@@ -254,6 +254,14 @@
     /// <summary>What the badge says on hover, which is the only place the estimate's provenance fits.</summary>
     private static string CountTitle(CollectionInfo collection)
     {
+        // The count says why it is the only one on offer when there is something to say - refused above
+        // ExactCountThreshold, or a never-analysed heap too large to read speculatively - and the two
+        // generic titles are the fallback. The sentence lives on the value so the list header agrees.
+        if (collection.Count.Reason is { } reason)
+        {
+            return reason;
+        }
+
         if (collection.Count.IsUnknown)
         {
             return "Postgres has never analysed this table";
