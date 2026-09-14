@@ -1,3 +1,4 @@
+@using MartenStudio.Services.Live
 @inject IJSRuntime JsRuntime
 
 @*
@@ -34,15 +35,7 @@
             bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { Text });
             copyLabel = copied ? "Copied" : "Copy failed";
         }
-        catch (JSException)
-        {
-            copyLabel = "Copy failed";
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            copyLabel = "Copy failed";
-        }
-        catch (InvalidOperationException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
             copyLabel = "Copy failed";
         }
@@ -56,13 +49,7 @@
                 "martenStudio.download.text",
                 new object?[] { FileName, "application/sql", Text });
         }
-        catch (JSException)
-        {
-        }
-        catch (System.Text.Json.JsonException)
-        {
-        }
-        catch (InvalidOperationException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
         }
     }

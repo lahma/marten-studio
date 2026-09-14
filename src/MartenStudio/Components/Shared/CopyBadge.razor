@@ -1,3 +1,4 @@
+@using MartenStudio.Services.Live
 @inject Microsoft.JSInterop.IJSRuntime JsRuntime
 
 <span class="ms-copy-badge" title="@FullKey">
@@ -48,15 +49,7 @@
             bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { FullKey });
             _copied = copied;
         }
-        catch (System.Text.Json.JsonException)
-        {
-            _copied = false;
-        }
-        catch (Microsoft.JSInterop.JSException)
-        {
-            _copied = false;
-        }
-        catch (InvalidOperationException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
             _copied = false;
         }

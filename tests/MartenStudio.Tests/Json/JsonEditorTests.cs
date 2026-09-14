@@ -1,6 +1,7 @@
 using AngleSharp.Dom;
 using Bunit;
 using MartenStudio.Components.Json;
+using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
@@ -321,6 +322,30 @@ public class JsonEditorTests
         var call = context.JSInterop.Invocations["martenStudio.json.enhanceTextarea"].Should().ContainSingle().Subject;
         call.Arguments.Should().HaveCount(3, "the textarea, the gutter, and the reference Ctrl+Enter calls back on");
         call.Arguments[2].Should().BeOfType<DotNetObjectReference<JsonEditor>>();
+    }
+
+    /// <summary>
+    /// A closed browser tab throws <see cref="JSDisconnectedException" /> out of
+    /// <c>martenStudio.json.readValue</c>, and it derives from <see cref="Exception" /> rather than from
+    /// <see cref="JSException" />. The save path has to refuse the same honest way an unset call does,
+    /// not escape the component.
+    /// </summary>
+    [Fact]
+    public void A_lost_circuit_reading_the_live_text_back_refuses_without_throwing_out_of_the_component()
+    {
+        using var context = new JsonTestContext();
+        var saves = 0;
+        context.JSInterop.Disconnect<string?>("martenStudio.json.readValue");
+
+        var view = context.Render<JsonEditor>(p => p
+            .Add(c => c.Json, """{"a":1}""")
+            .Add(c => c.OnSave, EventCallback.Factory.Create<string>(this, _ => saves++)));
+
+        Action save = () => Button(view, "Save").Click();
+
+        save.Should().NotThrow();
+        saves.Should().Be(0);
+        view.Find(".ms-editor-error-message").TextContent.Should().Contain("could not be read");
     }
 
     /// <summary>

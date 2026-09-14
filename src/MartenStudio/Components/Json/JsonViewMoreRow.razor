@@ -1,4 +1,5 @@
 @using MartenStudio.Components.Json
+@using MartenStudio.Services.Live
 
 @*
     The row that stands in for the rest of a windowed container.
@@ -78,13 +79,10 @@
         {
             await _element.FocusAsync();
         }
-        catch (JSException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
             // Prerendering, or the row has already been replaced. Keyboard focus is a nicety here, and
             // losing it must never take the circuit down with it.
-        }
-        catch (InvalidOperationException)
-        {
         }
     }
 

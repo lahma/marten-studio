@@ -4,6 +4,7 @@ using System.Text.Json;
 using AngleSharp.Dom;
 using Bunit;
 using MartenStudio.Components.Json;
+using MartenStudio.Tests.Support;
 
 namespace MartenStudio.Tests.Json;
 
@@ -425,6 +426,26 @@ public class JsonViewTests
 
         context.JSInterop.Invocations["martenStudio.clipboard.copyText"].Single().Arguments[0]
             .Should().Be("{\n  \"a\": 1\n}");
+    }
+
+    /// <summary>
+    /// A closed browser tab throws <see cref="Microsoft.JSInterop.JSDisconnectedException" /> out of
+    /// <c>martenStudio.clipboard.copyText</c>, and it derives from <see cref="Exception" /> rather than
+    /// from <see cref="Microsoft.JSInterop.JSException" />. The toolbar's own copy has to say it failed
+    /// the same honest way a refused clipboard does, not escape the component.
+    /// </summary>
+    [Fact]
+    public void A_lost_circuit_copying_the_whole_document_does_not_escape_and_still_announces_failure()
+    {
+        using var context = new JsonTestContext();
+        context.JSInterop.Disconnect<bool>("martenStudio.clipboard.copyText");
+
+        var view = context.Render<JsonView>(p => p.Add(c => c.Json, """{"a":1}"""));
+
+        Action copy = () => ButtonWithText(view, "Copy JSON").Click();
+
+        copy.Should().NotThrow();
+        view.Find(".ms-json-live").TextContent.Should().Be("Could not copy the document.");
     }
 
     [Fact]

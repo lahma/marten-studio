@@ -3,6 +3,7 @@ using Bunit;
 using MartenStudio.Services;
 using MartenStudio.Services.Schema;
 using MartenStudio.Tests.Components;
+using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -481,6 +482,29 @@ public class SchemaPageTests
         page.TextOfAll(".ms-index-flag-danger").Should().Contain("would be dropped");
         page.Markup.Should().Contain("1 index would be dropped");
         page.Markup.Should().Contain("IgnoreIndex");
+    }
+
+    /// <summary>
+    /// A closed browser tab throws <see cref="Microsoft.JSInterop.JSDisconnectedException" /> out of
+    /// <c>martenStudio.clipboard.copyText</c>, and it derives from <see cref="Exception" /> rather than
+    /// from <see cref="Microsoft.JSInterop.JSException" />. <c>SqlActions</c>' own copy button has to say
+    /// it failed the same honest way a refused clipboard does, not escape the page.
+    /// </summary>
+    [Fact]
+    public void Copying_the_generated_script_survives_a_lost_circuit()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema);
+        schema.Ddl = new DdlScript("create table studio.mt_doc_customer (id uuid);", null);
+        context.JSInterop.Disconnect<bool>("martenStudio.clipboard.copyText");
+
+        context.Navigate("/marten/schema?tab=ddl");
+        var page = context.Render<SchemaPage>();
+        ClickButton(page, "Generate script");
+
+        Action copy = () => ClickButton(page, "Copy SQL");
+
+        copy.Should().NotThrow();
+        page.Markup.Should().Contain("Copy failed");
     }
 
     /// <summary>

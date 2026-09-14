@@ -4,6 +4,7 @@ using JasperFx.Descriptors;
 
 using MartenStudio.Components.Layout;
 using MartenStudio.Services;
+using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
 
@@ -170,6 +171,24 @@ public class StudioLayoutTests
         layout.Find("#ms-timezone-select").Change("UTC");
 
         context.State.SelectedTimeZoneId.Should().Be("UTC");
+    }
+
+    /// <summary>
+    /// The first render reads <c>localStorage</c> through <c>martenStudio.prefs.get</c>, and a closed
+    /// browser tab throws <see cref="Microsoft.JSInterop.JSDisconnectedException" /> out of that call - a
+    /// type that derives from <see cref="Exception" /> rather than from
+    /// <see cref="Microsoft.JSInterop.JSException" />. The layout has to render anyway rather than take
+    /// the rest of the circuit down with it.
+    /// </summary>
+    [Fact]
+    public void A_lost_circuit_reading_stored_preferences_does_not_escape_the_layout()
+    {
+        using var context = new StudioComponentContext();
+        context.JSInterop.Disconnect<string?>("martenStudio.prefs.get");
+
+        Action render = () => RenderLayout(context);
+
+        render.Should().NotThrow();
     }
 
     // -------------------------------------------------------------------------------------------

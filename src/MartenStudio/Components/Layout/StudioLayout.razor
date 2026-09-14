@@ -3,6 +3,7 @@
 @using Microsoft.Extensions.Options
 @using MartenStudio.Internal
 @using MartenStudio.Services
+@using MartenStudio.Services.Live
 @inject StudioState State
 @inject StudioAuthorization Authorization
 @inject IOptions<MartenStudioOptions> Options
@@ -272,17 +273,9 @@
 
             return true;
         }
-        catch (JSException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
             // JS interop is unavailable during prerendering, and a browser can refuse storage outright.
-            return false;
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            return false;
-        }
-        catch (InvalidOperationException)
-        {
             return false;
         }
     }
@@ -322,13 +315,7 @@
         {
             await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", new object?[] { key, value });
         }
-        catch (JSException)
-        {
-        }
-        catch (System.Text.Json.JsonException)
-        {
-        }
-        catch (InvalidOperationException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
         }
     }

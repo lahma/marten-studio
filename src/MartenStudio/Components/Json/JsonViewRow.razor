@@ -2,6 +2,7 @@
 @using System.Text.Json
 @using MartenStudio.Components.Json
 @using MartenStudio.Services.Json
+@using MartenStudio.Services.Live
 
 @*
     One row of the flat model. Everything it needs arrives as a plain parameter - no model type crosses
@@ -309,13 +310,10 @@
         {
             await _element.FocusAsync();
         }
-        catch (JSException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
             // Prerendering, or the row has already been replaced. Keyboard focus is a nicety here, and
             // losing it must never take the circuit down with it.
-        }
-        catch (InvalidOperationException)
-        {
         }
     }
 

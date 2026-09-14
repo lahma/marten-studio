@@ -2,6 +2,7 @@
 @using System.Text.Json
 @using MartenStudio.Components.Json
 @using MartenStudio.Services.Json
+@using MartenStudio.Services.Live
 @inject IJSRuntime JsRuntime
 
 @*
@@ -641,10 +642,7 @@
         {
             copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
         }
-        catch (JSException)
-        {
-        }
-        catch (InvalidOperationException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
         }
 
@@ -921,10 +919,7 @@
         {
             await JsRuntime.InvokeVoidAsync("martenStudio.json.captureTreeKeys", _treeElement);
         }
-        catch (JSException)
-        {
-        }
-        catch (InvalidOperationException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
         }
     }

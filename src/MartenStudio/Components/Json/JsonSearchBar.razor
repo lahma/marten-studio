@@ -1,5 +1,6 @@
 @using MartenStudio.Components.Json
 @using MartenStudio.Services.Json
+@using MartenStudio.Services.Live
 @implements IDisposable
 
 @*
@@ -97,12 +98,9 @@
         {
             await _input.FocusAsync();
         }
-        catch (JSException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
             // Prerendering, or the element is already gone. Focus is a convenience, never a requirement.
-        }
-        catch (InvalidOperationException)
-        {
         }
     }
 

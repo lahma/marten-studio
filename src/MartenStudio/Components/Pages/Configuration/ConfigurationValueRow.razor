@@ -1,3 +1,4 @@
+@using MartenStudio.Services.Live
 @inject IJSRuntime JsRuntime
 
 @*
@@ -49,15 +50,7 @@
             bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { Value });
             label = copied ? "Copied" : "Failed";
         }
-        catch (JSException)
-        {
-            label = "Failed";
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            label = "Failed";
-        }
-        catch (InvalidOperationException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
             label = "Failed";
         }

@@ -1,6 +1,7 @@
 @using System.Text.Json
 @using MartenStudio.Components.Json
 @using MartenStudio.Services.Json
+@using MartenStudio.Services.Live
 @implements IDisposable
 @inject IJSRuntime JsRuntime
 
@@ -240,10 +241,7 @@
             _self ??= DotNetObjectReference.Create(this);
             await JsRuntime.InvokeVoidAsync("martenStudio.json.enhanceTextarea", _textArea, _gutter, _self);
         }
-        catch (JSException)
-        {
-        }
-        catch (InvalidOperationException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
         }
     }
@@ -330,10 +328,7 @@
                 return true;
             }
         }
-        catch (JSException)
-        {
-        }
-        catch (InvalidOperationException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
         }
 

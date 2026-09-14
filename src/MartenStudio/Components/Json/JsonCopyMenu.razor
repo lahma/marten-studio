@@ -1,5 +1,6 @@
 @using MartenStudio.Components.Json
 @using MartenStudio.Services.Json
+@using MartenStudio.Services.Live
 @inject IJSRuntime JsRuntime
 
 @*
@@ -108,13 +109,10 @@
         {
             await JsRuntime.InvokeVoidAsync("martenStudio.json.openMenu", _element);
         }
-        catch (JSException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
             // No JS module yet (prerender), or the browser has no popover support. The menu is still
             // reachable with the mouse through the row's own popovertarget button.
-        }
-        catch (InvalidOperationException)
-        {
         }
     }
 
@@ -185,10 +183,7 @@
         {
             await JsRuntime.InvokeVoidAsync("martenStudio.json.focusElement", ItemId(index));
         }
-        catch (JSException)
-        {
-        }
-        catch (InvalidOperationException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
         }
     }
@@ -203,13 +198,7 @@
         {
             copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
         }
-        catch (JSException)
-        {
-        }
-        catch (InvalidOperationException)
-        {
-        }
-        catch (System.Text.Json.JsonException)
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
         }
 

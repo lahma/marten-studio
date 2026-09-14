@@ -2,6 +2,7 @@ using Bunit;
 
 using MartenStudio.Services.Configuration;
 using MartenStudio.Tests.Components;
+using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -66,6 +67,26 @@ public class ConfigurationPageTests
         var page = context.Render<ConfigurationPage>();
         page.FindAll(".ms-copy-inline")[0].Click();
 
+        page.FindAll(".ms-copy-inline")[0].TextContent.Trim().Should().Be("Failed");
+    }
+
+    /// <summary>
+    /// A closed browser tab throws <see cref="Microsoft.JSInterop.JSDisconnectedException" /> out of
+    /// <c>martenStudio.clipboard.copyText</c>, and it derives from <see cref="Exception" /> rather than
+    /// from <see cref="Microsoft.JSInterop.JSException" />. <c>ConfigurationValueRow</c>'s copy button has
+    /// to say it failed the same honest way a refused clipboard does, not escape the page.
+    /// </summary>
+    [Fact]
+    public void A_lost_circuit_during_copy_does_not_escape_and_still_says_Failed()
+    {
+        using var context = NewContext(out _);
+        context.JSInterop.Disconnect<bool>("martenStudio.clipboard.copyText");
+
+        var page = context.Render<ConfigurationPage>();
+
+        Action copy = () => page.FindAll(".ms-copy-inline")[0].Click();
+
+        copy.Should().NotThrow();
         page.FindAll(".ms-copy-inline")[0].TextContent.Trim().Should().Be("Failed");
     }
 
