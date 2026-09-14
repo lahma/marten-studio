@@ -255,10 +255,20 @@ internal sealed class StudioPage : IAsyncDisposable
     }
 
     /// <summary>Writes a screenshot of the whole page to <paramref name="path" />.</summary>
+    /// <remarks>
+    /// The focus is dropped first. <c>&lt;FocusOnNavigate Selector="h1" /&gt;</c> focuses the page heading
+    /// after every navigation, which is right for a screen reader - and Chromium counts a scripted
+    /// navigation as keyboard-shaped, so <c>h1:focus-visible</c> draws its ring and every README image
+    /// came out with a box round its title. A person clicking a nav link with a mouse does not see it.
+    /// </remarks>
     /// <param name="path">Where to write it.</param>
     /// <param name="fullPage">Whether to capture past the viewport.</param>
-    public Task ScreenshotAsync(string path, bool fullPage = true) =>
-        Page.ScreenshotAsync(new PageScreenshotOptions { Path = path, FullPage = fullPage });
+    public async Task ScreenshotAsync(string path, bool fullPage = true)
+    {
+        await Page.EvaluateAsync("() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur()");
+
+        await Page.ScreenshotAsync(new PageScreenshotOptions { Path = path, FullPage = fullPage });
+    }
 
     /// <summary>
     /// Fails the scenario if the page complained or the server refused anything.

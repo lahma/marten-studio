@@ -35,6 +35,8 @@ byte-for-byte the application it was.
 | A stream's timeline, each event's JSON and headers, with aggregate time travel beside it | Dead letters, expanded to the failing event and its exception |
 | [![Projections](docs/screenshots/projections.png)](docs/screenshots/projections.png) | [![Schema drift](docs/screenshots/schema-drift.png)](docs/screenshots/schema-drift.png) |
 | Projections and the async daemon: shard state, progression and the high-water mark | Schema — what Marten would change, before anything is applied |
+| [![Relationships](docs/screenshots/relationships.png)](docs/screenshots/relationships.png) | |
+| Relationships — the foreign keys `StoreOptions` declares, cross-checked against the ones Postgres holds | |
 
 ## Install
 
