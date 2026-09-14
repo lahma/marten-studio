@@ -49,6 +49,18 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     private readonly IJSRuntime jsRuntime;
     private readonly ILogger<StudioLiveUpdates> logger;
 
+    /// <summary>
+    /// What the browser-side watcher list is keyed on for this instance.
+    /// </summary>
+    /// <remarks>
+    /// Not the <see cref="DotNetObjectReference{TValue}" />: Blazor marshals one as an id and the browser
+    /// materialises a fresh JS wrapper for every call, so the object that reaches <c>unwatch</c> is never
+    /// the object that reached <c>watch</c>. Keyed on a reference, <c>unwatch</c> removed nothing, the
+    /// document listener stayed attached for the life of the page, and every closed circuit left another
+    /// dead reference behind it. A string generated here survives the round trip unchanged.
+    /// </remarks>
+    private readonly string watchToken = Guid.NewGuid().ToString("N");
+
     private DotNetObjectReference<StudioLiveUpdates>? selfReference;
     private CancellationTokenSource? cancellation;
     private Task? loop;
@@ -248,7 +260,7 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
         {
             selfReference = DotNetObjectReference.Create(this);
             hidden = await jsRuntime
-                .InvokeAsync<bool>("martenStudio.visibility.watch", cancellationToken, selfReference)
+                .InvokeAsync<bool>("martenStudio.visibility.watch", cancellationToken, watchToken, selfReference)
                 .ConfigureAwait(false);
         }
         catch (Exception exception) when (IsInteropUnavailable(exception))
@@ -270,7 +282,7 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
 
         try
         {
-            await jsRuntime.InvokeVoidAsync("martenStudio.visibility.unwatch", selfReference).ConfigureAwait(false);
+            await jsRuntime.InvokeVoidAsync("martenStudio.visibility.unwatch", watchToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (IsInteropUnavailable(exception))
         {

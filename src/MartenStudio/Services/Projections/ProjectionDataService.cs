@@ -8,6 +8,7 @@ using Marten.Schema;
 using MartenStudio.Services.Live;
 
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace MartenStudio.Services.Projections;
 
@@ -49,6 +50,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
     private readonly StudioSnapshotCache cache;
     private readonly StudioLiveState liveState;
     private readonly StudioOperationTracker operations;
+    private readonly IOptions<MartenStudioOptions> options;
     private readonly ILogger<ProjectionDataService> logger;
 
     public ProjectionDataService(
@@ -60,6 +62,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
         StudioSnapshotCache cache,
         StudioLiveState liveState,
         StudioOperationTracker operations,
+        IOptions<MartenStudioOptions> options,
         ILogger<ProjectionDataService> logger)
     {
         this.resolver = resolver;
@@ -70,6 +73,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
         this.cache = cache;
         this.liveState = liveState;
         this.operations = operations;
+        this.options = options;
         this.logger = logger;
     }
 
@@ -147,7 +151,8 @@ internal sealed class ProjectionDataService : IProjectionDataService
             highWaterMark,
             [.. ShardIdentities(source)],
             TablesFor(resolved.Store, source),
-            source.Lifecycle);
+            source.Lifecycle,
+            options.Value.RebuildShardTimeout);
     }
 
     /// <inheritdoc />
@@ -210,7 +215,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
             cancellationToken);
 
     /// <inheritdoc />
-    public async Task<OperationHandle> RebuildAsync(
+    public async Task<OperationStart> RebuildAsync(
         StudioScope scope,
         string projectionName,
         CancellationToken cancellationToken = default)
@@ -241,21 +246,31 @@ internal sealed class ProjectionDataService : IProjectionDataService
             string storeKey = resolved.Registration.Key;
             string databaseId = resolved.Database.Id.Identity;
             string name = source.Name;
+            TimeSpan shardTimeout = options.Value.RebuildShardTimeout;
 
             // Detached, with a cancellation token the tracker owns. A rebuild that a closing browser tab
             // could cancel would leave a projection's tables neither the old shape nor the new one.
-            OperationHandle handle = operations.Start(
+            OperationStart start = operations.Start(
                 "Rebuild", name, storeKey, databaseId, user, StudioCapability.RebuildProjections,
                 async token =>
                 {
-                    await daemon.RebuildProjectionAsync(name, token).ConfigureAwait(false);
+                    await RebuildWithTimeoutAsync(daemon, name, shardTimeout, token).ConfigureAwait(false);
                     cache.InvalidatePrefix(CachePrefix(scope));
                 });
 
-            audit.Record(action, name, true, $"Started as operation {handle.Id}.", StudioCapability.RebuildProjections, scope);
+            audit.Record(
+                action,
+                name,
+                true,
+                start.Started
+                    ? $"Started as operation {start.Id}; per-shard timeout {shardTimeout}."
+                    : $"Already running as operation {start.Id}; nothing was started.",
+                StudioCapability.RebuildProjections,
+                scope);
+
             cache.InvalidatePrefix(CachePrefix(scope));
 
-            return handle;
+            return start;
         }
         catch (StudioCapabilityDeniedException denial)
         {
@@ -296,13 +311,94 @@ internal sealed class ProjectionDataService : IProjectionDataService
     public StudioOperation? FindOperation(string? operationId) => operations.Find(operationId);
 
     /// <inheritdoc />
-    public IReadOnlyList<StudioOperation> RunningOperations(StudioScope scope)
+    public async Task<bool> CancelOperationAsync(
+        StudioScope scope,
+        string operationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+
+        const string action = "CancelOperation";
+        const StudioCapability capability = StudioCapability.RebuildProjections;
+
+        try
+        {
+            capabilities.Require(capability);
+
+            ResolvedScope resolved = await resolver
+                .ResolveAsync(scope, capability.ToString(), cancellationToken)
+                .ConfigureAwait(false);
+
+            // An operation is addressed by where it runs: a visitor authorized for one database must not
+            // be able to stop a rebuild running against another.
+            StudioOperation? operation = operations.Find(operationId);
+            if (operation is null
+                || !string.Equals(operation.StoreKey, resolved.Registration.Key, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(operation.DatabaseId, resolved.Database.Id.Identity, StringComparison.OrdinalIgnoreCase))
+            {
+                audit.Record(action, operationId, false, "No such operation in this scope.", capability, scope);
+                return false;
+            }
+
+            bool cancelled = operations.Cancel(operationId);
+
+            audit.Record(
+                action,
+                operation.Kind + " " + operation.Target,
+                cancelled,
+                cancelled ? $"Asked operation {operationId} to stop." : $"Operation {operationId} was no longer running.",
+                capability,
+                scope);
+
+            return cancelled;
+        }
+        catch (StudioCapabilityDeniedException denial)
+        {
+            audit.RecordCapabilityDenied(denial, action, operationId);
+            throw;
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            audit.RecordScopeDenied(scope, PolicyName(capability), action, operationId);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<StudioOperation>> RunningOperationsAsync(
+        StudioScope scope,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        // Matched on the scope's own database identity: an operation is addressed by where it runs, and
-        // this is a read of an in-process list rather than of anything the visitor could not already see.
-        return operations.RunningFor(scope.StoreKey, scope.DatabaseId);
+        // Resolved like every sibling, so the store, database and tenant a visitor may address is decided
+        // in one place rather than trusted from the three strings in a URL.
+        ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+        return operations.RunningFor(resolved.Registration.Key, resolved.Database.Id.Identity);
+    }
+
+    /// <summary>
+    /// The one call that starts a replay, and the only place the per-shard timeout is chosen.
+    /// </summary>
+    /// <remarks>
+    /// <c>RebuildProjectionAsync(name, token)</c> looks like the plain overload and is not: JasperFx
+    /// 2.69.3 forwards it to <c>RebuildProjectionAsync(name, 5.Minutes(), token)</c>. The teardown of the
+    /// projection's tables happens <em>before</em> that budget starts applying to the replay, so on a
+    /// production-sized store the five minutes expire with the tables already emptied and the operation
+    /// recorded as failed. The studio therefore always names its own budget
+    /// (<c>MartenStudioOptions.RebuildShardTimeout</c>, one hour by default), and the rebuild dialog
+    /// states it next to the number of events.
+    /// </remarks>
+    internal static Task RebuildWithTimeoutAsync(
+        IProjectionDaemon daemon,
+        string projectionName,
+        TimeSpan shardTimeout,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(daemon);
+        return daemon.RebuildProjectionAsync(projectionName, shardTimeout, cancellationToken);
     }
 
     // ------------------------------------------------------------------------------------------------
@@ -331,8 +427,11 @@ internal sealed class ProjectionDataService : IProjectionDataService
             .FetchHighestEventSequenceNumber(cancellationToken)
             .ConfigureAwait(false);
 
-        // The tenant-scoped overload lives on AdvancedOperations rather than on IMartenDatabase, which
-        // only ever answers for the one database it is (Appendix B).
+        // AdvancedOperations.AllProjectionProgress(tenantId, ct) is not a filter: it resolves the tenant's
+        // database and returns every progression row that database has (verified against Marten 9.35's
+        // AdvancedOperations). It is used here because a tenant names a database under database-per-tenant
+        // tenancy, and the rows it returns are exactly the rows the resolved database holds - which is
+        // what IMartenDatabase.AllProjectionProgress answers when no tenant is selected.
         IReadOnlyList<ShardState> rows = resolved.TenantId is { Length: > 0 } tenantId
             ? await resolved.Store.Advanced.AllProjectionProgress(tenantId, cancellationToken).ConfigureAwait(false)
             : await resolved.Database.AllProjectionProgress(cancellationToken).ConfigureAwait(false);
@@ -370,17 +469,19 @@ internal sealed class ProjectionDataService : IProjectionDataService
             foreach (string shardName in projection.ShardNames)
             {
                 rendered.Add(shardName);
-                progress.Add(Build(shardName, projection.Name, byShard.GetValueOrDefault(shardName), live.GetValueOrDefault(shardName), stored.HighWaterMark));
+                progress.Add(Build(shardName, projection.Name, byShard.GetValueOrDefault(shardName), live.GetValueOrDefault(shardName), stored.HighWaterMark, isRegistered: true));
             }
         }
 
         // Rows the database has that the configuration does not: a projection that was removed from the
         // host's registration still has progress, and hiding it would hide the reason a table is stale.
+        // They are marked rather than mixed in, so the page can render them under their own heading
+        // instead of inventing a projection row for a projection this store no longer has.
         foreach (KeyValuePair<string, ShardState> orphan in byShard)
         {
             if (!rendered.Contains(orphan.Key))
             {
-                progress.Add(Build(orphan.Key, ProjectionNameOf(orphan.Key), orphan.Value, live.GetValueOrDefault(orphan.Key), stored.HighWaterMark));
+                progress.Add(Build(orphan.Key, ProjectionNameOf(orphan.Key), orphan.Value, live.GetValueOrDefault(orphan.Key), stored.HighWaterMark, isRegistered: false));
             }
         }
 
@@ -398,7 +499,8 @@ internal sealed class ProjectionDataService : IProjectionDataService
         string projectionName,
         ShardState? stored,
         ShardState? live,
-        long highWaterMark)
+        long highWaterMark,
+        bool isRegistered)
     {
         // The tracker is ahead of the database by design: it publishes as the shard advances, and the
         // progression row is written in the same transaction as the projected documents. Take whichever
@@ -418,7 +520,8 @@ internal sealed class ProjectionDataService : IProjectionDataService
             state?.SkippedEventsCount,
             Blank(state?.TenantId),
             stored is not null,
-            useLive && live is not null);
+            useLive && live is not null,
+            isRegistered);
     }
 
     private async Task<DaemonStatus> DescribeDaemonAsync(ResolvedScope resolved, CancellationToken cancellationToken)

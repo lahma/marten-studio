@@ -113,18 +113,48 @@ public class DaemonAccessorTests
     /// <summary>
     /// The one rule this whole class exists to protect: the studio never builds a daemon of its own.
     /// </summary>
+    /// <remarks>
+    /// <c>*.razor</c> as well as <c>*.cs</c>: a page's <c>@code</c> block is C# that this scanner could
+    /// not see, and half of what the studio does to the daemon is driven from one.
+    /// </remarks>
     [Fact]
     public void Nothing_in_the_studio_calls_BuildProjectionDaemonAsync()
     {
-        string source = Conventions.RepositoryRoot.Combine("src", "MartenStudio");
-
-        List<string> offenders = [.. Directory
-            .EnumerateFiles(source, "*.cs", SearchOption.AllDirectories)
-            .Where(static file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-            .Where(static file => File.ReadLines(file).Any(IsACall))];
+        List<string> offenders = [.. StudioSourceFiles().Where(static file => File.ReadLines(file).Any(IsACall))];
 
         offenders.Should().BeEmpty(
             "a second daemon fights the host's own over the same advisory locks until one hangs (AGENTS.md hard rule 11)");
+    }
+
+    /// <summary>
+    /// The scanner above strips comments, so it is exactly the kind of rule that can go quietly vacuous.
+    /// This is the anti-vacuity half: it must see a synthetic call and must not see one in prose.
+    /// </summary>
+    [Fact]
+    public void The_scanner_sees_a_call_and_ignores_one_in_prose()
+    {
+        IsACall("        await store.BuildProjectionDaemonAsync();").Should().BeTrue();
+        IsACall("    <text>await store.BuildProjectionDaemonAsync();</text>").Should().BeTrue();
+        IsACall("// never call store.BuildProjectionDaemonAsync() here").Should().BeFalse();
+        IsACall("    * BuildProjectionDaemonAsync( starts a second daemon").Should().BeFalse();
+
+        // And it really is reading the Razor pages, not only the .cs files.
+        StudioSourceFiles().Should().Contain(static file => file.EndsWith(".razor", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Every hand-written source file in the shipped library, generated output excluded.</summary>
+    private static IEnumerable<string> StudioSourceFiles()
+    {
+        string source = Conventions.RepositoryRoot.Combine("src", "MartenStudio");
+
+        return Directory
+            .EnumerateFiles(source, "*.*", SearchOption.AllDirectories)
+            .Where(static file =>
+                file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+                || file.EndsWith(".razor", StringComparison.OrdinalIgnoreCase))
+            .Where(static file =>
+                !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                && !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
     }
 
     /// <summary>

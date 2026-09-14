@@ -95,10 +95,17 @@ internal sealed class StudioSnapshotCache
             object? value = await entry.Work.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
             return (T) value!;
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // A faulted entry must not be served for the rest of its time-to-live: the next poll is how a
-            // page recovers from a database that came back.
+            // This caller gave up waiting. The shared work carries on for everyone else, and the entry
+            // stays: a tab navigating away must not throw away the query the other four are waiting on.
+            throw;
+        }
+        catch (Exception)
+        {
+            // A faulted *or cancelled* entry must not be served for the rest of its time-to-live. A
+            // cancelled shared task is as useless as a faulted one - it will never produce a value, and
+            // every later caller would await the same dead task - so the next poll is how a page recovers.
             entries.TryRemove(new KeyValuePair<string, Entry>(key, entry));
             throw;
         }
@@ -132,7 +139,16 @@ internal sealed class StudioSnapshotCache
             return false;
         }
 
-        return !entry.Work.IsValueCreated || !entry.Work.Value.IsFaulted;
+        if (!entry.Work.IsValueCreated)
+        {
+            return true;
+        }
+
+        // Faulted and cancelled are the same answer here: a task in either state will never produce a
+        // value, so serving it again would hand every caller for the rest of the time-to-live a failure
+        // that has already happened.
+        Task<object?> work = entry.Work.Value;
+        return !work.IsFaulted && !work.IsCanceled;
     }
 
     private void Prune(DateTimeOffset now)

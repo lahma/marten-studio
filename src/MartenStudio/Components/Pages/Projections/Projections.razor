@@ -8,13 +8,9 @@
 @inject IProjectionDataService ProjectionData
 @inject StudioState State
 @inject StudioCapabilityGuard Capabilities
-@inject StudioLiveUpdates Live
+@inject StudioLiveUpdatesFactory LiveFactory
 @inject ToastService Toasts
 @inject IOptions<MartenStudioOptions> Options
-
-@* This page's own stylesheet, pulled in here rather than added to marten-studio.css so that the
-   projections rules travel with the projections screen and a host that never opens it never parses
-   them. *@
 
 <PageTitle>Projections</PageTitle>
 
@@ -155,7 +151,8 @@
                                      State="@operation.State.ToString()"
                                      IsRunning="operation.IsRunning"
                                      Message="@operation.Message"
-                                     ElapsedMilliseconds="operation.ElapsedMilliseconds" />
+                                     ElapsedMilliseconds="operation.ElapsedMilliseconds"
+                                     OnCancel="CancelCallback" />
                 }
             </section>
         }
@@ -203,8 +200,8 @@
                                 {
                                     <button type="button"
                                             class="ms-button ms-button-danger ms-btn-sm ms-projection-rebuild"
-                                            disabled="@(!RebuildEnabled)"
-                                            title="@RebuildTitle"
+                                            disabled="@(!RebuildEnabledFor(projection.Name))"
+                                            title="@RebuildTitleFor(projection.Name)"
                                             @onclick="() => OpenRebuildAsync(projection.Name)">
                                         Rebuild
                                     </button>
@@ -294,6 +291,58 @@
                 @ProjectionLagThresholds.Red.ToString("N0", CultureInfo.InvariantCulture).
             </p>
         }
+
+        @if (view.UnregisteredShards.Count > 0)
+        {
+            @* Progression rows nothing in this store's StoreOptions claims. Hiding them would hide the
+               reason a table nobody writes to any more is still there, and the reason a shard name in
+               the logs is in no table on this page. *@
+            <section class="ms-unregistered-shards" aria-labelledby="ms-unregistered-shards-title">
+                <h2 class="ms-section-title" id="ms-unregistered-shards-title">Unregistered shards</h2>
+                <p class="ms-muted ms-unregistered-shards-note">
+                    These shards have rows in <code>mt_event_progression</code> and no projection in this
+                    store's <code>StoreOptions</code> claims them - a projection that was removed, renamed
+                    or given a new version. Nothing advances them, and they cannot be started or rebuilt
+                    from here.
+                </p>
+
+                <table class="ms-table ms-unregistered-shards-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Shard</th>
+                            <th scope="col">Sequence</th>
+                            <th scope="col">Lag</th>
+                            <th scope="col">Last advanced</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (ShardProgress shard in view.UnregisteredShards)
+                        {
+                            <tr class="ms-table-row ms-unregistered-shard-row"
+                                @key="shard.ShardName"
+                                data-unregistered-shard="@shard.ShardName">
+                                <td class="ms-table-cell ms-table-cell-mono">
+                                    @shard.ShardName
+                                    @if (shard.TenantId is { Length: > 0 })
+                                    {
+                                        <span class="ms-badge ms-shard-tenant">@shard.TenantId</span>
+                                    }
+                                </td>
+                                <td class="ms-table-cell ms-table-cell-mono">
+                                    @shard.Sequence.ToString("N0", CultureInfo.InvariantCulture)
+                                </td>
+                                <td class="ms-table-cell ms-table-cell-mono ms-lag-@shard.Severity.ToString().ToLowerInvariant()">
+                                    @shard.Lag.ToString("N0", CultureInfo.InvariantCulture)
+                                </td>
+                                <td class="ms-table-cell ms-table-cell-mono">
+                                    @(shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never")
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </section>
+        }
     }
 
     <RebuildDialog IsOpen="rebuild is not null"
@@ -303,6 +352,7 @@
                    Tables="rebuild?.TablesAffected ?? []"
                    Lifecycle="@(rebuild?.Lifecycle.ToString() ?? string.Empty)"
                    IsAsync="@(rebuild?.Lifecycle == JasperFx.Events.Projections.ProjectionLifecycle.Async)"
+                   ShardTimeout="@(rebuild?.ShardTimeout ?? Options.Value.RebuildShardTimeout)"
                    OnConfirm="ConfirmRebuildAsync"
                    OnCancel="CancelRebuild" />
 
@@ -314,20 +364,32 @@
 </div>
 
 @code {
-    /// <summary>The two progression corrections, which are confirmed but not typed out.</summary>
+    /// <summary>The actions that are confirmed but not typed out.</summary>
     private enum PendingAction
     {
         None,
         AdvanceHighWaterMark,
-        CorrectProgression
+        CorrectProgression,
+        CancelOperation
     }
 
     private readonly CancellationTokenSource pageCancellation = new();
+
+    /// <summary>
+    /// This page's polling loop, built rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// <c>StudioLiveUpdates</c> is <c>IAsyncDisposable</c>, and a transient registration would leave the
+    /// circuit's container holding one per page visit for the life of the circuit. The page owns it, and
+    /// the page disposes it.
+    /// </remarks>
+    private StudioLiveUpdates? live;
 
     private ProjectionsView? view;
     private IReadOnlyList<StudioOperation> operations = [];
     private RebuildScope? rebuild;
     private PendingAction pending = PendingAction.None;
+    private string? pendingOperationId;
     private IDisposable? liveLease;
     private bool loading = true;
     private bool started;
@@ -336,7 +398,9 @@
     protected override async Task OnInitializedAsync()
     {
         State.ScopeChanged += OnScopeChangedAsync;
-        Live.Failed += OnRefreshFailedAsync;
+
+        live = LiveFactory.Create();
+        live.Failed += OnRefreshFailedAsync;
 
         await LoadAsync(pageCancellation.Token);
     }
@@ -353,7 +417,11 @@
         // The tracker lease and the polling loop are both started after the first render: neither needs
         // to exist for the page to draw, and neither may delay it.
         await SubscribeToLiveStateAsync();
-        await Live.StartAsync(Options.Value.RefreshInterval, TickAsync, pageCancellation.Token);
+
+        if (live is not null)
+        {
+            await live.StartAsync(Options.Value.RefreshInterval, TickAsync, pageCancellation.Token);
+        }
     }
 
     /// <summary>
@@ -380,7 +448,7 @@
         try
         {
             view = await ProjectionData.GetProjectionsAsync(scope, cancellationToken);
-            operations = ProjectionData.RunningOperations(scope);
+            operations = await ProjectionData.RunningOperationsAsync(scope, cancellationToken);
             loadError = null;
         }
         catch (OperationCanceledException)
@@ -459,11 +527,50 @@
 
     private bool CorrectEnabled => Capabilities.IsEnabled(StudioCapability.CorrectProgression);
 
+    /// <summary>Whether a running operation may be asked to stop from here.</summary>
+    private bool CancelEnabled => !Capabilities.ReadOnly && Capabilities.IsEnabled(StudioCapability.RebuildProjections);
+
+    /// <summary>
+    /// The Cancel button on a running operation, or nothing.
+    /// </summary>
+    /// <remarks>
+    /// An <c>EventCallback</c> without a delegate is how <c>OperationStatus</c> is told not to offer the
+    /// button at all: a control that is rendered and then refused is worse than one that was never there,
+    /// and the service refuses either way (AGENTS.md hard rule 5).
+    /// </remarks>
+    private EventCallback<string> CancelCallback =>
+        CancelEnabled ? EventCallback.Factory.Create<string>(this, AskCancelAsync) : default;
+
     private string ControlTitle => Title(StudioCapability.ControlDaemon, needsDaemon: true);
 
-    private string RebuildTitle => Title(StudioCapability.RebuildProjections, needsDaemon: true);
-
     private string CorrectTitle => Title(StudioCapability.CorrectProgression, needsDaemon: false);
+
+    /// <summary>
+    /// Whether this projection may be rebuilt right now.
+    /// </summary>
+    /// <remarks>
+    /// One rebuild per projection at a time. The tracker is the singleton that actually enforces it - so
+    /// a second circuit is refused even though it rendered its own button - and this is the half that
+    /// stops the button being offered in the first place.
+    /// </remarks>
+    private bool RebuildEnabledFor(string projectionName) =>
+        RebuildEnabled && !IsRebuilding(projectionName);
+
+    private string RebuildTitleFor(string projectionName)
+    {
+        if (IsRebuilding(projectionName))
+        {
+            return $"A rebuild of {projectionName} is already running. Only one rebuild of a projection runs at a time.";
+        }
+
+        return Title(StudioCapability.RebuildProjections, needsDaemon: true);
+    }
+
+    /// <summary>Whether a rebuild of this projection is running anywhere in this process.</summary>
+    private bool IsRebuilding(string projectionName) =>
+        operations.Any(x => x.IsRunning
+            && string.Equals(x.Kind, "Rebuild", StringComparison.Ordinal)
+            && string.Equals(x.Target, projectionName, StringComparison.OrdinalIgnoreCase));
 
     private string Title(StudioCapability capability, bool needsDaemon)
     {
@@ -532,23 +639,48 @@
             $"Rebuild of {scope.ProjectionName} started",
             async (studioScope, token) =>
             {
-                OperationHandle handle = await ProjectionData.RebuildAsync(studioScope, scope.ProjectionName, token);
-                await Toasts.Info($"Rebuild {handle.Id} runs in the background; it will finish even if you leave this page.");
+                OperationStart start = await ProjectionData.RebuildAsync(studioScope, scope.ProjectionName, token);
+
+                if (start.Started)
+                {
+                    await Toasts.Info($"Rebuild {start.Id} runs in the background; it will finish even if you leave this page.");
+                }
+                else
+                {
+                    await Toasts.Info(
+                        $"{scope.ProjectionName} is already being rebuilt, as operation {start.Id}. Nothing was started.");
+                }
             });
     }
 
     private Task AskAsync(PendingAction action)
     {
         pending = action;
+        pendingOperationId = null;
         return Task.CompletedTask;
     }
 
-    private void CancelPending() => pending = PendingAction.None;
+    /// <summary>Asks before cancelling: a half-replayed projection is worse than a slow one.</summary>
+    private Task AskCancelAsync(string operationId)
+    {
+        pending = PendingAction.CancelOperation;
+        pendingOperationId = operationId;
+        return Task.CompletedTask;
+    }
+
+    private void CancelPending()
+    {
+        pending = PendingAction.None;
+        pendingOperationId = null;
+    }
 
     private async Task ConfirmPendingAsync()
     {
         PendingAction action = pending;
+        string? operationId = pendingOperationId;
+
         pending = PendingAction.None;
+        pendingOperationId = null;
 
         switch (action)
         {
@@ -564,6 +696,12 @@
                     (scope, token) => ProjectionData.CorrectProgressionAsync(scope, token));
                 break;
 
+            case PendingAction.CancelOperation when operationId is { Length: > 0 }:
+                await RunAsync(
+                    $"Asked operation {operationId} to stop",
+                    (scope, token) => ProjectionData.CancelOperationAsync(scope, operationId, token));
+                break;
+
             default:
                 break;
         }
@@ -573,6 +711,7 @@
     {
         PendingAction.AdvanceHighWaterMark => "Advance the high water mark?",
         PendingAction.CorrectProgression => "Correct the progression?",
+        PendingAction.CancelOperation => "Stop this operation?",
         _ => string.Empty
     };
 
@@ -585,6 +724,10 @@
         PendingAction.CorrectProgression =>
             "This pulls the high water mark and every shard's progression back to the highest real event "
             + "sequence. It only does anything if progression somehow ran ahead of the events themselves.",
+        PendingAction.CancelOperation =>
+            "Cancelling a replay leaves the projection partial: its tables were emptied before the replay "
+            + "started, so what is in them is whatever had been rewritten when it stopped. Nothing will "
+            + "finish it - the projection stays half built until it is rebuilt again.",
         _ => string.Empty
     };
 
@@ -650,7 +793,14 @@
         return worst;
     }
 
-    /// <summary>The progress rows belonging to one projection, worst first.</summary>
+    /// <summary>
+    /// The progress rows belonging to one projection, worst first.
+    /// </summary>
+    /// <remarks>
+    /// Only the rows a registered shard name claims. A progression row whose shard this projection no
+    /// longer runs - a version bump that changed the shard keys, say - belongs under "Unregistered
+    /// shards", not under a projection that would never advance it.
+    /// </remarks>
     private IEnumerable<ShardProgress> ShardsOf(ProjectionInfo projection)
     {
         if (view is null)
@@ -658,7 +808,8 @@
             return [];
         }
 
-        return view.Progress.Where(x => string.Equals(x.ProjectionName, projection.Name, StringComparison.OrdinalIgnoreCase));
+        return view.Progress.Where(x => x.IsRegistered
+            && string.Equals(x.ProjectionName, projection.Name, StringComparison.OrdinalIgnoreCase));
     }
 
     private string FreshnessLabel => view?.Daemon.IsHostedHere == true ? "live + polling" : "polling";
@@ -685,9 +836,13 @@
     public async ValueTask DisposeAsync()
     {
         State.ScopeChanged -= OnScopeChangedAsync;
-        Live.Failed -= OnRefreshFailedAsync;
 
-        await Live.DisposeAsync();
+        if (live is not null)
+        {
+            live.Failed -= OnRefreshFailedAsync;
+            await live.DisposeAsync();
+            live = null;
+        }
 
         ReleaseLease();
 

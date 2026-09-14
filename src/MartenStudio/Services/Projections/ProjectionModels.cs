@@ -92,6 +92,12 @@ internal static class ProjectionLagThresholds
 /// and an operations screen that draws them the same way is lying (plan section 4.8).
 /// </param>
 /// <param name="IsLive">Whether the numbers came from the in-process tracker rather than the database.</param>
+/// <param name="IsRegistered">
+/// Whether a projection this store currently registers claims this shard. <see langword="false" /> is a
+/// progression row left behind by a projection that has been removed from the host's registration or
+/// renamed: it still explains why a table is stale, so it is rendered in its own section rather than
+/// hidden (plan section 4.8 - "cannot report" and "nobody owns this" are values, not empty results).
+/// </param>
 internal sealed record ShardProgress(
     string ShardName,
     string ProjectionName,
@@ -104,7 +110,8 @@ internal sealed record ShardProgress(
     long? SkippedCount,
     string? TenantId,
     bool HasProgressRow,
-    bool IsLive)
+    bool IsLive,
+    bool IsRegistered = true)
 {
     /// <summary>How many events this shard has still to process. Never negative.</summary>
     public long Lag => Math.Max(0, HighWater - Sequence);
@@ -208,6 +215,17 @@ internal sealed record ProjectionsView(
         !Daemon.IsHostedHere
         && Projections.Any(static x => x.IsAsync)
         && !Progress.Any(static x => x.HasProgressRow && x.Sequence > 0);
+
+    /// <summary>
+    /// Progression rows no registered projection claims, worst first.
+    /// </summary>
+    /// <remarks>
+    /// A projection removed from <c>StoreOptions</c>, renamed, or bumped to a version whose shard names
+    /// differ leaves its rows in <c>mt_event_progression</c>. They are not noise: they are the reason a
+    /// table nothing writes to any more still exists, and the reason a shard name in a log does not
+    /// appear in the table above.
+    /// </remarks>
+    public IReadOnlyList<ShardProgress> UnregisteredShards => [.. Progress.Where(static x => !x.IsRegistered)];
 }
 
 /// <summary>
@@ -243,9 +261,15 @@ internal sealed record ProjectionSummary(
 /// <param name="ShardNames">The shards that would restart.</param>
 /// <param name="TablesAffected">The tables Marten would rewrite, by name.</param>
 /// <param name="Lifecycle">The projection's lifecycle, because rebuilding an inline projection is a different question.</param>
+/// <param name="ShardTimeout">
+/// The per-shard replay budget this rebuild will be given - <c>MartenStudioOptions.RebuildShardTimeout</c>.
+/// Stated in the dialog because Marten applies it <em>after</em> the projection's tables have been torn
+/// down, so a replay that overruns leaves them empty.
+/// </param>
 internal sealed record RebuildScope(
     string ProjectionName,
     long EventsToReplay,
     IReadOnlyList<string> ShardNames,
     IReadOnlyList<string> TablesAffected,
-    ProjectionLifecycle Lifecycle);
+    ProjectionLifecycle Lifecycle,
+    TimeSpan ShardTimeout);

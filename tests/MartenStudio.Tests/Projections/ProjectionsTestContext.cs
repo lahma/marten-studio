@@ -53,7 +53,9 @@ internal sealed class ProjectionsTestContext : BunitContext
         Services.AddSingleton<StudioActionLogService>();
         Services.AddSingleton<StudioActionLog>();
         Services.AddSingleton<IProjectionDataService>(ProjectionData);
-        Services.AddTransient<StudioLiveUpdates>();
+
+        // The page builds its own polling loop from this, so the circuit's container never tracks one.
+        Services.AddScoped<StudioLiveUpdatesFactory>();
 
         State = Services.GetRequiredService<StudioState>();
         State.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;

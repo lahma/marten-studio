@@ -38,6 +38,50 @@ public class StudioLiveUpdatesTests
 
         js.Calls.Should().Contain("martenStudio.visibility.watch");
         js.DotNetReference.Should().BeOfType<DotNetObjectReference<StudioLiveUpdates>>();
+        js.WatchToken.Should().NotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>
+    /// The watcher list in the browser is keyed on a string this side generates, and <c>unwatch</c> is
+    /// given that same string back.
+    /// </summary>
+    /// <remarks>
+    /// It cannot be keyed on the <see cref="DotNetObjectReference{TValue}" />: Blazor marshals one as an
+    /// id and the browser materialises a fresh wrapper object per call, so a <c>Set</c> keyed on it could
+    /// add and never remove - the document listener stayed attached for the life of the page and every
+    /// closed circuit left another dead reference in it.
+    /// </remarks>
+    [Fact]
+    public async Task The_watch_token_round_trips_from_watch_to_unwatch()
+    {
+        var js = new FakeJsRuntime();
+        var updates = new StudioLiveUpdates(js, NullLogger<StudioLiveUpdates>.Instance);
+
+        await updates.StartAsync(Interval, static _ => Task.CompletedTask, Token);
+
+        string? token = js.WatchToken;
+        token.Should().NotBeNullOrWhiteSpace();
+        token.Should().MatchRegex("^[0-9a-f]{32}$", "the token is a Guid in 'N' format, which survives the round trip as text");
+
+        await updates.DisposeAsync();
+
+        js.UnwatchToken.Should().Be(token);
+    }
+
+    /// <summary>Two loops on one circuit are two watchers, and they are not keyed on the same thing.</summary>
+    [Fact]
+    public async Task Two_loops_take_two_different_tokens()
+    {
+        var first = new FakeJsRuntime();
+        var second = new FakeJsRuntime();
+
+        await using var one = new StudioLiveUpdates(first, NullLogger<StudioLiveUpdates>.Instance);
+        await using var two = new StudioLiveUpdates(second, NullLogger<StudioLiveUpdates>.Instance);
+
+        await one.StartAsync(Interval, static _ => Task.CompletedTask, Token);
+        await two.StartAsync(Interval, static _ => Task.CompletedTask, Token);
+
+        first.WatchToken.Should().NotBe(second.WatchToken);
     }
 
     /// <summary>

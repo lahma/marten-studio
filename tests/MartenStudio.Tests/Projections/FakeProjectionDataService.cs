@@ -41,6 +41,12 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
     /// <summary>How many of those it gave back.</summary>
     public int Releases { get; private set; }
 
+    /// <summary>The per-shard replay budget the rebuild dialog is handed.</summary>
+    public TimeSpan ShardTimeout { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>What <see cref="RebuildAsync" /> answers: whether this call is what started it.</summary>
+    public bool RebuildStarts { get; set; } = true;
+
     /// <summary>Adds one projection with a single shard and that shard's progress.</summary>
     public FakeProjectionDataService WithProjection(
         string name,
@@ -63,6 +69,21 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
                 shardName, name, sequence, HighWaterMark, agentStatus, pauseReason, failure,
                 DateTimeOffset.UnixEpoch, skipped, null, hasProgressRow, isLive));
         }
+
+        return this;
+    }
+
+    /// <summary>
+    /// Adds a progression row no registered projection claims - a projection that was removed or renamed.
+    /// </summary>
+    public FakeProjectionDataService WithUnregisteredShard(string shardName, long sequence = 10)
+    {
+        int separator = shardName.IndexOf(':', StringComparison.Ordinal);
+        string projectionName = separator > 0 ? shardName[..separator] : shardName;
+
+        progress.Add(new ShardProgress(
+            shardName, projectionName, sequence, HighWaterMark, null, null, null,
+            DateTimeOffset.UnixEpoch, null, null, true, false, IsRegistered: false));
 
         return this;
     }
@@ -133,7 +154,8 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
             HighWaterMark,
             projection.ShardNames,
             ["studio_sample.mt_doc_" + projectionName.ToLowerInvariant()],
-            projection.Lifecycle));
+            projection.Lifecycle,
+            ShardTimeout));
     }
 
     /// <inheritdoc />
@@ -162,10 +184,10 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
         Record("RestartHighWater");
 
     /// <inheritdoc />
-    public async Task<OperationHandle> RebuildAsync(StudioScope scope, string projectionName, CancellationToken cancellationToken = default)
+    public async Task<OperationStart> RebuildAsync(StudioScope scope, string projectionName, CancellationToken cancellationToken = default)
     {
         await Record("Rebuild:" + projectionName);
-        return new OperationHandle("op1", "Rebuild", projectionName);
+        return new OperationStart(new OperationHandle("op1", "Rebuild", projectionName), RebuildStarts);
     }
 
     /// <inheritdoc />
@@ -181,7 +203,15 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
         running.FirstOrDefault(x => x.Id == operationId);
 
     /// <inheritdoc />
-    public IReadOnlyList<StudioOperation> RunningOperations(StudioScope scope) => running;
+    public async Task<bool> CancelOperationAsync(StudioScope scope, string operationId, CancellationToken cancellationToken = default)
+    {
+        await Record("CancelOperation:" + operationId);
+        return true;
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<StudioOperation>> RunningOperationsAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<StudioOperation>>(running);
 
     private Task Record(string call)
     {

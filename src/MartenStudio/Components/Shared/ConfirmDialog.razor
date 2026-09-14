@@ -4,6 +4,7 @@
         <div class="ms-confirm-dialog" role="alertdialog" aria-modal="true" aria-label="@Title">
             <h3>@Title</h3>
             <p>@Message</p>
+            @ChildContent
 
             @if (RequiresTypedConfirmation)
             {
@@ -49,6 +50,17 @@
 
     [Parameter]
     public string Message { get; set; } = "Are you sure?";
+
+    /// <summary>
+    /// Optional detail between the message and the confirmation, for an action whose scope is a table
+    /// rather than a sentence - the tables a rebuild rewrites, the shards it restarts.
+    /// </summary>
+    /// <remarks>
+    /// A slot here rather than a second dialog: a screen that grew its own copy of type-to-confirm is a
+    /// screen where the rule can be got wrong one more time.
+    /// </remarks>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
 
     /// <summary>
     /// What the visitor has to type before the confirm button works, or <see langword="null" /> for a

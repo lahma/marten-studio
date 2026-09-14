@@ -44,6 +44,7 @@ public class MartenStudioOptionsTest
         options.SqlConsoleRole.Should().BeNull();
         options.ExactCountThreshold.Should().Be(100_000);
         options.RefreshInterval.Should().Be(TimeSpan.FromSeconds(5));
+        options.RebuildShardTimeout.Should().Be(TimeSpan.FromHours(1));
         options.IsDocumentTypeVisible.Should().BeNull();
         options.IncludeAncillaryStores.Should().BeTrue();
         options.KnownTenantIds.Should().BeEmpty();

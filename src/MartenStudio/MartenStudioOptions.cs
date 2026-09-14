@@ -116,6 +116,17 @@ public sealed class MartenStudioOptions
     public TimeSpan RefreshInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// The per-shard replay timeout handed to Marten's rebuild. At least one minute.
+    /// </summary>
+    /// <remarks>
+    /// A rebuild tears the projection's tables down <em>before</em> this timeout starts applying to the
+    /// replay, so a rebuild that exceeds it stops with the projection's tables already emptied and the
+    /// operation recorded as failed. Set it generously: the default is one hour, where Marten's own
+    /// no-timeout overload would have silently used five minutes.
+    /// </remarks>
+    public TimeSpan RebuildShardTimeout { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>
     /// Optional filter over the registered document types. Applied in the data layer, not only in
     /// navigation.
     /// </summary>

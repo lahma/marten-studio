@@ -2,77 +2,59 @@
 
    A rebuild deletes the projection's documents and replays every event into them. There is no undo and
    there is no progress bar that can bring the old rows back, so this is the "type the name" severity of
-   confirmation rather than the "are you sure" one. It states the scope first - tables, shards, and how
-   many events would be replayed - because a person cannot consent to something the dialog did not
-   say. *@
+   confirmation rather than the "are you sure" one. It states the scope first - tables, shards, how many
+   events would be replayed and how long each shard is given - because a person cannot consent to
+   something the dialog did not say.
 
-@if (IsOpen)
-{
-    <div class="ms-confirm-overlay ms-rebuild-overlay">
-        <div class="ms-confirm-dialog ms-rebuild-dialog" role="dialog" aria-modal="true" aria-labelledby="ms-rebuild-title">
-            <h3 id="ms-rebuild-title">Rebuild projection @ProjectionName</h3>
+   The typed confirmation is the shared ConfirmDialog's, not a second implementation of it: this
+   component decides what has to be typed and what is shown above the box, and nothing else. *@
 
-            <p class="ms-rebuild-summary">
-                This deletes what <span class="ms-mono">@ProjectionName</span> has written and replays
-                <strong>@EventsToReplay.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</strong>
-                events into it from the beginning. It cannot be undone.
-            </p>
-
-            <div class="ms-kv ms-rebuild-scope">
-                <div class="ms-kv-row">
-                    <span class="ms-kv-key">Lifecycle</span>
-                    <span class="ms-kv-value">@Lifecycle</span>
-                </div>
-                <div class="ms-kv-row">
-                    <span class="ms-kv-key">Shards restarted</span>
-                    <span class="ms-kv-value ms-mono">@(Shards.Count == 0 ? "none" : string.Join(", ", Shards))</span>
-                </div>
-                <div class="ms-kv-row">
-                    <span class="ms-kv-key">Tables rewritten</span>
-                    <span class="ms-kv-value ms-mono">@(Tables.Count == 0 ? "could not be determined" : string.Join(", ", Tables))</span>
-                </div>
-                <div class="ms-kv-row">
-                    <span class="ms-kv-key">Events to replay</span>
-                    <span class="ms-kv-value ms-mono">@EventsToReplay.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</span>
-                </div>
-            </div>
-
-            @if (!IsAsync)
-            {
-                <p class="ms-alert ms-alert-warning ms-rebuild-inline-warning" role="note">
-                    This projection is <strong>@Lifecycle</strong>, not async. The daemon can still rebuild it,
-                    but nothing will keep it up to date afterwards except the next write.
-                </p>
-            }
-
-            <label class="ms-form-label" for="ms-rebuild-confirm">
-                Type <span class="ms-mono">@ProjectionName</span> to confirm
-            </label>
-            <input id="ms-rebuild-confirm"
-                   class="ms-input ms-input-mono ms-rebuild-input"
-                   type="text"
-                   autocomplete="off"
-                   spellcheck="false"
-                   value="@typed"
-                   @oninput="OnTypedAsync" />
-
-            <div class="ms-confirm-actions">
-                <button type="button"
-                        class="ms-button ms-button-danger ms-rebuild-confirm"
-                        disabled="@(!IsConfirmed)"
-                        @onclick="ConfirmAsync">
-                    Rebuild @ProjectionName
-                </button>
-                <button type="button" class="ms-button ms-rebuild-cancel" @onclick="CancelAsync">Cancel</button>
-            </div>
+<ConfirmDialog IsOpen="IsOpen"
+               Title="@($"Rebuild projection {ProjectionName}")"
+               Message="@Summary"
+               ConfirmationPhrase="@ProjectionName"
+               ConfirmText="@($"Rebuild {ProjectionName}")"
+               OnConfirm="OnConfirm"
+               OnCancel="OnCancel">
+    <div class="ms-kv ms-rebuild-scope">
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">Lifecycle</span>
+            <span class="ms-kv-value">@Lifecycle</span>
+        </div>
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">Shards restarted</span>
+            <span class="ms-kv-value ms-mono">@(Shards.Count == 0 ? "none" : string.Join(", ", Shards))</span>
+        </div>
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">Tables rewritten</span>
+            <span class="ms-kv-value ms-mono">@(Tables.Count == 0 ? "could not be determined" : string.Join(", ", Tables))</span>
+        </div>
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">Events to replay</span>
+            <span class="ms-kv-value ms-mono">@EventsToReplay.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</span>
+        </div>
+        <div class="ms-kv-row ms-rebuild-timeout">
+            <span class="ms-kv-key">Time allowed per shard</span>
+            <span class="ms-kv-value ms-mono">@TimeoutText</span>
         </div>
     </div>
-}
+
+    <p class="ms-muted ms-rebuild-timeout-note">
+        The tables are emptied first and then replayed, so a shard that has not finished within
+        @TimeoutText stops with them still empty. Raise
+        <code>MartenStudioOptions.RebuildShardTimeout</code> if this store needs longer.
+    </p>
+
+    @if (!IsAsync)
+    {
+        <p class="ms-alert ms-alert-warning ms-rebuild-inline-warning" role="note">
+            This projection is <strong>@Lifecycle</strong>, not async. The daemon can still rebuild it,
+            but nothing will keep it up to date afterwards except the next write.
+        </p>
+    }
+</ConfirmDialog>
 
 @code {
-    private string typed = string.Empty;
-    private string? openedFor;
-
     /// <summary>Whether the dialog is showing.</summary>
     [Parameter]
     public bool IsOpen { get; set; }
@@ -101,6 +83,16 @@
     [Parameter]
     public bool IsAsync { get; set; }
 
+    /// <summary>
+    /// How long each shard is given to replay - <c>MartenStudioOptions.RebuildShardTimeout</c>.
+    /// </summary>
+    /// <remarks>
+    /// Shown because it is not a retry budget: Marten tears the projection's tables down before the
+    /// timeout starts applying to the replay.
+    /// </remarks>
+    [Parameter]
+    public TimeSpan ShardTimeout { get; set; } = TimeSpan.FromHours(1);
+
     /// <summary>Raised when the name has been typed and the button pressed.</summary>
     [Parameter]
     public EventCallback OnConfirm { get; set; }
@@ -109,44 +101,26 @@
     [Parameter]
     public EventCallback OnCancel { get; set; }
 
-    /// <summary>Whether what was typed matches the projection's name, exactly.</summary>
-    private bool IsConfirmed => string.Equals(typed.Trim(), ProjectionName, StringComparison.Ordinal);
+    private string Summary =>
+        $"This deletes what {ProjectionName} has written and replays "
+        + EventsToReplay.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)
+        + " events into it from the beginning. It cannot be undone.";
 
-    /// <summary>
-    /// Clears the box whenever the dialog opens on a different projection, so a name typed for one
-    /// rebuild can never confirm another.
-    /// </summary>
-    protected override void OnParametersSet()
+    /// <summary>The timeout in the largest unit that says it without a decimal point.</summary>
+    private string TimeoutText
     {
-        if (!IsOpen)
+        get
         {
-            openedFor = null;
-            typed = string.Empty;
-            return;
+            System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.InvariantCulture;
+
+            if (ShardTimeout.TotalHours >= 1)
+            {
+                return string.Create(culture, $"{ShardTimeout.TotalHours:0.##} h");
+            }
+
+            return ShardTimeout.TotalMinutes >= 1
+                ? string.Create(culture, $"{ShardTimeout.TotalMinutes:0.##} min")
+                : string.Create(culture, $"{ShardTimeout.TotalSeconds:0.##} s");
         }
-
-        if (!string.Equals(openedFor, ProjectionName, StringComparison.Ordinal))
-        {
-            openedFor = ProjectionName;
-            typed = string.Empty;
-        }
-    }
-
-    private void OnTypedAsync(ChangeEventArgs args) => typed = args.Value?.ToString() ?? string.Empty;
-
-    private async Task ConfirmAsync()
-    {
-        if (!IsConfirmed)
-        {
-            return;
-        }
-
-        await OnConfirm.InvokeAsync();
-    }
-
-    private async Task CancelAsync()
-    {
-        typed = string.Empty;
-        await OnCancel.InvokeAsync();
     }
 }

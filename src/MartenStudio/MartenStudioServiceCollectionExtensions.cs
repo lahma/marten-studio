@@ -86,6 +86,9 @@ public static partial class MartenStudioServiceCollectionExtensions
                 static options => options.RefreshInterval >= TimeSpan.FromSeconds(1) && options.RefreshInterval <= TimeSpan.FromMinutes(5),
                 "MartenStudioOptions.RefreshInterval must be between one second and five minutes")
             .Validate(
+                static options => options.RebuildShardTimeout >= TimeSpan.FromMinutes(1),
+                "MartenStudioOptions.RebuildShardTimeout must be at least one minute: it is the per-shard replay budget, and a rebuild that exceeds it stops with the projection's tables already emptied")
+            .Validate(
                 static options => options.Capabilities is not null,
                 "MartenStudioOptions.Capabilities cannot be null: use new MartenStudioCapabilities() for none, or MartenStudioCapabilities.All()")
             .Validate(
@@ -152,9 +155,10 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<DaemonAccessor>();
         services.TryAddScoped<IProjectionDataService, ProjectionDataService>();
 
-        // Transient: a polling loop belongs to one page, and two pages on one circuit each need their
-        // own timer and their own .NET object reference.
-        services.TryAddTransient<StudioLiveUpdates>();
+        // A factory rather than the loop itself: StudioLiveUpdates is IAsyncDisposable, and a transient
+        // registration would leave the circuit's container tracking one instance per page visit for the
+        // life of the circuit. The page owns the loop it creates.
+        services.TryAddScoped<StudioLiveUpdatesFactory>();
 
         return services;
     }

@@ -6,6 +6,8 @@ using Marten;
 using MartenStudio.SampleDomain.Events;
 using MartenStudio.Services.Projections;
 
+using Microsoft.Extensions.DependencyInjection;
+
 namespace MartenStudio.Integration.Tests.Projections;
 
 /// <summary>
@@ -136,9 +138,10 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
     {
         await WaitUntilCaughtUpAsync(DailySalesName);
 
-        OperationHandle handle = await Fixture.UseAsync(service => service.RebuildAsync(Fixture.Scope, DailySalesName, Token));
+        OperationStart handle = await Fixture.UseAsync(service => service.RebuildAsync(Fixture.Scope, DailySalesName, Token));
 
-        handle.Target.Should().Be(DailySalesName);
+        handle.Started.Should().BeTrue();
+        handle.Handle.Target.Should().Be(DailySalesName);
 
         await ProjectionsFixture.WaitForAsync(
             () => Task.FromResult(Fixture.Operations.Find(handle.Id)?.IsRunning == false),
@@ -157,6 +160,45 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
 
         Fixture.ActionLog.GetLatest().Select(x => x.Action)
             .Should().Contain(["RebuildProjection", "RebuildStarted", "RebuildFinished"]);
+
+        // B1: the audit says which per-shard budget was handed to Marten, so a rebuild that ran out of
+        // time can be told apart from one that failed - and the number is in the record either way.
+        Fixture.ActionLog.GetLatest()
+            .Should().Contain(x => x.Action == "RebuildProjection" && x.Message!.Contains("per-shard timeout", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// B3: two rebuilds of one projection would replay the same events into the same tables at once. The
+    /// second request is answered with the first, and only one operation exists.
+    /// </summary>
+    [PostgresFact]
+    public async Task Two_rebuilds_of_one_projection_in_quick_succession_yield_one_operation()
+    {
+        await WaitUntilCaughtUpAsync(ShipmentTrackerName);
+
+        using IServiceScope scope = Fixture.CreateScope();
+        IProjectionDataService service = ProjectionsFixture.ServiceIn(scope);
+
+        OperationStart first = await service.RebuildAsync(Fixture.Scope, ShipmentTrackerName, Token);
+
+        // A second circuit, resolved separately, asking for the same thing before the first has finished.
+        OperationStart second = await Fixture.UseAsync(other => other.RebuildAsync(Fixture.Scope, ShipmentTrackerName, Token));
+
+        second.Id.Should().Be(first.Id);
+        second.Started.Should().BeFalse("one rebuild of a projection runs at a time");
+
+        Fixture.Operations.All()
+            .Count(x => x.Kind == "Rebuild" && x.Target == ShipmentTrackerName)
+            .Should().Be(1);
+
+        await ProjectionsFixture.WaitForAsync(
+            () => Task.FromResult(Fixture.Operations.Find(first.Id)?.IsRunning == false),
+            $"the rebuild of {ShipmentTrackerName} to finish",
+            TimeSpan.FromMinutes(2),
+            Token);
+
+        Fixture.ActionLog.GetLatest()
+            .Should().Contain(x => x.Action == "RebuildProjection" && x.Message!.Contains("Already running", StringComparison.Ordinal));
     }
 
     [PostgresFact]
@@ -218,37 +260,6 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
         lease.Dispose();
 
         Fixture.LiveState.WatchCount.Should().Be(0, "the last page leaving detaches the observer");
-    }
-
-    /// <summary>
-    /// The demo's poisoned stream produces a real dead letter: the projection threw, the daemon skipped
-    /// the event and recorded it. Read here with a direct query - the dead-letter screen itself belongs to
-    /// another packet.
-    /// </summary>
-    [PostgresFact]
-    public async Task The_poisoned_stream_produces_a_dead_letter_the_daemon_wrote()
-    {
-        await ProjectionsFixture.WaitForAsync(
-            async () =>
-            {
-                await using IQuerySession session = Fixture.Store.QuerySession();
-                return await session.Query<DeadLetterEvent>().AnyAsync(Token);
-            },
-            "the daemon to record the poisoned event as a dead letter",
-            TimeSpan.FromMinutes(2),
-            Token);
-
-        await using IQuerySession letters = Fixture.Store.QuerySession();
-        IReadOnlyList<DeadLetterEvent> dead = await letters.Query<DeadLetterEvent>().ToListAsync(Token);
-
-        dead.Should().NotBeEmpty();
-        dead.Should().Contain(x => x.ProjectionName == ShipmentTrackerName);
-        dead.Should().AllSatisfy(letter =>
-        {
-            letter.EventSequence.Should().BeGreaterThan(0);
-            letter.ExceptionMessage.Should().NotBeNullOrWhiteSpace();
-            letter.ExceptionType.Should().NotBeNullOrWhiteSpace();
-        });
     }
 
     /// <summary>

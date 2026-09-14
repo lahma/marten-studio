@@ -10,7 +10,9 @@ namespace MartenStudio.Tests.Projections;
 /// <remarks>
 /// Hand-written rather than mocked, and deliberately not bUnit's: these tests are about
 /// <c>StudioLiveUpdates</c> on its own, with no component and no renderer, and what they need to see is
-/// that the <c>DotNetObjectReference</c> was passed to <c>visibility.watch</c> and given back on dispose.
+/// that the watch <em>token</em> was passed to <c>visibility.watch</c> and handed back to
+/// <c>visibility.unwatch</c> - a <c>DotNetObjectReference</c> cannot be, because Blazor marshals one as an
+/// id and the browser makes a new wrapper object for every call.
 /// </remarks>
 internal sealed class FakeJsRuntime : IJSRuntime
 {
@@ -22,6 +24,12 @@ internal sealed class FakeJsRuntime : IJSRuntime
 
     /// <summary>What every call throws, when a test is about prerendering or a browser that refused.</summary>
     public Exception? Failure { get; set; }
+
+    /// <summary>The token <c>visibility.watch</c> was keyed on.</summary>
+    public string? WatchToken { get; private set; }
+
+    /// <summary>The token <c>visibility.unwatch</c> was given.</summary>
+    public string? UnwatchToken { get; private set; }
 
     /// <summary>The .NET reference the page handed the browser, so a test can call back through it.</summary>
     public object? DotNetReference { get; private set; }
@@ -46,8 +54,14 @@ internal sealed class FakeJsRuntime : IJSRuntime
 
         if (identifier == "martenStudio.visibility.watch")
         {
-            DotNetReference = args?.Length > 0 ? args[0] : null;
+            WatchToken = args?.Length > 0 ? args[0] as string : null;
+            DotNetReference = args?.Length > 1 ? args[1] : null;
             return ValueTask.FromResult((TValue) (object) StartsHidden);
+        }
+
+        if (identifier == "martenStudio.visibility.unwatch")
+        {
+            UnwatchToken = args?.Length > 0 ? args[0] as string : null;
         }
 
         return ValueTask.FromResult(default(TValue)!);

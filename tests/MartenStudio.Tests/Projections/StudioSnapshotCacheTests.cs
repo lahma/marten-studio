@@ -106,6 +106,33 @@ public class StudioSnapshotCacheTests
     }
 
     /// <summary>
+    /// A shared task that came back cancelled is as useless as one that faulted: it will never produce a
+    /// value, and serving it for the rest of the window would hand every later caller a cancellation that
+    /// has already happened.
+    /// </summary>
+    [Fact]
+    public async Task A_cancelled_query_is_evicted_like_a_failed_one()
+    {
+        var cache = new StudioSnapshotCache(new FakeTimeProvider(Now), TimeSpan.FromSeconds(30));
+        int calls = 0;
+
+        Func<Task> cancelling = async () => await cache.GetAsync<int>("k", _ =>
+        {
+            calls++;
+            return Task.FromCanceled<int>(new CancellationToken(canceled: true));
+        }, Token);
+
+        await cancelling.Should().ThrowAsync<OperationCanceledException>();
+
+        // The caller's own token was never cancelled, so this is the shared work having been cancelled -
+        // and the entry must be gone rather than replayed to the next poll.
+        int value = await cache.GetAsync("k", _ => Task.FromResult(++calls), Token);
+
+        calls.Should().Be(2);
+        value.Should().Be(2);
+    }
+
+    /// <summary>
     /// One caller walking away must not cancel the query every other tab is waiting on, so the shared
     /// work runs under a token of its own.
     /// </summary>

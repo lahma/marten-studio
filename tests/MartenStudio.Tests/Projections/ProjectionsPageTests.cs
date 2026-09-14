@@ -266,6 +266,12 @@ public class ProjectionsPageTests
     // The rebuild dialog
     // --------------------------------------------------------------------------------------------
 
+    /// <summary>The confirm button of whichever dialog is open. There is never more than one.</summary>
+    private const string ConfirmButton = ".ms-confirm-actions .ms-button-danger";
+
+    /// <summary>Its Cancel button.</summary>
+    private const string CancelButton = ".ms-confirm-actions .ms-button:not(.ms-button-danger)";
+
     [Fact]
     public async Task The_rebuild_dialog_states_the_scope_and_will_not_confirm_until_the_name_is_typed()
     {
@@ -278,26 +284,70 @@ public class ProjectionsPageTests
 
         page.Find(".ms-projection-rebuild").Click();
 
-        page.Find(".ms-rebuild-dialog").TextContent.Should().Contain("4,321");
-        page.Find(".ms-rebuild-dialog").TextContent.Should().Contain("mt_doc_dailysales");
+        page.Find(".ms-confirm-dialog").TextContent.Should().Contain("4,321");
+        page.Find(".ms-confirm-dialog").TextContent.Should().Contain("mt_doc_dailysales");
 
         // Nothing typed: the button is there and refuses.
-        page.Find(".ms-rebuild-confirm").HasAttribute("disabled").Should().BeTrue();
+        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue();
 
-        page.Find(".ms-rebuild-confirm").Click();
+        page.Find(ConfirmButton).Click();
         context.ProjectionData.Calls.Should().NotContain("Rebuild:DailySales");
 
         // The wrong name does not do either.
-        page.Find(".ms-rebuild-input").Input("dailysales");
-        page.Find(".ms-rebuild-confirm").HasAttribute("disabled").Should().BeTrue();
+        page.Find(".ms-confirm-input").Input("dailysales");
+        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue();
 
         // The right one does.
-        page.Find(".ms-rebuild-input").Input("DailySales");
-        page.Find(".ms-rebuild-confirm").HasAttribute("disabled").Should().BeFalse();
+        page.Find(".ms-confirm-input").Input("DailySales");
+        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeFalse();
 
-        page.Find(".ms-rebuild-confirm").Click();
+        page.Find(ConfirmButton).Click();
 
         context.ProjectionData.Calls.Should().Contain("Rebuild:DailySales");
+    }
+
+    /// <summary>
+    /// B1: Marten tears the projection's tables down before the per-shard timeout starts applying to the
+    /// replay, so the budget is part of what a person is consenting to and the dialog has to say it.
+    /// </summary>
+    [Fact]
+    public async Task The_rebuild_dialog_states_the_per_shard_timeout_and_that_the_tables_are_emptied_first()
+    {
+        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        context.ProjectionData.ShardTimeout = TimeSpan.FromHours(2);
+        context.ProjectionData.WithProjection("DailySales");
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        page.Find(".ms-projection-rebuild").Click();
+
+        page.Find(".ms-rebuild-timeout").TextContent.Should().Contain("2 h");
+
+        string note = page.Find(".ms-rebuild-timeout-note").TextContent;
+        note.Should().Contain("emptied first");
+        note.Should().Contain("MartenStudioOptions.RebuildShardTimeout");
+    }
+
+    /// <summary>
+    /// F7: the typed confirmation is the shared dialog's, so there is one implementation of the rule
+    /// rather than one per screen that needs it.
+    /// </summary>
+    [Fact]
+    public async Task The_rebuild_dialog_uses_the_shared_confirm_dialog()
+    {
+        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        context.ProjectionData.WithProjection("DailySales");
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        page.Find(".ms-projection-rebuild").Click();
+
+        page.FindAll(".ms-confirm-dialog").Should().ContainSingle();
+        page.FindAll(".ms-confirm-input").Should().ContainSingle();
+        page.FindAll(".ms-rebuild-input").Should().BeEmpty("the private type-to-confirm box is gone");
+        page.Find(".ms-rebuild-scope").TextContent.Should().Contain("DailySales:All");
     }
 
     [Fact]
@@ -310,10 +360,135 @@ public class ProjectionsPageTests
         var page = context.Render<Page>();
 
         page.Find(".ms-projection-rebuild").Click();
-        page.Find(".ms-rebuild-cancel").Click();
+        page.Find(CancelButton).Click();
 
-        page.FindAll(".ms-rebuild-dialog").Should().BeEmpty();
+        page.FindAll(".ms-confirm-dialog").Should().BeEmpty();
         context.ProjectionData.Calls.Should().NotContain("Rebuild:DailySales");
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // One rebuild per projection, and stopping one
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// B3: two rebuilds of one projection would race over the same tables, so the button goes away while
+    /// one is running - on every circuit, because the tracker the page reads is the singleton.
+    /// </summary>
+    [Fact]
+    public async Task A_projection_that_is_already_being_rebuilt_cannot_be_rebuilt_again()
+    {
+        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        context.ProjectionData
+            .WithProjection("DailySales")
+            .WithProjection("ShipmentTracker")
+            .WithRunningOperation("abc123", "DailySales");
+
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        IElement daily = page.Find("[data-projection='DailySales'] .ms-projection-rebuild");
+        daily.HasAttribute("disabled").Should().BeTrue();
+        daily.GetAttribute("title").Should().Contain("already running");
+
+        page.Find("[data-projection='ShipmentTracker'] .ms-projection-rebuild")
+            .HasAttribute("disabled").Should().BeFalse("only the projection being rebuilt is held back");
+    }
+
+    /// <summary>
+    /// The service answers a second rebuild with the running one rather than starting anything, and the
+    /// page says so rather than claiming it started something.
+    /// </summary>
+    [Fact]
+    public async Task A_rebuild_that_was_already_running_is_reported_as_such()
+    {
+        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        context.ProjectionData.WithProjection("DailySales");
+        context.ProjectionData.RebuildStarts = false;
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        page.Find(".ms-projection-rebuild").Click();
+        page.Find(".ms-confirm-input").Input("DailySales");
+        page.Find(ConfirmButton).Click();
+
+        context.Toasts.Messages.Select(x => x.Message)
+            .Should().Contain(x => x.Contains("already being rebuilt", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// F8: cancelling a replay leaves a partial projection, so it is offered behind the same capability
+    /// that started it and behind a confirmation that says what it costs.
+    /// </summary>
+    [Fact]
+    public async Task Cancelling_a_running_operation_asks_first_and_then_reaches_the_service()
+    {
+        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        context.ProjectionData.WithProjection("DailySales").WithRunningOperation("abc123", "DailySales");
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        page.Find("[data-operation='abc123'] .ms-operation-cancel").Click();
+
+        page.Find(".ms-confirm-dialog").TextContent.Should().Contain("leaves the projection partial");
+        context.ProjectionData.Calls.Should().NotContain("CancelOperation:abc123");
+
+        page.Find(ConfirmButton).Click();
+
+        context.ProjectionData.Calls.Should().Contain("CancelOperation:abc123");
+    }
+
+    [Fact]
+    public async Task Without_the_rebuild_capability_a_running_operation_offers_no_cancel()
+    {
+        await using var context = new ProjectionsTestContext();
+        context.ProjectionData.WithProjection("DailySales").WithRunningOperation("abc123", "DailySales");
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        page.FindAll("[data-operation='abc123'] .ms-operation-cancel").Should().BeEmpty();
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Unregistered shards
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// F2: a progression row nothing claims is the reason a stale table is still there. It gets its own
+    /// section rather than being invented into a projection row or dropped on the floor.
+    /// </summary>
+    [Fact]
+    public async Task Progression_rows_no_projection_claims_are_rendered_under_their_own_heading()
+    {
+        await using var context = new ProjectionsTestContext();
+        context.ProjectionData
+            .WithProjection("DailySales")
+            .WithUnregisteredShard("RetiredProjection:All", sequence: 17);
+
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        page.Find(".ms-unregistered-shards").TextContent.Should().Contain("mt_event_progression");
+        page.Find("[data-unregistered-shard='RetiredProjection:All']").TextContent.Should().Contain("17");
+
+        // And it is not smuggled into the projections table as a shard of something that is registered.
+        page.FindAll("[data-shard='RetiredProjection:All']").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task With_nothing_unregistered_the_section_is_absent()
+    {
+        await using var context = new ProjectionsTestContext();
+        context.ProjectionData.WithProjection("DailySales");
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        page.FindAll(".ms-unregistered-shards").Should().BeEmpty();
     }
 
     // --------------------------------------------------------------------------------------------

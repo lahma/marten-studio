@@ -71,8 +71,12 @@ internal interface IProjectionDataService
     /// <summary>
     /// Rebuilds one projection, detached. Requires <c>RebuildProjections</c>.
     /// </summary>
-    /// <returns>The handle to watch it by. The rebuild outlives the page that started it.</returns>
-    Task<OperationHandle> RebuildAsync(StudioScope scope, string projectionName, CancellationToken cancellationToken = default);
+    /// <returns>
+    /// The handle to watch it by, and whether this call is what started it. The rebuild outlives the page
+    /// that started it, and a projection already being rebuilt - on this circuit or any other - is
+    /// answered with the running rebuild rather than started a second time.
+    /// </returns>
+    Task<OperationStart> RebuildAsync(StudioScope scope, string projectionName, CancellationToken cancellationToken = default);
 
     /// <summary>Moves the high-water mark to the latest event. Requires <c>CorrectProgression</c>.</summary>
     Task AdvanceHighWaterMarkAsync(StudioScope scope, CancellationToken cancellationToken = default);
@@ -83,6 +87,18 @@ internal interface IProjectionDataService
     /// <summary>One long-running operation by its handle, or <see langword="null" />.</summary>
     StudioOperation? FindOperation(string? operationId);
 
-    /// <summary>Everything still running against this scope, newest first.</summary>
-    IReadOnlyList<StudioOperation> RunningOperations(StudioScope scope);
+    /// <summary>
+    /// Asks a running operation to stop. Requires <c>RebuildProjections</c>, and is audited.
+    /// </summary>
+    /// <returns><see langword="true" /> when something was asked to stop.</returns>
+    Task<bool> CancelOperationAsync(StudioScope scope, string operationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Everything still running against this scope, newest first.
+    /// </summary>
+    /// <remarks>
+    /// Resolves the scope like every sibling on this interface: the list is small and in-process, but the
+    /// store, database and tenant a visitor may address is decided in one place and never by the caller.
+    /// </remarks>
+    Task<IReadOnlyList<StudioOperation>> RunningOperationsAsync(StudioScope scope, CancellationToken cancellationToken = default);
 }

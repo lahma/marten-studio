@@ -97,22 +97,43 @@ export function afterWebStarted() {
     };
 
     // Page visibility, so a page that polls can stop while nobody is looking at it. One listener for the
-    // whole document however many components ask; the .NET references are held in a set and the listener
-    // is removed again once the last one goes, so a circuit that closes leaves nothing behind.
+    // whole document however many components ask, removed again once the last watcher goes, so a circuit
+    // that closes leaves nothing behind.
+    //
+    // Watchers are keyed on a string token the .NET side generates, NOT on the DotNetObjectReference.
+    // Blazor marshals a DotNetObjectReference as an id and materialises a *new* JS wrapper object for
+    // every call, so the object that arrives at unwatch is never the object that arrived at watch: a Set
+    // keyed on it could add but never remove, the visibilitychange listener stayed attached for the life
+    // of the page, and every closed circuit left another dead reference in it.
+    //
+    // invokeMethodAsync returns a promise, so a call on a disposed reference rejects rather than throwing:
+    // the synchronous catch below never saw it and the dead watcher was never dropped. Hence the .catch().
     window.martenStudio.visibility = window.martenStudio.visibility || (function () {
-        const watchers = new Set();
+        const watchers = new Map();
         let listening = false;
+        let legacySequence = 0;
+
+        function drop(token) {
+            if (watchers.delete(token) && watchers.size === 0) {
+                stop();
+            }
+        }
 
         function notify() {
             const hidden = document.hidden === true;
-            for (const watcher of watchers) {
+            for (const entry of Array.from(watchers)) {
+                const token = entry[0];
+                const watcher = entry[1];
                 try {
-                    watcher.invokeMethodAsync("OnVisibilityChanged", hidden);
+                    const pending = watcher.invokeMethodAsync("OnVisibilityChanged", hidden);
+                    if (pending && typeof pending.catch === "function") {
+                        // The circuit went away without unwatching. Drop it rather than rejecting on
+                        // every visibility change for the rest of the page's life.
+                        pending.catch(function () { drop(token); });
+                    }
                 }
                 catch {
-                    // The circuit went away without unwatching; drop it rather than throwing on every
-                    // visibility change for the rest of the page's life.
-                    watchers.delete(watcher);
+                    drop(token);
                 }
             }
 
@@ -140,17 +161,44 @@ export function afterWebStarted() {
         }
 
         return {
-            watch: function (dotNetRef) {
-                if (!dotNetRef || watchers.has(dotNetRef)) {
+            /*
+             * watch(token, dotNetRef) - the token is what unwatch(token) is called with later.
+             *
+             * watch(dotNetRef) is the deprecated one-argument form, kept working for callers that have
+             * not been moved over yet. It registers under a synthetic token, so the watcher does receive
+             * visibility changes; what it cannot do is be removed by handing the reference back, because
+             * that reference is a different object by then. Such a watcher is dropped by the rejected
+             * promise above the first time the document's visibility changes after its circuit closes.
+             */
+            watch: function (token, dotNetRef) {
+                if (dotNetRef === undefined || dotNetRef === null) {
+                    dotNetRef = token;
+                    token = "legacy:" + (++legacySequence);
+                }
+
+                if (!dotNetRef || typeof token !== "string" || watchers.has(token)) {
                     return document.hidden === true;
                 }
 
-                watchers.add(dotNetRef);
+                watchers.set(token, dotNetRef);
                 start();
                 return document.hidden === true;
             },
-            unwatch: function (dotNetRef) {
-                watchers.delete(dotNetRef);
+            unwatch: function (token) {
+                if (typeof token === "string") {
+                    drop(token);
+                    return;
+                }
+
+                // The deprecated form: a DotNetObjectReference cannot be matched back to the one that
+                // was handed in, so every synthetic-token watcher is released. There is at most one per
+                // page in the callers this shim exists for.
+                for (const key of Array.from(watchers.keys())) {
+                    if (key.startsWith("legacy:")) {
+                        watchers.delete(key);
+                    }
+                }
+
                 if (watchers.size === 0) {
                     stop();
                 }

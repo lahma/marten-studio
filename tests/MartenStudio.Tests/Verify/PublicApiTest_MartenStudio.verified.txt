@@ -44,6 +44,7 @@ namespace MartenStudio
         public string Path { get; set; }
         public System.TimeSpan QueryTimeout { get; set; }
         public bool ReadOnly { get; set; }
+        public System.TimeSpan RebuildShardTimeout { get; set; }
         public System.TimeSpan RefreshInterval { get; set; }
         public string? SqlConsoleRole { get; set; }
         public string? StoreAuthorizationPolicy { get; set; }
