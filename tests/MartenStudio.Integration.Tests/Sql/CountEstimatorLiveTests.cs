@@ -88,6 +88,60 @@ public class CountEstimatorLiveTests(PostgresFixture fixture) : PostgresTestBase
         count.IsEstimate.Should().BeFalse();
     }
 
+    /// <summary>
+    /// The exact count is the one read in the studio whose cost grows with how big the problem already is,
+    /// so it takes a tenant to narrow it and a budget to bound it. There is no tenant-scoped equivalent of
+    /// the estimate — <c>reltuples</c> describes the whole table and nothing narrower — which is why
+    /// <c>CountAsync</c> takes neither and this overload takes both.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_exact_count_can_be_scoped_to_a_tenant_and_given_a_budget()
+    {
+        await using var connection = await OpenAsync();
+
+        await ExecuteAsync(connection, $$"""
+            create table "{{Schema}}".mt_doc_tenanted (
+                id uuid not null,
+                data jsonb not null,
+                tenant_id varchar not null,
+                primary key (tenant_id, id)
+            );
+            insert into "{{Schema}}".mt_doc_tenanted select gen_random_uuid(), '{}'::jsonb, 'acme'
+            from generate_series(1, 7);
+            insert into "{{Schema}}".mt_doc_tenanted select gen_random_uuid(), '{}'::jsonb, 'globex'
+            from generate_series(1, 3);
+            """);
+
+        var estimator = new CountEstimator();
+
+        var everything = await estimator.CountExactAsync(connection, Schema, "mt_doc_tenanted");
+
+        everything.Value.Should().Be(10);
+
+        var acme = await estimator.CountExactAsync(
+            connection, Schema, "mt_doc_tenanted", "acme", TimeSpan.FromSeconds(10));
+
+        acme.Value.Should().Be(7);
+        acme.IsEstimate.Should().BeFalse();
+
+        var globex = await estimator.CountExactAsync(
+            connection, Schema, "mt_doc_tenanted", "globex", null);
+
+        globex.Value.Should().Be(3);
+    }
+
+    [Fact]
+    public void The_exact_count_query_parameterises_the_tenant_and_quotes_everything_else()
+    {
+        CountEstimator.ExactSql("studio_sql", "mt_doc_thing").Should().Be(
+            "select count(*) from \"studio_sql\".\"mt_doc_thing\"");
+
+        CountEstimator.ExactSql("studio_sql", "mt_doc_thing", "acme").Should().Be(
+            "select count(*) from \"studio_sql\".\"mt_doc_thing\" where \"tenant_id\" = @tenant",
+            "the tenant is a parameter, and the predicate only appears when there is one - this method is " +
+            "given a table name rather than a DocumentTableInfo and cannot ask whether the column exists");
+    }
+
     [PostgresFact]
     public async Task A_schema_or_table_with_an_odd_name_is_still_quoted_correctly()
     {

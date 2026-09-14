@@ -15,6 +15,12 @@ internal enum SqlRejectionReason
     /// <summary>There is more than one statement.</summary>
     MultipleStatements,
 
+    /// <summary>
+    /// The statement names a function the console refuses by policy — one that reaches outside the
+    /// read-only transaction that would otherwise be the whole guarantee.
+    /// </summary>
+    DisallowedFunction,
+
     /// <summary>A quoted string is never closed.</summary>
     UnterminatedString,
 
@@ -63,7 +69,8 @@ internal readonly record struct SqlGuardResult(
 /// tests assert it comes back as 25006 with the table unchanged.
 /// </para>
 /// <para>
-/// Two rules. The first significant token - after leading whitespace, <c>--</c> line comments and nestable
+/// Two rules about the shape of the statement. The first significant token - after leading whitespace,
+/// <c>--</c> line comments and nestable
 /// <c>/* */</c> block comments - must be one of <c>select</c>, <c>with</c>, <c>explain</c>, <c>table</c>,
 /// <c>values</c>. And there must be exactly one statement: a <c>;</c> anywhere except inside a string, a
 /// dollar-quoted body or a comment ends the statement, and anything but whitespace and comments after it is
@@ -74,9 +81,78 @@ internal readonly record struct SqlGuardResult(
 /// <c>explain</c> gets one extra check: <c>EXPLAIN ANALYZE</c> <em>runs</em> the statement it is given, so
 /// the guard looks past the explain options and holds whatever follows to the same allow-list.
 /// </para>
+/// <para>
+/// <b>Three guarantees, and only one of them is the database's.</b> The read-only transaction is the
+/// guarantee <em>for writes</em>: no <c>INSERT</c>, <c>UPDATE</c>, <c>DELETE</c>, <c>TRUNCATE</c> or DDL
+/// survives it, whatever this parser thinks. <see cref="DisallowedFunctions"/> is a guarantee
+/// <em>by policy</em> for everything else, because a read-only transaction is not a sandbox: verified
+/// against Postgres 17, <c>select pg_terminate_backend(pg_backend_pid())</c> runs happily inside one and
+/// kills the backend, and <c>pg_read_file</c>, <c>lo_export</c>, <c>pg_ls_dir</c>, <c>dblink</c> and the
+/// advisory-lock family are all "reads" as far as SQLSTATE 25006 is concerned. Those are refused here, by
+/// name, and that refusal is worth exactly what a parser's refusal is worth — a determined caller can
+/// reach the same function through a view, a <c>SECURITY DEFINER</c> wrapper or an alias, and this list
+/// will not see it. <b>The only true narrowing is <c>MartenStudioOptions.SqlConsoleRole</c></b>: a Postgres
+/// role that was never granted <c>EXECUTE</c> on these functions cannot call them however they are
+/// spelled, and that is what a host that cares should configure. The list is here because the host that
+/// did not configure one should still not be one paste away from terminating its own connections.
+/// </para>
 /// </remarks>
 internal static class ReadOnlySqlGuard
 {
+    /// <summary>
+    /// Functions the console refuses by name, each with the reason a user is told.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Matched against every identifier token in the statement, case-insensitively — which also catches
+    /// the schema-qualified spelling, because <c>pg_catalog.pg_terminate_backend</c> arrives at the scanner
+    /// as <c>pg_catalog</c>, <c>.</c> and <c>pg_terminate_backend</c>, and it is the bare name that is
+    /// looked up. Quoted strings, quoted identifiers, dollar-quoted bodies and comments are skipped by the
+    /// scanner and so cannot trip it.
+    /// </para>
+    /// <para>
+    /// <c>pg_sleep</c> is deliberately <em>not</em> here: <c>statement_timeout</c> bounds it, and it is how
+    /// the tests prove the timeout fires. <c>pg_sleep_for</c> and <c>pg_sleep_until</c> are, because
+    /// <c>pg_sleep_until</c> in particular parks until a wall-clock time the timeout does not describe.
+    /// <c>txid_current</c> is not here either; it assigns a transaction id and nothing more.
+    /// </para>
+    /// </remarks>
+    internal static readonly IReadOnlyDictionary<string, string> DisallowedFunctions =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["pg_terminate_backend"] = "terminates other sessions",
+            ["pg_cancel_backend"] = "cancels other sessions' running statements",
+            ["pg_log_backend_memory_contexts"] = "makes another session dump its memory contexts to the server log",
+            ["pg_reload_conf"] = "makes the server re-read its configuration files",
+            ["pg_rotate_logfile"] = "rotates the server's log file",
+            ["pg_stat_reset"] = "throws away the statistics the planner and everyone else depends on",
+            ["pg_switch_wal"] = "forces a write-ahead-log switch",
+            ["pg_create_restore_point"] = "writes a named restore point into the write-ahead log",
+            ["pg_backup_start"] = "puts the server into backup mode",
+            ["pg_backup_stop"] = "ends the server's backup mode",
+            ["pg_promote"] = "promotes a standby to be a primary",
+            ["pg_read_file"] = "reads files from the server's filesystem",
+            ["pg_read_binary_file"] = "reads files from the server's filesystem",
+            ["pg_stat_file"] = "reads file metadata from the server's filesystem",
+            ["pg_ls_dir"] = "lists the server's filesystem",
+            ["pg_ls_logdir"] = "lists the server's log directory",
+            ["pg_ls_waldir"] = "lists the server's write-ahead-log directory",
+            ["lo_export"] = "writes a file to the server's filesystem",
+            ["lo_import"] = "reads a file from the server's filesystem into a large object",
+            ["lo_unlink"] = "deletes a large object, which no read-only transaction prevents",
+            ["dblink"] = "opens a connection to another database, outside this transaction and its read-only flag",
+            ["dblink_exec"] = "runs a statement on another database, outside this transaction and its read-only flag",
+            ["dblink_connect"] = "opens a connection to another database, outside this transaction and its read-only flag",
+            ["pg_advisory_lock"] = "takes a session-level advisory lock that outlives this transaction",
+            ["pg_advisory_lock_shared"] = "takes a session-level advisory lock that outlives this transaction",
+            ["pg_advisory_xact_lock"] = "takes an advisory lock Marten's own daemon contends for",
+            ["pg_advisory_xact_lock_shared"] = "takes an advisory lock Marten's own daemon contends for",
+            ["pg_sleep_for"] = "parks the session for an interval rather than doing work",
+            ["pg_sleep_until"] = "parks the session until a wall-clock time the statement timeout does not describe",
+            ["set_config"] = "changes a server setting, which is how every other limit here would be undone",
+            ["pg_notify"] = "sends a notification to other sessions listening on this database",
+        };
+
     /// <summary>The statement shapes the console runs.</summary>
     internal static readonly string[] AllowedStatements = ["select", "with", "explain", "table", "values"];
 
@@ -175,6 +251,18 @@ internal static class ReadOnlySqlGuard
 
             if (token != ";")
             {
+                if (DisallowedFunctions.TryGetValue(token!, out var why))
+                {
+                    return SqlGuardResult.Reject(
+                        SqlRejectionReason.DisallowedFunction,
+                        $"'{token}' is not available in the SQL console: it {why}. The read-only transaction " +
+                        "refuses writes, but this is not a write, so the console refuses it by name instead. " +
+                        "Configure a restricted role for the console if you need the refusal to be the " +
+                        "database's rather than the studio's.",
+                        token,
+                        position);
+                }
+
                 continue;
             }
 
@@ -359,14 +447,20 @@ internal static class ReadOnlySqlGuard
         {
             var start = position;
 
+            // Backslash escapes exist in an E'' literal and nowhere else. With Postgres' default
+            // standard_conforming_strings = on, the backslash in 'a\' is an ordinary character and the
+            // quote after it CLOSES the string - so treating it as an escape made
+            // `select 'a\'; drop table t --'` look like one statement to this guard while Npgsql split it
+            // into two and ran both. Verified against Postgres 17. The prefix has to be a standalone e/E:
+            // `date'2026-01-01'` also ends in an 'e' and is not an escape string.
+            var escapes = quote == '\'' && IsEscapeStringPrefix(start);
+
             position++;
 
             while (position < text.Length)
             {
-                if (text[position] == '\\' && quote == '\'' && position + 1 < text.Length)
+                if (escapes && text[position] == '\\' && position + 1 < text.Length)
                 {
-                    // Only meaningful in an E'' string, but skipping the escaped character is harmless in a
-                    // standard-conforming one: the next character cannot be the closing quote either way.
                     position += 2;
                     continue;
                 }
@@ -393,6 +487,21 @@ internal static class ReadOnlySqlGuard
                 quote.ToString(),
                 start);
             return false;
+        }
+
+        /// <summary>Whether the quote at <paramref name="quotePosition"/> opens an <c>E'…'</c> literal.</summary>
+        private bool IsEscapeStringPrefix(int quotePosition)
+        {
+            if (quotePosition == 0 || text[quotePosition - 1] is not ('e' or 'E'))
+            {
+                return false;
+            }
+
+            // The e has to be a token of its own; `date'…'`, `alue'…'` and anything else that merely ends
+            // in an e is a typed literal or a syntax error, not an escape string.
+            var before = quotePosition - 2;
+
+            return before < 0 || !(char.IsLetterOrDigit(text[before]) || text[before] is '_' or '$');
         }
 
         private bool TryReadDollarTag(out string? tag)

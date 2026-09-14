@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
 
@@ -40,8 +41,28 @@ internal sealed record SqlResultSet(
 /// <summary>What the SQL console is allowed to do, all of it clamped on the server.</summary>
 internal sealed record ReadOnlySqlOptions
 {
-    /// <summary>How long a statement may run before Postgres cancels it.</summary>
-    public TimeSpan StatementTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    private readonly TimeSpan statementTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// How long a statement may run before Postgres cancels it. Must be positive.
+    /// </summary>
+    /// <remarks>
+    /// <b>Zero is not "no timeout" here, it is a configuration error.</b> Postgres reads
+    /// <c>statement_timeout = 0</c> as <em>disabled</em>, so a host that wrote
+    /// <c>StatementTimeout = TimeSpan.Zero</c> meaning "as short as possible" would have turned the one
+    /// limit that stops a console query from running until the database falls over into no limit at all.
+    /// The refusal is thrown from the initialiser, which is the only place an <c>init</c>-only record can
+    /// put a constructor check, so it fires where the mistake was written rather than on the first query.
+    /// </remarks>
+    public TimeSpan StatementTimeout
+    {
+        get => statementTimeout;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero);
+            statementTimeout = value;
+        }
+    }
 
     /// <summary>How long the statement may wait for a lock. Short on purpose: a console must not block DDL.</summary>
     public TimeSpan LockTimeout { get; init; } = TimeSpan.FromSeconds(3);
@@ -257,7 +278,29 @@ internal sealed class ReadOnlySqlSession
                     exception.Detail,
                     exception.Hint));
         }
+        catch (DbException exception)
+        {
+            // Not every failure of a statement is a PostgresException. A broken connection, a protocol
+            // error or a client-side timeout arrives as an NpgsqlException with no SQLSTATE, and letting it
+            // escape would take down the circuit for something the console can perfectly well render as a
+            // failed run. SqlState is on DbException itself, and is null for exactly those cases.
+            stopwatch.Stop();
+
+            return Failed(stopwatch.Elapsed, exception.SqlState ?? string.Empty, exception.Message);
+        }
+        catch (NotSupportedException exception)
+        {
+            // Npgsql's answer to `copy … from stdin` reaching ExecuteReader: the statement parses and is
+            // accepted by the server, and the *driver* refuses it, as a NotSupportedException that is not a
+            // DbException at all.
+            stopwatch.Stop();
+
+            return Failed(stopwatch.Elapsed, string.Empty, exception.Message);
+        }
     }
+
+    private static SqlResultSet Failed(TimeSpan elapsed, string sqlState, string message) =>
+        new([], [], false, elapsed, new SqlError(sqlState, message, 0, null, null));
 
     private SqlCell ReadCell(NpgsqlDataReader reader, int ordinal, string postgresType)
     {
@@ -298,6 +341,16 @@ internal sealed class ReadOnlySqlSession
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// A GUC value in milliseconds, never below one.
+    /// </summary>
+    /// <remarks>
+    /// <c>0ms</c> means <em>disabled</em> to Postgres for all three of <c>statement_timeout</c>,
+    /// <c>lock_timeout</c> and <c>idle_in_transaction_session_timeout</c>, so clamping a zero or negative
+    /// <see cref="TimeSpan"/> to zero turned the shortest timeout anybody could ask for into no timeout at
+    /// all. One millisecond is the smallest thing Postgres can be told, and a caller who asked for less
+    /// than that meant "immediately", not "never".
+    /// </remarks>
     private static string Milliseconds(TimeSpan value) =>
-        Math.Max((long)value.TotalMilliseconds, 0).ToString(CultureInfo.InvariantCulture) + "ms";
+        Math.Max((long)value.TotalMilliseconds, 1).ToString(CultureInfo.InvariantCulture) + "ms";
 }

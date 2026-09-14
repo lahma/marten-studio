@@ -45,16 +45,20 @@ public class ReadOnlySqlSessionTests
         ReadOnlySqlSession.ReadOnlySql.Should().Be("set transaction read only");
     }
 
+    /// <summary>
+    /// The argument checks run in argument order, so a null connection is complained about before the role
+    /// is ever looked at. Named for what it asserts: the role is validated too, but not here — the live
+    /// suite's <c>A_role_name_that_is_not_an_identifier_never_reaches_the_database</c> is where that is
+    /// proved, because it needs a connection to get past this check.
+    /// </summary>
     [Fact]
-    public async Task An_invalid_role_is_refused_before_a_connection_is_touched()
+    public async Task A_null_connection_is_refused_before_the_role_is_validated()
     {
         var session = new ReadOnlySqlSession(new ReadOnlySqlOptions { Role = "bad; drop table x" });
 
         var act = async () => await session.ExecuteAsync(null!, "select 1");
 
-        await act.Should().ThrowAsync<ArgumentNullException>(
-            "the null connection is what should be complained about second; the role check comes first " +
-            "only once a connection exists");
+        await act.Should().ThrowAsync<ArgumentNullException>();
     }
 
     [Fact]
@@ -67,5 +71,32 @@ public class ReadOnlySqlSessionTests
         options.IdleInTransactionTimeout.Should().Be(TimeSpan.FromSeconds(60));
         options.MaxRows.Should().Be(500);
         options.Role.Should().BeNull();
+    }
+
+    /// <summary>
+    /// <c>statement_timeout = 0</c> is Postgres for <em>disabled</em>, so a host that wrote
+    /// <c>TimeSpan.Zero</c> meaning "as tight as possible" would have removed the only thing stopping a
+    /// console query from running until the database falls over. It is refused where it is written.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(-30_000)]
+    public void A_statement_timeout_that_is_not_positive_is_refused_by_the_options(int milliseconds)
+    {
+        var act = () => new ReadOnlySqlOptions { StatementTimeout = TimeSpan.FromMilliseconds(milliseconds) };
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void A_positive_statement_timeout_is_kept_exactly()
+    {
+        new ReadOnlySqlOptions { StatementTimeout = TimeSpan.FromMilliseconds(1) }
+            .StatementTimeout.Should().Be(TimeSpan.FromMilliseconds(1));
+
+        (new ReadOnlySqlOptions() with { StatementTimeout = TimeSpan.FromSeconds(5) })
+            .StatementTimeout.Should().Be(TimeSpan.FromSeconds(5), "the check lives on the initialiser, " +
+                "so a `with` expression is checked exactly like a constructor call");
     }
 }

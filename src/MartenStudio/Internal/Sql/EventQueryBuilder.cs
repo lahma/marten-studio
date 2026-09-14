@@ -138,8 +138,19 @@ internal static class EventQueryBuilder
 
             var streamId = ParseStream(table, query.StreamId);
 
-            sql.Append("  and (").Append(parameters.AddNullable(table.StreamIdDbType, streamId, "streamId"))
-                .Append(" is null or ").Append(Column(Alias, "stream_id")).Append(" = @streamId)\n");
+            if (streamId.IsImpossible)
+            {
+                // The user asked for a stream id this store could never hold. "Not asked" and "asked for
+                // something that cannot exist" are different questions with different answers, and mapping
+                // both onto a null parameter answered the first one - so a typo in the stream box showed
+                // the whole feed instead of an empty page.
+                sql.Append("  and false\n");
+            }
+            else
+            {
+                sql.Append("  and (").Append(parameters.AddNullable(table.StreamIdDbType, streamId.Value, "streamId"))
+                    .Append(" is null or ").Append(Column(Alias, "stream_id")).Append(" = @streamId)\n");
+            }
 
             sql.Append("  and (").Append(parameters.AddNullable(NpgsqlDbType.Varchar, query.EventType, "type"))
                 .Append(" is null or ").Append(Column(Alias, "type")).Append(" = @type)\n");
@@ -260,8 +271,16 @@ internal static class EventQueryBuilder
 
             var streamId = ParseStream(table, query.StreamId);
 
-            sql.Append("where (").Append(parameters.AddNullable(table.StreamIdDbType, streamId, "id"))
-                .Append(" is null or ").Append(Column(StreamAlias, "id")).Append(" = @id)\n");
+            if (streamId.IsImpossible)
+            {
+                // Same as the feed: an id this store cannot hold matches nothing, not everything.
+                sql.Append("where false\n");
+            }
+            else
+            {
+                sql.Append("where (").Append(parameters.AddNullable(table.StreamIdDbType, streamId.Value, "id"))
+                    .Append(" is null or ").Append(Column(StreamAlias, "id")).Append(" = @id)\n");
+            }
 
             sql.Append("  and (").Append(parameters.AddNullable(
                     NpgsqlDbType.Varchar,
@@ -294,6 +313,10 @@ internal static class EventQueryBuilder
                 var timestamp = parameters.Add(NpgsqlDbType.TimestampTz, cursor.Timestamp, "k");
                 var id = parameters.Add(table.StreamIdDbType, parsedCursorId.Value!, "i");
 
+                // (timestamp, id) is a total order here because mt_streams."timestamp" is NOT NULL in
+                // Marten's own schema - a keyset on a nullable column silently drops every row whose key is
+                // null, since `null < @k` is null and not true. The `nulls last` on the ORDER BY below is
+                // the belt to this braces, for a table somebody migrated by hand.
                 sql.Append("  and (").Append(Column(StreamAlias, "timestamp")).Append(" < ").Append(timestamp)
                     .Append(" or (").Append(Column(StreamAlias, "timestamp")).Append(" = ").Append(timestamp)
                     .Append(" and ").Append(Column(StreamAlias, "id")).Append(" > ").Append(id).Append("))\n");
@@ -320,7 +343,23 @@ internal static class EventQueryBuilder
     }
 
     /// <summary>The streams with the most recent activity, for the overview panel.</summary>
-    public static NpgsqlCommand BuildRecentlyActiveStreams(EventTableInfo table, int take)
+    /// <param name="table">The discovered event tables.</param>
+    /// <param name="take">How many streams to return.</param>
+    /// <param name="tenantId">The scope's tenant, when the event store is conjoined-tenanted.</param>
+    /// <param name="commandTimeout">A bound on how long the panel may cost, when the caller sets one.</param>
+    /// <remarks>
+    /// <b>This reads <c>mt_streams</c>, and deliberately does not aggregate <c>mt_events</c>.</b> The
+    /// obvious query — <c>group by stream_id order by max(seq_id) desc limit n</c> — is an aggregate over
+    /// every event the store has ever appended, on a dashboard panel that refreshes on a timer, which is
+    /// D8's argument against <c>count(*)</c> made a second time and ignored. <c>mt_streams</c> already
+    /// holds one row per stream with the last-append <c>timestamp</c> on it, so the same panel is a top-n
+    /// with a <c>limit</c> instead of a full scan and a hash aggregate.
+    /// </remarks>
+    public static NpgsqlCommand BuildRecentlyActiveStreams(
+        EventTableInfo table,
+        int take,
+        string? tenantId = null,
+        TimeSpan? commandTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(table);
 
@@ -329,13 +368,40 @@ internal static class EventQueryBuilder
         try
         {
             var parameters = new ParameterBuilder(command);
+            var sql = new StringBuilder();
+            var first = true;
 
-            command.CommandText =
-                "select " + Column(Alias, "stream_id") + ", max(" + Column(Alias, "seq_id") + ") as last_seq\n" +
-                "from " + table.QualifiedEvents + " as " + Alias + '\n' +
-                "group by " + Column(Alias, "stream_id") + '\n' +
-                "order by 2 desc\n" +
-                "limit " + parameters.Add(NpgsqlDbType.Integer, Math.Clamp(take, 1, 1000), "limit");
+            sql.Append("select ");
+
+            foreach (var column in StreamColumns)
+            {
+                if (!table.HasStreamColumn(column))
+                {
+                    continue;
+                }
+
+                sql.Append(first ? string.Empty : ",\n       ").Append(Column(StreamAlias, column));
+                first = false;
+            }
+
+            sql.Append('\n');
+            sql.Append("from ").Append(table.QualifiedStreams).Append(AsStreamAlias).Append('\n');
+
+            if (table.HasStreamColumn("tenant_id"))
+            {
+                sql.Append("where (").Append(parameters.AddNullable(NpgsqlDbType.Varchar, tenantId, "tenant"))
+                    .Append(" is null or ").Append(Column(StreamAlias, "tenant_id")).Append(" = @tenant)\n");
+            }
+
+            // mt_streams."timestamp" is NOT NULL in every Marten schema, so there is nothing for a
+            // `nulls last` to rescue here and the id is only a tiebreaker for streams appended in the same
+            // transaction, which share a timestamp exactly.
+            sql.Append("order by ").Append(Column(StreamAlias, "timestamp")).Append(" desc, ")
+                .Append(Column(StreamAlias, "id")).Append('\n');
+            sql.Append("limit ").Append(parameters.Add(NpgsqlDbType.Integer, Math.Clamp(take, 1, 1000), "limit"));
+
+            command.CommandText = sql.ToString();
+            ApplyTimeout(command, commandTimeout);
 
             return command;
         }
@@ -347,24 +413,93 @@ internal static class EventQueryBuilder
     }
 
     /// <summary>How many events there are of each type, and the sequence range each covers.</summary>
-    public static NpgsqlCommand BuildEventTypeCounts(EventTableInfo table)
+    /// <param name="table">The discovered event tables.</param>
+    /// <param name="tenantId">The scope's tenant, when the event store is conjoined-tenanted.</param>
+    /// <param name="commandTimeout">A bound on how long the aggregate may cost, when the caller sets one.</param>
+    /// <remarks>
+    /// This one genuinely is an aggregate over <c>mt_events</c> — there is no other place the per-type
+    /// counts live — which is exactly why it takes a timeout. A caller that puts it on a refreshing panel
+    /// without one has written a scheduled sequential scan.
+    /// </remarks>
+    public static NpgsqlCommand BuildEventTypeCounts(
+        EventTableInfo table,
+        string? tenantId = null,
+        TimeSpan? commandTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(table);
 
-        return new NpgsqlCommand(
-            "select " + Column(Alias, "type") + ", count(*) as event_count, " +
-            "min(" + Column(Alias, "seq_id") + ") as first_seq, max(" + Column(Alias, "seq_id") + ") as last_seq\n" +
-            "from " + table.QualifiedEvents + " as " + Alias + '\n' +
-            "group by " + Column(Alias, "type") + '\n' +
-            "order by 2 desc, 1");
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var parameters = new ParameterBuilder(command);
+            var sql = new StringBuilder();
+
+            sql.Append("select ").Append(Column(Alias, "type")).Append(", count(*) as event_count, ")
+                .Append("min(").Append(Column(Alias, "seq_id")).Append(") as first_seq, ")
+                .Append("max(").Append(Column(Alias, "seq_id")).Append(") as last_seq\n");
+            sql.Append("from ").Append(table.QualifiedEvents).Append(AsAlias).Append('\n');
+
+            if (table.HasTenantId)
+            {
+                sql.Append("where (").Append(parameters.AddNullable(NpgsqlDbType.Varchar, tenantId, "tenant"))
+                    .Append(" is null or ").Append(Column(Alias, "tenant_id")).Append(" = @tenant)\n");
+            }
+
+            sql.Append("group by ").Append(Column(Alias, "type")).Append('\n');
+            sql.Append("order by 2 desc, 1");
+
+            command.CommandText = sql.ToString();
+            ApplyTimeout(command, commandTimeout);
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
     /// How many dead letters there are. A plain count of Marten's own document table, which is the one
     /// place the studio counts a document table by name rather than through a mapping.
     /// </summary>
-    public static NpgsqlCommand BuildDeadLetterCount(string schema) =>
-        new("select count(*) from " + SqlIdentifier.Qualify(schema, EventTableInfo.DeadLetterTable));
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="tenantId">
+    /// The scope's tenant. Unlike the other builders there is no <see cref="EventTableInfo"/> here to ask
+    /// whether <c>tenant_id</c> exists, so the predicate is emitted only when a tenant is actually given —
+    /// passing one is the caller's assertion that the event store is conjoined-tenanted.
+    /// </param>
+    /// <param name="commandTimeout">A bound on how long the count may cost, when the caller sets one.</param>
+    public static NpgsqlCommand BuildDeadLetterCount(
+        string schema,
+        string? tenantId = null,
+        TimeSpan? commandTimeout = null)
+    {
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var sql = "select count(*) from " + SqlIdentifier.Qualify(schema, EventTableInfo.DeadLetterTable);
+
+            if (tenantId is not null)
+            {
+                sql += " where " + SqlIdentifier.Quote("tenant_id") + " = @tenant";
+                command.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Varchar) { Value = tenantId });
+            }
+
+            command.CommandText = sql;
+            ApplyTimeout(command, commandTimeout);
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
 
     /// <summary>
     /// The highest event sequence. A <em>fallback</em>: the services normally ask Marten with
@@ -410,18 +545,35 @@ internal static class EventQueryBuilder
         sql.Append('\n');
     }
 
-    private static object? ParseStream(EventTableInfo table, string? rawStreamId)
+    /// <summary>
+    /// A stream-id filter in three states, because two of them are not the same answer.
+    /// </summary>
+    /// <param name="Value">The parsed id, when there is one.</param>
+    /// <param name="IsImpossible">
+    /// Whether the caller asked for an id this store's stream identity cannot hold — a non-GUID on a
+    /// GUID-identified store. Such a filter matches nothing, and the builder emits a <c>false</c> predicate
+    /// rather than a null parameter, which would have read as "no filter at all".
+    /// </param>
+    private readonly record struct StreamIdFilter(object? Value, bool IsImpossible)
+    {
+        public static StreamIdFilter NotAsked { get; } = new(null, false);
+
+        public static StreamIdFilter Impossible { get; } = new(null, true);
+    }
+
+    private static StreamIdFilter ParseStream(EventTableInfo table, string? rawStreamId)
     {
         if (string.IsNullOrWhiteSpace(rawStreamId))
         {
-            return null;
+            return StreamIdFilter.NotAsked;
         }
 
         var parsed = table.ParseStreamId(rawStreamId);
 
         // A filter by an id that cannot exist matches nothing, which is what the caller asked for. An
-        // unparseable GUID filter is therefore not an error here, it is an empty page.
-        return parsed.Success ? parsed.Value : null;
+        // unparseable GUID filter is therefore not an error here, it is an empty page - but it has to be
+        // built as an empty page, and not as the absence of a filter.
+        return parsed.Success ? new StreamIdFilter(parsed.Value, false) : StreamIdFilter.Impossible;
     }
 
     /// <summary>Escapes LIKE metacharacters and anchors the pattern at the start.</summary>
@@ -443,6 +595,19 @@ internal static class EventQueryBuilder
     }
 
     private static string Column(string alias, string name) => alias + "." + SqlIdentifier.Quote(name);
+
+    /// <summary>
+    /// Puts the caller's budget on the command, rounded up to whole seconds because that is the only unit
+    /// <c>NpgsqlCommand.CommandTimeout</c> has — and never to zero, which is Npgsql for "wait forever" and
+    /// is the opposite of what anyone passing a timeout meant.
+    /// </summary>
+    private static void ApplyTimeout(NpgsqlCommand command, TimeSpan? commandTimeout)
+    {
+        if (commandTimeout is { } timeout)
+        {
+            command.CommandTimeout = Math.Max((int)Math.Ceiling(timeout.TotalSeconds), 1);
+        }
+    }
 
     private sealed class ParameterBuilder(NpgsqlCommand command)
     {

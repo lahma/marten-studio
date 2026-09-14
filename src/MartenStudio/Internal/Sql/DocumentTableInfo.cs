@@ -93,8 +93,21 @@ internal enum DocumentMetadataColumn
 /// <param name="ColumnName">The physical column name, read from <c>MetadataColumn.Name</c>.</param>
 internal sealed record DocumentMetadataColumnInfo(DocumentMetadataColumn Column, string ColumnName)
 {
+    /// <summary>
+    /// The type <c>information_schema</c> reported for this column, once the catalog has been consulted.
+    /// </summary>
+    /// <remarks>
+    /// <b>The physical type wins, the same way the id column's does.</b>
+    /// <see cref="DocumentTableInfo.MetadataDbType"/> can only state the type Marten's default schema uses,
+    /// and for <see cref="DocumentMetadataColumn.Revision"/> that default is <c>bigint</c> — but a
+    /// <c>Marten.Metadata.IRevisioned</c> document gets Marten's <c>RevisionColumnInt32</c> and an
+    /// <c>integer</c> column instead, and a table somebody migrated by hand can be anything at all.
+    /// Binding a parameter of the wrong width against it is how a filter stops using the index on it.
+    /// </remarks>
+    public NpgsqlDbType? PhysicalDbType { get; init; }
+
     /// <summary>The parameter type to bind when this column is compared or used as a keyset cursor.</summary>
-    public NpgsqlDbType DbType => DocumentTableInfo.MetadataDbType(Column);
+    public NpgsqlDbType DbType => PhysicalDbType ?? DocumentTableInfo.MetadataDbType(Column);
 }
 
 /// <summary>
@@ -340,12 +353,23 @@ internal sealed record DocumentTableInfo
     /// generated SQL survive schema drift.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Marten's configuration describes the table it <em>would</em> create. The studio reads a database
     /// somebody else migrated, and the two can disagree: a duplicated field added in code but not yet
     /// applied, a strong-typed id whose column type no CLR type can predict, a store whose own soft-delete
     /// setting was changed after the table was made. A column that is not in
     /// <paramref name="physicalColumns"/> is dropped from the select list, and the id column's real type
     /// wins. An empty read is taken as "the catalog could not see it" and changes nothing.
+    /// </para>
+    /// <para>
+    /// <b>The disagreement runs both ways</b>, which is the half this used to get wrong. A table with a
+    /// physical <c>tenant_id</c> that the mapping does not declare was being marked
+    /// <see cref="TenancyStyle.Conjoined"/> without ever getting a <c>TenantId</c> entry in
+    /// <see cref="MetadataColumns"/> — so the tenant filter knew it had to filter and had no column name to
+    /// filter with, and threw with a message about a metadata column being disabled on a table that plainly
+    /// has it. <c>mt_deleted</c> and <c>mt_deleted_at</c> had the same hole. Every column the database has
+    /// and the configuration lacks is therefore added here under its well-known name.
+    /// </para>
     /// </remarks>
     public DocumentTableInfo WithPhysicalColumns(TableColumns physicalColumns)
     {
@@ -360,9 +384,9 @@ internal sealed record DocumentTableInfo
 
         foreach (var column in MetadataColumns)
         {
-            if (physicalColumns.Has(column.ColumnName))
+            if (physicalColumns.Find(column.ColumnName) is { } physical)
             {
-                metadata.Add(column);
+                metadata.Add(column with { PhysicalDbType = PhysicalDbTypeOf(physical) });
             }
         }
 
@@ -377,7 +401,12 @@ internal sealed record DocumentTableInfo
         }
 
         var softDeleteColumn = MetadataColumnName(DocumentMetadataColumn.IsSoftDeleted) ?? "mt_deleted";
+        var softDeletedAtColumn = MetadataColumnName(DocumentMetadataColumn.SoftDeletedAt) ?? "mt_deleted_at";
         var tenantColumn = MetadataColumnName(DocumentMetadataColumn.TenantId) ?? "tenant_id";
+
+        AddPhysicalOnly(metadata, physicalColumns, DocumentMetadataColumn.TenantId, tenantColumn);
+        AddPhysicalOnly(metadata, physicalColumns, DocumentMetadataColumn.IsSoftDeleted, softDeleteColumn);
+        AddPhysicalOnly(metadata, physicalColumns, DocumentMetadataColumn.SoftDeletedAt, softDeletedAtColumn);
 
         return this with
         {
@@ -390,6 +419,43 @@ internal sealed record DocumentTableInfo
             TenancyStyle = physicalColumns.Has(tenantColumn) ? TenancyStyle.Conjoined : TenancyStyle.Single,
         };
     }
+
+    /// <summary>
+    /// Adds the metadata entry for a column the table has and the configuration did not mention, so that
+    /// "this table is conjoined-tenanted" and "here is the column to filter on" can never disagree.
+    /// </summary>
+    private static void AddPhysicalOnly(
+        List<DocumentMetadataColumnInfo> metadata,
+        TableColumns physicalColumns,
+        DocumentMetadataColumn column,
+        string columnName)
+    {
+        if (physicalColumns.Find(columnName) is not { } physical)
+        {
+            return;
+        }
+
+        foreach (var existing in metadata)
+        {
+            if (existing.Column == column)
+            {
+                return;
+            }
+        }
+
+        metadata.Add(new DocumentMetadataColumnInfo(column, columnName)
+        {
+            PhysicalDbType = PhysicalDbTypeOf(physical),
+        });
+    }
+
+    /// <summary>
+    /// The Npgsql type of a physical column, or <see langword="null"/> when it is a type the studio does
+    /// not recognise — a domain, a <c>citext</c>, an enum — in which case the static map is a better guess
+    /// than <see cref="NpgsqlDbType.Unknown"/>.
+    /// </summary>
+    private static NpgsqlDbType? PhysicalDbTypeOf(PostgresColumn column) =>
+        PostgresColumn.ToNpgsqlDbType(column.UdtName) is var type && type != NpgsqlDbType.Unknown ? type : null;
 
     /// <summary>
     /// Describes an <c>mt_doc_*</c> table the studio found in the database but that no <c>StoreOptions</c>
@@ -420,7 +486,12 @@ internal sealed record DocumentTableInfo
 
             if (WellKnownMetadataColumns.TryGetValue(column.Name, out var known))
             {
-                metadata.Add(new DocumentMetadataColumnInfo(known, column.Name));
+                // The physical type is all there is on a table no mapping describes - and it is also how a
+                // discovered mt_version that holds a numeric revision rather than a Guid is bound correctly.
+                metadata.Add(new DocumentMetadataColumnInfo(known, column.Name)
+                {
+                    PhysicalDbType = PhysicalDbTypeOf(column),
+                });
                 continue;
             }
 
@@ -454,13 +525,24 @@ internal sealed record DocumentTableInfo
         };
     }
 
-    /// <summary>The parameter type for a metadata column, used when one is filtered on or paged by.</summary>
+    /// <summary>
+    /// The parameter type for a metadata column when the database has not been asked, used when one is
+    /// filtered on or paged by. <see cref="DocumentMetadataColumnInfo.PhysicalDbType"/> overrides it once
+    /// <see cref="WithPhysicalColumns"/> has read the real thing.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="DocumentMetadataColumn.Revision"/> is <c>bigint</c> and not <c>integer</c>: Marten 9.35's
+    /// default <c>RevisionColumn</c> declares <c>bigint</c>, and the <c>integer</c> one
+    /// (<c>RevisionColumnInt32</c>) is used only for a document implementing <c>IRevisioned</c>. Guessing
+    /// <c>integer</c> bound a 4-byte parameter against an 8-byte column on every ordinary revisioned
+    /// document.
+    /// </remarks>
     internal static NpgsqlDbType MetadataDbType(DocumentMetadataColumn column) => column switch
     {
         DocumentMetadataColumn.IsSoftDeleted => NpgsqlDbType.Boolean,
         DocumentMetadataColumn.SoftDeletedAt => NpgsqlDbType.TimestampTz,
         DocumentMetadataColumn.Version => NpgsqlDbType.Uuid,
-        DocumentMetadataColumn.Revision => NpgsqlDbType.Integer,
+        DocumentMetadataColumn.Revision => NpgsqlDbType.Bigint,
         DocumentMetadataColumn.LastModified => NpgsqlDbType.TimestampTz,
         DocumentMetadataColumn.CreatedAt => NpgsqlDbType.TimestampTz,
         DocumentMetadataColumn.Headers => NpgsqlDbType.Jsonb,

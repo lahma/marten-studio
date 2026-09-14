@@ -246,8 +246,10 @@ public class EventQueryBuilderLiveTests(PostgresFixture fixture) : PostgresTestB
         var active = await ReadAsync(EventQueryBuilder.BuildRecentlyActiveStreams(table, 10));
 
         active.Should().HaveCount(2);
-        active[0]["stream_id"].Should().Be(StreamTwo);
-        active[0]["last_seq"].Should().Be(4L);
+        active[0]["id"].Should().Be(StreamTwo, "newest activity first");
+        active[1]["id"].Should().Be(StreamOne);
+        active[0].Keys.Should().Contain("timestamp").And.NotContain("last_seq",
+            "the panel reads mt_streams now, not an aggregate of mt_events");
 
         var counts = await ReadAsync(EventQueryBuilder.BuildEventTypeCounts(table));
 
@@ -265,6 +267,70 @@ public class EventQueryBuilderLiveTests(PostgresFixture fixture) : PostgresTestB
 
         deadLetters.Connection = connection;
         (await deadLetters.ExecuteScalarAsync()).Should().Be(1L);
+    }
+
+    /// <summary>
+    /// The overview panel's three aggregates, each scoped to one tenant and each under a budget. Before
+    /// this they were the only reads in the studio with neither.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_overview_aggregates_can_be_scoped_to_a_tenant_and_bounded()
+    {
+        var table = await DescribeAsync(Schema, StreamIdentity.AsGuid);
+        var budget = TimeSpan.FromSeconds(10);
+
+        var active = await ReadAsync(EventQueryBuilder.BuildRecentlyActiveStreams(table, 10, "acme", budget));
+
+        active.Should().ContainSingle();
+        active[0]["id"].Should().Be(StreamOne);
+
+        var counts = await ReadAsync(EventQueryBuilder.BuildEventTypeCounts(table, "acme", budget));
+
+        counts.Should().HaveCount(2, "acme has one OrderPlaced and one OrderShipped");
+        counts.Should().AllSatisfy(row => row["event_count"].Should().Be(1L));
+
+        await using var connection = await OpenAsync();
+
+        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount(Schema, "acme", budget);
+
+        deadLetters.Connection = connection;
+
+        // The dead-letter table in this schema has no tenant_id, which is exactly the shape the predicate
+        // is conditional for: asking for a tenant on a store that is not conjoined is the caller's mistake
+        // and Postgres names it, rather than the count quietly ignoring the scope.
+        var act = async () => await deadLetters.ExecuteScalarAsync();
+
+        await act.Should().ThrowAsync<PostgresException>().Where(x => x.SqlState == "42703");
+    }
+
+    /// <summary>
+    /// A stream id this store could never hold matches nothing. It used to map onto a null parameter, which
+    /// the guarded predicate read as "no filter", so a typo showed every event in the store.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_stream_filter_that_cannot_be_a_guid_returns_no_rows_at_all()
+    {
+        var table = await DescribeAsync(Schema, StreamIdentity.AsGuid);
+
+        var unfiltered = await ReadAsync(EventQueryBuilder.BuildFeed(
+            table, new EventFeedQuery { IncludeArchived = true }));
+
+        unfiltered.Should().HaveCount(4, "the same query with no stream filter sees everything");
+
+        var impossible = await ReadAsync(EventQueryBuilder.BuildFeed(
+            table, new EventFeedQuery { StreamId = "not-a-guid", IncludeArchived = true }));
+
+        impossible.Should().BeEmpty();
+
+        var streams = await ReadAsync(EventQueryBuilder.BuildStreams(
+            table, new StreamListQuery { StreamId = "not-a-guid", IncludeArchived = true }));
+
+        streams.Should().BeEmpty();
+
+        var realStreams = await ReadAsync(EventQueryBuilder.BuildStreams(
+            table, new StreamListQuery { IncludeArchived = true }));
+
+        realStreams.Should().HaveCount(2);
     }
 
     private async Task<EventTableInfo> DescribeAsync(string schema, StreamIdentity identity)

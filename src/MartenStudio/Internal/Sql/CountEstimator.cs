@@ -118,19 +118,59 @@ internal sealed class CountEstimator
         return rows < 0 ? DocumentCount.Estimate(0) : DocumentCount.Estimate(rows);
     }
 
+    /// <summary>An exact <c>count(*)</c> of the whole table.</summary>
+    /// <param name="connection">An open connection.</param>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="cancellationToken">The usual.</param>
+    public Task<DocumentCount> CountExactAsync(
+        NpgsqlConnection connection,
+        string schema,
+        string table,
+        CancellationToken cancellationToken = default) =>
+        CountExactAsync(connection, schema, table, null, null, cancellationToken);
+
     /// <summary>An exact <c>count(*)</c>, which the user asked for explicitly or the threshold allowed.</summary>
+    /// <param name="connection">An open connection.</param>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="cancellationToken">The usual.</param>
+    /// <param name="tenantId">
+    /// Counts only this tenant's rows. There is no tenant-scoped equivalent on the estimate side —
+    /// <c>reltuples</c> describes the whole table and nothing narrower — which is why
+    /// <see cref="CountAsync"/> takes no tenant: a tenant-scoped number is always an exact one, and the
+    /// caller has to have decided it is worth paying for.
+    /// </param>
+    /// <param name="commandTimeout">
+    /// A bound on the scan, overriding <see cref="CommandTimeoutSeconds"/>. An exact count is the one query
+    /// in the studio whose cost is proportional to how big the problem already is.
+    /// </param>
+    /// <remarks>
+    /// This is an <em>overload</em> rather than two more optional parameters on the four-argument form,
+    /// because CA1068 requires the cancellation token to come last and putting the new parameters in front
+    /// of it would silently break every existing call site that passes a token positionally.
+    /// </remarks>
     public async Task<DocumentCount> CountExactAsync(
         NpgsqlConnection connection,
         string schema,
         string table,
+        string? tenantId,
+        TimeSpan? commandTimeout,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
 
-        await using var command = new NpgsqlCommand(ExactSql(schema, table), connection)
+        await using var command = new NpgsqlCommand(ExactSql(schema, table, tenantId), connection)
         {
-            CommandTimeout = CommandTimeoutSeconds,
+            CommandTimeout = commandTimeout is { } timeout
+                ? Math.Max((int)Math.Ceiling(timeout.TotalSeconds), 1)
+                : CommandTimeoutSeconds,
         };
+
+        if (tenantId is not null)
+        {
+            command.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Varchar) { Value = tenantId });
+        }
 
         var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
 
@@ -139,7 +179,12 @@ internal sealed class CountEstimator
             : DocumentCount.Exact(Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture));
     }
 
-    /// <summary>The exact-count query. The only thing interpolated is a quoted identifier.</summary>
-    internal static string ExactSql(string schema, string table) =>
-        "select count(*) from " + SqlIdentifier.Qualify(schema, table);
+    /// <summary>
+    /// The exact-count query. The only things interpolated are quoted identifiers; the tenant is a
+    /// parameter, and its predicate is emitted only when there is a tenant, because this method is given a
+    /// table name rather than a <see cref="DocumentTableInfo"/> and cannot ask whether the column exists.
+    /// </summary>
+    internal static string ExactSql(string schema, string table, string? tenantId = null) =>
+        "select count(*) from " + SqlIdentifier.Qualify(schema, table) +
+        (tenantId is null ? string.Empty : " where " + SqlIdentifier.Quote("tenant_id") + " = @tenant");
 }

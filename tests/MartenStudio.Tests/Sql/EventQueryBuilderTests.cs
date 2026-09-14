@@ -106,11 +106,45 @@ public class EventQueryBuilderTests
         command.Parameters["includeArchived"].Value.Should().Be(true);
     }
 
+    /// <summary>
+    /// "Not asked" and "asked for something that cannot exist" are different questions. Binding both to a
+    /// null parameter made the guarded predicate <c>(@streamId is null or …)</c> answer the first one, so a
+    /// typo in the stream box showed the entire feed instead of an empty page.
+    /// </summary>
     [Fact]
-    public void A_stream_id_filter_that_cannot_be_a_guid_matches_nothing_rather_than_failing()
+    public void A_stream_id_filter_that_cannot_be_a_guid_matches_nothing_rather_than_everything()
     {
         using var command = EventQueryBuilder.BuildFeed(Full, new EventFeedQuery { StreamId = "not-a-guid" });
 
+        command.CommandText.Should().Contain("and false");
+        command.CommandText.Should().NotContain("@streamId");
+        command.Parameters.Should().NotContain(x => x.ParameterName == "streamId");
+    }
+
+    [Fact]
+    public void A_stream_list_filtered_by_an_impossible_id_matches_nothing_too()
+    {
+        using var command = EventQueryBuilder.BuildStreams(Full, new StreamListQuery { StreamId = "not-a-guid" });
+
+        command.CommandText.Should().Contain("where false");
+        command.Parameters.Should().NotContain(x => x.ParameterName == "id");
+    }
+
+    [Fact]
+    public void A_string_identified_store_has_no_impossible_stream_ids()
+    {
+        using var command = EventQueryBuilder.BuildFeed(Minimal, new EventFeedQuery { StreamId = "not-a-guid" });
+
+        command.CommandText.Should().NotContain("and false", "every string is a stream id this store could hold");
+        command.Parameters["streamId"].Value.Should().Be("not-a-guid");
+    }
+
+    [Fact]
+    public void No_stream_filter_at_all_is_still_the_guarded_predicate()
+    {
+        using var command = EventQueryBuilder.BuildFeed(Full, new EventFeedQuery());
+
+        command.CommandText.Should().Contain("and (@streamId is null or e.\"stream_id\" = @streamId)");
         command.Parameters["streamId"].Value.Should().Be(DBNull.Value);
     }
 
@@ -219,21 +253,83 @@ public class EventQueryBuilderTests
         act.Should().Throw<ArgumentException>();
     }
 
+    /// <summary>
+    /// The overview panel reads <c>mt_streams</c>, and must not aggregate <c>mt_events</c>: one row per
+    /// stream with a <c>limit</c> on it, rather than a scan of every event the store has ever appended,
+    /// repeated on the refresh timer.
+    /// </summary>
     [Fact]
-    public void The_recently_active_streams_query_groups_by_stream()
+    public void The_recently_active_streams_query_is_a_top_n_of_the_streams_table()
     {
         using var command = EventQueryBuilder.BuildRecentlyActiveStreams(Full, 10);
 
         command.CommandText.Should().Be(
             """
-            select e."stream_id", max(e."seq_id") as last_seq
-            from "studio_sql"."mt_events" as e
-            group by e."stream_id"
-            order by 2 desc
+            select s."id",
+                   s."type",
+                   s."version",
+                   s."timestamp",
+                   s."created",
+                   s."is_archived",
+                   s."tenant_id"
+            from "studio_sql"."mt_streams" as s
+            where (@tenant is null or s."tenant_id" = @tenant)
+            order by s."timestamp" desc, s."id"
             limit @limit
             """.ReplaceLineEndings("\n"));
 
+        command.CommandText.Should().NotContain("mt_events");
+        command.CommandText.Should().NotContain("group by");
         command.Parameters["limit"].Value.Should().Be(10);
+        command.Parameters["tenant"].Value.Should().Be(DBNull.Value);
+    }
+
+    [Fact]
+    public void The_recently_active_streams_query_drops_the_tenant_clause_on_a_single_tenant_store()
+    {
+        using var command = EventQueryBuilder.BuildRecentlyActiveStreams(Minimal, 10);
+
+        command.CommandText.Should().NotContain("tenant");
+        command.CommandText.Should().Contain("order by s.\"timestamp\" desc, s.\"id\"");
+    }
+
+    [Fact]
+    public void Every_unbounded_aggregate_can_be_scoped_to_a_tenant_and_given_a_budget()
+    {
+        using var active = EventQueryBuilder.BuildRecentlyActiveStreams(
+            Full, 10, "acme", TimeSpan.FromSeconds(4));
+        using var counts = EventQueryBuilder.BuildEventTypeCounts(Full, "acme", TimeSpan.FromSeconds(4));
+        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount(
+            "studio_sql", "acme", TimeSpan.FromSeconds(4));
+
+        active.Parameters["tenant"].Value.Should().Be("acme");
+        counts.Parameters["tenant"].Value.Should().Be("acme");
+        deadLetters.Parameters["tenant"].Value.Should().Be("acme");
+
+        foreach (var command in new[] { active, counts, deadLetters })
+        {
+            command.CommandTimeout.Should().Be(4);
+        }
+    }
+
+    /// <summary>
+    /// Sub-second budgets round up rather than down. <c>CommandTimeout = 0</c> is Npgsql for "wait
+    /// forever", which is the opposite of what anybody passing a timeout meant.
+    /// </summary>
+    [Fact]
+    public void A_budget_under_a_second_never_becomes_no_budget()
+    {
+        using var command = EventQueryBuilder.BuildEventTypeCounts(Full, null, TimeSpan.FromMilliseconds(50));
+
+        command.CommandTimeout.Should().Be(1);
+    }
+
+    [Fact]
+    public void An_aggregate_with_no_budget_keeps_Npgsqls_own_default()
+    {
+        using var command = EventQueryBuilder.BuildEventTypeCounts(Full);
+
+        command.CommandTimeout.Should().Be(30, "that is NpgsqlCommand's own default, left alone");
     }
 
     [Fact]
@@ -244,7 +340,12 @@ public class EventQueryBuilderTests
         command.CommandText.Should().Contain("count(*) as event_count");
         command.CommandText.Should().Contain("min(e.\"seq_id\") as first_seq");
         command.CommandText.Should().Contain("max(e.\"seq_id\") as last_seq");
+        command.CommandText.Should().Contain("where (@tenant is null or e.\"tenant_id\" = @tenant)");
         command.CommandText.Should().Contain("group by e.\"type\"");
+
+        using var minimal = EventQueryBuilder.BuildEventTypeCounts(Minimal);
+
+        minimal.CommandText.Should().NotContain("tenant", "the column is not there to filter on");
     }
 
     [Fact]
@@ -254,6 +355,13 @@ public class EventQueryBuilderTests
 
         command.CommandText.Should().Be(
             "select count(*) from \"studio_sql\".\"mt_doc_deadletterevent\"");
+
+        // The tenant predicate is emitted only when there is a tenant: this builder is given a schema name
+        // and no EventTableInfo, so it cannot know whether the column exists until the caller says so.
+        using var scoped = EventQueryBuilder.BuildDeadLetterCount("studio_sql", "acme");
+
+        scoped.CommandText.Should().Be(
+            "select count(*) from \"studio_sql\".\"mt_doc_deadletterevent\" where \"tenant_id\" = @tenant");
     }
 
     [Fact]

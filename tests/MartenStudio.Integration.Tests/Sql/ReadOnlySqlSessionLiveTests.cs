@@ -125,6 +125,110 @@ public class ReadOnlySqlSessionLiveTests(PostgresFixture fixture) : PostgresTest
         result.Duration.Should().BeLessThan(TimeSpan.FromSeconds(5));
     }
 
+    /// <summary>
+    /// The shortest timeout anybody can ask for must not be no timeout. Postgres reads
+    /// <c>statement_timeout = 0ms</c> as <em>disabled</em>, so clamping a sub-millisecond
+    /// <see cref="TimeSpan"/> to zero turned "as tight as possible" into "unbounded" — and the query that
+    /// proves it is the one that would otherwise run for five seconds.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_sub_millisecond_timeout_is_clamped_up_to_one_millisecond_and_not_down_to_disabled()
+    {
+        var session = new ReadOnlySqlSession(new ReadOnlySqlOptions
+        {
+            StatementTimeout = TimeSpan.FromTicks(1),
+        });
+
+        await using var connection = await OpenAsync();
+
+        var result = await session.ExecuteAsync(connection, "select pg_sleep(5)");
+
+        result.Succeeded.Should().BeFalse();
+        result.Error!.SqlState.Should().Be("57014", "1ms is a timeout; 0ms would have been no timeout");
+        result.Duration.Should().BeLessThan(TimeSpan.FromSeconds(5));
+    }
+
+    [PostgresFact]
+    public async Task The_settings_the_session_applies_are_the_ones_Postgres_reports()
+    {
+        var session = new ReadOnlySqlSession(new ReadOnlySqlOptions
+        {
+            StatementTimeout = TimeSpan.FromSeconds(7),
+            LockTimeout = TimeSpan.Zero,
+            IdleInTransactionTimeout = TimeSpan.FromMilliseconds(-5),
+        });
+
+        await using var connection = await OpenAsync();
+
+        var result = await session.ExecuteAsync(
+            connection,
+            "select current_setting('statement_timeout') as s, current_setting('lock_timeout') as l, " +
+            "current_setting('idle_in_transaction_session_timeout') as i");
+
+        result.Succeeded.Should().BeTrue();
+
+        var row = result.Rows.Single();
+
+        row[0].Text.Should().Be("7s");
+        row[1].Text.Should().Be("1ms", "zero would have been Postgres for 'no lock timeout at all'");
+        row[2].Text.Should().Be("1ms", "and so would a negative TimeSpan");
+    }
+
+    /// <summary>
+    /// <c>COPY</c> reaches the server, is accepted, and is then refused by <em>Npgsql</em> — as a
+    /// <see cref="NotSupportedException"/>, which is not a <c>PostgresException</c> and not a
+    /// <c>DbException</c> either. Catching only <c>PostgresException</c> meant that exception escaped the
+    /// session and took the Blazor circuit with it, for a statement the console can perfectly well render
+    /// as a failed run. Sent straight to the session, past the guard, which would have refused it first.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_statement_the_driver_refuses_comes_back_as_an_error_rather_than_as_an_exception()
+    {
+        ReadOnlySqlGuard.Check($"copy \"{Schema}\".guarded to stdout").Allowed.Should().BeFalse(
+            "the guard refuses copy first; this test is about what happens when something gets past it");
+
+        var session = new ReadOnlySqlSession();
+
+        await using var connection = await OpenAsync();
+
+        var result = await session.ExecuteAsync(connection, $"copy \"{Schema}\".guarded to stdout");
+
+        result.Succeeded.Should().BeFalse();
+        result.Error!.MessageText.Should().NotBeEmpty();
+        result.Rows.Should().BeEmpty();
+        result.Columns.Should().BeEmpty();
+
+        // Npgsql breaks the connector on this one - a COPY response it did not ask for leaves the protocol
+        // stream somewhere it cannot resynchronise from - so this connection is genuinely finished, and the
+        // rollback in the session's finally swallowed that rather than throwing on top of the first
+        // failure. The next connection from the pool is fine, which is what the page's retry will get.
+        await using var next = await OpenAsync();
+
+        (await session.ExecuteAsync(next, "select 1")).Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void The_guard_refuses_the_functions_a_read_only_transaction_would_have_run()
+    {
+        // Verified against this very container: pg_terminate_backend(pg_backend_pid()) runs inside
+        // `begin; set transaction read only` and kills the backend. The transaction is the guarantee for
+        // writes; this list is the guarantee for everything else, and it is policy, not a boundary.
+        foreach (var sql in new[]
+        {
+            "select pg_terminate_backend(pg_backend_pid())",
+            "select pg_cancel_backend(pg_backend_pid())",
+            "select pg_read_file('postgresql.conf')",
+            "select pg_ls_dir('.')",
+            "select set_config('statement_timeout', '0', false)",
+        })
+        {
+            var checkResult = ReadOnlySqlGuard.Check(sql);
+
+            checkResult.Allowed.Should().BeFalse($"of: {sql}");
+            checkResult.Reason.Should().Be(SqlRejectionReason.DisallowedFunction);
+        }
+    }
+
     [PostgresFact]
     public async Task The_row_cap_stops_the_reader_and_says_so_without_touching_the_statement()
     {

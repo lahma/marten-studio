@@ -163,6 +163,108 @@ public class DocumentTableInfoTests
         drifted.DuplicatedColumns.Select(x => x.ColumnName).Should().BeEquivalentTo(["email"]);
     }
 
+    /// <summary>
+    /// Drift the other way: the <em>table</em> has <c>tenant_id</c>, <c>mt_deleted</c> and
+    /// <c>mt_deleted_at</c> and the mapping does not. Reading the tenancy style off the physical column
+    /// while leaving the metadata list alone left the builders knowing they had to filter by tenant and
+    /// having no column name to filter with, which surfaced as an exception about a metadata column being
+    /// disabled on a table that plainly has it.
+    /// </summary>
+    [Fact]
+    public void A_physical_tenant_or_soft_delete_column_the_configuration_lacks_is_reconciled_in()
+    {
+        var plain = DocumentTableInfo.FromDocumentType(SqlTestStore.DocumentType<SqlTestNote>());
+
+        plain.TenancyStyle.Should().Be(TenancyStyle.Single);
+        plain.HasMetadata(DocumentMetadataColumn.TenantId).Should().BeFalse();
+
+        var reconciled = plain.WithPhysicalColumns(new TableColumns(
+            SqlTestStore.Schema,
+            "mt_doc_sqltestnote",
+            [
+                new PostgresColumn("id", "uuid", "uuid", false),
+                new PostgresColumn("data", "jsonb", "jsonb", false),
+                new PostgresColumn("mt_last_modified", "timestamp with time zone", "timestamptz", true),
+                new PostgresColumn("tenant_id", "character varying", "varchar", false),
+                new PostgresColumn("mt_deleted", "boolean", "bool", false),
+                new PostgresColumn("mt_deleted_at", "timestamp with time zone", "timestamptz", true),
+            ]));
+
+        reconciled.TenancyStyle.Should().Be(TenancyStyle.Conjoined);
+        reconciled.SoftDeleteEnabled.Should().BeTrue();
+
+        reconciled.MetadataColumnName(DocumentMetadataColumn.TenantId).Should().Be("tenant_id");
+        reconciled.MetadataColumnName(DocumentMetadataColumn.IsSoftDeleted).Should().Be("mt_deleted");
+        reconciled.MetadataColumnName(DocumentMetadataColumn.SoftDeletedAt).Should().Be("mt_deleted_at");
+    }
+
+    [Fact]
+    public void A_reconciled_column_is_added_once_and_never_over_a_configured_one()
+    {
+        var configured = SqlTestTables.FullyFeatured();
+
+        var reconciled = configured.WithPhysicalColumns(new TableColumns(
+            SqlTestStore.Schema,
+            "mt_doc_sqltestcustomer",
+            [
+                new PostgresColumn("id", "uuid", "uuid", false),
+                new PostgresColumn("data", "jsonb", "jsonb", false),
+                new PostgresColumn("tenant_id", "character varying", "varchar", false),
+                new PostgresColumn("mt_deleted", "boolean", "bool", false),
+                new PostgresColumn("mt_deleted_at", "timestamp with time zone", "timestamptz", true),
+            ]));
+
+        reconciled.MetadataColumns.Select(x => x.Column).Should().OnlyHaveUniqueItems();
+        reconciled.MetadataColumns.Select(x => x.ColumnName).Should().BeEquivalentTo(
+            ["tenant_id", "mt_deleted", "mt_deleted_at"]);
+    }
+
+    /// <summary>
+    /// Marten's default <c>RevisionColumn</c> is <c>bigint</c>; the <c>integer</c> one is used only for a
+    /// document implementing <c>IRevisioned</c>. The static guess says so, and once the catalog has been
+    /// read the physical type wins over the guess either way.
+    /// </summary>
+    [Fact]
+    public void The_revision_column_is_a_bigint_unless_the_catalog_says_otherwise()
+    {
+        var revisioned = DocumentTableInfo.FromDocumentType(SqlTestStore.DocumentType<SqlTestNote>(options =>
+            options.Schema.For<SqlTestNote>().UseNumericRevisions(true)));
+
+        var revision = revisioned.MetadataColumns.Single(x => x.Column == DocumentMetadataColumn.Revision);
+
+        revision.ColumnName.Should().Be("mt_version", "Marten keeps the revision in the version column");
+        revision.PhysicalDbType.Should().BeNull("no catalog has been consulted yet");
+        revision.DbType.Should().Be(NpgsqlTypes.NpgsqlDbType.Bigint);
+
+        var read = revisioned.WithPhysicalColumns(new TableColumns(
+            SqlTestStore.Schema,
+            "mt_doc_sqltestnote",
+            [
+                new PostgresColumn("id", "uuid", "uuid", false),
+                new PostgresColumn("data", "jsonb", "jsonb", false),
+                new PostgresColumn("mt_version", "integer", "int4", false),
+            ]));
+
+        read.MetadataColumns.Single(x => x.Column == DocumentMetadataColumn.Revision)
+            .DbType.Should().Be(NpgsqlTypes.NpgsqlDbType.Integer, "an IRevisioned document gets int4");
+    }
+
+    [Fact]
+    public void A_column_type_the_studio_does_not_recognise_falls_back_to_the_static_guess()
+    {
+        var read = SqlTestTables.FullyFeatured().WithPhysicalColumns(new TableColumns(
+            SqlTestStore.Schema,
+            "mt_doc_sqltestcustomer",
+            [
+                new PostgresColumn("id", "uuid", "uuid", false),
+                new PostgresColumn("data", "jsonb", "jsonb", false),
+                new PostgresColumn("tenant_id", "USER-DEFINED", "citext", false),
+            ]));
+
+        read.MetadataColumns.Single(x => x.Column == DocumentMetadataColumn.TenantId)
+            .DbType.Should().Be(NpgsqlTypes.NpgsqlDbType.Varchar, "Unknown is a worse answer than the guess");
+    }
+
     [Fact]
     public void A_catalog_read_that_saw_nothing_changes_nothing()
     {
