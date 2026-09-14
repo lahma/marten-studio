@@ -1,4 +1,4 @@
-﻿namespace MartenStudio
+namespace MartenStudio
 {
     public sealed record MartenStoreResource : System.IEquatable<MartenStudio.MartenStoreResource>
     {

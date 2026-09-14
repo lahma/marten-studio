@@ -1,17 +1,33 @@
 @inherits LayoutComponentBase
 @implements IDisposable
 @using Microsoft.Extensions.Options
+@using MartenStudio.Internal
 @using MartenStudio.Services
 @inject StudioState State
 @inject StudioAuthorization Authorization
 @inject IOptions<MartenStudioOptions> Options
 @inject IJSRuntime JsRuntime
+@inject NavigationManager Navigation
+@inject PersistentComponentState PersistentState
+@inject MartenStudioMappedEndpoints MappedEndpoints
 
-<HeadContent>
-    <link rel="stylesheet" href="_content/MartenStudio/css/marten-studio.css" />
-</HeadContent>
+@* The stylesheet is not linked from here. It is static markup in MartenStudioApp's own <head>: a
+   <HeadContent> put it inside the <HeadOutlet> marker, and the interactive outlet's first render - which
+   happens before this layout has registered any section content - removed it from the live DOM. *@
 
 <div class="ms-studio" data-theme="@State.SelectedTheme">
+    @if (MappedEndpoints.ServedAnonymously)
+    {
+        @* Not a toast and not dismissible. A studio that anyone can open looks exactly like one behind a
+           policy, so the only honest place for this is the top of every page, always. *@
+        <div class="ms-anonymous-banner" role="alert">
+            <strong>This studio is served to anyone (AllowAnonymous)</strong>
+            <span>
+                Its pages carry no authorization, so every document, event stream and schema in this
+                process is readable by anyone who can reach this URL.
+            </span>
+        </div>
+    }
     <div class="ms-layout">
         <aside class="ms-sidebar" role="navigation" aria-label="Marten Studio navigation">
             <NavMenu />
@@ -32,7 +48,7 @@
                                 @onchange="OnTimeZoneChangedAsync">
                             @foreach (TimeZoneInfo timeZone in timeZones)
                             {
-                                <option value="@timeZone.Id">@TimeZoneLabel(timeZone)</option>
+                                <option value="@timeZone.Id" selected="@(timeZone.Id == State.SelectedTimeZoneId)">@TimeZoneLabel(timeZone)</option>
                             }
                         </select>
                     </div>
@@ -42,9 +58,9 @@
                                 class="ms-select ms-header-select"
                                 value="@State.SelectedTheme"
                                 @onchange="OnThemeChangedAsync">
-                            <option value="system">System</option>
-                            <option value="light">Light</option>
-                            <option value="dark">Dark</option>
+                            <option value="system" selected="@(State.SelectedTheme == "system")">System</option>
+                            <option value="light" selected="@(State.SelectedTheme == "light")">Light</option>
+                            <option value="dark" selected="@(State.SelectedTheme == "dark")">Dark</option>
                         </select>
                     </div>
                 </div>
@@ -82,6 +98,20 @@
         Denied
     }
 
+    /// <summary>
+    /// What the prerendered scope hands to the circuit's own scope.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="StudioState" /> is scoped, and the circuit's scope is not the request's: it has no
+    /// <c>HttpContext</c>, so the cookie that seeded the prerendered theme is invisible to it and the
+    /// studio flashed from dark to light the moment the circuit attached. Carried across as persisted
+    /// component state rather than re-fetched over JS interop, because a round trip is a flash by another
+    /// name.
+    /// </remarks>
+    private sealed record PersistedPreferences(string Theme, string TimeZoneId);
+
+    private const string PreferencesStateKey = "MartenStudio.Preferences";
+
     private readonly IReadOnlyList<TimeZoneInfo> timeZones = TimeZoneInfo
         .GetSystemTimeZones()
         .OrderBy(static tz => tz.Id, StringComparer.Ordinal)
@@ -89,13 +119,41 @@
 
     private ScopeAccess access = ScopeAccess.Unknown;
     private bool preferencesLoaded;
+    private bool interactive;
+    private PersistingComponentStateSubscription persistingSubscription;
 
     protected override async Task OnInitializedAsync()
     {
         State.ScopeChanged += OnScopeChanged;
 
+        // Before the first render, so the circuit's first paint already carries the prerendered theme.
+        if (PersistentState.TryTakeFromJson(PreferencesStateKey, out PersistedPreferences? persisted) && persisted is not null)
+        {
+            State.SelectedTheme = persisted.Theme;
+            State.SelectedTimeZoneId = persisted.TimeZoneId;
+        }
+
+        persistingSubscription = PersistentState.RegisterOnPersisting(PersistPreferences);
+
         await State.EnsureInitializedAsync();
+
+        // The scope travels in the query string so a pasted link reopens the same thing (plan D9).
+        // Anything the listings do not carry is ignored by StudioState rather than reported.
+        (string? storeKey, string? databaseId, string? tenantId) = StudioScopeQuery.Read(Navigation.Uri);
+        if (storeKey is not null || databaseId is not null || tenantId is not null)
+        {
+            await State.SetScopeAsync(storeKey, databaseId, tenantId);
+        }
+
         await UpdateAccessAsync();
+    }
+
+    private Task PersistPreferences()
+    {
+        PersistentState.PersistAsJson(
+            PreferencesStateKey,
+            new PersistedPreferences(State.SelectedTheme, State.SelectedTimeZoneId));
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -123,29 +181,61 @@
     {
         ScopeAccess previous = access;
         await UpdateAccessAsync();
+        SyncScopeToUrl();
         if (previous != access)
         {
             await InvokeAsync(StateHasChanged);
         }
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    /// <summary>
+    /// Writes the active scope into the query string, so the address bar names what is on screen and a
+    /// link someone pastes into a chat reopens the same store, database and tenant (plan D9).
+    /// </summary>
+    /// <remarks>
+    /// Only once the circuit exists. During static server-side rendering a <c>NavigateTo</c> is a
+    /// redirect, which would turn the first page load into a round trip; <see cref="OnAfterRenderAsync" />
+    /// is the one signal that says "this render is interactive" without needing renderer information a
+    /// test host may not supply.
+    /// </remarks>
+    private void SyncScopeToUrl()
     {
-        if (!firstRender || preferencesLoaded)
+        if (!interactive)
         {
             return;
         }
 
-        preferencesLoaded = await LoadPreferencesAsync();
+        string target = StudioScopeQuery.WithScope(Navigation, State.ActiveScope);
+        if (!string.Equals(target, Navigation.Uri, StringComparison.Ordinal))
+        {
+            Navigation.NavigateTo(target, forceLoad: false, replace: true);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        interactive = true;
+        SyncScopeToUrl();
+
+        if (!preferencesLoaded)
+        {
+            preferencesLoaded = await LoadPreferencesAsync();
+        }
     }
 
     /// <summary>
     /// Reads the browser's own remembered preferences once the circuit exists.
     /// </summary>
     /// <remarks>
-    /// The cookie has already seeded <see cref="StudioState" /> on the server, which is what keeps a dark
-    /// studio from flashing light during prerendering. This covers the case the cookie cannot: a
-    /// preference stored only in <c>localStorage</c>, and a browser whose cookie was cleared.
+    /// The cookie has already seeded <see cref="StudioState" /> in the prerender scope and persisted
+    /// component state carried that across to the circuit, which is what keeps a dark studio from
+    /// flashing light. This covers the case neither can: a preference stored only in
+    /// <c>localStorage</c>, and a browser whose cookie was cleared.
     /// </remarks>
     private async Task<bool> LoadPreferencesAsync()
     {
@@ -211,6 +301,7 @@
         {
             await State.NotifyAsync();
             await PersistPreferenceAsync(StudioState.TimeZonePreferenceKey, State.SelectedTimeZoneId);
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -252,5 +343,6 @@
     public void Dispose()
     {
         State.ScopeChanged -= OnScopeChanged;
+        persistingSubscription.Dispose();
     }
 }

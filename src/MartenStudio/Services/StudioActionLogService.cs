@@ -23,7 +23,21 @@ internal sealed record StudioActionLogEntry(
     string Target,
     bool Succeeded,
     string? Message,
-    string? Capability);
+    string? Capability)
+{
+    /// <summary>
+    /// Where this entry sits in the ring, counting from one. Assigned by
+    /// <see cref="StudioActionLogService.Record" />; zero on an entry that was never recorded.
+    /// </summary>
+    /// <remarks>
+    /// A record has value equality, so two identical actions - the same user deleting the same document
+    /// twice, or a retried failure - are the same object as far as any dictionary or Blazor <c>@key</c>
+    /// is concerned. The Activity page keys its rows on this instead, because a duplicate key makes the
+    /// renderer reuse the wrong row. A monotonic counter rather than a timestamp: two entries can share
+    /// a timestamp, and the ring is already ordered by insertion.
+    /// </remarks>
+    public long Sequence { get; init; }
+}
 
 /// <summary>
 /// The process's ring of recent actions, newest first.
@@ -41,15 +55,24 @@ internal sealed class StudioActionLogService
 
     private readonly List<StudioActionLogEntry> entries = [];
     private readonly Lock gate = new();
+    private long sequence;
 
-    /// <summary>Keeps one action, dropping the oldest once the bound is reached.</summary>
+    /// <summary>
+    /// Keeps one action, dropping the oldest once the bound is reached, and stamps it with the next
+    /// <see cref="StudioActionLogEntry.Sequence" />.
+    /// </summary>
+    /// <remarks>
+    /// The sequence is assigned here rather than by the caller so that it is the ring's own count and
+    /// nothing else can forge an ordering. Under the same lock as the insert, so the order of the
+    /// sequence numbers is the order of the list.
+    /// </remarks>
     public void Record(StudioActionLogEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
 
         lock (gate)
         {
-            entries.Insert(0, entry);
+            entries.Insert(0, entry with { Sequence = ++sequence });
             if (entries.Count > MaxEntries)
             {
                 entries.RemoveRange(MaxEntries, entries.Count - MaxEntries);

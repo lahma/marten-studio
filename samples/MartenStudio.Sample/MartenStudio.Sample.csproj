@@ -4,17 +4,24 @@
     <UserSecretsId>marten-studio-sample</UserSecretsId>
 
     <!--
-      Required on .NET 10 for any host whose only Blazor components come from a referenced RCL. As of
-      .NET 10 `_framework/blazor.web.js` is no longer embedded in the ASP.NET Core assemblies: it is a
-      static web asset, and the SDK only contributes it to a project that says it needs one. Without this
-      property `GET /_framework/blazor.web.js` is a 404, the studio prerenders and then never becomes
-      interactive, and nothing in the build says so. It pairs with `app.MapStaticAssets()` in Program.cs.
+      Not required any more, and kept on purpose. As of .NET 10 `_framework/blazor.web.js` is no longer
+      embedded in the ASP.NET Core assemblies: it is a static web asset out of a pack the SDK resolves
+      only for a project that says it needs one, and a host whose only Blazor components come from a
+      referenced RCL says nothing. The package now ships its own copy for exactly that host, but the
+      copy is only a fallback - the studio's script endpoint prefers whatever the host serves, because
+      the host's copy is the one that matches the host's runtime. This is the sample showing the shape a
+      real host should use, and it pairs with `app.MapStaticAssets()` in Program.cs.
     -->
     <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <!-- The sign-in form and the throwaway-Postgres switch are tested; both are internal to the demo. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="MartenStudio.Integration.Tests" />
   </ItemGroup>
 
   <ItemGroup>

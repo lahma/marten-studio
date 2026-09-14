@@ -175,6 +175,33 @@ public class StudioActionLogTest
     }
 
     /// <summary>
+    /// The ring stamps every entry with its own count, so two identical actions are two entries.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="StudioActionLogEntry" /> is a record and has value equality: the same user deleting the
+    /// same document twice produces two entries that are equal to each other, and the Activity page keyed
+    /// its rows on the entry. A duplicate Blazor <c>@key</c> makes the renderer reuse the wrong row.
+    /// </remarks>
+    [Fact]
+    public void Two_identical_actions_get_distinct_sequence_numbers()
+    {
+        var ring = new StudioActionLogService();
+        var entry = new StudioActionLogEntry(
+            DateTimeOffset.UnixEpoch, "ops", "default", "db", null, "DeleteDocument", "customer/42", true, "deleted", null);
+
+        ring.Record(entry);
+        ring.Record(entry);
+
+        var recorded = ring.GetLatest();
+        recorded.Should().HaveCount(2);
+        recorded.Select(x => x.Sequence).Should().OnlyHaveUniqueItems();
+        recorded[0].Sequence.Should().BeGreaterThan(recorded[1].Sequence, "newest first, and the count only goes up");
+
+        // Without the sequence the two are the same object as far as any key is concerned.
+        (recorded[0] with { Sequence = 0 }).Should().Be(recorded[1] with { Sequence = 0 });
+    }
+
+    /// <summary>
     /// All twelve ids are declared from the first packet that logs any of them, so the numbers are
     /// reserved rather than assigned in the order features happen to land.
     /// </summary>

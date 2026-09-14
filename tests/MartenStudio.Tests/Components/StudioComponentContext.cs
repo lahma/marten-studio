@@ -1,12 +1,16 @@
 using Bunit;
 
+using MartenStudio.Internal;
 using MartenStudio.Services;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Infrastructure;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -69,6 +73,17 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<StudioActionLogService>();
         Services.AddSingleton<StudioActionLog>();
 
+        // What the layout reads to decide whether to draw the "served to anyone" banner. The real
+        // singleton, so a test says what it says by handing it real endpoint metadata.
+        MappedEndpoints = new MartenStudioMappedEndpoints();
+        Services.AddSingleton(MappedEndpoints);
+
+        // AddRazorComponents() would register these; a bUnit context has neither, and the layout carries
+        // the prerendered theme and time zone across to the circuit through them.
+        Services.AddSingleton<ComponentStatePersistenceManager>();
+        Services.AddSingleton(static provider =>
+            provider.GetRequiredService<ComponentStatePersistenceManager>().State);
+
         configure?.Invoke(Services);
 
         State = Services.GetRequiredService<StudioState>();
@@ -94,6 +109,9 @@ internal class StudioComponentContext : BunitContext
 
     /// <summary>The circuit's scope state, as the components see it.</summary>
     public StudioState State { get; }
+
+    /// <summary>What the startup guard observed about the mapping, as the layout reads it.</summary>
+    public MartenStudioMappedEndpoints MappedEndpoints { get; }
 
     public ToastService Toasts { get; }
 
@@ -135,6 +153,42 @@ internal class StudioComponentContext : BunitContext
     public StudioComponentContext Navigate(string relativeUri)
     {
         Services.GetRequiredService<NavigationManager>().NavigateTo(relativeUri);
+        return this;
+    }
+
+    /// <summary>
+    /// Says the studio was mapped with <c>AllowAnonymous()</c>, the way the startup guard finds out:
+    /// by looking at a finished page endpoint's metadata.
+    /// </summary>
+    public StudioComponentContext ServedAnonymously()
+    {
+        RouteEndpointBuilder endpoint = new(
+            static _ => Task.CompletedTask,
+            RoutePatternFactory.Parse("/marten"),
+            order: 0);
+
+        endpoint.Metadata.Add(new MartenStudioEndpointMarker("Marten Studio", "(remedies)", isPage: true));
+        endpoint.Metadata.Add(new AllowAnonymousAttribute());
+
+        MappedEndpoints.ObserveAnonymousPages([endpoint.Build()]);
+        return this;
+    }
+
+    /// <summary>
+    /// What the prerender scope would have handed the circuit's scope, restored before anything renders.
+    /// </summary>
+    /// <remarks>
+    /// The circuit's DI scope is not the request's and has no <c>HttpContext</c>, so the cookie that
+    /// themed the prerendered page is invisible to it; persisted component state is how the answer
+    /// crosses. Restored through <see cref="ComponentStatePersistenceManager" /> rather than poked in,
+    /// so the test exercises the same path the framework uses.
+    /// </remarks>
+    public StudioComponentContext WithPersistedState(string key, object value)
+    {
+        ComponentStatePersistenceManager manager = Services.GetRequiredService<ComponentStatePersistenceManager>();
+        TestPersistentComponentStateStore store = new();
+        store.Seed(key, value);
+        manager.RestoreStateAsync(store).GetAwaiter().GetResult();
         return this;
     }
 }

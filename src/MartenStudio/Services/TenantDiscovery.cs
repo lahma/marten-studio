@@ -25,7 +25,7 @@ internal enum TenantListSource
     /// <summary>Marten's own database descriptors carried them.</summary>
     Descriptor,
 
-    /// <summary>They were read out of the event store's stream table, bounded.</summary>
+    /// <summary>They were read out of the tenant columns of the store's own tables, bounded.</summary>
     Queried,
 
     /// <summary>Nothing could answer. Not the same as "there are none".</summary>
@@ -55,8 +55,15 @@ internal sealed record TenantList(IReadOnlyList<string> Ids, bool IsTruncated, T
 /// Tier 1 is <see cref="MartenStudioOptions.KnownTenantIds" />: a host that knows its tenants says so and
 /// nothing is discovered. Tier 2 is Marten's own <c>Tenancy.DescribeDatabasesAsync</c>, which answers for
 /// a static multi-tenancy configuration without touching the database. Tier 3 is a bounded
-/// <c>select distinct tenant_id</c> against the event store's stream table, run only when the event store
-/// is conjoined and only when <see cref="MartenStudioOptions.DiscoverTenantIds" /> allows it.
+/// <c>select distinct tenant_id</c> over every table in the store that has a tenant column, run only when
+/// <see cref="MartenStudioOptions.DiscoverTenantIds" /> allows it.
+/// </para>
+/// <para>
+/// "Every table that has one" and not just <c>mt_streams</c>: conjoined tenancy is a per-document-type
+/// setting, and a store whose documents are conjoined while its event store is not — which is the common
+/// shape, and the sample's — has its tenant ids only in the document tables. Asking only the event store
+/// meant such a store discovered nothing, the selector offered nothing, and
+/// <see cref="StudioScopeResolver" /> then refused every tenant the visitor could have typed.
 /// </para>
 /// <para>
 /// The tier-3 query is capped at 201 rows so that "more than 200" is answerable without counting, and the
@@ -212,22 +219,74 @@ internal sealed class TenantDiscovery
             logger.LogDebug(exception, "Marten Studio could not describe the databases of a store while discovering tenants");
         }
 
-        // Tier 3, and only for a conjoined event store: the tenant column of mt_streams is the only place
-        // tenant ids exist as data rather than as configuration.
-        if (store.Options.Events.TenancyStyle != TenancyStyle.Conjoined)
+        // Tier 3: the tenant columns, which are the only place tenant ids exist as data rather than as
+        // configuration.
+        List<string> tables = TenantedTables(store, value);
+        if (tables.Count == 0)
         {
             return TenantList.Unavailable;
         }
 
         try
         {
-            return await QueryAsync(store, database, value, cancellationToken).ConfigureAwait(false);
+            return await QueryAsync(tables, database, value, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogDebug(exception, "Marten Studio could not query tenant ids from the event store");
+            logger.LogDebug(exception, "Marten Studio could not query tenant ids from the store's tenanted tables");
             return TenantList.Unavailable;
         }
+    }
+
+    /// <summary>
+    /// How many tenanted tables tier 3 will read from before it gives up on being exhaustive.
+    /// </summary>
+    /// <remarks>
+    /// A store with three hundred conjoined document types would otherwise produce a three-hundred-branch
+    /// union, and the point of this tier is to be cheap. The tables are taken in the order Marten knows
+    /// them, with the event store first, so the cap is deterministic rather than arbitrary.
+    /// </remarks>
+    private const int MaxTenantedTablesQueried = 16;
+
+    /// <summary>
+    /// Every table of <paramref name="store" /> that carries a <c>tenant_id</c>, quoted, event store
+    /// first.
+    /// </summary>
+    private static List<string> TenantedTables(IDocumentStore store, MartenStudioOptions value)
+    {
+        List<string> tables = [];
+
+        if (store.Options.Events.TenancyStyle == TenancyStyle.Conjoined)
+        {
+            tables.Add(SqlIdentifier.Qualify(store.Options.Events.DatabaseSchemaName, "mt_streams"));
+        }
+
+        // The visibility filter is applied here as well as in navigation (AGENTS.md: it is a data-layer
+        // filter, not a UI one), so a hidden document type's tenants are not discovered on its behalf.
+        Func<Type, bool>? visible = value.IsDocumentTypeVisible;
+        foreach (IDocumentType documentType in store.Options.AllKnownDocumentTypes())
+        {
+            if (tables.Count >= MaxTenantedTablesQueried)
+            {
+                break;
+            }
+
+            if (documentType.TenancyStyle != TenancyStyle.Conjoined
+                || (visible is not null && !visible(documentType.DocumentType)))
+            {
+                continue;
+            }
+
+            // Both halves are Marten's own mapping, and both go through the quoting builder rather than
+            // into the string as they are (AGENTS.md hard rule 4).
+            string table = SqlIdentifier.Qualify(documentType.TableName.Schema, documentType.TableName.Name);
+            if (!tables.Contains(table, StringComparer.Ordinal))
+            {
+                tables.Add(table);
+            }
+        }
+
+        return tables;
     }
 
     /// <summary>
@@ -247,22 +306,33 @@ internal sealed class TenantDiscovery
             || string.Equals(descriptor.Identifier, database.Id.Identity, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// One bounded read over every tenanted table, de-duplicated by the database.
+    /// </summary>
+    /// <remarks>
+    /// Each branch is capped at <see cref="MaxListedTenants" /> + 1 rows of its own, so the union can
+    /// never carry more than the number of tables times that however large the tables are, and the whole
+    /// statement is capped again on the way out - "more than two hundred" is then answerable without
+    /// counting. <c>CommandTimeout</c> is the studio's <see cref="MartenStudioOptions.QueryTimeout" />,
+    /// because a <c>select distinct</c> over a table with no index on <c>tenant_id</c> is a scan and this
+    /// runs behind a page that someone is looking at.
+    /// </remarks>
     private static async ValueTask<TenantList> QueryAsync(
-        IDocumentStore store,
+        IReadOnlyList<string> tables,
         IMartenDatabase database,
         MartenStudioOptions value,
         CancellationToken cancellationToken)
     {
-        // The only identifiers here are Marten's own schema name and its fixed table name, and both go
-        // through the quoting builder rather than into the string as they are (AGENTS.md hard rule 4).
-        string streams = SqlIdentifier.Qualify(store.Options.Events.DatabaseSchemaName, "mt_streams");
+        string branches = string.Join(
+            " union ",
+            tables.Select(table => $"(select distinct tenant_id from {table} order by tenant_id limit {MaxListedTenants + 1})"));
 
         await using NpgsqlConnection connection = database.CreateConnection(ConnectionUsage.Read);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using NpgsqlCommand command = connection.CreateCommand();
         command.CommandText =
-            $"select distinct tenant_id from {streams} order by tenant_id limit {MaxListedTenants + 1}";
+            $"select tenant_id from ({branches}) as tenants where tenant_id is not null order by tenant_id limit {MaxListedTenants + 1}";
         command.CommandTimeout = (int) Math.Ceiling(value.QueryTimeout.TotalSeconds);
 
         List<string> ids = [];

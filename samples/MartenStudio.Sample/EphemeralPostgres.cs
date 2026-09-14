@@ -24,7 +24,7 @@ internal static class EphemeralPostgres
             // Reuse so that stopping and starting the sample does not cost a fresh container and a fresh
             // seed every time. Honoured only when the machine has testcontainers.reuse.enable=true in
             // ~/.testcontainers.properties; without it this is simply a new container each run.
-            .WithReuse(true)
+            .WithReuse(ReuseRequested())
             .Build();
 
         try
@@ -66,5 +66,37 @@ internal static class EphemeralPostgres
         Console.WriteLine();
 
         return connectionString;
+    }
+
+    /// <summary>The environment variable that turns container reuse off for one run.</summary>
+    /// <remarks>
+    /// <c>TESTCONTAINERS_REUSE_ENABLE</c> reads like the obvious name and does nothing: Testcontainers
+    /// for .NET 4.x has no such variable — reuse is a per-container builder call, and the only ambient
+    /// switch is <c>testcontainers.reuse.enable</c> in <c>~/.testcontainers.properties</c>, which is a
+    /// machine-wide setting nobody wants a demo run to depend on. So the sample reads its own, named
+    /// after the project so it cannot be mistaken for one of the library's.
+    /// </remarks>
+    internal const string ReuseEnvironmentVariable = "MARTENSTUDIO_PG_REUSE";
+
+    /// <summary>
+    /// Whether to ask for a reusable container, as <see cref="ReuseEnvironmentVariable" /> says.
+    /// </summary>
+    private static bool ReuseRequested() =>
+        IsReuseEnabled(Environment.GetEnvironmentVariable(ReuseEnvironmentVariable));
+
+    /// <summary>
+    /// Reuse is the default; anything that reads as false turns it off. <see langword="null" /> means the
+    /// variable is not set.
+    /// </summary>
+    internal static bool IsReuseEnabled(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        string trimmed = value.Trim();
+        return !(trimmed is "0" or "no" or "off"
+            || string.Equals(trimmed, "false", StringComparison.OrdinalIgnoreCase));
     }
 }

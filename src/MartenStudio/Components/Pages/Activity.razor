@@ -1,7 +1,9 @@
 @page "/marten/activity"
 @using MartenStudio.Services
+@implements IDisposable
 @inject StudioActionLog ActionLog
 @inject StudioState State
+@inject StudioAuthorization Authorization
 
 <PageTitle>Activity</PageTitle>
 
@@ -17,7 +19,7 @@
         is in this application's own log, under event ids 9200-9211.
     </p>
 
-    @if (Filtered.Count == 0)
+    @if (visible.Count == 0)
     {
         <div class="ms-empty">
             <p class="ms-empty-title">Nothing to show</p>
@@ -46,9 +48,12 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (StudioActionLogEntry entry in Filtered)
+                @foreach (StudioActionLogEntry entry in visible)
                 {
-                    <tr class="ms-table-row" @key="entry">
+                    @* Keyed by the ring's own sequence number, not by the entry: the record has value
+                       equality, and two identical actions a second apart would collide on one key and
+                       make the diff reuse the wrong row. *@
+                    <tr class="ms-table-row" @key="entry.Sequence">
                         <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(entry.Timestamp)</td>
                         <td class="ms-table-cell">@entry.User</td>
                         <td class="ms-table-cell ms-table-cell-mono">@entry.StoreKey</td>
@@ -73,39 +78,72 @@
 
 @code {
     private string filter = string.Empty;
+    private List<StudioActionLogEntry> visible = [];
 
     /// <summary>Failures are recorded too, which is the point - so the outcome is a column, not a filter.</summary>
     private static string Outcome(StudioActionLogEntry entry) => entry.Succeeded ? "succeeded" : "failed";
 
-    private List<StudioActionLogEntry> Filtered
+    protected override async Task OnInitializedAsync()
     {
-        get
-        {
-            IReadOnlyList<StudioActionLogEntry> entries = ActionLog.GetLatest();
-            if (string.IsNullOrWhiteSpace(filter))
-            {
-                return [.. entries];
-            }
-
-            string needle = filter.Trim();
-            List<StudioActionLogEntry> matches = [];
-            foreach (StudioActionLogEntry entry in entries)
-            {
-                if (entry.Action.Contains(needle, StringComparison.OrdinalIgnoreCase)
-                    || entry.User.Contains(needle, StringComparison.OrdinalIgnoreCase)
-                    || Outcome(entry).Contains(needle, StringComparison.OrdinalIgnoreCase))
-                {
-                    matches.Add(entry);
-                }
-            }
-
-            return matches;
-        }
+        State.ScopeChanged += OnScopeChanged;
+        await ReloadAsync();
     }
 
-    private Task OnFilterChangedAsync(string value)
+    /// <summary>
+    /// Reads the ring, drops every entry the visitor may not see, then applies the text filter.
+    /// </summary>
+    /// <remarks>
+    /// The ring is process-wide and every circuit writes into it, so it is the one place in the studio
+    /// where one visitor's actions can be read by another. The per-store policy decides, entry by entry,
+    /// against the store, database and tenant the action was aimed at - the same question
+    /// <see cref="StudioScopeResolver" /> asks before any of those actions could have run. Entries whose
+    /// scope was never settled carry a placeholder store key, which no policy recognises, so they are
+    /// filtered out too; that is the safe direction.
+    /// </remarks>
+    private async Task ReloadAsync()
+    {
+        IReadOnlyList<StudioActionLogEntry> entries = ActionLog.GetLatest();
+
+        List<StudioActionLogEntry> allowed = await Authorization.FilterAsync(
+            entries,
+            static entry => new StudioScope(entry.StoreKey, entry.DatabaseId, entry.TenantId));
+
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            visible = allowed;
+            return;
+        }
+
+        string needle = filter.Trim();
+        List<StudioActionLogEntry> matches = [];
+        foreach (StudioActionLogEntry entry in allowed)
+        {
+            if (entry.Action.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                || entry.User.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                || Outcome(entry).Contains(needle, StringComparison.OrdinalIgnoreCase))
+            {
+                matches.Add(entry);
+            }
+        }
+
+        visible = matches;
+    }
+
+    private async Task OnScopeChanged()
+    {
+        await ReloadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnFilterChangedAsync(string value)
     {
         filter = value;
-        return InvokeAsync(StateHasChanged);
+        await ReloadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        State.ScopeChanged -= OnScopeChanged;
     }
 }

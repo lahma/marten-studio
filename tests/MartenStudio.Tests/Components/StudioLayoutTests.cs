@@ -212,8 +212,8 @@ public class StudioLayoutTests
 
         var layout = RenderLayout(context);
 
-        // In custom-path mode the shell roots the document at the studio itself, so links are relative to
-        // the studio root and an empty href resolves to it.
+        // The shell roots the document at the studio itself, so links are relative to the studio root and
+        // an empty href resolves to it.
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
             "",
             "events/streams",
@@ -226,23 +226,27 @@ public class StudioLayoutTests
             "activity");
     }
 
+    /// <summary>
+    /// The default mount is studio-rooted too, so its links have exactly the shape a custom path's do.
+    /// There is no second link shape any more: that was the branch nobody ran locally.
+    /// </summary>
     [Fact]
-    public void The_nav_links_carry_the_default_path_when_the_document_is_rooted_at_the_application()
+    public void The_nav_links_have_the_same_shape_at_the_default_path()
     {
         using var context = new StudioComponentContext();
 
         var layout = RenderLayout(context);
 
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
-            "marten",
-            "marten/events/streams",
-            "marten/events/feed",
-            "marten/events/types",
-            "marten/events/dead-letters",
-            "marten/projections",
-            "marten/schema",
-            "marten/config",
-            "marten/activity");
+            "",
+            "events/streams",
+            "events/feed",
+            "events/types",
+            "events/dead-letters",
+            "projections",
+            "schema",
+            "config",
+            "activity");
     }
 
     // -------------------------------------------------------------------------------------------
@@ -423,5 +427,165 @@ public class StudioLayoutTests
         layout.Find("#ms-store-select").Change("not-a-store");
 
         context.State.ActiveScope!.StoreKey.Should().Be("default");
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // The pickers actually reach the server, and what is on screen is in the URL (plan D9)
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The header's three pickers are the studio's only controls that are not on a page, and a browser
+    /// check found them doing nothing at all. They are written with an explicit <c>value</c> plus
+    /// <c>@onchange</c> rather than <c>@bind</c>, so this pins that the handler runs and that the selected
+    /// option is marked in the markup - during static server-side rendering <c>value</c> on a
+    /// <c>&lt;select&gt;</c> is an attribute browsers ignore, so without <c>selected</c> the prerendered
+    /// picker showed its first option whatever the state said.
+    /// </summary>
+    [Fact]
+    public void The_theme_picker_marks_the_selected_option_and_moves_the_state()
+    {
+        using var context = new StudioComponentContext();
+        var layout = RenderLayout(context);
+
+        layout.Find("#ms-theme-select").Change("dark");
+
+        context.State.SelectedTheme.Should().Be("dark");
+        layout.ThemeAttribute().Should().Be("dark");
+        layout.Find("#ms-theme-select option[value=dark]").HasAttribute("selected").Should().BeTrue();
+        layout.Find("#ms-theme-select option[value=light]").HasAttribute("selected").Should().BeFalse();
+    }
+
+    [Fact]
+    public void The_time_zone_picker_marks_the_selected_option()
+    {
+        using var context = new StudioComponentContext();
+        var layout = RenderLayout(context);
+
+        layout.Find("#ms-timezone-select").Change("UTC");
+
+        layout.FindAll("#ms-timezone-select option")
+            .Where(x => x.HasAttribute("selected"))
+            .Select(x => x.GetAttribute("value"))
+            .Should().Equal("UTC");
+    }
+
+    [Fact]
+    public void The_store_picker_marks_the_active_store()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
+
+        var layout = RenderLayout(context);
+        layout.Find("#ms-store-select").Change("IInvoicingStore");
+
+        layout.FindAll("#ms-store-select option")
+            .Where(x => x.HasAttribute("selected"))
+            .Select(x => x.GetAttribute("value"))
+            .Should().Equal("IInvoicingStore");
+    }
+
+    /// <summary>
+    /// Plan D9: the scope lives in the URL for the same reason a document id does — a link someone pastes
+    /// into a chat has to reopen the same thing. It never did; the address bar stayed on the bare page.
+    /// </summary>
+    [Fact]
+    public void Changing_the_scope_writes_it_into_the_query_string()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
+
+        var layout = RenderLayout(context);
+        layout.Find("#ms-store-select").Change("IInvoicingStore");
+
+        context.CurrentUri.Should().Contain("store=IInvoicingStore").And.Contain("db=localhost.invoicing");
+    }
+
+    [Fact]
+    public void The_scope_in_the_query_string_is_what_the_studio_opens_on()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "localhost.marten")
+            .WithStore("IInvoicingStore", "Invoicing Store", databaseIdentities: "localhost.invoicing");
+        context.Navigate("marten?store=IInvoicingStore");
+
+        RenderLayout(context);
+
+        context.State.ActiveScope!.StoreKey.Should().Be("IInvoicingStore");
+    }
+
+    [Fact]
+    public void A_store_the_query_string_names_but_the_listing_does_not_carry_is_ignored()
+    {
+        using var context = new StudioComponentContext();
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+        context.Navigate("marten?store=somebody-elses-store");
+
+        RenderLayout(context);
+
+        context.State.ActiveScope!.StoreKey.Should().Be("default", "a URL is something anyone can type");
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // The "served to anyone" banner
+    // -------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void An_anonymous_studio_says_so_on_every_page()
+    {
+        using var context = new StudioComponentContext();
+        context.ServedAnonymously();
+
+        var layout = RenderLayout(context);
+
+        layout.Find(".ms-anonymous-banner").TextContent
+            .Should().Contain("served to anyone").And.Contain("AllowAnonymous");
+    }
+
+    [Fact]
+    public void An_authorized_studio_draws_no_banner()
+    {
+        using var context = new StudioComponentContext();
+
+        RenderLayout(context).FindAll(".ms-anonymous-banner").Should().BeEmpty();
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // The prerendered theme survives the circuit
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <see cref="StudioState" /> is scoped and the circuit's scope has no <c>HttpContext</c>, so the
+    /// cookie that themed the prerendered page is invisible to it: a dark studio flashed to light the
+    /// moment the circuit attached, and an interop round trip to fix it would only have made the flash
+    /// shorter. The prerender scope persists what it knew and the circuit reads it before its first
+    /// render.
+    /// </summary>
+    [Fact]
+    public void The_circuit_opens_on_the_theme_the_prerender_rendered()
+    {
+        using var context = new StudioComponentContext();
+        context.WithPersistedState(
+            "MartenStudio.Preferences",
+            new { Theme = "dark", TimeZoneId = "UTC" });
+
+        var layout = RenderLayout(context);
+
+        layout.ThemeAttribute().Should().Be("dark");
+        context.State.SelectedTheme.Should().Be("dark");
+        context.State.SelectedTimeZoneId.Should().Be("UTC");
+    }
+
+    [Fact]
+    public void Nothing_persisted_leaves_the_state_as_the_scope_found_it()
+    {
+        using var context = new StudioComponentContext();
+        context.State.SelectedTheme = "light";
+
+        RenderLayout(context).ThemeAttribute().Should().Be("light");
     }
 }

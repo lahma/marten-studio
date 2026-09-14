@@ -8,6 +8,7 @@ using MartenStudio.Sample;
 using MartenStudio.Sample.Auth;
 using MartenStudio.SampleDomain;
 
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication.Cookies;
 
 SampleOptions sample = SampleOptions.Parse(args);
@@ -44,7 +45,13 @@ builder.Services.AddMartenStudio(options =>
 {
     // Who gets in, and who may change anything: the studio evaluates both against the host's own
     // authorization, and never authenticates anybody itself.
-    options.AuthorizationPolicy = SamplePolicies.Studio;
+    //
+    // --anonymous leaves AuthorizationPolicy unset on purpose. AllowAnonymous() on the mapping does win
+    // over a configured policy - the studio's endpoints carry both and AllowAnonymous is what the
+    // authorization middleware honours - but saying "this policy governs the studio" and then "anyone
+    // may open it" in the same application is two answers to one question, and a demo should show the
+    // one it means.
+    options.AuthorizationPolicy = sample.Anonymous ? null : SamplePolicies.Studio;
     options.WriteAuthorizationPolicy = SamplePolicies.StudioWrite;
 
     // Every mutating operation is off until the host says otherwise. `All()` is the one-line, greppable
@@ -87,7 +94,7 @@ else
 
 app.MapLogin();
 
-app.MapGet("/", (HttpContext context) =>
+app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
 {
     ClaimsPrincipal user = context.User;
     string who = user.Identity?.IsAuthenticated == true
@@ -97,6 +104,20 @@ app.MapGet("/", (HttpContext context) =>
     string studioPath = sample.Path is { Length: > 0 } mounted ? mounted : "/marten";
     string mode = sample.Anonymous ? "anonymous (no policy on the mapping)" : "behind the MartenStudio policy";
     string capabilities = sample.ReadOnly ? "read-only (ReadOnly = true)" : "all capabilities enabled";
+
+    // The same warning the studio's own layout draws, on the page that links to it: somebody who lands
+    // here in --anonymous mode has to see it before they follow the link, not only after.
+    string anonymousBanner = sample.Anonymous
+        ? """
+          <p style="background:#dc2626;color:#fff;padding:.75rem 1rem;border-radius:4px">
+            <strong>This studio is served to anyone (AllowAnonymous).</strong>
+            Every document, event stream and schema in this process is readable by anyone who can reach
+            this URL. This is what <code>--anonymous</code> demonstrates; it is not a way to run one.
+          </p>
+          """
+        : string.Empty;
+
+    AntiforgeryTokenSet tokens = antiforgery.GetAndStoreTokens(context);
 
     context.Response.ContentType = "text/html; charset=utf-8";
     return context.Response.WriteAsync($$"""
@@ -113,12 +134,16 @@ app.MapGet("/", (HttpContext context) =>
         </head>
         <body>
           <h1>Marten Studio sample</h1>
+          {{anonymousBanner}}
           <p>{{who}}</p>
           <ul>
             <li><a href="{{WebUtility.HtmlEncode(studioPath)}}">Open Marten Studio</a> &mdash; mounted at <code>{{WebUtility.HtmlEncode(studioPath)}}</code>, {{mode}}, {{capabilities}}</li>
             <li><a href="/login">Sign in</a> as <code>admin</code>, <code>ops</code> or <code>viewer</code> (the password is the user name)</li>
           </ul>
-          <form method="post" action="/logout"><button type="submit">Sign out</button></form>
+          <form method="post" action="/logout">
+            <input type="hidden" name="{{LoginEndpoints.AntiforgeryFieldName}}" value="{{WebUtility.HtmlEncode(tokens.RequestToken)}}" />
+            <button type="submit">Sign out</button>
+          </form>
           <p>Switches: <code>--anonymous</code>, <code>--readonly</code>, <code>--path /ops/marten</code>.</p>
         </body>
         </html>

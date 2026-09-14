@@ -54,6 +54,14 @@ namespace MartenStudio.Internal;
 /// to refuse, which is right: an application that registered the services and never mapped the endpoints
 /// serves nothing.
 /// </para>
+/// <para>
+/// A <c>MapMartenStudio()</c> made after the host has started — from a hosted service, from a lazily
+/// built <see cref="EndpointDataSource" />, from anything that runs once requests are already being
+/// served — is out of scope and always will be. Both of this guard's passes have run by then, so such a
+/// mapping is never checked and never refused. There is no hook that would catch it without inspecting
+/// every endpoint on every request, which is a cost the whole application would pay for a mistake nobody
+/// has made; the rule is simply that the studio is mapped while the application is being built.
+/// </para>
 /// </remarks>
 internal sealed class MartenStudioEndpointAuthorizationGuard : IHostedLifecycleService
 {
@@ -122,6 +130,10 @@ internal sealed class MartenStudioEndpointAuthorizationGuard : IHostedLifecycleS
 
     private void Verify(List<Endpoint> endpoints)
     {
+        // Read before the fallback-policy shortcut below: "the studio is served to anyone" is a fact about
+        // the mapping that the banner needs whether or not this guard has anything to refuse.
+        mappedEndpoints.ObserveAnonymousPages(endpoints);
+
         if (authorizationOptions?.Value.FallbackPolicy is not null)
         {
             // A fallback policy is evaluated for every endpoint that states nothing itself, so the

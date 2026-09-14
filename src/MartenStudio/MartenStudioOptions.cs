@@ -146,9 +146,15 @@ public sealed class MartenStudioOptions
 
     /// <summary>
     /// Whether <see cref="Path"/> differs from the compile-time default "/marten".
-    /// A custom path implies the standalone hosting mode because it is rejected when
-    /// integrating with an existing Blazor application.
     /// </summary>
+    /// <remarks>
+    /// A fact, and nothing behaves differently on it. Every mount is studio-rooted now — the studio
+    /// always re-roots its own <c>/_blazor</c>, its framework script and its asset mirror under
+    /// <see cref="Path"/> and always renders a studio-rooted <c>&lt;base href&gt;</c> — because a
+    /// default mount that left a second <c>/_blazor</c> at the application root was an
+    /// <c>AmbiguousMatchException</c> in any host with a Blazor app of its own, and because two shapes
+    /// meant the shape nobody runs locally was the one that broke in production.
+    /// </remarks>
     internal bool HasCustomPath => PathCache.HasCustom;
 
     /// <summary>

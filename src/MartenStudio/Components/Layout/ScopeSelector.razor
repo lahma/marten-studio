@@ -17,7 +17,11 @@
                     @* A store that would not build is offered and greyed out rather than omitted: it is
                        one the application registered, and leaving it out makes it look as though it never
                        was. There is nothing behind it to select. *@
+                    @* `selected` as well as the select's `value`: during static server-side rendering
+                       `value` on a <select> is an attribute browsers ignore, so a prerendered picker
+                       showed its first option whatever the scope actually was. *@
                     <option value="@store.Key"
+                            selected="@(store.Key == State.ActiveScope?.StoreKey)"
                             disabled="@(!store.Availability.IsAvailable)"
                             title="@store.Availability.Message">
                         @StoreLabel(store)
@@ -37,7 +41,8 @@
                     @onchange="OnDatabaseChangedAsync">
                 @foreach (DatabaseListing database in State.AvailableDatabases)
                 {
-                    <option value="@database.Identity">@database.Identity</option>
+                    <option value="@database.Identity"
+                            selected="@(database.Identity == State.ActiveScope?.DatabaseId)">@database.Identity</option>
                 }
             </select>
             @if (State.Cardinality == DatabaseCardinality.DynamicMultiple)
@@ -76,10 +81,10 @@
                         class="ms-select ms-header-select"
                         value="@State.ActiveScope?.TenantId"
                         @onchange="OnTenantChangedAsync">
-                    <option value="">All tenants</option>
+                    <option value="" selected="@(State.ActiveScope?.TenantId is null)">All tenants</option>
                     @foreach (string tenantId in State.AvailableTenants.Ids)
                     {
-                        <option value="@tenantId">@tenantId</option>
+                        <option value="@tenantId" selected="@(tenantId == State.ActiveScope?.TenantId)">@tenantId</option>
                     }
                 </select>
             }

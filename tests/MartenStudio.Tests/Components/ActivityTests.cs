@@ -102,4 +102,57 @@ public class ActivityTests
 
         page.Find("tbody tr td").TextContent.Trim().Should().EndWith("+00:00");
     }
+
+    // -------------------------------------------------------------------------------------------
+    // The ring is process-wide, so what it shows is not
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The one place in the studio where one visitor's actions can be read by another: the action ring is
+    /// a singleton and every circuit writes into it. Every entry goes back through the per-store policy,
+    /// against the store, database and tenant the action was aimed at — the same question that was asked
+    /// before the action could have run in the first place.
+    /// </summary>
+    [Fact]
+    public void An_action_against_a_store_the_visitor_may_not_see_is_not_listed()
+    {
+        using var context = new StudioComponentContext().WithPolicy("mine");
+        context.AuthenticationState.SignIn("ops");
+        context.ActionLog.Record("MineAction", "customer/1", succeeded: true, "done", capability: null, new StudioScope("mine", "localhost.marten", null));
+        context.ActionLog.Record("TheirsAction", "customer/2", succeeded: true, "done", capability: null, new StudioScope("theirs", "localhost.marten", null));
+
+        var page = context.Render<Activity>();
+
+        var actions = page.TextOfAll("tbody tr td");
+        actions.Should().Contain("MineAction");
+        actions.Should().NotContain("TheirsAction");
+    }
+
+    [Fact]
+    public void With_no_store_policy_configured_nothing_is_filtered_out()
+    {
+        using var context = new StudioComponentContext();
+        context.AuthenticationState.SignIn("ops");
+        context.ActionLog.Record("MineAction", "customer/1", succeeded: true, "done", capability: null, new StudioScope("mine", "localhost.marten", null));
+        context.ActionLog.Record("TheirsAction", "customer/2", succeeded: true, "done", capability: null, new StudioScope("theirs", "localhost.marten", null));
+
+        var actions = context.Render<Activity>().TextOfAll("tbody tr td");
+
+        actions.Should().Contain("MineAction").And.Contain("TheirsAction");
+    }
+
+    /// <summary>
+    /// Rows are keyed by the ring's sequence number, not by the entry: the entry is a record with value
+    /// equality, so two identical actions collide on one key and the renderer reuses the wrong row.
+    /// </summary>
+    [Fact]
+    public void Two_identical_actions_are_two_rows()
+    {
+        using var context = new StudioComponentContext();
+        context.AuthenticationState.SignIn("ops");
+        context.ActionLog.Record("DeleteDocument", "customer/42", succeeded: true, "deleted");
+        context.ActionLog.Record("DeleteDocument", "customer/42", succeeded: true, "deleted");
+
+        context.Render<Activity>().TextOfAll("tbody tr").Should().HaveCount(2);
+    }
 }

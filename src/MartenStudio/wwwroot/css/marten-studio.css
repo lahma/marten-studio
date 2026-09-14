@@ -4345,3 +4345,27 @@ a.ms-event-chip:focus-visible {
         max-height: 24rem;
     }
 }
+
+/* ==========================================================================
+   ANONYMOUS-ACCESS BANNER (P1.2-fix)
+
+   Drawn by StudioLayout when the studio's page endpoints carry AllowAnonymous. Deliberately loud and
+   not dismissible: an open studio looks exactly like one behind a policy, and the whole point is that
+   nobody discovers the difference from the outside.
+   ========================================================================== */
+
+.ms-anonymous-banner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    align-items: baseline;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    background-color: var(--ms-color-danger);
+    color: #ffffff;
+    font-size: var(--ms-font-size-sm);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.ms-anonymous-banner strong {
+    font-weight: 700;
+}

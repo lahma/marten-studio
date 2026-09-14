@@ -1,38 +1,6 @@
 export function afterWebStarted() {
     window.martenStudio = window.martenStudio || {};
 
-    window.martenStudio.clipboard = window.martenStudio.clipboard || {
-        copyText: async function (text) {
-            const normalized = text ?? "";
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(normalized);
-                    return true;
-                }
-            }
-            catch {
-            }
-
-            try {
-                const textArea = document.createElement("textarea");
-                textArea.value = normalized;
-                textArea.setAttribute("readonly", "");
-                textArea.style.position = "fixed";
-                textArea.style.opacity = "0";
-                textArea.style.pointerEvents = "none";
-                document.body.appendChild(textArea);
-                textArea.select();
-                textArea.setSelectionRange(0, normalized.length);
-                const copied = document.execCommand("copy");
-                document.body.removeChild(textArea);
-                return copied;
-            }
-            catch {
-                return false;
-            }
-        }
-    };
-
     window.martenStudio.prefs = window.martenStudio.prefs || {
         get: function (key) {
             try {
@@ -67,6 +35,64 @@ export function afterWebStarted() {
             const encodedKey = encodeURIComponent(key);
             const encodedValue = encodeURIComponent(value);
             document.cookie = encodedKey + "=" + encodedValue + "; path=" + basePath + "; max-age=31536000; samesite=lax";
+        }
+    };
+
+    // The theme, applied before anything else this module does.
+    //
+    // StudioState is scoped and the circuit's scope is not the request's: it has no HttpContext, so the
+    // cookie that themed the prerendered page is invisible to the circuit and the studio flashed from
+    // dark to light the moment the circuit attached. The server side of that is fixed by carrying the
+    // prerendered theme across as persisted component state; this is the half that covers a preference
+    // stored only in localStorage, and it runs here - synchronously, on the prerendered DOM - so the
+    // flash is over before the first interactive render arrives.
+    (function applyRememberedTheme() {
+        let theme = null;
+        try {
+            theme = window.martenStudio.prefs.get("ms_theme");
+        }
+        catch {
+            return;
+        }
+
+        if (theme !== "light" && theme !== "dark" && theme !== "system") {
+            return;
+        }
+
+        for (const element of document.querySelectorAll(".ms-studio")) {
+            element.setAttribute("data-theme", theme);
+        }
+    })();
+
+    window.martenStudio.clipboard = window.martenStudio.clipboard || {
+        copyText: async function (text) {
+            const normalized = text ?? "";
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(normalized);
+                    return true;
+                }
+            }
+            catch {
+            }
+
+            try {
+                const textArea = document.createElement("textarea");
+                textArea.value = normalized;
+                textArea.setAttribute("readonly", "");
+                textArea.style.position = "fixed";
+                textArea.style.opacity = "0";
+                textArea.style.pointerEvents = "none";
+                document.body.appendChild(textArea);
+                textArea.select();
+                textArea.setSelectionRange(0, normalized.length);
+                const copied = document.execCommand("copy");
+                document.body.removeChild(textArea);
+                return copied;
+            }
+            catch {
+                return false;
+            }
         }
     };
 

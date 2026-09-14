@@ -27,11 +27,21 @@ namespace MartenStudio;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Not the Razor components builder itself. A convention put on that builder reaches every endpoint it
-/// owns, and a <c>RequireAuthorization()</c> or an <c>AllowAnonymous()</c> the caller wrote is a
-/// statement about <em>the studio</em> — so it is applied only to the endpoints whose component comes
-/// out of this assembly. The filter costs one metadata scan per convention and is cheap insurance
-/// against the day the builder holds something that is not the studio's.
+/// Every endpoint the studio's own <c>MapRazorComponents&lt;MartenStudioApp&gt;()</c> produced — its
+/// pages <em>and</em> the <c>/_blazor</c> circuit it registered — because the studio owns that root
+/// component and therefore owns everything that call mapped. A <c>RequireAuthorization()</c> or an
+/// <c>AllowAnonymous()</c> the caller wrote is a statement about <em>the studio</em>, and a statement
+/// that reached the pages but not the circuit was the worst of both: the pages answered 401 while
+/// <c>POST /_blazor/negotiate</c> answered 200, so a client could open a circuit, replay a prerender
+/// descriptor and run the studio's components against Marten without ever passing the policy. It is a
+/// narrower claim than "every endpoint of this builder is the studio's", which is what makes it safe:
+/// the host's own Razor components live in the host's own builder.
+/// </para>
+/// <para>
+/// The studio's static web assets and its framework-script mirror are deliberately <em>not</em> here.
+/// They are separate route handlers, they carry no Marten data, and they have already decided for
+/// themselves — the configured policy when there is one, <c>AllowAnonymous</c> when there is not — so
+/// that a fail-closed <c>FallbackPolicy</c> cannot leave the studio without its stylesheet.
 /// </para>
 /// <para>
 /// The hub slot is empty in v1 and is kept for a reason: pages poll through a snapshot cache instead
@@ -42,13 +52,10 @@ namespace MartenStudio;
 internal sealed class MartenStudioConventionBuilder : IEndpointConventionBuilder
 {
     private readonly IEndpointConventionBuilder components;
-    private readonly Func<EndpointBuilder, bool>? componentFilter;
     private readonly IEndpointConventionBuilder? hub;
 
-    /// <param name="components">The Razor components builder the studio pages live in.</param>
-    /// <param name="componentFilter">
-    /// Which of that builder's endpoints a convention reaches, or <see langword="null" /> for all of
-    /// them.
+    /// <param name="components">
+    /// The Razor components builder the studio's pages and its Blazor circuit live in.
     /// </param>
     /// <param name="hub">
     /// The studio's live-events hub, or <see langword="null" /> when there is none. There is none in v1:
@@ -57,40 +64,21 @@ internal sealed class MartenStudioConventionBuilder : IEndpointConventionBuilder
     /// </param>
     public MartenStudioConventionBuilder(
         IEndpointConventionBuilder components,
-        Func<EndpointBuilder, bool>? componentFilter,
         IEndpointConventionBuilder? hub)
     {
         this.components = components;
-        this.componentFilter = componentFilter;
         this.hub = hub;
     }
 
     public void Add(Action<EndpointBuilder> convention)
     {
-        components.Add(Restrict(convention));
+        components.Add(convention);
         hub?.Add(convention);
     }
 
     public void Finally(Action<EndpointBuilder> finallyConvention)
     {
-        components.Finally(Restrict(finallyConvention));
+        components.Finally(finallyConvention);
         hub?.Finally(finallyConvention);
-    }
-
-    private Action<EndpointBuilder> Restrict(Action<EndpointBuilder> convention)
-    {
-        if (componentFilter is null)
-        {
-            return convention;
-        }
-
-        Func<EndpointBuilder, bool> filter = componentFilter;
-        return endpointBuilder =>
-        {
-            if (filter(endpointBuilder))
-            {
-                convention(endpointBuilder);
-            }
-        };
     }
 }

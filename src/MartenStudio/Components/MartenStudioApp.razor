@@ -7,17 +7,43 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@Options.Value.Title</title>
     <base href="@BaseHref" />
+    @*
+        Static markup in the shell's own <head>, deliberately not a <HeadContent> in the layout. The
+        studio renders its whole document, so it has a <head> to write into and needs no section for
+        this - and putting it in one was a real bug: the prerendered <link> lived inside the
+        <HeadOutlet> marker, and the interactive HeadOutlet renders before the layout has registered
+        its section content. On a page whose first load is slow (Overview waits for Marten) the outlet
+        emitted an empty head, the stylesheet was removed from the live DOM and never came back, and
+        the studio rendered unstyled the moment the circuit attached. HeadOutlet stays for <PageTitle>,
+        which is per-page and genuinely is a section.
+    *@
+    <link rel="stylesheet" href="_content/MartenStudio/css/marten-studio.css" />
     <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
 </head>
 <body>
     <AntiforgeryToken />
     <Routes @rendermode="RenderMode.InteractiveServer" />
+    @*
+        Relative, so it resolves against the studio-rooted <base href> above: every mount serves its own
+        copy of the framework script at {Path}/_framework/blazor.web.js.
+    *@
     <script src="_framework/blazor.web.js"></script>
 </body>
 </html>
 
 @code
 {
+    /// <summary>
+    /// The studio root, always: <c>{PathBase}{Path}/</c>.
+    /// </summary>
+    /// <remarks>
+    /// Every mount is studio-rooted, the default <c>/marten</c> included, because the studio always takes
+    /// its own <c>/_blazor</c>, its framework script and its asset mirror under <see
+    /// cref="MartenStudioOptions.Path" /> - a second <c>/_blazor</c> at the application root is an
+    /// <c>AmbiguousMatchException</c> in any host that has a Blazor app of its own. Rooting the document
+    /// here is what makes every relative URL in it resolve to those copies, and it is the only prefix a
+    /// path-forwarding reverse proxy is guaranteed to expose.
+    /// </remarks>
     private string BaseHref
     {
         get
@@ -27,16 +53,9 @@
             string pathBase = new Uri(Navigation.BaseUri).AbsolutePath;
 
             MartenStudioOptions options = Options.Value;
-            if (!options.HasCustomPath)
-            {
-                return pathBase;
-            }
 
-            // Custom-path mode: root the document at the studio itself so the framework script, the
-            // stylesheet, the _blazor circuit and every navigation link resolve under Path - the only
-            // prefix a path-forwarding reverse proxy is guaranteed to expose. The percent-encoded form
-            // keeps the browser's document.baseURI comparable to the configured path (the path base from
-            // Navigation.BaseUri is already encoded).
+            // The percent-encoded form keeps the browser's document.baseURI comparable to the configured
+            // path (the path base from Navigation.BaseUri is already encoded).
             string baseHrefPath = pathBase.TrimEnd('/') + options.EscapedPath;
 
             // Server-side route matching is case-insensitive, so the request URL may carry different

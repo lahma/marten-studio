@@ -19,6 +19,7 @@
 
 #endregion
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
@@ -78,6 +79,50 @@ internal sealed class MartenStudioMappedEndpoints
             }
 
             sources.Add(dataSources);
+        }
+    }
+
+    /// <summary>
+    /// Whether the studio's pages are served to anyone: they carry <see cref="IAllowAnonymous" />, so
+    /// nothing about the visitor is ever checked before Marten data is rendered.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A deliberate state — <c>MapMartenStudio().AllowAnonymous()</c> is one of the three things the
+    /// startup guard accepts — and one a person looking at the page has to be told about, because the
+    /// studio looks exactly the same either way. The layout draws a banner from this and the sample's
+    /// landing page says the same thing, so <c>--anonymous</c> can never be mistaken for a demo that
+    /// happened to skip the login.
+    /// </para>
+    /// <para>
+    /// Observed from the finished endpoint metadata rather than from the options, because it is a fact
+    /// about what the mapping ended up saying: the caller's <c>AllowAnonymous()</c>, a group above it, or
+    /// nothing at all. Sticky once seen, since the mapping may only be finished by the time the host has
+    /// started (a <c>MapGroup</c>, or a <c>Startup.Configure</c> that maps inside the pipeline).
+    /// </para>
+    /// </remarks>
+    public bool ServedAnonymously => servedAnonymously;
+
+    private volatile bool servedAnonymously;
+
+    /// <summary>
+    /// Reads <see cref="ServedAnonymously" /> off the endpoints the startup guard has just built.
+    /// </summary>
+    internal void ObserveAnonymousPages(List<Endpoint> endpoints)
+    {
+        if (servedAnonymously)
+        {
+            return;
+        }
+
+        foreach (Endpoint endpoint in endpoints)
+        {
+            if (endpoint.Metadata.GetMetadata<MartenStudioEndpointMarker>() is { IsPage: true }
+                && endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null)
+            {
+                servedAnonymously = true;
+                return;
+            }
         }
     }
 

@@ -26,27 +26,31 @@ namespace MartenStudio.Components;
 /// </summary>
 internal static class StudioLink
 {
+    /// <summary>
+    /// The href for a page below the studio root.
+    /// </summary>
+    /// <param name="options">
+    /// The studio's options. Not read: <see cref="MartenStudioApp" /> renders a studio-rooted
+    /// <c>&lt;base href&gt;</c> for every mount now, so the answer no longer depends on the configured
+    /// path. The parameter stays because it is what every call site passes and because a future shape
+    /// that does depend on the options must not be a signature change across all of them.
+    /// </param>
+    /// <param name="subPath">The path below the studio root, with no leading slash.</param>
     internal static string To(MartenStudioOptions options, string subPath)
     {
-        if (options.HasCustomPath)
-        {
-            // MartenStudioApp renders a dashboard-rooted <base href> in custom-path mode (a custom
-            // path implies standalone hosting), so links are relative to the studio root itself;
-            // an empty href resolves to the base URI (RFC 3986 §5.4)
-            return subPath;
-        }
-
-        string root = options.TrimmedPath.TrimStart('/');
-        return subPath.Length == 0 ? root : root + "/" + subPath;
+        // Relative to the studio-rooted document base; an empty href resolves to the base URI
+        // (RFC 3986 §5.4), which is the studio's own front page.
+        _ = options;
+        return subPath;
     }
 
     /// <summary>
     /// Converts an absolute URI into a path relative to the studio root ("" for the root itself,
     /// no leading slash, query string and fragment stripped), or <see langword="null"/> when the URI
-    /// is not a dashboard location. Handles both base URI shapes seen in standalone custom-path mode:
-    /// during static server-side rendering the base URI is the application path base and the relative
-    /// path still carries the studio path prefix, while on the interactive circuit the base URI is
-    /// the studio root itself (the rendered &lt;base href&gt;).
+    /// is not a studio location. Handles both base URI shapes: during static server-side rendering the
+    /// base URI is the application path base and the relative path still carries the studio path
+    /// prefix, while on the interactive circuit the base URI is the studio root itself (the rendered
+    /// &lt;base href&gt;).
     /// </summary>
     internal static string? ToDashboardRelativePath(string uri, string baseUri, MartenStudioOptions options)
     {
@@ -59,14 +63,13 @@ internal static class StudioLink
         relative = NormalizeRelativePath(relative);
 
         // Decide which shape the base URI has before touching the relative path. On the interactive
-        // circuit in custom-path mode the base URI is the rendered dashboard-rooted <base href>, so
-        // the base-relative path is already dashboard-rooted and must not be prefix-stripped — a
-        // dashboard path whose name collides with a page route (e.g. "/jobs") would otherwise be
-        // misresolved. The comparison is against the base URI's PATH (not the whole absolute URI,
-        // whose host name could otherwise spuriously match the studio path) in its percent-encoded
-        // form (browsers emit encoded URIs); the leading slash keeps the EndsWith segment-aligned.
-        if (options.HasCustomPath
-            && GetAbsolutePath(baseUri).TrimEnd('/').EndsWith(options.EscapedPath, StringComparison.OrdinalIgnoreCase))
+        // circuit the base URI is the rendered studio-rooted <base href>, so the base-relative path is
+        // already studio-rooted and must not be prefix-stripped — a studio path whose name collides
+        // with a page route (e.g. "/jobs") would otherwise be misresolved. The comparison is against
+        // the base URI's PATH (not the whole absolute URI, whose host name could otherwise spuriously
+        // match the studio path) in its percent-encoded form (browsers emit encoded URIs); the leading
+        // slash keeps the EndsWith segment-aligned.
+        if (GetAbsolutePath(baseUri).TrimEnd('/').EndsWith(options.EscapedPath, StringComparison.OrdinalIgnoreCase))
         {
             return relative;
         }

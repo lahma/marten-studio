@@ -1,5 +1,6 @@
 using System.Net;
 
+using MartenStudio.Internal;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authentication;
@@ -76,6 +77,12 @@ public class StudioEndpointsTest
         assets.Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull();
     }
 
+    /// <summary>Every studio mount is studio-rooted, so the circuit lives under the studio path.</summary>
+    private static List<RouteEndpoint> GetCircuitEndpoints(WebApplication app, string studioPath = "/marten") =>
+        GetRouteEndpoints(app)
+            .Where(x => x.RoutePattern.RawText?.StartsWith(studioPath + "/_blazor", StringComparison.Ordinal) == true)
+            .ToList();
+
     [Fact]
     public async Task A_configured_policy_covers_pages_and_the_circuit()
     {
@@ -89,28 +96,80 @@ public class StudioEndpointsTest
 
         // The endpoints not backed by a page component - the /_blazor circuit - must carry the policy too
         // so a fail-closed FallbackPolicy configuration keeps working.
-        var circuit = endpoints.Where(x => x.RoutePattern.RawText?.StartsWith("/_blazor", StringComparison.Ordinal) == true).ToList();
+        var circuit = GetCircuitEndpoints(app);
         circuit.Should().NotBeEmpty();
         circuit.Should().OnlyContain(x => x.Metadata.GetMetadata<IAuthorizeData>() != null);
     }
 
+    /// <summary>
+    /// The plan section 4.3 matrix, as it reads after the circuit stopped being stamped anonymous: with
+    /// no policy and nothing said at the map site, the pages and the circuit alike carry no metadata, so
+    /// a host <c>FallbackPolicy</c> governs both. The old behaviour - <c>AllowAnonymous</c> on
+    /// <c>/_blazor</c> - meant an application that authorized the studio with
+    /// <c>RequireAuthorization()</c> on the builder answered 401 for its pages and 200 for
+    /// <c>POST /_blazor/negotiate</c>, which is a circuit anyone could open.
+    /// </summary>
     [Fact]
-    public async Task Without_a_policy_the_circuit_is_anonymous_and_the_pages_carry_no_metadata()
+    public async Task Without_a_policy_neither_the_pages_nor_the_circuit_carry_metadata()
     {
         await using var app = CreateApp();
         app.MapMartenStudio();
 
-        var endpoints = GetRouteEndpoints(app);
-
-        var circuit = endpoints.Where(x => x.RoutePattern.RawText?.StartsWith("/_blazor", StringComparison.Ordinal) == true).ToList();
+        var circuit = GetCircuitEndpoints(app);
         circuit.Should().NotBeEmpty();
-        circuit.Should().OnlyContain(x => x.Metadata.GetMetadata<IAllowAnonymous>() != null);
+        circuit.Should().OnlyContain(x => x.Metadata.GetMetadata<IAllowAnonymous>() == null);
+        circuit.Should().OnlyContain(x => x.Metadata.GetMetadata<IAuthorizeData>() == null);
 
         // The pages stay subject to the host's own policies: neither anonymous nor explicitly authorized,
         // so Marten data is never silently exposed.
-        var page = endpoints.First(x => x.RoutePattern.RawText == "/marten");
+        var page = GetRouteEndpoints(app).First(x => x.RoutePattern.RawText == "/marten");
         page.Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull();
         page.Metadata.GetMetadata<IAuthorizeData>().Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RequireAuthorization_on_the_builder_reaches_the_circuit()
+    {
+        await using var app = CreateApp();
+        app.MapMartenStudio().RequireAuthorization("studio-policy");
+
+        var circuit = GetCircuitEndpoints(app);
+        circuit.Should().NotBeEmpty();
+        circuit.Should().OnlyContain(x => x.Metadata.GetMetadata<IAuthorizeData>() != null);
+        circuit.Should().OnlyContain(x => x.Metadata.GetMetadata<IAllowAnonymous>() == null);
+
+        GetRouteEndpoints(app).First(x => x.RoutePattern.RawText == "/marten")
+            .Metadata.GetMetadata<IAuthorizeData>()!.Policy.Should().Be("studio-policy");
+    }
+
+    [Fact]
+    public async Task AllowAnonymous_on_the_builder_reaches_the_circuit()
+    {
+        await using var app = CreateApp();
+        app.MapMartenStudio().AllowAnonymous();
+
+        GetCircuitEndpoints(app).Should().NotBeEmpty()
+            .And.OnlyContain(x => x.Metadata.GetMetadata<IAllowAnonymous>() != null);
+    }
+
+    /// <summary>
+    /// The startup guard's marker now covers the circuit as well as the pages: an unauthorized circuit is
+    /// the more dangerous of the two, because it is the one that runs components.
+    /// </summary>
+    [Fact]
+    public async Task The_guards_marker_covers_the_pages_and_the_circuit()
+    {
+        await using var app = CreateApp();
+        app.MapMartenStudio().AllowAnonymous();
+
+        var endpoints = GetRouteEndpoints(app);
+
+        endpoints.First(x => x.RoutePattern.RawText == "/marten")
+            .Metadata.GetMetadata<MartenStudioEndpointMarker>()!.IsPage.Should().BeTrue();
+
+        GetCircuitEndpoints(app).Should().OnlyContain(
+            x => x.Metadata.GetMetadata<MartenStudioEndpointMarker>() != null
+                && !x.Metadata.GetMetadata<MartenStudioEndpointMarker>()!.IsPage);
     }
 
     // -------------------------------------------------------------------------------------------
@@ -171,23 +230,30 @@ public class StudioEndpointsTest
     }
 
     [Fact]
-    public async Task A_custom_path_without_a_policy_keeps_the_plumbing_anonymous_and_the_pages_bare()
+    public async Task A_custom_path_without_a_policy_keeps_the_assets_anonymous_and_the_rest_bare()
     {
         await using var app = CreateApp(options => options.Path = "/ops/marten");
         app.MapMartenStudio();
 
         var endpoints = GetRouteEndpoints(app);
 
-        var circuit = endpoints.Where(x => x.RoutePattern.RawText?.StartsWith("/ops/marten/_blazor", StringComparison.Ordinal) == true).ToList();
+        // The circuit is the studio, so it is governed by whatever governs the studio - not by a blanket
+        // AllowAnonymous of the studio's own.
+        var circuit = GetCircuitEndpoints(app, "/ops/marten");
         circuit.Should().NotBeEmpty();
-        circuit.Should().OnlyContain(x => x.Metadata.GetMetadata<IAllowAnonymous>() != null);
+        circuit.Should().OnlyContain(x => x.Metadata.GetMetadata<IAllowAnonymous>() == null);
 
+        // Package content: the stylesheet and the framework script stay reachable under a fail-closed
+        // FallbackPolicy, because a studio without its stylesheet is not a security win.
         endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_framework/blazor.web.js")
-            .Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull();
-        endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_framework/opaque-redirect")
             .Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull();
         endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_content/MartenStudio/{**path}")
             .Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull();
+
+        // The enhanced-navigation redirect endpoint comes out of the studio's own MapRazorComponents, so
+        // it is governed with the rest of the studio rather than opting itself out.
+        endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_framework/opaque-redirect")
+            .Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull();
 
         var page = endpoints.First(x => x.RoutePattern.RawText == "/ops/marten");
         page.Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull();
@@ -263,7 +329,7 @@ public class StudioEndpointsTest
     // -------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task The_default_path_serves_the_shell_with_a_path_base_rooted_base_href()
+    public async Task The_default_path_serves_the_shell_with_a_studio_rooted_base_href()
     {
         await using var app = CreateApp();
         app.UseAntiforgery();
@@ -277,8 +343,12 @@ public class StudioEndpointsTest
             response.StatusCode.Should().Be(HttpStatusCode.OK);
 
             var body = await response.Content.ReadAsStringAsync(Token);
-            body.Should().Contain("<base href=\"/\"");
-            body.Should().Contain("_framework/blazor.web.js");
+
+            // Studio-rooted, at the default path too: the studio always takes its own /_blazor, framework
+            // script and asset mirror under Path, and the document base is what points the browser there.
+            body.Should().Contain("<base href=\"/marten/\"");
+            body.Should().Contain("<script src=\"_framework/blazor.web.js\">");
+            body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/MartenStudio/css/marten-studio.css\"");
             body.Should().Contain("<title>Marten Studio</title>");
         }
         finally
@@ -480,6 +550,252 @@ public class StudioEndpointsTest
             using var response = await client.GetAsync(new Uri("/ops/marten/_framework/opaque-redirect", UriKind.Relative), Token);
 
             response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Every mount is studio-rooted (P1.2 review finding B2)
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The default mount takes its plumbing with it, exactly as a custom path does. Before this, the
+    /// studio's <c>MapRazorComponents</c> left a second <c>/_blazor</c> at the application root; in a
+    /// host that has a Blazor application of its own that is two endpoints on one route, and
+    /// <em>every</em> <c>POST /_blazor/negotiate</c> in the process - the host's included - answers 500
+    /// with an <c>AmbiguousMatchException</c>.
+    /// </summary>
+    [Fact]
+    public async Task The_default_mount_leaves_no_endpoint_at_the_application_root()
+    {
+        await using var app = CreateApp();
+        app.MapMartenStudio().AllowAnonymous();
+
+        var patterns = GetRouteEndpoints(app).Select(x => x.RoutePattern.RawText).ToList();
+
+        patterns.Where(x => x?.StartsWith("/_blazor", StringComparison.Ordinal) == true).Should().BeEmpty();
+        patterns.Should().NotContain("/_framework/opaque-redirect");
+
+        patterns.Should().Contain("/marten");
+        patterns.Should().Contain("/marten/_blazor/negotiate");
+        patterns.Should().Contain("/marten/_framework/opaque-redirect");
+        patterns.Should().Contain("/marten/_framework/blazor.web.js");
+        patterns.Should().Contain("/marten/_content/MartenStudio/{**path}");
+        patterns.Should().Contain("_content/MartenStudio/{**path}");
+    }
+
+    [Fact]
+    public async Task A_host_with_its_own_blazor_app_keeps_its_own_circuit()
+    {
+        await using var app = CreateApp();
+        app.UseAntiforgery();
+        app.MapRazorComponents<TestHostComponents>().AddInteractiveServerRenderMode();
+        app.MapMartenStudio().AllowAnonymous();
+        await app.StartAsync(Token);
+        try
+        {
+            using var client = app.GetTestClient();
+
+            using var hostCircuit = await client.PostAsync(new Uri("/_blazor/negotiate?negotiateVersion=1", UriKind.Relative), content: null, Token);
+            hostCircuit.StatusCode.Should().Be(HttpStatusCode.OK, "the host's own circuit must be untouched by mapping the studio");
+
+            using var studioCircuit = await client.PostAsync(new Uri("/marten/_blazor/negotiate?negotiateVersion=1", UriKind.Relative), content: null, Token);
+            studioCircuit.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            using var hostPage = await client.GetAsync(new Uri("/host-page", UriKind.Relative), Token);
+            hostPage.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            using var studioPage = await client.GetAsync(new Uri("/marten", UriKind.Relative), Token);
+            studioPage.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>
+    /// The framework script is mapped for every mount, not only a custom path (P1.2 review finding B1).
+    /// A host with no <c>.razor</c> files of its own never resolves the ASP.NET Core web-assets pack, so
+    /// nothing serves <c>/_framework/blazor.web.js</c> and the studio prerenders and stops there - with
+    /// the default path it did not even have a route of its own to answer from.
+    /// </summary>
+    [Fact]
+    public async Task The_default_path_serves_the_framework_script_from_the_hosts_web_root()
+    {
+        await using var app = CreateApp(
+            configureBuilder: builder => builder.Environment.WebRootFileProvider = new TestFileProvider(new Dictionary<string, byte[]>
+            {
+                ["_framework/blazor.web.js"] = "// the host's own"u8.ToArray(),
+            }));
+
+        app.MapMartenStudio().AllowAnonymous();
+        await app.StartAsync(Token);
+        try
+        {
+            using var client = app.GetTestClient();
+
+            using var script = await client.GetAsync(new Uri("/marten/_framework/blazor.web.js", UriKind.Relative), Token);
+
+            script.StatusCode.Should().Be(HttpStatusCode.OK);
+            (await script.Content.ReadAsStringAsync(Token)).Should().Be("// the host's own");
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>
+    /// The last tier: the copy the package ships, served when the host has neither a web-root copy nor an
+    /// endpoint of its own. The host's copy is preferred where there is one, because it is the one that
+    /// matches the host's runtime.
+    /// </summary>
+    [Fact]
+    public async Task The_packaged_framework_script_is_the_fallback_when_the_host_serves_none()
+    {
+        await using var app = CreateApp(
+            configureBuilder: builder => builder.Environment.WebRootFileProvider = new TestFileProvider(new Dictionary<string, byte[]>
+            {
+                ["_content/MartenStudio/_framework/blazor.web.js"] = "// the package's own"u8.ToArray(),
+            }));
+
+        app.MapMartenStudio().AllowAnonymous();
+        await app.StartAsync(Token);
+        try
+        {
+            using var client = app.GetTestClient();
+
+            using var script = await client.GetAsync(new Uri("/marten/_framework/blazor.web.js", UriKind.Relative), Token);
+
+            script.StatusCode.Should().Be(HttpStatusCode.OK);
+            script.Content.Headers.ContentType!.MediaType.Should().Be("text/javascript");
+            (await script.Content.ReadAsStringAsync(Token)).Should().Be("// the package's own");
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // The circuit is authorized with the studio (P1.2 review finding B3)
+    // -------------------------------------------------------------------------------------------
+
+    private static void AddTestAuthentication(WebApplicationBuilder builder)
+    {
+        builder.Services
+            .AddAuthentication(TestAuthenticationHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(TestAuthenticationHandler.SchemeName, null);
+        builder.Services.AddAuthorization();
+    }
+
+    /// <summary>
+    /// The finding itself: with <c>RequireAuthorization()</c> on the returned builder and no
+    /// <c>AuthorizationPolicy</c> option, the pages answered 401 and <c>POST /_blazor/negotiate</c>
+    /// answered 200, so anyone could open a circuit, replay a prerender descriptor and run the studio's
+    /// components against Marten without ever passing the policy.
+    /// </summary>
+    [Fact]
+    public async Task An_anonymous_client_cannot_open_a_circuit_when_the_builder_requires_authorization()
+    {
+        await using var app = CreateApp(configureBuilder: AddTestAuthentication);
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapMartenStudio().RequireAuthorization();
+        await app.StartAsync(Token);
+        try
+        {
+            using var client = app.GetTestClient();
+
+            using var anonymous = await client.PostAsync(new Uri("/marten/_blazor/negotiate?negotiateVersion=1", UriKind.Relative), content: null, Token);
+            anonymous.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+            using var page = await client.GetAsync(new Uri("/marten", UriKind.Relative), Token);
+            page.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the pages were already refused; the circuit is what leaked");
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri("/marten/_blazor/negotiate?negotiateVersion=1", UriKind.Relative));
+            request.Headers.Add(TestAuthenticationHandler.UserHeader, "operator");
+            using var authenticated = await client.SendAsync(request, Token);
+            authenticated.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>
+    /// <c>AllowAnonymous()</c> at the map site wins over a configured <c>AuthorizationPolicy</c>, because
+    /// the studio's endpoints carry both and that is what the authorization middleware honours. The
+    /// sample's <c>--anonymous</c> switch relied on it and got a 401 negotiate instead, because the
+    /// statement never reached the circuit.
+    /// </summary>
+    [Fact]
+    public async Task AllowAnonymous_at_the_map_site_wins_over_a_configured_policy()
+    {
+        await using var app = CreateApp(
+            options => options.AuthorizationPolicy = "studio-policy",
+            builder =>
+            {
+                AddTestAuthentication(builder);
+                builder.Services.AddAuthorizationBuilder()
+                    .AddPolicy("studio-policy", policy => policy.RequireAssertion(static _ => false));
+            });
+
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.UseAntiforgery();
+        app.MapMartenStudio().AllowAnonymous();
+        await app.StartAsync(Token);
+        try
+        {
+            using var client = app.GetTestClient();
+
+            using var negotiate = await client.PostAsync(new Uri("/marten/_blazor/negotiate?negotiateVersion=1", UriKind.Relative), content: null, Token);
+            negotiate.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            using var page = await client.GetAsync(new Uri("/marten", UriKind.Relative), Token);
+            page.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>
+    /// The "served to anyone" fact the layout's red banner is drawn from, read off the finished endpoint
+    /// metadata by the startup guard.
+    /// </summary>
+    [Fact]
+    public async Task An_anonymous_mapping_is_observed_so_the_studio_can_say_so()
+    {
+        await using var app = CreateApp();
+        app.MapMartenStudio().AllowAnonymous();
+        await app.StartAsync(Token);
+        try
+        {
+            app.Services.GetRequiredService<MartenStudioMappedEndpoints>().ServedAnonymously.Should().BeTrue();
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    [Fact]
+    public async Task An_authorized_mapping_is_not_reported_as_anonymous()
+    {
+        await using var app = CreateApp();
+        app.MapMartenStudio().RequireAuthorization("studio-policy");
+        await app.StartAsync(Token);
+        try
+        {
+            app.Services.GetRequiredService<MartenStudioMappedEndpoints>().ServedAnonymously.Should().BeFalse();
         }
         finally
         {

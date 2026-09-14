@@ -35,17 +35,28 @@ internal sealed class MartenStudioEndpointMarker
 {
     /// <param name="surface">What this endpoint is part of, named the way the failure message names it.</param>
     /// <param name="remedies">The ways to say what this surface means, listed in the failure message.</param>
+    /// <param name="isPage">
+    /// Whether this is one of the studio's routable pages rather than its Blazor circuit. Both are the
+    /// studio and both are the guard's business; the distinction is for the "served to anyone" banner,
+    /// which is a statement about what a person can open in a browser.
+    /// </param>
     /// <param name="authorizedByOptions">
     /// Whether a Marten Studio option has already stated an authorization rule for this endpoint that is
     /// enforced elsewhere rather than by <c>IAuthorizeData</c> metadata, so it is invisible to the
     /// metadata check and has to be said here.
     /// </param>
-    public MartenStudioEndpointMarker(string surface, string remedies, bool authorizedByOptions = false)
+    public MartenStudioEndpointMarker(string surface, string remedies, bool isPage, bool authorizedByOptions = false)
     {
         Surface = surface;
         Remedies = remedies;
+        IsPage = isPage;
         AuthorizedByOptions = authorizedByOptions;
     }
+
+    /// <summary>
+    /// Whether this endpoint is a routable studio page rather than the Blazor circuit behind it.
+    /// </summary>
+    public bool IsPage { get; }
 
     /// <summary>
     /// What this endpoint is part of — "the studio".

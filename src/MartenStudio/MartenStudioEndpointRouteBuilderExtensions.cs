@@ -23,7 +23,6 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using System.Security.Cryptography;
 
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Components.Endpoints;
 using Microsoft.AspNetCore.Hosting;
@@ -118,78 +117,34 @@ public static class MartenStudioEndpointRouteBuilderExtensions
 
         MartenStudioOptions options = builder.ServiceProvider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
         string studioPath = options.TrimmedPath;
-        bool hasCustomPath = options.HasCustomPath;
 
         // The pages already carry their compile-time /marten prefix in their @page directives, so the
-        // components root is mapped at the application root and re-rooted below when the path is custom.
+        // components root is mapped at the application root and everything it produced is re-rooted below.
         RazorComponentsEndpointConventionBuilder components = builder
             .MapRazorComponents<MartenStudioApp>()
             .AddInteractiveServerRenderMode();
 
-        if (hasCustomPath)
-        {
-            // Re-root the studio page endpoints from the compile-time /marten prefix to the configured
-            // path so the initial page load and enhanced navigations resolve. Interactive navigation is
-            // handled by the studio's own route matching in Routes.razor.
-            components.Add(endpointBuilder =>
-            {
-                if (endpointBuilder is not RouteEndpointBuilder routeEndpointBuilder)
-                {
-                    return;
-                }
-
-                string? rawText = routeEndpointBuilder.RoutePattern.RawText;
-                if (string.IsNullOrEmpty(rawText) || rawText[0] != '/')
-                {
-                    return;
-                }
-
-                Type? componentType = GetComponentType(endpointBuilder);
-                if (componentType is null)
-                {
-                    // The /_blazor circuit endpoints move under the studio path so a reverse proxy that
-                    // forwards only the studio prefix can reach them; SignalR dispatch does not depend on
-                    // the route pattern. Other framework-owned endpoints stay put: the runtime registers
-                    // the blazor.web.js script endpoint through this data source and it serves content
-                    // keyed by its original path, so re-rooting it breaks it - the studio maps its own
-                    // copy under the studio path instead.
-                    if (rawText == "/_blazor" || rawText.StartsWith("/_blazor/", StringComparison.Ordinal))
-                    {
-                        routeEndpointBuilder.RoutePattern = RoutePatternFactory.Parse(studioPath + rawText);
-                    }
-
-                    return;
-                }
-
-                if (componentType.Assembly != StudioAssembly
-                    || !rawText.StartsWith(MartenStudioOptions.DefaultPath, StringComparison.OrdinalIgnoreCase)
-                    || (rawText.Length > MartenStudioOptions.DefaultPath.Length && rawText[MartenStudioOptions.DefaultPath.Length] != '/'))
-                {
-                    return;
-                }
-
-                routeEndpointBuilder.RoutePattern = RoutePatternFactory.Parse(
-                    string.Concat(studioPath, rawText.AsSpan(MartenStudioOptions.DefaultPath.Length)));
-            });
-        }
+        // Every mount is studio-rooted, the default /marten included. MapRazorComponents registers the
+        // Blazor circuit at the application's own /_blazor, so a host that has its own Blazor app - and
+        // therefore its own MapRazorComponents - ends up with two endpoints on the same route and every
+        // POST /_blazor/negotiate in the process becomes an AmbiguousMatchException. There is no variant
+        // of "mount the studio and change nothing about the host" that leaves those at the root, so the
+        // studio always takes its plumbing with it: its circuit, its opaque-redirect endpoint, its
+        // framework script and its asset mirror all live under Path, and the shell renders a
+        // studio-rooted <base href> so the browser asks for them there. It is also what a reverse proxy
+        // that forwards only the studio prefix needs.
+        components.Add(endpointBuilder => ReRootUnderStudioPath(endpointBuilder, studioPath));
 
         // Serve the studio's static web assets through endpoint routing as a fallback for hosts that do
-        // not configure UseStaticFiles()/MapStaticAssets() (API-only projects, for instance).
+        // not configure UseStaticFiles()/MapStaticAssets() (API-only projects, for instance). The root
+        // copy stays for hosts that do not path-forward; the mirror under the studio path is what the
+        // studio-rooted <base href> actually resolves to.
         List<IEndpointConventionBuilder> assetEndpoints =
         [
-            MapStudioStaticAssets(builder, pathPrefix: string.Empty)
+            MapStudioStaticAssets(builder, pathPrefix: string.Empty),
+            MapStudioStaticAssets(builder, pathPrefix: studioPath),
+            MapStudioFrameworkScript(builder, studioPath)
         ];
-
-        if (hasCustomPath)
-        {
-            // With a custom path the shell renders a studio-rooted <base href>, so the browser requests
-            // the static assets and the Blazor framework plumbing under the studio path. Mirror them
-            // there so a reverse proxy that forwards only the studio prefix can reach them; the root
-            // asset endpoint stays for hosts that do not path-forward.
-            assetEndpoints.Add(MapStudioStaticAssets(builder, pathPrefix: studioPath));
-            assetEndpoints.Add(MapStudioFrameworkScript(builder, studioPath));
-            assetEndpoints.Add(MapStudioOpaqueRedirect(builder, studioPath));
-        }
 
         if (!string.IsNullOrWhiteSpace(options.AuthorizationPolicy))
         {
@@ -203,9 +158,9 @@ public static class MartenStudioEndpointRouteBuilderExtensions
                 assetEndpoint.RequireAuthorization(policyName);
             }
 
-            // Standalone: the components builder holds only the studio's endpoints - its pages, the
-            // framework script and the circuit endpoints - so the policy can cover them all, which is also
-            // what keeps /_framework and /_blazor reachable under a fail-closed FallbackPolicy.
+            // The components builder holds only the studio's endpoints - its pages and its circuit - so
+            // the policy covers them all, which is also what keeps /_blazor reachable under a fail-closed
+            // FallbackPolicy.
             components.RequireAuthorization(policyName);
         }
         else
@@ -218,39 +173,88 @@ public static class MartenStudioEndpointRouteBuilderExtensions
                 assetEndpoint.AllowAnonymous();
             }
 
-            // The non-page endpoints (/_blazor) are marked anonymous so the circuit stays reachable under
-            // a fail-closed FallbackPolicy. The pages are deliberately left without metadata so they stay
-            // governed by the host's own policies and no Marten data is silently exposed to anonymous
-            // users.
-            components.Add(static endpointBuilder =>
-            {
-                if (GetComponentType(endpointBuilder) is null)
-                {
-                    endpointBuilder.Metadata.Add(new AllowAnonymousAttribute());
-                }
-            });
+            // The pages and the circuit are deliberately left without metadata, so a host FallbackPolicy
+            // or a RequireAuthorization() on the returned builder governs both. Stamping AllowAnonymous on
+            // /_blazor here - which is what this used to do, to keep the circuit reachable under a
+            // fail-closed FallbackPolicy - opened a circuit to anyone in every application that authorized
+            // the studio with RequireAuthorization() on the builder instead of the option: the pages
+            // answered 401 while POST /_blazor/negotiate answered 200, and a replayed prerender descriptor
+            // then ran the studio's components against Marten. The circuit is reachable because whatever
+            // the caller said about the studio now reaches it too (MartenStudioConventionBuilder).
         }
 
-        // Says "Marten Studio mapped this" on the endpoints that answer with Marten data - the pages. The
-        // static assets have already decided for themselves above, and the Blazor circuit is plumbing that
-        // carries nothing on its own, so neither is the guard's business.
-        MartenStudioEndpointMarker marker = new(StudioSurface, StudioRemedies);
+        // Says "Marten Studio mapped this", on the pages and on the circuit alike: both are the studio,
+        // every remedy the failure message lists reaches both, and an unauthorized circuit is the more
+        // dangerous of the two because it is the one that runs components. The static assets have already
+        // decided for themselves above and are package content, so they are not the guard's business.
+        MartenStudioEndpointMarker pageMarker = new(StudioSurface, StudioRemedies, isPage: true);
+        MartenStudioEndpointMarker circuitMarker = new(StudioSurface, StudioRemedies, isPage: false);
         components.Add(endpointBuilder =>
-        {
-            if (IsStudioPage(endpointBuilder))
-            {
-                endpointBuilder.Metadata.Add(marker);
-            }
-        });
+            endpointBuilder.Metadata.Add(IsStudioPage(endpointBuilder) ? pageMarker : circuitMarker));
 
-        return new MartenStudioConventionBuilder(components, IsStudioPage, hub: null);
+        return new MartenStudioConventionBuilder(components, hub: null);
     }
+
+    /// <summary>
+    /// Moves one endpoint of the studio's own <c>MapRazorComponents</c> call under
+    /// <see cref="MartenStudioOptions.Path" />.
+    /// </summary>
+    /// <remarks>
+    /// Three kinds of endpoint come out of that data source. The studio's pages carry their compile-time
+    /// <c>/marten</c> prefix and are rebased onto the configured path. The SignalR circuit
+    /// (<c>/_blazor</c> and its sub-routes) moves wholesale: dispatch does not depend on the route
+    /// pattern. So does the enhanced-navigation <c>opaque-redirect</c> endpoint, whose handler reads the
+    /// protected URL out of the query string and is equally path-independent - and whose emitted URL is
+    /// document-relative, so the studio-rooted <c>&lt;base href&gt;</c> points at the moved copy. Anything
+    /// else is left alone.
+    /// </remarks>
+    private static void ReRootUnderStudioPath(EndpointBuilder endpointBuilder, string studioPath)
+    {
+        if (endpointBuilder is not RouteEndpointBuilder routeEndpointBuilder)
+        {
+            return;
+        }
+
+        string? rawText = routeEndpointBuilder.RoutePattern.RawText;
+        if (string.IsNullOrEmpty(rawText) || rawText[0] != '/')
+        {
+            return;
+        }
+
+        Type? componentType = GetComponentType(endpointBuilder);
+        if (componentType is null)
+        {
+            if (IsUnder(rawText, BlazorCircuitPath) || IsUnder(rawText, OpaqueRedirectPath))
+            {
+                routeEndpointBuilder.RoutePattern = RoutePatternFactory.Parse(studioPath + rawText);
+            }
+
+            return;
+        }
+
+        if (componentType.Assembly != StudioAssembly || !IsUnder(rawText, MartenStudioOptions.DefaultPath))
+        {
+            return;
+        }
+
+        routeEndpointBuilder.RoutePattern = RoutePatternFactory.Parse(
+            string.Concat(studioPath, rawText.AsSpan(MartenStudioOptions.DefaultPath.Length)));
+    }
+
+    /// <summary>Whether <paramref name="rawText" /> is <paramref name="prefix" /> or a route below it.</summary>
+    private static bool IsUnder(string rawText, string prefix) =>
+        rawText.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+        && (rawText.Length == prefix.Length || rawText[prefix.Length] == '/');
+
+    private const string BlazorCircuitPath = "/_blazor";
+
+    private const string OpaqueRedirectPath = "/_framework/opaque-redirect";
 
     private const string StudioSurface = "Marten Studio";
 
     private const string StudioRemedies = """
-          - app.MapMartenStudio().RequireAuthorization() authorizes its pages;
-          - services.AddMartenStudio(options => options.AuthorizationPolicy = "...") authorizes those and the static assets and the Blazor circuit with them;
+          - app.MapMartenStudio().RequireAuthorization() authorizes its pages and its Blazor circuit;
+          - services.AddMartenStudio(options => options.AuthorizationPolicy = "...") authorizes those and the static assets with them;
           - app.MapMartenStudio().AllowAnonymous() serves it to anyone, deliberately.
         """;
 
@@ -305,44 +309,61 @@ public static class MartenStudioEndpointRouteBuilderExtensions
         }).ExcludeFromDescription();
     }
 
+    /// <summary>
+    /// Serves <c>blazor.web.js</c> at <c>{Path}/_framework/blazor.web.js</c>, which is where the shell's
+    /// studio-rooted <c>&lt;base href&gt;</c> makes the browser ask for it.
+    /// </summary>
+    /// <remarks>
+    /// Mapped for every mount, not only a custom path: the studio always serves its own script so that a
+    /// host which never configured Blazor web assets still gets an interactive studio. Three tiers, in
+    /// the order that keeps the host in charge — the host's own web root, then whatever endpoint the host
+    /// serves the script from (<c>MapStaticAssets()</c>), and only then the copy this package ships. The
+    /// host's copy is the one that matches the host's runtime, so it always wins where there is one; see
+    /// the long comment in MartenStudio.csproj for why a copy is shipped at all.
+    /// </remarks>
     private static IEndpointConventionBuilder MapStudioFrameworkScript(IEndpointRouteBuilder builder, string studioPath)
     {
-        const string scriptPath = "/_framework/blazor.web.js";
-        return builder.MapMethods(studioPath + scriptPath, GetAndHeadMethods, static async (HttpContext context) =>
+        return builder.MapMethods(studioPath + FrameworkScriptPath, GetAndHeadMethods, static async (HttpContext context) =>
         {
             IWebHostEnvironment env = context.RequestServices.GetRequiredService<IWebHostEnvironment>();
-            IFileInfo fileInfo = env.WebRootFileProvider.GetFileInfo("_framework/blazor.web.js");
+            IFileInfo fileInfo = env.WebRootFileProvider.GetFileInfo(HostFrameworkScriptAssetPath);
             if (fileInfo.Exists)
             {
-                // parity with the framework-owned script endpoint
-                context.Response.Headers.CacheControl = "no-cache";
-                await WriteFileAsync(context, fileInfo, "text/javascript", etagCacheKey: fileInfo.PhysicalPath ?? "_framework/blazor.web.js").ConfigureAwait(false);
+                await WriteFrameworkScriptAsync(context, fileInfo, HostFrameworkScriptAssetPath).ConfigureAwait(false);
                 return;
             }
 
-            // On .NET 10 the script is a static web asset served through the framework's own endpoint
-            // rather than from the web root, so forward to it. The .NET 8/9 ManifestEmbeddedFileProvider
-            // tier the Quartz original carried is gone: this package targets net10.0 only.
-            if (!await TryForwardToRootEndpointAsync(context, scriptPath).ConfigureAwait(false))
+            // The host may serve it through its own static-asset endpoint rather than from the web root.
+            if (await TryForwardToRootEndpointAsync(context, FrameworkScriptPath).ConfigureAwait(false))
             {
-                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
             }
+
+            IFileInfo packaged = env.WebRootFileProvider.GetFileInfo(PackagedFrameworkScriptAssetPath);
+            if (packaged.Exists)
+            {
+                await WriteFrameworkScriptAsync(context, packaged, PackagedFrameworkScriptAssetPath).ConfigureAwait(false);
+                return;
+            }
+
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
         }).ExcludeFromDescription();
     }
 
-    private static IEndpointConventionBuilder MapStudioOpaqueRedirect(IEndpointRouteBuilder builder, string studioPath)
+    private const string FrameworkScriptPath = "/_framework/blazor.web.js";
+
+    /// <summary>Where the host's own copy sits in its web root, when it has one.</summary>
+    private const string HostFrameworkScriptAssetPath = "_framework/blazor.web.js";
+
+    /// <summary>Where this package's copy sits, as a static web asset of the RCL.</summary>
+    private const string PackagedFrameworkScriptAssetPath = "_content/MartenStudio/_framework/blazor.web.js";
+
+    private static Task WriteFrameworkScriptAsync(HttpContext context, IFileInfo fileInfo, string logicalPath)
     {
-        // The framework emits enhanced-navigation redirects as URLs relative to the document base, which
-        // the studio-rooted <base href> resolves under the studio path; forward those requests to the
-        // framework-owned root endpoint so the redirect flow completes.
-        const string redirectPath = "/_framework/opaque-redirect";
-        return builder.MapGet(studioPath + redirectPath, static async (HttpContext context) =>
-        {
-            if (!await TryForwardToRootEndpointAsync(context, redirectPath).ConfigureAwait(false))
-            {
-                context.Response.StatusCode = StatusCodes.Status404NotFound;
-            }
-        }).ExcludeFromDescription();
+        // Parity with the framework-owned script endpoint: revalidate rather than cache, so a runtime
+        // upgrade is picked up without a hard refresh.
+        context.Response.Headers.CacheControl = "no-cache";
+        return WriteFileAsync(context, fileInfo, "text/javascript", etagCacheKey: fileInfo.PhysicalPath ?? logicalPath);
     }
 
     private static async Task<bool> TryForwardToRootEndpointAsync(HttpContext context, string rootPath)

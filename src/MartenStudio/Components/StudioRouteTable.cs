@@ -55,7 +55,7 @@ internal static class StudioRouteTable
     internal static string ResolveLeaf(string dashboardRelativePath, MartenStudioOptions options)
     {
         string normalized = StudioLink.NormalizeRelativePath(dashboardRelativePath);
-        if (!options.HasCustomPath || Match(normalized) is not null)
+        if (Match(normalized) is not null)
         {
             return normalized;
         }
