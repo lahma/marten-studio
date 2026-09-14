@@ -506,12 +506,26 @@ internal static class ReadOnlySqlGuard
 
         private bool TryReadDollarTag(out string? tag)
         {
-            // $tag$ or $$; a bare $1 parameter placeholder is not a dollar quote.
+            // $tag$ or $$; a bare $1 parameter placeholder is not a dollar quote. A tag follows the rules
+            // of an unquoted identifier, so it cannot begin with a digit: Postgres reads `$1$…$1$` as two
+            // parameter placeholders around text, not as a quoted body, and a scanner that read it as a
+            // body would skip the `;` inside it - the one thing this scanner must never do.
             var probe = position + 1;
 
-            while (probe < text.Length && (char.IsLetterOrDigit(text[probe]) || text[probe] == '_'))
+            if (probe < text.Length && text[probe] != '$')
             {
+                if (!char.IsLetter(text[probe]) && text[probe] != '_')
+                {
+                    tag = null;
+                    return false;
+                }
+
                 probe++;
+
+                while (probe < text.Length && (char.IsLetterOrDigit(text[probe]) || text[probe] == '_'))
+                {
+                    probe++;
+                }
             }
 
             if (probe < text.Length && text[probe] == '$')

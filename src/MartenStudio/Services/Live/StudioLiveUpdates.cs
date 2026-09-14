@@ -314,6 +314,7 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     /// <param name="exception">The exception an interop call threw.</param>
     /// <returns>Whether it means "the browser is not reachable" rather than "this code is wrong".</returns>
     internal static bool IsInteropUnavailable(Exception exception) =>
-        exception is JSException or JSDisconnectedException or InvalidOperationException or TaskCanceledException
+        exception is JSException or JSDisconnectedException or InvalidOperationException
+            or OperationCanceledException or ObjectDisposedException
         || exception is System.Text.Json.JsonException;
 }

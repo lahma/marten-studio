@@ -50,7 +50,13 @@ public class ReadOnlySqlGuardTests
         { "select \"a;column\" from t", nameof(SqlRejectionReason.None) },
         { "select $$a;b$$", nameof(SqlRejectionReason.None) },
         { "select $tag$a;b$tag$", nameof(SqlRejectionReason.None) },
+        { "select $_t1$a;b$_t1$", nameof(SqlRejectionReason.None) },
         { "select $1", nameof(SqlRejectionReason.None) },
+
+        // A dollar-quote tag follows the rules of an unquoted identifier and cannot start with a digit:
+        // to Postgres `$1$` is a parameter placeholder followed by a dollar sign, so the `;` between the
+        // two is a real separator and the scanner must see it rather than skip a body that is not there.
+        { "select 'x' = $1$;drop table t;--$1$", nameof(SqlRejectionReason.MultipleStatements) },
 
         // A backslash escapes the quote only in an E'' literal. With standard_conforming_strings on -
         // Postgres' default since 9.1 - the quote after the backslash CLOSES the string, and what follows
