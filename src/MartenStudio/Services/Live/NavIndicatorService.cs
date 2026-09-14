@@ -70,6 +70,27 @@ internal interface INavIndicatorService
 /// at, and a visitor who may not see a database does not learn its dead-letter count from the sidebar.
 /// </para>
 /// <para>
+/// <b>The projection half is gated on the event tables existing</b> (hard rule 14).
+/// <see cref="IProjectionDataService.GetSummaryAsync" /> reaches
+/// <c>IMartenDatabase.FetchHighestEventSequenceNumber</c> and <c>AllProjectionProgress</c>, and both of
+/// those open with <c>EnsureStorageExistsAsync(typeof(IEvent))</c> - a Weasel migration of the event
+/// store under the database's own <c>AutoCreate</c>. The sidebar is on <em>every</em> route, so an
+/// ungated badge would mean that a host whose database has no event tables got them created by opening
+/// <c>/marten/documents</c>. <see cref="IEventDataService.DescribeAsync" /> answers the same question
+/// from <c>information_schema</c> through the studio's own cached column catalog, and the projection
+/// read only happens when it says there is already something to read.
+/// </para>
+/// <para>
+/// <b>Authorization comes before the cache, not inside it.</b>
+/// <see cref="StudioSnapshotCache" /> is a process-wide singleton keyed on the scope alone - its own
+/// contract says so, and says why: callers are expected to have passed
+/// <see cref="MartenStudioOptions.StoreAuthorizationPolicy" /> for that scope before they reach it. A
+/// cache hit returns without running the factory, so asking inside would mean the second circuit to want
+/// a badge for a database got one without the policy being consulted (D5). The refusal is
+/// <see cref="NavIndicators.None" />, which is the same thing the sidebar draws for a database nobody
+/// could read: a visitor who may not see a database learns nothing from the difference.
+/// </para>
+/// <para>
 /// The whole answer goes through <see cref="StudioSnapshotCache" /> under one key (plan D10): the
 /// navigation is on every page, so without it a studio open in five tabs would run two extra queries per
 /// tab per interval for two small numbers. The cache's time-to-live is about a second, which is well
@@ -83,6 +104,7 @@ internal interface INavIndicatorService
 internal sealed class NavIndicatorService : INavIndicatorService
 {
     private readonly StudioState state;
+    private readonly StudioAuthorization authorization;
     private readonly IEventDataService events;
     private readonly IProjectionDataService projections;
     private readonly StudioSnapshotCache cache;
@@ -90,12 +112,14 @@ internal sealed class NavIndicatorService : INavIndicatorService
 
     public NavIndicatorService(
         StudioState state,
+        StudioAuthorization authorization,
         IEventDataService events,
         IProjectionDataService projections,
         StudioSnapshotCache cache,
         ILogger<NavIndicatorService> logger)
     {
         this.state = state;
+        this.authorization = authorization;
         this.events = events;
         this.projections = projections;
         this.cache = cache;
@@ -113,6 +137,13 @@ internal sealed class NavIndicatorService : INavIndicatorService
 
         try
         {
+            // Before the cache, never inside it: a hit skips the factory, and the factory is where the
+            // data services would have resolved the scope and applied the store policy.
+            if (!await authorization.IsAuthorizedAsync(scope, capability: null, cancellationToken).ConfigureAwait(false))
+            {
+                return NavIndicators.None;
+            }
+
             return await cache
                 .GetAsync(CacheKey(scope), token => ReadUncachedAsync(scope, token), cancellationToken)
                 .ConfigureAwait(false);
@@ -132,7 +163,21 @@ internal sealed class NavIndicatorService : INavIndicatorService
     {
         // Both already answer "could not read" as a value rather than by throwing, so there is no
         // per-call try here: what this method must not do is let one of them decide the other's fate.
+        // CountDeadLettersAsync is already safe on a database with no event store - it asks the column
+        // catalog whether mt_doc_deadletterevent exists and answers a real zero when it does not.
         long? deadLetters = await events.CountDeadLettersAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        // Hard rule 14. DescribeAsync is the cheapest honest answer to "does this database have an event
+        // store": one information_schema read through the shared, expiring ColumnCatalog, and no Marten
+        // call of any kind. A shape that could not be read leaves EventTablesExist false, so an
+        // unreachable database is treated exactly as one with no event tables - the conservative way
+        // round, because the only thing on the other side of this branch is a migration.
+        EventStoreShape shape = await events.DescribeAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (!shape.EventTablesExist)
+        {
+            return new NavIndicators(deadLetters, false, null);
+        }
 
         ProjectionSummary summary = await projections.GetSummaryAsync(scope, cancellationToken).ConfigureAwait(false);
 

@@ -319,6 +319,76 @@ public class DeadLettersTests
         context.Render<DeadLetters>().Find(".ms-empty-title").TextContent.Should().Be("No dead letters");
     }
 
+    // -----------------------------------------------------------------------------------------------
+    // Hard rule 14: this screen must not be able to create an event store by being opened.
+    // -----------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A database with no event tables is never asked about projections.
+    /// </summary>
+    /// <remarks>
+    /// The projections read is what feeds the Rewind button, and it reaches
+    /// <c>AllProjectionProgress</c> and <c>FetchHighestEventSequenceNumber</c> - both of which open with
+    /// <c>EnsureStorageExistsAsync(typeof(IEvent))</c> and apply the event store's migration under the
+    /// database's own <c>AutoCreate</c> before reading a row. The shape is already in hand from
+    /// <c>DescribeAsync</c>, which is an <c>information_schema</c> question, and a database with no event
+    /// store has no dead letters to rewind either. <c>NavIndicatorNoDdlLiveTests</c> is the same statement
+    /// against a real Postgres.
+    /// </remarks>
+    [Fact]
+    public async Task A_database_with_no_event_tables_is_never_asked_about_projections()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.WithAllCapabilities();
+        context.EventData.Shape = new EventStoreShape { EventTablesExist = false };
+        context.ProjectionData.WithProjection("OrderSummary");
+
+        context.Render<DeadLetters>();
+
+        context.ProjectionData.Reads.Should().Be(0, "reading the progression would have created the event store");
+    }
+
+    /// <summary>
+    /// And the dead-letter list is not read either, for the same reason.
+    /// </summary>
+    /// <remarks>
+    /// <c>ListDeadLettersAsync</c> is a Marten session query over <c>DeadLetterEvent</c>, and a Marten
+    /// query opens with <c>EnsureStorageExistsAsync</c> for its document type - which on a database that
+    /// has never run the daemon creates <c>mt_doc_deadletterevent</c> and Marten's whole helper-function
+    /// set. A database with no event tables has never recorded a dead letter, so the list would have been
+    /// empty at the cost of a migration. <c>NavIndicatorNoDdlLiveTests</c> proves both halves live.
+    /// </remarks>
+    [Fact]
+    public async Task A_database_with_no_event_tables_is_never_asked_for_the_list_either()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Shape = new EventStoreShape { EventTablesExist = false };
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId)], false);
+
+        IRenderedComponent<DeadLetters> page = context.Render<DeadLetters>();
+
+        context.EventData.DeadLetterQueries.Should().BeEmpty("the query would have created the document table");
+
+        page.Find(".ms-empty-title").TextContent.Should().Be("This store has no event storage yet");
+    }
+
+    /// <summary>
+    /// And with the tables there both reads still happen, so the gate above is a gate rather than a
+    /// removal.
+    /// </summary>
+    [Fact]
+    public async Task A_database_that_has_event_tables_is_still_asked()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.WithAllCapabilities();
+        context.ProjectionData.WithProjection("OrderSummary");
+
+        context.Render<DeadLetters>();
+
+        context.ProjectionData.Reads.Should().Be(1);
+        context.EventData.DeadLetterQueries.Should().ContainSingle();
+    }
+
     private static AngleSharp.Dom.IElement SkipButton(IRenderedComponent<DeadLetters> page) =>
         page.FindAll(".ms-dead-letter-actions button")
             .Single(x => x.TextContent.Contains("Skip event", StringComparison.Ordinal));

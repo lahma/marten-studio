@@ -638,6 +638,15 @@
     /// (<see cref="EventStoreCounts.TablesExist" />) is asked first and the rest is only asked when there
     /// is already something to read.
     /// </para>
+    /// <para>
+    /// <b>Every answer is stamped with the scope it was asked for.</b> The poll and
+    /// <see cref="OnScopeChangedAsync" /> both start this method and neither waits for the other, so two
+    /// runs overlap whenever somebody moves the selector while a read is in flight - and the one that
+    /// finishes last wins, which is not the same as the one that was asked last. Each read therefore
+    /// lands in a local, and the field is only assigned while <see cref="StudioState.ActiveScope" /> is
+    /// still the scope this run began with. An abandoned run stops where it noticed rather than going on
+    /// to read five more regions for a database nobody is looking at.
+    /// </para>
     /// </remarks>
     private async Task LoadScopeRegionsAsync()
     {
@@ -647,9 +656,28 @@
             return;
         }
 
-        await countsRegion.RunAsync(async token => counts = await Events.GetEventStoreCountsAsync(scope, token));
+        // Each local starts at what is on screen, so a read that failed leaves the tile showing the
+        // last number anybody actually got rather than blanking it - which is what the assignment
+        // straight into the field used to do for free, because a throw simply never reached it.
+        EventStoreCounts readCounts = counts;
+        await countsRegion.RunAsync(async token => readCounts = await Events.GetEventStoreCountsAsync(scope, token));
 
-        await activityRegion.RunAsync(async token => activity = await ReadActivityAsync(token));
+        if (HasMovedOn(scope))
+        {
+            return;
+        }
+
+        counts = readCounts;
+
+        List<StudioActionLogEntry> readActivity = activity;
+        await activityRegion.RunAsync(async token => readActivity = await ReadActivityAsync(token));
+
+        if (HasMovedOn(scope))
+        {
+            return;
+        }
+
+        activity = readActivity;
 
         if (!counts.TablesExist)
         {
@@ -660,38 +688,117 @@
             return;
         }
 
-        await projectionsRegion.RunAsync(async token => projections = await ProjectionData.GetSummaryAsync(scope, token));
+        ProjectionSummary readProjections = projections;
+        await projectionsRegion.RunAsync(async token => readProjections = await ProjectionData.GetSummaryAsync(scope, token));
 
-        await deadLettersRegion.RunAsync(async token => deadLetters = await Events.CountDeadLettersAsync(scope, token));
+        if (HasMovedOn(scope))
+        {
+            return;
+        }
 
-        await eventsRegion.RunAsync(async token => recentEvents = await Events.GetFeedAsync(
+        projections = readProjections;
+
+        long? readDeadLetters = deadLetters;
+        await deadLettersRegion.RunAsync(async token => readDeadLetters = await Events.CountDeadLettersAsync(scope, token));
+
+        if (HasMovedOn(scope))
+        {
+            return;
+        }
+
+        deadLetters = readDeadLetters;
+
+        EventPage readEvents = recentEvents;
+        await eventsRegion.RunAsync(async token => readEvents = await Events.GetFeedAsync(
             scope,
             new EventFeedRequest { PageSize = RecentCount, IncludeArchived = false, IncludeSkipped = true },
             token));
 
+        if (HasMovedOn(scope))
+        {
+            return;
+        }
+
+        recentEvents = readEvents;
+
+        RecentStreams readStreams = recentStreams;
         await streamsRegion.RunAsync(async token =>
-            recentStreams = await Events.GetRecentStreamsAsync(scope, RecentStreamCount, token));
+            readStreams = await Events.GetRecentStreamsAsync(scope, RecentStreamCount, token));
+
+        if (HasMovedOn(scope))
+        {
+            return;
+        }
+
+        recentStreams = readStreams;
     }
 
     /// <summary>
-    /// The audit ring, filtered exactly as the Activity screen filters it.
+    /// Whether the selector has moved away from <paramref name="scope" /> since this run started.
     /// </summary>
     /// <remarks>
+    /// <see cref="StudioScope" /> is a record, so this is value equality over the store, the database and
+    /// the tenant - two runs for the same scope are the same run as far as this is concerned, and both
+    /// may land.
+    /// </remarks>
+    private bool HasMovedOn(StudioScope scope) => State.ActiveScope != scope;
+
+    /// <summary>
+    /// The audit ring, filtered exactly as the Activity screen filters it - but only as far as the
+    /// fifteen rows this panel draws.
+    /// </summary>
+    /// <remarks>
+    /// <para>
     /// The ring is process-wide and every circuit writes into it, so it is the one place in the studio
     /// where one visitor's actions can be read by another. The per-store policy decides entry by entry,
     /// against the store, database and tenant the action was aimed at.
+    /// </para>
+    /// <para>
+    /// <b>Lazily, and stopping at <see cref="RecentCount" />.</b> <c>GetLatest()</c> hands back the whole
+    /// ring - five hundred entries - and filtering all of it costs five hundred
+    /// <c>IAuthorizationService.AuthorizeAsync</c> calls, every refresh interval, in every circuit, to
+    /// render fifteen rows. The ring is newest first, so the fifteenth entry the visitor may see is the
+    /// last one this panel has any use for and everything past it is work nobody asked for. The token is
+    /// the region's, checked between entries, so a page that went away stops asking rather than finishing
+    /// the sweep.
+    /// </para>
+    /// <para>
+    /// With no per-store policy configured nothing is asked at all - the same fast path
+    /// <see cref="StudioAuthorization.FilterAsync{T}" /> takes, and the reason an application that never
+    /// set the option pays nothing for this panel.
+    /// </para>
     /// </remarks>
     private async Task<List<StudioActionLogEntry>> ReadActivityAsync(CancellationToken cancellationToken)
     {
         IReadOnlyList<StudioActionLogEntry> entries = ActionLog.GetLatest();
 
-        List<StudioActionLogEntry> allowed = await Authorization.FilterAsync(
-            entries,
-            static entry => new StudioScope(entry.StoreKey, entry.DatabaseId, entry.TenantId));
-
         cancellationToken.ThrowIfCancellationRequested();
 
-        return allowed.Count <= RecentCount ? allowed : [.. allowed.Take(RecentCount)];
+        if (!Authorization.IsEnabled)
+        {
+            return entries.Count <= RecentCount ? [.. entries] : [.. entries.Take(RecentCount)];
+        }
+
+        List<StudioActionLogEntry> allowed = new(RecentCount);
+
+        foreach (StudioActionLogEntry entry in entries)
+        {
+            if (allowed.Count == RecentCount)
+            {
+                break;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            StudioScope entryScope = new(entry.StoreKey, entry.DatabaseId, entry.TenantId);
+
+            if (await Authorization.IsAuthorizedAsync(entryScope, capability: null, cancellationToken))
+            {
+                allowed.Add(entry);
+            }
+        }
+
+        return allowed;
     }
 
     private string Link(string route) => EventLinks.To(Options.Value, route, State.ActiveScope);

@@ -3,6 +3,8 @@ using System.Globalization;
 
 using JasperFx.Events;
 using JasperFx.Events.Daemon;
+using JasperFx.Events.Projections;
+using JasperFx.Events.Subscriptions;
 
 using Marten;
 using Marten.Services;
@@ -1105,6 +1107,23 @@ internal sealed class EventDataService : IEventDataService
             projectionName + " to #" + eventSequence.ToString(CultureInfo.InvariantCulture),
             async (resolved, token) =>
             {
+                // The name is checked here rather than left to Marten, and the message is the whole
+                // reason. Marten's IEventStore.RewindSubscriptionProgressAsync (DocumentStore.EventStore.cs,
+                // 9.35) throws ArgumentOutOfRangeException with "Unknown subscription name 'x'. Available
+                // options are A, B, C" - every shard the store has, joined into the message. That message
+                // reaches the audit entry and the page, so a name typed at a studio would have listed the
+                // store's whole projection set to whoever typed it. The refusal below says only what the
+                // caller already supplied.
+                //
+                // The set asked is exactly the one the page's own Rewind button is drawn from -
+                // Options.Events.Projections() narrowed to the async lifecycle - so the service refuses
+                // precisely what the UI declines to offer (hard rule 5), rather than inventing a second,
+                // looser rule behind the button.
+                if (!HasAsyncProjection(resolved.Store.Options.Events.Projections(), projectionName))
+                {
+                    throw UnknownAsyncProjection(projectionName);
+                }
+
                 // Hard rule 15: the sequence arrives from a dead-letter row, which Marten registers
                 // SingleTenanted, and the rewind reaches an API that applies no tenant predicate of its
                 // own. So a visitor scoped to one tenant has to be shown to be able to see the event
@@ -1173,6 +1192,65 @@ internal sealed class EventDataService : IEventDataService
     /// </remarks>
     /// <param name="eventSequence">The sequence to re-apply.</param>
     internal static long RewindFloor(long eventSequence) => Math.Max(0, eventSequence - 1);
+
+    /// <summary>
+    /// Whether <paramref name="projections" /> holds an <em>async</em> projection called
+    /// <paramref name="projectionName" />.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The list is <c>IReadOnlyEventStoreOptions.Projections()</c>, which is the static model - the same
+    /// one the projections screen, the dead-letter page's Rewind button and
+    /// <c>ProjectionDataService.DescribeRebuildAsync</c> are all built from - and it costs nothing,
+    /// because it is the configuration the host wrote rather than anything in a database. The lifecycle
+    /// narrowing matters as much as the name: an inline or live projection has no shard for the daemon to
+    /// restart, so rewinding one is not a thing that can be done however it is spelt.
+    /// </para>
+    /// <para>
+    /// The comparison is ordinal-ignore-case, which is Marten's own (<c>EqualsIgnoreCase</c> against the
+    /// shard name). The one thing this is narrower about than Marten is a raw
+    /// <c>Subscribe(ISubscription)</c> registration: those live in the projection graph's separate
+    /// subscription list and <c>Projections()</c> does not return them (verified against JasperFx.Events'
+    /// <c>ProjectionGraph</c> for 9.35). The studio cannot list such a subscription on any screen either,
+    /// so its Rewind button is never offered for one - this refuses exactly what the UI refuses.
+    /// </para>
+    /// <para>
+    /// A list rather than the store, so that the decision is a pure function of the configuration and can
+    /// be tested without a Postgres or a built <see cref="IDocumentStore" /> behind it.
+    /// </para>
+    /// </remarks>
+    /// <param name="projections">The store's registered projections and subscriptions.</param>
+    /// <param name="projectionName">The name a dead letter carried, or a caller typed.</param>
+    internal static bool HasAsyncProjection(IReadOnlyList<ISubscriptionSource> projections, string projectionName)
+    {
+        ArgumentNullException.ThrowIfNull(projections);
+
+        foreach (ISubscriptionSource source in projections)
+        {
+            if (source.Lifecycle == ProjectionLifecycle.Async
+                && string.Equals(source.Name, projectionName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The refusal a rewind gets for a name this store has no async projection for.
+    /// </summary>
+    /// <remarks>
+    /// The message repeats only the name it was given, and that is the entire point of it existing.
+    /// Marten's own check - <c>IEventStore.RewindSubscriptionProgressAsync</c> in 9.35 - throws
+    /// <see cref="ArgumentOutOfRangeException" /> with <c>"Unknown subscription name 'x'. Available
+    /// options are A, B, C"</c>, every shard the store has joined into the sentence. That message would
+    /// travel into the audit ring and onto the page, so a wrong name typed at the studio would have
+    /// listed the store's whole projection set to whoever typed it.
+    /// </remarks>
+    /// <param name="projectionName">The name that was asked for.</param>
+    internal static KeyNotFoundException UnknownAsyncProjection(string projectionName) =>
+        new($"This store has no async projection named '{projectionName}'.");
 
     /// <summary>
     /// The one call that rewinds a subscription, and the only place the argument order is chosen.

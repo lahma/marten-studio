@@ -215,11 +215,17 @@ public class RewindSubscriptionLiveTests(PostgresFixture postgres) : IAsyncLifet
     }
 
     /// <summary>
-    /// A projection nothing registers has no shard for the daemon to restart, and Marten says so by name.
-    /// The refusal is audited as a failed action rather than swallowed.
+    /// A projection nothing registers has no shard for the daemon to restart, and the refusal names only
+    /// the name that was asked for. It is audited as a failed action rather than swallowed.
     /// </summary>
+    /// <remarks>
+    /// Marten's own check would have answered <c>ArgumentOutOfRangeException</c> with "Unknown
+    /// subscription name 'x'. Available options are …" - every shard this store has, in a message that
+    /// reaches both the audit ring and the page. The studio asks the static model itself and refuses
+    /// first, so what lands in the ring below mentions <c>PoisonProjection</c> nowhere.
+    /// </remarks>
     [PostgresFact]
-    public async Task Rewinding_a_projection_this_store_does_not_have_is_refused_and_audited()
+    public async Task Rewinding_a_projection_this_store_does_not_have_is_refused_and_discloses_nothing()
     {
         CancellationToken token = TestContext.Current.CancellationToken;
 
@@ -228,12 +234,42 @@ public class RewindSubscriptionLiveTests(PostgresFixture postgres) : IAsyncLifet
 
         Func<Task> rewinding = () => events.RewindSubscriptionAsync(Scope, "NoSuchProjection", 5, token);
 
-        await rewinding.Should().ThrowAsync<ArgumentOutOfRangeException>();
+        (await rewinding.Should().ThrowAsync<KeyNotFoundException>())
+            .WithMessage("This store has no async projection named 'NoSuchProjection'.");
 
         StudioActionLogService audit = host.Services.GetRequiredService<StudioActionLogService>();
 
-        audit.GetLatest().Should().Contain(x =>
+        StudioActionLogEntry refusal = audit.GetLatest().First(x =>
             x.Action == "Rewind subscription" && !x.Succeeded && x.Target.StartsWith("NoSuchProjection", StringComparison.Ordinal));
+
+        refusal.Message.Should().NotContain(nameof(PoisonProjection),
+            "a refusal must not answer with the list of projections this store has (D5)");
+        refusal.Message.Should().NotContain("Available options");
+    }
+
+    /// <summary>
+    /// The same refusal without the daemon ever being reached: a bad name costs no connection, no
+    /// coordinator lookup and no event-store read.
+    /// </summary>
+    /// <remarks>
+    /// The name is checked first, before the tenant proof that opens a connection - so the cheapest
+    /// possible answer to "rewind something that is not there" is the one that is given.
+    /// </remarks>
+    [PostgresFact]
+    public async Task An_inline_or_live_name_is_refused_the_same_way()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+
+        using IServiceScope scope = host!.Services.CreateScope();
+        IEventDataService events = scope.ServiceProvider.GetRequiredService<IEventDataService>();
+
+        // The store's one projection, spelled as its shard rather than as its name: a shard identity is
+        // something Marten would have matched and the studio does not, because every screen that offers
+        // the action offers the projection's name.
+        Func<Task> rewinding = () => events.RewindSubscriptionAsync(Scope, nameof(PoisonProjection) + ":All", 5, token);
+
+        (await rewinding.Should().ThrowAsync<KeyNotFoundException>())
+            .WithMessage($"This store has no async projection named '{nameof(PoisonProjection)}:All'.");
     }
 
     public async ValueTask DisposeAsync()

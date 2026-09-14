@@ -175,6 +175,13 @@ internal interface IEventDataService
     /// projection, and Marten deletes the projection's existing dead letters at or above the floor on the
     /// way - so the record being looked at disappears whether or not the replay succeeds.
     /// </para>
+    /// <para>
+    /// <paramref name="projectionName" /> is checked against the store's own async projections before
+    /// anything else happens, and an unknown one is refused with a
+    /// <see cref="KeyNotFoundException" /> that repeats only the name it was given. Marten's own check
+    /// names every projection the store has in its message, and that message would reach the audit entry
+    /// and the screen.
+    /// </para>
     /// </remarks>
     /// <param name="scope">The store, database and tenant.</param>
     /// <param name="projectionName">The projection or subscription to rewind, as the dead letter names it.</param>
@@ -187,6 +194,9 @@ internal interface IEventDataService
     /// <exception cref="StudioNotAuthorizedException">The write policy refused this scope.</exception>
     /// <exception cref="MartenStudio.Services.Projections.StudioDaemonNotHostedException">
     /// No async daemon is hosted in this process.
+    /// </exception>
+    /// <exception cref="KeyNotFoundException">
+    /// This store registers no async projection by that name.
     /// </exception>
     Task RewindSubscriptionAsync(
         StudioScope scope,

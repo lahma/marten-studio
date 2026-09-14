@@ -83,6 +83,19 @@ internal sealed class FakeEventDataService : IEventDataService
     public EventStoreCounts Counts { get; set; } = new(
         EventStoreCount.Estimate(1_200), EventStoreCount.Estimate(9_400), TablesExist: true, Error: null);
 
+    /// <summary>
+    /// Gates, one per counts read: a call takes the next one off the queue and waits on it before it
+    /// answers. A call made when the queue is empty answers immediately.
+    /// </summary>
+    /// <remarks>
+    /// What this is for is the Overview's scope race. Two runs of <c>LoadScopeRegionsAsync</c> overlap
+    /// whenever the selector moves while a read is in flight, and the only way to test <em>which</em> one
+    /// lands is to decide the order they finish in. <see cref="Counts" /> is captured when the call is
+    /// made rather than when it returns, so a test can change the answer while a call is held and the
+    /// held call still returns what the scope it was asked for would have reported.
+    /// </remarks>
+    public Queue<TaskCompletionSource> CountsGates { get; } = new();
+
     /// <summary>What the Overview's streams panel is given.</summary>
     public RecentStreams Recent { get; set; } = RecentStreams.Empty;
 
@@ -181,10 +194,19 @@ internal sealed class FakeEventDataService : IEventDataService
         return Task.FromResult(next);
     }
 
-    public Task<EventStoreCounts> GetEventStoreCountsAsync(
+    public async Task<EventStoreCounts> GetEventStoreCountsAsync(
         StudioScope scope,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(Counts);
+        CancellationToken cancellationToken = default)
+    {
+        EventStoreCounts answer = Counts;
+
+        if (CountsGates.Count > 0)
+        {
+            await CountsGates.Dequeue().Task;
+        }
+
+        return answer;
+    }
 
     public Task<RecentStreams> GetRecentStreamsAsync(
         StudioScope scope,

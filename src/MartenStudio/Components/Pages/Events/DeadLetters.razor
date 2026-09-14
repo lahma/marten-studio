@@ -72,6 +72,15 @@
     {
         <ErrorAlert Message="@error.Display" OnRetry="@(error.CanRetry ? EventCallback.Factory.Create(this, ReloadAsync) : default)" />
     }
+    else if (shape is { Available: true, EventTablesExist: false })
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">This store has no event storage yet</p>
+            <p class="ms-empty-description">
+                Nothing has appended an event, so no projection has run and nothing can have failed on one.
+            </p>
+        </div>
+    }
     else if (page is null || page.Rows.Count == 0)
     {
         <div class="ms-empty">
@@ -560,16 +569,37 @@
             CancellationToken token = pageCancellation.Token;
 
             shape = await Events.DescribeAsync(scope, token);
-            page = await Events.ListDeadLettersAsync(scope, new DeadLetterQuery
-            {
-                ProjectionName = Projection,
-                ShardName = Shard,
-                ExceptionType = Exception,
-                Offset = OffsetValue,
-                PageSize = PageSize,
-            }, token);
 
-            projections = await ReadProjectionsAsync(scope, token);
+            // Hard rule 14 gates all three reads below, and the shape is what answers it: one
+            // information_schema question, through the studio's own cached column catalog, with no Marten
+            // call in it.
+            //
+            // The list is a Marten session query over DeadLetterEvent, and every Marten query opens with
+            // EnsureStorageExistsAsync for the document type - which on a database that has never run the
+            // daemon creates mt_doc_deadletterevent and Marten's whole helper-function set under the
+            // database's own AutoCreate. Proven live by NavIndicatorNoDdlLiveTests: a studio that wrote
+            // twenty functions and a table because somebody opened a tab.
+            //
+            // Nothing is lost by not asking. A dead letter is recorded by the async daemon while it
+            // applies an event, so a database with no event tables has never had one - the list would
+            // have been empty, at the cost of a migration.
+            if (shape.EventTablesExist)
+            {
+                page = await Events.ListDeadLettersAsync(scope, new DeadLetterQuery
+                {
+                    ProjectionName = Projection,
+                    ShardName = Shard,
+                    ExceptionType = Exception,
+                    Offset = OffsetValue,
+                    PageSize = PageSize,
+                }, token);
+            }
+            else
+            {
+                page = DeadLetterPage.Empty;
+            }
+
+            projections = await ReadProjectionsAsync(scope, shape, token);
         }
         catch (OperationCanceledException)
         {
@@ -647,6 +677,12 @@
     /// projection's shards, its tables and the high-water mark a replay runs to - the same numbers the
     /// rebuild dialog shows, for an operation that costs the same kind of work. A projection it cannot
     /// describe still opens the dialog, saying so: the service is what refuses the rewind, not this.
+    /// <c>DescribeRebuildAsync</c> reads the high-water mark, which is a Marten call that would apply the
+    /// event store's migration (hard rule 14), so it is asked only where there is an event store. Belt and
+    /// braces rather than the gate that matters: a database with no event tables renders the "no event
+    /// storage yet" empty state and therefore no rows, so no handler exists for a circuit to be driven to
+    /// invoke. It is one line and it is the same condition, and a row rendered in that state by some later
+    /// change would otherwise arrive with a migration behind its button.
     /// </remarks>
     private async Task OpenRewindAsync(DeadLetterRow row)
     {
@@ -657,7 +693,7 @@
         dialog = DialogKind.Rewind;
 
         StudioScope? scope = State.ActiveScope;
-        if (scope is null)
+        if (scope is null || shape?.EventTablesExist != true)
         {
             return;
         }
@@ -679,11 +715,30 @@
     /// The daemon card and the registered projections, read as a value.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A failure here takes the rewind button away and nothing else: this page is about dead letters, and
     /// a projections service that cannot answer must not be able to blank the list (plan section 4.8).
+    /// </para>
+    /// <para>
+    /// <b>Not asked at all when this database has no event tables</b> (hard rule 14).
+    /// <c>GetProjectionsAsync</c> reads the progression rows and the high-water mark, and both of those
+    /// Marten calls open with <c>EnsureStorageExistsAsync(typeof(IEvent))</c> - they apply the event
+    /// store's migration under the database's own <c>AutoCreate</c> before they read anything. The shape
+    /// is already in hand from <c>DescribeAsync</c>, which answers from <c>information_schema</c>, and a
+    /// database with no event store has no dead letters to rewind either, so there is nothing the read
+    /// could have told this page that is worth creating an event store for.
+    /// </para>
     /// </remarks>
-    private async Task<ProjectionsView?> ReadProjectionsAsync(StudioScope scope, CancellationToken token)
+    private async Task<ProjectionsView?> ReadProjectionsAsync(
+        StudioScope scope,
+        EventStoreShape shape,
+        CancellationToken token)
     {
+        if (!shape.EventTablesExist)
+        {
+            return null;
+        }
+
         try
         {
             return await ProjectionData.GetProjectionsAsync(scope, token);

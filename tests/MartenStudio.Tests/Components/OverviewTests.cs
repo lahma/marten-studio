@@ -1,8 +1,11 @@
+using System.Globalization;
+
 using Bunit;
 
 using JasperFx.Events;
 
 using MartenStudio.Components.Pages;
+using MartenStudio.Services;
 using MartenStudio.Services.Events;
 using MartenStudio.Tests.Events;
 
@@ -414,12 +417,174 @@ public class OverviewTests
         page.FindAll(".ms-overview-projections").Should().BeEmpty();
     }
 
+    // -----------------------------------------------------------------------------------------------
+    // The audit ring: five hundred entries, fifteen rows.
+    // -----------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The ring is filtered only as far as the panel draws.
+    /// </summary>
+    /// <remarks>
+    /// <c>GetLatest()</c> hands back the whole ring, and the per-store policy decides entry by entry - one
+    /// <c>IAuthorizationService.AuthorizeAsync</c> each. Filtering all of it to render fifteen rows would
+    /// be five hundred policy evaluations per refresh interval per circuit. The ring is newest first, so
+    /// the fifteenth entry the visitor may see is the last one worth asking about.
+    /// </remarks>
+    [Fact]
+    public async Task The_activity_ring_is_only_authorized_as_far_as_the_fifteen_rows_it_draws()
+    {
+        using StudioComponentContext context = await ScopedAsync();
+        context.WithPolicy("default");
+
+        for (int index = 0; index < 40; index++)
+        {
+            context.ActionLog.Record("Archive stream", "order-" + index.ToString(CultureInfo.InvariantCulture), succeeded: true);
+        }
+
+        var page = context.Render<Overview>();
+
+        page.TextOfAll(".ms-overview-activity .ms-overview-list-name").Should().HaveCount(15);
+        context.AuthorizationService.Calls.Should().HaveCount(15, "the sweep stops at the fifteenth row it can draw");
+    }
+
+    /// <summary>
+    /// With no per-store policy configured the ring costs nothing at all.
+    /// </summary>
+    /// <remarks>
+    /// The fast path <see cref="MartenStudio.Services.StudioAuthorization.FilterAsync{T}" /> takes, and
+    /// the reason an application that never set the option pays nothing for this panel.
+    /// </remarks>
+    [Fact]
+    public async Task Without_a_store_policy_the_ring_asks_nothing()
+    {
+        using StudioComponentContext context = await ScopedAsync();
+
+        for (int index = 0; index < 40; index++)
+        {
+            context.ActionLog.Record("Archive stream", "order-" + index.ToString(CultureInfo.InvariantCulture), succeeded: true);
+        }
+
+        var page = context.Render<Overview>();
+
+        page.TextOfAll(".ms-overview-activity .ms-overview-list-name").Should().HaveCount(15);
+        context.AuthorizationService.Calls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// An entry aimed at a store the visitor may not see is not drawn, and the sweep still stops at
+    /// fifteen rows rather than at fifteen entries.
+    /// </summary>
+    [Fact]
+    public async Task Entries_for_a_store_the_visitor_may_not_see_are_skipped_and_not_counted()
+    {
+        using StudioComponentContext context = await ScopedAsync();
+        context.WithPolicy("default");
+
+        // The ring is newest first, so this records oldest first: ten that are never reached, then the
+        // fifteen the panel draws, then twenty the policy refuses and the sweep has to read past.
+        for (int index = 0; index < 10; index++)
+        {
+            context.ActionLog.Record("Archive stream", "older-" + index.ToString(CultureInfo.InvariantCulture), succeeded: true);
+        }
+
+        for (int index = 0; index < 15; index++)
+        {
+            context.ActionLog.Record("Archive stream", "mine-" + index.ToString(CultureInfo.InvariantCulture), succeeded: true);
+        }
+
+        for (int index = 0; index < 20; index++)
+        {
+            context.ActionLog.Record(
+                "Archive stream",
+                "theirs-" + index.ToString(CultureInfo.InvariantCulture),
+                succeeded: true,
+                message: null,
+                capability: null,
+                scope: new StudioScope("IInvoicingStore", "localhost.invoicing", null));
+        }
+
+        var page = context.Render<Overview>();
+
+        List<string> targets = [.. page.TextOfAll(".ms-overview-activity .ms-overview-list-stream")];
+
+        targets.Should().HaveCount(15);
+        targets.Should().NotContain(x => x.Contains("theirs", StringComparison.Ordinal), "the policy refused them");
+        targets.Should().NotContain(x => x.Contains("older", StringComparison.Ordinal), "the newest fifteen filled the panel");
+        context.AuthorizationService.Calls.Should().HaveCount(35,
+            "twenty refusals, then the fifteen it could draw, and then it stopped");
+    }
+
+    // -----------------------------------------------------------------------------------------------
+    // The scope race: two runs of LoadScopeRegionsAsync, and the one that finishes last is not the one
+    // that was asked last.
+    // -----------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A read that was in flight when the selector moved does not land.
+    /// </summary>
+    /// <remarks>
+    /// <c>LoadScopeRegionsAsync</c> is started by the poll, by the refresh button and by the scope-changed
+    /// handler, and none of them waits for the others. Without a stamp the slower run wins, which is how a
+    /// page ends up showing one database's numbers under another database's name - and on a
+    /// multi-tenant store, one tenant's numbers under another tenant's. The gate here decides which run
+    /// finishes last so that the test is about the rule rather than about the scheduler.
+    /// </remarks>
+    [Fact]
+    public async Task A_read_that_was_in_flight_when_the_scope_moved_does_not_land()
+    {
+        using StudioComponentContext context = await TwoStoreContextAsync();
+
+        var page = context.Render<Overview>();
+        page.StatCardValue("Streams").Should().Be("~1,200");
+
+        // The next counts read is held open. The run it belongs to is the one for the other store.
+        TaskCompletionSource held = new();
+        context.EventData.CountsGates.Enqueue(held);
+
+        Task movedAway = context.State.SetScopeAsync("other", null, null, Xunit.TestContext.Current.CancellationToken);
+        movedAway.IsCompleted.Should().BeFalse("the other store's counts read is being held open");
+
+        // What the store the visitor came back to reports, which is a different number.
+        context.EventData.Counts = new EventStoreCounts(
+            EventStoreCount.Estimate(77), EventStoreCount.Estimate(88), TablesExist: true, Error: null);
+
+        await context.State.SetScopeAsync("default", null, null, Xunit.TestContext.Current.CancellationToken);
+
+        page.StatCardValue("Streams").Should().Be("~77", "the run for the scope the selector is on landed");
+
+        // Now the abandoned run finishes, holding the first store's numbers.
+        held.SetResult();
+        await movedAway;
+
+        page.StatCardValue("Streams").Should().Be("~77", "the abandoned run must not put the old scope's numbers back");
+        context.EventData.FeedRequests.Should().HaveCount(2,
+            "the abandoned run stopped where it noticed rather than reading five more regions");
+    }
+
     /// <summary>A context with a settled scope and a store for the sections below the tiles.</summary>
     private static async Task<StudioComponentContext> ScopedAsync()
     {
         var context = new StudioComponentContext();
         context.StoreInfo.WithStore();
         await context.ReadyAsync();
+        return context;
+    }
+
+    /// <summary>
+    /// A context whose selector has somewhere else to go, settled on the first store.
+    /// </summary>
+    /// <remarks>
+    /// The catalog is filled by hand rather than through <c>ReadyAsync</c>, which would add the default
+    /// store a second time: <c>SetScopeAsync</c> validates against the listing the circuit was given, so
+    /// both stores have to be in it before the state is initialized.
+    /// </remarks>
+    private static async Task<StudioComponentContext> TwoStoreContextAsync()
+    {
+        var context = new StudioComponentContext();
+        context.StoreInfo.WithStore();
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+        context.Catalog.WithStore("other", "Other", databaseIdentities: "localhost.other");
+        await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
         return context;
     }
 }
