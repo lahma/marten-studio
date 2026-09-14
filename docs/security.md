@@ -238,18 +238,24 @@ same thing the documents list does with a search box. The studio composes the st
 ```sql
 select d."id", d."data"::text /*, d."tenant_id", d."mt_deleted" when the table has them */
 from <schema>."mt_doc_<alias>" as d
-where 1 = 1 and d."tenant_id" = @tenant and d."mt_deleted" = false and ( <your clause> )
+where 1 = 1 and d."tenant_id" = @tenant and d."mt_deleted" = false
+  and ( <your clause> )
+  and d."tenant_id" = @tenant and d."mt_deleted" = false
 order by … limit @limit
 ```
 
 The tenant predicate and the soft-delete predicate are the Documents browser's, decided from the
 document type's configuration reconciled against the physical columns, and the SQL the page shows is the
 SQL that ran. Marten's own string query (`Query<T>("where …")`) is never used for this: it applies
-neither predicate. That is also precisely why the clause is held to a stricter shape than the console: it
-runs as an ordinary command on a read connection, **not** inside the console's read-only transaction, so
-a clause carrying a second statement would really write.
+neither predicate. The studio's terms are repeated *after* your predicate as well as in front of it,
+because a parenthesised predicate only contains an `or` for as long as the parentheses hold — and
+`1 = 1) or (1 = 1` was measured closing the studio's own bracket and returning four rows on a scope
+narrowed to one tenant. The clause is held to a stricter shape than the console for the same reason it
+needs no capability, and it runs inside the same read-only transaction the console does, with the same
+`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout` and optional
+`SqlConsoleRole`.
 
-Three rules, all structural rather than semantic:
+Six rules, all structural rather than semantic:
 
 1. **Always:** no `;` outside a string, quoted identifier, dollar-quoted body or comment.
 2. **Always:** the clause does not begin a statement of its own — `select`, `with`, `insert`, `update`,
@@ -257,32 +263,43 @@ Three rules, all structural rather than semantic:
    `call`, `do`, `vacuum`, `analyze`, `set`, `reset`, `table`, `values`, `begin`, `commit`, `rollback`,
    `listen`, `notify`, `lock`, `refresh`, `reindex`, `cluster`, `comment`, `security`, `prepare`,
    `execute`, `deallocate`, `discard`, `import`, `checkpoint`.
-3. **Without `RunSql`:** no word that reaches another relation (`select`, `from`, `union`, `intersect`,
-   `except`, `join`, `into`, `with`, `lateral`, `returning`, `copy`, `do`, `call`, `execute`); no
-   function that reads, writes or waits outside the row — the console's denylist above, plus `pg_sleep`,
-   `current_setting`, `query_to_xml`, `query_to_xml_and_xmlschema`, `table_to_xml`, `xpath`,
-   `xpath_exists`, `nextval`, `setval`; and no `::regclass` or `::regproc` cast.
+3. **Always:** the clause's parentheses balance — a `)` that closes nothing would close the studio's own
+   wrapper, and a `(` left open would swallow it.
+4. **Always:** the tail must then be `[order by <sort list>] [limit <integer>] [offset <integer>]` and
+   nothing else — each at most once, `order by` first, both counts plain non-negative integers, and the
+   sort list free of `for`, `fetch`, `into`, `union`, `intersect` and `except` at parenthesis depth zero.
+   Postgres accepts a locking clause between `ORDER BY` and `LIMIT`, and `order by 1 for update` is not a
+   read.
+5. **Always:** no function that reads, writes or waits outside the row — the console's denylist above,
+   plus `pg_sleep`, `current_setting`, `query_to_xml`, `query_to_xml_and_xmlschema`, `table_to_xml`,
+   `xpath`, `xpath_exists`, `nextval`, `setval` — and no `::regclass` or `::regproc` cast.
+6. **Without `RunSql`:** no word that reaches another relation (`select`, `from`, `union`, `intersect`,
+   `except`, `join`, `into`, `with`, `lateral`, `returning`, `copy`, `do`, `call`, `execute`).
 
 A visitor who *may* run SQL — `RunSql` enabled **and** allowed by the write policy against this very
-scope — gets rule 3 lifted, because everything it refuses they could type into the console instead.
-Asking only the capability and not the policy would hand subqueries to somebody the write policy refuses
-the console to, which is the hole the policy exists to close.
+scope — gets rule 6 lifted, and only rule 6, because everything it refuses they could type into the
+console instead. Asking only the capability and not the policy would hand subqueries to somebody the
+write policy refuses the console to, which is the hole the policy exists to close.
 
-Rule 3 has deliberate false positives: `from` is in the list, so `extract(year from …)`,
+Rule 6 has deliberate false positives: `from` is in the list, so `extract(year from …)`,
 `substring(x from 1)` and `trim(both ' ' from x)` are refused. The list is structural, the escape hatch
 is the capability, and a parser treated as a security boundary is how these features get CVEs. Every
 refusal names `MartenStudioOptions.Capabilities.RunSql` as the thing that would lift it.
 
 ### What Mode A does **not** do
 
-It does not run inside a read-only transaction. The statement is the studio's own `select`, the guard
-refuses a second statement, and without `RunSql` every function that could write is refused — but a
-visitor who holds `RunSql` (and passes the write policy) may name such a function inside the clause,
-`setval(…)` say, and nothing behind Mode A would roll it back the way the console's transaction would.
-The console is the safer place for that visitor's ad-hoc reads; grant `RunSql` accordingly.
+It does not make the clause guard the only thing between a visitor and the database, and it never did
+the opposite either. The statement runs inside `BEGIN; SET TRANSACTION READ ONLY; …; ROLLBACK`, so a
+clause that reaches a writing function through a view or a `SECURITY DEFINER` wrapper comes back as
+`25006` and changes nothing. What a read-only transaction does *not* refuse is an advisory lock, a
+`setval`, a `pg_terminate_backend` or a `pg_read_file` — which is precisely why the function denylist
+applies to a `RunSql` holder here as well, unlike the nested-read rule.
 
-Every successful run is audited under 9204 `SqlExecuted` with the statement that ran, so a clause that
-should not have been typed is at least on the record.
+It does not let you bind parameters. The clause is SQL text, so a literal you paste in is SQL too.
+
+Every successful run is audited under 9204 `SqlExecuted` with the statement that ran; every refusal
+under 9205 `SqlRejected`, and a scope refusal under 9203 `ScopeAuthorizationDenied` — so a clause that
+should not have been typed is on the record either way.
 
 ## What the studio never does
 

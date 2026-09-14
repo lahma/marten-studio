@@ -302,7 +302,7 @@ fails the host with a message that names the option.
 | `QueryTimeout` | 30 seconds | `statement_timeout` on every query the studio issues. 1 second … 10 minutes. |
 | `MaxInlineDocumentBytes` | 512 KiB | Documents larger than this are not fetched into list views and show as raw text in the detail view. 1 byte … 64 MiB. |
 | `MaxSqlConsoleRows` | `500` | Row cap for the SQL console; the reader stops there rather than rewriting your statement. 1 … 10 000. |
-| `SqlConsoleRole` | `null` | A Postgres role the console switches to with `SET LOCAL ROLE` inside its read-only transaction. Must be a plain identifier. |
+| `SqlConsoleRole` | `null` | A Postgres role the SQL console **and the Marten `where` clause** switch to with `SET LOCAL ROLE` inside their read-only transaction. Must be a plain identifier — and must be able to `select` from the document tables, or the Query page answers `42501`. |
 | `ExactCountThreshold` | `100000` | Above this estimated row count, collection counts stay `pg_class.reltuples` estimates, prefixed `~`, instead of becoming `count(*)`. |
 | `RefreshInterval` | 5 seconds | How often live pages poll. Paused while the tab is hidden. 1 second … 5 minutes. |
 | `RebuildShardTimeout` | 1 hour | The per-shard replay budget handed to Marten's rebuild. At least 1 minute — see the warning below. |
@@ -353,10 +353,13 @@ linking to that collection already filtered on this document.
 
 **Query** — two modes, and the asymmetry between them is the design. *Mode A, a Marten `where` clause*,
 is a read against one document type and needs no capability, so the service holds it to being a
-*clause*: no `;`, no statement of its own, and — without `RunSql` — no subquery, union, join, `lateral`,
-`returning`, catalog-probing function or `::regclass` cast either. Results come back as documents
-through the store's own serializer, the composed statement is shown, and a plan is offered where
-`RunSql` allows one (`EXPLAIN`, never `EXPLAIN ANALYZE`). *Mode B, the SQL console*, is arbitrary
+*clause*: no `;`, no statement of its own, brackets that balance, a tail that is
+`[order by …] [limit n] [offset n]` and nothing else, no function that reads, writes or waits outside
+the row, no `::regclass` cast — and, without `RunSql`, no subquery, union, join, `lateral` or
+`returning` either. It runs inside the same `BEGIN; SET TRANSACTION READ ONLY; …; ROLLBACK` as the
+console, under the same `QueryTimeout` and the same optional `SqlConsoleRole`. Results come back as the
+`data` column itself, never round-tripped through a CLR type, the composed statement is shown, and a plan
+is offered where `RunSql` allows one (`EXPLAIN`, never `EXPLAIN ANALYZE`). *Mode B, the SQL console*, is arbitrary
 read-only SQL against the whole database, is gated on `RunSql`, and is limited by `MaxSqlConsoleRows`,
 `QueryTimeout`, a 3-second lock timeout, a 60-second idle-in-transaction timeout and an optional
 `SqlConsoleRole` — inside `BEGIN; SET TRANSACTION READ ONLY; …; ROLLBACK`. The row cap stops the reader;
@@ -543,12 +546,15 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   store's own Postgres role can read — every table in the database, Marten's or not.
 - **Grant `RunSql` only to people you would give `psql` to.** That is the whole of it.
 - **Mode A is guarded differently, because it needs no capability.** The studio composes the statement
-  itself — `select … from <table> as d where 1 = 1 and <tenant> and <not deleted> and ( <your clause> )`
-  — so the tenant in the header and the soft-delete rule apply exactly as they do in the Documents
-  browser, and the SQL the page shows is the SQL that ran. The clause may not carry a second statement or
-  be a statement of its own, and without `RunSql` it may not reach another relation, call a function that
-  reads, writes or waits outside the row, or cast to `regclass`/`regproc`. The scanner errs towards
-  refusing, and every refusal names the capability that would lift it.
+  itself — `select … from <table> as d where 1 = 1 and <tenant> and <not deleted> and ( <your clause> )
+  and <tenant> and <not deleted>` — so the tenant in the header and the soft-delete rule apply exactly as
+  they do in the Documents browser, and the SQL the page shows is the SQL that ran. The studio's terms
+  are repeated *after* your predicate as well as before it, because a parenthesised predicate only
+  contains an `or` while the parentheses hold. The clause may not carry a second statement, be a
+  statement of its own, leave a bracket unbalanced, hang anything but a sort list off `order by`, call a
+  function that reads, writes or waits outside the row, or cast to `regclass`/`regproc` — **none of
+  which `RunSql` lifts**. What `RunSql` lifts is reaching another relation: subquery, union, join,
+  `lateral`, `returning`. The scanner errs towards refusing, and every refusal names what would lift it.
 - **Audit.** Every mutating operation and every refusal is written to a 500-entry in-memory ring (the
   Activity page) *and* to your `ILogger` under event ids **9200–9211**, which is the copy that survives a
   deployment. 9200 `ActionPerformed`, 9201 `ActionFailed`, 9202 `CapabilityDenied`, 9203
@@ -561,15 +567,11 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
 
 ## Current limitations
 
-- **Mode A runs on a plain read connection, not inside the console's read-only transaction.** The
-  composed statement is the studio's own `select`, the clause guard refuses a second statement, and
-  without `RunSql` every function that could write is refused — but a visitor who holds `RunSql` may name
-  such a function inside the clause, and there is no `SET TRANSACTION READ ONLY` behind Mode A to catch
-  it the way there is behind the console. Grant `RunSql` accordingly.
 - **Mode A takes no parameters.** The clause is handed to Marten as SQL text; there is no `?`/`@p`
   binding, so a literal you paste in is SQL too. What keeps that from being an ungated console is the
-  clause guard — no second statement, and without `RunSql` no nested read — not a parameter you could
-  have put the value in safely.
+  clause guard — no second statement, balanced brackets, the function denylist, and without `RunSql` no
+  nested read — together with the read-only transaction it runs in; not a parameter you could have put
+  the value in safely.
 - **No push, no hub.** Live pages poll at `RefreshInterval` through a single-flight snapshot cache,
   paused on hidden tabs; only projection state gets sub-second updates, and only where the daemon is
   hosted in this process. There is no SignalR hub of the studio's own in v1 — adding one would add a
