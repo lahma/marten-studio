@@ -299,11 +299,11 @@ fails the host with a message that names the option.
 | `Capabilities` | all off | Which mutating operations are enabled. |
 | `DefaultPageSize` | `50` | Rows per page when a list is first shown. 1 … `MaxPageSize`. |
 | `MaxPageSize` | `500` | The largest page a user may pick. 1 … 5000. |
-| `QueryTimeout` | 30 seconds | `statement_timeout` on every query the studio issues. 1 second … 10 minutes. |
+| `QueryTimeout` | 30 seconds | How long a studio query may run. It is a server-side `statement_timeout` where the studio owns a transaction — the SQL console, the Marten `where` clause, the recent-documents scan — and Npgsql's client-side `CommandTimeout` everywhere else. 1 second … 10 minutes. |
 | `MaxInlineDocumentBytes` | 512 KiB | Documents larger than this are not fetched into list views and show as raw text in the detail view. 1 byte … 64 MiB. |
 | `MaxSqlConsoleRows` | `500` | Row cap for the SQL console; the reader stops there rather than rewriting your statement. 1 … 10 000. |
 | `SqlConsoleRole` | `null` | A Postgres role the SQL console **and the Marten `where` clause** switch to with `SET LOCAL ROLE` inside their read-only transaction. Must be a plain identifier — and must be able to `select` from the document tables, or the Query page answers `42501`. |
-| `ExactCountThreshold` | `100000` | Above this estimated row count, collection counts stay `pg_class.reltuples` estimates, prefixed `~`, instead of becoming `count(*)`. |
+| `ExactCountThreshold` | `100000` | Above this estimated row count, collection counts stay `pg_class.reltuples` estimates, prefixed `~`, instead of becoming `count(*)` — and asking for an exact count is **refused**, with the reason on the badge, rather than being paid for. A conjoined collection under a tenant scope is the exception: that count is `where tenant_id = …`, which Marten makes index-backed by putting `tenant_id` first in the primary key, so it is always counted exactly and this threshold never applies to it. |
 | `RefreshInterval` | 5 seconds | How often live pages poll. Paused while the tab is hidden. 1 second … 5 minutes. |
 | `RebuildShardTimeout` | 1 hour | The per-shard replay budget handed to Marten's rebuild. At least 1 minute — see the warning below. |
 | `IsDocumentTypeVisible` | `null` | `Func<Type, bool>` filter over the registered document types, applied in the data layer and not only in navigation. |
@@ -322,8 +322,9 @@ fails the host with a message that names the option.
 version, tenancy, stream identity, event append mode and the schemas in play. A store that will not
 build gets its own error region rather than blanking the page for the ones that do.
 
-**Documents** — a collections rail with per-collection counts (estimates above `ExactCountThreshold`,
-prefixed `~`, with exact counts on demand), then a list with column chooser, keyset paging and a search
+**Documents** — a collections rail with per-collection counts (estimates, prefixed `~`; below
+`ExactCountThreshold` the `=` beside a collection pays for an exact `count(*)`, and above it the studio
+declines and says so on the badge), then a list with column chooser, keyset paging and a search
 grammar (`field:value`, `>=`, `is:deleted`, `tenant:…`) that compiles to parameterised SQL against the
 duplicated columns and JSON paths Marten actually created. Each search gets an index verdict —
 green/amber/red with the `StoreOptions` line that would fix it — and a "Show SQL" disclosure with the
@@ -595,8 +596,14 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
 - **Read-only and the capabilities are process-wide**, not per store, per database or per tenant. *Which*
   scopes a visitor sees is expressible, through `StoreAuthorizationPolicy`; "this tenant may edit but not
   delete" is not.
-- **Counts are estimates above `ExactCountThreshold`.** A `~` prefix says so, and an exact count is one
-  click away, under `statement_timeout`.
+- **Counts are estimates above `ExactCountThreshold`.** A `~` prefix says so. The `=` beside a collection
+  asks for an exact `count(*)`: below the threshold you get one, bounded by Npgsql's `CommandTimeout`
+  (from `QueryTimeout`) rather than by a server-side `statement_timeout`; above it the answer is the same
+  estimate marked "estimate only", with the reason on the badge, and the button is not offered again. The
+  exception is a conjoined collection under a tenant scope: that count is `where tenant_id = …`, which
+  Marten makes index-backed by putting `tenant_id` first in the primary key, so it is always counted
+  exactly — and such a visitor is never shown the whole-table estimate at all, because `reltuples` counts
+  every tenant's rows.
 - **A mapping made after the host has started is never checked** by the startup guard — from a hosted
   service, or a lazily built `EndpointDataSource`. Map the studio while the application is being built.
 - **Marten Studio is a store console, not an ETL tool.** Import, dumping a whole collection, copying
