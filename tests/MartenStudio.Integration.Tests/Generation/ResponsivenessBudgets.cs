@@ -118,6 +118,71 @@ internal static class ResponsivenessBudgets
 }
 
 /// <summary>
+/// The same budgets seen from a browser: what a page is allowed to take before it has painted.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Derived, never invented.</b> Every number here is a service-level budget from
+/// <see cref="ResponsivenessBudgets" /> plus one allowance, so there is still only one set of numbers to
+/// argue about. A second, independent table of "page" numbers would let a screen get ten times slower
+/// while both suites stayed green, which is precisely the regression these exist to catch.
+/// </para>
+/// <para>
+/// <b>Why they are not the same numbers.</b> A service measurement is one <c>await</c> on a warm
+/// connection inside the test process. A page measurement is a navigation: a TCP connection, the
+/// authorization middleware, a full server-side prerender of the whole component tree (which is where
+/// the service call happens), the HTML on the wire, Chromium's parse and layout, <c>blazor.web.js</c>,
+/// a WebSocket handshake, the circuit's first render and its diff back to the DOM. None of that is the
+/// studio's data path and all of it is between the click and the paint, so holding a page to a
+/// 250-millisecond service budget would only measure how fast Chromium starts.
+/// </para>
+/// <para>
+/// <b>The allowance is deliberately one number.</b> It is the same for every page, because every page
+/// pays the same circuit cost; if one screen needs more than the others, that is a fact about the screen
+/// and belongs in its service budget, not in a per-page fudge.
+/// </para>
+/// <para>
+/// <b>What a page budget can and cannot catch, said plainly.</b> Measured on this machine against the
+/// Medium set — 100 001 documents and 100 008 events — the median first paint was 55 ms for the
+/// collections rail, 57 ms for a customer list page, 98 ms for the event feed, 46 ms for the stream list
+/// and 27 ms for projections. Against budgets of about 1.3 seconds that is twenty times the headroom, so
+/// these will <em>not</em> notice a screen getting three times slower; the tight measurement is the
+/// service-level one, and that is where a regression of that size belongs. What a ceiling this shape
+/// does catch is the class of failure that has no service-level symptom at all: a page that renders ten
+/// thousand rows into the DOM, a circuit that serializes a megabyte of render tree before the first
+/// paint, or a screen that simply never paints. Those are seconds, not milliseconds.
+/// </para>
+/// </remarks>
+internal static class PageResponsivenessBudgets
+{
+    /// <summary>
+    /// Everything between the navigation and the paint that is not the studio's data call: connection,
+    /// prerender plumbing, transfer, Chromium's parse and layout, the script, and the circuit handshake.
+    /// </summary>
+    /// <remarks>
+    /// One second, which is about twenty times what the whole navigation measured locally and leaves room
+    /// for a CI runner that is also building containers. It is a ceiling, not a stopwatch — see the note
+    /// on the type.
+    /// </remarks>
+    public static readonly TimeSpan CircuitAllowance = TimeSpan.FromSeconds(1);
+
+    /// <summary>One collection's list page, first paint.</summary>
+    public static readonly TimeSpan DocumentsPage = ResponsivenessBudgets.DocumentPage + CircuitAllowance;
+
+    /// <summary>The collections rail with nothing selected, first paint.</summary>
+    public static readonly TimeSpan DocumentsIndex = ResponsivenessBudgets.CollectionsRail + CircuitAllowance;
+
+    /// <summary>The global event feed, first paint.</summary>
+    public static readonly TimeSpan FeedPage = ResponsivenessBudgets.EventFeedPage + CircuitAllowance;
+
+    /// <summary>The stream list, first paint.</summary>
+    public static readonly TimeSpan StreamsPage = ResponsivenessBudgets.StreamPage + CircuitAllowance;
+
+    /// <summary>The projections screen, first paint.</summary>
+    public static readonly TimeSpan ProjectionsPage = ResponsivenessBudgets.ProjectionsProgress + CircuitAllowance;
+}
+
+/// <summary>
 /// Collects the measurements of one run, separating a new hot spot from a known one.
 /// </summary>
 /// <param name="write">Where a line goes - the test's own output helper.</param>

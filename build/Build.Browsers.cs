@@ -1,3 +1,5 @@
+using System.Linq;
+
 using Fallout.Common;
 using Fallout.Common.CI.GitHubActions;
 using Fallout.Common.IO;
@@ -16,15 +18,26 @@ partial class Build
     readonly bool Playwright;
 
     /// <summary>
-    /// Local runs install browsers only when asked; CI always does.
+    /// Local runs install browsers only when asked; CI always does; and asking for this target by name is
+    /// asking for it.
     /// </summary>
     /// <remarks>
     /// This is the build-side half of D19. The test-side half is the opposite rule: locally the browser
     /// suite <em>skips with a reason</em> when Chromium is missing, on CI it <em>throws</em>. Together they
     /// mean a developer never pays a 150 MB download for `dotnet fallout Test`, and CI can never report a
     /// green run whose browser tests silently did not happen.
+    ///
+    /// The third clause is why `dotnet fallout Browsers` does what it says. Without it the condition was
+    /// only `Playwright || CI`, so the command AGENTS.md documents as "just the Chromium install" - and
+    /// the command the test suite's skip reason has to name - printed
+    /// `Skipped // OnlyWhen: ShouldInstallBrowsers` and installed nothing. A documented command that
+    /// silently does nothing is the same failure the skip/throw rule above exists to prevent, one layer
+    /// up. `--playwright` is still what turns the install on when the invoked target is `Test`.
     /// </remarks>
-    bool ShouldInstallBrowsers => Playwright || GitHubActions.Instance != null;
+    bool ShouldInstallBrowsers =>
+        Playwright
+        || GitHubActions.Instance != null
+        || InvokedTargets.Any(x => x.Name == nameof(Browsers));
 
     /// <summary>
     /// Where the Playwright CLI bootstrapper lands. Microsoft.Playwright emits <c>playwright.ps1</c> into

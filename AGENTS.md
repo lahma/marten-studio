@@ -492,6 +492,7 @@ src/MartenStudio/Services/Relationships/      The relationship graph service, it
 src/MartenStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
 tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, page and panel - no database
 tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both ways, visibility, bounded counts
+tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: six scenarios, the D19 gate, the large-data pass
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),
