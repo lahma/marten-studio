@@ -19,6 +19,18 @@ namespace MartenStudio.Integration.Tests;
 /// is why <see cref="CreateSchemaAsync"/> drops before it creates.
 /// </para>
 /// <para>
+/// <b><see cref="ReuseEnvironmentVariable"/> turns reuse off for one run</b>, and it is this project's own
+/// variable rather than a Testcontainers one. <c>TESTCONTAINERS_REUSE_ENABLE</c> is <em>not</em> read by
+/// Testcontainers for .NET 4.x: the string does not occur anywhere in <c>Testcontainers.dll</c>, and reuse
+/// is decided solely by the <c>WithReuse(bool)</c> below. Setting it therefore does nothing at all, and a
+/// run that believed otherwise was still sharing one reused container with every other run on the
+/// machine. That is a real collision on a box where several agent sessions test at once: the schema names
+/// here are derived from test class names, so two runs land on the same schema and drop each other's
+/// tables, and Testcontainers can restart the shared container under a run that is mid-query. Set
+/// <c>MARTENSTUDIO_PG_REUSE=false</c> (or <c>0</c>) to get a container of this run's own; anything else,
+/// including leaving it unset, keeps the local-reuse default.
+/// </para>
+/// <para>
 /// <b>Isolation is per schema, not per server.</b> Each test class gets its own schema and never sees
 /// another's tables, which is all the isolation these tests need and costs one round trip instead of one
 /// container start.
@@ -30,11 +42,21 @@ namespace MartenStudio.Integration.Tests;
 /// </remarks>
 public sealed class PostgresFixture : IAsyncLifetime
 {
+    /// <summary>The variable that turns container reuse off for one run.</summary>
+    public const string ReuseEnvironmentVariable = "MARTENSTUDIO_PG_REUSE";
+
     private readonly PostgreSqlContainer container = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithReuse(!DockerAvailability.OnContinuousIntegration)
+        .WithReuse(ShouldReuse)
         .Build();
 
     private bool started;
+
+    /// <summary>
+    /// Whether this run shares a container with the ones around it: never on CI, and not when
+    /// <see cref="ReuseEnvironmentVariable"/> is <c>false</c> or <c>0</c>.
+    /// </summary>
+    public static bool ShouldReuse =>
+        !DockerAvailability.OnContinuousIntegration && !IsReuseDisabledByEnvironment();
 
     /// <summary>The connection string for the container, once it is running.</summary>
     public string ConnectionString => started
@@ -95,4 +117,21 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         return name;
     }
+
+    private static bool IsReuseDisabledByEnvironment() =>
+        IsReuseDisabled(Environment.GetEnvironmentVariable(ReuseEnvironmentVariable));
+
+    /// <summary>
+    /// Whether a <see cref="ReuseEnvironmentVariable"/> value turns reuse off. Only <c>false</c> and
+    /// <c>0</c> do, so an unset variable — or a misspelt value — leaves the default alone rather than
+    /// silently changing it.
+    /// </summary>
+    /// <remarks>
+    /// Split out from the environment read so that it can be tested without a test mutating process-wide
+    /// state that every other test in the run shares.
+    /// </remarks>
+    internal static bool IsReuseDisabled(string? value) =>
+        value?.Trim() is { } trimmed &&
+        (string.Equals(trimmed, "false", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(trimmed, "0", StringComparison.Ordinal));
 }

@@ -381,9 +381,16 @@ fails with `Could not find commit information` on an empty repository.
 ```powershell
 .\build.ps1 Test                                          # everything, through the orchestrator
 dotnet test tests\MartenStudio.Tests                       # the fast suite alone
+$env:MARTENSTUDIO_PG_REUSE='false'                         # a container of this run's own; see PostgresFixture
 dotnet test tests\MartenStudio.Integration.Tests           # needs Docker - run `docker info` first
 dotnet test tests\MartenStudio.Tests --filter "FullyQualifiedName~ApiSurface"
 ```
+
+Container reuse is on by default locally (a second run attaches to the same Postgres) and off on CI.
+`MARTENSTUDIO_PG_REUSE=false` is how one run opts out, which every run that might overlap another —
+parallel agent packets, two terminals — must do, because schema names derive from test class names and two
+runs on one reused container drop each other's tables. `TESTCONTAINERS_REUSE_ENABLE` is **not** read by
+Testcontainers 4.x (verified by decompilation, 2026-09-14) and must not be used.
 
 There are seven kinds of test, in two projects:
 
@@ -415,7 +422,8 @@ There are seven kinds of test, in two projects:
    against the real assemblies (2026-09-14), which is why they are worth reading before calling a Marten
    API you have not used here yet.
 7. **Integration and browser** (`tests/MartenStudio.Integration.Tests/`) — one `postgres:17-alpine` via an
-   assembly fixture (reuse enabled locally), one Marten schema per collection, everything driven *through*
+   assembly fixture (reuse enabled locally unless `MARTENSTUDIO_PG_REUSE=false`; `PostgresFixtureTests`
+   pins the variable's name), one Marten schema per collection, everything driven *through*
    the studio's own services so the gating is exercised rather than bypassed. Waits are always
    wait-on-condition, **never `Task.Delay`**. The Playwright scenarios live in `Browser/`: locally they
    skip with the install command in the reason when Chromium is missing; on CI a missing browser throws

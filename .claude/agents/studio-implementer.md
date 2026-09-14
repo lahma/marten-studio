@@ -48,7 +48,9 @@ committed change.
 - Write the tests with the code, in the same commit.
 - Verify, in this order, and paste the tail of each into your report:
   `dotnet build marten-studio.slnx`, `dotnet test tests/MartenStudio.Tests`,
-  `dotnet test tests/MartenStudio.Integration.Tests` (needs Docker — run `docker info` first),
+  `MARTENSTUDIO_PG_REUSE=false dotnet test tests/MartenStudio.Integration.Tests` (needs Docker — run
+  `docker info` first; the variable gives this run its own container so parallel packets cannot collide
+  on schemas — `TESTCONTAINERS_REUSE_ENABLE` is not read by Testcontainers 4.x and must not be used),
   `dotnet fallout Test`.
 - Commit on your branch with a message naming the packet. Do not push, do not open a PR, do not merge to
   `main` — the orchestrator validates and integrates.
