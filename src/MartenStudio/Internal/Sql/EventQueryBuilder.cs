@@ -524,7 +524,19 @@ internal static class EventQueryBuilder
     }
 
     /// <summary>One event by its sequence, for the dead-letter expansion.</summary>
-    public static NpgsqlCommand BuildEventBySequence(EventTableInfo table, long sequence)
+    /// <param name="table">The discovered event tables.</param>
+    /// <param name="sequence">The global <c>seq_id</c> to read.</param>
+    /// <param name="tenantId">The scope's tenant, when the event store is conjoined-tenanted.</param>
+    /// <remarks>
+    /// <para>
+    /// The tenant predicate is the sibling of the feed's, and it is load-bearing rather than decorative.
+    /// A dead letter names an event by its <em>global</em> sequence, and <c>DeadLetterEvent</c> is
+    /// registered <c>SingleTenanted()</c> unconditionally — so the sequence a visitor scoped to one
+    /// tenant hands this builder may well belong to another one. Without the predicate the expansion
+    /// would render that other tenant's event body, and <c>SkipEventAsync</c> would go on to write to it.
+    /// </para>
+    /// </remarks>
+    public static NpgsqlCommand BuildEventBySequence(EventTableInfo table, long sequence, string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(table);
 
@@ -539,6 +551,12 @@ internal static class EventQueryBuilder
             sql.Append("from ").Append(table.QualifiedEvents).Append(AsAlias).Append('\n');
             sql.Append("where ").Append(Column(Alias, "seq_id")).Append(" = ")
                 .Append(parameters.Add(NpgsqlDbType.Bigint, sequence, "seq"));
+
+            if (table.HasTenantId)
+            {
+                sql.Append("\n  and (").Append(parameters.AddNullable(NpgsqlDbType.Varchar, tenantId, "tenant"))
+                    .Append(" is null or ").Append(Column(Alias, "tenant_id")).Append(" = @tenant)");
+            }
 
             command.CommandText = sql.ToString();
             return command;
@@ -604,30 +622,28 @@ internal static class EventQueryBuilder
     /// place the studio counts a document table by name rather than through a mapping.
     /// </summary>
     /// <param name="schema">The event store's schema.</param>
-    /// <param name="tenantId">
-    /// The scope's tenant. Unlike the other builders there is no <see cref="EventTableInfo"/> here to ask
-    /// whether <c>tenant_id</c> exists, so the predicate is emitted only when a tenant is actually given —
-    /// passing one is the caller's assertion that the event store is conjoined-tenanted.
-    /// </param>
     /// <param name="commandTimeout">A bound on how long the count may cost, when the caller sets one.</param>
-    public static NpgsqlCommand BuildDeadLetterCount(
-        string schema,
-        string? tenantId = null,
-        TimeSpan? commandTimeout = null)
+    /// <remarks>
+    /// <para>
+    /// <b>There is no tenant parameter, and there cannot be one.</b> Marten registers
+    /// <c>DeadLetterEvent</c> into the event schema <c>SingleTenanted()</c> unconditionally
+    /// (<c>StoreOptions.ApplyConfiguration</c>, verified by decompilation against 9.35), so
+    /// <c>mt_doc_deadletterevent</c> has no <c>tenant_id</c> column on any store — conjoined event store
+    /// or not. This builder used to take one and emit <c>where "tenant_id" = @tenant</c>, which could only
+    /// ever raise <c>42703 undefined_column</c>; a parameter whose only reachable behaviour is to throw is
+    /// not a feature. The dead-letter <em>list</em> narrows by the document's own <c>TenantId</c>
+    /// <em>property</em> instead, which is stored inside the JSON body and is queryable through Marten's
+    /// LINQ — see <c>EventDataService.ListDeadLettersAsync</c>.
+    /// </para>
+    /// </remarks>
+    public static NpgsqlCommand BuildDeadLetterCount(string schema, TimeSpan? commandTimeout = null)
     {
         var command = new NpgsqlCommand();
 
         try
         {
-            var sql = "select count(*) from " + SqlIdentifier.Qualify(schema, EventTableInfo.DeadLetterTable);
-
-            if (tenantId is not null)
-            {
-                sql += " where " + SqlIdentifier.Quote("tenant_id") + " = @tenant";
-                command.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Varchar) { Value = tenantId });
-            }
-
-            command.CommandText = sql;
+            command.CommandText =
+                "select count(*) from " + SqlIdentifier.Qualify(schema, EventTableInfo.DeadLetterTable);
             ApplyTimeout(command, commandTimeout);
 
             return command;

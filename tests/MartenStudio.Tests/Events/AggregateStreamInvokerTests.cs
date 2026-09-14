@@ -130,6 +130,61 @@ public class AggregateStreamInvokerTests
         candidates.Should().OnlyContain(x => !x.Type.IsValueType);
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // The wrapper path: a container-scoped or composite registration is an ISubscriptionSource but not an
+    // IAggregateProjection, so the aggregate has to come off ImplementationType's base chain.
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The base is matched by <b>type identity</b> against <c>SingleStreamProjection&lt;,&gt;</c> and
+    /// <c>JasperFxSingleStreamProjectionBase&lt;,,,&gt;</c>, which is what the remarks claimed and the code
+    /// did not: it matched <c>GetGenericTypeDefinition().Name.StartsWith("SingleStreamProjection")</c>.
+    /// </summary>
+    [Fact]
+    public void The_wrapper_path_reads_the_aggregate_off_the_real_base_type()
+    {
+        AggregateStreamInvoker.FromImplementationType(typeof(TimeTravelSummaryProjection), StreamIdentity.AsGuid)
+            .Should().Be<TimeTravelSummary>();
+
+        AggregateStreamInvoker.FromImplementationType(typeof(TimeTravelKeyedProjection), StreamIdentity.AsString)
+            .Should().Be<TimeTravelKeyed>();
+    }
+
+    /// <summary>A projection whose identity does not match this store's streams is not a candidate.</summary>
+    [Fact]
+    public void The_wrapper_path_drops_a_projection_keyed_the_other_way()
+    {
+        AggregateStreamInvoker.FromImplementationType(typeof(TimeTravelSummaryProjection), StreamIdentity.AsString)
+            .Should().BeNull();
+
+        AggregateStreamInvoker.FromImplementationType(typeof(TimeTravelKeyedProjection), StreamIdentity.AsGuid)
+            .Should().BeNull();
+    }
+
+    /// <summary>
+    /// The regression the name match could not see. A host type that is merely <em>called</em>
+    /// <c>SingleStreamProjectionOfMine&lt;TDoc,TId&gt;</c> and is not a projection at all used to be read
+    /// as one, and its first generic argument offered in the picker as an aggregate — which would have
+    /// thrown at the click. Type identity cannot make that mistake, and a JasperFx rename now breaks the
+    /// build rather than silently matching nothing.
+    /// </summary>
+    [Fact]
+    public void A_type_that_only_looks_like_a_single_stream_projection_is_not_one()
+    {
+        AggregateStreamInvoker
+            .FromImplementationType(typeof(SingleStreamProjectionOfMine<TimeTravelNote, Guid>), StreamIdentity.AsGuid)
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void The_wrapper_path_answers_nothing_for_a_type_that_is_not_a_projection()
+    {
+        AggregateStreamInvoker.FromImplementationType(typeof(TimeTravelNote), StreamIdentity.AsGuid)
+            .Should().BeNull();
+
+        AggregateStreamInvoker.FromImplementationType(null, StreamIdentity.AsGuid).Should().BeNull();
+    }
+
     [Fact]
     public void Replaying_into_a_value_type_is_refused_with_the_reason()
     {
@@ -223,4 +278,22 @@ public class TimeTravelKeyedProjection : SingleStreamProjection<TimeTravelKeyed,
 {
     /// <summary>Counts the events in the stream.</summary>
     public static void Apply(TimeTravelOrderPlaced placed, TimeTravelKeyed keyed) => keyed.Count++;
+}
+
+/// <summary>
+/// A decoy: two generic arguments and a name that starts with <c>SingleStreamProjection</c>, and nothing
+/// whatever to do with Marten. The name-prefix match used to read <typeparamref name="TDoc" /> off it and
+/// offer it in the time-travel picker.
+/// </summary>
+/// <typeparam name="TDoc">Would have been taken for the aggregate.</typeparam>
+/// <typeparam name="TId">Would have been taken for its identity.</typeparam>
+public class SingleStreamProjectionOfMine<TDoc, TId>
+    where TDoc : class
+    where TId : notnull
+{
+    /// <summary>Whatever this host type is actually for.</summary>
+    public TDoc? Value { get; set; }
+
+    /// <summary>Its key.</summary>
+    public TId? Key { get; set; }
 }

@@ -326,10 +326,17 @@ internal sealed record EventTypeInfo(
 /// <param name="Types">The types, registered ones first.</param>
 /// <param name="CountsLoaded">Whether the group-by has been run.</param>
 /// <param name="Error">What went wrong, when the list could not be read.</param>
+/// <param name="IsTruncated">
+/// Whether the store has more event types than the screen will list. The cap exists so that a store whose
+/// <c>mt_events.type</c> column holds tens of thousands of distinct values cannot turn one click into a
+/// page nobody can render — but a truncated list that does not say so is a list that quietly lies about
+/// what the store holds, which is the same failure as drawing "could not count" as zero.
+/// </param>
 internal sealed record EventTypeList(
     IReadOnlyList<EventTypeInfo> Types,
     bool CountsLoaded,
-    EventDataError? Error = null)
+    EventDataError? Error = null,
+    bool IsTruncated = false)
 {
     /// <summary>An empty list that failed.</summary>
     public static EventTypeList Failed(EventDataError error) => new([], false, error);
@@ -407,8 +414,52 @@ internal enum AggregateCandidateSource
     /// <summary>A registered single-stream projection whose identity matches this store's streams.</summary>
     SingleStreamProjection,
 
-    /// <summary>Any document type the store knows, offered as the fallback picker.</summary>
+    /// <summary>
+    /// Any document type the store knows, offered as the manual "try any type (may fail)" fallback.
+    /// Nothing says the type can aggregate this stream, and Marten throws when it cannot.
+    /// </summary>
     DocumentType
+}
+
+/// <summary>
+/// Why a replay produced no aggregate. Four different facts that used to render as one sentence.
+/// </summary>
+/// <remarks>
+/// Marten's <c>AggregateStreamAsync&lt;T&gt;</c> answers <see langword="null" /> for all four (verified
+/// against 9.35's <c>QueryEventStore</c>): the stream's events are fetched through an
+/// <c>EventStatement</c> that always applies <c>IsNotArchivedFilter</c>, so an archived stream fetches
+/// empty; a version past the stream's last one is an explicit
+/// <c>if (version != 0 &amp;&amp; version &gt; events[^1].Version) return null</c>; and an aggregator that
+/// never creates — or that deletes — returns null of its own accord. Telling the visitor "produced
+/// nothing" for the first two is technically true and practically useless.
+/// </remarks>
+internal enum AggregateMissingReason
+{
+    /// <summary>The replay ran and the aggregator produced nothing.</summary>
+    NoAggregate,
+
+    /// <summary>There is no such stream in this scope at all.</summary>
+    StreamMissing,
+
+    /// <summary>The stream is archived, and Marten's stream fetch never returns archived events.</summary>
+    StreamArchived,
+
+    /// <summary>The version asked for is past the stream's last version.</summary>
+    VersionPastEnd,
+
+    /// <summary>
+    /// The event store is conjoined-tenanted and the scope is "all tenants", which is not a thing a
+    /// replay can be.
+    /// </summary>
+    /// <remarks>
+    /// A Marten session always has exactly one tenant: <c>SessionOptions.ForDatabase(database)</c> is
+    /// <c>ForDatabase("*DEFAULT*", database)</c> (verified against Marten 9.35's
+    /// <c>Services/SessionOptions.cs</c>), and <c>EventStatement</c> emits
+    /// <c>d.tenant_id = '*DEFAULT*'</c> for a conjoined store — so an "all tenants" replay silently reads
+    /// no events and looks exactly like an aggregate that refused to build. There is no "any tenant"
+    /// session to ask instead; the honest answer is to say which tenant to pick.
+    /// </remarks>
+    TenantRequired
 }
 
 /// <summary>The result of replaying a stream to a version.</summary>
@@ -417,18 +468,30 @@ internal enum AggregateCandidateSource
 /// <param name="Json">The aggregate, serialized with the store's own serializer.</param>
 /// <param name="Found">Whether the replay produced an aggregate at all.</param>
 /// <param name="Error">What went wrong, when the replay failed.</param>
+/// <param name="Reason">Why nothing came back, when <paramref name="Found" /> is false.</param>
+/// <param name="StreamVersion">
+/// The stream's own last version, when it was read. Only set on the <see cref="AggregateMissingReason" />
+/// paths that had to read it, so that the page can say "this stream ends at 7" rather than only "not
+/// found".
+/// </param>
 internal sealed record AggregateSnapshot(
     string TypeName,
     long Version,
     string? Json,
     bool Found,
-    EventDataError? Error = null)
+    EventDataError? Error = null,
+    AggregateMissingReason Reason = AggregateMissingReason.NoAggregate,
+    long? StreamVersion = null)
 {
     /// <summary>A replay that failed.</summary>
     public static AggregateSnapshot Failed(string typeName, long version, EventDataError error) =>
         new(typeName, version, null, false, error);
 
     /// <summary>A replay that produced nothing: no events of that shape, or a deleted aggregate.</summary>
-    public static AggregateSnapshot NotFound(string typeName, long version) =>
-        new(typeName, version, null, false);
+    public static AggregateSnapshot NotFound(
+        string typeName,
+        long version,
+        AggregateMissingReason reason = AggregateMissingReason.NoAggregate,
+        long? streamVersion = null) =>
+        new(typeName, version, null, false, null, reason, streamVersion);
 }

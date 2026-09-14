@@ -7,6 +7,7 @@ using JasperFx.Events.Daemon;
 using JasperFx.Events.Subscriptions;
 
 using Marten;
+using Marten.Events.Aggregation;
 using Marten.Schema;
 
 namespace MartenStudio.Services.Events;
@@ -74,6 +75,19 @@ internal static class AggregateStreamInvoker
     /// </summary>
     /// <param name="options">The store's own configuration - nothing here is guessed.</param>
     /// <returns>The candidates, projections first, each type appearing once.</returns>
+    /// <remarks>
+    /// <para>
+    /// The two halves are not the same claim, which is why they carry different
+    /// <see cref="AggregateCandidateSource" /> values and the picker labels them differently.
+    /// <see cref="AggregateCandidateSource.SingleStreamProjection" /> means the store itself registers a
+    /// projection that aggregates this type from a single stream keyed the way this store's streams are
+    /// keyed: replaying into it is what the store already does on every append, and it will work.
+    /// <see cref="AggregateCandidateSource.DocumentType" /> means only that the store knows the type -
+    /// <c>AggregateStreamAsync&lt;T&gt;</c> will ask Marten's <c>AggregatorFor&lt;T&gt;</c> to build an
+    /// aggregator for it, which throws for a type with no <c>Create</c>/<c>Apply</c> for any of the
+    /// stream's events. That is a "try any type (may fail)" affordance and the screen says so.
+    /// </para>
+    /// </remarks>
     public static IReadOnlyList<AggregateTypeCandidate> Candidates(IReadOnlyStoreOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -184,16 +198,46 @@ internal static class AggregateStreamInvoker
     }
 
     /// <summary>
+    /// The two closed generic bases a single-stream projection's type is reached through, matched by type
+    /// identity.
+    /// </summary>
+    /// <remarks>
+    /// <c>Marten.Events.Aggregation.SingleStreamProjection&lt;TDoc,TId&gt;</c> derives from
+    /// <c>JasperFx.Events.Aggregation.JasperFxSingleStreamProjectionBase&lt;TDoc,TId,IDocumentOperations,IQuerySession&gt;</c>
+    /// (verified against Marten 9.35), so the second entry alone would do — the first is here so that the
+    /// intent survives a JasperFx release that reshuffles the base chain. Both are <c>typeof</c>, so the
+    /// compiler checks the arity and a rename breaks the build rather than silently matching nothing.
+    /// </remarks>
+    private static readonly Type[] SingleStreamBases =
+        [typeof(SingleStreamProjection<,>), typeof(JasperFxSingleStreamProjectionBase<,,,>)];
+
+    /// <summary>
     /// <c>TDoc</c> and <c>TId</c> from the aggregation base in a projection type's base chain.
     /// </summary>
     /// <remarks>
-    /// Matched by generic-argument shape rather than by name: <c>SingleStreamProjection&lt;TDoc,TId&gt;</c>
-    /// is Marten's own subclass of <c>JasperFxSingleStreamProjectionBase&lt;TDoc,TId,TOperations,TSession&gt;</c>,
-    /// and a host may well derive its own type from either. Walking to the first base type with at least
-    /// two generic arguments that also implements the aggregation interface covers both, and covers
-    /// whatever the next JasperFx release calls the base.
+    /// <para>
+    /// Only reached for a source that is <em>not</em> an <see cref="IAggregateProjection" /> — a
+    /// container-scoped or composite wrapper. The base is matched by <b>type identity</b> against the open
+    /// generic definitions in <see cref="SingleStreamBases" />, never by the name of the generic type
+    /// definition: a name prefix would have matched any type somebody happened to call
+    /// <c>SingleStreamProjectionOfMine&lt;,&gt;</c>, and would have stopped matching the moment JasperFx
+    /// renamed its own base without anything failing to compile.
+    /// </para>
+    /// <para>
+    /// The aggregate is the base's first generic argument and its identity the second, which is what
+    /// <c>&lt;TDoc, TId&gt;</c> means in both of them.
+    /// </para>
+    /// <para>
+    /// <c>internal</c> rather than <c>private</c> so it can be tested directly: reaching it through
+    /// <see cref="Candidates" /> needs a registration Marten only produces for a container-scoped or
+    /// composite projection, which a unit test cannot build without a container - and the regression this
+    /// guards (a type merely <em>named</em> like a single-stream projection) is worth a test of its own.
+    /// </para>
     /// </remarks>
-    private static Type? FromImplementationType(Type? implementationType, StreamIdentity identity)
+    /// <param name="implementationType">The projection's own type, from <c>ISubscriptionSource</c>.</param>
+    /// <param name="identity">How this store's streams are keyed.</param>
+    /// <returns>The aggregate type, or <see langword="null" /> when this is not a matching projection.</returns>
+    internal static Type? FromImplementationType(Type? implementationType, StreamIdentity identity)
     {
         for (Type? type = implementationType; type is not null; type = type.BaseType)
         {
@@ -202,18 +246,13 @@ internal static class AggregateStreamInvoker
                 continue;
             }
 
-            Type[] arguments = type.GetGenericArguments();
-            if (arguments.Length < 2)
+            Type definition = type.GetGenericTypeDefinition();
+            if (Array.IndexOf(SingleStreamBases, definition) < 0)
             {
                 continue;
             }
 
-            string name = type.GetGenericTypeDefinition().Name;
-            if (!name.StartsWith("SingleStreamProjection", StringComparison.Ordinal)
-                && !name.StartsWith("JasperFxSingleStreamProjectionBase", StringComparison.Ordinal))
-            {
-                continue;
-            }
+            Type[] arguments = type.GetGenericArguments();
 
             return Matches(arguments[1], identity) ? arguments[0] : null;
         }

@@ -3,6 +3,7 @@
 @using Microsoft.Extensions.Options
 @using MartenStudio.Services
 @using MartenStudio.Services.Events
+@using MartenStudio.Services.Live
 @implements IAsyncDisposable
 @inject IEventDataService Events
 @inject StudioState State
@@ -44,8 +45,8 @@
 
         @if (pending.Count > 0)
         {
-            <button type="button" class="ms-follow-pill" @onclick="ShowPendingAsync">
-                @pending.Count.ToString(CultureInfo.InvariantCulture) new event@(pending.Count == 1 ? string.Empty : "s")
+            <button type="button" class="ms-follow-pill" title="@PendingTitle" @onclick="ShowPendingAsync">
+                @PendingLabel
             </button>
         }
 
@@ -153,6 +154,13 @@
     private bool loading = true;
     private bool hasMore;
     private bool tabHidden;
+
+    /// <summary>Whether the pending buffer has had to drop events, so the pill says "500+" rather than "500".</summary>
+    private bool pendingTrimmed;
+
+    /// <summary>Whether <see cref="DisposeAsync" /> has already run.</summary>
+    private bool disposed;
+
     private string? signature;
 
     /// <summary>The event types ticked, comma-separated in the URL.</summary>
@@ -213,6 +221,25 @@
         ? (tabHidden ? "ms-follow-paused" : "ms-follow-live")
         : string.Empty;
 
+    /// <summary>
+    /// What the pill says. "500+" once the buffer has had to drop events, because "500 new events" after
+    /// a burst of two thousand is a number that is simply wrong - and the one the reader would use to
+    /// decide whether they have seen everything.
+    /// </summary>
+    private string PendingLabel
+    {
+        get
+        {
+            string count = pending.Count.ToString(CultureInfo.InvariantCulture) + (pendingTrimmed ? "+" : string.Empty);
+            return count + " new event" + (pending.Count == 1 && !pendingTrimmed ? string.Empty : "s");
+        }
+    }
+
+    private string PendingTitle => pendingTrimmed
+        ? $"More than {MaxBufferedRows.ToString(CultureInfo.InvariantCulture)} events arrived; the oldest of "
+            + "them were dropped rather than buffered. Reload for the newest page."
+        : "Show these on the page";
+
     private string FollowState
     {
         get
@@ -272,18 +299,11 @@
             tabHidden = await JsRuntime.InvokeAsync<bool>(
                 "martenStudio.visibility.watch", pageCancellation.Token, selfReference);
         }
-        catch (JSException)
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
         {
-            // Prerendering, or a browser that will not answer. Follow mode then simply never pauses.
-        }
-        catch (System.Text.Json.JsonException)
-        {
-        }
-        catch (InvalidOperationException)
-        {
-        }
-        catch (OperationCanceledException)
-        {
+            // Prerendering, a browser that will not answer, or a circuit that is already gone. Follow mode
+            // then simply never pauses, which is the safe way round. One filter rather than a ladder of
+            // catch clauses because JSDisconnectedException is not a JSException and a ladder misses it.
         }
     }
 
@@ -343,6 +363,7 @@
         loading = true;
         error = null;
         pending.Clear();
+        pendingTrimmed = false;
         StateHasChanged();
 
         try
@@ -580,21 +601,26 @@
             pending.Insert(0, delta[index]);
         }
 
-        Trim(pending);
+        pendingTrimmed |= Trim(pending);
     }
 
-    private static void Trim(List<EventRow> buffer)
+    /// <summary>Caps a buffer, and says whether it had to.</summary>
+    private static bool Trim(List<EventRow> buffer)
     {
-        if (buffer.Count > MaxBufferedRows)
+        if (buffer.Count <= MaxBufferedRows)
         {
-            buffer.RemoveRange(MaxBufferedRows, buffer.Count - MaxBufferedRows);
+            return false;
         }
+
+        buffer.RemoveRange(MaxBufferedRows, buffer.Count - MaxBufferedRows);
+        return true;
     }
 
     private async Task ShowPendingAsync()
     {
         rows.InsertRange(0, pending);
         pending.Clear();
+        pendingTrimmed = false;
         Trim(rows);
 
         await InvokeAsync(StateHasChanged);
@@ -604,18 +630,9 @@
             await JsRuntime.InvokeAsync<bool>(
                 "martenStudio.scroll.intoView", pageCancellation.Token, "ms-feed-top", "start");
         }
-        catch (JSException)
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
         {
             // Scrolling is a courtesy; the rows are already on the page.
-        }
-        catch (System.Text.Json.JsonException)
-        {
-        }
-        catch (InvalidOperationException)
-        {
-        }
-        catch (OperationCanceledException)
-        {
         }
     }
 
@@ -711,37 +728,61 @@
             After?.ToString(CultureInfo.InvariantCulture),
             Follow);
 
+    /// <summary>
+    /// Gives the browser's .NET reference back, stops the poll and cancels the page's token - in that
+    /// order, and all of them however the interop call goes.
+    /// </summary>
+    /// <remarks>
+    /// The <c>finally</c> blocks are the point. Handing the reference back is a best-effort courtesy to a
+    /// browser that may already be gone, but disposing the <see cref="DotNetObjectReference{TValue}" />
+    /// and the page's <see cref="CancellationTokenSource" /> is not optional: an undisposed reference pins
+    /// this component - and everything it holds - for the life of the process, and an uncancelled token
+    /// leaves whatever is mid-read running against a circuit nobody is on. Before this, an exception out
+    /// of <c>visibility.unwatch</c> skipped both.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        State.ScopeChanged -= OnScopeChangedAsync;
-
-        await StopFollowAsync();
-
-        if (selfReference is not null)
+        if (disposed)
         {
-            try
-            {
-                await JsRuntime.InvokeAsync<bool>("martenStudio.visibility.unwatch", selfReference);
-            }
-            catch (JSException)
-            {
-            }
-            catch (System.Text.Json.JsonException)
-            {
-            }
-            catch (InvalidOperationException)
-            {
-            }
-            catch (OperationCanceledException)
-            {
-            }
-
-            selfReference.Dispose();
-            selfReference = null;
+            // Idempotent, because a CancellationTokenSource that has been disposed throws from Cancel and
+            // a second disposal must not be the thing that finally puts an exception on the circuit.
+            return;
         }
 
-        await pageCancellation.CancelAsync();
-        pageCancellation.Dispose();
+        disposed = true;
+
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        try
+        {
+            await StopFollowAsync();
+
+            if (selfReference is not null)
+            {
+                try
+                {
+                    await JsRuntime.InvokeAsync<bool>("martenStudio.visibility.unwatch", selfReference);
+                }
+                catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+                {
+                    // The circuit is already gone; the browser-side watcher drops the reference itself.
+                }
+            }
+        }
+        finally
+        {
+            selfReference?.Dispose();
+            selfReference = null;
+
+            try
+            {
+                await pageCancellation.CancelAsync();
+            }
+            finally
+            {
+                pageCancellation.Dispose();
+            }
+        }
 
         GC.SuppressFinalize(this);
     }

@@ -293,18 +293,22 @@ public class EventQueryBuilderTests
         command.CommandText.Should().Contain("order by s.\"timestamp\" desc, s.\"id\"");
     }
 
+    /// <summary>
+    /// The dead-letter count takes no tenant, and deliberately: <c>mt_doc_deadletterevent</c> has no
+    /// <c>tenant_id</c> column on any store, because Marten registers <c>DeadLetterEvent</c>
+    /// <c>SingleTenanted()</c> unconditionally. It keeps the budget, which it does need.
+    /// </summary>
     [Fact]
     public void Every_unbounded_aggregate_can_be_scoped_to_a_tenant_and_given_a_budget()
     {
         using var active = EventQueryBuilder.BuildRecentlyActiveStreams(
             Full, 10, "acme", TimeSpan.FromSeconds(4));
         using var counts = EventQueryBuilder.BuildEventTypeCounts(Full, "acme", TimeSpan.FromSeconds(4));
-        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount(
-            "studio_sql", "acme", TimeSpan.FromSeconds(4));
+        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount("studio_sql", TimeSpan.FromSeconds(4));
 
         active.Parameters["tenant"].Value.Should().Be("acme");
         counts.Parameters["tenant"].Value.Should().Be("acme");
-        deadLetters.Parameters["tenant"].Value.Should().Be("acme");
+        deadLetters.Parameters.Should().BeEmpty("the dead-letter table has no column to scope by");
 
         foreach (var command in new[] { active, counts, deadLetters })
         {
@@ -348,6 +352,13 @@ public class EventQueryBuilderTests
         minimal.CommandText.Should().NotContain("tenant", "the column is not there to filter on");
     }
 
+    /// <summary>
+    /// A plain count, with no tenant predicate available to it at all. The builder used to take a tenant
+    /// and emit <c>where "tenant_id" = @tenant</c>, which could only ever raise <c>42703</c>: Marten
+    /// registers <c>DeadLetterEvent</c> <c>SingleTenanted()</c> whatever the event store's tenancy is, so
+    /// the column does not exist on any store. The tenant axis lives on the document's own
+    /// <c>TenantId</c> property, which the list filters through LINQ.
+    /// </summary>
     [Fact]
     public void The_dead_letter_count_is_a_plain_count_of_Martens_own_table()
     {
@@ -355,13 +366,7 @@ public class EventQueryBuilderTests
 
         command.CommandText.Should().Be(
             "select count(*) from \"studio_sql\".\"mt_doc_deadletterevent\"");
-
-        // The tenant predicate is emitted only when there is a tenant: this builder is given a schema name
-        // and no EventTableInfo, so it cannot know whether the column exists until the caller says so.
-        using var scoped = EventQueryBuilder.BuildDeadLetterCount("studio_sql", "acme");
-
-        scoped.CommandText.Should().Be(
-            "select count(*) from \"studio_sql\".\"mt_doc_deadletterevent\" where \"tenant_id\" = @tenant");
+        command.Parameters.Should().BeEmpty();
     }
 
     [Fact]

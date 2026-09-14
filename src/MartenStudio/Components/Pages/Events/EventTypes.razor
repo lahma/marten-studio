@@ -91,6 +91,22 @@
             </tbody>
         </table>
 
+        @if (list.IsTruncated)
+        {
+            <div class="ms-alert ms-alert-warning" role="status">
+                <div class="ms-alert-content">
+                    <p>This list is not complete.</p>
+                    <p class="ms-muted">
+                        This store has more than
+                        @list.Types.Count.ToString("N0", CultureInfo.InvariantCulture) distinct event types
+                        and the screen stops there, so a store whose <code>type</code> column holds tens of
+                        thousands of values cannot turn one click into a page nobody can render. Narrow the
+                        question in the feed instead.
+                    </p>
+                </div>
+            </div>
+        }
+
         @if (!list.CountsLoaded)
         {
             <p class="ms-muted">

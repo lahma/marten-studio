@@ -4,6 +4,8 @@ using MartenStudio.Components.Pages.Events;
 using MartenStudio.Services.Events;
 using MartenStudio.Tests.Components;
 
+using Microsoft.JSInterop;
+
 namespace MartenStudio.Tests.Events;
 
 /// <summary>
@@ -178,6 +180,105 @@ public class FeedTests
 
         with.Render<Feed>().TextOfAll(".ms-event-filter-checkbox").Should().Contain("Include skipped");
     }
+
+    /// <summary>
+    /// The pill counts what it is holding, and says so when that is not all of it. A burst larger than
+    /// the buffer used to render as a flat "500 new events", which is a number the reader would use to
+    /// decide they had seen everything.
+    /// </summary>
+    [Fact]
+    public async Task The_pill_says_five_hundred_plus_once_the_buffer_has_had_to_drop_events()
+    {
+        using EventsComponentContext context = await NewContextAsync();
+
+        context.Options.RefreshInterval = TimeSpan.FromMilliseconds(20);
+
+        context.Data.Feed = new EventPage([FakeEventDataService.Event(10)], 10, false);
+        context.Data.HighestSequences.Enqueue(10);
+        context.Data.HighestSequences.Enqueue(1_000);
+
+        // 501 is one more than the buffer holds: newest first, the way the builder returns them.
+        List<EventRow> burst = [];
+        for (long sequence = 511; sequence > 10; sequence--)
+        {
+            burst.Add(FakeEventDataService.Event(sequence));
+        }
+
+        burst.Should().HaveCount(501);
+        context.Data.FeedDeltas.Enqueue(new EventPage(burst, 11, false));
+
+        context.Navigate("marten/events/feed?follow=1");
+
+        IRenderedComponent<Feed> page = context.Render<Feed>();
+
+        page.WaitForAssertion(
+            () => page.Find(".ms-follow-pill").TextContent.Trim().Should().Be("500+ new events"),
+            TimeSpan.FromSeconds(10));
+
+        page.Find(".ms-follow-pill").GetAttribute("title").Should().Contain("dropped");
+
+        // Showing them clears the flag as well as the buffer: the next pill counts from scratch.
+        await page.Find(".ms-follow-pill").ClickAsync(new());
+
+        page.FindAll(".ms-follow-pill").Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// A closed browser tab is the normal way this page ends, and closing one throws
+    /// <see cref="Microsoft.JSInterop.JSDisconnectedException" /> out of <c>visibility.unwatch</c>. It
+    /// derives from <see cref="Exception" /> and <em>not</em> from
+    /// <see cref="Microsoft.JSInterop.JSException" />, so the <c>catch (JSException)</c> ladder that used
+    /// to stand here let it straight through <c>DisposeAsync</c> - which then never disposed the
+    /// <c>DotNetObjectReference</c> that pins this component, and never cancelled the page's token.
+    /// </summary>
+    [Fact]
+    public async Task Disposal_survives_a_circuit_that_is_already_gone_and_still_releases_everything()
+    {
+        var js = new DisconnectingJsRuntime();
+
+        using var context = new EventsComponentContext(js);
+        await context.ReadyAsync();
+
+        // An empty feed on purpose. Every JSON body on the page brings a JsonView, whose own interop
+        // still catches by exception type and therefore lets a JSDisconnectedException escape its render
+        // - which is the same finding in a component this packet does not own, and would fail this test
+        // for a reason that is not what it is about.
+        IRenderedComponent<Feed> page = context.Render<Feed>();
+
+        js.DotNetReference.Should().BeOfType<DotNetObjectReference<Feed>>(
+            "the page watches the tab on its first render");
+
+        Func<Task> dispose = async () => await page.Instance.DisposeAsync();
+
+        await dispose.Should().NotThrowAsync();
+
+        js.TriedToUnwatch.Should().BeTrue("the reference is handed back before it is dropped");
+
+        // A disposed DotNetObjectReference throws from Value; an undisposed one would answer the page.
+        var reference = (DotNetObjectReference<Feed>) js.DotNetReference!;
+        Action read = () => _ = reference.Value;
+        read.Should().Throw<ObjectDisposedException>("the reference must be released however interop went");
+
+        PageCancellation(page.Instance).IsCancellationRequested.Should().BeTrue();
+
+        // Blazor disposes a component once; bUnit disposes it again when the context goes. Neither may
+        // throw, which is why disposal is idempotent - Cancel on a disposed CTS is an ObjectDisposedException.
+        await dispose.Should().NotThrowAsync();
+    }
+
+    /// <summary>
+    /// The page's own <see cref="CancellationTokenSource" />, read by reflection.
+    /// </summary>
+    /// <remarks>
+    /// There is no other way to see it: it is a private field of a component and it has no observable
+    /// effect once every read it governs has finished. It is nevertheless exactly what this test is about
+    /// - "disposal completed" is not the same claim as "disposal finished its job" - so the reflection is
+    /// the honest way to assert it rather than a reason to assert something weaker.
+    /// </remarks>
+    private static CancellationTokenSource PageCancellation(Feed page) =>
+        (CancellationTokenSource) typeof(Feed)
+            .GetField("pageCancellation", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(page)!;
 
     private static async Task<EventsComponentContext> NewContextAsync()
     {

@@ -291,16 +291,18 @@ public class EventQueryBuilderLiveTests(PostgresFixture fixture) : PostgresTestB
 
         await using var connection = await OpenAsync();
 
-        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount(Schema, "acme", budget);
+        // The dead-letter count is the odd one out: it takes a budget and NOT a tenant. Marten registers
+        // DeadLetterEvent SingleTenanted() unconditionally, so mt_doc_deadletterevent has no tenant_id
+        // column on any store - conjoined event store or not. This builder used to take a tenant and emit
+        // `where "tenant_id" = @tenant`, and the test that stood here proved only that doing so raises
+        // 42703; a parameter whose sole reachable behaviour is to throw is not a feature, so it is gone
+        // and what is asserted now is that the count works.
+        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount(Schema, budget);
 
         deadLetters.Connection = connection;
+        deadLetters.CommandTimeout.Should().Be(10);
 
-        // The dead-letter table in this schema has no tenant_id, which is exactly the shape the predicate
-        // is conditional for: asking for a tenant on a store that is not conjoined is the caller's mistake
-        // and Postgres names it, rather than the count quietly ignoring the scope.
-        var act = async () => await deadLetters.ExecuteScalarAsync();
-
-        await act.Should().ThrowAsync<PostgresException>().Where(x => x.SqlState == "42703");
+        (await deadLetters.ExecuteScalarAsync()).Should().Be(1L);
     }
 
     /// <summary>

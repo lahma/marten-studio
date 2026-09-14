@@ -87,11 +87,7 @@
         }
         else if (HasResult && !Found)
         {
-            <p class="ms-time-travel-note">
-                Replaying this stream into <code>@SelectedTypeLabel</code> at version
-                @Version.ToString(CultureInfo.InvariantCulture) produced nothing. The aggregate has no
-                create step for the first event of this stream, or it deletes itself by this version.
-            </p>
+            <p class="ms-time-travel-note ms-time-travel-empty">@NotFoundText</p>
         }
         else if (!string.IsNullOrWhiteSpace(Json))
         {
@@ -163,6 +159,34 @@
     /// <summary>Raised when the visitor asks for a replay.</summary>
     [Parameter]
     public EventCallback OnLoad { get; set; }
+
+    /// <summary>
+    /// Why the last replay produced nothing, when the page could tell them apart.
+    /// </summary>
+    /// <remarks>
+    /// A string rather than the service's <c>AggregateMissingReason</c>: the component class is public, so
+    /// a <c>[Parameter]</c> cannot be of an internal type (D12). The page composes the sentence because it
+    /// is the one that holds both the reason and the stream, and the panel only draws it.
+    /// </remarks>
+    [Parameter]
+    public string? NotFoundMessage { get; set; }
+
+    /// <summary>
+    /// What the panel says when the replay produced nothing.
+    /// </summary>
+    /// <remarks>
+    /// The fallback is the generic answer, which is the truth when nothing more specific is known: the
+    /// aggregate has no create step for this stream's first event, or it deletes itself before this
+    /// version. An archived stream and a version past the end are <em>different</em> facts that Marten
+    /// also answers with a bare null, and rendering all three the same sentence is how somebody spends
+    /// twenty minutes looking for a bug in their aggregate.
+    /// </remarks>
+    private string NotFoundText => string.IsNullOrWhiteSpace(NotFoundMessage)
+        ? $"Replaying this stream into {SelectedTypeLabel} at version "
+            + Version.ToString(CultureInfo.InvariantCulture)
+            + " produced nothing. The aggregate has no create step for the first event of this stream, or "
+            + "it deletes itself by this version."
+        : NotFoundMessage;
 
     private string SelectedTypeLabel
     {

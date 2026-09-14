@@ -149,6 +149,38 @@ public class EventQueryBuilderEventsTests
         command.Parameters["seq"].NpgsqlDbType.Should().Be(NpgsqlDbType.Bigint);
     }
 
+    /// <summary>
+    /// The single-event read is the one the dead-letter screen uses, and a dead letter names its event by
+    /// the <em>global</em> sequence - <c>DeadLetterEvent</c> is registered <c>SingleTenanted()</c>, so the
+    /// number can perfectly well belong to another tenant. Without the sibling predicate the expansion
+    /// rendered that tenant's event body, and the Skip action went on to write to it.
+    /// </summary>
+    [Fact]
+    public void One_event_by_sequence_is_scoped_to_the_tenant_when_the_store_has_one()
+    {
+        using var scoped = EventQueryBuilder.BuildEventBySequence(Full, 42, "acme");
+        using var unscoped = EventQueryBuilder.BuildEventBySequence(Full, 42);
+
+        scoped.CommandText.Should().Contain("and (@tenant is null or e.\"tenant_id\" = @tenant)");
+        scoped.Parameters["tenant"].Value.Should().Be("acme");
+        scoped.Parameters["tenant"].NpgsqlDbType.Should().Be(NpgsqlDbType.Varchar);
+
+        // One statement, one plan, for both the scoped and the unscoped read - the same guarded-predicate
+        // shape as the feed, rather than two command texts.
+        unscoped.CommandText.Should().Be(scoped.CommandText);
+        unscoped.Parameters["tenant"].Value.Should().Be(DBNull.Value);
+    }
+
+    /// <summary>A store that is not conjoined has no column to name, and naming it would be 42703.</summary>
+    [Fact]
+    public void One_event_by_sequence_names_no_tenant_column_where_there_is_none()
+    {
+        using var command = EventQueryBuilder.BuildEventBySequence(Minimal, 42, "acme");
+
+        command.CommandText.Should().NotContain("tenant");
+        command.Parameters.Should().ContainSingle();
+    }
+
     /// <summary>The dead letter table is a document table Marten puts in the *event* schema.</summary>
     [Fact]
     public void The_dead_letter_count_is_scoped_by_the_schema_it_is_given()
@@ -156,5 +188,8 @@ public class EventQueryBuilderEventsTests
         using var command = EventQueryBuilder.BuildDeadLetterCount("studio_events");
 
         command.CommandText.Should().Be("select count(*) from \"studio_events\".\"mt_doc_deadletterevent\"");
+        command.Parameters.Should().BeEmpty(
+            "mt_doc_deadletterevent has no tenant_id column on any store - Marten registers DeadLetterEvent "
+            + "SingleTenanted() whatever the event store's tenancy is");
     }
 }

@@ -180,6 +180,7 @@
                                  Found="@(snapshot?.Found == true)"
                                  IsLoading="replaying"
                                  Error="@snapshot?.Error?.Display"
+                                 NotFoundMessage="@NotFoundMessage"
                                  OnLoad="ReplayAsync" />
         </div>
     }
@@ -254,6 +255,35 @@
 
     private string TypeHref(string eventType) =>
         EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
+
+    /// <summary>
+    /// Why the replay produced nothing, when the service could tell the cases apart.
+    /// </summary>
+    /// <remarks>
+    /// Marten answers <see langword="null" /> for four different facts. "Archived" and "past the end" are
+    /// both things the visitor did rather than things the aggregate did, and saying so turns a dead end
+    /// into an instruction.
+    /// </remarks>
+    private string? NotFoundMessage => snapshot is null || snapshot.Found
+        ? null
+        : snapshot.Reason switch
+        {
+            AggregateMissingReason.StreamArchived =>
+                "This stream is archived, and Marten's stream fetch never returns archived events - so "
+                + "replaying it produces nothing whatever the aggregate does. That is Marten's own "
+                + "behaviour, not a limitation of this screen.",
+            AggregateMissingReason.VersionPastEnd =>
+                $"This stream ends at version {snapshot.StreamVersion?.ToString(CultureInfo.InvariantCulture) ?? "?"}, "
+                + $"and version {snapshot.Version.ToString(CultureInfo.InvariantCulture)} is past it. Marten "
+                + "returns nothing rather than the last state it had.",
+            AggregateMissingReason.StreamMissing =>
+                "There is no such stream in this scope any more - it may have been archived, or it may "
+                + "belong to another tenant.",
+            AggregateMissingReason.TenantRequired =>
+                "This event store is tenanted per event, and a replay always runs as exactly one tenant. "
+                + "Pick a tenant in the header and try again - \"All tenants\" reads no events at all.",
+            _ => null,
+        };
 
     /// <summary>The rail dot goes with the selected card, which is the one the panel is replaying to.</summary>
     private string TimelineItemClass(EventRow row) =>
@@ -342,11 +372,15 @@
             stream = await Events.GetStreamAsync(scope, Id, token);
 
             IReadOnlyList<AggregateTypeCandidate> candidates = await Events.ListAggregateCandidatesAsync(scope, token);
+            // The two sources are two different promises, and the labels say which is which. A registered
+            // single-stream projection is what the store already aggregates this stream into; anything
+            // else is the manual picker, where Marten builds an aggregator for a type nothing says can
+            // handle these events and throws when it cannot.
             candidateOptions = [.. candidates.Select(static x => new KeyValuePair<string, string>(
                 x.FullName,
                 x.Source == AggregateCandidateSource.SingleStreamProjection
                     ? x.Name + " (single-stream projection)"
-                    : x.Name))];
+                    : x.Name + " (try any type - may fail)"))];
 
             if (stream.Exists)
             {

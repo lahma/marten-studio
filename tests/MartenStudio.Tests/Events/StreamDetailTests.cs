@@ -110,8 +110,10 @@ public class StreamDetailTests
     }
 
     /// <summary>
-    /// The picker falls back to the store's document types when no single-stream projection matches,
-    /// and says which is which.
+    /// The picker falls back to the store's document types when no single-stream projection matches, and
+    /// says which is which - including that the fallback is a guess. Nothing says a document type can
+    /// aggregate this stream, and Marten throws when it cannot, so the option that promises nothing has
+    /// to say so.
     /// </summary>
     [Fact]
     public async Task The_time_travel_picker_falls_back_to_the_stores_document_types()
@@ -124,7 +126,7 @@ public class StreamDetailTests
         IRenderedComponent<StreamDetail> page = Render(context);
 
         page.TextOfAll("#ms-time-travel-type option").Should()
-            .Equal("Pick an aggregate type", "TimeTravelNote");
+            .Equal("Pick an aggregate type", "TimeTravelNote (try any type - may fail)");
     }
 
     [Fact]
@@ -180,6 +182,35 @@ public class StreamDetailTests
         await page.Find(".ms-time-travel button.ms-button-primary").ClickAsync(new());
 
         page.Find(".ms-time-travel").TextContent.Should().Contain("produced nothing");
+    }
+
+    /// <summary>
+    /// Marten answers <see langword="null" /> for four different facts, and rendering all four as
+    /// "produced nothing" is how somebody spends twenty minutes looking for a bug in their aggregate. An
+    /// archived stream and a version past the end are things the visitor did, not things the aggregate
+    /// did, and each one names what to do about it.
+    /// </summary>
+    [Theory]
+    [InlineData(AggregateMissingReason.StreamArchived, "archived")]
+    [InlineData(AggregateMissingReason.VersionPastEnd, "ends at version 3")]
+    [InlineData(AggregateMissingReason.StreamMissing, "no such stream")]
+    [InlineData(AggregateMissingReason.TenantRequired, "Pick a tenant")]
+    [InlineData(AggregateMissingReason.NoAggregate, "produced nothing")]
+    internal async Task A_replay_that_produced_nothing_says_which_kind_of_nothing(
+        AggregateMissingReason reason,
+        string expected)
+    {
+        using EventsComponentContext context = await NewContextAsync();
+        context.Data.StreamStates[StreamId] = Stream();
+        context.Data.Candidates.Add(new AggregateTypeCandidate(
+            typeof(TimeTravelOrder), "TimeTravelOrder", "X.TimeTravelOrder", AggregateCandidateSource.SingleStreamProjection));
+        context.Data.Snapshot = AggregateSnapshot.NotFound("TimeTravelOrder", 5, reason, streamVersion: 3);
+
+        IRenderedComponent<StreamDetail> page = Render(context, "&agg=X.TimeTravelOrder&v=2");
+
+        await page.Find(".ms-time-travel button.ms-button-primary").ClickAsync(new());
+
+        page.Find(".ms-time-travel-empty").TextContent.Should().Contain(expected);
     }
 
     // ------------------------------------------------------------------------------------------------

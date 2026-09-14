@@ -34,7 +34,13 @@ namespace MartenStudio.Tests.Events;
 /// </remarks>
 internal sealed class EventsComponentContext : BunitContext
 {
-    public EventsComponentContext()
+    /// <param name="jsRuntime">
+    /// A JavaScript runtime of the test's own, for the tests that are about what happens when the browser
+    /// is not there. Left null, the pages talk to bUnit's loose runtime, which answers everything.
+    /// Registered <em>after</em> the base constructor has added bUnit's own, so this one wins - which is
+    /// only possible because the registration happens here, before anything resolves from the provider.
+    /// </param>
+    public EventsComponentContext(Microsoft.JSInterop.IJSRuntime? jsRuntime = null)
     {
         Options = new MartenStudioOptions();
         Catalog = new FakeStudioScopeCatalog();
@@ -59,6 +65,11 @@ internal sealed class EventsComponentContext : BunitContext
         Services.AddSingleton<StudioActionLogService>();
         Services.AddSingleton<StudioActionLog>();
         Services.AddSingleton<IEventDataService>(Data);
+
+        if (jsRuntime is not null)
+        {
+            Services.AddSingleton(jsRuntime);
+        }
     }
 
     /// <summary>The options an application would have configured.</summary>

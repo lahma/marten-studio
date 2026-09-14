@@ -96,6 +96,37 @@ public class EventTypesTests
             .Contain("[42501] permission denied");
     }
 
+    /// <summary>
+    /// The screen lists at most two thousand types, and a capped list that does not say so is
+    /// indistinguishable from a complete one - which is the same failure as drawing "could not count" as
+    /// zero. Before this the cap was silent.
+    /// </summary>
+    [Fact]
+    public async Task A_list_that_was_cut_short_says_so()
+    {
+        using EventsComponentContext context = await NewContextAsync();
+        context.Data.TypesWithCounts = new EventTypeList(
+            [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true, 12, 1, 12)],
+            CountsLoaded: true,
+            Error: null,
+            IsTruncated: true);
+        context.Data.TypesWithoutCounts = context.Data.TypesWithCounts with { CountsLoaded = false };
+
+        IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+        page.Find(".ms-alert-warning").TextContent.Should().Contain("not complete");
+    }
+
+    [Fact]
+    public async Task A_complete_list_says_nothing_about_being_cut_short()
+    {
+        using EventsComponentContext context = await NewContextAsync();
+        context.Data.TypesWithoutCounts = new EventTypeList(
+            [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true)], false);
+
+        context.Render<EventTypes>().FindAll(".ms-alert-warning").Should().BeEmpty();
+    }
+
     [Fact]
     public async Task A_store_with_no_event_types_says_so()
     {

@@ -51,6 +51,34 @@ public class EventsLiveTests(EventsStoreFixture fixture) : IClassFixture<EventsS
     // Streams
     // ------------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// The keyset on <c>(timestamp desc, id)</c> is only a total order because
+    /// <c>mt_streams."timestamp"</c> is <c>NOT NULL</c>: a keyset on a nullable column silently drops
+    /// every row whose key is null, because <c>null &lt; @k</c> is null and not true. The service's
+    /// "hasMore but no cursor" branch exists for a hand-migrated table and is unreachable on a schema
+    /// Marten created - and this is what says so, against the real schema rather than against a belief
+    /// about it.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_streams_table_timestamp_is_not_nullable_so_the_keyset_can_page_it()
+    {
+        await using Npgsql.NpgsqlConnection connection = await Events.OpenAsync(TestContext.Current.CancellationToken);
+
+        await using var command = new Npgsql.NpgsqlCommand(
+            """
+            select is_nullable
+            from information_schema.columns
+            where table_schema = @schema and table_name = 'mt_streams' and column_name = 'timestamp'
+            """,
+            connection);
+
+        command.Parameters.AddWithValue("schema", Schema);
+
+        object? nullable = await command.ExecuteScalarAsync(TestContext.Current.CancellationToken);
+
+        nullable.Should().Be("NO");
+    }
+
     [PostgresFact]
     public async Task The_stream_list_pages_by_keyset_and_never_repeats_a_row()
     {

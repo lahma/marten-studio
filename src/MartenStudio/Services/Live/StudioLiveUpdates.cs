@@ -294,11 +294,26 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     /// Whether this is JavaScript being unreachable rather than a bug.
     /// </summary>
     /// <remarks>
-    /// All three happen normally: <c>JSException</c> when the function is missing,
+    /// <para>
+    /// All of them happen normally: <c>JSException</c> when the function is missing,
     /// <c>InvalidOperationException</c> during prerendering, and <c>JSDisconnectedException</c> when the
     /// circuit closed before <c>DisposeAsync</c> ran - which is the common case, not the rare one.
+    /// </para>
+    /// <para>
+    /// <b>Every interop call site in the studio must go through this, and a list of <c>catch</c> clauses
+    /// is not a substitute for it.</b> <c>JSDisconnectedException</c> derives from <see cref="Exception" />
+    /// and <em>not</em> from <c>JSException</c> (verified against
+    /// <c>Microsoft.JSInterop.JSDisconnectedException</c>), so the obvious
+    /// <c>catch (JSException) { } catch (InvalidOperationException) { }</c> ladder misses exactly the case
+    /// that happens on every closed browser tab - and an exception escaping an <c>await using</c> or a
+    /// component's <c>DisposeAsync</c> takes the rest of that disposal with it. Hence
+    /// <c>catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))</c>, which is a filter and
+    /// therefore still rethrows anything that is a real bug.
+    /// </para>
     /// </remarks>
-    private static bool IsInteropUnavailable(Exception exception) =>
+    /// <param name="exception">The exception an interop call threw.</param>
+    /// <returns>Whether it means "the browser is not reachable" rather than "this code is wrong".</returns>
+    internal static bool IsInteropUnavailable(Exception exception) =>
         exception is JSException or JSDisconnectedException or InvalidOperationException or TaskCanceledException
         || exception is System.Text.Json.JsonException;
 }
