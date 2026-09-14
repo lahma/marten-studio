@@ -1,11 +1,33 @@
 @if (IsOpen)
 {
     <div class="ms-confirm-overlay">
-        <div class="ms-confirm-dialog">
+        <div class="ms-confirm-dialog" role="alertdialog" aria-modal="true" aria-label="@Title">
             <h3>@Title</h3>
             <p>@Message</p>
+
+            @if (RequiresTypedConfirmation)
+            {
+                @* Type-to-confirm. The point is not that it is hard to defeat - it is that the person has
+                   to read what they are about to change and write it out, which is what stops the wrong
+                   row being archived from a list of forty that look alike. *@
+                <p class="ms-muted">
+                    Type <code>@ConfirmationPhrase</code> to confirm.
+                </p>
+                <input type="text"
+                       class="ms-input ms-input-mono"
+                       aria-label="@($"Type {ConfirmationPhrase} to confirm")"
+                       autocomplete="off"
+                       value="@typed"
+                       @oninput="OnTypedAsync" />
+            }
+
             <div class="ms-confirm-actions">
-                <button type="button" class="ms-button ms-button-danger" @onclick="ConfirmAsync">Confirm</button>
+                <button type="button"
+                        class="ms-button ms-button-danger"
+                        disabled="@(!CanConfirm)"
+                        @onclick="ConfirmAsync">
+                    @ConfirmText
+                </button>
                 <button type="button" class="ms-button" @onclick="CancelAsync">Cancel</button>
             </div>
         </div>
@@ -13,6 +35,9 @@
 }
 
 @code {
+    private string typed = string.Empty;
+    private bool wasOpen;
+
     [Parameter]
     public bool IsOpen { get; set; }
 
@@ -22,14 +47,51 @@
     [Parameter]
     public string Message { get; set; } = "Are you sure?";
 
+    /// <summary>
+    /// What the visitor has to type before the confirm button works, or <see langword="null" /> for a
+    /// plain confirmation.
+    /// </summary>
+    [Parameter]
+    public string? ConfirmationPhrase { get; set; }
+
+    /// <summary>What the confirm button says.</summary>
+    [Parameter]
+    public string ConfirmText { get; set; } = "Confirm";
+
     [Parameter]
     public EventCallback OnConfirm { get; set; }
 
     [Parameter]
     public EventCallback OnCancel { get; set; }
 
+    private bool RequiresTypedConfirmation => !string.IsNullOrWhiteSpace(ConfirmationPhrase);
+
+    private bool CanConfirm =>
+        !RequiresTypedConfirmation || string.Equals(typed.Trim(), ConfirmationPhrase, StringComparison.Ordinal);
+
+    /// <summary>Clears whatever was typed whenever the dialog opens, so the last answer cannot carry over.</summary>
+    protected override void OnParametersSet()
+    {
+        if (IsOpen != wasOpen)
+        {
+            wasOpen = IsOpen;
+            typed = string.Empty;
+        }
+    }
+
+    private Task OnTypedAsync(ChangeEventArgs args)
+    {
+        typed = args.Value?.ToString() ?? string.Empty;
+        return Task.CompletedTask;
+    }
+
     private async Task ConfirmAsync()
     {
+        if (!CanConfirm)
+        {
+            return;
+        }
+
         await OnConfirm.InvokeAsync();
     }
 

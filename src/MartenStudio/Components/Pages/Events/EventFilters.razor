@@ -1,0 +1,208 @@
+@using System.Globalization
+
+@* The feed's filter bar: type multi-select, time range presets, stream, tenant and the two
+   include-this-as-well switches.
+
+   Every control is bound one way and reports through a callback, so the page owns the filter state and
+   can put all of it in the query string - which is what makes a filtered feed a link someone can paste
+   (D9). *@
+
+<div class="ms-event-filters">
+    @if (AvailableTypes.Count > 0)
+    {
+        <div class="ms-event-filter">
+            <span class="ms-event-filter-label" id="ms-feed-types-label">Event types</span>
+            <div class="ms-event-filter-types" role="group" aria-labelledby="ms-feed-types-label">
+                @foreach (string type in AvailableTypes)
+                {
+                    <label class="ms-event-filter-type" @key="type">
+                        <input type="checkbox"
+                               checked="@SelectedTypes.Contains(type)"
+                               @onchange="@(args => ToggleTypeAsync(type, args))" />
+                        <EventTypeChip Name="@type" />
+                    </label>
+                }
+            </div>
+        </div>
+    }
+
+    <div class="ms-event-filter">
+        <label class="ms-event-filter-label" for="ms-feed-range">Time range</label>
+        <select id="ms-feed-range" class="ms-select" value="@Range" @onchange="OnRangeChangedAsync">
+            @foreach (KeyValuePair<string, string> preset in Presets)
+            {
+                <option value="@preset.Key" @key="preset.Key">@preset.Value</option>
+            }
+        </select>
+    </div>
+
+    <div class="ms-event-filter">
+        <label class="ms-event-filter-label" for="ms-feed-stream">Stream id</label>
+        <input id="ms-feed-stream"
+               type="text"
+               class="ms-input ms-input-mono"
+               placeholder="@StreamPlaceholder"
+               value="@StreamId"
+               @onchange="OnStreamChangedAsync" />
+    </div>
+
+    @if (ShowTenant)
+    {
+        <div class="ms-event-filter">
+            <span class="ms-event-filter-label">Tenant</span>
+            <span class="ms-mono">@(string.IsNullOrEmpty(TenantId) ? "all tenants" : TenantId)</span>
+        </div>
+    }
+
+    <div class="ms-event-filter">
+        <label class="ms-event-filter-checkbox">
+            <input type="checkbox" checked="@IncludeArchived" @onchange="OnIncludeArchivedChangedAsync" />
+            Include archived
+        </label>
+
+        @if (SupportsSkipped)
+        {
+            <label class="ms-event-filter-checkbox">
+                <input type="checkbox" checked="@IncludeSkipped" @onchange="OnIncludeSkippedChangedAsync" />
+                Include skipped
+            </label>
+        }
+    </div>
+
+    <div class="ms-event-filter">
+        <button type="button" class="ms-button" @onclick="ClearAsync">Clear filters</button>
+    </div>
+</div>
+
+@code {
+    /// <summary>The time-range presets, by the token that travels in the query string.</summary>
+    internal static readonly IReadOnlyList<KeyValuePair<string, string>> Presets =
+    [
+        new("", "Any time"),
+        new("15m", "Last 15 minutes"),
+        new("1h", "Last hour"),
+        new("24h", "Last 24 hours"),
+        new("7d", "Last 7 days"),
+        new("30d", "Last 30 days"),
+    ];
+
+    /// <summary>Turns a preset token into the instant a feed page starts at.</summary>
+    /// <remarks>
+    /// Resolved against <paramref name="now" /> rather than <c>DateTimeOffset.UtcNow</c> so the page can
+    /// pin one instant per read: a range recomputed per query would shift under a follow-mode poll and
+    /// silently drop the row at its edge.
+    /// </remarks>
+    internal static DateTimeOffset? ResolveFrom(string? range, DateTimeOffset now) => range switch
+    {
+        "15m" => now.AddMinutes(-15),
+        "1h" => now.AddHours(-1),
+        "24h" => now.AddDays(-1),
+        "7d" => now.AddDays(-7),
+        "30d" => now.AddDays(-30),
+        _ => null,
+    };
+
+    /// <summary>Every event type the feed can be filtered to.</summary>
+    [Parameter]
+    public IReadOnlyList<string> AvailableTypes { get; set; } = [];
+
+    /// <summary>The types currently ticked.</summary>
+    [Parameter]
+    public IReadOnlyList<string> SelectedTypes { get; set; } = [];
+
+    /// <summary>Raised with the whole new selection when one is ticked or unticked.</summary>
+    [Parameter]
+    public EventCallback<IReadOnlyList<string>> SelectedTypesChanged { get; set; }
+
+    /// <summary>The time-range preset token.</summary>
+    [Parameter]
+    public string Range { get; set; } = string.Empty;
+
+    /// <summary>Raised when the range changes.</summary>
+    [Parameter]
+    public EventCallback<string> RangeChanged { get; set; }
+
+    /// <summary>The stream id filter, as typed.</summary>
+    [Parameter]
+    public string? StreamId { get; set; }
+
+    /// <summary>Raised when the stream id changes.</summary>
+    [Parameter]
+    public EventCallback<string> StreamIdChanged { get; set; }
+
+    /// <summary>What the stream box suggests, which depends on the store's stream identity.</summary>
+    [Parameter]
+    public string StreamPlaceholder { get; set; } = "any stream";
+
+    /// <summary>Whether the tenant is shown at all.</summary>
+    [Parameter]
+    public bool ShowTenant { get; set; }
+
+    /// <summary>The tenant the scope is pinned to.</summary>
+    [Parameter]
+    public string? TenantId { get; set; }
+
+    /// <summary>Whether archived events are included.</summary>
+    [Parameter]
+    public bool IncludeArchived { get; set; }
+
+    /// <summary>Raised when that changes.</summary>
+    [Parameter]
+    public EventCallback<bool> IncludeArchivedChanged { get; set; }
+
+    /// <summary>Whether skipped events are included.</summary>
+    [Parameter]
+    public bool IncludeSkipped { get; set; } = true;
+
+    /// <summary>Raised when that changes.</summary>
+    [Parameter]
+    public EventCallback<bool> IncludeSkippedChanged { get; set; }
+
+    /// <summary>Whether this store records skipped events at all.</summary>
+    [Parameter]
+    public bool SupportsSkipped { get; set; }
+
+    /// <summary>Raised when the visitor clears every filter.</summary>
+    [Parameter]
+    public EventCallback OnClear { get; set; }
+
+    private async Task ToggleTypeAsync(string type, ChangeEventArgs args)
+    {
+        bool ticked = args.Value is bool value && value;
+
+        List<string> selection = [.. SelectedTypes];
+        if (ticked)
+        {
+            if (!selection.Contains(type, StringComparer.Ordinal))
+            {
+                selection.Add(type);
+            }
+        }
+        else
+        {
+            selection.RemoveAll(x => string.Equals(x, type, StringComparison.Ordinal));
+        }
+
+        await SelectedTypesChanged.InvokeAsync(selection);
+    }
+
+    private async Task OnRangeChangedAsync(ChangeEventArgs args) =>
+        await RangeChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+
+    private async Task OnStreamChangedAsync(ChangeEventArgs args) =>
+        await StreamIdChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+
+    private async Task OnIncludeArchivedChangedAsync(ChangeEventArgs args) =>
+        await IncludeArchivedChanged.InvokeAsync(args.Value is bool value && value);
+
+    private async Task OnIncludeSkippedChangedAsync(ChangeEventArgs args) =>
+        await IncludeSkippedChanged.InvokeAsync(args.Value is bool value && value);
+
+    private async Task ClearAsync()
+    {
+        if (OnClear.HasDelegate)
+        {
+            await OnClear.InvokeAsync();
+        }
+    }
+}

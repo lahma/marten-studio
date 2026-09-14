@@ -1,0 +1,213 @@
+@using System.Globalization
+@using MartenStudio.Components.Json
+@using MartenStudio.Services
+@inject StudioState State
+
+@* One event, on the timeline or in the feed.
+
+   Every parameter is a primitive or a BCL type, the way JsonViewRow's are: the row records live in
+   MartenStudio.Services.Events and are internal, and the Razor compiler emits a public component class,
+   so a parameter typed as one of them would not compile (D12 keeps the data seam internal).
+
+   The binary payload is reported, never rendered: "binary payload, N bytes" is what the reader saw -
+   (bdata is not null) and octet_length(bdata) - and the column itself was never in the select list. *@
+
+<div class="@CardClass" @onclick="SelectAsync">
+    <div class="ms-event-card-header">
+        @if (ShowVersion)
+        {
+            <span class="ms-event-card-version">v@(Version.ToString(CultureInfo.InvariantCulture))</span>
+        }
+
+        @* The chip is a link of its own; without stopping the bubble, clicking it would both follow the
+           link and select the card, and whichever navigation ran last would win. *@
+        <span @onclick:stopPropagation="true">
+            <EventTypeChip Name="@EventType" DotNetTypeName="@DotNetType" Href="@TypeHref" />
+        </span>
+
+        @if (IsArchived)
+        {
+            <span class="ms-event-flag ms-event-flag-archived" title="This event belongs to an archived stream">archived</span>
+        }
+
+        @if (IsSkipped)
+        {
+            <span class="ms-event-flag ms-event-flag-skipped" title="The daemon was told to skip this event">skipped</span>
+        }
+
+        @if (HasBinary)
+        {
+            <span class="ms-event-binary" title="The payload itself is never read by Marten Studio">
+                binary payload, @BinaryDescription
+            </span>
+        }
+
+        <span class="ms-event-card-spacer"></span>
+
+        <span class="ms-event-card-seq" title="Global event sequence">#@Sequence.ToString(CultureInfo.InvariantCulture)</span>
+        <span class="ms-event-card-time" title="@State.FormatInSelectedTimeZone(Timestamp)">
+            <TimeAgo Timestamp="Timestamp" />
+        </span>
+    </div>
+
+    @if (ShowStream && !string.IsNullOrEmpty(StreamId))
+    {
+        <div class="ms-event-card-header" @onclick:stopPropagation="true">
+            <span class="ms-event-meta-key">stream</span>
+            @if (string.IsNullOrEmpty(StreamHref))
+            {
+                <span class="ms-event-meta-value">@StreamId</span>
+            }
+            else
+            {
+                <a class="ms-event-meta-value" href="@StreamHref">@StreamId</a>
+            }
+        </div>
+    }
+
+    @if (Metadata.Count > 0)
+    {
+        <div class="ms-event-meta">
+            @foreach (KeyValuePair<string, string?> entry in Metadata)
+            {
+                @if (!string.IsNullOrWhiteSpace(entry.Value))
+                {
+                    <span class="ms-event-meta-chip" @key="entry.Key">
+                        <span class="ms-event-meta-key">@entry.Key</span>
+                        <span class="ms-event-meta-value" title="@entry.Value">@entry.Value</span>
+                    </span>
+                }
+            }
+        </div>
+    }
+
+    @* The viewer has its own buttons - expand, copy, raw - and none of them means "select this event". *@
+    <div class="ms-event-card-body" @onclick:stopPropagation="true">
+        @if (string.IsNullOrWhiteSpace(Json))
+        {
+            <p class="ms-event-card-empty">
+                @(HasBinary
+                    ? "This event's payload is binary, so there is no JSON body to show."
+                    : "This event has no JSON body.")
+            </p>
+        }
+        else
+        {
+            <JsonView Json="@Json"
+                      Label="@($"{EventType} body")"
+                      AutoExpandDepth="1"
+                      ShowSearch="false"
+                      DownloadFileName="@($"{EventType}-{Sequence.ToString(CultureInfo.InvariantCulture)}.json")" />
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>The global event sequence.</summary>
+    [Parameter]
+    public long Sequence { get; set; }
+
+    /// <summary>The event's version within its stream.</summary>
+    [Parameter]
+    public long Version { get; set; }
+
+    /// <summary>The event type name.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string EventType { get; set; } = string.Empty;
+
+    /// <summary>The .NET type name the store recorded, when it records one.</summary>
+    [Parameter]
+    public string? DotNetType { get; set; }
+
+    /// <summary>When the event was appended.</summary>
+    [Parameter]
+    public DateTimeOffset Timestamp { get; set; }
+
+    /// <summary>The stream this event belongs to, as text.</summary>
+    [Parameter]
+    public string? StreamId { get; set; }
+
+    /// <summary>Where the stream's detail page is.</summary>
+    [Parameter]
+    public string? StreamHref { get; set; }
+
+    /// <summary>Where the feed filtered to this event type is.</summary>
+    [Parameter]
+    public string? TypeHref { get; set; }
+
+    /// <summary>Whether the stream row is shown - the feed wants it, a stream's own timeline does not.</summary>
+    [Parameter]
+    public bool ShowStream { get; set; }
+
+    /// <summary>Whether the version is shown - a timeline wants it, the feed keys on the sequence.</summary>
+    [Parameter]
+    public bool ShowVersion { get; set; } = true;
+
+    /// <summary>Whether this event's stream is archived.</summary>
+    [Parameter]
+    public bool IsArchived { get; set; }
+
+    /// <summary>Whether the daemon was told to skip this event.</summary>
+    [Parameter]
+    public bool IsSkipped { get; set; }
+
+    /// <summary>Whether the event carries a binary payload.</summary>
+    [Parameter]
+    public bool HasBinary { get; set; }
+
+    /// <summary>How many bytes that payload is, when the database could say.</summary>
+    [Parameter]
+    public long? BinaryLength { get; set; }
+
+    /// <summary>The event body as JSON text.</summary>
+    [Parameter]
+    public string? Json { get; set; }
+
+    /// <summary>
+    /// Every optional <c>mt_events</c> column this store has, by column name - one chip each.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyDictionary<string, string?> Metadata { get; set; } =
+        new Dictionary<string, string?>(StringComparer.Ordinal);
+
+    /// <summary>Whether this card is the selected one.</summary>
+    [Parameter]
+    public bool IsSelected { get; set; }
+
+    /// <summary>Raised with this event's version when the card is clicked.</summary>
+    [Parameter]
+    public EventCallback<long> OnSelect { get; set; }
+
+    private string CardClass
+    {
+        get
+        {
+            string classes = "ms-event-card";
+            if (IsSelected)
+            {
+                classes += " ms-event-card-selected";
+            }
+
+            if (IsArchived)
+            {
+                classes += " ms-event-card-archived";
+            }
+
+            return classes;
+        }
+    }
+
+    /// <summary>"N bytes", or an honest "size unknown" when <c>octet_length</c> came back null.</summary>
+    private string BinaryDescription => BinaryLength is { } length
+        ? length.ToString("N0", CultureInfo.InvariantCulture) + " bytes"
+        : "size unknown";
+
+    private async Task SelectAsync()
+    {
+        if (OnSelect.HasDelegate)
+        {
+            await OnSelect.InvokeAsync(Version);
+        }
+    }
+}

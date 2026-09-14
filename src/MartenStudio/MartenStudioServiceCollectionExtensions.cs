@@ -4,6 +4,7 @@ using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Documents;
+using MartenStudio.Services.Events;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 
@@ -114,6 +115,10 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddSingleton<StudioCapabilityGuard>();
         services.TryAddSingleton<StudioActionLogService>();
 
+        // The information_schema reader, singleton because what it caches - a table's physical columns -
+        // changes only with a schema migration and is the same answer for every circuit.
+        services.TryAddSingleton<ColumnCatalog>();
+
         // Scoped, because all five are about one circuit: what it is pointed at, who is driving it, and
         // what it has been told.
         services.TryAddScoped<StudioState>();
@@ -124,8 +129,8 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<StudioActionLog>();
         services.TryAddScoped<ToastService>();
         services.TryAddScoped<IStoreInfoService, StoreInfoService>();
-        services.TryAddSingleton<ColumnCatalog>();
         services.TryAddScoped<IDocumentWriteService, DocumentWriteService>();
+        services.TryAddScoped<IEventDataService, EventDataService>();
 
         // Projections and the async daemon. The three singletons are process-wide on purpose: one
         // snapshot per interval however many circuits are watching, one tracker subscription per

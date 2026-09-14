@@ -186,9 +186,10 @@ public class StudioLayoutTests
 
         // Only the pages that have an @page yet are links; the rest are visible and disabled, so the
         // information architecture is legible from the first version. This list grows one packet at a
-        // time - Projections joined it in P5.
+        // time - Projections joined it in P5, the four Events screens in P4.
         layout.TextOfAll(".ms-nav-link:not(.ms-nav-link-disabled) .ms-nav-link-text")
-            .Should().Equal("Overview", "Projections", "Activity");
+            .Should().Equal(
+                "Overview", "Streams", "Feed", "Event types", "Dead letters", "Projections", "Activity");
 
         layout.FindAll(".ms-nav-link-disabled").Should().OnlyContain(x =>
             x.GetAttribute("title") == "Coming in a later release" && x.GetAttribute("aria-disabled") == "true");
@@ -204,7 +205,8 @@ public class StudioLayoutTests
 
         // In custom-path mode the shell roots the document at the studio itself, so links are relative to
         // the studio root and an empty href resolves to it.
-        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal("", "projections", "activity");
+        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
+            "", "events/streams", "events/feed", "events/types", "events/dead-letters", "projections", "activity");
     }
 
     [Fact]
@@ -214,8 +216,14 @@ public class StudioLayoutTests
 
         var layout = RenderLayout(context);
 
-        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href"))
-            .Should().Equal("marten", "marten/projections", "marten/activity");
+        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
+            "marten",
+            "marten/events/streams",
+            "marten/events/feed",
+            "marten/events/types",
+            "marten/events/dead-letters",
+            "marten/projections",
+            "marten/activity");
     }
 
     // -------------------------------------------------------------------------------------------

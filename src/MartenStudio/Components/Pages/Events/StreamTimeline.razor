@@ -1,0 +1,58 @@
+@* The rail a stream's events sit on, plus its "load more" foot.
+
+   It takes a RenderFragment rather than the rows themselves: the row record is internal (D12) and a
+   component parameter cannot be, so the page does the loop and this owns the rail, the dots and the
+   window's end. *@
+
+<div class="ms-timeline">
+    @ChildContent
+</div>
+
+@if (HasMore)
+{
+    <div class="ms-timeline-more">
+        <button type="button" class="ms-button" disabled="@IsLoading" @onclick="LoadMoreAsync">
+            @(IsLoading ? "Loading..." : LoadMoreText)
+        </button>
+    </div>
+}
+else if (ShowEnd)
+{
+    <div class="ms-timeline-more">
+        <span class="ms-muted">That is the whole stream.</span>
+    </div>
+}
+
+@code {
+    /// <summary>The timeline items, each a <c>div.ms-timeline-item</c>.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Whether there is another window of events after this one.</summary>
+    [Parameter]
+    public bool HasMore { get; set; }
+
+    /// <summary>Whether the "that is the whole stream" foot is drawn when there is no more.</summary>
+    [Parameter]
+    public bool ShowEnd { get; set; } = true;
+
+    /// <summary>Whether a window is being fetched right now.</summary>
+    [Parameter]
+    public bool IsLoading { get; set; }
+
+    /// <summary>What the button says.</summary>
+    [Parameter]
+    public string LoadMoreText { get; set; } = "Load more";
+
+    /// <summary>Raised when the visitor asks for the next window.</summary>
+    [Parameter]
+    public EventCallback OnLoadMore { get; set; }
+
+    private async Task LoadMoreAsync()
+    {
+        if (OnLoadMore.HasDelegate)
+        {
+            await OnLoadMore.InvokeAsync();
+        }
+    }
+}

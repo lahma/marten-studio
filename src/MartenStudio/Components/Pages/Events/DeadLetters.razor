@@ -1,0 +1,570 @@
+@page "/marten/events/dead-letters"
+@using System.Globalization
+@using Microsoft.Extensions.Options
+@using MartenStudio.Components.Json
+@using MartenStudio.Services
+@using MartenStudio.Services.Events
+@implements IAsyncDisposable
+@inject IEventDataService Events
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject ToastService Toasts
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+
+<PageTitle>Dead letters</PageTitle>
+
+<div class="ms-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Dead letters</h1>
+    </div>
+
+    <p class="ms-muted">
+        An event the async daemon could not apply, recorded by Marten as a
+        <code>DeadLetterEvent</code> document in the event store's own schema. The projection is still
+        stopped or still skipping: discarding the record forgets the failure, it does not fix it.
+    </p>
+
+    <div class="ms-event-filters">
+        <div class="ms-event-filter">
+            <label class="ms-event-filter-label" for="ms-dl-projection">Projection</label>
+            <input id="ms-dl-projection"
+                   type="text"
+                   class="ms-input"
+                   placeholder="any projection"
+                   value="@Projection"
+                   @onchange="OnProjectionChangedAsync" />
+        </div>
+
+        <div class="ms-event-filter">
+            <label class="ms-event-filter-label" for="ms-dl-shard">Shard</label>
+            <input id="ms-dl-shard"
+                   type="text"
+                   class="ms-input"
+                   placeholder="any shard"
+                   value="@Shard"
+                   @onchange="OnShardChangedAsync" />
+        </div>
+
+        <div class="ms-event-filter">
+            <label class="ms-event-filter-label" for="ms-dl-exception">Exception type contains</label>
+            <input id="ms-dl-exception"
+                   type="text"
+                   class="ms-input"
+                   placeholder="any exception"
+                   value="@Exception"
+                   @onchange="OnExceptionChangedAsync" />
+        </div>
+    </div>
+
+    @if (!Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
+    {
+        <CapabilityDisabled Capability="@nameof(StudioCapability.ManageDeadLetters)" Action="Managing dead letters" />
+    }
+
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (page?.Error is { } error)
+    {
+        <ErrorAlert Message="@error.Display" OnRetry="@(error.CanRetry ? EventCallback.Factory.Create(this, ReloadAsync) : default)" />
+    }
+    else if (page is null || page.Rows.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No dead letters</p>
+            <p class="ms-empty-description">
+                @(HasFilters
+                    ? "No dead letter matches these filters."
+                    : "No projection in this database has failed on an event.")
+            </p>
+        </div>
+    }
+    else
+    {
+        <table class="ms-table">
+            <thead>
+                <tr>
+                    <th>Projection</th>
+                    <th>Shard</th>
+                    <th>Event</th>
+                    <th>Exception</th>
+                    <th>When</th>
+                    <th>Tenant</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (DeadLetterRow row in page.Rows)
+                {
+                    <tr class="ms-table-row" @key="row.Id">
+                        <td class="ms-table-cell ms-table-cell-mono">@row.ProjectionName</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@row.ShardName</td>
+                        <td class="ms-table-cell ms-table-cell-mono">#@row.EventSequence.ToString(CultureInfo.InvariantCulture)</td>
+                        <td class="ms-table-cell ms-truncate" title="@row.ExceptionMessage">@row.ExceptionType</td>
+                        <td class="ms-table-cell"><TimeAgo Timestamp="row.Timestamp" /></td>
+                        <td class="ms-table-cell ms-table-cell-mono">@row.TenantId</td>
+                        <td class="ms-table-cell ms-table-cell-actions">
+                            <button type="button" class="ms-button ms-btn-sm" @onclick="() => ToggleAsync(row.Id, row.EventSequence)">
+                                @(expanded == row.Id ? "Hide" : "Details")
+                            </button>
+                        </td>
+                    </tr>
+
+                    @if (expanded == row.Id)
+                    {
+                        <tr class="ms-table-row ms-dead-letter-detail" @key="@(row.Id.ToString() + "-detail")">
+                            <td class="ms-table-cell" colspan="@DetailColumnSpan">
+                                <div class="ms-dead-letter-panel">
+                                    <pre class="ms-dead-letter-exception">@row.ExceptionType: @row.ExceptionMessage</pre>
+
+                                    <div>
+                                        <h3 class="ms-section-title">The event that failed</h3>
+                                        @if (loadingEvent)
+                                        {
+                                            <LoadingSpinner />
+                                        }
+                                        else if (offending is null)
+                                        {
+                                            <p class="ms-muted">
+                                                Event #@row.EventSequence.ToString(CultureInfo.InvariantCulture) is no
+                                                longer in <code>mt_events</code>, or this tenant cannot see it.
+                                            </p>
+                                        }
+                                        else
+                                        {
+                                            <EventCard Sequence="offending.Sequence"
+                                                       Version="offending.Version"
+                                                       EventType="@offending.EventType"
+                                                       DotNetType="@offending.DotNetType"
+                                                       Timestamp="offending.Timestamp"
+                                                       StreamId="@offending.StreamId"
+                                                       StreamHref="@StreamHref(offending.StreamId)"
+                                                       ShowStream="true"
+                                                       IsArchived="offending.IsArchived"
+                                                       IsSkipped="offending.IsSkipped"
+                                                       HasBinary="offending.HasBinary"
+                                                       BinaryLength="offending.BinaryLength"
+                                                       Json="@offending.Json"
+                                                       Metadata="offending.Metadata" />
+                                        }
+                                    </div>
+
+                                    <div class="ms-dead-letter-actions">
+                                        @if (!Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
+                                        {
+                                            <span class="ms-muted">
+                                                Discard and Skip need
+                                                <code>MartenStudioOptions.Capabilities.ManageDeadLetters</code>.
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button type="button"
+                                                    class="ms-button ms-button-danger"
+                                                    disabled="@working"
+                                                    @onclick="() => OpenDiscardAsync(row.Id)">
+                                                Discard
+                                            </button>
+
+                                            <button type="button"
+                                                    class="ms-button"
+                                                    disabled="@(working || !SupportsSkipping)"
+                                                    title="@SkipTitle"
+                                                    @onclick="() => OpenSkipAsync(row.EventSequence)">
+                                                Skip event
+                                            </button>
+                                        }
+
+                                        @* The third action the design names. It needs a running daemon,
+                                           which this page deliberately never reaches for, so it ships
+                                           disabled and says where it is going rather than pretending it
+                                           is not part of the design. *@
+                                        <button type="button"
+                                                class="ms-button ms-btn-disabled"
+                                                disabled
+                                                title="arrives with the projections page">
+                                            Rewind subscription to this event
+                                        </button>
+                                    </div>
+
+                                    @if (!string.IsNullOrWhiteSpace(actionError))
+                                    {
+                                        <ErrorAlert Message="@actionError" />
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+
+        <nav class="ms-pagination">
+            @if (OffsetValue > 0)
+            {
+                <a class="ms-button" href="@PageHref(Math.Max(0, OffsetValue - PageSize))">Previous</a>
+            }
+            else
+            {
+                <span class="ms-button ms-btn-disabled" aria-disabled="true">Previous</span>
+            }
+            <span class="ms-pagination-info">from @((OffsetValue + 1).ToString(CultureInfo.InvariantCulture))</span>
+            @if (page.HasMore)
+            {
+                <a class="ms-button" href="@PageHref(OffsetValue + PageSize)">Next</a>
+            }
+        </nav>
+    }
+</div>
+
+<ConfirmDialog IsOpen="@(dialog is not DialogKind.None)"
+               Title="@DialogTitle"
+               Message="@DialogMessage"
+               ConfirmText="@DialogConfirmText"
+               OnConfirm="ConfirmAsync"
+               OnCancel="CancelDialog" />
+
+@code {
+    private const int PageSize = 50;
+
+    /// <summary>Which confirmation is open.</summary>
+    private enum DialogKind
+    {
+        None,
+        Discard,
+        Skip
+    }
+
+    private readonly CancellationTokenSource pageCancellation = new();
+
+    private DeadLetterPage? page;
+    private EventStoreShape? shape;
+    private EventRow? offending;
+    private Guid? expanded;
+    private Guid pendingDiscard;
+    private long pendingSkip;
+    private DialogKind dialog = DialogKind.None;
+    private bool loading = true;
+    private bool loadingEvent;
+    private bool working;
+    private string? actionError;
+    private string? signature;
+
+    /// <summary>Only this projection's dead letters.</summary>
+    [SupplyParameterFromQuery(Name = "projection")]
+    public string? Projection { get; set; }
+
+    /// <summary>Only this shard's.</summary>
+    [SupplyParameterFromQuery(Name = "shard")]
+    public string? Shard { get; set; }
+
+    /// <summary>Only those whose exception type contains this.</summary>
+    [SupplyParameterFromQuery(Name = "exception")]
+    public string? Exception { get; set; }
+
+    /// <summary>How many to skip.</summary>
+    [SupplyParameterFromQuery(Name = "offset")]
+    public int? Offset { get; set; }
+
+    /// <summary>The store this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.StoreKey)]
+    public string? Store { get; set; }
+
+    /// <summary>The database this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.DatabaseKey)]
+    public string? Database { get; set; }
+
+    /// <summary>The tenant this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.TenantKey)]
+    public string? Tenant { get; set; }
+
+    private int OffsetValue => Math.Max(0, Offset ?? 0);
+
+    private bool HasFilters =>
+        !string.IsNullOrWhiteSpace(Projection)
+        || !string.IsNullOrWhiteSpace(Shard)
+        || !string.IsNullOrWhiteSpace(Exception);
+
+    private int DetailColumnSpan => 7;
+
+    private bool SupportsSkipping => shape?.HasIsSkipped == true;
+
+    private string SkipTitle => SupportsSkipping
+        ? "Marks the event skipped so the daemon steps over it"
+        : "This store has no mt_events.is_skipped column: the host did not enable event skipping";
+
+    private string DialogTitle => dialog switch
+    {
+        DialogKind.Discard => "Discard this dead letter?",
+        DialogKind.Skip => "Mark this event as skipped?",
+        _ => "Confirm",
+    };
+
+    private string DialogMessage => dialog switch
+    {
+        DialogKind.Discard =>
+            "The record of the failure is deleted. The projection is not restarted and the event is not " +
+            "reapplied - if the shard is still failing on it, a new dead letter will appear.",
+        DialogKind.Skip =>
+            $"Event #{pendingSkip.ToString(CultureInfo.InvariantCulture)} is marked skipped, so the daemon " +
+            "steps over it on the next attempt. The event stays in the store, and every projection that " +
+            "reads it from now on will not see it.",
+        _ => string.Empty,
+    };
+
+    private string DialogConfirmText => dialog == DialogKind.Skip ? "Skip event" : "Discard";
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        await ApplyScopeFromQueryAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        string current = Signature();
+        if (string.Equals(current, signature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        signature = current;
+        await LoadAsync();
+    }
+
+    private async Task ApplyScopeFromQueryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Store) && string.IsNullOrWhiteSpace(Database) && string.IsNullOrWhiteSpace(Tenant))
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+        if (active is not null
+            && string.Equals(active.StoreKey, Store ?? active.StoreKey, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.DatabaseId, Database ?? active.DatabaseId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.TenantId ?? string.Empty, Tenant ?? active.TenantId ?? string.Empty, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await State.SetScopeAsync(Store, Database, Tenant, pageCancellation.Token);
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        signature = Signature();
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task ReloadAsync()
+    {
+        signature = Signature();
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            loading = false;
+            return;
+        }
+
+        loading = true;
+        expanded = null;
+        offending = null;
+        StateHasChanged();
+
+        try
+        {
+            CancellationToken token = pageCancellation.Token;
+
+            shape = await Events.DescribeAsync(scope, token);
+            page = await Events.ListDeadLettersAsync(scope, new DeadLetterQuery
+            {
+                ProjectionName = Projection,
+                ShardName = Shard,
+                ExceptionType = Exception,
+                Offset = OffsetValue,
+                PageSize = PageSize,
+            }, token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            page = DeadLetterPage.Failed(new EventDataError(exception.Message, null, true));
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task ToggleAsync(Guid id, long sequence)
+    {
+        actionError = null;
+
+        if (expanded == id)
+        {
+            expanded = null;
+            offending = null;
+            return;
+        }
+
+        expanded = id;
+        offending = null;
+
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
+
+        loadingEvent = true;
+
+        try
+        {
+            offending = await Events.GetEventBySequenceAsync(scope, sequence, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            actionError = exception.Message;
+        }
+        finally
+        {
+            loadingEvent = false;
+        }
+    }
+
+    private Task OpenDiscardAsync(Guid id)
+    {
+        actionError = null;
+        pendingDiscard = id;
+        dialog = DialogKind.Discard;
+        return Task.CompletedTask;
+    }
+
+    private Task OpenSkipAsync(long sequence)
+    {
+        actionError = null;
+        pendingSkip = sequence;
+        dialog = DialogKind.Skip;
+        return Task.CompletedTask;
+    }
+
+    private void CancelDialog() => dialog = DialogKind.None;
+
+    private async Task ConfirmAsync()
+    {
+        DialogKind kind = dialog;
+        dialog = DialogKind.None;
+
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || kind == DialogKind.None)
+        {
+            return;
+        }
+
+        working = true;
+        actionError = null;
+
+        try
+        {
+            if (kind == DialogKind.Discard)
+            {
+                await Events.DiscardDeadLetterAsync(scope, pendingDiscard, pageCancellation.Token);
+                await Toasts.Success("The dead letter is discarded.");
+            }
+            else
+            {
+                await Events.SkipEventAsync(scope, pendingSkip, pageCancellation.Token);
+                await Toasts.Success(
+                    $"Event #{pendingSkip.ToString(CultureInfo.InvariantCulture)} is marked as skipped.");
+            }
+
+            await LoadAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            actionError = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            working = false;
+        }
+    }
+
+    private Task OnProjectionChangedAsync(ChangeEventArgs args)
+    {
+        Projection = args.Value?.ToString();
+        return NavigateAsync();
+    }
+
+    private Task OnShardChangedAsync(ChangeEventArgs args)
+    {
+        Shard = args.Value?.ToString();
+        return NavigateAsync();
+    }
+
+    private Task OnExceptionChangedAsync(ChangeEventArgs args)
+    {
+        Exception = args.Value?.ToString();
+        return NavigateAsync();
+    }
+
+    private Task NavigateAsync()
+    {
+        Navigation.NavigateTo(PageHref(0));
+        return Task.CompletedTask;
+    }
+
+    private string PageHref(int offset) =>
+        EventLinks.To(
+            Options.Value,
+            EventLinks.DeadLettersRoute,
+            State.ActiveScope,
+            [
+                new("projection", Projection),
+                new("shard", Shard),
+                new("exception", Exception),
+                new("offset", offset > 0 ? offset.ToString(CultureInfo.InvariantCulture) : null),
+            ]);
+
+    private string StreamHref(string streamId) =>
+        EventLinks.ToStream(Options.Value, State.ActiveScope, streamId);
+
+    private string Signature() =>
+        string.Join(
+            '',
+            State.ActiveScope?.StoreKey,
+            State.ActiveScope?.DatabaseId,
+            State.ActiveScope?.TenantId,
+            Projection,
+            Shard,
+            Exception,
+            OffsetValue.ToString(CultureInfo.InvariantCulture));
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        await pageCancellation.CancelAsync();
+        pageCancellation.Dispose();
+
+        GC.SuppressFinalize(this);
+    }
+}

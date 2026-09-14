@@ -1,0 +1,426 @@
+@page "/marten/events/streams"
+@using System.Globalization
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services
+@using MartenStudio.Services.Events
+@implements IAsyncDisposable
+@inject IEventDataService Events
+@inject StudioState State
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+
+<PageTitle>Streams</PageTitle>
+
+<div class="ms-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Streams</h1>
+    </div>
+
+    <div class="ms-event-filters">
+        <div class="ms-event-filter">
+            <label class="ms-event-filter-label" for="ms-streams-id">Stream id</label>
+            <input id="ms-streams-id"
+                   type="text"
+                   class="ms-input ms-input-mono"
+                   placeholder="@IdPlaceholder"
+                   value="@Id"
+                   @onchange="OnIdChangedAsync" />
+        </div>
+
+        <div class="ms-event-filter">
+            <label class="ms-event-filter-label" for="ms-streams-type">Aggregate type starts with</label>
+            <input id="ms-streams-type"
+                   type="text"
+                   class="ms-input"
+                   placeholder="any type"
+                   value="@Type"
+                   @onchange="OnTypeChangedAsync" />
+        </div>
+
+        <div class="ms-event-filter">
+            <label class="ms-event-filter-label" for="ms-streams-order">Order</label>
+            <select id="ms-streams-order" class="ms-select" value="@Order" @onchange="OnOrderChangedAsync">
+                <option value="">Newest first</option>
+                <option value="recent">Recently active</option>
+            </select>
+        </div>
+
+        <div class="ms-event-filter">
+            <label class="ms-event-filter-checkbox">
+                <input type="checkbox" checked="@ArchivedFlag" @onchange="OnArchivedChangedAsync" />
+                Include archived
+            </label>
+        </div>
+    </div>
+
+    @if (Order == RecentOrder)
+    {
+        <p class="ms-muted">
+            "Recently active" orders by the highest event sequence per stream, which is an aggregate over
+            the events table rather than an index walk. It pages by offset, and the offset is capped.
+        </p>
+    }
+
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (page?.Error is { } error)
+    {
+        <ErrorAlert Message="@error.Display" OnRetry="@(error.CanRetry ? EventCallback.Factory.Create(this, ReloadAsync) : default)" />
+    }
+    else if (shape is { Available: true, EventTablesExist: false })
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">This store has no event storage yet</p>
+            <p class="ms-empty-description">
+                Marten creates <code>mt_streams</code> and <code>mt_events</code> the first time something
+                appends an event, or when the schema is created up front. Nothing has yet.
+            </p>
+        </div>
+    }
+    else if (page is null || page.Rows.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No streams</p>
+            <p class="ms-empty-description">
+                @(HasFilters
+                    ? "No stream matches these filters."
+                    : "This store's event store holds no streams.")
+            </p>
+        </div>
+    }
+    else
+    {
+        <table class="ms-table">
+            <thead>
+                <tr>
+                    <th>Stream</th>
+                    <th>Type</th>
+                    <th>Version</th>
+                    <th>Created</th>
+                    <th>Last event</th>
+                    @if (ShowTenant)
+                    {
+                        <th>Tenant</th>
+                    }
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (StreamRow row in page.Rows)
+                {
+                    <tr class="ms-table-row" @key="row.Id">
+                        <td class="ms-table-cell ms-table-cell-mono">
+                            <a href="@StreamHref(row.Id)">@row.Id</a>
+                            <CopyBadge Value="@row.Id" />
+                        </td>
+                        <td class="ms-table-cell">
+                            @if (!string.IsNullOrEmpty(row.AggregateType))
+                            {
+                                <EventTypeChip Name="@row.AggregateType" />
+                            }
+                            else
+                            {
+                                <span class="ms-muted">untyped</span>
+                            }
+                            @if (row.IsArchived)
+                            {
+                                <span class="ms-event-flag ms-event-flag-archived">archived</span>
+                            }
+                        </td>
+                        <td class="ms-table-cell ms-table-cell-mono">@row.Version.ToString(CultureInfo.InvariantCulture)</td>
+                        <td class="ms-table-cell">@State.FormatInSelectedTimeZone(row.Created)</td>
+                        <td class="ms-table-cell"><TimeAgo Timestamp="row.LastEvent" /></td>
+                        @if (ShowTenant)
+                        {
+                            <td class="ms-table-cell ms-table-cell-mono">@(row.TenantId ?? "-")</td>
+                        }
+                        <td class="ms-table-cell ms-table-cell-actions">
+                            <a class="ms-button ms-btn-sm" href="@FeedHref(row.Id)">Open in feed</a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <nav class="ms-pagination">
+            @if (Order == RecentOrder)
+            {
+                @* A disabled anchor is still a link a keyboard reaches, so the unavailable state is a
+                   span rather than an <a> with a class on it. *@
+                @if (OffsetValue > 0)
+                {
+                    <a class="ms-button" href="@OffsetHref(Math.Max(0, OffsetValue - PageSize))">Previous</a>
+                }
+                else
+                {
+                    <span class="ms-button ms-btn-disabled" aria-disabled="true">Previous</span>
+                }
+                <span class="ms-pagination-info">
+                    from @((OffsetValue + 1).ToString(CultureInfo.InvariantCulture))
+                </span>
+                @if (page.HasMore)
+                {
+                    <a class="ms-button" href="@OffsetHref(OffsetValue + PageSize)">Next</a>
+                }
+            }
+            else
+            {
+                @if (!string.IsNullOrEmpty(Cursor))
+                {
+                    <a class="ms-button" href="@CursorHref(null)">First page</a>
+                }
+                @if (page.NextCursor is { } next)
+                {
+                    <a class="ms-button" href="@CursorHref(next.ToToken())">Next</a>
+                }
+            }
+        </nav>
+    }
+</div>
+
+@code {
+    /// <summary>The <c>order</c> value that asks for the aggregate ordering.</summary>
+    private const string RecentOrder = "recent";
+
+    private const int PageSize = 50;
+
+    private readonly CancellationTokenSource pageCancellation = new();
+
+    private StreamPage? page;
+    private EventStoreShape? shape;
+    private bool loading = true;
+    private string? signature;
+
+    /// <summary>One stream by id.</summary>
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? Id { get; set; }
+
+    /// <summary>Streams whose aggregate type starts with this.</summary>
+    [SupplyParameterFromQuery(Name = "type")]
+    public string? Type { get; set; }
+
+    /// <summary>Whether archived streams are listed.</summary>
+    [SupplyParameterFromQuery(Name = "archived")]
+    public string? Archived { get; set; }
+
+    /// <summary>Empty for the keyset ordering, <c>recent</c> for the aggregate one.</summary>
+    [SupplyParameterFromQuery(Name = "order")]
+    public string? Order { get; set; }
+
+    /// <summary>The keyset cursor token.</summary>
+    [SupplyParameterFromQuery(Name = "cursor")]
+    public string? Cursor { get; set; }
+
+    /// <summary>The offset, for the aggregate ordering.</summary>
+    [SupplyParameterFromQuery(Name = "offset")]
+    public int? Offset { get; set; }
+
+    /// <summary>The store this link is about (D9).</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.StoreKey)]
+    public string? Store { get; set; }
+
+    /// <summary>The database this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.DatabaseKey)]
+    public string? Database { get; set; }
+
+    /// <summary>The tenant this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.TenantKey)]
+    public string? Tenant { get; set; }
+
+    private bool ArchivedFlag => EventLinks.ReadFlag(Archived);
+
+    private int OffsetValue => Math.Max(0, Offset ?? 0);
+
+    private bool ShowTenant => shape?.HasTenantId == true;
+
+    private bool HasFilters =>
+        !string.IsNullOrWhiteSpace(Id) || !string.IsNullOrWhiteSpace(Type);
+
+    private string IdPlaceholder => shape?.StreamIdentity == JasperFx.Events.StreamIdentity.AsString
+        ? "any stream key"
+        : "any stream GUID";
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        await ApplyScopeFromQueryAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        string current = Signature();
+        if (string.Equals(current, signature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        signature = current;
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Points the studio at the scope the link named, when it named one the visitor may have.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="StudioState.SetScopeAsync" /> validates against the listings the visitor is actually
+    /// authorized for and silently ignores anything else, which is what makes a pasted link safe: it
+    /// opens what they may see, never what they may not.
+    /// </remarks>
+    private async Task ApplyScopeFromQueryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Store) && string.IsNullOrWhiteSpace(Database) && string.IsNullOrWhiteSpace(Tenant))
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+        if (active is not null
+            && string.Equals(active.StoreKey, Store ?? active.StoreKey, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.DatabaseId, Database ?? active.DatabaseId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.TenantId ?? string.Empty, Tenant ?? active.TenantId ?? string.Empty, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await State.SetScopeAsync(Store, Database, Tenant, pageCancellation.Token);
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        signature = Signature();
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task ReloadAsync()
+    {
+        signature = Signature();
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            page = StreamPage.Empty;
+            loading = false;
+            return;
+        }
+
+        loading = true;
+        StateHasChanged();
+
+        try
+        {
+            CancellationToken token = pageCancellation.Token;
+
+            shape = await Events.DescribeAsync(scope, token);
+            page = await Events.ListStreamsAsync(scope, new StreamListRequest
+            {
+                StreamId = Id,
+                TypePrefix = Type,
+                IncludeArchived = ArchivedFlag,
+                Order = Order == RecentOrder ? StreamListOrder.RecentlyActive : StreamListOrder.Newest,
+                Cursor = StreamCursor.FromToken(Cursor),
+                Offset = OffsetValue,
+                PageSize = PageSize,
+            }, token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The circuit is going away; there is nothing left to draw.
+        }
+        catch (Exception exception)
+        {
+            page = StreamPage.Failed(new EventDataError(exception.Message, null, true));
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private string Signature() =>
+        string.Join(
+            '',
+            State.ActiveScope?.StoreKey,
+            State.ActiveScope?.DatabaseId,
+            State.ActiveScope?.TenantId,
+            Id,
+            Type,
+            Archived,
+            Order,
+            Cursor,
+            OffsetValue.ToString(CultureInfo.InvariantCulture));
+
+    private string StreamHref(string streamId) =>
+        EventLinks.ToStream(Options.Value, State.ActiveScope, streamId);
+
+    private string FeedHref(string streamId) =>
+        EventLinks.ToFeedForStream(Options.Value, State.ActiveScope, streamId);
+
+    private string CursorHref(string? cursor) => Href(cursor, offset: null);
+
+    private string OffsetHref(int offset) => Href(cursor: null, offset);
+
+    private string Href(string? cursor, int? offset) =>
+        EventLinks.To(
+            Options.Value,
+            EventLinks.StreamsRoute,
+            State.ActiveScope,
+            [
+                new("id", Id),
+                new("type", Type),
+                new("archived", EventLinks.Flag(ArchivedFlag)),
+                new("order", Order),
+                new("cursor", cursor),
+                new("offset", offset is > 0 ? offset.Value.ToString(CultureInfo.InvariantCulture) : null),
+            ]);
+
+    private Task OnIdChangedAsync(ChangeEventArgs args)
+    {
+        Id = args.Value?.ToString();
+        return NavigateAsync();
+    }
+
+    private Task OnTypeChangedAsync(ChangeEventArgs args)
+    {
+        Type = args.Value?.ToString();
+        return NavigateAsync();
+    }
+
+    private Task OnOrderChangedAsync(ChangeEventArgs args)
+    {
+        Order = args.Value?.ToString();
+        return NavigateAsync();
+    }
+
+    private Task OnArchivedChangedAsync(ChangeEventArgs args)
+    {
+        Archived = args.Value is bool value && value ? "1" : null;
+        return NavigateAsync();
+    }
+
+    /// <summary>
+    /// Every filter change goes through the URL rather than straight into a field, so the page someone
+    /// is looking at is the page they can send to someone else.
+    /// </summary>
+    private Task NavigateAsync()
+    {
+        Navigation.NavigateTo(Href(cursor: null, offset: null));
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        await pageCancellation.CancelAsync();
+        pageCancellation.Dispose();
+
+        GC.SuppressFinalize(this);
+    }
+}

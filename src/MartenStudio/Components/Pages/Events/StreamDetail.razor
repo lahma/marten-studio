@@ -1,0 +1,536 @@
+@page "/marten/events/streams/s"
+@using System.Globalization
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services
+@using MartenStudio.Services.Events
+@implements IAsyncDisposable
+@inject IEventDataService Events
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject ToastService Toasts
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+
+<PageTitle>Stream</PageTitle>
+
+<div class="ms-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Stream</h1>
+        <a class="ms-button" href="@StreamsHref">All streams</a>
+    </div>
+
+    @if (string.IsNullOrWhiteSpace(Id))
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No stream asked for</p>
+            <p class="ms-empty-description">
+                This page opens one stream, and the id travels in the query string (<code>?id=</code>).
+                Pick one from <a href="@StreamsHref">the stream list</a>.
+            </p>
+        </div>
+    }
+    else if (loading && stream is null)
+    {
+        <LoadingSpinner />
+    }
+    else if (stream?.Error is { } headerError)
+    {
+        <ErrorAlert Message="@headerError.Display" OnRetry="@(headerError.CanRetry ? EventCallback.Factory.Create(this, ReloadAsync) : default)" />
+    }
+    else if (stream is null || !stream.Exists)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No such stream</p>
+            <p class="ms-empty-description">
+                This store's event store holds no stream with id <code>@Id</code>
+                @(string.IsNullOrEmpty(State.ActiveScope?.TenantId) ? string.Empty : " for this tenant").
+            </p>
+        </div>
+    }
+    else
+    {
+        <div class="ms-stream-header">
+            <CopyBadge Value="@stream.Id" />
+            @if (!string.IsNullOrEmpty(stream.AggregateType))
+            {
+                <EventTypeChip Name="@stream.AggregateType" />
+            }
+            <span class="ms-event-flag">version @stream.Version.ToString(CultureInfo.InvariantCulture)</span>
+            @if (stream.IsArchived)
+            {
+                <span class="ms-event-flag ms-event-flag-archived">archived</span>
+            }
+            @if (!string.IsNullOrEmpty(stream.TenantId))
+            {
+                <span class="ms-event-flag">tenant @stream.TenantId</span>
+            }
+            <span class="ms-event-card-spacer"></span>
+            <a class="ms-button" href="@FeedHref">Open in feed</a>
+        </div>
+
+        <div class="ms-kv">
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Created</span>
+                <span class="ms-kv-value">@State.FormatInSelectedTimeZone(stream.Created)</span>
+            </div>
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Last event</span>
+                <span class="ms-kv-value">
+                    @State.FormatInSelectedTimeZone(stream.LastEvent) (<TimeAgo Timestamp="stream.LastEvent" />)
+                </span>
+            </div>
+        </div>
+
+        @if (stream.IsArchived)
+        {
+            <div class="ms-alert ms-alert-warning" role="status">
+                <div class="ms-alert-content">
+                    <p>This stream is archived.</p>
+                    <p class="ms-muted">
+                        Its events are still here and are still replayable, but Marten's LINQ queries skip
+                        them unless a query asks for archived events, and the async daemon does not feed
+                        them to projections.
+                    </p>
+                </div>
+            </div>
+        }
+
+        <section class="ms-section">
+            <h2 class="ms-section-title">Archive</h2>
+            @if (!Capabilities.IsEnabled(StudioCapability.ArchiveStreams))
+            {
+                <CapabilityDisabled Capability="@nameof(StudioCapability.ArchiveStreams)" Action="Archiving streams" />
+            }
+            else if (stream.IsArchived)
+            {
+                <p class="ms-muted">This stream is already archived.</p>
+            }
+            else
+            {
+                <p class="ms-muted">
+                    Archiving marks the stream and all of its events archived. It is a write, it is
+                    audited, and Marten has no un-archive operation.
+                </p>
+                <button type="button" class="ms-button ms-button-danger" disabled="@archiving" @onclick="OpenArchiveDialog">
+                    @(archiving ? "Archiving..." : "Archive this stream")
+                </button>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(archiveError))
+            {
+                <ErrorAlert Message="@archiveError" />
+            }
+        </section>
+
+        <div class="ms-stream-panes">
+            <div class="ms-stream-timeline-pane">
+                <h2 class="ms-section-title">Timeline</h2>
+
+                @if (timeline.Count == 0 && !loading)
+                {
+                    <div class="ms-empty">
+                        <p class="ms-empty-title">No events</p>
+                        <p class="ms-empty-description">This stream's row exists but it holds no events.</p>
+                    </div>
+                }
+                else
+                {
+                    <StreamTimeline HasMore="hasMoreEvents"
+                                    IsLoading="loadingMore"
+                                    OnLoadMore="LoadMoreAsync"
+                                    ShowEnd="@(timeline.Count > 0)">
+                        @foreach (EventRow row in timeline)
+                        {
+                            <div class="@TimelineItemClass(row)" @key="row.Sequence">
+                                <EventCard Sequence="row.Sequence"
+                                           Version="row.Version"
+                                           EventType="@row.EventType"
+                                           DotNetType="@row.DotNetType"
+                                           Timestamp="row.Timestamp"
+                                           StreamId="@row.StreamId"
+                                           TypeHref="@TypeHref(row.EventType)"
+                                           ShowStream="false"
+                                           IsArchived="row.IsArchived"
+                                           IsSkipped="row.IsSkipped"
+                                           HasBinary="row.HasBinary"
+                                           BinaryLength="row.BinaryLength"
+                                           Json="@row.Json"
+                                           Metadata="row.Metadata"
+                                           IsSelected="@(row.Version == SelectedVersion)"
+                                           OnSelect="SelectVersionAsync" />
+                            </div>
+                        }
+                    </StreamTimeline>
+                }
+
+                @if (timelineError is { } listError)
+                {
+                    <ErrorAlert Message="@listError.Display" OnRetry="@(listError.CanRetry ? EventCallback.Factory.Create(this, ReloadAsync) : default)" />
+                }
+            </div>
+
+            <AggregateTimeTravel MaxVersion="stream.Version"
+                                 Version="SelectedVersion"
+                                 VersionChanged="SelectVersionAsync"
+                                 Candidates="candidateOptions"
+                                 SelectedType="@SelectedAggregate"
+                                 SelectedTypeChanged="SelectAggregateAsync"
+                                 Json="@snapshot?.Json"
+                                 HasResult="@(snapshot is not null)"
+                                 Found="@(snapshot?.Found == true)"
+                                 IsLoading="replaying"
+                                 Error="@snapshot?.Error?.Display"
+                                 OnLoad="ReplayAsync" />
+        </div>
+    }
+</div>
+
+<ConfirmDialog IsOpen="archiveDialogOpen"
+               Title="Archive this stream?"
+               Message="@ArchiveMessage"
+               ConfirmationPhrase="@Id"
+               ConfirmText="Archive"
+               OnConfirm="ArchiveAsync"
+               OnCancel="CloseArchiveDialog" />
+
+@code {
+    /// <summary>How many events one window of the timeline holds.</summary>
+    private const int WindowSize = 50;
+
+    private readonly CancellationTokenSource pageCancellation = new();
+    private readonly List<EventRow> timeline = [];
+
+    private List<KeyValuePair<string, string>> candidateOptions = [];
+    private StreamState? stream;
+    private EventStoreShape? shape;
+    private AggregateSnapshot? snapshot;
+    private EventDataError? timelineError;
+    private bool loading = true;
+    private bool loadingMore;
+    private bool replaying;
+    private bool archiving;
+    private bool archiveDialogOpen;
+    private string? archiveError;
+    private string? signature;
+    private long lastVersionLoaded;
+
+    /// <summary>The stream id. In the query string, not the route (D9).</summary>
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? Id { get; set; }
+
+    /// <summary>The version the time-travel panel is showing.</summary>
+    [SupplyParameterFromQuery(Name = "v")]
+    public long? Version { get; set; }
+
+    /// <summary>The full name of the aggregate type being replayed into.</summary>
+    [SupplyParameterFromQuery(Name = "agg")]
+    public string? Aggregate { get; set; }
+
+    /// <summary>The store this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.StoreKey)]
+    public string? Store { get; set; }
+
+    /// <summary>The database this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.DatabaseKey)]
+    public string? Database { get; set; }
+
+    /// <summary>The tenant this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.TenantKey)]
+    public string? Tenant { get; set; }
+
+    private long SelectedVersion => Math.Clamp(Version ?? stream?.Version ?? 1, 1, Math.Max(1, stream?.Version ?? 1));
+
+    private string? SelectedAggregate => Aggregate;
+
+    private bool hasMoreEvents;
+
+    private string StreamsHref => EventLinks.To(Options.Value, EventLinks.StreamsRoute, State.ActiveScope);
+
+    private string FeedHref => EventLinks.ToFeedForStream(Options.Value, State.ActiveScope, Id ?? string.Empty);
+
+    private string ArchiveMessage =>
+        $"Archiving marks stream {Id} and every one of its events as archived. Marten has no un-archive " +
+        "operation, so this cannot be undone from here.";
+
+    private string TypeHref(string eventType) =>
+        EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
+
+    /// <summary>The rail dot goes with the selected card, which is the one the panel is replaying to.</summary>
+    private string TimelineItemClass(EventRow row) =>
+        row.Version == SelectedVersion ? "ms-timeline-item ms-timeline-item-selected" : "ms-timeline-item";
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        await ApplyScopeFromQueryAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        string current = Signature();
+        if (string.Equals(current, signature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        bool sameStream = signature is not null && current.StartsWith(StreamSignature(), StringComparison.Ordinal);
+        signature = current;
+
+        if (sameStream)
+        {
+            // Only the version or the aggregate type moved: the timeline is still the right one.
+            snapshot = null;
+            return;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task ApplyScopeFromQueryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Store) && string.IsNullOrWhiteSpace(Database) && string.IsNullOrWhiteSpace(Tenant))
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+        if (active is not null
+            && string.Equals(active.StoreKey, Store ?? active.StoreKey, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.DatabaseId, Database ?? active.DatabaseId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.TenantId ?? string.Empty, Tenant ?? active.TenantId ?? string.Empty, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await State.SetScopeAsync(Store, Database, Tenant, pageCancellation.Token);
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        signature = Signature();
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task ReloadAsync()
+    {
+        signature = Signature();
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || string.IsNullOrWhiteSpace(Id))
+        {
+            loading = false;
+            return;
+        }
+
+        loading = true;
+        timeline.Clear();
+        timelineError = null;
+        snapshot = null;
+        lastVersionLoaded = 0;
+        StateHasChanged();
+
+        try
+        {
+            CancellationToken token = pageCancellation.Token;
+
+            shape = await Events.DescribeAsync(scope, token);
+            stream = await Events.GetStreamAsync(scope, Id, token);
+
+            IReadOnlyList<AggregateTypeCandidate> candidates = await Events.ListAggregateCandidatesAsync(scope, token);
+            candidateOptions = [.. candidates.Select(static x => new KeyValuePair<string, string>(
+                x.FullName,
+                x.Source == AggregateCandidateSource.SingleStreamProjection
+                    ? x.Name + " (single-stream projection)"
+                    : x.Name))];
+
+            if (stream.Exists)
+            {
+                await LoadWindowAsync(scope, token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            timelineError = new EventDataError(exception.Message, null, true);
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task LoadWindowAsync(StudioScope scope, CancellationToken token)
+    {
+        EventPage window = await Events.GetStreamEventsAsync(scope, Id!, lastVersionLoaded, WindowSize, token);
+
+        if (window.Error is { } error)
+        {
+            timelineError = error;
+            hasMoreEvents = false;
+            return;
+        }
+
+        timeline.AddRange(window.Rows);
+        hasMoreEvents = window.HasMore;
+
+        if (window.Rows.Count > 0)
+        {
+            lastVersionLoaded = window.Rows[^1].Version;
+        }
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || string.IsNullOrWhiteSpace(Id) || loadingMore)
+        {
+            return;
+        }
+
+        loadingMore = true;
+
+        try
+        {
+            await LoadWindowAsync(scope, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            timelineError = new EventDataError(exception.Message, null, true);
+        }
+        finally
+        {
+            loadingMore = false;
+        }
+    }
+
+    /// <summary>Clicking an event on the timeline is what moves the time-travel panel.</summary>
+    private Task SelectVersionAsync(long version)
+    {
+        Navigation.NavigateTo(Href(version, Aggregate));
+        return Task.CompletedTask;
+    }
+
+    private Task SelectAggregateAsync(string aggregate)
+    {
+        Navigation.NavigateTo(Href(Version, string.IsNullOrWhiteSpace(aggregate) ? null : aggregate));
+        return Task.CompletedTask;
+    }
+
+    private async Task ReplayAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || string.IsNullOrWhiteSpace(Id) || string.IsNullOrWhiteSpace(SelectedAggregate))
+        {
+            return;
+        }
+
+        replaying = true;
+        snapshot = null;
+
+        try
+        {
+            snapshot = await Events.AggregateAtVersionAsync(
+                scope, Id, SelectedAggregate, SelectedVersion, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            snapshot = AggregateSnapshot.Failed(
+                SelectedAggregate, SelectedVersion, new EventDataError(exception.Message, null, false));
+        }
+        finally
+        {
+            replaying = false;
+        }
+    }
+
+    private void OpenArchiveDialog()
+    {
+        archiveError = null;
+        archiveDialogOpen = true;
+    }
+
+    private void CloseArchiveDialog() => archiveDialogOpen = false;
+
+    private async Task ArchiveAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        archiveDialogOpen = false;
+
+        if (scope is null || string.IsNullOrWhiteSpace(Id))
+        {
+            return;
+        }
+
+        archiving = true;
+        archiveError = null;
+
+        try
+        {
+            await Events.ArchiveStreamAsync(scope, Id, pageCancellation.Token);
+            await Toasts.Success($"Stream {Id} is archived.");
+            await LoadAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page as well as in the toast: a failure that only flashes past is a failure nobody
+            // can act on (plan §4.8).
+            archiveError = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            archiving = false;
+        }
+    }
+
+    private string StreamSignature() =>
+        string.Join(
+            '',
+            State.ActiveScope?.StoreKey,
+            State.ActiveScope?.DatabaseId,
+            State.ActiveScope?.TenantId,
+            Id) + '';
+
+    private string Signature() =>
+        StreamSignature() + string.Join(
+            '',
+            Version?.ToString(CultureInfo.InvariantCulture),
+            Aggregate);
+
+    private string Href(long? version, string? aggregate) =>
+        EventLinks.To(
+            Options.Value,
+            EventLinks.StreamDetailRoute,
+            State.ActiveScope,
+            [
+                new("id", Id),
+                new("v", EventLinks.Number(version)),
+                new("agg", aggregate),
+            ]);
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        await pageCancellation.CancelAsync();
+        pageCancellation.Dispose();
+
+        GC.SuppressFinalize(this);
+    }
+}

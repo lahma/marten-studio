@@ -1,0 +1,50 @@
+@using MartenStudio.Services
+
+@* One event type, in the colour CollectionColorizer gives it.
+
+   The colour is a pure function of the type name (FNV-1a into a twelve-slot ring that avoids the danger
+   and success hues), so the same event type is the same colour on the feed, the timeline, the types
+   screen and in every other process. Only the hue travels in the style attribute; the saturation and
+   both lightnesses are themed tokens in events.css, which is what makes one chip readable in both
+   themes without twelve hard-coded pairs. *@
+
+@if (string.IsNullOrEmpty(Href))
+{
+    <span class="@ChipClass" style="@HueStyle" title="@TitleText">@Name</span>
+}
+else
+{
+    <a class="@ChipClass" style="@HueStyle" title="@TitleText" href="@Href">@Name</a>
+}
+
+@code {
+    /// <summary>The event type name, as it is stored in <c>mt_events.type</c>.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Where clicking the chip goes, or <see langword="null" /> for a chip that is not a link.</summary>
+    [Parameter]
+    public string? Href { get; set; }
+
+    /// <summary>The .NET type name, shown as the tooltip when the store records one.</summary>
+    [Parameter]
+    public string? DotNetTypeName { get; set; }
+
+    /// <summary>
+    /// Whether the store knows this event type. An unregistered one - present in the table, absent from
+    /// the configuration - is drawn with a dashed border rather than a different colour, because the
+    /// colour already means "which type this is".
+    /// </summary>
+    [Parameter]
+    public bool IsRegistered { get; set; } = true;
+
+    private string ChipClass => IsRegistered ? "ms-event-chip" : "ms-event-chip ms-event-chip-unregistered";
+
+    private string HueStyle =>
+        "--ms-event-hue: " + CollectionColorizer.EventTypeHueFor(Name).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private string TitleText => string.IsNullOrWhiteSpace(DotNetTypeName)
+        ? (IsRegistered ? Name : Name + " - not registered with this store")
+        : DotNetTypeName;
+}

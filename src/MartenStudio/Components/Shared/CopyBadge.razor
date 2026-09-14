@@ -21,7 +21,20 @@
     [Parameter]
     public string ItemName { get; set; } = string.Empty;
 
-    private string FullKey => DisplayValueHelper.FormatKey(GroupName, ItemName);
+    /// <summary>
+    /// The exact text to show and copy, for the badges that are not a group-and-name pair.
+    /// </summary>
+    /// <remarks>
+    /// A stream id, a document id or an event id is one value, not two, and pushing it through
+    /// <see cref="DisplayValueHelper.FormatKey" /> would put a <c>DEFAULT.</c> in front of it and copy
+    /// that too. When this is set the pair is ignored.
+    /// </remarks>
+    [Parameter]
+    public string? Value { get; set; }
+
+    private string FullKey => string.IsNullOrEmpty(Value)
+        ? DisplayValueHelper.FormatKey(GroupName, ItemName)
+        : Value;
 
     protected override void OnParametersSet()
     {

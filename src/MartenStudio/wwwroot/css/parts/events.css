@@ -1,0 +1,496 @@
+/*
+ * Marten Studio - the Events area (streams, stream detail, feed, event types, dead letters).
+ *
+ * Hand-rolled, prefixed ms-, and built only from the design tokens in marten-studio.css plus the six
+ * declared below (AGENTS.md hard rule 3 - no third-party CSS, ever). Each of the six is declared three
+ * times, the way the base stylesheet declares its own: once for the light default, once under
+ * prefers-color-scheme for the system dark theme, and once for each explicit .ms-studio[data-theme]
+ * choice, so an explicit light theme still wins inside a dark browser.
+ *
+ * This file is a part: the orchestrator folds it into marten-studio.css. Nothing here may restate a
+ * base token - it derives from them, so a change to the palette reaches the event timeline too.
+ */
+
+/* ==========================================================================
+   1. TOKENS
+   ========================================================================== */
+
+.ms-studio {
+    /* The colour ring CollectionColorizer.EventTypeHueFor lands an event type in. The hue itself is an
+       inline custom property on each chip - only the saturation, the lightnesses and the border alpha
+       are themed, which is what keeps one type the same colour in both themes without hard-coding
+       twelve pairs of hex values. */
+    --ms-event-chip-saturation: 65%;
+    --ms-event-chip-bg-lightness: 94%;
+    --ms-event-chip-text-lightness: 28%;
+    --ms-event-chip-border-alpha: 0.35;
+
+    /* The stream timeline's rail: the vertical line the version dots sit on. */
+    --ms-timeline-gutter: 28px;
+    --ms-timeline-dot-size: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .ms-studio {
+        --ms-event-chip-saturation: 55%;
+        --ms-event-chip-bg-lightness: 22%;
+        --ms-event-chip-text-lightness: 78%;
+        --ms-event-chip-border-alpha: 0.45;
+    }
+}
+
+.ms-studio[data-theme="light"] {
+    --ms-event-chip-saturation: 65%;
+    --ms-event-chip-bg-lightness: 94%;
+    --ms-event-chip-text-lightness: 28%;
+    --ms-event-chip-border-alpha: 0.35;
+}
+
+.ms-studio[data-theme="dark"] {
+    --ms-event-chip-saturation: 55%;
+    --ms-event-chip-bg-lightness: 22%;
+    --ms-event-chip-text-lightness: 78%;
+    --ms-event-chip-border-alpha: 0.45;
+}
+
+/* ==========================================================================
+   2. EVENT TYPE CHIP
+   ========================================================================== */
+
+.ms-event-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    max-width: 100%;
+    padding: 2px var(--ms-space-sm);
+    border-radius: var(--ms-radius-full);
+    border: 1px solid hsl(var(--ms-event-hue, 210) var(--ms-event-chip-saturation) 50% / var(--ms-event-chip-border-alpha));
+    background-color: hsl(var(--ms-event-hue, 210) var(--ms-event-chip-saturation) var(--ms-event-chip-bg-lightness));
+    color: hsl(var(--ms-event-hue, 210) var(--ms-event-chip-saturation) var(--ms-event-chip-text-lightness));
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    line-height: 1.6;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-decoration: none;
+}
+
+a.ms-event-chip:hover,
+a.ms-event-chip:focus-visible {
+    border-color: hsl(var(--ms-event-hue, 210) var(--ms-event-chip-saturation) 50%);
+    text-decoration: none;
+}
+
+.ms-event-chip-unregistered {
+    border-style: dashed;
+}
+
+/* ==========================================================================
+   3. FLAGS AND INDICATORS
+   ========================================================================== */
+
+.ms-event-flag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 1px var(--ms-space-sm);
+    border-radius: var(--ms-radius-full);
+    border: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+.ms-event-flag-archived {
+    border-color: var(--ms-color-warning);
+    background-color: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+}
+
+.ms-event-flag-skipped {
+    border-color: var(--ms-color-danger);
+    background-color: var(--ms-color-danger-bg);
+    color: var(--ms-color-danger);
+}
+
+.ms-event-binary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 1px var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    border: 1px dashed var(--ms-color-border-strong);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* One metadata chip per optional mt_events column the store actually has. */
+.ms-event-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-event-meta-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+    max-width: 100%;
+    padding: 1px var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    border: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-event-meta-key {
+    color: var(--ms-color-text-muted);
+    font-family: var(--ms-font-mono);
+}
+
+.ms-event-meta-value {
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 36ch;
+}
+
+/* ==========================================================================
+   4. EVENT CARD
+   ========================================================================== */
+
+.ms-event-card {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    box-shadow: var(--ms-shadow-sm);
+}
+
+.ms-event-card-selected {
+    border-color: var(--ms-color-primary);
+    box-shadow: 0 0 0 1px var(--ms-color-primary);
+}
+
+.ms-event-card-archived {
+    opacity: 0.75;
+}
+
+.ms-event-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-event-card-version {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text);
+}
+
+.ms-event-card-seq {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-event-card-spacer {
+    flex: 1 1 auto;
+}
+
+.ms-event-card-time {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+    white-space: nowrap;
+}
+
+.ms-event-card-body {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-event-card-empty {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-muted);
+}
+
+/* ==========================================================================
+   5. STREAM TIMELINE
+   ========================================================================== */
+
+.ms-timeline {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    padding-left: var(--ms-timeline-gutter);
+}
+
+/* The rail. A pseudo-element rather than a border on each row, so the line is continuous through the
+   gaps between cards and does not move when a card grows. */
+.ms-timeline::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--ms-timeline-dot-size) / 2);
+    width: 1px;
+    background-color: var(--ms-color-border);
+}
+
+.ms-timeline-item {
+    position: relative;
+}
+
+.ms-timeline-item::before {
+    content: "";
+    position: absolute;
+    top: var(--ms-space-md);
+    left: calc(-1 * var(--ms-timeline-gutter) + var(--ms-timeline-dot-size) / 2);
+    width: var(--ms-timeline-dot-size);
+    height: var(--ms-timeline-dot-size);
+    margin-left: calc(-1 * var(--ms-timeline-dot-size) / 2);
+    border-radius: var(--ms-radius-full);
+    border: 2px solid var(--ms-color-surface);
+    background-color: var(--ms-color-border-strong);
+}
+
+.ms-timeline-item-selected::before {
+    background-color: var(--ms-color-primary);
+}
+
+.ms-timeline-more {
+    display: flex;
+    justify-content: center;
+    padding: var(--ms-space-sm) 0;
+}
+
+/* ==========================================================================
+   6. FILTER BAR
+   ========================================================================== */
+
+.ms-event-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--ms-space-md);
+    padding: var(--ms-space-md);
+    margin-bottom: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+}
+
+.ms-event-filter {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-event-filter-label {
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-event-filter-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-event-filter-types {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    max-height: 96px;
+    overflow-y: auto;
+    padding: var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-bg);
+}
+
+.ms-event-filter-type {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* ==========================================================================
+   7. FOLLOW MODE
+   ========================================================================== */
+
+.ms-follow-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-follow-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 2px var(--ms-space-md);
+    border-radius: var(--ms-radius-full);
+    border: 1px solid var(--ms-color-primary);
+    background-color: var(--ms-color-primary-light);
+    color: var(--ms-color-primary);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    cursor: pointer;
+}
+
+.ms-follow-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--ms-radius-full);
+    background-color: var(--ms-color-text-muted);
+}
+
+.ms-follow-live .ms-follow-dot {
+    background-color: var(--ms-color-success);
+}
+
+.ms-follow-paused .ms-follow-dot {
+    background-color: var(--ms-color-warning);
+}
+
+.ms-follow-state {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+/* ==========================================================================
+   8. STREAM DETAIL AND TIME TRAVEL
+   ========================================================================== */
+
+.ms-stream-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-stream-panes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-lg);
+    align-items: flex-start;
+}
+
+.ms-stream-timeline-pane {
+    flex: 2 1 420px;
+    min-width: 0;
+}
+
+.ms-time-travel {
+    flex: 1 1 320px;
+    min-width: 0;
+    position: sticky;
+    top: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    padding: var(--ms-space-md);
+}
+
+.ms-time-travel-title {
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-time-travel-stepper {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-time-travel-version {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-base);
+    min-width: 6ch;
+    text-align: center;
+}
+
+.ms-time-travel-json {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-time-travel-note {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+    margin-top: var(--ms-space-sm);
+}
+
+/* ==========================================================================
+   9. DEAD LETTERS
+   ========================================================================== */
+
+.ms-dead-letter-detail {
+    background-color: var(--ms-color-bg);
+}
+
+.ms-dead-letter-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    padding: var(--ms-space-md);
+}
+
+.ms-dead-letter-exception {
+    margin: 0;
+    padding: var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    border: 1px solid var(--ms-color-danger);
+    background-color: var(--ms-color-danger-bg);
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    white-space: pre-wrap;
+    overflow-x: auto;
+}
+
+.ms-dead-letter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    align-items: center;
+}
+
+/* ==========================================================================
+   10. SMALL SCREENS
+   ========================================================================== */
+
+@media (max-width: 720px) {
+    .ms-stream-panes {
+        flex-direction: column;
+    }
+
+    .ms-time-travel {
+        position: static;
+        width: 100%;
+    }
+
+    .ms-event-meta-value {
+        max-width: 20ch;
+    }
+}

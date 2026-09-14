@@ -1,0 +1,212 @@
+@using System.Globalization
+@using MartenStudio.Components.Json
+
+@* Aggregate time travel: what this stream's aggregate looked like at version N.
+
+   The version stepper runs 1..Version and is also driven by clicking an event on the timeline, which is
+   the interaction that makes the panel worth having - you read an event, and the panel already shows
+   what it produced.
+
+   The candidate list is a KeyValuePair per entry (full type name -> label) rather than the candidate
+   record: the record is internal and a component parameter cannot be (D12). *@
+
+<aside class="ms-time-travel" aria-label="Aggregate time travel">
+    <h2 class="ms-time-travel-title">Time travel</h2>
+
+    @if (Candidates.Count == 0)
+    {
+        <p class="ms-muted">
+            This store registers no single-stream projection whose identity matches its streams, and it
+            knows no document type that could stand in for one. There is nothing to replay this stream
+            into.
+        </p>
+    }
+    else
+    {
+        <div class="ms-form-group">
+            <label class="ms-form-label" for="ms-time-travel-type">Aggregate type</label>
+            <select id="ms-time-travel-type"
+                    class="ms-select"
+                    value="@SelectedType"
+                    @onchange="OnTypeChangedAsync">
+                <option value="">Pick an aggregate type</option>
+                @foreach (KeyValuePair<string, string> candidate in Candidates)
+                {
+                    <option value="@candidate.Key" @key="candidate.Key">@candidate.Value</option>
+                }
+            </select>
+        </div>
+
+        <div class="ms-time-travel-stepper">
+            <button type="button"
+                    class="ms-button"
+                    aria-label="Previous version"
+                    disabled="@(Version <= 1)"
+                    @onclick="() => SetVersionAsync(Version - 1)">
+                &#8592;
+            </button>
+
+            <input type="range"
+                   id="ms-time-travel-version"
+                   aria-label="Version"
+                   min="1"
+                   max="@MaxVersion.ToString(CultureInfo.InvariantCulture)"
+                   step="1"
+                   value="@Version.ToString(CultureInfo.InvariantCulture)"
+                   @onchange="OnSliderChangedAsync" />
+
+            <span class="ms-time-travel-version">@Version.ToString(CultureInfo.InvariantCulture) / @MaxVersion.ToString(CultureInfo.InvariantCulture)</span>
+
+            <button type="button"
+                    class="ms-button"
+                    aria-label="Next version"
+                    disabled="@(Version >= MaxVersion)"
+                    @onclick="() => SetVersionAsync(Version + 1)">
+                &#8594;
+            </button>
+        </div>
+
+        <button type="button"
+                class="ms-button ms-button-primary"
+                disabled="@(IsLoading || string.IsNullOrEmpty(SelectedType))"
+                @onclick="LoadAsync">
+            @(IsLoading ? "Replaying..." : "Replay to this version")
+        </button>
+
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <div class="ms-time-travel-json">
+                <ErrorAlert Message="@Error" />
+            </div>
+        }
+        else if (IsLoading)
+        {
+            <div class="ms-time-travel-json">
+                <LoadingSpinner />
+            </div>
+        }
+        else if (HasResult && !Found)
+        {
+            <p class="ms-time-travel-note">
+                Replaying this stream into <code>@SelectedTypeLabel</code> at version
+                @Version.ToString(CultureInfo.InvariantCulture) produced nothing. The aggregate has no
+                create step for the first event of this stream, or it deletes itself by this version.
+            </p>
+        }
+        else if (!string.IsNullOrWhiteSpace(Json))
+        {
+            <div class="ms-time-travel-json">
+                <JsonView Json="@Json"
+                          Label="@($"{SelectedTypeLabel} at version {Version.ToString(CultureInfo.InvariantCulture)}")"
+                          AutoExpandDepth="2"
+                          ShowSearch="false"
+                          DownloadFileName="@($"{SelectedTypeLabel}-v{Version.ToString(CultureInfo.InvariantCulture)}.json")" />
+            </div>
+        }
+
+        <p class="ms-time-travel-note">
+            The aggregate is replayed on demand with
+            <code>AggregateStreamAsync&lt;T&gt;(id, version:)</code> and serialized with this store's own
+            serializer. Nothing is written, and no projection is run.
+        </p>
+    }
+</aside>
+
+@code {
+    /// <summary>The stream's current version, which is the top of the stepper.</summary>
+    [Parameter]
+    public long MaxVersion { get; set; }
+
+    /// <summary>The version being shown.</summary>
+    [Parameter]
+    public long Version { get; set; } = 1;
+
+    /// <summary>Raised when the stepper or the slider moves.</summary>
+    [Parameter]
+    public EventCallback<long> VersionChanged { get; set; }
+
+    /// <summary>
+    /// The aggregate types on offer: the key is the full type name that identifies one to the service,
+    /// the value is what the picker shows.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<KeyValuePair<string, string>> Candidates { get; set; } = [];
+
+    /// <summary>The full type name currently picked.</summary>
+    [Parameter]
+    public string? SelectedType { get; set; }
+
+    /// <summary>Raised when the picker changes.</summary>
+    [Parameter]
+    public EventCallback<string> SelectedTypeChanged { get; set; }
+
+    /// <summary>The replayed aggregate as JSON.</summary>
+    [Parameter]
+    public string? Json { get; set; }
+
+    /// <summary>Whether a replay has been run at all.</summary>
+    [Parameter]
+    public bool HasResult { get; set; }
+
+    /// <summary>Whether the last replay produced an aggregate.</summary>
+    [Parameter]
+    public bool Found { get; set; }
+
+    /// <summary>Whether a replay is running.</summary>
+    [Parameter]
+    public bool IsLoading { get; set; }
+
+    /// <summary>What the last replay failed with.</summary>
+    [Parameter]
+    public string? Error { get; set; }
+
+    /// <summary>Raised when the visitor asks for a replay.</summary>
+    [Parameter]
+    public EventCallback OnLoad { get; set; }
+
+    private string SelectedTypeLabel
+    {
+        get
+        {
+            foreach (KeyValuePair<string, string> candidate in Candidates)
+            {
+                if (string.Equals(candidate.Key, SelectedType, StringComparison.Ordinal))
+                {
+                    return candidate.Value;
+                }
+            }
+
+            return SelectedType ?? "the aggregate";
+        }
+    }
+
+    private async Task OnTypeChangedAsync(ChangeEventArgs args)
+    {
+        await SelectedTypeChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+    }
+
+    private async Task OnSliderChangedAsync(ChangeEventArgs args)
+    {
+        if (long.TryParse(args.Value?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long version))
+        {
+            await SetVersionAsync(version);
+        }
+    }
+
+    private async Task SetVersionAsync(long version)
+    {
+        long clamped = Math.Clamp(version, 1, Math.Max(1, MaxVersion));
+        if (clamped != Version)
+        {
+            await VersionChanged.InvokeAsync(clamped);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        if (OnLoad.HasDelegate)
+        {
+            await OnLoad.InvokeAsync();
+        }
+    }
+}

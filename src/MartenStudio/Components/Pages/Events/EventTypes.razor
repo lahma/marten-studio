@@ -1,0 +1,257 @@
+@page "/marten/events/types"
+@using System.Globalization
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services
+@using MartenStudio.Services.Events
+@implements IAsyncDisposable
+@inject IEventDataService Events
+@inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
+
+<PageTitle>Event types</PageTitle>
+
+<div class="ms-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Event types</h1>
+        <button type="button" class="ms-button" disabled="@(loading || counting)" @onclick="LoadCountsAsync">
+            @(counting ? "Counting..." : "Load counts")
+        </button>
+    </div>
+
+    <p class="ms-muted">
+        Every event type this store registers, in the colour it wears everywhere else. Counts are behind
+        the button because <code>group by type</code> reads the whole events table - the same reason
+        collection counts are estimates by default. They are cached for this session once loaded.
+    </p>
+
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (list?.Error is { } error)
+    {
+        <ErrorAlert Message="@error.Display" OnRetry="@(error.CanRetry ? EventCallback.Factory.Create(this, ReloadAsync) : default)" />
+    }
+    else if (list is null || list.Types.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No event types</p>
+            <p class="ms-empty-description">
+                This store registers no event type, and none has been seen in <code>mt_events</code>.
+            </p>
+        </div>
+    }
+    else
+    {
+        <table class="ms-table">
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>.NET type</th>
+                    <th>Events</th>
+                    <th>First</th>
+                    <th>Last</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (EventTypeInfo type in list.Types)
+                {
+                    <tr class="ms-table-row" @key="type.Name">
+                        <td class="ms-table-cell">
+                            <EventTypeChip Name="@type.Name"
+                                           DotNetTypeName="@type.DotNetTypeName"
+                                           IsRegistered="type.IsRegistered"
+                                           Href="@FeedHref(type.Name)" />
+                        </td>
+                        <td class="ms-table-cell ms-table-cell-mono ms-truncate">@(type.DotNetTypeName ?? "-")</td>
+                        <td class="ms-table-cell ms-table-cell-mono">
+                            @(type.Count is { } count ? count.ToString("N0", CultureInfo.InvariantCulture) : "not counted")
+                        </td>
+                        <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.FirstSequence)</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.LastSequence)</td>
+                        <td class="ms-table-cell">
+                            @if (type.IsUnregistered)
+                            {
+                                <span class="ms-event-flag ms-event-flag-skipped"
+                                      title="Present in mt_events, absent from this store's configuration">
+                                    not registered
+                                </span>
+                            }
+                            @if (list.CountsLoaded && type.IsRegisteredButEmpty)
+                            {
+                                <span class="ms-event-flag ms-event-flag-archived"
+                                      title="Registered with the store, but no event of this type has ever been appended">
+                                    no events
+                                </span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        @if (!list.CountsLoaded)
+        {
+            <p class="ms-muted">
+                Counts, first and last sequence are unknown until "Load counts" is pressed. Unknown is not
+                zero: a type with no row here may simply not have been counted.
+            </p>
+        }
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource pageCancellation = new();
+
+    private EventTypeList? list;
+    private bool loading = true;
+    private bool counting;
+    private bool countsRequested;
+    private string? signature;
+
+    /// <summary>The store this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.StoreKey)]
+    public string? Store { get; set; }
+
+    /// <summary>The database this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.DatabaseKey)]
+    public string? Database { get; set; }
+
+    /// <summary>The tenant this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.TenantKey)]
+    public string? Tenant { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        await ApplyScopeFromQueryAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        string current = Signature();
+        if (string.Equals(current, signature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        signature = current;
+        await LoadAsync();
+    }
+
+    private async Task ApplyScopeFromQueryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Store) && string.IsNullOrWhiteSpace(Database) && string.IsNullOrWhiteSpace(Tenant))
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+        if (active is not null
+            && string.Equals(active.StoreKey, Store ?? active.StoreKey, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.DatabaseId, Database ?? active.DatabaseId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.TenantId ?? string.Empty, Tenant ?? active.TenantId ?? string.Empty, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await State.SetScopeAsync(Store, Database, Tenant, pageCancellation.Token);
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        // A different store is a different set of types, and the counts asked for on the last one say
+        // nothing about this one.
+        countsRequested = false;
+        signature = Signature();
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task ReloadAsync()
+    {
+        signature = Signature();
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            loading = false;
+            return;
+        }
+
+        loading = true;
+        StateHasChanged();
+
+        try
+        {
+            list = await Events.ListEventTypesAsync(scope, countsRequested, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            list = EventTypeList.Failed(new EventDataError(exception.Message, null, true));
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task LoadCountsAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || counting)
+        {
+            return;
+        }
+
+        counting = true;
+        countsRequested = true;
+
+        try
+        {
+            list = await Events.ListEventTypesAsync(scope, withCounts: true, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            list = EventTypeList.Failed(new EventDataError(exception.Message, null, true));
+        }
+        finally
+        {
+            counting = false;
+        }
+    }
+
+    private static string Sequence(long? value) =>
+        value is { } sequence ? "#" + sequence.ToString(CultureInfo.InvariantCulture) : "-";
+
+    private string FeedHref(string eventType) =>
+        EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
+
+    private string Signature() =>
+        string.Join(
+            '',
+            State.ActiveScope?.StoreKey,
+            State.ActiveScope?.DatabaseId,
+            State.ActiveScope?.TenantId);
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        await pageCancellation.CancelAsync();
+        pageCancellation.Dispose();
+
+        GC.SuppressFinalize(this);
+    }
+}

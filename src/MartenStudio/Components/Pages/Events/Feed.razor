@@ -1,0 +1,748 @@
+@page "/marten/events/feed"
+@using System.Globalization
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services
+@using MartenStudio.Services.Events
+@implements IAsyncDisposable
+@inject IEventDataService Events
+@inject StudioState State
+@inject NavigationManager Navigation
+@inject IJSRuntime JsRuntime
+@inject IOptions<MartenStudioOptions> Options
+
+<PageTitle>Event feed</PageTitle>
+
+<div class="ms-page" id="ms-feed-top">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Event feed</h1>
+    </div>
+
+    <EventFilters AvailableTypes="availableTypes"
+                  SelectedTypes="SelectedTypes"
+                  SelectedTypesChanged="OnTypesChangedAsync"
+                  Range="@(Range ?? string.Empty)"
+                  RangeChanged="OnRangeChangedAsync"
+                  StreamId="@Stream"
+                  StreamIdChanged="OnStreamChangedAsync"
+                  StreamPlaceholder="@StreamPlaceholder"
+                  ShowTenant="@(shape?.HasTenantId == true)"
+                  TenantId="@State.ActiveScope?.TenantId"
+                  IncludeArchived="ArchivedFlag"
+                  IncludeArchivedChanged="OnArchivedChangedAsync"
+                  IncludeSkipped="SkippedFlag"
+                  IncludeSkippedChanged="OnSkippedChangedAsync"
+                  SupportsSkipped="@(shape?.HasIsSkipped == true)"
+                  OnClear="OnClearAsync" />
+
+    <div class="ms-follow-bar @FollowClass">
+        <label class="ms-event-filter-checkbox">
+            <input type="checkbox" checked="@FollowFlag" disabled="@(!CanFollow)" @onchange="OnFollowChangedAsync" />
+            Follow
+        </label>
+        <span class="ms-follow-dot" aria-hidden="true"></span>
+        <span class="ms-follow-state">@FollowState</span>
+
+        @if (pending.Count > 0)
+        {
+            <button type="button" class="ms-follow-pill" @onclick="ShowPendingAsync">
+                @pending.Count.ToString(CultureInfo.InvariantCulture) new event@(pending.Count == 1 ? string.Empty : "s")
+            </button>
+        }
+
+        <span class="ms-event-card-spacer"></span>
+
+        @if (highestSequence is { } highest)
+        {
+            <span class="ms-follow-state" title="IMartenDatabase.FetchHighestEventSequenceNumber">
+                high-water #@highest.ToString(CultureInfo.InvariantCulture)
+            </span>
+        }
+    </div>
+
+    @if (loading && rows.Count == 0)
+    {
+        <LoadingSpinner />
+    }
+    else if (error is { } feedError)
+    {
+        <ErrorAlert Message="@feedError.Display" OnRetry="@(feedError.CanRetry ? EventCallback.Factory.Create(this, ReloadAsync) : default)" />
+    }
+    else if (shape is { Available: true, EventTablesExist: false })
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">This store has no event storage yet</p>
+            <p class="ms-empty-description">Nothing has appended an event, so there is no feed to show.</p>
+        </div>
+    }
+    else if (rows.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No events</p>
+            <p class="ms-empty-description">No event matches these filters.</p>
+        </div>
+    }
+    else
+    {
+        <div class="ms-timeline">
+            @foreach (EventRow row in rows)
+            {
+                <div class="ms-timeline-item" @key="row.Sequence">
+                    <EventCard Sequence="row.Sequence"
+                               Version="row.Version"
+                               EventType="@row.EventType"
+                               DotNetType="@row.DotNetType"
+                               Timestamp="row.Timestamp"
+                               StreamId="@row.StreamId"
+                               StreamHref="@StreamHref(row.StreamId)"
+                               TypeHref="@TypeHref(row.EventType)"
+                               ShowStream="true"
+                               ShowVersion="true"
+                               IsArchived="row.IsArchived"
+                               IsSkipped="row.IsSkipped"
+                               HasBinary="row.HasBinary"
+                               BinaryLength="row.BinaryLength"
+                               Json="@row.Json"
+                               Metadata="row.Metadata" />
+                </div>
+            }
+        </div>
+
+        <nav class="ms-pagination">
+            @if (After is not null)
+            {
+                <a class="ms-button" href="@PageHref(null)">Newest</a>
+            }
+            @if (hasMore && rows.Count > 0)
+            {
+                <a class="ms-button" href="@PageHref(rows[^1].Sequence)">Older</a>
+            }
+            <span class="ms-pagination-info">
+                @rows.Count.ToString(CultureInfo.InvariantCulture) shown
+                @(rows.Count >= MaxBufferedRows ? " (buffer full)" : string.Empty)
+            </span>
+        </nav>
+    }
+</div>
+
+@code {
+    /// <summary>The most rows the feed keeps in the DOM, however long follow mode runs.</summary>
+    private const int MaxBufferedRows = 500;
+
+    private const int PageSize = 50;
+
+    /// <summary>
+    /// How many events one follow-mode poll reads. Larger than a page, because a burst between two ticks
+    /// is not a page the reader is walking - but still bounded: a store that took ten thousand events in
+    /// five seconds shows the newest two hundred and says so through the high-water number, rather than
+    /// pulling ten thousand rows down a circuit nobody can read.
+    /// </summary>
+    private const int DeltaPageSize = 200;
+
+    private readonly CancellationTokenSource pageCancellation = new();
+    private readonly List<EventRow> rows = [];
+    private readonly List<EventRow> pending = [];
+
+    private List<string> availableTypes = [];
+    private EventStoreShape? shape;
+    private EventDataError? error;
+    private DotNetObjectReference<Feed>? selfReference;
+    private PeriodicTimer? timer;
+    private Task? followLoop;
+    private CancellationTokenSource? followCancellation;
+    private long? highestSequence;
+    private bool loading = true;
+    private bool hasMore;
+    private bool tabHidden;
+    private string? signature;
+
+    /// <summary>The event types ticked, comma-separated in the URL.</summary>
+    [SupplyParameterFromQuery(Name = "types")]
+    public string? Types { get; set; }
+
+    /// <summary>The time-range preset token.</summary>
+    [SupplyParameterFromQuery(Name = "range")]
+    public string? Range { get; set; }
+
+    /// <summary>The stream filter.</summary>
+    [SupplyParameterFromQuery(Name = "stream")]
+    public string? Stream { get; set; }
+
+    /// <summary>Whether archived events are included.</summary>
+    [SupplyParameterFromQuery(Name = "archived")]
+    public string? Archived { get; set; }
+
+    /// <summary>Whether skipped events are included.</summary>
+    [SupplyParameterFromQuery(Name = "skipped")]
+    public string? Skipped { get; set; }
+
+    /// <summary>The keyset cursor: events before this sequence.</summary>
+    [SupplyParameterFromQuery(Name = "after")]
+    public long? After { get; set; }
+
+    /// <summary>Whether follow mode is on.</summary>
+    [SupplyParameterFromQuery(Name = "follow")]
+    public string? Follow { get; set; }
+
+    /// <summary>The store this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.StoreKey)]
+    public string? Store { get; set; }
+
+    /// <summary>The database this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.DatabaseKey)]
+    public string? Database { get; set; }
+
+    /// <summary>The tenant this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.TenantKey)]
+    public string? Tenant { get; set; }
+
+    private bool ArchivedFlag => EventLinks.ReadFlag(Archived);
+
+    private bool SkippedFlag => EventLinks.ReadFlag(Skipped, fallback: true);
+
+    private bool FollowFlag => EventLinks.ReadFlag(Follow) && CanFollow;
+
+    /// <summary>Follow mode only makes sense on the newest page: an older page has a fixed top.</summary>
+    private bool CanFollow => After is null;
+
+    private IReadOnlyList<string> SelectedTypes =>
+        string.IsNullOrWhiteSpace(Types)
+            ? []
+            : [.. Types.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
+
+    private string FollowClass => FollowFlag
+        ? (tabHidden ? "ms-follow-paused" : "ms-follow-live")
+        : string.Empty;
+
+    private string FollowState
+    {
+        get
+        {
+            if (!CanFollow)
+            {
+                return "follow is only available on the newest page";
+            }
+
+            if (!FollowFlag)
+            {
+                return "not following";
+            }
+
+            return tabHidden
+                ? "paused - this tab is in the background"
+                : $"polling every {Options.Value.RefreshInterval.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture)}s";
+        }
+    }
+
+    private string StreamPlaceholder => shape?.StreamIdentity == JasperFx.Events.StreamIdentity.AsString
+        ? "any stream key"
+        : "any stream GUID";
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        await ApplyScopeFromQueryAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        string current = Signature();
+        if (string.Equals(current, signature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        signature = current;
+        await LoadAsync();
+        await SyncFollowAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // One visibility watcher for the page's whole life. The JS module holds the references in a set
+        // and removes its own listener when the last one goes, so a closed circuit leaves nothing behind.
+        selfReference = DotNetObjectReference.Create(this);
+
+        try
+        {
+            tabHidden = await JsRuntime.InvokeAsync<bool>(
+                "martenStudio.visibility.watch", pageCancellation.Token, selfReference);
+        }
+        catch (JSException)
+        {
+            // Prerendering, or a browser that will not answer. Follow mode then simply never pauses.
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    /// <summary>Called by the JavaScript module when the tab is hidden or shown.</summary>
+    /// <remarks>
+    /// A <see cref="Task" />-returning method rather than <c>async void</c>: an unobserved exception out
+    /// of a JS-invoked handler kills the circuit silently (AGENTS.md hard rule 6).
+    /// </remarks>
+    [JSInvokable]
+    public async Task OnVisibilityChanged(bool hidden)
+    {
+        tabHidden = hidden;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ApplyScopeFromQueryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Store) && string.IsNullOrWhiteSpace(Database) && string.IsNullOrWhiteSpace(Tenant))
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+        if (active is not null
+            && string.Equals(active.StoreKey, Store ?? active.StoreKey, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.DatabaseId, Database ?? active.DatabaseId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.TenantId ?? string.Empty, Tenant ?? active.TenantId ?? string.Empty, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await State.SetScopeAsync(Store, Database, Tenant, pageCancellation.Token);
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        signature = Signature();
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task ReloadAsync()
+    {
+        signature = Signature();
+        return LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            loading = false;
+            return;
+        }
+
+        loading = true;
+        error = null;
+        pending.Clear();
+        StateHasChanged();
+
+        try
+        {
+            CancellationToken token = pageCancellation.Token;
+
+            shape = await Events.DescribeAsync(scope, token);
+
+            EventPage page = await Events.GetFeedAsync(scope, BuildRequest(After, since: null), token);
+
+            rows.Clear();
+
+            if (page.Error is { } failure)
+            {
+                error = failure;
+                hasMore = false;
+            }
+            else
+            {
+                rows.AddRange(page.Rows);
+                hasMore = page.HasMore;
+            }
+
+            await RefreshTypesAsync(scope, token);
+
+            highestSequence = await Events.GetHighestSequenceAsync(scope, token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            error = new EventDataError(exception.Message, null, true);
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    /// <summary>
+    /// The type filter's options: every type the store registers, plus every type this page of the feed
+    /// actually shows.
+    /// </summary>
+    /// <remarks>
+    /// The unregistered ones are added from the loaded rows rather than from a <c>group by type</c> over
+    /// the whole table, which would be a sequential scan on every filter change. The Event types screen
+    /// runs that aggregate, once, behind a button.
+    /// </remarks>
+    private async Task RefreshTypesAsync(StudioScope scope, CancellationToken token)
+    {
+        EventTypeList known = await Events.ListEventTypesAsync(scope, withCounts: false, token);
+
+        SortedSet<string> names = new(StringComparer.Ordinal);
+        foreach (EventTypeInfo type in known.Types)
+        {
+            names.Add(type.Name);
+        }
+
+        foreach (EventRow row in rows)
+        {
+            names.Add(row.EventType);
+        }
+
+        foreach (string selected in SelectedTypes)
+        {
+            names.Add(selected);
+        }
+
+        availableTypes = [.. names];
+    }
+
+    private EventFeedRequest BuildRequest(long? after, long? since, int? pageSize = null) => new()
+    {
+        AfterSequence = after,
+        SinceSequence = since,
+        EventTypes = SelectedTypes,
+        StreamId = string.IsNullOrWhiteSpace(Stream) ? null : Stream,
+        From = EventFilters.ResolveFrom(Range, DateTimeOffset.UtcNow),
+        IncludeArchived = ArchivedFlag,
+        IncludeSkipped = SkippedFlag,
+        PageSize = pageSize ?? PageSize,
+    };
+
+    // ------------------------------------------------------------------------------------------------
+    // Follow mode
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>Starts or stops the poll to match what the URL now says.</summary>
+    private async Task SyncFollowAsync()
+    {
+        if (FollowFlag && followLoop is null)
+        {
+            await StartFollowAsync();
+        }
+        else if (!FollowFlag && followLoop is not null)
+        {
+            await StopFollowAsync();
+        }
+    }
+
+    private Task StartFollowAsync()
+    {
+        followCancellation = CancellationTokenSource.CreateLinkedTokenSource(pageCancellation.Token);
+        timer = new PeriodicTimer(Options.Value.RefreshInterval);
+        followLoop = PollAsync(timer, followCancellation.Token);
+        return Task.CompletedTask;
+    }
+
+    private async Task StopFollowAsync()
+    {
+        if (followCancellation is not null)
+        {
+            await followCancellation.CancelAsync();
+        }
+
+        timer?.Dispose();
+        timer = null;
+
+        if (followLoop is not null)
+        {
+            try
+            {
+                await followLoop;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            followLoop = null;
+        }
+
+        followCancellation?.Dispose();
+        followCancellation = null;
+    }
+
+    /// <summary>
+    /// The poll. One <see cref="PeriodicTimer" /> for this page, paused while the tab is hidden and
+    /// cancelled on dispose (D10).
+    /// </summary>
+    /// <remarks>
+    /// It asks <c>FetchHighestEventSequenceNumber</c> first and only reads events when that moved, so an
+    /// idle store costs one cheap query per interval rather than a page of the feed. P5 introduces the
+    /// shared <c>StudioLiveUpdates</c> and its single-flight snapshot cache; this is deliberately a local
+    /// timer until then, so the two packets do not both define it.
+    /// </remarks>
+    private async Task PollAsync(PeriodicTimer pollTimer, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (await pollTimer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (tabHidden)
+                {
+                    continue;
+                }
+
+                StudioScope? scope = State.ActiveScope;
+                if (scope is null)
+                {
+                    continue;
+                }
+
+                long? highest = await Events.GetHighestSequenceAsync(scope, cancellationToken).ConfigureAwait(false);
+                if (highest is null)
+                {
+                    continue;
+                }
+
+                long known = KnownSequence();
+                highestSequence = highest;
+
+                if (highest <= known)
+                {
+                    await InvokeAsync(StateHasChanged);
+                    continue;
+                }
+
+                EventPage delta = await Events
+                    .GetFeedAsync(scope, BuildRequest(after: null, since: known, DeltaPageSize), cancellationToken)
+                    .ConfigureAwait(false);
+
+                // The buffers are read by the renderer, so they are only ever written on the renderer's
+                // synchronization context - a timer thread mutating a list a render is walking is the
+                // kind of bug that shows up once a fortnight as a torn page.
+                await InvokeAsync(() =>
+                {
+                    if (delta.Error is null && delta.Rows.Count > 0)
+                    {
+                        Merge(delta.Rows);
+                    }
+
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Follow was turned off, or the page went away.
+        }
+        catch (Exception exception)
+        {
+            error = new EventDataError(exception.Message, null, true);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>The newest sequence this page already has, counting what is still in the pending buffer.</summary>
+    private long KnownSequence()
+    {
+        long known = rows.Count > 0 ? rows[0].Sequence : 0;
+
+        if (pending.Count > 0 && pending[0].Sequence > known)
+        {
+            known = pending[0].Sequence;
+        }
+
+        return known;
+    }
+
+    /// <summary>
+    /// Puts the delta in the pending buffer rather than on the page.
+    /// </summary>
+    /// <remarks>
+    /// Never prepending on its own is deliberate. The studio cannot see where the reader has scrolled to
+    /// - the one JavaScript helper for that would have to live in the shared module - so the choice is
+    /// between sometimes yanking the page out from under someone who is reading, and always asking first.
+    /// The pill asks. Clicking it merges and scrolls back to the top.
+    /// </remarks>
+    private void Merge(IReadOnlyList<EventRow> delta)
+    {
+        // Newest first, and the builder already returned them that way.
+        for (int index = delta.Count - 1; index >= 0; index--)
+        {
+            pending.Insert(0, delta[index]);
+        }
+
+        Trim(pending);
+    }
+
+    private static void Trim(List<EventRow> buffer)
+    {
+        if (buffer.Count > MaxBufferedRows)
+        {
+            buffer.RemoveRange(MaxBufferedRows, buffer.Count - MaxBufferedRows);
+        }
+    }
+
+    private async Task ShowPendingAsync()
+    {
+        rows.InsertRange(0, pending);
+        pending.Clear();
+        Trim(rows);
+
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>(
+                "martenStudio.scroll.intoView", pageCancellation.Token, "ms-feed-top", "start");
+        }
+        catch (JSException)
+        {
+            // Scrolling is a courtesy; the rows are already on the page.
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Filters
+    // ------------------------------------------------------------------------------------------------
+
+    private Task OnTypesChangedAsync(IReadOnlyList<string> types)
+    {
+        Types = types.Count == 0 ? null : string.Join(',', types);
+        return NavigateAsync();
+    }
+
+    private Task OnRangeChangedAsync(string range)
+    {
+        Range = string.IsNullOrWhiteSpace(range) ? null : range;
+        return NavigateAsync();
+    }
+
+    private Task OnStreamChangedAsync(string stream)
+    {
+        Stream = string.IsNullOrWhiteSpace(stream) ? null : stream;
+        return NavigateAsync();
+    }
+
+    private Task OnArchivedChangedAsync(bool included)
+    {
+        Archived = included ? "1" : null;
+        return NavigateAsync();
+    }
+
+    private Task OnSkippedChangedAsync(bool included)
+    {
+        Skipped = included ? null : "0";
+        return NavigateAsync();
+    }
+
+    private Task OnFollowChangedAsync(ChangeEventArgs args)
+    {
+        Follow = args.Value is bool value && value ? "1" : null;
+        return NavigateAsync();
+    }
+
+    private Task OnClearAsync()
+    {
+        Types = null;
+        Range = null;
+        Stream = null;
+        Archived = null;
+        Skipped = null;
+        After = null;
+        return NavigateAsync();
+    }
+
+    private Task NavigateAsync()
+    {
+        Navigation.NavigateTo(PageHref(null));
+        return Task.CompletedTask;
+    }
+
+    private string PageHref(long? after) =>
+        EventLinks.To(
+            Options.Value,
+            EventLinks.FeedRoute,
+            State.ActiveScope,
+            [
+                new("types", Types),
+                new("range", Range),
+                new("stream", Stream),
+                new("archived", EventLinks.Flag(ArchivedFlag)),
+                new("skipped", SkippedFlag ? null : "0"),
+                new("after", EventLinks.Number(after)),
+                new("follow", after is null ? EventLinks.Flag(EventLinks.ReadFlag(Follow)) : null),
+            ]);
+
+    private string StreamHref(string streamId) =>
+        EventLinks.ToStream(Options.Value, State.ActiveScope, streamId);
+
+    private string TypeHref(string eventType) =>
+        EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
+
+    private string Signature() =>
+        string.Join(
+            '',
+            State.ActiveScope?.StoreKey,
+            State.ActiveScope?.DatabaseId,
+            State.ActiveScope?.TenantId,
+            Types,
+            Range,
+            Stream,
+            Archived,
+            Skipped,
+            After?.ToString(CultureInfo.InvariantCulture),
+            Follow);
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        await StopFollowAsync();
+
+        if (selfReference is not null)
+        {
+            try
+            {
+                await JsRuntime.InvokeAsync<bool>("martenStudio.visibility.unwatch", selfReference);
+            }
+            catch (JSException)
+            {
+            }
+            catch (System.Text.Json.JsonException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            selfReference.Dispose();
+            selfReference = null;
+        }
+
+        await pageCancellation.CancelAsync();
+        pageCancellation.Dispose();
+
+        GC.SuppressFinalize(this);
+    }
+}

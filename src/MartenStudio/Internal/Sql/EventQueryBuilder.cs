@@ -28,8 +28,31 @@ internal sealed record EventFeedQuery
     /// <summary>Only this event type name.</summary>
     public string? EventType { get; init; }
 
+    /// <summary>
+    /// Only these event type names, for the feed's multi-select. Null or empty means every type.
+    /// </summary>
+    /// <remarks>
+    /// A <c>text[]</c> parameter compared with <c>= any(@types)</c>, not a generated <c>in (…)</c> list:
+    /// one statement and one plan however many types are ticked, and no identifier or value is ever
+    /// interpolated. <see cref="EventType" /> stays for the single-type links and the two are ANDed, which
+    /// is what "the feed opened from an event type, then narrowed" means.
+    /// </remarks>
+    public IReadOnlyList<string>? EventTypes { get; init; }
+
+    /// <summary>Only events at or after this instant.</summary>
+    public DateTimeOffset? From { get; init; }
+
+    /// <summary>Only events before this instant.</summary>
+    public DateTimeOffset? To { get; init; }
+
     /// <summary>Whether archived events are included.</summary>
     public bool IncludeArchived { get; init; }
+
+    /// <summary>
+    /// Whether events the daemon was told to skip are included. Only meaningful on a store that enabled
+    /// event skipping, which is the only store whose <c>mt_events</c> has an <c>is_skipped</c> column.
+    /// </summary>
+    public bool IncludeSkipped { get; init; } = true;
 
     /// <summary>How many events to return.</summary>
     public int PageSize { get; init; } = DefaultPageSize;
@@ -155,10 +178,26 @@ internal static class EventQueryBuilder
             sql.Append("  and (").Append(parameters.AddNullable(NpgsqlDbType.Varchar, query.EventType, "type"))
                 .Append(" is null or ").Append(Column(Alias, "type")).Append(" = @type)\n");
 
+            sql.Append("  and (").Append(parameters.AddNullable(
+                    NpgsqlDbType.Array | NpgsqlDbType.Text, NormalizeTypes(query.EventTypes), "types"))
+                .Append(" is null or ").Append(Column(Alias, "type")).Append(" = any(@types))\n");
+
+            sql.Append("  and (").Append(parameters.AddNullable(NpgsqlDbType.TimestampTz, query.From, "from"))
+                .Append(" is null or ").Append(Column(Alias, "timestamp")).Append(" >= @from)\n");
+
+            sql.Append("  and (").Append(parameters.AddNullable(NpgsqlDbType.TimestampTz, query.To, "to"))
+                .Append(" is null or ").Append(Column(Alias, "timestamp")).Append(" < @to)\n");
+
             if (table.HasIsArchived)
             {
                 sql.Append("  and (").Append(parameters.Add(NpgsqlDbType.Boolean, query.IncludeArchived, "includeArchived"))
                     .Append(" or ").Append(Column(Alias, "is_archived")).Append(" = false)\n");
+            }
+
+            if (table.HasIsSkipped)
+            {
+                sql.Append("  and (").Append(parameters.Add(NpgsqlDbType.Boolean, query.IncludeSkipped, "includeSkipped"))
+                    .Append(" or ").Append(Column(Alias, "is_skipped")).Append(" = false)\n");
             }
 
             sql.Append("order by ").Append(Column(Alias, "seq_id")).Append(" desc\n");
@@ -269,36 +308,7 @@ internal static class EventQueryBuilder
             sql.Append('\n');
             sql.Append("from ").Append(table.QualifiedStreams).Append(AsStreamAlias).Append('\n');
 
-            var streamId = ParseStream(table, query.StreamId);
-
-            if (streamId.IsImpossible)
-            {
-                // Same as the feed: an id this store cannot hold matches nothing, not everything.
-                sql.Append("where false\n");
-            }
-            else
-            {
-                sql.Append("where (").Append(parameters.AddNullable(table.StreamIdDbType, streamId.Value, "id"))
-                    .Append(" is null or ").Append(Column(StreamAlias, "id")).Append(" = @id)\n");
-            }
-
-            sql.Append("  and (").Append(parameters.AddNullable(
-                    NpgsqlDbType.Varchar,
-                    query.TypePrefix is null ? null : EscapeLikePrefix(query.TypePrefix),
-                    "typePrefix"))
-                .Append(" is null or ").Append(Column(StreamAlias, "type")).Append(" like @typePrefix)\n");
-
-            if (table.HasStreamColumn("tenant_id"))
-            {
-                sql.Append("  and (").Append(parameters.AddNullable(NpgsqlDbType.Varchar, query.TenantId, "tenant"))
-                    .Append(" is null or ").Append(Column(StreamAlias, "tenant_id")).Append(" = @tenant)\n");
-            }
-
-            if (table.HasStreamColumn("is_archived"))
-            {
-                sql.Append("  and (").Append(parameters.Add(NpgsqlDbType.Boolean, query.IncludeArchived, "includeArchived"))
-                    .Append(" or ").Append(Column(StreamAlias, "is_archived")).Append(" = false)\n");
-            }
+            AppendStreamFilters(sql, parameters, table, query);
 
             if (query.Cursor is { } cursor)
             {
@@ -348,12 +358,25 @@ internal static class EventQueryBuilder
     /// <param name="tenantId">The scope's tenant, when the event store is conjoined-tenanted.</param>
     /// <param name="commandTimeout">A bound on how long the panel may cost, when the caller sets one.</param>
     /// <remarks>
+    /// <para>
     /// <b>This reads <c>mt_streams</c>, and deliberately does not aggregate <c>mt_events</c>.</b> The
     /// obvious query — <c>group by stream_id order by max(seq_id) desc limit n</c> — is an aggregate over
     /// every event the store has ever appended, on a dashboard panel that refreshes on a timer, which is
-    /// D8's argument against <c>count(*)</c> made a second time and ignored. <c>mt_streams</c> already
-    /// holds one row per stream with the last-append <c>timestamp</c> on it, so the same panel is a top-n
-    /// with a <c>limit</c> instead of a full scan and a hash aggregate.
+    /// D8's argument against <c>count(*)</c> made a second time and ignored. <c>mt_streams</c> holds one
+    /// row per stream already, so the same panel is a top-n with a <c>limit</c> instead of a full scan and
+    /// a hash aggregate.
+    /// </para>
+    /// <para>
+    /// What that <c>timestamp</c> means depends on the store's append mode, verified against Marten 9.35
+    /// (2026-09-14). Under the default <c>EventAppendMode.Rich</c> the version
+    /// bump is <c>update … mt_streams set version = $1 where id = $2 and version = $3 returning version</c>
+    /// and never touches <c>timestamp</c>, so the column keeps its <c>default now()</c> from stream
+    /// creation; under <c>Quick</c> and <c>QuickWithServerTimestamps</c> the append goes through
+    /// <c>mt_quick_append_events</c>, whose body does <c>set version = event_version, timestamp =
+    /// now()</c>. So this is "most recently started" on a Rich store and "most recently appended to" on a
+    /// Quick one. The panel this feeds wants the cheap answer either way;
+    /// <see cref="BuildStreamsByRecentActivity" /> is the expensive one that is exact on both.
+    /// </para>
     /// </remarks>
     public static NpgsqlCommand BuildRecentlyActiveStreams(
         EventTableInfo table,
@@ -403,6 +426,121 @@ internal static class EventQueryBuilder
             command.CommandText = sql.ToString();
             ApplyTimeout(command, commandTimeout);
 
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The stream list ordered by the sequence of the last event appended to each stream, rather than by
+    /// the streams table's own timestamp.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two orderings answer two different questions. <see cref="BuildStreams" /> keysets on
+    /// <c>(timestamp desc, id)</c>, which is a total order over an indexed column and is what paging
+    /// through every stream must use. "Recently active" is the <c>max(seq_id) group by stream_id</c>
+    /// aggregate joined back to <c>mt_streams</c>: it is the truth about which stream was appended to
+    /// last, and it costs an aggregate over <c>mt_events</c>.
+    /// </para>
+    /// <para>
+    /// The aggregate earns its cost because the cheap column does not answer the question. Under Marten's
+    /// default <c>EventAppendMode.Rich</c> the per-append statement is
+    /// <c>update … mt_streams set version = $1 where id = $2 and version = $3 returning version</c> —
+    /// <c>timestamp</c> is not in the <c>set</c> list, so it stays at the <c>default now()</c> the row was
+    /// created with (verified against Marten 9.35, 2026-09-14; only the <c>Quick</c> modes' PL/pgSQL
+    /// <c>mt_quick_append_events</c> does <c>timestamp = now()</c> on append). On a Rich store, which is
+    /// most of them, ordering by <c>mt_streams.timestamp</c> would list the newest streams and call it
+    /// activity. <see cref="BuildRecentlyActiveStreams" /> takes that cheap approximation deliberately,
+    /// because it feeds a panel on a refresh timer; this one is the opt-in on a page the visitor asked
+    /// for.
+    /// </para>
+    /// <para>
+    /// Because the aggregate has no usable keyset, this one pages by offset, under the same
+    /// <see cref="DocumentQueryBuilder.MaxOffset" /> cap as every other offset walk in the studio. That is
+    /// the deliberate trade: the expensive ordering is also the bounded one.
+    /// </para>
+    /// </remarks>
+    public static NpgsqlCommand BuildStreamsByRecentActivity(EventTableInfo table, StreamListQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(query);
+
+        if (query.Offset is < 0 or > DocumentQueryBuilder.MaxOffset)
+        {
+            throw new ArgumentException(
+                $"An offset must be between 0 and {DocumentQueryBuilder.MaxOffset.ToString(CultureInfo.InvariantCulture)}.",
+                nameof(query));
+        }
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var parameters = new ParameterBuilder(command);
+            var sql = new StringBuilder();
+            var first = true;
+
+            sql.Append("select ");
+
+            foreach (var column in StreamColumns)
+            {
+                if (!table.HasStreamColumn(column))
+                {
+                    continue;
+                }
+
+                sql.Append(first ? string.Empty : ",\n       ").Append(Column(StreamAlias, column));
+                first = false;
+            }
+
+            sql.Append('\n');
+            sql.Append("from ").Append(table.QualifiedStreams).Append(AsStreamAlias).Append('\n');
+            sql.Append("join (select ").Append(Column(Alias, "stream_id")).Append(" as stream_id, max(")
+                .Append(Column(Alias, "seq_id")).Append(") as last_seq\n")
+                .Append("      from ").Append(table.QualifiedEvents).Append(AsAlias).Append('\n')
+                .Append("      group by ").Append(Column(Alias, "stream_id")).Append(") as a\n")
+                .Append("  on a.stream_id = ").Append(Column(StreamAlias, "id")).Append('\n');
+
+            AppendStreamFilters(sql, parameters, table, query);
+
+            sql.Append("order by a.last_seq desc\n");
+            sql.Append("limit ").Append(parameters.Add(
+                NpgsqlDbType.Integer, Math.Clamp(query.PageSize, 1, StreamListQuery.MaxPageSize), "limit"));
+            sql.Append(" offset ").Append(parameters.Add(NpgsqlDbType.Integer, query.Offset, "offset"));
+
+            command.CommandText = sql.ToString();
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>One event by its sequence, for the dead-letter expansion.</summary>
+    public static NpgsqlCommand BuildEventBySequence(EventTableInfo table, long sequence)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var parameters = new ParameterBuilder(command);
+            var sql = new StringBuilder();
+
+            AppendEventSelect(sql, table);
+            sql.Append("from ").Append(table.QualifiedEvents).Append(AsAlias).Append('\n');
+            sql.Append("where ").Append(Column(Alias, "seq_id")).Append(" = ")
+                .Append(parameters.Add(NpgsqlDbType.Bigint, sequence, "seq"));
+
+            command.CommandText = sql.ToString();
             return command;
         }
         catch
@@ -511,6 +649,76 @@ internal static class EventQueryBuilder
 
         return new NpgsqlCommand(
             "select max(" + Column(Alias, "seq_id") + ") from " + table.QualifiedEvents + " as " + Alias);
+    }
+
+    /// <summary>
+    /// The <c>where</c> block both stream listings share: id, aggregate-type prefix, tenant and the
+    /// archived flag, each a parameter that may be null so that one statement serves every filter
+    /// combination.
+    /// </summary>
+    /// <remarks>
+    /// The id is the one filter that is not simply nullable: an id this store's stream identity cannot
+    /// hold is a filter that matches nothing, and it has to be emitted as a <c>false</c> predicate rather
+    /// than as a null parameter, which would read as "no filter at all". Same rule as the feed.
+    /// </remarks>
+    private static void AppendStreamFilters(
+        StringBuilder sql,
+        ParameterBuilder parameters,
+        EventTableInfo table,
+        StreamListQuery query)
+    {
+        var streamId = ParseStream(table, query.StreamId);
+
+        if (streamId.IsImpossible)
+        {
+            sql.Append("where false\n");
+        }
+        else
+        {
+            sql.Append("where (").Append(parameters.AddNullable(table.StreamIdDbType, streamId.Value, "id"))
+                .Append(" is null or ").Append(Column(StreamAlias, "id")).Append(" = @id)\n");
+        }
+
+        sql.Append("  and (").Append(parameters.AddNullable(
+                NpgsqlDbType.Varchar,
+                query.TypePrefix is null ? null : EscapeLikePrefix(query.TypePrefix),
+                "typePrefix"))
+            .Append(" is null or ").Append(Column(StreamAlias, "type")).Append(" like @typePrefix)\n");
+
+        if (table.HasStreamColumn("tenant_id"))
+        {
+            sql.Append("  and (").Append(parameters.AddNullable(NpgsqlDbType.Varchar, query.TenantId, "tenant"))
+                .Append(" is null or ").Append(Column(StreamAlias, "tenant_id")).Append(" = @tenant)\n");
+        }
+
+        if (table.HasStreamColumn("is_archived"))
+        {
+            sql.Append("  and (").Append(parameters.Add(NpgsqlDbType.Boolean, query.IncludeArchived, "includeArchived"))
+                .Append(" or ").Append(Column(StreamAlias, "is_archived")).Append(" = false)\n");
+        }
+    }
+
+    /// <summary>
+    /// The type filter as an array parameter, or <see langword="null" /> when nothing was ticked. Blank
+    /// entries are dropped: an empty string is not an event type and would silently match nothing.
+    /// </summary>
+    private static string[]? NormalizeTypes(IReadOnlyList<string>? types)
+    {
+        if (types is null || types.Count == 0)
+        {
+            return null;
+        }
+
+        List<string> kept = [];
+        foreach (var type in types)
+        {
+            if (!string.IsNullOrWhiteSpace(type))
+            {
+                kept.Add(type.Trim());
+            }
+        }
+
+        return kept.Count == 0 ? null : [.. kept];
     }
 
     private static void AppendEventSelect(StringBuilder sql, EventTableInfo table)
