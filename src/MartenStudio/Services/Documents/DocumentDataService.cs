@@ -331,15 +331,19 @@ internal sealed partial class DocumentDataService : IDocumentDataService
                     cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (PostgresException postgres)
+        catch (Exception exception) when (IsTimeout(exception))
         {
-            logger.LogWarning(postgres, "Marten Studio could not count '{Alias}' exactly", alias);
-
-            // 57014 is statement_timeout: the collection is certainly there and measuring it costs more
-            // than the host allows a statement to take, which is "unknown" rather than "unreachable".
-            return string.Equals(postgres.SqlState, "57014", StringComparison.Ordinal)
-                ? DocumentCount.Unknown
-                : DocumentCount.Unavailable;
+            // The collection is certainly there and measuring it costs more than the host allows a
+            // statement to take: "unknown", not "unreachable".
+            //
+            // The difference is a screen the visitor cannot get back from. Unknown renders as "?" beside
+            // the collection with the "=" button still offered, so pressing it again - or narrowing the
+            // scope, or running ANALYZE - is something a person can do. Unavailable renders as "could not
+            // read this table": the badge and the button both go, and the only way out is a reload. The
+            // general catch below used to swallow this case, so the button that started a count(*) too
+            // slow to finish was a button that removed itself.
+            logger.LogWarning(exception, "Marten Studio's exact count of '{Alias}' timed out", alias);
+            return DocumentCount.Unknown;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -789,14 +793,18 @@ internal sealed partial class DocumentDataService : IDocumentDataService
                     estimator, connection, table, estimate, tenantId, deleted, cancellationToken)
                 .ConfigureAwait(false);
         }
+        catch (Exception exception) when (IsTimeout(exception))
+        {
+            // The table is certainly there and its size is simply not worth what it would cost to find
+            // out: "unknown" rather than "could not be reached". The header draws nothing and the page
+            // goes on working, rather than claiming the collection could not be read.
+            logger.LogWarning(exception, "Marten Studio's count of '{Alias}' timed out", table.Alias);
+            return DocumentCount.Unknown;
+        }
         catch (PostgresException exception)
         {
             logger.LogWarning(exception, "Marten Studio could not count '{Alias}'", table.Alias);
-            // 57014 is statement_timeout: the table is certainly there and its size is simply not worth
-            // what it would cost to find out, which is "unknown" rather than "could not be reached".
-            return string.Equals(exception.SqlState, "57014", StringComparison.Ordinal)
-                ? DocumentCount.Unknown
-                : DocumentCount.Unavailable;
+            return DocumentCount.Unavailable;
         }
     }
 
@@ -1423,16 +1431,29 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     }
 
     /// <summary>
-    /// Whether a failed read is a timeout rather than a fault — Postgres' own, or Npgsql's.
+    /// Whether a failed count is a timeout rather than a fault — Postgres' own, or Npgsql's.
     /// </summary>
     /// <remarks>
-    /// Both spellings, because which one arrives is a race. A <see cref="NpgsqlCommand.CommandTimeout"/>
-    /// that expires makes Npgsql send a cancellation request: when the backend answers it in time the
-    /// client sees <c>57014</c>, and when it does not the client sees an <see cref="NpgsqlException"/>
-    /// wrapping a <see cref="TimeoutException"/>. Catching only the first works until the day the database
-    /// is busy, which is the day this matters.
+    /// <para>
+    /// <b>Both spellings, because which one arrives is a race.</b> A
+    /// <see cref="NpgsqlCommand.CommandTimeout"/> that expires makes Npgsql send a cancellation request:
+    /// when the backend answers it in time the client sees <c>57014</c>, and when it does not the client
+    /// sees an <see cref="NpgsqlException"/> wrapping a <see cref="TimeoutException"/>. A host that sets
+    /// <c>statement_timeout</c> on the role, the database or the connection string produces the first
+    /// directly. Catching only one of them works until the day the database is busy, which is the day this
+    /// matters.
+    /// </para>
+    /// <para>
+    /// <b>Why the distinction is worth a method.</b> Every caller maps a timeout to
+    /// <see cref="DocumentCount.Unknown"/> and a fault to <see cref="DocumentCount.Unavailable"/>, and
+    /// those two draw differently on purpose: unknown is "there, and nobody has measured it" and keeps the
+    /// "=" button on offer, while unavailable is "could not read this table" and takes the badge away
+    /// entirely. Reporting a slow count as unavailable turns a button that was too slow into a screen the
+    /// visitor cannot get back from without reloading.
+    /// </para>
     /// </remarks>
-    private static bool IsTimeout(Exception exception) =>
+    /// <param name="exception">The failure.</param>
+    internal static bool IsTimeout(Exception exception) =>
         (exception is PostgresException postgres && string.Equals(postgres.SqlState, "57014", StringComparison.Ordinal))
         || exception is TimeoutException
         || (exception is NpgsqlException npgsql && npgsql.InnerException is TimeoutException);

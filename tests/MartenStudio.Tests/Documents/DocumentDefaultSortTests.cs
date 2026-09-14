@@ -4,7 +4,76 @@ using MartenStudio.Services.Query;
 
 using MartenStudio.Tests.Sql;
 
+using Npgsql;
+
 namespace MartenStudio.Tests.Documents;
+
+/// <summary>
+/// A count that ran out of time is a different answer from a count that could not be read.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The two produce different screens. <c>Unknown</c> draws "?" beside the collection with the "=" button
+/// still offered, so pressing it again, narrowing the scope or running <c>ANALYZE</c> are all things a
+/// person can do next. <c>Unavailable</c> draws "could not read this table" and takes the badge and the
+/// button with it, which from a browser is indistinguishable from the studio having broken — and there is
+/// no way back short of reloading the page.
+/// </para>
+/// <para>
+/// So a slow <c>count(*)</c> must never be reported as an unreadable table, and that means recognising a
+/// timeout in both of the shapes it arrives in: Postgres' own <c>57014</c>, which a host's
+/// <c>statement_timeout</c> produces directly, and the <see cref="NpgsqlException" /> wrapping a
+/// <see cref="TimeoutException" /> that Npgsql raises when its client-side
+/// <c>CommandTimeout</c> expires before the backend answers the cancellation request. Which one arrives is
+/// a race, so catching one of them is catching it on the days it does not matter.
+/// </para>
+/// </remarks>
+public class DocumentCountFailureTests
+{
+    /// <summary>Postgres' <c>query_canceled</c> is a timeout, whatever raised it.</summary>
+    [Fact]
+    public void A_57014_is_a_timeout() =>
+        DocumentDataService.IsTimeout(Postgres("57014")).Should().BeTrue();
+
+    /// <summary>Npgsql's client-side timeout is the same answer wearing a different exception.</summary>
+    [Fact]
+    public void And_so_is_Npgsqls_own_command_timeout() =>
+        DocumentDataService.IsTimeout(
+                new NpgsqlException("Exception while reading from stream", new TimeoutException()))
+            .Should().BeTrue();
+
+    /// <summary>A bare <see cref="TimeoutException" />, for the paths that do not wrap it.</summary>
+    [Fact]
+    public void And_a_bare_TimeoutException() =>
+        DocumentDataService.IsTimeout(new TimeoutException()).Should().BeTrue();
+
+    /// <summary>
+    /// Everything else is a fault, and has to stay one.
+    /// </summary>
+    /// <remarks>
+    /// The anti-vacuity half. A classifier that said "timeout" to everything would make this packet's fix
+    /// look right while turning a missing table, a revoked grant and a broken connection into "nobody has
+    /// measured this collection" — a studio that never admits it cannot read something.
+    /// </remarks>
+    [Theory]
+    [InlineData("42P01")] // undefined_table
+    [InlineData("42501")] // insufficient_privilege
+    [InlineData("55P03")] // lock_not_available
+    [InlineData("53300")] // too_many_connections
+    public void But_an_ordinary_Postgres_failure_is_not(string sqlState) =>
+        DocumentDataService.IsTimeout(Postgres(sqlState)).Should().BeFalse();
+
+    /// <summary>And neither is a plain programming error.</summary>
+    [Fact]
+    public void And_neither_is_anything_else()
+    {
+        DocumentDataService.IsTimeout(new InvalidOperationException()).Should().BeFalse();
+        DocumentDataService.IsTimeout(new NpgsqlException("the socket went away")).Should().BeFalse();
+    }
+
+    private static PostgresException Postgres(string sqlState) =>
+        new("something went wrong", "ERROR", "ERROR", sqlState);
+}
 
 /// <summary>
 /// Which way a collection opens, and why it is the same answer for every collection.
