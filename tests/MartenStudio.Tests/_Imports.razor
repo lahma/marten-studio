@@ -1,0 +1,8 @@
+@* The usings every .razor file in the test project is compiled with. Mirrors the library's own
+   _Imports.razor: without Microsoft.AspNetCore.Components.Web in scope the Razor compiler emits
+   @onclick and friends as literal HTML attributes, silently. *@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop

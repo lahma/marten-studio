@@ -1,0 +1,256 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services
+@inject StudioState State
+@inject StudioAuthorization Authorization
+@inject IOptions<MartenStudioOptions> Options
+@inject IJSRuntime JsRuntime
+
+<HeadContent>
+    <link rel="stylesheet" href="_content/MartenStudio/css/marten-studio.css" />
+</HeadContent>
+
+<div class="ms-studio" data-theme="@State.SelectedTheme">
+    <div class="ms-layout">
+        <aside class="ms-sidebar" role="navigation" aria-label="Marten Studio navigation">
+            <NavMenu />
+        </aside>
+
+        <div class="ms-main">
+            <header class="ms-header">
+                <div class="ms-header-left">
+                    <ScopeSelector />
+                </div>
+                <div class="ms-header-right">
+                    <CapabilityBanner />
+                    <div class="ms-header-control">
+                        <label class="ms-header-control-label" for="ms-timezone-select">Time zone</label>
+                        <select id="ms-timezone-select"
+                                class="ms-select ms-header-select"
+                                value="@State.SelectedTimeZoneId"
+                                @onchange="OnTimeZoneChangedAsync">
+                            @foreach (TimeZoneInfo timeZone in timeZones)
+                            {
+                                <option value="@timeZone.Id">@TimeZoneLabel(timeZone)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="ms-header-control">
+                        <label class="ms-header-control-label" for="ms-theme-select">Theme</label>
+                        <select id="ms-theme-select"
+                                class="ms-select ms-header-select"
+                                value="@State.SelectedTheme"
+                                @onchange="OnThemeChangedAsync">
+                            <option value="system">System</option>
+                            <option value="light">Light</option>
+                            <option value="dark">Dark</option>
+                        </select>
+                    </div>
+                </div>
+            </header>
+
+            <main class="ms-content" role="main">
+                @* The page frame is where a per-store refusal belongs: a page that is never rendered never
+                   runs its OnInitializedAsync, so nothing about a store the visitor may not see is read on
+                   their behalf. The header above stays, so they can pick one they may. *@
+                @if (access is ScopeAccess.Granted)
+                {
+                    @Body
+                }
+                else if (access is ScopeAccess.Denied)
+                {
+                    <ScopeNotAuthorized StoreName="@State.ActiveScope?.StoreKey" />
+                }
+                else
+                {
+                    <LoadingSpinner />
+                }
+            </main>
+        </div>
+    </div>
+    <ToastHost />
+</div>
+
+@code {
+    /// <summary>What the frame knows about the visitor's right to the scope the studio is about.</summary>
+    private enum ScopeAccess
+    {
+        /// <summary>The policy has not answered yet, and until it does the page is not rendered.</summary>
+        Unknown,
+        Granted,
+        Denied
+    }
+
+    private readonly IReadOnlyList<TimeZoneInfo> timeZones = TimeZoneInfo
+        .GetSystemTimeZones()
+        .OrderBy(static tz => tz.Id, StringComparer.Ordinal)
+        .ToList();
+
+    private ScopeAccess access = ScopeAccess.Unknown;
+    private bool preferencesLoaded;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChanged;
+
+        await State.EnsureInitializedAsync();
+        await UpdateAccessAsync();
+    }
+
+    /// <summary>
+    /// Re-asks the policy about whatever the studio is now about. The previous answer stands while the
+    /// new one is being fetched: dropping back to <see cref="ScopeAccess.Unknown" /> would tear the page
+    /// down and build it again on every switch between two stores the visitor may see.
+    /// </summary>
+    private async Task UpdateAccessAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            // Nothing to be about. The page renders and says so for itself, which is the honest answer
+            // both when no Marten store is registered and when the visitor may see none of them.
+            access = ScopeAccess.Granted;
+            return;
+        }
+
+        access = await Authorization.IsAuthorizedAsync(scope)
+            ? ScopeAccess.Granted
+            : ScopeAccess.Denied;
+    }
+
+    private async Task OnScopeChanged()
+    {
+        ScopeAccess previous = access;
+        await UpdateAccessAsync();
+        if (previous != access)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || preferencesLoaded)
+        {
+            return;
+        }
+
+        preferencesLoaded = await LoadPreferencesAsync();
+    }
+
+    /// <summary>
+    /// Reads the browser's own remembered preferences once the circuit exists.
+    /// </summary>
+    /// <remarks>
+    /// The cookie has already seeded <see cref="StudioState" /> on the server, which is what keeps a dark
+    /// studio from flashing light during prerendering. This covers the case the cookie cannot: a
+    /// preference stored only in <c>localStorage</c>, and a browser whose cookie was cleared.
+    /// </remarks>
+    private async Task<bool> LoadPreferencesAsync()
+    {
+        try
+        {
+            string previousTheme = State.SelectedTheme;
+            string previousTimeZoneId = State.SelectedTimeZoneId;
+
+            string? storedTheme = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { StudioState.ThemePreferenceKey });
+            string? storedTimeZoneId = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { StudioState.TimeZonePreferenceKey });
+
+            if (!string.IsNullOrWhiteSpace(storedTheme))
+            {
+                State.SelectedTheme = storedTheme;
+            }
+
+            if (!string.IsNullOrWhiteSpace(storedTimeZoneId))
+            {
+                State.SelectedTimeZoneId = storedTimeZoneId;
+            }
+
+            bool timeZoneChanged = !string.Equals(previousTimeZoneId, State.SelectedTimeZoneId, StringComparison.Ordinal);
+            bool themeChanged = !string.Equals(previousTheme, State.SelectedTheme, StringComparison.Ordinal);
+
+            if (timeZoneChanged)
+            {
+                await State.NotifyAsync();
+            }
+
+            if (timeZoneChanged || themeChanged)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+
+            return true;
+        }
+        catch (JSException)
+        {
+            // JS interop is unavailable during prerendering, and a browser can refuse storage outright.
+            return false;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private async Task OnTimeZoneChangedAsync(ChangeEventArgs args)
+    {
+        string? selected = args.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(selected))
+        {
+            return;
+        }
+
+        string previous = State.SelectedTimeZoneId;
+        State.SelectedTimeZoneId = selected;
+        if (!string.Equals(previous, State.SelectedTimeZoneId, StringComparison.Ordinal))
+        {
+            await State.NotifyAsync();
+            await PersistPreferenceAsync(StudioState.TimeZonePreferenceKey, State.SelectedTimeZoneId);
+        }
+    }
+
+    private async Task OnThemeChangedAsync(ChangeEventArgs args)
+    {
+        string previous = State.SelectedTheme;
+        State.SelectedTheme = args.Value?.ToString() ?? "system";
+        if (!string.Equals(previous, State.SelectedTheme, StringComparison.Ordinal))
+        {
+            await PersistPreferenceAsync(StudioState.ThemePreferenceKey, State.SelectedTheme);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task PersistPreferenceAsync(string key, string value)
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", new object?[] { key, value });
+        }
+        catch (JSException)
+        {
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private static string TimeZoneLabel(TimeZoneInfo timeZone)
+    {
+        return string.Equals(timeZone.Id, TimeZoneInfo.Local.Id, StringComparison.Ordinal)
+            ? timeZone.Id + " (local)"
+            : timeZone.Id;
+    }
+
+    public void Dispose()
+    {
+        State.ScopeChanged -= OnScopeChanged;
+    }
+}

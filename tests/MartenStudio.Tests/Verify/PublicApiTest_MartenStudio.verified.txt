@@ -1,0 +1,57 @@
+﻿namespace MartenStudio
+{
+    public sealed record MartenStoreResource : System.IEquatable<MartenStudio.MartenStoreResource>
+    {
+        public MartenStoreResource(string StoreName, string DatabaseIdentifier, string? TenantId, string? Capability) { }
+        public string? Capability { get; init; }
+        public string DatabaseIdentifier { get; init; }
+        public string StoreName { get; init; }
+        public string? TenantId { get; init; }
+    }
+    public sealed class MartenStudioCapabilities
+    {
+        public MartenStudioCapabilities() { }
+        public bool ApplySchemaChanges { get; set; }
+        public bool ArchiveStreams { get; set; }
+        public bool ControlDaemon { get; set; }
+        public bool CorrectProgression { get; set; }
+        public bool DeleteDocuments { get; set; }
+        public bool EditDocuments { get; set; }
+        public bool ManageDeadLetters { get; set; }
+        public bool RebuildProjections { get; set; }
+        public bool RunSql { get; set; }
+        public static MartenStudio.MartenStudioCapabilities All() { }
+    }
+    public static class MartenStudioEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapMartenStudio(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder builder) { }
+        public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapMartenStudio(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder builder, string pattern) { }
+    }
+    public sealed class MartenStudioOptions
+    {
+        public MartenStudioOptions() { }
+        public string? AuthorizationPolicy { get; set; }
+        public MartenStudio.MartenStudioCapabilities Capabilities { get; set; }
+        public int DefaultPageSize { get; set; }
+        public bool DiscoverTenantIds { get; set; }
+        public long ExactCountThreshold { get; set; }
+        public bool IncludeAncillaryStores { get; set; }
+        public System.Func<System.Type, bool>? IsDocumentTypeVisible { get; set; }
+        public System.Collections.Generic.IList<string> KnownTenantIds { get; }
+        public int MaxInlineDocumentBytes { get; set; }
+        public int MaxPageSize { get; set; }
+        public int MaxSqlConsoleRows { get; set; }
+        public string Path { get; set; }
+        public System.TimeSpan QueryTimeout { get; set; }
+        public bool ReadOnly { get; set; }
+        public System.TimeSpan RefreshInterval { get; set; }
+        public string? SqlConsoleRole { get; set; }
+        public string? StoreAuthorizationPolicy { get; set; }
+        public string Title { get; set; }
+        public string? WriteAuthorizationPolicy { get; set; }
+    }
+    public static class MartenStudioServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMartenStudio(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<MartenStudio.MartenStudioOptions>? configure = null) { }
+    }
+}

@@ -1,0 +1,56 @@
+@inject Microsoft.AspNetCore.Components.NavigationManager Navigation
+@inject Microsoft.Extensions.Options.IOptions<MartenStudioOptions> Options
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@Options.Value.Title</title>
+    <base href="@BaseHref" />
+    <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
+</head>
+<body>
+    <AntiforgeryToken />
+    <Routes @rendermode="RenderMode.InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>
+
+@code
+{
+    private string BaseHref
+    {
+        get
+        {
+            // Path base of the host application ("/" when none); this shell only renders during static
+            // server-side rendering, where Navigation.BaseUri reflects HttpRequest.PathBase.
+            string pathBase = new Uri(Navigation.BaseUri).AbsolutePath;
+
+            MartenStudioOptions options = Options.Value;
+            if (!options.HasCustomPath)
+            {
+                return pathBase;
+            }
+
+            // Custom-path mode: root the document at the studio itself so the framework script, the
+            // stylesheet, the _blazor circuit and every navigation link resolve under Path - the only
+            // prefix a path-forwarding reverse proxy is guaranteed to expose. The percent-encoded form
+            // keeps the browser's document.baseURI comparable to the configured path (the path base from
+            // Navigation.BaseUri is already encoded).
+            string baseHrefPath = pathBase.TrimEnd('/') + options.EscapedPath;
+
+            // Server-side route matching is case-insensitive, so the request URL may carry different
+            // casing than the configured path; keep the request's casing in the <base href> so the
+            // document base URI stays an ordinal prefix of the browser URL (relative navigations and
+            // NavigationManager.ToBaseRelativePath depend on that).
+            string requestPath = new Uri(Navigation.Uri).AbsolutePath;
+            if (requestPath.StartsWith(baseHrefPath, StringComparison.OrdinalIgnoreCase)
+                && (requestPath.Length == baseHrefPath.Length || requestPath[baseHrefPath.Length] == '/'))
+            {
+                return requestPath.Substring(0, baseHrefPath.Length) + "/";
+            }
+
+            return baseHrefPath + "/";
+        }
+    }
+}

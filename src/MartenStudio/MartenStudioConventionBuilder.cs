@@ -22,39 +22,43 @@ using Microsoft.AspNetCore.Builder;
 namespace MartenStudio;
 
 /// <summary>
-/// What <c>MapMartenStudio</c> hands back: the studio's pages and its live-events hub, as one
-/// thing to say something about.
+/// What <c>MapMartenStudio</c> hands back: everything the studio mapped, as one thing to say something
+/// about.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The hub is mapped separately from the pages — SignalR needs its own route — and it carries the same
-/// scheduler data the pages render, so a <c>RequireAuthorization()</c> that reached only the pages would
-/// leave the interesting half open. It is the reason these overloads return this rather than the Razor
-/// components builder they used to: what the caller means to say is about the studio, and the
-/// studio is both.
+/// Not the Razor components builder itself. A convention put on that builder reaches every endpoint it
+/// owns, and a <c>RequireAuthorization()</c> or an <c>AllowAnonymous()</c> the caller wrote is a
+/// statement about <em>the studio</em> — so it is applied only to the endpoints whose component comes
+/// out of this assembly. The filter costs one metadata scan per convention and is cheap insurance
+/// against the day the builder holds something that is not the studio's.
 /// </para>
 /// <para>
-/// In integrated hosting the components builder is the application's own, so a convention is applied
-/// only to the endpoints whose component comes from this assembly — the host's pages are not the
-/// studio's to authorize (#3066).
+/// The hub slot is empty in v1 and is kept for a reason: pages poll through a snapshot cache instead
+/// (D10), and if a hub is ever added it must arrive without changing what this method returns, so that
+/// the one statement a caller made about the studio keeps covering all of it.
 /// </para>
 /// </remarks>
 internal sealed class MartenStudioConventionBuilder : IEndpointConventionBuilder
 {
     private readonly IEndpointConventionBuilder components;
     private readonly Func<EndpointBuilder, bool>? componentFilter;
-    private readonly IEndpointConventionBuilder hub;
+    private readonly IEndpointConventionBuilder? hub;
 
     /// <param name="components">The Razor components builder the studio pages live in.</param>
     /// <param name="componentFilter">
     /// Which of that builder's endpoints a convention reaches, or <see langword="null" /> for all of
-    /// them — which is right in standalone hosting, where the builder holds nothing else.
+    /// them.
     /// </param>
-    /// <param name="hub">The studio's live-events hub.</param>
+    /// <param name="hub">
+    /// The studio's live-events hub, or <see langword="null" /> when there is none. There is none in v1:
+    /// pages poll through a snapshot cache rather than opening a second host-visible endpoint (D10), and
+    /// the slot is kept because adding the hub later must not change what <c>MapMartenStudio</c> returns.
+    /// </param>
     public MartenStudioConventionBuilder(
         IEndpointConventionBuilder components,
         Func<EndpointBuilder, bool>? componentFilter,
-        IEndpointConventionBuilder hub)
+        IEndpointConventionBuilder? hub)
     {
         this.components = components;
         this.componentFilter = componentFilter;
@@ -64,13 +68,13 @@ internal sealed class MartenStudioConventionBuilder : IEndpointConventionBuilder
     public void Add(Action<EndpointBuilder> convention)
     {
         components.Add(Restrict(convention));
-        hub.Add(convention);
+        hub?.Add(convention);
     }
 
     public void Finally(Action<EndpointBuilder> finallyConvention)
     {
         components.Finally(Restrict(finallyConvention));
-        hub.Finally(finallyConvention);
+        hub?.Finally(finallyConvention);
     }
 
     private Action<EndpointBuilder> Restrict(Action<EndpointBuilder> convention)

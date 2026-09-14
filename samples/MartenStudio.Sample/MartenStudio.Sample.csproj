@@ -2,6 +2,15 @@
 
   <PropertyGroup>
     <UserSecretsId>marten-studio-sample</UserSecretsId>
+
+    <!--
+      Required on .NET 10 for any host whose only Blazor components come from a referenced RCL. As of
+      .NET 10 `_framework/blazor.web.js` is no longer embedded in the ASP.NET Core assemblies: it is a
+      static web asset, and the SDK only contributes it to a project that says it needs one. Without this
+      property `GET /_framework/blazor.web.js` is a 404, the studio prerenders and then never becomes
+      interactive, and nothing in the build says so. It pairs with `app.MapStaticAssets()` in Program.cs.
+    -->
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
 
   <ItemGroup>

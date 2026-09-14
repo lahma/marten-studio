@@ -1,0 +1,38 @@
+@using MartenStudio.Services
+@inject StudioCapabilityGuard Capabilities
+
+@if (Capabilities.ReadOnly)
+{
+    <span class="ms-chip ms-chip-warning" title="MartenStudioOptions.ReadOnly is true, so every capability is off">
+        Read-only
+    </span>
+}
+else
+{
+    <button type="button"
+            class="ms-chip ms-chip-button"
+            popovertarget="ms-capability-popover"
+            aria-label="@($"{Capabilities.EnabledCount} of {StudioCapabilityGuard.All.Count} capabilities enabled")">
+        @Capabilities.EnabledCount / @StudioCapabilityGuard.All.Count capabilities
+    </button>
+
+    @* Native popover: no positioning library, no third-party menu component (AGENTS.md hard rule 3). *@
+    <div id="ms-capability-popover" popover="auto" class="ms-popover">
+        <p class="ms-popover-title">Mutating operations</p>
+        <ul class="ms-capability-list">
+            @foreach (StudioCapability capability in StudioCapabilityGuard.All)
+            {
+                bool enabled = Capabilities.IsEnabled(capability);
+                <li class="ms-capability @(enabled ? "ms-capability-on" : "ms-capability-off")" @key="capability">
+                    <span class="ms-capability-state" aria-hidden="true">@(enabled ? "on" : "off")</span>
+                    <span class="ms-capability-name">@capability</span>
+                    <code class="ms-capability-option">@StudioCapabilityGuard.OptionName(capability)</code>
+                </li>
+            }
+        </ul>
+        <p class="ms-popover-footnote">
+            Every one of these is off until the host sets it. <code>MartenStudioCapabilities.All()</code>
+            turns them all on; <code>MartenStudioOptions.ReadOnly</code> turns them all off again.
+        </p>
+    </div>
+}

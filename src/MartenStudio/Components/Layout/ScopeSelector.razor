@@ -1,0 +1,143 @@
+@using JasperFx.Descriptors
+@using MartenStudio.Services
+@implements IDisposable
+@inject StudioState State
+
+<div class="ms-scope-selector">
+    @if (State.AvailableStores.Count > 1)
+    {
+        <div class="ms-header-control">
+            <label class="ms-header-control-label" for="ms-store-select">Store</label>
+            <select id="ms-store-select"
+                    class="ms-select ms-header-select"
+                    value="@State.ActiveScope?.StoreKey"
+                    @onchange="OnStoreChangedAsync">
+                @foreach (StoreListing store in State.AvailableStores)
+                {
+                    @* A store that would not build is offered and greyed out rather than omitted: it is
+                       one the application registered, and leaving it out makes it look as though it never
+                       was. There is nothing behind it to select. *@
+                    <option value="@store.Key"
+                            disabled="@(!store.Availability.IsAvailable)"
+                            title="@store.Availability.Message">
+                        @StoreLabel(store)
+                    </option>
+                }
+            </select>
+        </div>
+    }
+
+    @if (ShowDatabaseSelector)
+    {
+        <div class="ms-header-control">
+            <label class="ms-header-control-label" for="ms-database-select">Database</label>
+            <select id="ms-database-select"
+                    class="ms-select ms-header-select"
+                    value="@State.ActiveScope?.DatabaseId"
+                    @onchange="OnDatabaseChangedAsync">
+                @foreach (DatabaseListing database in State.AvailableDatabases)
+                {
+                    <option value="@database.Identity">@database.Identity</option>
+                }
+            </select>
+            @if (State.Cardinality == DatabaseCardinality.DynamicMultiple)
+            {
+                @* Dynamic tenancy adds databases while the process runs, so the listing is a snapshot
+                   and there has to be a way to ask again. *@
+                <button type="button"
+                        class="ms-button ms-btn-sm"
+                        title="Look for databases added since this page loaded"
+                        @onclick="RefreshAsync">
+                    Refresh
+                </button>
+            }
+        </div>
+    }
+
+    @if (State.ShowTenantSelector)
+    {
+        <div class="ms-header-control">
+            <label class="ms-header-control-label" for="ms-tenant-select">Tenant</label>
+            @if (State.AvailableTenants.IsTruncated)
+            {
+                @* More tenants than anyone can pick from a list. A picker that silently omitted the rest
+                   would be worse than none, so the box takes the id instead. *@
+                <input id="ms-tenant-select"
+                       class="ms-input ms-header-select"
+                       type="text"
+                       placeholder="All tenants"
+                       value="@State.ActiveScope?.TenantId"
+                       title="@($"More than {TenantDiscovery.MaxListedTenants} tenants - type the tenant id")"
+                       @onchange="OnTenantChangedAsync" />
+            }
+            else
+            {
+                <select id="ms-tenant-select"
+                        class="ms-select ms-header-select"
+                        value="@State.ActiveScope?.TenantId"
+                        @onchange="OnTenantChangedAsync">
+                    <option value="">All tenants</option>
+                    @foreach (string tenantId in State.AvailableTenants.Ids)
+                    {
+                        <option value="@tenantId">@tenantId</option>
+                    }
+                </select>
+            }
+        </div>
+    }
+
+    @if (State.ActiveStoreUnavailableMessage is { Length: > 0 } unavailable)
+    {
+        <span class="ms-scope-unavailable" role="status">Store unavailable: @unavailable</span>
+    }
+</div>
+
+@code
+{
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChanged;
+        await State.EnsureInitializedAsync();
+    }
+
+    /// <summary>
+    /// A database picker only means something where there is more than one database. A single-database
+    /// store would render a select with one option, which is a control that cannot do anything.
+    /// </summary>
+    private bool ShowDatabaseSelector =>
+        State.Cardinality is DatabaseCardinality.StaticMultiple or DatabaseCardinality.DynamicMultiple
+        && State.AvailableDatabases.Count > 0;
+
+    private static string StoreLabel(StoreListing store) =>
+        store.Availability.IsAvailable ? store.DisplayName : store.DisplayName + " (unavailable)";
+
+    private Task OnScopeChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task OnStoreChangedAsync(ChangeEventArgs args)
+    {
+        // The value arrives from a browser change event and Blazor does not check that the server offered
+        // it; StudioState validates it against the last listing and ignores anything else.
+        await State.SetScopeAsync(args.Value?.ToString(), null, null);
+    }
+
+    private async Task OnDatabaseChangedAsync(ChangeEventArgs args)
+    {
+        await State.SetScopeAsync(State.ActiveScope?.StoreKey, args.Value?.ToString(), State.ActiveScope?.TenantId);
+    }
+
+    private async Task OnTenantChangedAsync(ChangeEventArgs args)
+    {
+        await State.SetScopeAsync(State.ActiveScope?.StoreKey, State.ActiveScope?.DatabaseId, args.Value?.ToString());
+    }
+
+    private async Task RefreshAsync()
+    {
+        await State.RefreshScopeListingsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        State.ScopeChanged -= OnScopeChanged;
+    }
+}

@@ -1,0 +1,31 @@
+@* What a page frame renders instead of the page when the visitor may not see the store the page would
+   be about. Nothing is fetched to draw it, which is the point: the refusal happens before the page
+   exists, so no store the visitor may not see is read on their behalf. The store is not named beyond the
+   key they already asked for - a refusal that described what is behind it would be the leak the
+   per-store policy exists to prevent. *@
+
+<div class="ms-page">
+    <div class="ms-empty" role="alert">
+        <p class="ms-empty-title">Not authorized</p>
+        <p class="ms-empty-description">
+            @if (string.IsNullOrWhiteSpace(StoreName))
+            {
+                <text>You are not authorized to view this Marten store.</text>
+            }
+            else
+            {
+                <text>You are not authorized to view the Marten store <strong>@StoreName</strong>.</text>
+            }
+            Pick another one from the store list above.
+        </p>
+    </div>
+</div>
+
+@code {
+    /// <summary>
+    /// The store key the visitor was pointed at, named so that someone who administers several knows
+    /// which one they were refused rather than only that they were.
+    /// </summary>
+    [Parameter]
+    public string? StoreName { get; set; }
+}

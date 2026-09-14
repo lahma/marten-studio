@@ -1,0 +1,51 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Components.Layout
+@implements IDisposable
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+
+@* The built-in Blazor Router can only match the compile-time "/marten" page templates, so the studio
+   matches routes itself to honour a custom MartenStudioOptions.Path. *@
+@if (routeData is not null)
+{
+    <RouteView RouteData="routeData" DefaultLayout="typeof(StudioLayout)" />
+    <FocusOnNavigate RouteData="routeData" Selector="h1" />
+}
+else
+{
+    <LayoutView Layout="typeof(StudioLayout)">
+        <div class="ms-page">
+            <h1>Not found</h1>
+            <p class="ms-muted">The requested page was not found.</p>
+            <a href="@StudioLink.To(Options.Value, "")" class="ms-button">Back to the overview</a>
+        </div>
+    </LayoutView>
+}
+
+@code
+{
+    private RouteData? routeData;
+
+    protected override void OnInitialized()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        UpdateRouteData(Navigation.Uri);
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        UpdateRouteData(e.Location);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void UpdateRouteData(string uri)
+    {
+        string? relative = StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Options.Value);
+        routeData = relative is null ? null : StudioRouteTable.Match(relative, Options.Value);
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+}

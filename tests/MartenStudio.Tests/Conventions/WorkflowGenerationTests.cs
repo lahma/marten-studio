@@ -107,6 +107,35 @@ public class WorkflowGenerationTests
         build.Should().Contain("cancel-in-progress: true");
     }
 
+    /// <summary>
+    /// The CI workflow runs on every push and every pull request, including from a fork. It must not be
+    /// able to mint a nuget.org publishing key, and it must not be able to write to the repository.
+    /// </summary>
+    [Fact]
+    public void The_build_workflow_can_neither_mint_a_key_nor_write_to_the_repository()
+    {
+        var build = ReadWorkflow("build.yml");
+
+        build.Should().NotContain("id-token: write",
+            "only publish.yml may hold the OIDC permission; a workflow that runs on every pull request must not");
+        build.Should().NotContain("contents: write");
+        build.Should().Contain("contents: read",
+            "naming one read permission makes every other permission 'none' for the run");
+    }
+
+    /// <summary>
+    /// The nuget.org leg is one job running one target chain. More jobs would mean more OIDC exchanges
+    /// racing the one-key-per-30-seconds rate limit, and a Publish that did not follow a Test in the same
+    /// run would be publishing something nothing had verified.
+    /// </summary>
+    [Fact]
+    public void The_publish_workflow_runs_compile_test_pack_and_publish_in_one_job()
+    {
+        var publish = ReadWorkflow("publish.yml");
+
+        publish.Should().Contain("Compile Test Pack Publish");
+    }
+
     private static string ReadWorkflow(string fileName) =>
         File.ReadAllText(Path.Combine(WorkflowsDirectory, fileName));
 }

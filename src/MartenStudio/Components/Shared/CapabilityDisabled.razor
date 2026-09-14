@@ -1,0 +1,48 @@
+@using MartenStudio.Services
+@inject StudioCapabilityGuard Capabilities
+
+@* What a page renders where a mutating control would be when the capability behind it is off. It names
+   the exact property a host would set, because "not permitted" with nothing to act on is the failure
+   mode of every feature-flagged admin UI (D4). The service refuses regardless of what is rendered. *@
+
+<div class="ms-alert ms-alert-info ms-capability-disabled" role="note">
+    <div class="ms-alert-content">
+        <p>@(string.IsNullOrWhiteSpace(Action) ? Capability : Action) is not enabled.</p>
+        @if (Capabilities.ReadOnly)
+        {
+            <p class="ms-muted">
+                <code>MartenStudioOptions.ReadOnly</code> is <code>true</code>, which turns every mutating
+                operation off.
+            </p>
+        }
+        else
+        {
+            <p class="ms-muted">
+                Set <code>MartenStudioOptions.Capabilities.@Capability</code> to <code>true</code>, or
+                <code>MartenStudioOptions.Capabilities = MartenStudioCapabilities.All()</code> to enable
+                all of them.
+            </p>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>
+    /// The capability the hidden control would have needed, by name.
+    /// </summary>
+    /// <remarks>
+    /// A string rather than the internal <c>StudioCapability</c> enum: the Razor compiler emits a public
+    /// component class, and a public parameter cannot have an internal type. Call sites pass
+    /// <c>nameof(StudioCapability.EditDocuments)</c>, which the compiler still checks.
+    /// </remarks>
+    [Parameter]
+    [EditorRequired]
+    public string Capability { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What the control would have done, in the page's own words ("Editing documents"). Falls back to the
+    /// capability's name.
+    /// </summary>
+    [Parameter]
+    public string? Action { get; set; }
+}

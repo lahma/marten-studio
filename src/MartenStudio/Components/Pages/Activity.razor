@@ -1,0 +1,111 @@
+@page "/marten/activity"
+@using MartenStudio.Services
+@inject StudioActionLog ActionLog
+@inject StudioState State
+
+<PageTitle>Activity</PageTitle>
+
+<div class="ms-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Activity</h1>
+        <SearchFilter Placeholder="Filter by action, outcome or user" OnFilterChanged="OnFilterChangedAsync" />
+    </div>
+
+    <p class="ms-muted">
+        The most recent @StudioActionLogService.MaxEntries actions taken through Marten Studio in this
+        process, newest first. The ring is in memory and goes away with the process - the durable record
+        is in this application's own log, under event ids 9200-9211.
+    </p>
+
+    @if (Filtered.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">Nothing to show</p>
+            <p class="ms-empty-description">
+                @(string.IsNullOrWhiteSpace(filter)
+                    ? "No one has changed anything through Marten Studio since this process started."
+                    : "No recorded action matches that filter.")
+            </p>
+        </div>
+    }
+    else
+    {
+        <table class="ms-table">
+            <thead>
+                <tr>
+                    <th>When</th>
+                    <th>User</th>
+                    <th>Store</th>
+                    <th>Database</th>
+                    <th>Tenant</th>
+                    <th>Action</th>
+                    <th>Target</th>
+                    <th>Outcome</th>
+                    <th>Capability</th>
+                    <th>Message</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (StudioActionLogEntry entry in Filtered)
+                {
+                    <tr class="ms-table-row" @key="entry">
+                        <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(entry.Timestamp)</td>
+                        <td class="ms-table-cell">@entry.User</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@entry.StoreKey</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@entry.DatabaseId</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@(entry.TenantId ?? "all")</td>
+                        <td class="ms-table-cell">@entry.Action</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@entry.Target</td>
+                        <td class="ms-table-cell">
+                            <span class="ms-state-indicator">
+                                <span class="ms-state-dot @(entry.Succeeded ? "ms-state-success" : "ms-state-error")" aria-hidden="true"></span>
+                                <span class="ms-state-label">@Outcome(entry)</span>
+                            </span>
+                        </td>
+                        <td class="ms-table-cell">@(entry.Capability ?? "-")</td>
+                        <td class="ms-table-cell">@entry.Message</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private string filter = string.Empty;
+
+    /// <summary>Failures are recorded too, which is the point - so the outcome is a column, not a filter.</summary>
+    private static string Outcome(StudioActionLogEntry entry) => entry.Succeeded ? "succeeded" : "failed";
+
+    private List<StudioActionLogEntry> Filtered
+    {
+        get
+        {
+            IReadOnlyList<StudioActionLogEntry> entries = ActionLog.GetLatest();
+            if (string.IsNullOrWhiteSpace(filter))
+            {
+                return [.. entries];
+            }
+
+            string needle = filter.Trim();
+            List<StudioActionLogEntry> matches = [];
+            foreach (StudioActionLogEntry entry in entries)
+            {
+                if (entry.Action.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                    || entry.User.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                    || Outcome(entry).Contains(needle, StringComparison.OrdinalIgnoreCase))
+                {
+                    matches.Add(entry);
+                }
+            }
+
+            return matches;
+        }
+    }
+
+    private Task OnFilterChangedAsync(string value)
+    {
+        filter = value;
+        return InvokeAsync(StateHasChanged);
+    }
+}

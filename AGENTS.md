@@ -54,7 +54,12 @@ model, the phased delivery plan — lives in the approved plan at
    `try`/`catch` that puts the failure on screen. An `async void` handler's exception escapes the
    synchronization context unobserved and kills the circuit: the page silently stops responding and the
    server log gets an unhandled exception with no component in the stack. `NoAsyncVoidTests` scans `src/`
-   and fails on any occurrence.
+   and fails on any occurrence. **The lambda form is equally forbidden and the scanner cannot see it:**
+   `handler += async (s, e) => …` against an `EventHandler`, or any `async` lambda converted to an
+   `Action`, is an `async void` with different spelling and fails in exactly the same way. That is why
+   every event this codebase raises is declared `event Func<Task>?` rather than `EventHandler` — an
+   `EventHandler` is what *forces* the mistake, so the type is the enforcement and the scanner is only
+   the backstop.
 7. **A public API change needs a reviewed Verify baseline and a CHANGELOG entry.** The public surface is
    two static classes, two classes and one record; anything else appearing in
    `tests/MartenStudio.Tests/Verify/PublicApiTest_MartenStudio.verified.txt` is a mistake, not a feature.
@@ -319,6 +324,17 @@ tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metad
 tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to leave to review
 tests/MartenStudio.Tests/Marten/         MartenApiSurfaceTest - the Marten 9.35 contract, pinned
 tests/MartenStudio.Integration.Tests/    Testcontainers Postgres + Playwright. Needs Docker
+src/MartenStudio/Internal/Sql/           The only place a Postgres identifier becomes SQL text (hard rule 4)
+src/MartenStudio/Components/Layout/      Shell chrome: layout, nav, scope selector, capability chip
+src/MartenStudio/Components/Pages/       The routed pages; each @page must be rooted at /marten
+samples/MartenStudio.SampleDomain/Documents/  The demo document types
+samples/MartenStudio.Sample/Auth/        Cookie auth, the three demo users, the two policies
+samples/MartenStudio.Sample/Properties/  launchSettings.json, fixed at http://localhost:5210
+tests/MartenStudio.Tests/Endpoints/      Authorization matrix, sub-path re-rooting, the startup guard
+tests/MartenStudio.Tests/Services/       Registry, scope resolver, audit log, tenant discovery
+tests/MartenStudio.Tests/Components/     bUnit: StudioComponentContext, StudioMarkup and the page tests
+tests/MartenStudio.Tests/Support/        Test doubles shared by the tiers - never a mocking library
+tests/MartenStudio.Tests/Verify/         The approved API baseline; never hand-edited (hard rule 7)
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),
@@ -456,10 +472,16 @@ mints exactly one key.
 The whole ladder is exercisable locally, and should be before any tag:
 
 ```powershell
+dotnet fallout Pack                                # the package the next steps would push
 dotnet fallout Publish --skip                      # skips, and says why
 $env:GITHUB_ACTIONS='true'; $env:NUGET_USER='lahma'; $env:GITHUB_REF_NAME='v0.1.0'
 dotnet fallout Publish --skip                      # must fail with "GitHub OIDC is unavailable"
 ```
+
+`Pack` comes first because it is the only step that can fail for a reason the token exchange will never
+tell you about: a missing README, a static web asset that did not make it into the nupkg, a package
+validation error. Getting a minted key and *then* discovering the package is wrong wastes the one thing
+in this path that expires.
 
 That last failure is the success signal: it proves the tagged path routed all the way to the token
 exchange. Clear the three variables afterwards.

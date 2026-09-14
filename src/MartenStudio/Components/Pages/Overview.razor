@@ -1,0 +1,143 @@
+@page "/marten"
+@using MartenStudio.Services
+@inject IStoreInfoService StoreInfo
+
+<PageTitle>Overview</PageTitle>
+
+<div class="ms-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Overview</h1>
+    </div>
+
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (loadError is { Length: > 0 })
+    {
+        <ErrorAlert Message="@loadError" OnRetry="LoadAsync" />
+    }
+    else if (overview is null || overview.Stores.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No Marten store to show</p>
+            <p class="ms-empty-description">
+                This application registered no Marten store that you are authorized to see. Marten Studio
+                renders the stores the host configured - add <code>AddMarten(...)</code> to the container,
+                or check the policy named by <code>MartenStudioOptions.StoreAuthorizationPolicy</code>.
+            </p>
+        </div>
+    }
+    else
+    {
+        @foreach (StoreOverview store in overview.Stores)
+        {
+            <section class="ms-section" @key="store.Key">
+                <h2 class="ms-section-title">
+                    @store.DisplayName
+                    <code class="ms-section-key">@store.Key</code>
+                </h2>
+
+                @if (!store.IsAvailable)
+                {
+                    @* Its own region: a store that will not build must not blank the page for the ones
+                       that do (plan section 4.8). *@
+                    <ErrorAlert Message="@($"This store could not be built: {store.UnavailableMessage}")" OnRetry="LoadAsync" />
+                }
+                else
+                {
+                    <div class="ms-stat-grid">
+                        <StatCard Title="Databases" Value="@store.Databases.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)" Color="info" />
+                        <StatCard Title="Document types" Value="@store.DocumentTypeCount.ToString(System.Globalization.CultureInfo.InvariantCulture)" Color="info" />
+                        <StatCard Title="Event types" Value="@(store.Events?.KnownEventTypeCount.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "n/a")" Color="info" />
+                        <StatCard Title="PostgreSQL" Value="@(store.PostgresVersion ?? "unknown")" Color="@(store.PostgresVersion is null ? "warning" : "success")" />
+                    </div>
+
+                    <div class="ms-kv">
+                        <div class="ms-kv-row">
+                            <span class="ms-kv-key">Tenancy</span>
+                            <span class="ms-kv-value">@store.Cardinality</span>
+                        </div>
+                        @if (store.Events is { } events)
+                        {
+                            <div class="ms-kv-row">
+                                <span class="ms-kv-key">Stream identity</span>
+                                <span class="ms-kv-value">@events.StreamIdentity</span>
+                            </div>
+                            <div class="ms-kv-row">
+                                <span class="ms-kv-key">Append mode</span>
+                                <span class="ms-kv-value">@events.AppendMode</span>
+                            </div>
+                            <div class="ms-kv-row">
+                                <span class="ms-kv-key">Event tenancy</span>
+                                <span class="ms-kv-value">@events.TenancyStyle</span>
+                            </div>
+                            <div class="ms-kv-row">
+                                <span class="ms-kv-key">Event schema</span>
+                                <span class="ms-kv-value ms-mono">@events.SchemaName</span>
+                            </div>
+                        }
+                    </div>
+
+                    @foreach (DatabaseOverview database in store.Databases)
+                    {
+                        <div class="ms-database-card" @key="database.Identity">
+                            <h3 class="ms-database-title ms-mono">@database.Identity</h3>
+                            @if (database.Error is { Length: > 0 } error)
+                            {
+                                <ErrorAlert Message="@error" OnRetry="LoadAsync" />
+                            }
+                            else
+                            {
+                                <div class="ms-kv">
+                                    <div class="ms-kv-row">
+                                        <span class="ms-kv-key">Database</span>
+                                        <span class="ms-kv-value ms-mono">@database.Name</span>
+                                    </div>
+                                    <div class="ms-kv-row">
+                                        <span class="ms-kv-key">Server</span>
+                                        <span class="ms-kv-value ms-mono">@database.Server</span>
+                                    </div>
+                                    <div class="ms-kv-row">
+                                        <span class="ms-kv-key">Schemas</span>
+                                        <span class="ms-kv-value ms-mono">@(database.SchemaNames.Count == 0 ? "none" : string.Join(", ", database.SchemaNames))</span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+            </section>
+        }
+    }
+</div>
+
+@code {
+    private StudioOverview? overview;
+    private bool loading = true;
+    private string? loadError;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        loadError = null;
+        StateHasChanged();
+
+        try
+        {
+            overview = await StoreInfo.GetOverviewAsync();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // On the page rather than in the log only: a failure the visitor cannot see is a page that
+            // silently shows nothing.
+            loadError = exception.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+}

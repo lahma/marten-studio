@@ -1908,3 +1908,233 @@ body{
         align-items: flex-start;
     }
 }
+
+/* ==========================================================================
+   26. SCOPE SELECTOR (store / database / tenant)
+   ========================================================================== */
+
+.ms-scope-selector {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--ms-space-md);
+    flex-wrap: wrap;
+}
+
+.ms-scope-selector .ms-header-control {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-scope-unavailable {
+    color: var(--ms-color-warning);
+    font-size: var(--ms-font-size-xs);
+    align-self: center;
+}
+
+/* ==========================================================================
+   27. CHIPS AND THE CAPABILITY POPOVER
+   ========================================================================== */
+
+.ms-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 2px var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-full);
+    background: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    white-space: nowrap;
+}
+
+.ms-chip-warning {
+    border-color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+}
+
+.ms-chip-button {
+    cursor: pointer;
+    font-family: inherit;
+    anchor-name: --ms-capability-anchor;
+}
+
+.ms-chip-button:hover {
+    background: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+/* Native popover - no positioning library, no third-party menu component. */
+.ms-popover {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    box-shadow: var(--ms-shadow-lg);
+    padding: var(--ms-space-md);
+    max-width: 420px;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-popover:popover-open {
+    position: fixed;
+    inset: auto;
+    position-anchor: --ms-capability-anchor;
+    top: anchor(bottom);
+    right: anchor(right);
+    margin-top: var(--ms-space-xs);
+}
+
+.ms-popover-title {
+    margin: 0 0 var(--ms-space-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-popover-footnote {
+    margin: var(--ms-space-sm) 0 0;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-capability-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+}
+
+.ms-capability {
+    display: grid;
+    grid-template-columns: 2.5rem 10rem 1fr;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+}
+
+.ms-capability-state {
+    text-transform: uppercase;
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-bold);
+}
+
+.ms-capability-on .ms-capability-state {
+    color: var(--ms-color-success);
+}
+
+.ms-capability-off .ms-capability-state {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-capability-off .ms-capability-name {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-capability-option {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-capability-disabled code {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* ==========================================================================
+   28. NAV ENTRIES WITHOUT A PAGE YET
+   ========================================================================== */
+
+.ms-nav-link-disabled {
+    color: var(--ms-color-text-muted);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.ms-nav-link-disabled:hover {
+    background: transparent;
+    color: var(--ms-color-text-muted);
+}
+
+/* ==========================================================================
+   29. KEY / VALUE LISTS AND SECTION HEADINGS
+   ========================================================================== */
+
+.ms-section-title {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    font-size: var(--ms-font-size-xl);
+    font-weight: var(--ms-font-weight-semibold);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-section-key {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-kv {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    overflow: hidden;
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-kv-row {
+    display: grid;
+    grid-template-columns: 12rem 1fr;
+    gap: var(--ms-space-md);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-kv-row:last-child {
+    border-bottom: none;
+}
+
+.ms-kv-key {
+    color: var(--ms-color-text-secondary);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-kv-value {
+    color: var(--ms-color-text);
+    word-break: break-word;
+}
+
+.ms-database-card {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    padding: var(--ms-space-md);
+    margin-bottom: var(--ms-space-md);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-database-title {
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+@media (max-width: 1024px) {
+    .ms-kv-row {
+        grid-template-columns: 1fr;
+        gap: var(--ms-space-xs);
+    }
+
+    .ms-capability {
+        grid-template-columns: 2.5rem 1fr;
+    }
+
+    .ms-capability-option {
+        grid-column: 1 / -1;
+    }
+}

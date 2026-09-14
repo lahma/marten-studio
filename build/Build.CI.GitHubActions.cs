@@ -23,7 +23,12 @@ using Fallout.Components;
     ConcurrencyCancelInProgress = true,
     CacheIncludePatterns = ["~/.nuget/packages", "~/.cache/ms-playwright"],
     InvokedTargets = [nameof(ITest.Test)],
-    PublishArtifacts = true)]
+    PublishArtifacts = true,
+    // Said out loud rather than left to GitHub's repository default, which is configurable and may be
+    // read-write. This job only reads the source; it must never be able to write to the repository, and
+    // naming one read permission makes every other permission `none` for the run. A convention test
+    // asserts it, and asserts that this file cannot mint a nuget.org key either.
+    ReadPermissions = [GitHubActionsPermissions.Contents])]
 // .github/workflows/publish.yml - the nuget.org leg (D15).
 //
 // It lives in its own workflow file because a nuget.org trusted publishing policy is scoped by
