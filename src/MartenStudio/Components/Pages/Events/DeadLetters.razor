@@ -68,7 +68,10 @@
     {
         <LoadingSpinner />
     }
-    else if (page?.Error is { } error)
+    @* The shape's own error matters as much as the page's: when DescribeAsync could not read the
+       database, EventTablesExist is false - the conservative answer - and without this the screen would
+       fall through to "no dead letters", which is a confident statement about something it never read. *@
+    else if ((page?.Error ?? shape?.Error) is { } error)
     {
         <ErrorAlert Message="@error.Display" OnRetry="@(error.CanRetry ? EventCallback.Factory.Create(this, ReloadAsync) : default)" />
     }
