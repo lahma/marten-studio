@@ -1,8 +1,6 @@
 using System.Globalization;
 
-using MartenStudio.Internal.Sql;
-
-namespace MartenStudio.Services.Query;
+namespace MartenStudio.Internal.Sql;
 
 /// <summary>
 /// What the studio composed for a Marten <c>where</c> clause: the statement it shows, and the clause it
@@ -67,40 +65,97 @@ internal static class QuerySqlComposer
     ];
 
     /// <summary>
-    /// Why a <c>where</c> clause is refused before it is handed to Marten, or <see langword="null" />.
+    /// Words that make a clause reach outside the table it is filtering. Refused unless the visitor may
+    /// run SQL.
     /// </summary>
     /// <remarks>
+    /// <c>from</c> is in the list, which also refuses <c>extract(year from …)</c>, <c>substring(x from 1)</c>
+    /// and <c>trim(both ' ' from x)</c>. That is a deliberate false positive: the list is structural rather
+    /// than semantic, and the escape hatch is the capability rather than a cleverer parser - a parser
+    /// treated as a security boundary is how these features get CVEs (D13).
+    /// </remarks>
+    internal static readonly string[] NestedReadKeywords =
+    [
+        "select", "from", "union", "intersect", "except", "join", "into", "with", "lateral", "returning",
+        "copy", "do", "call", "execute",
+    ];
+
+    /// <summary>
+    /// Functions that read, write or wait outside the row they are given. Refused unless the visitor may
+    /// run SQL.
+    /// </summary>
+    /// <remarks>
+    /// <b>When W2-fix's <c>ReadOnlySqlGuard.DisallowedFunctions</c> lands, union it into this list</b> - it
+    /// is the same question asked of a different text, and two lists answering it differently is exactly
+    /// the drift a reviewer cannot see. This is what could be named on a base without that set.
+    /// </remarks>
+    internal static readonly string[] DisallowedFunctions =
+    [
+        "pg_sleep", "pg_sleep_for", "pg_sleep_until", "set_config", "current_setting", "dblink",
+        "dblink_exec", "dblink_connect", "query_to_xml", "query_to_xml_and_xmlschema", "table_to_xml",
+        "xpath", "xpath_exists", "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_stat_file",
+        "lo_import", "lo_export", "pg_terminate_backend", "pg_cancel_backend", "pg_advisory_lock",
+        "pg_advisory_xact_lock", "pg_reload_conf", "pg_rotate_logfile", "nextval", "setval",
+    ];
+
+    /// <summary>Casts that turn text into a database object, and so into a probe of the catalog.</summary>
+    internal static readonly string[] DisallowedCastTargets = ["regclass", "regproc"];
+
+    /// <summary>
+    /// The option a host sets to lift the nested-read rules. Spelled out rather than read from
+    /// <c>StudioCapabilityGuard</c> so this file stays inside <c>Internal/Sql</c> and depends on nothing
+    /// above it; a unit test holds the two spellings together.
+    /// </summary>
+    internal const string RunSqlOption = "MartenStudioOptions.Capabilities.RunSql";
+
+    /// <summary>
+    /// Whether a <c>where</c> clause may be handed to Marten, and why not.
+    /// </summary>
+    /// <param name="clause">The clause as typed.</param>
+    /// <param name="allowNestedReads">
+    /// Whether the visitor may run SQL - <c>RunSql</c> enabled <em>and</em> allowed by the write policy. A
+    /// visitor who may is left alone: subqueries, unions and <c>lateral</c> joins are the point of the mode
+    /// for them, and everything they would be refused here they could type into the console instead.
+    /// </param>
+    /// <remarks>
     /// <para>
-    /// <b>This one is load-bearing.</b> Mode A needs no capability, and Marten's string query runs on an
-    /// ordinary session - not inside the SQL console's read-only transaction - so a clause that could carry
-    /// a second statement would <em>be</em> an ungated SQL console: <c>1 = 1; drop table x</c> arrives at
-    /// Npgsql as one command holding two statements, and Postgres runs both. So a clause has to be what it
-    /// says it is: a fragment of the one statement the studio composed.
+    /// <b>This is load-bearing.</b> Mode A needs no capability, and Marten's string query runs on an
+    /// ordinary session - not inside the SQL console's read-only transaction - so a clause that carried a
+    /// second statement would <em>be</em> an ungated SQL console: <c>1 = 1; drop table x</c> arrives at
+    /// Npgsql as one command holding two statements, and Postgres runs both.
     /// </para>
     /// <para>
-    /// Two rules, both about the shape rather than the meaning. There is no <c>;</c> outside a string, a
-    /// quoted identifier, a dollar-quoted body or a comment; and the clause does not begin a statement of
-    /// its own (<c>select</c>, <c>with</c>, …), because Marten would then run it <em>instead of</em> the
-    /// document query and the collection picker would be decoration. What remains possible - a subquery or
-    /// a <c>union</c> reading another table this connection can reach - is a read, and it is the residual
-    /// risk this mode shares with every filter box that takes SQL.
+    /// Three rules, in order, all structural rather than semantic. <b>Always:</b> no <c>;</c> outside a
+    /// string, a quoted identifier, a dollar-quoted body or a comment, and the clause does not begin a
+    /// statement of its own - either would stop it being a filter on the collection that was picked, and
+    /// neither is something the console's read-only transaction would forgive here, because there is no
+    /// transaction. <b>Without <c>RunSql</c>:</b> no word that reaches another relation
+    /// (<see cref="NestedReadKeywords" />), no function that reads, writes or waits outside the row
+    /// (<see cref="DisallowedFunctions" />), and no <c>::regclass</c>/<c>::regproc</c> cast. What is left
+    /// reads the selected table's own columns and JSON - which the visitor may see anyway, so the clause
+    /// grants nothing the collection browser did not already.
+    /// </para>
+    /// <para>
+    /// It is a scanner, not a parser. It is not the security boundary for the console (that is the
+    /// transaction, D13); it is the boundary for the <em>ungated</em> mode, which is why it errs towards
+    /// refusing and why every refusal names the capability that lifts it.
     /// </para>
     /// </remarks>
-    public static SqlRejection? RejectionFor(string? clause)
+    public static SqlGuardResult CheckClause(string? clause, bool allowNestedReads)
     {
         if (string.IsNullOrWhiteSpace(clause))
         {
-            return null;
+            return SqlGuardResult.Allow(string.Empty, 0);
         }
 
         int separator = IndexOfStatementSeparator(clause);
 
         if (separator >= 0)
         {
-            return new SqlRejection(
-                nameof(SqlRejectionReason.MultipleStatements),
+            return SqlGuardResult.Reject(
+                SqlRejectionReason.MultipleStatements,
                 "A where clause is part of one statement, so it cannot contain ';'. Whole statements run in " +
-                "the SQL console, which is gated on " + StudioCapabilityGuard.OptionName(StudioCapability.RunSql) + ".",
+                "the SQL console, which is gated on " + RunSqlOption + ".",
                 ";",
                 separator);
         }
@@ -112,17 +167,155 @@ internal static class QuerySqlComposer
         {
             if (StartsWithWord(trimmed, keyword))
             {
-                return new SqlRejection(
-                    nameof(SqlRejectionReason.DisallowedStatement),
+                return SqlGuardResult.Reject(
+                    SqlRejectionReason.DisallowedStatement,
                     $"A where clause filters the collection you picked; it cannot start with '{keyword}', which " +
                     "would replace the query altogether. Whole statements run in the SQL console, which is gated " +
-                    "on " + StudioCapabilityGuard.OptionName(StudioCapability.RunSql) + ".",
+                    "on " + RunSqlOption + ".",
                     keyword,
                     offset);
             }
         }
 
-        return null;
+        return allowNestedReads ? SqlGuardResult.Allow(string.Empty, 0) : CheckForNestedReads(clause);
+    }
+
+    /// <summary>
+    /// The clause, token by token, looking for the words, functions and casts that reach outside the table
+    /// being filtered.
+    /// </summary>
+    /// <remarks>
+    /// Strings, quoted identifiers, dollar-quoted bodies and comments are skipped - the same discipline
+    /// <see cref="ReadOnlySqlGuard" /> uses - so a document whose value happens to be the word
+    /// <c>select</c> is not a refusal, and a keyword hidden inside <c>$$…$$</c> is not an escape.
+    /// </remarks>
+    private static SqlGuardResult CheckForNestedReads(string clause)
+    {
+        var i = 0;
+
+        while (i < clause.Length)
+        {
+            char c = clause[i];
+
+            if (c == '-' && i + 1 < clause.Length && clause[i + 1] == '-')
+            {
+                while (i < clause.Length && clause[i] != '\n')
+                {
+                    i++;
+                }
+
+                continue;
+            }
+
+            if (c == '/' && i + 1 < clause.Length && clause[i + 1] == '*')
+            {
+                var commentEnd = clause.IndexOf("*/", i + 2, StringComparison.Ordinal);
+
+                if (commentEnd < 0)
+                {
+                    return Unreadable("/*", i, "an unterminated comment");
+                }
+
+                i = commentEnd + 2;
+                continue;
+            }
+
+            if (c is '\'' or '"')
+            {
+                var quoteEnd = clause.IndexOf(c, i + 1);
+
+                if (quoteEnd < 0)
+                {
+                    return Unreadable(c.ToString(), i, "an unterminated string");
+                }
+
+                i = quoteEnd + 1;
+                continue;
+            }
+
+            if (c == '$' && TryReadDollarTag(clause, i, out var tag))
+            {
+                var bodyEnd = clause.IndexOf(tag, i + tag.Length, StringComparison.Ordinal);
+
+                if (bodyEnd < 0)
+                {
+                    return Unreadable(tag, i, "an unterminated quoted body");
+                }
+
+                i = bodyEnd + tag.Length;
+                continue;
+            }
+
+            if (char.IsLetter(c) || c == '_')
+            {
+                var start = i;
+
+                while (i < clause.Length && (char.IsLetterOrDigit(clause[i]) || clause[i] == '_'))
+                {
+                    i++;
+                }
+
+                var word = clause[start..i];
+
+                if (Contains(NestedReadKeywords, word))
+                {
+                    return SqlGuardResult.Reject(
+                        SqlRejectionReason.DisallowedStatement,
+                        $"'{word}' makes this clause read outside the collection you picked. A filter that needs " +
+                        "it is a query, and queries run in the SQL console, which is gated on " + RunSqlOption + ".",
+                        word,
+                        start);
+                }
+
+                if (Contains(DisallowedFunctions, word))
+                {
+                    return SqlGuardResult.Reject(
+                        SqlRejectionReason.DisallowedStatement,
+                        $"'{word}' reads, writes or waits outside the row it is given, which is not something a " +
+                        "filter does. It runs in the SQL console, which is gated on " + RunSqlOption + ".",
+                        word,
+                        start);
+                }
+
+                if (start >= 2 && clause[start - 1] == ':' && clause[start - 2] == ':'
+                    && Contains(DisallowedCastTargets, word))
+                {
+                    return SqlGuardResult.Reject(
+                        SqlRejectionReason.DisallowedStatement,
+                        $"A '::{word}' cast turns text into a database object, which is a probe of the catalog " +
+                        "rather than a filter. It runs in the SQL console, which is gated on " + RunSqlOption + ".",
+                        "::" + word,
+                        start - 2);
+                }
+
+                continue;
+            }
+
+            i++;
+        }
+
+        return SqlGuardResult.Allow(string.Empty, 0);
+    }
+
+    private static SqlGuardResult Unreadable(string token, int position, string what) =>
+        SqlGuardResult.Reject(
+            SqlRejectionReason.DisallowedStatement,
+            $"This clause has {what}, so the studio cannot tell what it would run. Fix the quoting, or use the " +
+            "SQL console, which is gated on " + RunSqlOption + ".",
+            token,
+            position);
+
+    private static bool Contains(string[] words, string word)
+    {
+        foreach (string candidate in words)
+        {
+            if (string.Equals(candidate, word, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

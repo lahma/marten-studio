@@ -9,6 +9,7 @@ using MartenStudio.Services.Query;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace MartenStudio.Integration.Tests.Query;
 
@@ -59,13 +60,25 @@ internal sealed class QueryHarness : IAsyncDisposable
 
     private readonly ServiceProvider provider;
     private readonly IServiceScope scope;
+    private readonly HarnessLogCollector logs;
 
-    private QueryHarness(ServiceProvider provider, IServiceScope scope, string schema)
+    private QueryHarness(ServiceProvider provider, IServiceScope scope, string schema, HarnessLogCollector logs)
     {
         this.provider = provider;
         this.scope = scope;
+        this.logs = logs;
         Schema = schema;
     }
+
+    /// <summary>
+    /// Everything the studio logged, so a test can assert the stable event id rather than only the ring.
+    /// </summary>
+    /// <remarks>
+    /// The ring is in memory and gone at the next restart; the application's own log is the record that
+    /// survives a deployment, and the event ids (9204, 9205) are what an operator's saved query matches on.
+    /// A test that only read the ring would not notice the id moving.
+    /// </remarks>
+    public IReadOnlyList<HarnessLogEntry> Logs => logs.Entries;
 
     /// <summary>The schema this harness owns.</summary>
     public string Schema { get; }
@@ -96,8 +109,9 @@ internal sealed class QueryHarness : IAsyncDisposable
         await fixture.CreateSchemaAsync(schema);
 
         var services = new ServiceCollection();
+        var logs = new HarnessLogCollector();
 
-        services.AddLogging();
+        services.AddLogging(builder => builder.AddProvider(logs));
         services.AddAuthorization(options =>
             options.AddPolicy(DenyWritesPolicy, policy => policy.RequireAssertion(static _ => false)));
         services.AddSingleton<AuthenticationStateProvider, HarnessAuthenticationStateProvider>();
@@ -122,7 +136,7 @@ internal sealed class QueryHarness : IAsyncDisposable
 
         ServiceProvider provider = services.BuildServiceProvider();
         IServiceScope serviceScope = provider.CreateScope();
-        var harness = new QueryHarness(provider, serviceScope, schema);
+        var harness = new QueryHarness(provider, serviceScope, schema, logs);
 
         await harness.SeedAsync();
 
@@ -164,5 +178,60 @@ internal sealed class QueryHarness : IAsyncDisposable
         public override Task<AuthenticationState> GetAuthenticationStateAsync() =>
             Task.FromResult(new AuthenticationState(
                 new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "ops")], "test"))));
+    }
+}
+
+/// <summary>One line the studio wrote to the application's log.</summary>
+/// <param name="EventId">The stable id from <c>StudioLog</c> - 9204, 9205, and so on.</param>
+/// <param name="Level">How loud it was.</param>
+/// <param name="Message">The formatted message.</param>
+internal sealed record HarnessLogEntry(int EventId, LogLevel Level, string Message);
+
+/// <summary>Collects everything logged in one harness, so a test can assert an event id.</summary>
+internal sealed class HarnessLogCollector : ILoggerProvider
+{
+    private readonly List<HarnessLogEntry> entries = [];
+
+    /// <summary>What has been logged so far, newest last.</summary>
+    public IReadOnlyList<HarnessLogEntry> Entries
+    {
+        get
+        {
+            lock (entries)
+            {
+                return [.. entries];
+            }
+        }
+    }
+
+    public ILogger CreateLogger(string categoryName) => new Sink(this);
+
+    public void Dispose() => GC.SuppressFinalize(this);
+
+    private void Add(HarnessLogEntry entry)
+    {
+        lock (entries)
+        {
+            entries.Add(entry);
+        }
+    }
+
+    private sealed class Sink(HarnessLogCollector owner) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            ArgumentNullException.ThrowIfNull(formatter);
+
+            owner.Add(new HarnessLogEntry(eventId.Id, logLevel, formatter(state, exception)));
+        }
     }
 }

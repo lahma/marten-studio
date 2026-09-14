@@ -727,6 +727,39 @@ public class MartenApiSurfaceTest
         RequireMethod(extensions, "ToCommand").ReturnType.Should().Be<NpgsqlCommand>();
     }
 
+    /// <summary>
+    /// The one string-query overload that takes a runtime <see cref="Type"/>, which is the whole reason the
+    /// Query screen can run a <c>where</c> clause at all.
+    /// </summary>
+    /// <remarks>
+    /// Every other <c>Query</c>/<c>QueryAsync</c> on <c>IQuerySession</c> is generic in the document type,
+    /// and the studio only ever holds an <c>IDocumentType</c> - so without this member the Query screen
+    /// would need <c>MakeGenericMethod</c> over a helper, which is what the plan assumed. It does not:
+    /// <c>Marten.QuerySessionExtensions.QueryAsync(session, type, sql, token, parameters)</c> exists and
+    /// returns <c>Task&lt;IReadOnlyList&lt;object&gt;&gt;</c>. If it ever moves, Mode A is what breaks.
+    /// </remarks>
+    [Fact]
+    public void The_string_query_by_runtime_type_is_QuerySessionExtensions_QueryAsync()
+    {
+        var extensions = typeof(QuerySessionExtensions);
+
+        extensions.Namespace.Should().Be("Marten");
+
+        var method = RequireMethod(
+            extensions,
+            "QueryAsync",
+            typeof(IQuerySession),
+            typeof(Type),
+            typeof(string),
+            typeof(CancellationToken),
+            typeof(object[]));
+
+        method.IsStatic.Should().BeTrue("it is an extension method on IQuerySession");
+        method.IsGenericMethod.Should().BeFalse("the studio only ever has a runtime Type");
+        method.ReturnType.Should().Be<Task<IReadOnlyList<object>>>();
+        method.GetParameters()[4].IsDefined(typeof(ParamArrayAttribute), inherit: false).Should().BeTrue();
+    }
+
     // --------------------------------------------------------------------------------------------
     // The compile-time half
     // --------------------------------------------------------------------------------------------

@@ -79,7 +79,8 @@ internal sealed record MartenQueryRow(string Id, string Json);
 /// <param name="Plan">The plan, when one was asked for and could be fetched.</param>
 /// <param name="Rejection">
 /// Why the clause was never sent. A <c>where</c> clause runs without a capability, so it is held to being
-/// a fragment of one statement - see <see cref="QuerySqlComposer.RejectionFor" />.
+/// a fragment of one statement that reads only the table it filters - see
+/// <see cref="QuerySqlComposer.CheckClause" />.
 /// </param>
 internal sealed record MartenQueryResult(
     string Alias,

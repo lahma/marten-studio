@@ -17,8 +17,11 @@
 
     A Marten `where` clause is a read against one document type the host registered: no capability needed,
     the same thing the documents list does with a search box. Because it needs no capability, the service
-    holds it to being a *clause* - no second statement, and not a statement of its own - which is what keeps
-    this mode from being an ungated SQL console (QuerySqlComposer.RejectionFor).
+    holds it to being a *clause* that reads only the table it filters - no second statement, no statement of
+    its own, and without RunSql no subquery, union, join or catalog-probing function either. That is what
+    keeps this mode from being an ungated SQL console (QuerySqlComposer.CheckClause). A visitor who may run
+    SQL gets the rules lifted, because everything they would be refused here they could type into the
+    console instead.
 
     The SQL console is arbitrary SQL against the whole database, so it is gated on RunSql, resolved with
     write-policy semantics, checked by the statement guard, run inside a read-only transaction and audited

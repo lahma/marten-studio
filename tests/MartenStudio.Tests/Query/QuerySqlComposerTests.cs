@@ -1,4 +1,5 @@
-using MartenStudio.Services.Query;
+using MartenStudio.Internal.Sql;
+using MartenStudio.Services;
 
 namespace MartenStudio.Tests.Query;
 
@@ -122,11 +123,24 @@ public class QuerySqlComposerTests
     [InlineData("where a = 'unterminated")]
     public void A_clause_carrying_a_second_statement_is_refused(string clause)
     {
-        SqlRejection? rejection = QuerySqlComposer.RejectionFor(clause);
+        SqlGuardResult refused = QuerySqlComposer.CheckClause(clause, allowNestedReads: false);
 
-        rejection.Should().NotBeNull();
-        rejection!.Message.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
-        rejection.Position.Should().BeGreaterThanOrEqualTo(0);
+        refused.Allowed.Should().BeFalse();
+        refused.Message.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
+        refused.Position.Should().BeGreaterThanOrEqualTo(0);
+    }
+
+    /// <summary>
+    /// The two shape rules hold even for somebody who may run SQL: Mode A goes through a Marten session
+    /// rather than the console's read-only transaction, so a second statement here would really write -
+    /// which is more than <c>RunSql</c> grants anywhere else.
+    /// </summary>
+    [Theory]
+    [InlineData("where a = 1; drop table x")]
+    [InlineData("select * from pg_authid")]
+    public void The_shape_rules_hold_even_with_RunSql(string clause)
+    {
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: true).Allowed.Should().BeFalse(clause);
     }
 
     [Theory]
@@ -138,20 +152,91 @@ public class QuerySqlComposerTests
     [InlineData("copy x from '/etc/passwd'")]
     public void A_clause_that_is_a_statement_of_its_own_is_refused(string clause)
     {
-        QuerySqlComposer.RejectionFor(clause).Should().NotBeNull(clause);
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: false).Allowed.Should().BeFalse(clause);
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // Reading outside the collection. Refused without RunSql; left alone with it.
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// What a filter on a collection looks like: the table's own columns, its JSON, and ordinary SQL over
+    /// both. None of it reads anything the visitor could not already see by opening the collection.
+    /// </summary>
     [Theory]
-    [InlineData("where data ->> 'Name' = 'Alice'")]
+    [InlineData("where data ->> 'Name' = 'x'")]
+    [InlineData("where d.data @> '{\"a\":1}'")]
+    [InlineData("where mt_last_modified > now() - interval '1 day'")]
+    [InlineData("where (data ->> 'Age')::int > 3 and d.id is not null")]
+    [InlineData("where lower(data ->> 'Name') like 'a%'")]
     [InlineData("where name = 'it''s; fine'")]
     [InlineData("order by mt_last_modified desc")]
     [InlineData("age > 30 and name like 'A%'")]
-    [InlineData("where d.data @> '{\"Name\": \"Alice\"}'")]
     [InlineData(null)]
     [InlineData("")]
-    public void An_ordinary_clause_is_not_refused(string? clause)
+    public void A_clause_that_reads_only_its_own_collection_is_allowed_without_RunSql(string? clause)
     {
-        QuerySqlComposer.RejectionFor(clause).Should().BeNull(clause ?? "(null)");
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: false).Allowed.Should().BeTrue(clause ?? "(null)");
+    }
+
+    [Theory]
+    [InlineData("where id in (select id from other.t)")]
+    [InlineData("where exists (select 1)")]
+    [InlineData("where pg_read_file('x') = ''")]
+    [InlineData("where 1 = 1 union select id, data from other.t")]
+    [InlineData("where pg_sleep(10) is null")]
+    [InlineData("where d.id = (with x as (select 1) select 1)")]
+    [InlineData("where d.id in (select id from t join u on true)")]
+    [InlineData("where current_setting('is_superuser') = 'on'")]
+    [InlineData("where 'mt_doc_person'::regclass is not null")]
+    [InlineData("where set_config('statement_timeout', '0', false) is not null")]
+    public void A_clause_that_reads_outside_its_collection_is_refused_without_RunSql(string clause)
+    {
+        SqlGuardResult refused = QuerySqlComposer.CheckClause(clause, allowNestedReads: false);
+
+        refused.Allowed.Should().BeFalse(clause);
+        refused.Message.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
+        refused.Token.Should().NotBeNullOrEmpty();
+        refused.Position.Should().BeGreaterThanOrEqualTo(0);
+    }
+
+    /// <summary>
+    /// With <c>RunSql</c> the same clauses run: a subquery is the point of the mode for somebody who could
+    /// have typed the whole thing into the console anyway.
+    /// </summary>
+    [Theory]
+    [InlineData("where id in (select id from other.t)")]
+    [InlineData("where exists (select 1)")]
+    [InlineData("where 1 = 1 union select id, data from other.t")]
+    [InlineData("where pg_sleep(10) is null")]
+    public void The_same_clause_is_allowed_with_RunSql(string clause)
+    {
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: true).Allowed.Should().BeTrue(clause);
+    }
+
+    /// <summary>
+    /// A keyword inside a value is a value. The scanner skips strings, quoted identifiers, dollar-quoted
+    /// bodies and comments, which is the same discipline the statement guard uses.
+    /// </summary>
+    [Theory]
+    [InlineData("where data ->> 'Name' = 'select from union'")]
+    [InlineData("where \"join\" = 1")]
+    [InlineData("where data ->> 'Name' = $$ select 1 $$")]
+    [InlineData("where a = 1 -- select from t")]
+    [InlineData("where a = 1 /* select from t */")]
+    public void A_keyword_inside_a_literal_is_not_a_refusal(string clause)
+    {
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: false).Allowed.Should().BeTrue(clause);
+    }
+
+    /// <summary>
+    /// The composer spells the option out rather than reaching up into the services layer, so this is what
+    /// keeps the two spellings from drifting apart.
+    /// </summary>
+    [Fact]
+    public void The_option_the_refusals_name_is_the_one_the_capability_guard_names()
+    {
+        QuerySqlComposer.RunSqlOption.Should().Be(StudioCapabilityGuard.OptionName(StudioCapability.RunSql));
     }
 
     [Theory]

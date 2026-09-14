@@ -1,5 +1,6 @@
 using System.Text.Json;
 
+using MartenStudio.Services;
 using MartenStudio.Services.Query;
 
 namespace MartenStudio.Integration.Tests.Query;
@@ -229,6 +230,62 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
             harness.Scope, new MartenQueryRequest(alias, null), Token);
 
         after.Rows.Should().HaveCount(before.Rows.Count, "the table is still there with the same rows");
+    }
+
+    /// <summary>
+    /// Without <c>RunSql</c>, a clause may read the collection it filters and nothing else. The refusal
+    /// happens before anything is sent, and it is written to the application's log under 9205 - the same
+    /// id the SQL console's refusals carry, because it is the same question.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_subquery_clause_is_refused_without_RunSql_audited_as_9205_and_runs_nothing()
+    {
+        await using QueryHarness gated = await QueryHarness.CreateAsync(
+            fixture, "martenqueryliveguard", options => options.Capabilities.RunSql = false);
+
+        IReadOnlyList<QueryDocumentTypeInfo> types = await gated.Queries.ListDocumentTypesAsync(gated.Scope, Token);
+        QueryDocumentTypeInfo person = types.Single(x => x.TypeName == nameof(QueryPerson));
+        string clause = $"where d.id in (select id from {person.QualifiedTableName})";
+
+        MartenQueryResult result = await gated.Queries.RunMartenQueryAsync(
+            gated.Scope, new MartenQueryRequest(person.Alias, clause), Token);
+
+        result.Succeeded.Should().BeFalse();
+        result.Rejection.Should().NotBeNull();
+        result.Rejection!.Message.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
+        result.Rejection.Token.Should().Be("select");
+        result.Rows.Should().BeEmpty();
+        result.Error.Should().BeNull("nothing was sent, so Postgres never saw it");
+
+        gated.Logs.Should().ContainSingle(x => x.EventId == 9205)
+            .Which.Message.Should().Contain(clause, "9205 carries the statement text");
+
+        StudioActionLogEntry entry = gated.Audit.GetLatest()[0];
+
+        entry.Action.Should().Be("MartenQuery");
+        entry.Succeeded.Should().BeFalse();
+        entry.Target.Should().Contain("select id from");
+        gated.Logs.Should().NotContain(x => x.EventId == 9204, "nothing ran");
+    }
+
+    /// <summary>
+    /// The same clause with <c>RunSql</c> granted: a subquery is the point of the mode for somebody who
+    /// could have typed the whole statement into the console anyway.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_same_subquery_clause_runs_when_RunSql_is_granted()
+    {
+        IReadOnlyList<QueryDocumentTypeInfo> types = await harness.Queries.ListDocumentTypesAsync(harness.Scope, Token);
+        QueryDocumentTypeInfo person = types.Single(x => x.TypeName == nameof(QueryPerson));
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            harness.Scope,
+            new MartenQueryRequest(person.Alias, $"where d.id in (select id from {person.QualifiedTableName})"),
+            Token);
+
+        result.Rejection.Should().BeNull("the clause guard's nested-read rules are lifted by RunSql");
+        result.Error.Should().BeNull(result.Error?.MessageText ?? string.Empty);
+        result.Rows.Should().HaveCount(3);
     }
 
     [PostgresFact]

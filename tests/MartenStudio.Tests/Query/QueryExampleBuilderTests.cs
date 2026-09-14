@@ -1,3 +1,4 @@
+using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Query;
 
 namespace MartenStudio.Tests.Query;
@@ -92,6 +93,31 @@ public class QueryExampleBuilderTests
 
         examples.Sql.Should().HaveCount(2);
         examples.Sql.Should().AllSatisfy(x => x.Snippet.Should().NotContain("mt_events"));
+    }
+
+    /// <summary>
+    /// The examples are offered to a visitor who has no capability at all, so every one of them has to
+    /// pass the clause guard with the nested-read rules on. An example that only runs for an administrator
+    /// would be a trap on the idle panel.
+    /// </summary>
+    [Fact]
+    public void Every_where_example_passes_the_clause_guard_without_RunSql()
+    {
+        var examples = QueryExampleBuilder.Build([Person(), Tag()], "studio_events");
+
+        foreach (QueryExample example in examples.Where)
+        {
+            QuerySqlComposer.CheckClause(example.Snippet, allowNestedReads: false)
+                .Allowed.Should().BeTrue(example.Snippet);
+        }
+
+        QueryExamples plain = QueryExampleBuilder.Build([Person(lastModified: false)], null);
+
+        foreach (QueryExample example in plain.Where)
+        {
+            QuerySqlComposer.CheckClause(example.Snippet, allowNestedReads: false)
+                .Allowed.Should().BeTrue(example.Snippet);
+        }
     }
 
     [Fact]

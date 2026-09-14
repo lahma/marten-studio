@@ -53,12 +53,20 @@ internal sealed class QueryService : IQueryService
     /// <summary>What the audit ring calls a SQL console run.</summary>
     internal const string RunSqlAction = "RunSql";
 
+    /// <summary>What the audit ring calls a refused Marten where clause.</summary>
+    /// <remarks>
+    /// Only refusals are recorded under it. A clause that runs is a read like any other page's read, and a
+    /// ring that filled with every filter somebody typed would bury the entries that matter.
+    /// </remarks>
+    internal const string MartenQueryAction = "MartenQuery";
+
     /// <summary>How much of a statement goes into the audit ring's target column.</summary>
     internal const int AuditTargetLength = 200;
 
     private const string Unknown = "(unknown)";
 
     private readonly StudioScopeResolver resolver;
+    private readonly StudioAuthorization authorization;
     private readonly StudioCapabilityGuard capabilities;
     private readonly StudioActionLog audit;
     private readonly IOptions<MartenStudioOptions> options;
@@ -67,6 +75,7 @@ internal sealed class QueryService : IQueryService
 
     public QueryService(
         StudioScopeResolver resolver,
+        StudioAuthorization authorization,
         StudioCapabilityGuard capabilities,
         StudioActionLog audit,
         IOptions<MartenStudioOptions> options,
@@ -74,6 +83,7 @@ internal sealed class QueryService : IQueryService
         AuthenticationStateProvider authenticationStateProvider)
     {
         this.resolver = resolver;
+        this.authorization = authorization;
         this.capabilities = capabilities;
         this.audit = audit;
         this.options = options;
@@ -132,12 +142,24 @@ internal sealed class QueryService : IQueryService
 
         ComposedQuery composed = QuerySqlComposer.Compose(table.QualifiedName, request.WhereClause, limit);
 
-        // A where clause needs no capability, so it has to be a clause: no second statement, and not a
-        // statement of its own. Without this, Mode A would be an ungated SQL console (see
-        // QuerySqlComposer.RejectionFor) - and unlike the console, it does not run in a read-only
-        // transaction, because it runs through a Marten session.
-        if (QuerySqlComposer.RejectionFor(request.WhereClause) is { } rejected)
+        // A where clause needs no capability, so it has to be a clause. Without RunSql it may read only the
+        // table that was picked; with RunSql the nested-read rules are lifted, because everything they
+        // refuse the same person could type into the console. The two shape rules - one statement, and not
+        // a statement of its own - hold either way: Mode A runs through a Marten session rather than the
+        // console's read-only transaction, so a second statement here would really write.
+        bool mayRunSql = await MayRunSqlAsync(scope, cancellationToken).ConfigureAwait(false);
+        SqlGuardResult clauseGuard = QuerySqlComposer.CheckClause(request.WhereClause, mayRunSql);
+
+        if (!clauseGuard.Allowed)
         {
+            SqlRejection rejected = SqlRejection.FromGuard(clauseGuard);
+            string refusedTarget = Target(request.WhereClause);
+            string refusedUser = UserName();
+
+            audit.Record(MartenQueryAction, refusedTarget, succeeded: false, rejected.Message, null, scope);
+            logger.SqlRejected(
+                refusedUser, scope.StoreKey, scope.DatabaseId, rejected.Message, request.WhereClause ?? string.Empty);
+
             return new MartenQueryResult(
                 documentType.Alias, [], composed.Statement, [], TimeSpan.Zero, limit, composed.LimitApplied,
                 null, ExplainResult.Unavailable("The clause was never sent."), rejected);
@@ -245,6 +267,28 @@ internal sealed class QueryService : IQueryService
         sources.Sort(static (left, right) => CompareAliases(left.Alias, right.Alias));
 
         return QueryExampleBuilder.Build(sources, resolved.Store.Options.Events.DatabaseSchemaName);
+    }
+
+    /// <summary>
+    /// Whether this visitor may run SQL against this scope, which is what lifts the clause guard's
+    /// nested-read rules.
+    /// </summary>
+    /// <remarks>
+    /// Both halves, in the order the rest of the studio asks them: the process-wide capability (D4), and
+    /// then the per-visitor write policy against this very scope. Asking only the first would hand
+    /// subqueries to somebody the <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> refuses the
+    /// console to, which is the hole the policy exists to close.
+    /// </remarks>
+    private async Task<bool> MayRunSqlAsync(StudioScope scope, CancellationToken cancellationToken)
+    {
+        if (!capabilities.IsEnabled(StudioCapability.RunSql))
+        {
+            return false;
+        }
+
+        return await authorization
+            .IsAuthorizedAsync(scope, nameof(StudioCapability.RunSql), cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
