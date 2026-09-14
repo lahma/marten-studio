@@ -11,12 +11,22 @@ namespace MartenStudio.Services.Schema;
 /// <param name="IsPrimaryKey">Whether it backs the primary key.</param>
 /// <param name="IsUnique">Whether it enforces uniqueness.</param>
 /// <param name="DeclaredByMarten">
-/// Whether the store's configuration asks for an index of this name. An index that is present but
-/// undeclared survives until somebody runs a migration with <c>AutoCreate.All</c>, and then does not -
-/// which is exactly the sort of thing that should be visible before it happens.
+/// Whether the store's configuration asks for an index of this name, or told Marten to ignore it. An
+/// index on a Marten table that is neither is <em>dropped</em> by the next
+/// <c>ApplyAllConfiguredChangesToDatabaseAsync</c>, under <c>AutoCreate.CreateOrUpdate</c> and not only
+/// under <c>All</c> - which is exactly the sort of thing that has to be visible before it happens.
 /// </param>
 /// <param name="CollectionAlias">The document type whose table this index is on, when it is one.</param>
 /// <param name="Suggestion">What the studio has to say about it, or <see langword="null" />.</param>
+/// <param name="OnMartenTable">
+/// Whether the table this index is on is one Marten configures. A host's own table can live in the same
+/// schema, and no migration from here touches it - so "undeclared" means something quite different there
+/// and must not carry the same warning.
+/// </param>
+/// <param name="IgnoredByConfiguration">
+/// Whether the host called <c>IgnoreIndex</c> for this name. Weasel drops such an index from both sides
+/// of the delta, so it is neither created nor dropped.
+/// </param>
 internal sealed record IndexInfo(
     string Schema,
     string Table,
@@ -29,8 +39,13 @@ internal sealed record IndexInfo(
     bool IsUnique,
     bool DeclaredByMarten,
     string? CollectionAlias,
-    string? Suggestion)
+    string? Suggestion,
+    bool OnMartenTable = true,
+    bool IgnoredByConfiguration = false)
 {
+    /// <summary>Whether the next apply would drop this index.</summary>
+    public bool WouldBeDropped => OnMartenTable && !DeclaredByMarten && !IsPrimaryKey;
+
     /// <summary>
     /// Whether Postgres has recorded no scan of this index at all.
     /// </summary>
@@ -102,6 +117,30 @@ internal sealed record SchemaIndexes(
             foreach (IndexInfo index in Indexes)
             {
                 if (index.NeverUsed && !index.IsConstraint)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+    }
+
+    /// <summary>
+    /// How many indexes an apply would drop.
+    /// </summary>
+    /// <remarks>
+    /// The number a person most needs before they press Apply, and the reason it is a summary rather than
+    /// only a per-row flag: one hand-made index buried in a list of forty is exactly what gets lost.
+    /// </remarks>
+    public int WouldBeDroppedCount
+    {
+        get
+        {
+            int count = 0;
+            foreach (IndexInfo index in Indexes)
+            {
+                if (index.WouldBeDropped)
                 {
                     count++;
                 }

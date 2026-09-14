@@ -51,6 +51,15 @@ internal sealed class FakeSchemaDataService : ISchemaDataService
     /// <inheritdoc cref="Checks" />
     public int Applies { get; private set; }
 
+    /// <summary>
+    /// How many times the DDL script was asked for.
+    /// </summary>
+    /// <remarks>
+    /// Counted because producing the script walks <c>AllObjects()</c>, which can create Marten's own HiLo
+    /// objects - so "nobody asked for it on navigation" is a fact a test has to be able to assert.
+    /// </remarks>
+    public int Ddls { get; private set; }
+
     /// <summary>What the last apply was given as the typed confirmation.</summary>
     public string? LastConfirmation { get; private set; }
 
@@ -88,8 +97,11 @@ internal sealed class FakeSchemaDataService : ISchemaDataService
     public Task<SchemaFunctions> FunctionsAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
         Task.FromResult(Functions);
 
-    public Task<DdlScript> DdlAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Ddl);
+    public Task<DdlScript> DdlAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        Ddls++;
+        return Task.FromResult(Ddl);
+    }
 
     public Task<string> DatabaseIdentityAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
         Task.FromResult(DatabaseIdentity);

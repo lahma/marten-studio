@@ -7,7 +7,12 @@
     Both directions of the join: what Postgres has that the configuration does not ask for, and what the
     configuration asks for that Postgres does not have. Every suggestion is a StoreOptions line, never
     DDL - an index the studio created directly would be one the host's own configuration knows nothing
-    about, so the next migration would report drift for it and AutoCreate.All would drop it again.
+    about, and the next apply would drop it again. Not "AutoCreate.All would": CreateOrUpdate drops it,
+    because Weasel writes "drop index" for every index on a Marten table that the configuration does not
+    declare and reports the table as Update (packet P7-fix, finding B2).
+
+    Nothing on this tab asks the database for anything but pg_catalog rows: the declarations come from
+    StoreOptions through SchemaDeclarationReader, never from AllObjects().
 *@
 
 @if (loading)
@@ -26,6 +31,22 @@ else
         <span><strong>@indexes.Missing.Count</strong> declared but missing</span>
         <span><strong>@indexes.Unindexed.Count</strong> collections with only a primary key</span>
     </div>
+
+    @if (indexes.WouldBeDroppedCount > 0)
+    {
+        <div class="ms-alert ms-alert-error" role="alert">
+            <div class="ms-alert-content">
+                <p>
+                    <strong>@DroppedHeadline</strong>
+                    They exist on tables Marten manages and <code>StoreOptions</code> does not declare
+                    them, so Weasel writes <code>drop index</code> for each - under
+                    <code>AutoCreate.CreateOrUpdate</code>, not only under <code>All</code>. Declare them,
+                    or name each one in <code>opts.Schema.For&lt;T&gt;().IgnoreIndex("...")</code> (or
+                    <code>opts.Events.IgnoreIndex("...")</code> on an event table).
+                </p>
+            </div>
+        </div>
+    }
 
     @if (indexes.Missing.Count > 0)
     {
@@ -131,9 +152,17 @@ else
                             {
                                 <span class="ms-index-flag">unique</span>
                             }
-                            @if (!index.DeclaredByMarten)
+                            @if (index.WouldBeDropped)
                             {
-                                <span class="ms-index-flag ms-index-flag-info">undeclared</span>
+                                <span class="ms-index-flag ms-index-flag-danger">would be dropped</span>
+                            }
+                            else if (index.IgnoredByConfiguration)
+                            {
+                                <span class="ms-index-flag ms-index-flag-info">ignored by config</span>
+                            }
+                            else if (!index.DeclaredByMarten && !index.OnMartenTable)
+                            {
+                                <span class="ms-index-flag ms-index-flag-info">not a Marten table</span>
                             }
                             @if (index.NeverUsed && !index.IsConstraint)
                             {
@@ -162,6 +191,17 @@ else
 
     private SchemaIndexes indexes = SchemaIndexes.Empty;
     private bool loading = true;
+
+    /// <summary>
+    /// The headline of the drop warning, as one string.
+    /// </summary>
+    /// <remarks>
+    /// Composed here rather than out of three markup expressions so that the rendered sentence is one
+    /// run of text - which is what a test can assert on, and what a screen reader reads as a sentence.
+    /// </remarks>
+    private string DroppedHeadline => indexes.WouldBeDroppedCount == 1
+        ? "1 index would be dropped by an apply."
+        : $"{indexes.WouldBeDroppedCount} indexes would be dropped by an apply.";
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 

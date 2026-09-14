@@ -67,8 +67,9 @@ internal sealed record FunctionStatsRow(string Schema, string Name, string Signa
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every one of these is scoped to the schemas the store actually owns — <c>AllSchemaNames()</c> passed
-/// as a single <c>text[]</c> parameter and compared with <c>= any(@schemas)</c>. That is not a
+/// Every one of these is scoped to the schemas the store actually owns — derived from <c>StoreOptions</c>
+/// by <c>SchemaDeclarationReader</c> (never <c>AllSchemaNames()</c>, which applies migrations), passed as
+/// a single <c>text[]</c> parameter and compared with <c>= any(@schemas)</c>. That is not a
 /// convenience: a studio that listed every table on the server would report on the host application's
 /// own tables, which is both a surprise and an information leak in a shared database. No identifier is
 /// interpolated into any statement here; the schema names travel as a value like everything else
@@ -85,7 +86,17 @@ internal sealed record FunctionStatsRow(string Schema, string Name, string Signa
 /// </remarks>
 internal static class SchemaStatsQueries
 {
-    /// <summary>Sizes and activity for every ordinary table in the store's schemas, largest first.</summary>
+    /// <summary>
+    /// Sizes and activity for every ordinary table in the store's schemas, largest first.
+    /// </summary>
+    /// <remarks>
+    /// <c>relkind in ('r', 'p')</c>, not <c>= 'r'</c>: <c>'p'</c> is a partitioned table, and Marten
+    /// partitions the event tables under <c>UseArchivedStreamPartitioning</c> or
+    /// <c>UseTenantPartitionedEvents</c> and any document type with a <c>Partitioning</c> scheme. A
+    /// <c>'r'</c>-only filter hid exactly the tables most worth looking at, and hid them silently.
+    /// <c>pg_total_relation_size</c> of a partitioned parent is the parent's own forks only, so the
+    /// partitions still appear as their own rows and nothing is double-counted.
+    /// </remarks>
     internal const string TableStatsSql =
         """
         select n.nspname,
@@ -103,7 +114,7 @@ internal static class SchemaStatsQueries
         from pg_class c
         join pg_namespace n on n.oid = c.relnamespace
         left join pg_stat_user_tables s on s.relid = c.oid
-        where c.relkind = 'r' and n.nspname = any(@schemas)
+        where c.relkind in ('r', 'p') and n.nspname = any(@schemas)
         order by pg_total_relation_size(c.oid) desc, n.nspname, c.relname
         """;
 
@@ -153,7 +164,7 @@ internal static class SchemaStatsQueries
 
     /// <summary>Reads table sizes and activity for the store's schemas.</summary>
     /// <param name="connection">An open connection to the database in scope.</param>
-    /// <param name="schemas">The schemas the store owns, from <c>IMartenStorage.AllSchemaNames()</c>.</param>
+    /// <param name="schemas">The schemas the store owns, derived from its options.</param>
     /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<IReadOnlyList<TableStatsRow>> ReadTablesAsync(

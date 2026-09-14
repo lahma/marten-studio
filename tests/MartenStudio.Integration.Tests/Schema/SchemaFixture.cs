@@ -92,8 +92,13 @@ internal sealed class SchemaFixture : IAsyncDisposable
     /// A second studio over the same schema whose configuration asks for one more index than the
     /// database has, and which will never create it on its own.
     /// </summary>
-    public StudioHost Drifted(Action<MartenStudioOptions>? configure = null) =>
-        BuildHost(extraIndex: true, configure);
+    /// <param name="configure">Extra studio options, for the tests about capabilities and policies.</param>
+    /// <param name="ignoredIndex">
+    /// An index name to pass to <c>Schema.For&lt;SchemaCustomer&gt;().IgnoreIndex(...)</c>, which is how
+    /// a host keeps a hand-made index that the migration would otherwise drop.
+    /// </param>
+    public StudioHost Drifted(Action<MartenStudioOptions>? configure = null, string? ignoredIndex = null) =>
+        BuildHost(extraIndex: true, configure, ignoredIndex);
 
     /// <summary>The name of the index the drifted configuration asks for and the database does not have.</summary>
     public const string DriftIndexName = "mt_doc_customer_idx_name";
@@ -131,7 +136,31 @@ internal sealed class SchemaFixture : IAsyncDisposable
         providers.Clear();
     }
 
-    private StudioHost BuildHost(bool extraIndex, Action<MartenStudioOptions>? configure)
+    /// <summary>
+    /// Creates an index by hand, the way somebody would in psql - one the store's configuration knows
+    /// nothing about.
+    /// </summary>
+    /// <remarks>
+    /// Raw SQL in a test rather than through the studio's builders, deliberately: the point of this
+    /// index is that nothing in <c>StoreOptions</c> asks for it.
+    /// </remarks>
+    public async Task CreateIndexAsync(
+        string indexName,
+        string table,
+        string column,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = new NpgsqlConnection(ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            $"create index \"{indexName}\" on \"{Schema}\".\"{table}\" ((data ->> '{column}'));",
+            connection);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private StudioHost BuildHost(bool extraIndex, Action<MartenStudioOptions>? configure, string? ignoredIndex = null)
     {
         var services = new ServiceCollection();
 
@@ -147,6 +176,16 @@ internal sealed class SchemaFixture : IAsyncDisposable
             // "the host wired up one that does not" without inventing an authorization handler.
             options.AddPolicy(DenyPolicy, policy => policy.RequireAssertion(static _ => false));
             options.AddPolicy(AllowPolicy, policy => policy.RequireAssertion(static _ => true));
+
+            // Allows, and runs whatever OnAuthorized is set to on the way through. That is the only
+            // deterministic seam the studio's own pipeline offers for "the circuit went away after the
+            // authorization gate and before the database was touched", which is the case the apply has
+            // to survive rather than abandon (P7-fix follow-up 1).
+            options.AddPolicy(AllowAndSignalPolicy, policy => policy.RequireAssertion(_ =>
+            {
+                OnAuthorized?.Invoke();
+                return true;
+            }));
         });
 
         services.AddSingleton<AuthenticationStateProvider, TestAuthenticationStateProvider>();
@@ -168,6 +207,11 @@ internal sealed class SchemaFixture : IAsyncDisposable
             if (extraIndex)
             {
                 customer.Index(x => x.Name);
+            }
+
+            if (ignoredIndex is { Length: > 0 })
+            {
+                customer.IgnoreIndex(ignoredIndex);
             }
 
             options.Schema.For<SchemaOrder>().SoftDeleted();
@@ -194,6 +238,16 @@ internal sealed class SchemaFixture : IAsyncDisposable
 
     /// <summary>The policy name a test uses for a write policy that allows.</summary>
     public const string AllowPolicy = "studio-allow";
+
+    /// <summary>A write policy that allows and calls <see cref="OnAuthorized" /> on the way through.</summary>
+    public const string AllowAndSignalPolicy = "studio-allow-and-signal";
+
+    /// <summary>
+    /// Run inside <see cref="AllowAndSignalPolicy" />, which is inside the studio's write-authorization
+    /// check. Set it for one test and clear it afterwards; it is static because the authorization options
+    /// are built once per host and there is no per-call seam.
+    /// </summary>
+    public static Action? OnAuthorized { get; set; }
 
     /// <summary>One built studio, and a scope to reach its services through.</summary>
     internal sealed class StudioHost(ServiceProvider provider)

@@ -6,9 +6,11 @@ namespace MartenStudio.Services.Schema;
 /// <param name="Signature">The name with its argument types, which is what makes an overload identifiable.</param>
 /// <param name="Definition">What <c>pg_get_functiondef</c> reconstructs for it.</param>
 /// <param name="DeclaredByMarten">
-/// Whether the store's own configuration asks for a function of this name, matched against
-/// <c>IMartenDatabase.AllObjects()</c>. Anything else in the schema is the application's own, and it is
-/// worth knowing which is which before running a migration that could drop it.
+/// Whether the store's own configuration asks for a function of this name. Matched against
+/// <c>SchemaDeclarationReader</c> - the event store's own feature objects plus a list of the helper
+/// functions Marten installs into the document schema - and never against
+/// <c>IMartenDatabase.AllObjects()</c>, which applies migrations on the way. Anything else in the schema
+/// is the application's own, and it is worth knowing which is which before running a migration.
 /// </param>
 internal sealed record FunctionInfo(
     string Schema,

@@ -34,6 +34,18 @@ internal sealed record MigrationPreview(
 
     /// <summary>How large the script is, for the download button's label.</summary>
     public int Bytes => System.Text.Encoding.UTF8.GetByteCount(Sql);
+
+    /// <summary>
+    /// The statements in this script that remove or rewrite something.
+    /// </summary>
+    /// <remarks>
+    /// Computed rather than stored, so it can never disagree with <see cref="Sql" />. See
+    /// <see cref="MigrationRisk" /> for why <c>AutoCreate.CreateOrUpdate</c> needs this at all.
+    /// </remarks>
+    public IReadOnlyList<DestructiveStatement> DestructiveStatements => MigrationRisk.Find(Sql);
+
+    /// <summary>Whether applying this would remove or rewrite an object.</summary>
+    public bool IsDestructive => DestructiveStatements.Count > 0;
 }
 
 /// <summary>What applying a migration did.</summary>

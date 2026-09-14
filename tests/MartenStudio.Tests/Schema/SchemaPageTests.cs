@@ -58,6 +58,7 @@ public class SchemaPageTests
         var page = context.Render<SchemaPage>();
 
         page.Find(".ms-tab-active").TextContent.Trim().Should().Be("DDL");
+        ClickButton(page, "Generate script");
         page.Markup.Should().Contain("create");
     }
 
@@ -298,7 +299,7 @@ public class SchemaPageTests
             ],
             [],
             [new UnindexedCollection("note", "Note", "studio", "mt_doc_note",
-                IndexAdvice.SuggestionsFor(new DeclaredCollection("note", "Note", "studio", "mt_doc_note", false, "Text")))],
+                IndexAdvice.SuggestionsFor(new DeclaredCollection("note", "Note", "studio", "mt_doc_note", "Text")))],
             null);
 
         context.Navigate("/marten/schema?tab=indexes");
@@ -329,7 +330,7 @@ public class SchemaPageTests
     }
 
     [Fact]
-    public void The_DDL_tab_offers_the_script_for_copy_and_download()
+    public void The_DDL_tab_offers_the_script_for_copy_and_download_once_it_is_generated()
     {
         using var context = NewContext(out FakeSchemaDataService schema);
         schema.Ddl = new DdlScript("create table studio.mt_doc_customer (id uuid);", null);
@@ -337,8 +338,149 @@ public class SchemaPageTests
         context.Navigate("/marten/schema?tab=ddl");
         var page = context.Render<SchemaPage>();
 
+        ClickButton(page, "Generate script");
+
+        schema.Ddls.Should().Be(1);
         page.TextOfAll(".ms-schema-toolbar .ms-button").Should().Contain("Download .sql");
         page.Markup.Should().Contain("mt_doc_customer");
+    }
+
+    /// <summary>
+    /// P7-fix B1. <c>ToDatabaseScript()</c> walks <c>AllObjects()</c>, which builds Marten's feature
+    /// schemas - including the lazy HiLo <c>Sequences</c> feature, whose initialiser applies a migration.
+    /// Opening a tab must never do that, so the DDL tab arrives with a button and a sentence saying what
+    /// pressing it may create.
+    /// </summary>
+    [Fact]
+    public void Opening_the_DDL_tab_produces_no_script_until_somebody_asks_and_says_what_it_may_create()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema);
+        schema.Ddl = new DdlScript("create table studio.mt_doc_customer (id uuid);", null);
+
+        context.Navigate("/marten/schema?tab=ddl");
+        var page = context.Render<SchemaPage>();
+
+        schema.Ddls.Should().Be(0);
+        page.Markup.Should().Contain("Not generated yet");
+        page.Markup.Should().Contain("mt_hilo");
+        page.Markup.Should().NotContain("mt_doc_customer");
+    }
+
+    /// <summary>The same for the Drift tab's two buttons, which reach Weasel the same way.</summary>
+    [Fact]
+    public void The_Drift_tab_says_that_checking_may_create_Martens_own_bookkeeping_objects()
+    {
+        using var context = NewContext(out _);
+
+        var page = context.Render<SchemaPage>();
+
+        page.Markup.Should().Contain("mt_hilo");
+        page.Markup.Should().Contain("mt_get_next_hi");
+    }
+
+    /// <summary>
+    /// The three navigation paths take a scope and answer from <c>pg_catalog</c> plus <c>StoreOptions</c>;
+    /// none of them may reach Check, Preview or the DDL script.
+    /// </summary>
+    [Theory]
+    [InlineData("tables")]
+    [InlineData("indexes")]
+    [InlineData("functions")]
+    public void Navigating_to_a_read_tab_calls_none_of_the_migration_building_methods(string tab)
+    {
+        using var context = NewContext(out FakeSchemaDataService schema);
+        context.Navigate("/marten/schema?tab=" + tab);
+
+        context.Render<SchemaPage>();
+
+        schema.Checks.Should().Be(0);
+        schema.Previews.Should().Be(0);
+        schema.Ddls.Should().Be(0);
+        schema.Applies.Should().Be(0);
+    }
+
+    /// <summary>
+    /// P7-fix B2. The preview is the whole of what runs, so every statement in it that removes or
+    /// rewrites an object is listed in red and has to be acknowledged before Apply is even clickable.
+    /// </summary>
+    [Fact]
+    public void A_destructive_migration_is_listed_in_red_and_Apply_waits_for_an_acknowledgement()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema, capabilities: true);
+        schema.Preview = new MigrationPreview(
+            "drop index studio.hand_rolled_idx;\nalter table studio.mt_doc_customer drop column legacy_code;",
+            1,
+            [],
+            "Update",
+            null);
+
+        var page = context.Render<SchemaPage>();
+        ClickPreview(page);
+
+        page.Find(".ms-schema-destructive").TextContent.Should().Contain("removes or rewrites objects");
+        page.TextOfAll(".ms-destructive-kind").Should().Equal("drops an index", "drops a column");
+        page.Find(".ms-button-danger").HasAttribute("disabled").Should()
+            .BeTrue("nothing may be applied before the destructive statements are acknowledged");
+
+        page.Find(".ms-destructive-ack input").Change(true);
+
+        page.Find(".ms-button-danger").HasAttribute("disabled").Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_migration_that_only_creates_things_needs_no_acknowledgement()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema, capabilities: true);
+        schema.Preview = new MigrationPreview("create index x on y (z);", 1, [], "Update", null);
+
+        var page = context.Render<SchemaPage>();
+        ClickPreview(page);
+
+        page.FindAll(".ms-schema-destructive").Should().BeEmpty(
+            "a box people have to tick for the harmless case is a box nobody reads");
+        page.Find(".ms-button-danger").HasAttribute("disabled").Should().BeFalse();
+    }
+
+    /// <summary>
+    /// P7-fix follow-up 4. A read that could not answer must say so. The declaration set used to come
+    /// from <c>AllObjects()</c> with its failure swallowed into an empty list, which drew every index in
+    /// the database as undeclared - and that verdict now means "an apply drops this".
+    /// </summary>
+    [Fact]
+    public void An_Indexes_tab_that_could_not_read_says_why_instead_of_calling_everything_undeclared()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema);
+        schema.Indexes = SchemaIndexes.Unavailable("42501: permission denied for schema studio");
+
+        context.Navigate("/marten/schema?tab=indexes");
+        var page = context.Render<SchemaPage>();
+
+        page.Find(".ms-error-alert").TextContent.Should().Contain("42501");
+        page.FindAll(".ms-index-flag-danger").Should().BeEmpty();
+        page.Markup.Should().NotContain("would be dropped");
+    }
+
+    /// <summary>The Indexes tab has to say the same thing the advice does.</summary>
+    [Fact]
+    public void The_Indexes_tab_counts_the_indexes_an_apply_would_drop()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema);
+        schema.Indexes = new SchemaIndexes(
+            [
+                new IndexInfo("studio", "mt_doc_customer", "hand_rolled_idx",
+                    "CREATE INDEX ...", 8192, 400, 900, false, false, false, "customer",
+                    IndexAdvice.UndeclaredSuggestion),
+            ],
+            [],
+            [],
+            null);
+
+        context.Navigate("/marten/schema?tab=indexes");
+        var page = context.Render<SchemaPage>();
+
+        page.TextOfAll(".ms-index-flag-danger").Should().Contain("would be dropped");
+        page.Markup.Should().Contain("1 index would be dropped");
+        page.Markup.Should().Contain("IgnoreIndex");
     }
 
     /// <summary>
@@ -348,18 +490,21 @@ public class SchemaPageTests
     /// Re-found on every call rather than held: clicking it re-renders the toolbar, and an element
     /// captured before the render is an element that is no longer in the document.
     /// </remarks>
-    private static void ClickPreview(IRenderedComponent<SchemaPage> page)
+    private static void ClickPreview(IRenderedComponent<SchemaPage> page) => ClickButton(page, "Preview");
+
+    /// <summary>Clicks the toolbar button whose text contains <paramref name="text" />.</summary>
+    private static void ClickButton(IRenderedComponent<SchemaPage> page, string text)
     {
         foreach (var button in page.FindAll(".ms-schema-toolbar .ms-button"))
         {
-            if (button.TextContent.Contains("Preview", StringComparison.Ordinal))
+            if (button.TextContent.Contains(text, StringComparison.Ordinal))
             {
                 button.Click();
                 return;
             }
         }
 
-        throw new InvalidOperationException("The Drift tab rendered no Preview button.");
+        throw new InvalidOperationException($"No toolbar button matching '{text}' was rendered.");
     }
 
     private static StudioComponentContext NewContext(out FakeSchemaDataService schema, bool capabilities = false)

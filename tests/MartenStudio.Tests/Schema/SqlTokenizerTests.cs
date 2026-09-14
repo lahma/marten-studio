@@ -154,6 +154,53 @@ public class SqlTokenizerTests
         document.TotalLines.Should().Be(50);
     }
 
+    /// <summary>
+    /// The line cap alone does not bound the render tree: Weasel writes a wide table's
+    /// <c>create table</c> on one line, and <c>pg_get_functiondef</c> can return a whole body on one.
+    /// Four thousand lines of a megabyte each is a browser that stops responding.
+    /// </summary>
+    [Fact]
+    public void A_single_very_long_line_is_cut_and_says_so()
+    {
+        string sql = "select " + new string('x', 5_000) + ";";
+
+        SqlDocument document = SqlTokenizer.Tokenize(sql, maxLineLength: 100);
+
+        document.HasTrimmedLines.Should().BeTrue();
+        document.LinesTrimmed.Should().Be(1);
+
+        string rendered = string.Concat(document.Lines[0].Tokens.Select(static x => x.Text));
+        rendered.Length.Should().BeLessThan(200);
+        rendered.Should().EndWith("(line truncated)");
+    }
+
+    [Fact]
+    public void Each_over_long_line_is_counted_and_the_rest_of_the_script_still_renders()
+    {
+        string sql = string.Join('\n',
+        [
+            "select " + new string('a', 200) + ";",
+            "select 1;",
+            "select " + new string('b', 200) + ";",
+        ]);
+
+        SqlDocument document = SqlTokenizer.Tokenize(sql, maxLineLength: 50);
+
+        document.LinesTrimmed.Should().Be(2);
+        document.Lines.Should().HaveCount(3);
+        string second = string.Concat(document.Lines[1].Tokens.Select(static x => x.Text));
+        second.Should().Be("select 1;", "a short line between two long ones is untouched");
+    }
+
+    [Fact]
+    public void A_script_of_ordinary_lines_reports_no_trimming()
+    {
+        SqlDocument document = SqlTokenizer.Tokenize("select 1;\nselect 2;");
+
+        document.HasTrimmedLines.Should().BeFalse();
+        document.LinesTrimmed.Should().Be(0);
+    }
+
     [Fact]
     public void Nothing_in_is_nothing_out()
     {

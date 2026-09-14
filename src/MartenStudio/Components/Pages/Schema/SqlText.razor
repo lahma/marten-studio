@@ -26,6 +26,15 @@
             the whole script.
         </p>
     }
+
+    @if (document.HasTrimmedLines)
+    {
+        <p class="ms-sql-footnote">
+            @(document.LinesTrimmed == 1 ? "One line was" : document.LinesTrimmed + " lines were")
+            longer than @MaxLineLength characters and @(document.LinesTrimmed == 1 ? "was" : "were") cut
+            here. Copy or download to get the whole text.
+        </p>
+    }
 </div>
 
 @code {
@@ -49,6 +58,16 @@
     [Parameter]
     public int MaxLines { get; set; } = SqlTokenizer.DefaultMaxLines;
 
+    /// <summary>
+    /// The most characters of one line to put in the DOM.
+    /// </summary>
+    /// <remarks>
+    /// A line cap alone does not bound the render tree: Weasel writes a wide table's <c>create table</c>
+    /// on one line, so four thousand lines can still be megabytes of spans.
+    /// </remarks>
+    [Parameter]
+    public int MaxLineLength { get; set; } = SqlTokenizer.DefaultMaxLineLength;
+
     /// <summary>The accessible name of the block.</summary>
     [Parameter]
     public string Label { get; set; } = "SQL";
@@ -66,7 +85,7 @@
 
         hasRendered = true;
         rendered = Sql;
-        document = SqlTokenizer.Tokenize(Sql, MaxLines);
+        document = SqlTokenizer.Tokenize(Sql, MaxLines, MaxLineLength);
     }
 
     private static RenderFragment Tokens(SqlLine line) => builder =>

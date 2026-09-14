@@ -22,8 +22,9 @@
 {
     <div class="ms-schema-toolbar">
         <span class="ms-schema-note">
-            @ObjectSummary Nothing below has been run: producing this reads the catalog and writes to a
-            string.
+            @ObjectSummary None of it has been run: producing this reads the catalog and writes to a
+            string. (Building it does ask Marten for its feature schemas, which can create Marten's own
+            HiLo bookkeeping - the Drift tab's buttons say so.)
         </span>
         <span class="ms-schema-toolbar-spacer"></span>
         <SqlActions Text="@Sql" FileName="@FileName" />

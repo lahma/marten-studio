@@ -42,10 +42,22 @@ internal readonly record struct SqlLine(int Number, ImmutableArray<SqlToken> Tok
 /// <param name="Lines">The lines to show.</param>
 /// <param name="TotalLines">How many lines the text has, which is more than <paramref name="Lines" /> when clamped.</param>
 /// <param name="Truncated">Whether the line list was clamped.</param>
-internal sealed record SqlDocument(ImmutableArray<SqlLine> Lines, int TotalLines, bool Truncated)
+/// <param name="LinesTrimmed">
+/// How many lines were cut short because they were longer than the per-line cap. A migration for a wide
+/// table is one <c>create table</c> statement on a single line, and Marten's own function bodies arrive
+/// as one long line when a server has reformatted them - a cap on lines alone does not bound the DOM.
+/// </param>
+internal sealed record SqlDocument(
+    ImmutableArray<SqlLine> Lines,
+    int TotalLines,
+    bool Truncated,
+    int LinesTrimmed = 0)
 {
     /// <summary>Nothing to show.</summary>
     public static SqlDocument Empty { get; } = new([], 0, false);
+
+    /// <summary>Whether any line was cut short.</summary>
+    public bool HasTrimmedLines => LinesTrimmed > 0;
 }
 
 /// <summary>
@@ -75,6 +87,18 @@ internal static class SqlTokenizer
     public const int DefaultMaxLines = 4_000;
 
     /// <summary>
+    /// How many characters of one line are rendered before the rest of it is cut.
+    /// </summary>
+    /// <remarks>
+    /// The line cap alone does not bound the work: Weasel writes a <c>create table</c> for a wide
+    /// document as a single line, and <c>pg_get_functiondef</c> can return a whole function body on one.
+    /// Four thousand lines of a megabyte each is a megabyte of spans on the circuit's render tree and a
+    /// browser that stops responding, so the two caps exist together. Copy and download are unaffected -
+    /// they carry the original text, which is the point of having them.
+    /// </remarks>
+    public const int DefaultMaxLineLength = 2_000;
+
+    /// <summary>
     /// The words that get the keyword colour.
     /// </summary>
     /// <remarks>
@@ -102,14 +126,18 @@ internal static class SqlTokenizer
     /// <summary>Tokenizes <paramref name="sql" /> line by line.</summary>
     /// <param name="sql">The SQL text, or <see langword="null" />.</param>
     /// <param name="maxLines">How many lines to put in the DOM before clamping.</param>
-    public static SqlDocument Tokenize(string? sql, int maxLines = DefaultMaxLines)
+    /// <param name="maxLineLength">How many characters of one line to put in the DOM before cutting it.</param>
+    public static SqlDocument Tokenize(
+        string? sql,
+        int maxLines = DefaultMaxLines,
+        int maxLineLength = DefaultMaxLineLength)
     {
         if (string.IsNullOrEmpty(sql))
         {
             return SqlDocument.Empty;
         }
 
-        var writer = new LineWriter(maxLines);
+        var writer = new LineWriter(maxLines, maxLineLength);
 
         int i = 0;
         while (i < sql.Length)
@@ -282,12 +310,18 @@ internal static class SqlTokenizer
     /// A block comment and a dollar-quoted function body both contain newlines, so the lexer cannot be
     /// line-oriented; this is what keeps the gutter honest anyway.
     /// </remarks>
-    private sealed class LineWriter(int maxLines)
+    private sealed class LineWriter(int maxLines, int maxLineLength)
     {
+        /// <summary>What is put where the rest of a cut line would have been.</summary>
+        private const string Ellipsis = " … (line truncated)";
+
         private readonly ImmutableArray<SqlLine>.Builder lines = ImmutableArray.CreateBuilder<SqlLine>();
         private readonly ImmutableArray<SqlToken>.Builder tokens = ImmutableArray.CreateBuilder<SqlToken>();
         private int lineNumber = 1;
         private int totalLines;
+        private int lineLength;
+        private int linesTrimmed;
+        private bool lineCut;
         private bool clamped;
 
         public void Write(string text, SqlTokenKind kind)
@@ -322,6 +356,8 @@ internal static class SqlTokenizer
             tokens.Clear();
             lineNumber++;
             totalLines = lineNumber - 1;
+            lineLength = 0;
+            lineCut = false;
         }
 
         public SqlDocument Complete()
@@ -331,16 +367,41 @@ internal static class SqlTokenizer
                 EndLine();
             }
 
-            return new SqlDocument(lines.ToImmutable(), Math.Max(totalLines, lines.Count), clamped);
+            return new SqlDocument(lines.ToImmutable(), Math.Max(totalLines, lines.Count), clamped, linesTrimmed);
         }
 
         private void Append(string text, SqlTokenKind kind)
         {
             string trimmed = text.TrimEnd('\r');
-            if (trimmed.Length > 0)
+            if (trimmed.Length == 0)
             {
-                tokens.Add(new SqlToken(trimmed, kind));
+                return;
             }
+
+            if (lineCut)
+            {
+                return;
+            }
+
+            int room = maxLineLength - lineLength;
+            if (trimmed.Length > room)
+            {
+                // Cut once, mark the line, and say so in the document rather than silently dropping the
+                // rest: a person reading a truncated statement has to know it was truncated.
+                if (room > 0)
+                {
+                    tokens.Add(new SqlToken(trimmed[..room], kind));
+                    lineLength += room;
+                }
+
+                tokens.Add(new SqlToken(Ellipsis, SqlTokenKind.Comment));
+                lineCut = true;
+                linesTrimmed++;
+                return;
+            }
+
+            tokens.Add(new SqlToken(trimmed, kind));
+            lineLength += trimmed.Length;
         }
     }
 }

@@ -154,6 +154,164 @@ public class SchemaLiveTests(PostgresFixture fixture)
         (await schema.IndexNamesAsync("mt_doc_customer")).Should().NotContain(SchemaFixture.DriftIndexName);
     }
 
+    /// <summary>
+    /// P7-fix B2. The old advice said <c>CreateOrUpdate</c> left an undeclared index alone and only
+    /// <c>AutoCreate.All</c> would drop it. Weasel's <c>TableDelta.WriteUpdate</c> emits
+    /// <c>drop index</c> for every index in <c>Indexes.Extras</c> and reports the table as
+    /// <c>Update</c> - which is what <c>CreateOrUpdate</c> allows. This runs the whole thing: a hand-made
+    /// index, a preview that names the drop, the dialog's destructive list, and an apply that really
+    /// does drop it.
+    /// </summary>
+    [PostgresFact]
+    public async Task An_index_the_configuration_does_not_declare_is_dropped_by_an_apply_and_the_preview_says_so()
+    {
+        await using SchemaFixture schema = await Start(nameof(An_index_the_configuration_does_not_declare_is_dropped_by_an_apply_and_the_preview_says_so));
+
+        const string HandMade = "hand_rolled_customer_name_idx";
+        await schema.CreateIndexAsync(HandMade, "mt_doc_customer", "name");
+
+        (await schema.IndexNamesAsync("mt_doc_customer")).Should().Contain(HandMade);
+
+        SchemaFixture.StudioHost host = schema.Drifted(options =>
+        {
+            options.Capabilities = MartenStudioCapabilities.All();
+            options.WriteAuthorizationPolicy = SchemaFixture.AllowPolicy;
+        });
+
+        // The Indexes tab says it, in the words that matter.
+        SchemaIndexes indexes = await host.SchemaAsync(x => x.IndexesAsync(SchemaFixture.Scope));
+        IndexInfo handMade = indexes.Indexes.Single(x => x.Name == HandMade);
+
+        handMade.DeclaredByMarten.Should().BeFalse();
+        handMade.OnMartenTable.Should().BeTrue();
+        handMade.WouldBeDropped.Should().BeTrue();
+        indexes.WouldBeDroppedCount.Should().BeGreaterThanOrEqualTo(1);
+        handMade.Suggestion.Should().Be(IndexAdvice.UndeclaredSuggestion);
+
+        // The preview says it, and the dialog's destructive block is built from exactly this.
+        MigrationPreview preview = await host.SchemaAsync(x => x.PreviewAsync(SchemaFixture.Scope));
+
+        preview.Sql.Should().Contain("drop index", "Weasel writes one for every index it calls an extra");
+        preview.Sql.Should().Contain(HandMade);
+        preview.IsDestructive.Should().BeTrue();
+        preview.DestructiveStatements.Should().Contain(x =>
+            x.Kind == "drops an index" && x.Statement.Contains(HandMade, StringComparison.Ordinal));
+
+        // And the apply does it, under CreateOrUpdate.
+        string identity = await host.SchemaAsync(x => x.DatabaseIdentityAsync(SchemaFixture.Scope));
+        SchemaApplyResult result = await host.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, identity));
+
+        result.Succeeded.Should().BeTrue(result.Message);
+
+        IReadOnlyList<string> after = await schema.IndexNamesAsync("mt_doc_customer");
+        after.Should().NotContain(HandMade, "AutoCreate.CreateOrUpdate is not additive");
+        after.Should().Contain(SchemaFixture.DriftIndexName, "and the declared one was created in the same run");
+    }
+
+    /// <summary>
+    /// P7-fix B2, the other half: an index the host told Marten to ignore survives the same apply.
+    /// </summary>
+    [PostgresFact]
+    public async Task An_index_named_in_IgnoreIndex_survives_the_apply_and_is_not_flagged()
+    {
+        await using SchemaFixture schema = await Start(nameof(An_index_named_in_IgnoreIndex_survives_the_apply_and_is_not_flagged));
+
+        const string Kept = "kept_customer_name_idx";
+        await schema.CreateIndexAsync(Kept, "mt_doc_customer", "name");
+
+        SchemaFixture.StudioHost host = schema.Drifted(
+            options =>
+            {
+                options.Capabilities = MartenStudioCapabilities.All();
+                options.WriteAuthorizationPolicy = SchemaFixture.AllowPolicy;
+            },
+            ignoredIndex: Kept);
+
+        SchemaIndexes indexes = await host.SchemaAsync(x => x.IndexesAsync(SchemaFixture.Scope));
+        IndexInfo kept = indexes.Indexes.Single(x => x.Name == Kept);
+
+        kept.IgnoredByConfiguration.Should().BeTrue();
+        kept.WouldBeDropped.Should().BeFalse();
+        kept.Suggestion.Should().Be(IndexAdvice.IgnoredSuggestion);
+
+        MigrationPreview preview = await host.SchemaAsync(x => x.PreviewAsync(SchemaFixture.Scope));
+        preview.Sql.Should().NotContain(Kept);
+
+        string identity = await host.SchemaAsync(x => x.DatabaseIdentityAsync(SchemaFixture.Scope));
+        SchemaApplyResult result = await host.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, identity));
+
+        result.Succeeded.Should().BeTrue(result.Message);
+        (await schema.IndexNamesAsync("mt_doc_customer")).Should().Contain(Kept);
+    }
+
+    /// <summary>
+    /// P7-fix follow-up 1. The token an apply arrived with belongs to a Blazor circuit, and a closed tab
+    /// cancelling it mid-migration left the schema in neither shape and wrote no audit entry, because the
+    /// rethrow came before <c>audit.Record</c>. The apply now runs on a token of its own from the moment
+    /// the typed confirmation passes, so a circuit that goes away after the authorization gate does not
+    /// abandon it.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_circuit_that_goes_away_after_the_gate_does_not_abandon_the_apply()
+    {
+        await using SchemaFixture schema = await Start(nameof(A_circuit_that_goes_away_after_the_gate_does_not_abandon_the_apply));
+
+        SchemaFixture.StudioHost host = schema.Drifted(options =>
+        {
+            options.Capabilities = MartenStudioCapabilities.All();
+            options.WriteAuthorizationPolicy = SchemaFixture.AllowAndSignalPolicy;
+        });
+
+        string identity = await host.SchemaAsync(x => x.DatabaseIdentityAsync(SchemaFixture.Scope));
+
+        using var circuit = new CancellationTokenSource();
+
+        // Fires inside the write-authorization check, which is the last step that still honours the
+        // caller's token. Everything after it - the rendered script and the migration itself - is the
+        // studio's own operation.
+        SchemaFixture.OnAuthorized = circuit.Cancel;
+
+        try
+        {
+            SchemaApplyResult result = await host.SchemaAsync(
+                x => x.ApplyAsync(SchemaFixture.Scope, identity, circuit.Token));
+
+            result.Succeeded.Should().BeTrue(result.Message);
+        }
+        finally
+        {
+            SchemaFixture.OnAuthorized = null;
+        }
+
+        circuit.IsCancellationRequested.Should().BeTrue("the test's own hook cancelled it");
+
+        (await schema.IndexNamesAsync("mt_doc_customer")).Should().Contain(SchemaFixture.DriftIndexName);
+
+        StudioActionLogEntry entry = host.Audit.GetLatest()
+            .First(x => x.Action == "Apply schema changes" && x.Succeeded);
+
+        entry.Message.Should().Contain(SchemaFixture.DriftIndexName,
+            "the outcome is audited whatever the circuit did");
+    }
+
+    [PostgresFact]
+    public async Task A_refused_typed_confirmation_is_audited_as_a_failure()
+    {
+        await using SchemaFixture schema = await Start(nameof(A_refused_typed_confirmation_is_audited_as_a_failure));
+
+        SchemaFixture.StudioHost drifted = schema.Drifted(options => options.Capabilities = MartenStudioCapabilities.All());
+
+        Func<Task> apply = () => drifted.SchemaAsync(x => x.ApplyAsync(SchemaFixture.Scope, "not-the-database"));
+
+        await apply.Should().ThrowAsync<InvalidOperationException>();
+
+        StudioActionLogEntry entry = drifted.Audit.GetLatest()
+            .First(x => x.Action == "Apply schema changes" && !x.Succeeded);
+
+        entry.Message.Should().Contain("typed confirmation");
+        entry.Capability.Should().Be(nameof(StudioCapability.ApplySchemaChanges));
+    }
+
     [PostgresFact]
     public async Task The_tables_tab_lists_the_document_tables_with_their_sizes_and_row_estimates()
     {
@@ -239,6 +397,14 @@ public class SchemaLiveTests(PostgresFixture fixture)
             .And.Contain("mt_jsonb_patch")
             .And.Contain("mt_quick_append_events")
             .And.NotContain(x => x.StartsWith("mt_upsert_", StringComparison.Ordinal));
+
+        // P7-fix B1: the declared-function set is a list of names plus the event store's own feature
+        // objects, because Marten's SystemFunctions and SequenceFactory are internal and the only public
+        // way to them - AllObjects() - applies migrations. So the list has to be checked against a real
+        // schema, and this is the assertion that fails if Marten ever installs one it does not know.
+        functions.Functions.Should().OnlyContain(x => x.DeclaredByMarten,
+            "every function in a schema Marten owns and nothing else created is one Marten installs - " +
+            "a name missing from SchemaDeclarationReader shows up here as 'undeclared'");
 
         FunctionInfo appendEvents = functions.Functions.First(x => x.Name == "mt_quick_append_events");
         appendEvents.Schema.Should().Be(schema.EventSchema);

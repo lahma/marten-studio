@@ -78,8 +78,18 @@
     [Parameter]
     public string ConfirmText { get; set; } = "Confirm";
 
+    /// <summary>
+    /// Raised with <em>what the visitor typed</em>, so a caller can pass that on to the service.
+    /// </summary>
+    /// <remarks>
+    /// The argument is the whole point. A service that re-checks a typed confirmation is only checking
+    /// anything if the string it receives came from the input box; a page that passed its own copy of the
+    /// phrase would be handing the service the answer, and the second check would be a tautology. A
+    /// parameterless handler still binds - <c>EventCallback.Factory.Create&lt;string&gt;</c> has a
+    /// <c>Func&lt;Task&gt;</c> overload - which is what the dialogs with no typed confirmation use.
+    /// </remarks>
     [Parameter]
-    public EventCallback OnConfirm { get; set; }
+    public EventCallback<string> OnConfirm { get; set; }
 
     [Parameter]
     public EventCallback OnCancel { get; set; }
@@ -114,7 +124,7 @@
             return;
         }
 
-        await OnConfirm.InvokeAsync();
+        await OnConfirm.InvokeAsync(typed.Trim());
     }
 
     private async Task CancelAsync()

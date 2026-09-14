@@ -6,9 +6,14 @@
 @inject ToastService Toasts
 
 @*
-    Nothing here runs on navigation. Creating a migration opens connections and reads the whole catalog
-    of every schema the store owns, which on a large database is seconds - so the tab arrives with two
-    buttons and a sentence, and the visitor decides when to pay for it (packet P7, acceptance 7).
+    Nothing here runs on navigation, and the reason is stronger than "it is slow".
+
+    Both buttons reach Weasel through IMartenDatabase, which builds every feature schema in the store to
+    get there - and Marten's feature list includes the lazy HiLo Sequences feature, whose initialiser
+    applies a migration under the database's own AutoCreate. So asking either question can create
+    Marten's own bookkeeping objects (mt_hilo, mt_get_next_hi) in a schema that did not have them. That
+    is a fine thing to do on purpose and an indefensible thing to do because somebody opened a tab, so
+    the tab arrives with two buttons that say what pressing them may do (packet P7-fix, finding B1).
 *@
 
 <div class="ms-schema-toolbar">
@@ -43,6 +48,12 @@
             (<code>AssertDatabaseMatchesConfigurationAsync</code>) and lists the objects that differ.
             <strong>Preview migration</strong> renders the SQL that would bring it into line, without
             running any of it.
+        </p>
+        <p class="ms-empty-description ms-schema-caution">
+            Both ask Marten to build its feature schemas, and that step can create Marten's own
+            bookkeeping objects - the HiLo sequence table <code>mt_hilo</code> and
+            <code>mt_get_next_hi</code> - in a schema that does not have them yet. Neither applies
+            anything else, and nothing on this page runs until you press a button.
         </p>
     </div>
 }
@@ -148,9 +159,47 @@ else
         every object Marten manages. The SQL is written to the audit log under event id 9206.
     </p>
 
+    <p class="ms-schema-note ms-schema-caution">
+        <strong><code>CreateOrUpdate</code> is not additive.</strong> It can
+        <strong>drop an index or a column</strong> that exists on a Marten table and is not in
+        <code>StoreOptions</code>, <strong>change a column's type</strong>, <strong>drop and recreate a
+        changed primary key</strong> with <code>CASCADE</code>, and <strong>rebuild a repartitioned
+        table</strong> by copying it out and back. Read the SQL above; the preview is the whole of what
+        runs. To keep an index the configuration does not declare, name it in
+        <code>opts.Schema.For&lt;T&gt;().IgnoreIndex("...")</code> - or
+        <code>opts.Events.IgnoreIndex("...")</code> on an event table.
+    </p>
+
+    @if (preview.IsDestructive)
+    {
+        <div class="ms-alert ms-alert-error ms-schema-destructive" role="alert">
+            <div class="ms-alert-content">
+                <p><strong>This migration removes or rewrites objects.</strong> @MigrationRisk.Warning</p>
+                <ul class="ms-destructive-list">
+                    @foreach (DestructiveStatement statement in preview.DestructiveStatements)
+                    {
+                        <li @key="statement.Statement">
+                            <span class="ms-destructive-kind">@statement.Kind</span>
+                            <code class="ms-destructive-statement">@statement.Statement</code>
+                        </li>
+                    }
+                </ul>
+                <label class="ms-destructive-ack">
+                    <input type="checkbox"
+                           checked="@acknowledged"
+                           @onchange="OnAcknowledgedAsync" />
+                    <span>
+                        I have read the @preview.DestructiveStatements.Count statement(s) above and accept
+                        that applying this removes or rewrites them.
+                    </span>
+                </label>
+            </div>
+        </div>
+    }
+
     <button type="button"
             class="ms-button ms-button-danger"
-            disabled="@(busy || !preview.HasSql)"
+            disabled="@(busy || !preview.HasSql || !Acknowledged)"
             @onclick="OpenApplyAsync">
         Apply @(preview.HasSql ? preview.ObjectCount.ToString(System.Globalization.CultureInfo.InvariantCulture) + " change(s)" : "changes")
     </button>
@@ -198,6 +247,16 @@ else
     private bool previewed;
     private bool busy;
     private bool applyOpen;
+    private bool acknowledged;
+
+    /// <summary>
+    /// Whether the destructive-statement block has been ticked, when there is one.
+    /// </summary>
+    /// <remarks>
+    /// A migration that only creates things needs no acknowledgement - making people tick a box for the
+    /// harmless case is how a box stops being read.
+    /// </remarks>
+    private bool Acknowledged => !preview.IsDestructive || acknowledged;
 
     private string BadgeClass => check.Status switch
     {
@@ -208,9 +267,20 @@ else
 
     private string FileName => "marten-migration-" + Sanitize(databaseIdentity) + ".sql";
 
-    private string ConfirmMessage =>
-        $"This runs {preview.ObjectCount} schema change(s) against {databaseIdentity}. " +
-        "It cannot be undone from here.";
+    private string ConfirmMessage
+    {
+        get
+        {
+            string message =
+                $"This runs {preview.ObjectCount} schema change(s) against {databaseIdentity}. " +
+                "It cannot be undone from here.";
+
+            return preview.IsDestructive
+                ? message + $" {preview.DestructiveStatements.Count} of its statements remove or rewrite " +
+                  "an object: " + string.Join(", ", MigrationRisk.KindsIn(preview.Sql)) + "."
+                : message;
+        }
+    }
 
     private async Task CheckAsync()
     {
@@ -240,7 +310,17 @@ else
             preview = await SchemaData.PreviewAsync(scope, token);
             databaseIdentity = await SchemaData.DatabaseIdentityAsync(scope, token);
             previewed = true;
+
+            // A fresh preview is a fresh decision: an acknowledgement carried over from a script the
+            // visitor is no longer looking at would be an acknowledgement of nothing.
+            acknowledged = false;
         });
+    }
+
+    private Task OnAcknowledgedAsync(ChangeEventArgs args)
+    {
+        acknowledged = args.Value is true;
+        return InvokeAsync(StateHasChanged);
     }
 
     private async Task OpenApplyAsync()
@@ -264,7 +344,15 @@ else
         return InvokeAsync(StateHasChanged);
     }
 
-    private async Task ApplyAsync()
+    /// <summary>
+    /// Applies the migration, with <paramref name="typed" /> being what the visitor wrote in the dialog.
+    /// </summary>
+    /// <remarks>
+    /// The dialog hands the typed string out rather than the page handing its own copy of the identity
+    /// in. Passing <c>databaseIdentity</c> here would mean the service's second check compared the
+    /// server's own value against itself, which proves nothing about what anybody typed.
+    /// </remarks>
+    private async Task ApplyAsync(string typed)
     {
         applyOpen = false;
 
@@ -276,7 +364,7 @@ else
                 return;
             }
 
-            applyResult = await SchemaData.ApplyAsync(scope, databaseIdentity, token);
+            applyResult = await SchemaData.ApplyAsync(scope, typed, token);
 
             if (applyResult.Succeeded)
             {
@@ -286,6 +374,7 @@ else
                 // wrong. Re-checking is cheaper than leaving a stale "3 differences" badge up.
                 check = await SchemaData.CheckAsync(scope, token);
                 preview = await SchemaData.PreviewAsync(scope, token);
+                acknowledged = false;
             }
             else
             {

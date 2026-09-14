@@ -7,7 +7,29 @@
     The whole creation script for this store's schema objects, as Marten would write it into a new
     database. This is the thing to hand a DBA who wants to review before anything is applied, which is
     why it is copyable and downloadable rather than only readable.
+
+    It is behind a button for the same reason the Drift tab's two are. IMartenDatabase.ToDatabaseScript()
+    walks AllObjects(), AllObjects() is BuildFeatureSchemas(), and Marten's feature list reaches the lazy
+    HiLo Sequences feature, whose initialiser applies a migration under the database's own AutoCreate -
+    so producing this script can create mt_hilo and mt_get_next_hi in a schema that did not have them.
+    Navigating to a tab must never do that (packet P7-fix, finding B1).
 *@
+
+<div class="ms-schema-toolbar">
+    <button type="button" class="ms-button ms-button-primary" disabled="@loading" @onclick="LoadAsync">
+        @(generated ? "Rebuild script" : "Generate script")
+    </button>
+    <span class="ms-schema-toolbar-spacer"></span>
+    @if (generated && script.HasText)
+    {
+        <span class="ms-schema-note">
+            @SchemaFormat.Bytes(script.Bytes) of DDL, from
+            <code>IMartenDatabase.ToDatabaseScript()</code>. It describes what Marten <em>would</em>
+            create; the Drift tab says what is actually missing.
+        </span>
+        <SqlActions Text="@script.Text" FileName="marten-schema.sql" Disabled="@(!script.HasText)" />
+    }
+</div>
 
 @if (loading)
 {
@@ -17,38 +39,40 @@ else if (script.Reason is { Length: > 0 } reason)
 {
     <ErrorAlert Message="@reason" OnRetry="LoadAsync" />
 }
+else if (!generated)
+{
+    <div class="ms-empty">
+        <p class="ms-empty-title">Not generated yet</p>
+        <p class="ms-empty-description">
+            <strong>Generate script</strong> asks Marten for the DDL it would run against an empty
+            database - every table, index and function this store configures.
+        </p>
+        <p class="ms-empty-description ms-schema-caution">
+            Producing it makes Marten build its feature schemas, and that step can create Marten's own
+            bookkeeping objects - the HiLo sequence table <code>mt_hilo</code> and
+            <code>mt_get_next_hi</code> - in a schema that does not have them yet. Nothing else in the
+            script is applied.
+        </p>
+    </div>
+}
+else if (script.HasText)
+{
+    <SqlText Sql="@script.Text" Label="Database script" />
+}
 else
 {
-    <div class="ms-schema-toolbar">
-        <span class="ms-schema-note">
-            @SchemaFormat.Bytes(script.Bytes) of DDL, from
-            <code>IMartenDatabase.ToDatabaseScript()</code>. It describes what Marten <em>would</em>
-            create; the Drift tab says what is actually missing.
-        </span>
-        <span class="ms-schema-toolbar-spacer"></span>
-        <SqlActions Text="@script.Text" FileName="marten-schema.sql" Disabled="@(!script.HasText)" />
+    <div class="ms-empty">
+        <p class="ms-empty-title">Nothing to script</p>
+        <p class="ms-empty-description">This store configures no schema objects.</p>
     </div>
-
-    @if (script.HasText)
-    {
-        <SqlText Sql="@script.Text" Label="Database script" />
-    }
-    else
-    {
-        <div class="ms-empty">
-            <p class="ms-empty-title">Nothing to script</p>
-            <p class="ms-empty-description">This store configures no schema objects.</p>
-        </div>
-    }
 }
 
 @code {
     private readonly CancellationTokenSource lifetime = new();
 
     private DdlScript script = DdlScript.Empty;
-    private bool loading = true;
-
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private bool loading;
+    private bool generated;
 
     private async Task LoadAsync()
     {
@@ -61,6 +85,8 @@ else
             script = scope is null
                 ? DdlScript.Empty
                 : await SchemaData.DdlAsync(scope, lifetime.Token);
+
+            generated = true;
         }
         catch (OperationCanceledException)
         {
@@ -68,6 +94,7 @@ else
         catch (Exception exception)
         {
             script = DdlScript.Unavailable(exception.Message);
+            generated = true;
         }
         finally
         {

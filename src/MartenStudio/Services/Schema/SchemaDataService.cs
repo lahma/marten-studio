@@ -42,6 +42,23 @@ namespace MartenStudio.Services.Schema;
 /// preview is rendered with <c>CreateOrUpdate</c> for the same reason, so what a person reads on screen
 /// is exactly what is run. A migration Weasel calls invalid is reported, not quietly forced.
 /// </para>
+/// <para>
+/// <b><c>CreateOrUpdate</c> is not "additive", and nothing here may imply that it is.</b> Weasel's
+/// <c>TableDelta.WriteUpdate</c> writes <c>drop index</c> for every physical index the configuration does
+/// not declare, <c>drop column</c> for every extra column, <c>alter column … type</c> for a changed one,
+/// a <c>drop constraint … CASCADE</c> pair for a changed primary key, and a temp-table copy for a changed
+/// partition scheme - all of it reported as <c>Update</c>, and <c>Update</c> is what <c>CreateOrUpdate</c>
+/// allows. <see cref="MigrationRisk" /> finds those statements in the preview so the dialog can show them.
+/// </para>
+/// <para>
+/// <b>No read path calls <c>AllSchemaNames()</c>, <c>AllObjects()</c>, <c>ToDatabaseScript()</c> or
+/// <c>CreateMigrationAsync()</c>.</b> The first two run Weasel migrations through Marten's lazy
+/// <c>Sequences</c> feature - an <c>AllSchemaNames()</c> call on an empty schema creates <c>mt_hilo</c>
+/// and <c>mt_get_next_hi</c>, proven live - and the last two are simply slow and connection-hungry.
+/// Everything a tab needs on navigation comes from <see cref="SchemaDeclarationReader" />, which reads
+/// <c>StoreOptions</c> and nothing else; <see cref="CheckAsync" />, <see cref="PreviewAsync" /> and
+/// <see cref="DdlAsync" /> are behind buttons and say what they may create.
+/// </para>
 /// </remarks>
 internal sealed class SchemaDataService : ISchemaDataService
 {
@@ -195,16 +212,28 @@ internal sealed class SchemaDataService : ISchemaDataService
             throw new InvalidOperationException(message);
         }
 
-        // 4. The script, rendered before anything is applied, so the audit entry says what was run even
+        // 4. Everything past the confirmation runs on a token of this method's own, never the caller's.
+        //
+        //    Weasel executes a migration as a sequence of commands with no enclosing transaction, so
+        //    cancelling half way leaves the schema in neither the old shape nor the new one. The caller's
+        //    token is a Blazor circuit's: it is cancelled by a closed tab, a dropped WebSocket or a
+        //    navigation, and none of those is a decision to abandon a migration somebody has typed a
+        //    database name to start. The rendered script is inside the same boundary because it is the
+        //    audit record of what ran - applying a migration and recording no SQL because the tab closed
+        //    while the script was being rendered is the same hole in a different place. This is the
+        //    reasoning that gives StudioOperationTracker its own CTS for a rebuild.
+        //
+        //    The three steps above it - the capability, the write policy and the typed confirmation - do
+        //    honour the caller's token: nothing has happened yet, and a refused or abandoned request that
+        //    never reached the database costs nothing to drop.
+        using var applying = new CancellationTokenSource();
+
+        // 5. The script, rendered before anything is applied, so the audit entry says what was run even
         //    when the run itself fails half way.
         MigrationPreview preview;
         try
         {
-            preview = await RenderPreviewAsync(database, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
+            preview = await RenderPreviewAsync(database, applying.Token).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -217,7 +246,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         try
         {
             SchemaPatchDifference applied = await database
-                .ApplyAllConfiguredChangesToDatabaseAsync(ApplyMode, ct: cancellationToken)
+                .ApplyAllConfiguredChangesToDatabaseAsync(ApplyMode, ct: applying.Token)
                 .ConfigureAwait(false);
 
             string outcome = string.Create(
@@ -234,8 +263,19 @@ internal sealed class SchemaDataService : ISchemaDataService
                 $"Applied to {identity}. Weasel reported {applied}.",
                 SqlState: null);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
+            // Only the process going down can reach this now, and it is precisely the case where the
+            // schema may be half migrated. An audit that records nothing because the operation was
+            // cancelled cannot answer the question people ask afterwards, which is what ran.
+            string cancelled =
+                "Cancelled while applying; the migration runs as separate statements with no transaction, " +
+                "so part of it may have been applied. SQL: " + auditedSql;
+
+            audit.Record(ApplyAction, target, succeeded: false, cancelled, StudioCapability.ApplySchemaChanges, scope);
+            logger.SchemaChangeApplied(user, scope.StoreKey, identity, "CANCELLED: " + cancelled);
+            logger.LogWarning(exception, "Marten Studio's schema apply on {DatabaseId} was cancelled", identity);
+
             throw;
         }
         catch (Exception exception)
@@ -280,7 +320,7 @@ internal sealed class SchemaDataService : ISchemaDataService
             List<TableStats> tables = new(rows.Count);
             foreach (TableStatsRow row in rows)
             {
-                byTable.TryGetValue(Key(row.Schema, row.Table), out IDocumentType? documentType);
+                byTable.TryGetValue(SchemaKey.For(row.Schema, row.Table), out IDocumentType? documentType);
 
                 tables.Add(new TableStats(
                     row.Schema,
@@ -296,7 +336,7 @@ internal sealed class SchemaDataService : ISchemaDataService
                     row.LastVacuum,
                     row.LastAnalyze,
                     documentType?.Alias,
-                    documentType?.DocumentType.Name,
+                    documentType is null ? null : SchemaTypeName.Of(documentType.DocumentType),
                     string.Equals(row.Schema, eventSchema, StringComparison.OrdinalIgnoreCase)));
             }
 
@@ -317,18 +357,29 @@ internal sealed class SchemaDataService : ISchemaDataService
     public async Task<SchemaIndexes> IndexesAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
-        string[] schemas = SchemaNames(resolved);
 
         try
         {
+            // Read before the connection is opened, and deliberately not swallowed: a declaration set
+            // that could not be built would make every index on the page look undeclared, which now
+            // reads as "the apply will drop this". A reason on screen is the only honest answer.
+            SchemaDeclarations declarations = SchemaDeclarationReader.Read(
+                resolved.Store.Options,
+                options.Value.IsDocumentTypeVisible);
+
             await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             IReadOnlyList<IndexStatsRow> actual = await SchemaStatsQueries
-                .ReadIndexesAsync(connection, schemas, CommandTimeoutSeconds, cancellationToken)
+                .ReadIndexesAsync(connection, [.. declarations.Schemas], CommandTimeoutSeconds, cancellationToken)
                 .ConfigureAwait(false);
 
-            return IndexAdvice.Join(actual, DeclaredIndexes(resolved), DeclaredCollections(resolved));
+            return IndexAdvice.Join(
+                actual,
+                declarations.Indexes,
+                DeclaredCollections(resolved),
+                declarations.ManagedTables,
+                declarations.IgnoredIndexes);
         }
         catch (OperationCanceledException)
         {
@@ -345,16 +396,18 @@ internal sealed class SchemaDataService : ISchemaDataService
     public async Task<SchemaFunctions> FunctionsAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
-        string[] schemas = SchemaNames(resolved);
-        HashSet<string> declared = DeclaredFunctionNames(resolved.Database);
 
         try
         {
+            SchemaDeclarations declarations = SchemaDeclarationReader.Read(
+                resolved.Store.Options,
+                options.Value.IsDocumentTypeVisible);
+
             await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             IReadOnlyList<FunctionStatsRow> rows = await SchemaStatsQueries
-                .ReadFunctionsAsync(connection, schemas, CommandTimeoutSeconds, cancellationToken)
+                .ReadFunctionsAsync(connection, [.. declarations.Schemas], CommandTimeoutSeconds, cancellationToken)
                 .ConfigureAwait(false);
 
             List<FunctionInfo> functions = new(rows.Count);
@@ -365,7 +418,7 @@ internal sealed class SchemaDataService : ISchemaDataService
                     row.Name,
                     row.Signature,
                     row.Definition,
-                    declared.Contains(Key(row.Schema, row.Name))));
+                    declarations.Functions.Contains(SchemaKey.For(row.Schema, row.Name))));
             }
 
             return new SchemaFunctions(functions, null);
@@ -389,7 +442,8 @@ internal sealed class SchemaDataService : ISchemaDataService
         try
         {
             // Synchronous, and it builds every feature schema in the store, so it goes onto the thread
-            // pool rather than onto the circuit's renderer.
+            // pool rather than onto the circuit's renderer. It also walks AllObjects(), which is why the
+            // DDL tab is behind a button and says what pressing it may create (see the class remarks).
             IMartenDatabase database = resolved.Database;
             string script = await Task.Run(database.ToDatabaseScript, cancellationToken).ConfigureAwait(false);
             return new DdlScript(script, null);
@@ -438,10 +492,15 @@ internal sealed class SchemaDataService : ISchemaDataService
         {
             migration.WriteAllUpdates(writer, database.Migrator, ApplyMode);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException)
+        catch (SchemaMigrationException exception)
         {
             // Weasel refuses to write an update script for a migration it judged Invalid, because applying
             // it would mean dropping something. Saying so beats an empty code block.
+            //
+            // The type matters: WriteAllUpdates calls AssertPatchingIsValid, which throws
+            // Weasel.Core.SchemaMigrationException - a direct subclass of Exception, neither an
+            // InvalidOperationException nor a NotSupportedException. Filtering on those two made this
+            // notice unreachable and turned an invalid migration into a generic error alert.
             return new MigrationPreview(
                 string.Empty,
                 deltas.Count,
@@ -488,17 +547,16 @@ internal sealed class SchemaDataService : ISchemaDataService
     private static string KindOf(ISchemaObject schemaObject) =>
         schemaObject is Table ? "Table" : schemaObject.GetType().Name;
 
-    private static string[] SchemaNames(ResolvedScope resolved)
-    {
-        try
-        {
-            return resolved.Database.AllSchemaNames();
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return [resolved.Store.Options.DatabaseSchemaName];
-        }
-    }
+    /// <summary>
+    /// The schemas this store owns in this database, from its options alone.
+    /// </summary>
+    /// <remarks>
+    /// Never <c>IMartenDatabase.AllSchemaNames()</c>: that is <c>AllObjects()</c>, which is
+    /// <c>BuildFeatureSchemas()</c>, which reaches Marten's lazy <c>Sequences</c> feature and applies a
+    /// migration on the spot. See <see cref="SchemaDeclarationReader" />.
+    /// </remarks>
+    private static string[] SchemaNames(ResolvedScope resolved) =>
+        SchemaDeclarationReader.SchemaNames(resolved.Store.Options);
 
     private Dictionary<string, IDocumentType> DocumentTypesByTable(IReadOnlyStoreOptions storeOptions)
     {
@@ -512,59 +570,10 @@ internal sealed class SchemaDataService : ISchemaDataService
                 continue;
             }
 
-            byTable[Key(documentType.TableName.Schema, documentType.TableName.Name)] = documentType;
+            byTable[SchemaKey.For(documentType.TableName.Schema, documentType.TableName.Name)] = documentType;
         }
 
         return byTable;
-    }
-
-    /// <summary>
-    /// Every index the store's configuration asks for, in this database.
-    /// </summary>
-    /// <remarks>
-    /// Read from <c>AllObjects()</c> rather than from <c>IDocumentType.Indexes</c>, because the event
-    /// store's tables are configured objects too and have no <c>IDocumentType</c> to hang off. The
-    /// primary key is added by name for the same reason: Marten declares it as part of the table rather
-    /// than as an entry in the index list, and an index list that called every primary key "undeclared"
-    /// would be worse than no list at all.
-    /// </remarks>
-    private List<DeclaredIndex> DeclaredIndexes(ResolvedScope resolved)
-    {
-        Dictionary<string, IDocumentType> byTable = DocumentTypesByTable(resolved.Store.Options);
-        List<DeclaredIndex> declared = [];
-
-        foreach (ISchemaObject schemaObject in AllObjects(resolved.Database))
-        {
-            if (schemaObject is not Table table)
-            {
-                continue;
-            }
-
-            string schema = table.Identifier.Schema;
-            string name = table.Identifier.Name;
-            byTable.TryGetValue(Key(schema, name), out IDocumentType? documentType);
-
-            string alias = documentType?.Alias ?? name;
-            string typeName = documentType?.DocumentType.Name ?? name;
-
-            if (!string.IsNullOrWhiteSpace(table.PrimaryKeyName))
-            {
-                declared.Add(new DeclaredIndex(
-                    alias,
-                    typeName,
-                    schema,
-                    name,
-                    table.PrimaryKeyName,
-                    "primary key (" + string.Join(", ", table.PrimaryKeyColumns) + ")"));
-            }
-
-            foreach (IndexDefinition index in table.Indexes)
-            {
-                declared.Add(new DeclaredIndex(alias, typeName, schema, name, index.Name, Ddl(index, table)));
-            }
-        }
-
-        return declared;
     }
 
     private List<DeclaredCollection> DeclaredCollections(ResolvedScope resolved)
@@ -577,63 +586,13 @@ internal sealed class SchemaDataService : ISchemaDataService
 
             collections.Add(new DeclaredCollection(
                 documentType.Alias,
-                documentType.DocumentType.Name,
+                SchemaTypeName.Of(documentType.DocumentType),
                 documentType.TableName.Schema,
                 documentType.TableName.Name,
-                documentType.DuplicatedFields.Count > 0,
                 SampleMember(documentType)));
         }
 
         return collections;
-    }
-
-    private static HashSet<string> DeclaredFunctionNames(IMartenDatabase database)
-    {
-        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (ISchemaObject schemaObject in AllObjects(database))
-        {
-            if (schemaObject is Table)
-            {
-                continue;
-            }
-
-            names.Add(Key(schemaObject.Identifier.Schema, schemaObject.Identifier.Name));
-        }
-
-        return names;
-    }
-
-    /// <summary>
-    /// Whatever <c>AllObjects()</c> answers, or nothing.
-    /// </summary>
-    /// <remarks>
-    /// It builds every feature schema in the store, which is where a misconfigured feature surfaces. A
-    /// tab that could not list declared objects still shows the ones Postgres has, so the failure is
-    /// swallowed here rather than taken up to the page.
-    /// </remarks>
-    private static IReadOnlyList<ISchemaObject> AllObjects(IMartenDatabase database)
-    {
-        try
-        {
-            return [.. database.AllObjects()];
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return [];
-        }
-    }
-
-    private static string Ddl(IndexDefinition index, Table table)
-    {
-        try
-        {
-            return index.ToDDL(table);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return index.Name;
-        }
     }
 
     /// <summary>
@@ -668,6 +627,4 @@ internal sealed class SchemaDataService : ISchemaDataService
 
     private static string Clamp(string value) =>
         value.Length <= AuditedSqlLength ? value : value[..AuditedSqlLength] + " ... (truncated)";
-
-    private static string Key(string schema, string name) => schema + "." + name;
 }
