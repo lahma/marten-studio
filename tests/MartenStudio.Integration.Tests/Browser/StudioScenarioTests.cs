@@ -58,9 +58,31 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
             await studio.GoAsync(fixture.Root.StudioUrl());
 
             ILocator tiles = studio.Page.Locator(".ms-overview-tiles .ms-stat-card");
-            await tiles.First.WaitForAsync();
+
+            // The sixth, not the first: the tiles arrive as their regions do, so counting straight after
+            // the first one exists is counting a page that is still filling in.
+            await tiles.Nth(5).WaitForAsync();
 
             (await tiles.CountAsync()).Should().Be(6, "the Overview draws six tiles");
+
+            // The Overview's regions load independently of the first render - skeletons rather than
+            // spinners, deliberately - so a tile can honestly read "unknown" for a moment before its own
+            // read lands, and a slower machine catches it there. Waiting for the digits is what separates
+            // "this tile never fills", which is the failure worth having, from "this runner painted before
+            // the query came back", which is not. The assertion below still runs either way, so a tile
+            // that never fills fails with the text it was showing rather than with a timeout.
+            try
+            {
+                await studio.Page.WaitForFunctionAsync(
+                    "() => { const v = document.querySelector('.ms-overview-tiles .ms-stat-card-value');"
+                    + " return v !== null && /\\d/.test(v.textContent ?? ''); }",
+                    null,
+                    new PageWaitForFunctionOptions { Timeout = 15_000 });
+            }
+            catch (TimeoutException)
+            {
+                // Fall through: the assertion says what it read, which is the useful message.
+            }
 
             string values = await studio.Page.Locator(".ms-overview-tiles .ms-stat-card-value").First.InnerTextAsync();
             Digits.IsMatch(values).Should().BeTrue(
@@ -246,7 +268,9 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
             await studio.GoAsync(host.StudioUrl());
 
             ILocator tiles = studio.Page.Locator(".ms-overview-tiles .ms-stat-card");
-            await tiles.First.WaitForAsync();
+
+            // The sixth, for the reason the Overview scenario gives: the tiles arrive as their regions do.
+            await tiles.Nth(5).WaitForAsync();
             (await tiles.CountAsync()).Should().Be(6);
 
             await studio.SetThemeAsync("dark");
