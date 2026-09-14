@@ -1014,7 +1014,10 @@ internal static class QuerySqlComposer
 
                 if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
                 {
-                    while (i < sql.Length && sql[i] != '\n')
+                    // Postgres ends a line comment at CR as well as LF (its lexer's non_newline is [^\n\r]),
+                    // so a scanner that ran on to the LF would hide everything after a lone CR from every
+                    // rule while Postgres ran it - measured, as a cross-tenant read with no capability.
+                    while (i < sql.Length && sql[i] is not ('\n' or '\r'))
                     {
                         i++;
                     }
@@ -1250,7 +1253,7 @@ internal static class QuerySqlComposer
 
             if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
             {
-                while (i < sql.Length && sql[i] != '\n')
+                while (i < sql.Length && sql[i] is not ('\n' or '\r'))
                 {
                     i++;
                 }
@@ -1336,7 +1339,7 @@ internal static class QuerySqlComposer
 
             if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
             {
-                while (i < sql.Length && sql[i] != '\n')
+                while (i < sql.Length && sql[i] is not ('\n' or '\r'))
                 {
                     i++;
                 }

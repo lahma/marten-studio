@@ -400,7 +400,10 @@ internal static class ReadOnlySqlGuard
 
         private void SkipLineComment()
         {
-            while (position < text.Length && text[position] != '\n')
+            // A line comment ends at CR as well as LF to Postgres (its lexer's non_newline is [^\n\r]);
+            // a scanner that read on to the LF would hide the rest of that line from the denylist
+            // and the statement-separator rule while Postgres ran it.
+            while (position < text.Length && text[position] is not ('\n' or '\r'))
             {
                 position++;
             }

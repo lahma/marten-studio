@@ -58,6 +58,12 @@ public class ReadOnlySqlGuardTests
         // two is a real separator and the scanner must see it rather than skip a body that is not there.
         { "select 'x' = $1$;drop table t;--$1$", nameof(SqlRejectionReason.MultipleStatements) },
 
+        // Postgres ends a line comment at CR as well as LF, so what follows a lone CR is live SQL. A
+        // scanner that read on to the LF hid a second statement and a denylisted function in there.
+        { "select 1 --\r; select 2", nameof(SqlRejectionReason.MultipleStatements) },
+        { "select 1 where 'x' = 'y' --\r or pg_advisory_lock(1) is not null", nameof(SqlRejectionReason.DisallowedFunction) },
+        { "select 1 -- a comment\r\n", nameof(SqlRejectionReason.None) },
+
         // A backslash escapes the quote only in an E'' literal. With standard_conforming_strings on -
         // Postgres' default since 9.1 - the quote after the backslash CLOSES the string, and what follows
         // is a second statement that Npgsql will happily split off and run.

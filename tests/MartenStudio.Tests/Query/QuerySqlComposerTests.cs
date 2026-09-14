@@ -472,6 +472,9 @@ public class QuerySqlComposerTests
     [InlineData("where 1 = 1) or (1 = 1", ")")]
     [InlineData("a = 1 --\n) or (true", ")")]
     [InlineData("data is not null -- \n) or (true", ")")]
+    [InlineData("data is not null --\r) or (d.id in (select id from t)) or (true", ")")]
+    [InlineData("data is not null --\r) or (pg_advisory_lock(1) is not null) or (true", ")")]
+    [InlineData("a = 1 --\r\n) or (true", ")")]
     [InlineData("x = 1) or (1=1 limit 5", ")")]
     [InlineData("1=1) or (1=1 order by d.tenant_id limit 500", ")")]
     [InlineData("a = 1)", ")")]
@@ -508,6 +511,8 @@ public class QuerySqlComposerTests
     [InlineData("where \")\" = 1")]
     [InlineData("where x = $tag$ ) ) ( $tag$")]
     [InlineData("where a = 1 -- ) ) (")]
+    [InlineData("where a = 1 -- ) ) (\r\n and b = 2")]
+    [InlineData("where a = 1 -- ) ) (\r and b = 2")]
     [InlineData("where a = 1 /* ) ) ( */")]
     [InlineData("where (a = 1 or b = 2) and (c = 3)")]
     [InlineData("where lower(data ->> 'Name') like 'a%'")]
@@ -554,6 +559,24 @@ public class QuerySqlComposerTests
     }
 
     /// <summary>
+    /// Postgres ends a <c>--</c> comment at a carriage return as well as at a line feed (its lexer's
+    /// <c>non_newline</c> is <c>[^\n\r]</c>). A scanner that read on to the line feed hid everything after
+    /// a lone CR from every rule while Postgres ran it - a second statement, a denylisted function, an
+    /// unbalanced bracket - and a <c>%0D</c> in the page's <c>?where=</c> deep link delivers one.
+    /// </summary>
+    [Theory]
+    [InlineData("a = 1 --\r; select 1")]
+    [InlineData("data is not null --\r); select pg_advisory_lock(1) from t d where (1=1")]
+    public void A_line_comment_ends_at_a_carriage_return_as_it_does_to_postgres(string clause)
+    {
+        SqlGuardResult refused = QuerySqlComposer.CheckClause(clause, allowNestedReads: true);
+
+        refused.Allowed.Should().BeFalse(clause);
+        refused.Reason.Should().Be(SqlRejectionReason.MultipleStatements);
+        refused.Token.Should().Be(";");
+    }
+
+    /// <summary>
     /// A dollar-quote tag follows the rules of an unquoted identifier, so it cannot begin with a digit:
     /// <c>$1$</c> is a parameter placeholder. Reading it as a tag made the <c>;</c> scanner skip the span
     /// between two of them, which is a scanner disagreeing with Postgres about where a string is - the one
@@ -595,6 +618,7 @@ public class QuerySqlComposerTests
 
     [Theory]
     [InlineData("where a = 1 order by 1 for update", "for")]
+    [InlineData("where a = 1 order by 1 --\rfor update", "for")]
     [InlineData("order by 1 for update", "for")]
     [InlineData("where a = 1 order by d.id for no key update", "for")]
     [InlineData("where a = 1 order by 1 fetch first 1 rows only", "fetch")]
@@ -725,6 +749,7 @@ public class QuerySqlComposerTests
     [InlineData("where pg_notify('c', 'p') is null")]
     [InlineData("where 'mt_doc_person'::regclass is not null")]
     [InlineData("where 'now'::regproc is not null")]
+    [InlineData("where 1 = 1 --\r and pg_advisory_lock(42) is not null")]
     public void A_function_or_cast_the_denylist_names_is_refused_at_both_capability_levels(string clause)
     {
         foreach (bool mayRunSql in new[] { false, true })
