@@ -171,9 +171,9 @@ internal static class ReadOnlySqlGuard
             return SqlGuardResult.Reject(SqlRejectionReason.Empty, "There is no statement to run.", null, 0);
         }
 
-        var scanner = new Scanner(sql);
+        var scanner = new SqlLexer(sql);
 
-        if (!scanner.TryReadToken(out var first, out var firstPosition, out var scanError))
+        if (!TryReadToken(ref scanner, out var first, out var firstPosition, out var scanError))
         {
             return scanError ?? SqlGuardResult.Reject(
                 SqlRejectionReason.Empty, "There is no statement to run, only comments.", null, 0);
@@ -203,15 +203,17 @@ internal static class ReadOnlySqlGuard
         return ScanForSecondStatement(ref scanner, first!, firstPosition);
     }
 
-    private static SqlGuardResult CheckExplainTarget(ref Scanner scanner)
+    private static SqlGuardResult CheckExplainTarget(ref SqlLexer scanner)
     {
         // EXPLAIN ANALYZE executes what it is given, so whatever the options end at has to be allow-listed
         // too. Unrecognised words are left alone: they will be the statement, or Postgres' own syntax error.
         while (true)
         {
+            // A copy, so the allow-listed word can be put back for the caller to read again. SqlLexer is a
+            // struct exactly so that this is an assignment rather than a rewind method.
             var before = scanner;
 
-            if (!scanner.TryReadToken(out var token, out var position, out var error))
+            if (!TryReadToken(ref scanner, out var token, out var position, out var error))
             {
                 return error ?? SqlGuardResult.Reject(
                     SqlRejectionReason.DisallowedStatement,
@@ -240,11 +242,11 @@ internal static class ReadOnlySqlGuard
         }
     }
 
-    private static SqlGuardResult ScanForSecondStatement(ref Scanner scanner, string first, int firstPosition)
+    private static SqlGuardResult ScanForSecondStatement(ref SqlLexer scanner, string first, int firstPosition)
     {
         while (true)
         {
-            if (!scanner.TryReadToken(out var token, out var position, out var error))
+            if (!TryReadToken(ref scanner, out var token, out var position, out var error))
             {
                 return error ?? SqlGuardResult.Allow(first, firstPosition);
             }
@@ -274,7 +276,7 @@ internal static class ReadOnlySqlGuard
 
             do
             {
-                if (!scanner.TryReadToken(out next, out nextPosition, out trailingError))
+                if (!TryReadToken(ref scanner, out next, out nextPosition, out trailingError))
                 {
                     return trailingError ?? SqlGuardResult.Allow(first, firstPosition);
                 }
@@ -304,261 +306,61 @@ internal static class ReadOnlySqlGuard
     }
 
     /// <summary>
-    /// A minimal Postgres lexer: enough to know where a token is and what is inside a string, a comment or
-    /// a dollar-quoted body, and nothing more.
+    /// The next significant token from <paramref name="scanner" />, in the shape this guard's rules read.
     /// </summary>
-    private struct Scanner(string text)
+    /// <param name="scanner">The shared lexer, advanced past whatever it read.</param>
+    /// <param name="token">
+    /// The word, or the single punctuation character. Strings, quoted identifiers, dollar-quoted bodies and
+    /// comments are walked over by the lexer and never come back as tokens.
+    /// </param>
+    /// <param name="tokenPosition">Where the token starts, or the end of the text.</param>
+    /// <param name="error">
+    /// The refusal, when the text does not close. The lexer says <em>which</em> thing never closed and
+    /// where; the wording, the <see cref="SqlRejectionReason" /> and the token this guard points at are its
+    /// own - the clause composer answers the same fault with a different message, and keeping the two
+    /// messages apart is the whole reason only the lexing is shared.
+    /// </param>
+    /// <returns><see langword="false" /> at the end of the text, and on a fault.</returns>
+    private static bool TryReadToken(
+        ref SqlLexer scanner,
+        out string? token,
+        out int tokenPosition,
+        out SqlGuardResult? error)
     {
-        private int position;
+        error = null;
 
-        /// <summary>
-        /// Reads the next significant token. Punctuation comes back one character at a time; a word comes
-        /// back whole; strings and comments are skipped over rather than returned.
-        /// </summary>
-        public bool TryReadToken(out string? token, out int tokenPosition, out SqlGuardResult? error)
+        if (!scanner.TryRead(out SqlToken read))
         {
-            error = null;
-
-            while (position < text.Length)
-            {
-                var c = text[position];
-
-                if (char.IsWhiteSpace(c))
-                {
-                    position++;
-                    continue;
-                }
-
-                if (c == '-' && Peek(1) == '-')
-                {
-                    SkipLineComment();
-                    continue;
-                }
-
-                if (c == '/' && Peek(1) == '*')
-                {
-                    if (!SkipBlockComment(out error))
-                    {
-                        token = null;
-                        tokenPosition = position;
-                        return false;
-                    }
-
-                    continue;
-                }
-
-                if (c is '\'' or '"')
-                {
-                    if (!SkipQuoted(c, out error))
-                    {
-                        token = null;
-                        tokenPosition = position;
-                        return false;
-                    }
-
-                    continue;
-                }
-
-                if (c == '$' && TryReadDollarTag(out var tag))
-                {
-                    if (!SkipDollarQuoted(tag!, out error))
-                    {
-                        token = null;
-                        tokenPosition = position;
-                        return false;
-                    }
-
-                    continue;
-                }
-
-                tokenPosition = position;
-
-                if (char.IsLetter(c) || c == '_')
-                {
-                    var start = position;
-
-                    while (position < text.Length && (char.IsLetterOrDigit(text[position]) || text[position] == '_'))
-                    {
-                        position++;
-                    }
-
-                    token = text[start..position];
-                    return true;
-                }
-
-                position++;
-                token = c.ToString();
-                return true;
-            }
-
             token = null;
-            tokenPosition = position;
+            tokenPosition = scanner.Position;
             return false;
         }
 
-        private char Peek(int offset) => position + offset < text.Length ? text[position + offset] : '\0';
-
-        private void SkipLineComment()
+        if (read.Kind == SqlTokenKind.Unreadable)
         {
-            // A line comment ends at CR as well as LF to Postgres (its lexer's non_newline is [^\n\r]);
-            // a scanner that read on to the LF would hide the rest of that line from the denylist
-            // and the statement-separator rule while Postgres ran it.
-            while (position < text.Length && text[position] is not ('\n' or '\r'))
+            token = null;
+            tokenPosition = read.Start;
+            error = read.Fault switch
             {
-                position++;
-            }
-        }
-
-        private bool SkipBlockComment(out SqlGuardResult? error)
-        {
-            // Postgres block comments nest, unlike C's.
-            var start = position;
-            var depth = 0;
-
-            while (position < text.Length)
-            {
-                if (text[position] == '/' && Peek(1) == '*')
-                {
-                    depth++;
-                    position += 2;
-                    continue;
-                }
-
-                if (text[position] == '*' && Peek(1) == '/')
-                {
-                    depth--;
-                    position += 2;
-
-                    if (depth == 0)
-                    {
-                        error = null;
-                        return true;
-                    }
-
-                    continue;
-                }
-
-                position++;
-            }
-
-            error = SqlGuardResult.Reject(
-                SqlRejectionReason.UnterminatedComment, "A /* comment is never closed.", "/*", start);
-            return false;
-        }
-
-        private bool SkipQuoted(char quote, out SqlGuardResult? error)
-        {
-            var start = position;
-
-            // Backslash escapes exist in an E'' literal and nowhere else. With Postgres' default
-            // standard_conforming_strings = on, the backslash in 'a\' is an ordinary character and the
-            // quote after it CLOSES the string - so treating it as an escape made
-            // `select 'a\'; drop table t --'` look like one statement to this guard while Npgsql split it
-            // into two and ran both. Verified against Postgres 17. The prefix has to be a standalone e/E:
-            // `date'2026-01-01'` also ends in an 'e' and is not an escape string.
-            var escapes = quote == '\'' && IsEscapeStringPrefix(start);
-
-            position++;
-
-            while (position < text.Length)
-            {
-                if (escapes && text[position] == '\\' && position + 1 < text.Length)
-                {
-                    position += 2;
-                    continue;
-                }
-
-                if (text[position] == quote)
-                {
-                    if (Peek(1) == quote)
-                    {
-                        position += 2;
-                        continue;
-                    }
-
-                    position++;
-                    error = null;
-                    return true;
-                }
-
-                position++;
-            }
-
-            error = SqlGuardResult.Reject(
-                SqlRejectionReason.UnterminatedString,
-                $"A {quote} quoted string is never closed.",
-                quote.ToString(),
-                start);
-            return false;
-        }
-
-        /// <summary>Whether the quote at <paramref name="quotePosition"/> opens an <c>E'…'</c> literal.</summary>
-        private bool IsEscapeStringPrefix(int quotePosition)
-        {
-            if (quotePosition == 0 || text[quotePosition - 1] is not ('e' or 'E'))
-            {
-                return false;
-            }
-
-            // The e has to be a token of its own; `date'…'`, `alue'…'` and anything else that merely ends
-            // in an e is a typed literal or a syntax error, not an escape string.
-            var before = quotePosition - 2;
-
-            return before < 0 || !(char.IsLetterOrDigit(text[before]) || text[before] is '_' or '$');
-        }
-
-        private bool TryReadDollarTag(out string? tag)
-        {
-            // $tag$ or $$; a bare $1 parameter placeholder is not a dollar quote. A tag follows the rules
-            // of an unquoted identifier, so it cannot begin with a digit: Postgres reads `$1$…$1$` as two
-            // parameter placeholders around text, not as a quoted body, and a scanner that read it as a
-            // body would skip the `;` inside it - the one thing this scanner must never do.
-            var probe = position + 1;
-
-            if (probe < text.Length && text[probe] != '$')
-            {
-                if (!char.IsLetter(text[probe]) && text[probe] != '_')
-                {
-                    tag = null;
-                    return false;
-                }
-
-                probe++;
-
-                while (probe < text.Length && (char.IsLetterOrDigit(text[probe]) || text[probe] == '_'))
-                {
-                    probe++;
-                }
-            }
-
-            if (probe < text.Length && text[probe] == '$')
-            {
-                tag = text[position..(probe + 1)];
-                return true;
-            }
-
-            tag = null;
-            return false;
-        }
-
-        private bool SkipDollarQuoted(string tag, out SqlGuardResult? error)
-        {
-            var start = position;
-            var closing = text.IndexOf(tag, position + tag.Length, StringComparison.Ordinal);
-
-            if (closing < 0)
-            {
-                error = SqlGuardResult.Reject(
+                SqlLexFault.UnterminatedComment => SqlGuardResult.Reject(
+                    SqlRejectionReason.UnterminatedComment, "A /* comment is never closed.", "/*", read.Start),
+                SqlLexFault.UnterminatedString => SqlGuardResult.Reject(
+                    SqlRejectionReason.UnterminatedString,
+                    $"A {read.Text} quoted string is never closed.",
+                    read.Text,
+                    read.Start),
+                _ => SqlGuardResult.Reject(
                     SqlRejectionReason.UnterminatedDollarQuote,
-                    $"A {tag} quoted body is never closed.",
-                    tag,
-                    start);
-                return false;
-            }
+                    $"A {read.Text} quoted body is never closed.",
+                    read.Text,
+                    read.Start),
+            };
 
-            position = closing + tag.Length;
-            error = null;
-            return true;
+            return false;
         }
+
+        token = read.Text;
+        tokenPosition = read.Start;
+        return true;
     }
 }

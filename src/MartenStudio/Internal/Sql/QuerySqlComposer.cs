@@ -165,9 +165,16 @@ internal sealed record ComposedQuery(
 /// </para>
 /// <para>
 /// <b>The studio's own terms are then repeated after the visitor's predicate</b>, which costs nothing and
-/// is the defence that does not depend on a scanner being right: with <c>… and (X) and tenant = @tenant</c>
-/// every disjunct an escaped <c>or</c> could produce still carries the tenant and soft-delete terms on one
-/// side or the other. The balance check is the rule; this is what holds if the rule is ever wrong.
+/// is defence in depth <em>for a balanced clause</em>: while the predicate really is one parenthesised
+/// term, <c>A and (X) and A</c> distributes over whatever <c>or</c> is inside <c>X</c>, so every disjunct
+/// of the visitor's own predicate still carries the tenant and soft-delete terms.
+/// <b>It is not a guarantee, and must never be described as one.</b> A clause whose brackets do not
+/// balance is not "X" at all: an attacker-supplied <c>) … (</c> pair brackets a disjunct of its own that
+/// sits between the studio's two copies and carries neither of them - <c>a and (1=1) or (true) or (1=1)
+/// and a</c> has a middle disjunct with no predicate on either side, and the carriage-return spelling of
+/// that escape was measured returning every tenant's rows against this very shape.
+/// <b><see cref="CheckClause" />'s balance rule is the guarantee</b>; the repeat is what narrows the blast
+/// radius of an ordinary <c>or</c>, not what stops the escape.
 /// </para>
 /// <para>
 /// <b><c>order by</c>, <c>limit</c> and <c>offset</c> are split off deterministically</b>, because neither
@@ -644,11 +651,13 @@ internal static class QuerySqlComposer
             // bracket that is not there.
             sql.Append("  and (\n    ").Append(parts.Predicate).Append("\n  )\n");
 
-            // And then the same terms again, after it. CheckClause refuses a clause whose brackets do not
-            // balance, so nothing should ever escape the parentheses above; this is what holds if that is
-            // ever wrong. `a and (X) and a` distributes over any `or` the predicate turns out to contain,
-            // so every disjunct still carries the tenant and the soft-delete term. It costs one more index
-            // condition Postgres folds away, and it is free in the plan.
+            // And then the same terms again, after it - defence in depth, not a second guarantee. While the
+            // brackets balance, the predicate really is one term and `a and (X) and a` distributes over any
+            // `or` inside X, so every disjunct of the visitor's own predicate still carries the tenant and
+            // soft-delete terms. It does NOT save an unbalanced clause: a `) … (` pair the visitor supplied
+            // brackets a disjunct of its own between these two copies, which carries neither. CheckClause's
+            // balance rule is what makes that unreachable. This costs one more index condition Postgres
+            // folds away, and it is free in the plan.
             AppendStudioTerms();
         }
 
@@ -935,32 +944,23 @@ internal static class QuerySqlComposer
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>One scanner, three questions.</b> The balance check, the <c>order by</c> / <c>limit</c> /
+    /// <b>One walk, three questions.</b> The balance check, the <c>order by</c> / <c>limit</c> /
     /// <c>offset</c> split and the word rules all need to know where the strings, quoted identifiers,
     /// dollar-quoted bodies and comments are, and three scanners that <em>nearly</em> agree is how a
-    /// <c>)</c> ends up visible to one of them and not to another. It is the same discipline
-    /// <see cref="ReadOnlySqlGuard" /> uses on a whole statement, and it agrees with Postgres about four
-    /// things that are easy to get wrong:
+    /// <c>)</c> ends up visible to one of them and not to another.
     /// </para>
-    /// <list type="bullet">
-    /// <item><description>
-    /// block comments <b>nest</b> (<c>/* /* */ */</c> is one comment), unlike C's;
-    /// </description></item>
-    /// <item><description>
-    /// a doubled quote inside a literal is an escaped quote and does not end it (<c>'it''s'</c>);
-    /// </description></item>
-    /// <item><description>
-    /// a backslash escapes only inside an <c>E'…'</c> literal - with the default
-    /// <c>standard_conforming_strings = on</c> the quote after <c>'a\</c> <em>closes</em> the string; and
-    /// </description></item>
-    /// <item><description>
-    /// a dollar-quote tag follows the rules of an unquoted identifier, so <c>$1$</c> is a parameter
-    /// placeholder and not the start of a body - reading it as one let a <c>;</c> hide between two of them.
-    /// </description></item>
-    /// </list>
     /// <para>
-    /// Anything it cannot read is a refusal rather than a guess, because "I cannot tell what this would
-    /// run" and "this is safe" are not the same answer.
+    /// <b>The lexing itself is not here.</b> It is <see cref="SqlLexer" />, shared with
+    /// <see cref="ReadOnlySqlGuard" />, which is where the five things Postgres does that are easy to get
+    /// wrong are written down and tested - a line comment ending at CR as well as LF, nesting block
+    /// comments, doubled quotes, <c>E'…'</c> backslashes and dollar tags that may not begin with a digit.
+    /// Two copies of that walk is how the same defect came to be fixed twice; this class asks the lexer for
+    /// tokens and does the bookkeeping the <em>clause</em> rules need, which is depth, bracket balance and
+    /// where each bare word was.
+    /// </para>
+    /// <para>
+    /// Anything the lexer cannot read is a refusal rather than a guess, because "I cannot tell what this
+    /// would run" and "this is safe" are not the same answer.
     /// </para>
     /// </remarks>
     private sealed class ClauseScan
@@ -999,201 +999,67 @@ internal static class QuerySqlComposer
         /// <summary>Whether the quoting could be read at all.</summary>
         public bool Readable => Rejection is null;
 
-        /// <summary>Walks <paramref name="sql" /> once.</summary>
+        /// <summary>Walks <paramref name="sql" /> once, through the assembly's one lexer.</summary>
+        /// <remarks>
+        /// The lexing is <see cref="SqlLexer" />'s and the bookkeeping is this method's: which brackets were
+        /// left open, which <c>)</c> closed nothing, and every bare word with the depth it sat at. Nothing
+        /// here knows what a string or a comment looks like, which is the point - that knowledge lived in
+        /// two places and the same defect had to be fixed in both, twice.
+        /// </remarks>
         public static ClauseScan Of(string sql)
         {
             List<ScannedWord> words = [];
             List<int> open = [];
-            var depth = 0;
             var unmatchedClose = -1;
-            var i = 0;
+            var lexer = new SqlLexer(sql);
 
-            while (i < sql.Length)
+            while (lexer.TryRead(out SqlToken token))
             {
-                char c = sql[i];
-
-                if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+                if (token.Kind == SqlTokenKind.Unreadable)
                 {
-                    // Postgres ends a line comment at CR as well as LF (its lexer's non_newline is [^\n\r]),
-                    // so a scanner that ran on to the LF would hide everything after a lone CR from every
-                    // rule while Postgres ran it - measured, as a cross-tenant read with no capability.
-                    while (i < sql.Length && sql[i] is not ('\n' or '\r'))
-                    {
-                        i++;
-                    }
+                    return new ClauseScan(Unreadable(token.Text, token.Start, Describe(token.Fault)));
+                }
 
+                if (token.Kind == SqlTokenKind.Word)
+                {
+                    words.Add(new ScannedWord(token.Text, token.Start, token.End, token.Depth));
                     continue;
                 }
 
-                if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+                if (token.Is('('))
                 {
-                    int start = i;
-
-                    if (!TrySkipBlockComment(sql, ref i))
-                    {
-                        return new ClauseScan(Unreadable("/*", start, "an unterminated comment"));
-                    }
-
+                    open.Add(token.Start);
                     continue;
                 }
 
-                if (c is '\'' or '"')
+                if (token.Is(')'))
                 {
-                    int start = i;
-
-                    if (!TrySkipQuoted(sql, ref i))
-                    {
-                        return new ClauseScan(Unreadable(c.ToString(), start, "an unterminated string"));
-                    }
-
-                    continue;
-                }
-
-                if (c == '$' && TryReadDollarTag(sql, i, out string tag))
-                {
-                    int end = sql.IndexOf(tag, i + tag.Length, StringComparison.Ordinal);
-
-                    if (end < 0)
-                    {
-                        return new ClauseScan(Unreadable(tag, i, "an unterminated quoted body"));
-                    }
-
-                    i = end + tag.Length;
-                    continue;
-                }
-
-                if (c == '(')
-                {
-                    open.Add(i);
-                    depth++;
-                    i++;
-                    continue;
-                }
-
-                if (c == ')')
-                {
-                    if (depth == 0)
+                    if (token.Depth == 0)
                     {
                         // Remembered, not fatal here: the walk carries on so that a clause which is wrong in
                         // two ways is described by the first thing that is wrong with it.
                         if (unmatchedClose < 0)
                         {
-                            unmatchedClose = i;
+                            unmatchedClose = token.Start;
                         }
                     }
                     else
                     {
-                        depth--;
                         open.RemoveAt(open.Count - 1);
                     }
-
-                    i++;
-                    continue;
                 }
-
-                if (char.IsLetter(c) || c == '_')
-                {
-                    int start = i;
-
-                    while (i < sql.Length && (char.IsLetterOrDigit(sql[i]) || sql[i] == '_'))
-                    {
-                        i++;
-                    }
-
-                    words.Add(new ScannedWord(sql[start..i], start, i, depth));
-                    continue;
-                }
-
-                i++;
             }
 
-            return new ClauseScan(words, depth, unmatchedClose, open.Count > 0 ? open[0] : -1);
+            return new ClauseScan(words, lexer.Depth, unmatchedClose, open.Count > 0 ? open[0] : -1);
         }
 
-        /// <summary>Skips a <c>/* … */</c> comment, counting nesting the way Postgres does.</summary>
-        internal static bool TrySkipBlockComment(string sql, ref int i)
+        /// <summary>How a refusal names the thing that never closed.</summary>
+        private static string Describe(SqlLexFault fault) => fault switch
         {
-            var depth = 0;
-
-            while (i < sql.Length)
-            {
-                if (sql[i] == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
-                {
-                    depth++;
-                    i += 2;
-                    continue;
-                }
-
-                if (sql[i] == '*' && i + 1 < sql.Length && sql[i + 1] == '/')
-                {
-                    depth--;
-                    i += 2;
-
-                    if (depth == 0)
-                    {
-                        return true;
-                    }
-
-                    continue;
-                }
-
-                i++;
-            }
-
-            return false;
-        }
-
-        /// <summary>Skips a <c>'…'</c> literal or a <c>"…"</c> identifier, doubling and escapes included.</summary>
-        internal static bool TrySkipQuoted(string sql, ref int i)
-        {
-            char quote = sql[i];
-
-            // Backslash escapes exist in an E'' literal and nowhere else. With the default
-            // standard_conforming_strings = on, the backslash in 'a\' is an ordinary character and the
-            // quote after it CLOSES the string.
-            bool escapes = quote == '\'' && IsEscapeStringPrefix(sql, i);
-
-            i++;
-
-            while (i < sql.Length)
-            {
-                if (escapes && sql[i] == '\\' && i + 1 < sql.Length)
-                {
-                    i += 2;
-                    continue;
-                }
-
-                if (sql[i] == quote)
-                {
-                    if (i + 1 < sql.Length && sql[i + 1] == quote)
-                    {
-                        i += 2;
-                        continue;
-                    }
-
-                    i++;
-                    return true;
-                }
-
-                i++;
-            }
-
-            return false;
-        }
-
-        /// <summary>Whether the quote at <paramref name="quotePosition" /> opens an <c>E'…'</c> literal.</summary>
-        private static bool IsEscapeStringPrefix(string sql, int quotePosition)
-        {
-            if (quotePosition == 0 || sql[quotePosition - 1] is not ('e' or 'E'))
-            {
-                return false;
-            }
-
-            // The e has to be a token of its own; `date'…'` also ends in an e and is a typed literal.
-            int before = quotePosition - 2;
-
-            return before < 0 || !(char.IsLetterOrDigit(sql[before]) || sql[before] is '_' or '$');
-        }
+            SqlLexFault.UnterminatedComment => "an unterminated comment",
+            SqlLexFault.UnterminatedString => "an unterminated string",
+            _ => "an unterminated quoted body",
+        };
     }
 
     private static bool TryParseCount(string value, out int count) =>
@@ -1245,73 +1111,16 @@ internal static class QuerySqlComposer
             return false;
         }
 
-        var i = 0;
+        var lexer = new SqlLexer(sql);
 
-        while (i < sql.Length)
+        while (lexer.TryRead(out SqlToken token))
         {
-            var c = sql[i];
-
-            if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+            // Unterminated anything: the guard will refuse it in its own right, and "present" is the safe
+            // answer to a question asked of text nobody can read.
+            if (token.Kind == SqlTokenKind.Unreadable || token.IsWord(keyword))
             {
-                while (i < sql.Length && sql[i] is not ('\n' or '\r'))
-                {
-                    i++;
-                }
-
-                continue;
+                return true;
             }
-
-            if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
-            {
-                if (!ClauseScan.TrySkipBlockComment(sql, ref i))
-                {
-                    // Unterminated: the guard will refuse it anyway, and "present" is the safe answer.
-                    return true;
-                }
-
-                continue;
-            }
-
-            if (c is '\'' or '"')
-            {
-                if (!ClauseScan.TrySkipQuoted(sql, ref i))
-                {
-                    return true;
-                }
-
-                continue;
-            }
-
-            if (c == '$' && TryReadDollarTag(sql, i, out var tag))
-            {
-                var end = sql.IndexOf(tag, i + tag.Length, StringComparison.Ordinal);
-                if (end < 0)
-                {
-                    return true;
-                }
-
-                i = end + tag.Length;
-                continue;
-            }
-
-            if (char.IsLetter(c) || c == '_')
-            {
-                var start = i;
-
-                while (i < sql.Length && (char.IsLetterOrDigit(sql[i]) || sql[i] == '_'))
-                {
-                    i++;
-                }
-
-                if (string.Equals(sql[start..i], keyword, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-
-                continue;
-            }
-
-            i++;
         }
 
         return false;
@@ -1326,65 +1135,17 @@ internal static class QuerySqlComposer
     {
         ArgumentNullException.ThrowIfNull(sql);
 
-        var i = 0;
+        var lexer = new SqlLexer(sql);
 
-        while (i < sql.Length)
+        while (lexer.TryRead(out SqlToken token))
         {
-            char c = sql[i];
-
-            if (c == ';')
+            // A fault is reported where the thing that never closed began, which is the character the
+            // editor puts its caret under - and refusing there is the conservative answer, because text
+            // nobody can read may hold a separator anywhere in it.
+            if (token.Kind == SqlTokenKind.Unreadable || token.Is(';'))
             {
-                return i;
+                return token.Start;
             }
-
-            if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
-            {
-                while (i < sql.Length && sql[i] is not ('\n' or '\r'))
-                {
-                    i++;
-                }
-
-                continue;
-            }
-
-            if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
-            {
-                var start = i;
-
-                if (!ClauseScan.TrySkipBlockComment(sql, ref i))
-                {
-                    return start;
-                }
-
-                continue;
-            }
-
-            if (c is '\'' or '"')
-            {
-                var start = i;
-
-                if (!ClauseScan.TrySkipQuoted(sql, ref i))
-                {
-                    return start;
-                }
-
-                continue;
-            }
-
-            if (c == '$' && TryReadDollarTag(sql, i, out var tag))
-            {
-                var end = sql.IndexOf(tag, i + tag.Length, StringComparison.Ordinal);
-
-                if (end < 0)
-                {
-                    return i;
-                }
-
-                i = end + tag.Length;
-                continue;
-            }
-
-            i++;
         }
 
         return -1;
@@ -1406,49 +1167,4 @@ internal static class QuerySqlComposer
         return after == sql.Length || !char.IsLetterOrDigit(sql[after]) && sql[after] != '_';
     }
 
-    /// <summary>
-    /// Reads the <c>$tag$</c> that opens a dollar-quoted body at <paramref name="position" />, if one does.
-    /// </summary>
-    /// <remarks>
-    /// <b>The first character of a tag has to be a letter or an underscore</b>, because a dollar-quote tag
-    /// follows the rules of an unquoted identifier and Postgres reads <c>$1</c> as a parameter placeholder.
-    /// Accepting a digit made <c>'x' = $1$;drop table x;--$1$</c> look like a quoted body to the <c>;</c>
-    /// scanner, which then skipped straight past both semicolons - a scanner disagreeing with Postgres
-    /// about where a string is, which is the one thing it may never do. <c>$$</c> with no tag at all is
-    /// still a body.
-    /// </remarks>
-    private static bool TryReadDollarTag(string sql, int position, out string tag)
-    {
-        tag = string.Empty;
-
-        var probe = position + 1;
-
-        if (probe >= sql.Length)
-        {
-            return false;
-        }
-
-        if (sql[probe] != '$')
-        {
-            if (!char.IsLetter(sql[probe]) && sql[probe] != '_')
-            {
-                return false;
-            }
-
-            probe++;
-
-            while (probe < sql.Length && (char.IsLetterOrDigit(sql[probe]) || sql[probe] == '_'))
-            {
-                probe++;
-            }
-        }
-
-        if (probe < sql.Length && sql[probe] == '$')
-        {
-            tag = sql[position..(probe + 1)];
-            return true;
-        }
-
-        return false;
-    }
 }

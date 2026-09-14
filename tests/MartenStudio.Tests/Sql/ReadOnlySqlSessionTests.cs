@@ -78,15 +78,21 @@ public class ReadOnlySqlSessionTests
     }
 
     /// <summary>
-    /// The Mode A entry point takes the same checks in the same order, because it is the same method:
-    /// <c>ExecuteAsync</c> is a caller of <c>InTransactionAsync</c> rather than a second copy of the
-    /// preamble. Two copies of <c>BEGIN; SET TRANSACTION READ ONLY; …</c> is precisely how Mode A came to
-    /// have none at all.
+    /// The Mode A entry point takes the same argument checks in the same order, because it is the same
+    /// method: <c>ExecuteAsync</c> is a caller of <c>InTransactionAsync</c> rather than a second copy of
+    /// the preamble. Two copies of <c>BEGIN; SET TRANSACTION READ ONLY; …</c> is precisely how Mode A came
+    /// to have none at all.
     /// </summary>
+    /// <remarks>
+    /// Plain options, deliberately. This used to be written with an invalid <c>Role</c> on the session, as
+    /// if the two assertions said something about role validation - they cannot, because both throw on the
+    /// null argument before the role is ever looked at. The role claim is
+    /// <see cref="An_invalid_role_is_refused_before_a_transaction_is_ever_begun" />, which reaches it.
+    /// </remarks>
     [Fact]
     public async Task The_transaction_helper_the_query_page_uses_takes_the_same_checks()
     {
-        var session = new ReadOnlySqlSession(new ReadOnlySqlOptions { Role = "bad; drop table x" });
+        var session = new ReadOnlySqlSession(new ReadOnlySqlOptions());
 
         var nullConnection = async () =>
             await session.InTransactionAsync<int>(null!, (_, _) => Task.FromResult(1));
@@ -97,6 +103,31 @@ public class ReadOnlySqlSessionTests
             await session.InTransactionAsync<int>(new NpgsqlConnection(), null!);
 
         await nullWork.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    /// <summary>
+    /// The role check with both arguments supplied, which is the only way to reach it: it sits after the
+    /// two <see cref="ArgumentNullException" /> guards and <em>before</em> <c>BeginTransactionAsync</c>, so
+    /// an invalid role never becomes a connection attempt, let alone a <c>set_config</c>.
+    /// </summary>
+    /// <remarks>
+    /// The message is asserted rather than only the type, and it has to be: a closed
+    /// <see cref="NpgsqlConnection" /> would answer <c>BeginTransactionAsync</c> with an
+    /// <see cref="InvalidOperationException" /> of its own, so "it threw the right type" would pass whether
+    /// the role was checked or not. Naming the role is what distinguishes the two, and it is also what
+    /// proves the refusal happened before the connection was touched - this session has no connection
+    /// string at all.
+    /// </remarks>
+    [Fact]
+    public async Task An_invalid_role_is_refused_before_a_transaction_is_ever_begun()
+    {
+        var session = new ReadOnlySqlSession(new ReadOnlySqlOptions { Role = "bad; drop table x" });
+
+        var act = async () =>
+            await session.InTransactionAsync(new NpgsqlConnection(), (_, _) => Task.FromResult(1));
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*bad; drop table x*is not a valid Postgres role name*");
     }
 
     [Fact]

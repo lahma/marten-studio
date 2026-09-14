@@ -26,6 +26,26 @@ namespace MartenStudio.Integration.Tests.Query;
 /// </remarks>
 public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
 {
+    /// <summary>
+    /// How many advisory locks are held on the ids the denylist theory's clauses ask for.
+    /// </summary>
+    /// <remarks>
+    /// <b>Scoped to those ids on purpose.</b> <c>pg_locks</c> is cluster-wide - every database and every
+    /// session on the container - and this suite shares one container with every other integration class,
+    /// reused between local runs by default. A cluster-wide <c>count(*) … where locktype = 'advisory'</c>
+    /// makes any other test that takes a lock into a failure here, which is a flake that says nothing about
+    /// the clause under test. The one-argument form of <c>pg_advisory_lock</c> puts a key below 2^32 in
+    /// <c>objid</c>; the two-integer form puts the second key there. Proved by
+    /// <see cref="The_scoped_advisory_lock_counts_can_see_a_lock_when_there_is_one" />, without which
+    /// "zero" would be worth nothing.
+    /// </remarks>
+    private const string DenylistLockCountSql =
+        "select count(*) from pg_locks where locktype = 'advisory' and objid in (424242::oid, 424244::oid)";
+
+    /// <summary>The same, for the ids the carriage-return theory's clauses ask for.</summary>
+    private const string CarriageReturnLockCountSql =
+        "select count(*) from pg_locks where locktype = 'advisory' and objid in (424246::oid, 424247::oid)";
+
     private QueryHarness harness = null!;
 
     public async ValueTask InitializeAsync()
@@ -657,6 +677,109 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
         harness.Audit.GetLatest().First(x => x.Action == "MartenQuery").Succeeded.Should().BeFalse();
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // Escaping the studio's parentheses behind a carriage return. Postgres ends a `--` comment at CR as
+    // well as LF (its lexer's non_newline is [^\n\r]); a scanner that ran on to the LF saw the whole rest
+    // of the clause as a comment and every rule above went quiet while Postgres ran it. This is the third
+    // review's finding, and these are the inputs it measured.
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The four spellings the review measured, each with the token the refusal has to name.
+    /// </summary>
+    /// <remarks>
+    /// <c>{table}</c> is filled in with this harness's own ticket table - a clause that reads another
+    /// relation is the point of two of these, and it has to be a relation that really is there, or the
+    /// refusal could be Postgres' rather than the studio's. Every carriage return is written as <c>\r</c>
+    /// and never as a literal: the repository normalises line endings on checkout, so a literal would
+    /// quietly become a line feed and the row would stop testing what it names.
+    /// </remarks>
+    public static TheoryData<string, string> CarriageReturnClauses() =>
+        new()
+        {
+            { "data is not null --\r) or (d.id in (select id from {table})) or (true", ")" },
+            { "data is not null --\r) or (pg_advisory_lock(424246) is not null) or (true", ")" },
+            { "data is not null --\r); select pg_advisory_lock(424247) from {table} d where (1=1", ";" },
+            { "1 = 1 order by 1 --\rfor update", "for" },
+        };
+
+    [PostgresTheory]
+    [MemberData(nameof(CarriageReturnClauses))]
+    public async Task As_one_tenant_a_clause_hidden_behind_a_carriage_return_is_refused_and_never_sent(
+        string template,
+        string token)
+    {
+        StudioScope acme = QueryHarness.ScopeFor(QueryHarness.Acme);
+        string alias = await TicketAliasAsync(acme);
+        DocumentTableInfo table = TicketTable();
+        string clause = template.Replace("{table}", table.QualifiedName, StringComparison.Ordinal);
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            acme, new MartenQueryRequest(alias, clause), Token);
+
+        result.Rejection.Should().NotBeNull(clause);
+        result.Rejection!.Token.Should().Be(token, clause);
+        result.Error.Should().BeNull("nothing was sent");
+        result.Rows.Should().BeEmpty(clause);
+
+        // The harness grants RunSql, so this is the capability level the review probed at: a carriage
+        // return is not something a capability lifts, any more than a bracket is.
+        harness.Audit.GetLatest().First(x => x.Action == "MartenQuery").Succeeded.Should().BeFalse();
+
+        // And nothing was left behind by the two spellings that ask for a lock, or by the locking tail.
+        (await ScalarAsync(CarriageReturnLockCountSql)).Should().Be(0L, clause);
+        await AssertRowIsNotLockedAsync(table, QueryHarness.AcmeLive);
+    }
+
+    /// <summary>
+    /// The anti-vacuity half of the carriage-return rows, and the proof that the doc comment on
+    /// <see cref="QuerySqlComposer" /> is now the honest one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The clause is handed straight to <see cref="QuerySqlComposer.Compose" />, which is what Mode A would
+    /// have run had the scanner ended the comment at the line feed the way it used to - the composed text
+    /// is byte-identical either way, because a scanner that saw only a comment found no tail to split off
+    /// and neither does this one. It returns <b>four</b> rows on a scope narrowed to <c>acme</c>: acme
+    /// live, acme deleted, globex live and globex deleted. That is the leak, reproduced against this
+    /// fixture, and it is what the guard is now the only thing standing in front of.
+    /// </para>
+    /// <para>
+    /// <b>It also shows what the repeated predicates do not do.</b>
+    /// <see cref="The_shape_that_leaked_still_leaks_and_the_shape_the_composer_writes_does_not" /> shows
+    /// them saving a <em>balanced</em> clause, because <c>a and (X) and a</c> distributes over any
+    /// <c>or</c> inside <c>X</c>. They do not save this one: the <c>) … (</c> pair the clause supplies
+    /// brackets a disjunct of its own that sits between the studio's two copies and carries neither, so
+    /// <c>d.id in (select id from …)</c> matches every row of every tenant. The balance check is the
+    /// guarantee; the repeat is defence in depth.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_carriage_return_clause_the_guard_missed_would_read_every_tenants_rows()
+    {
+        DocumentTableInfo table = TicketTable();
+
+        table.TenancyStyle.Should().Be(TenancyStyle.Conjoined, "otherwise this proves nothing");
+        table.SoftDeleteEnabled.Should().BeTrue("otherwise this proves nothing");
+
+        string clause = $"data is not null --\r) or (d.id in (select id from {table.QualifiedName})) or (true";
+
+        ComposedQuery composed = QuerySqlComposer.Compose(table, clause, 500, QueryHarness.Acme);
+
+        composed.Statement.Should().Contain(
+            "  and d.\"tenant_id\" = @tenant\n  and d.\"mt_deleted\" = false\nlimit @limit",
+            "the studio's terms really are repeated after the visitor's predicate in the text being run");
+
+        (await CountRowsAsync(composed.Statement, QueryHarness.Acme)).Should().Be(
+            4,
+            "the comment ends at the carriage return, so the clause closes the studio's bracket and its " +
+            "middle disjunct carries neither the tenant predicate nor the soft-delete one - every " +
+            "tenant's rows, deleted included, from a scope narrowed to one tenant");
+
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: true).Allowed.Should().BeFalse(
+            "and the guard refuses it before that statement is ever composed for real");
+    }
+
     /// <summary>
     /// The anti-vacuity half, and the proof that <em>both</em> halves of the fix are load-bearing.
     /// </summary>
@@ -753,14 +876,26 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
     /// <summary>
     /// <c>for update</c> reached the server through the <c>order by</c> tail, at both capability levels -
     /// Postgres accepts a locking clause between <c>ORDER BY</c> and <c>LIMIT</c>, so the studio was
-    /// handing out row-level write locks from the ungated read mode. It is refused now, and a second
-    /// connection with a one-millisecond <c>lock_timeout</c> proves no lock was left behind.
+    /// handing out row-level write locks from the ungated read mode. <b>The guard refuses it</b>, nothing
+    /// is sent, and a second connection with a one-millisecond <c>lock_timeout</c> proves no lock was left
+    /// behind.
     /// </summary>
+    /// <remarks>
+    /// This test used to branch on <c>if (result.Rejection is null)</c> and accept <c>25006</c> as an
+    /// alternative, which meant a guard that stopped refusing the clause altogether would have gone on
+    /// passing - the transaction would have caught it and the test would have said so in the other branch.
+    /// A test with a fallback is a test that cannot fail for the reason it was written. The two claims are
+    /// separate now: this one is the guard's, and
+    /// <see cref="A_locking_statement_the_guard_never_saw_is_refused_by_the_read_only_transaction" /> is
+    /// the transaction's, driven straight at <see cref="ReadOnlySqlSession" /> with the statement Mode A
+    /// would have composed.
+    /// </remarks>
     [PostgresTheory]
     [InlineData("where 1 = 1 order by d.id for update")]
     [InlineData("order by 1 for update")]
     [InlineData("where 1 = 1 order by 1 for no key update")]
-    public async Task A_locking_clause_in_the_tail_is_refused_and_leaves_no_lock(string clause)
+    [InlineData("where 1 = 1 order by 1 fetch first 1 rows only")]
+    public async Task A_locking_clause_in_the_tail_is_refused_by_the_guard_and_leaves_no_lock(string clause)
     {
         StudioScope acme = QueryHarness.ScopeFor(QueryHarness.Acme);
         string alias = await TicketAliasAsync(acme);
@@ -768,18 +903,65 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
         MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
             acme, new MartenQueryRequest(alias, clause), Token);
 
-        if (result.Rejection is null)
-        {
-            result.Error.Should().NotBeNull(clause);
-            result.Error!.SqlState.Should().Be("25006", "the read-only transaction is the second boundary");
-        }
-        else
-        {
-            result.Rejection.Token.Should().Be("for", clause);
-            result.Error.Should().BeNull("nothing was sent");
-        }
+        result.Rejection.Should().NotBeNull(clause);
+        result.Rejection!.Token.Should().BeOneOf(["for", "fetch"], clause);
+        result.Rejection.Message.Should().Contain("no capability lifts this one");
+        result.Error.Should().BeNull("nothing was sent");
+        result.Rows.Should().BeEmpty(clause);
 
         await AssertRowIsNotLockedAsync(TicketTable(), QueryHarness.AcmeLive);
+    }
+
+    /// <summary>
+    /// The other half, and the one that cannot pass on the guard: the statement Mode A <em>would</em> have
+    /// composed for <c>where 1 = 1 order by d.id for update</c>, sent past the guard entirely and straight
+    /// into <see cref="ReadOnlySqlSession" />. Postgres answers <c>25006</c> and no row is locked.
+    /// </summary>
+    /// <remarks>
+    /// Written out rather than composed, because <see cref="QuerySqlComposer.Compose" /> no longer produces
+    /// it - the sort-list rule refuses the clause, so the composer keeps the whole thing inside the
+    /// parenthesised predicate, where it is a syntax error rather than a locking read. The text here is the
+    /// shape that reached the server before that rule existed: the studio's own terms, an empty visitor
+    /// predicate, and the locking clause between <c>order by</c> and <c>limit</c> where Postgres accepts
+    /// it. It is the second boundary stated as its own claim, which is what "the transaction is the guard,
+    /// not the parser" (D13) means when the parser is the thing being changed.
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_locking_statement_the_guard_never_saw_is_refused_by_the_read_only_transaction()
+    {
+        DocumentTableInfo table = TicketTable();
+
+        string statement =
+            $"select d.\"id\", d.\"data\"::text\nfrom {table.QualifiedName} as d\n" +
+            "where 1 = 1\n" +
+            "  and d.\"tenant_id\" = @tenant\n" +
+            "  and d.\"mt_deleted\" = false\n" +
+            "order by d.\"id\" for update\n" +
+            "limit @limit";
+
+        var session = new ReadOnlySqlSession(new ReadOnlySqlOptions());
+
+        await using NpgsqlConnection connection = await fixture.OpenAsync(Token);
+
+        SqlResultSet result = await session.ExecuteAsync(
+            connection,
+            statement,
+            command =>
+            {
+                command.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Varchar)
+                {
+                    Value = QueryHarness.Acme,
+                });
+                command.Parameters.Add(new NpgsqlParameter("limit", NpgsqlDbType.Integer) { Value = 500 });
+            },
+            Token);
+
+        result.Succeeded.Should().BeFalse("a locking read writes, whatever the guard thought");
+        result.Error!.SqlState.Should().Be(
+            "25006", "that is Postgres' read_only_sql_transaction, and it is the second boundary");
+        result.Rows.Should().BeEmpty();
+
+        await AssertRowIsNotLockedAsync(table, QueryHarness.AcmeLive);
     }
 
     /// <summary>
@@ -790,7 +972,7 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
     /// </summary>
     [PostgresTheory]
     [InlineData("where pg_advisory_lock(424242) is not null", "pg_advisory_lock")]
-    [InlineData("where pg_advisory_lock_shared(4, 2) is not null", "pg_advisory_lock_shared")]
+    [InlineData("where pg_advisory_lock_shared(424243, 424244) is not null", "pg_advisory_lock_shared")]
     [InlineData("where set_config('statement_timeout', '0', false) is not null", "set_config")]
     [InlineData("where nextval('nothing') > 0", "nextval")]
     [InlineData("where pg_sleep(30) is null", "pg_sleep")]
@@ -810,8 +992,61 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
         result.Error.Should().BeNull("nothing was sent");
         result.Rows.Should().BeEmpty();
 
-        (await ScalarAsync("select count(*) from pg_locks where locktype = 'advisory'"))
-            .Should().Be(0L, "no advisory lock was taken, by this clause or by any that came before it");
+        (await ScalarAsync(DenylistLockCountSql)).Should().Be(
+            0L, "no advisory lock was taken by the ids these clauses ask for");
+    }
+
+    /// <summary>
+    /// The anti-vacuity half of the two scoped lock counts above: the predicate really can see a lock, so
+    /// "zero" means "none was taken" rather than "this query matches nothing whatever happens".
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why they are scoped at all.</b> They used to read
+    /// <c>count(*) from pg_locks where locktype = 'advisory'</c>, which is <em>cluster-wide</em>: every
+    /// database and every session on the container. Locally the Postgres container is reused between runs
+    /// by default and the integration suite runs its classes in parallel, so any other test - or another
+    /// agent's packet sharing the same container - taking an advisory lock for its own reasons would fail
+    /// this one, as a flake with no relation to what it was asserting. The counts name their own ids
+    /// instead.
+    /// </para>
+    /// <para>
+    /// Advisory-lock ids appear in <c>pg_locks</c> split across <c>classid</c> and <c>objid</c>: the
+    /// one-argument form puts a key below 2^32 in <c>objid</c> with <c>classid</c> zero, and the two-integer
+    /// form puts the first key in <c>classid</c> and the second in <c>objid</c>. Both counts therefore key
+    /// on <c>objid</c>, and this test proves that is the column the lock actually lands in.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task The_scoped_advisory_lock_counts_can_see_a_lock_when_there_is_one()
+    {
+        await using NpgsqlConnection connection = await fixture.OpenAsync(Token);
+
+        await using (var take = new NpgsqlCommand(
+            "select pg_advisory_lock(424242), pg_advisory_lock_shared(424243, 424244), " +
+            "pg_advisory_lock(424246), pg_advisory_lock(424247)",
+            connection))
+        {
+            await take.ExecuteScalarAsync(Token);
+        }
+
+        try
+        {
+            (await ScalarAsync(DenylistLockCountSql)).Should().Be(
+                2L, "both of the denylist theory's ids are held, and the predicate sees both");
+
+            (await ScalarAsync(CarriageReturnLockCountSql)).Should().Be(
+                2L, "and so are both of the carriage-return theory's");
+        }
+        finally
+        {
+            await using var release = new NpgsqlCommand("select pg_advisory_unlock_all()", connection);
+
+            await release.ExecuteScalarAsync(Token);
+        }
+
+        (await ScalarAsync(DenylistLockCountSql)).Should().Be(0L, "and released is released");
+        (await ScalarAsync(CarriageReturnLockCountSql)).Should().Be(0L);
     }
 
     /// <summary>

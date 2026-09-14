@@ -30,6 +30,24 @@ internal sealed class FakeQueryService : IQueryService
     /// <summary>What the Marten mode throws instead of answering.</summary>
     public Exception? MartenFailure { get; set; }
 
+    /// <summary>
+    /// When set, the fake runs the <em>real</em> clause guard over whatever the page handed it and answers
+    /// its refusal, instead of returning <see cref="MartenResult" />.
+    /// </summary>
+    /// <remarks>
+    /// A fake that always says yes cannot prove anything about text that has to be refused. This is not a
+    /// second implementation of the service - it is one call to
+    /// <see cref="QuerySqlComposer.CheckClause" />, the same call <c>QueryService</c> makes - and it exists
+    /// so a page test can assert end to end that a clause arriving through a URL reaches the guard byte for
+    /// byte. A carriage return that the router, the parameter binding or the editor turned into a line feed
+    /// somewhere in between would be a clause the guard reads differently from the one Postgres runs, and
+    /// no test that stopped at "the page sent something" would notice.
+    /// </remarks>
+    public bool UseRealClauseGuard { get; set; }
+
+    /// <summary>What the real guard is told about <c>RunSql</c>, when it is running at all.</summary>
+    public bool AllowNestedReads { get; set; } = true;
+
     /// <summary>What the SQL console throws instead of answering.</summary>
     public Exception? SqlFailure { get; set; }
 
@@ -85,6 +103,19 @@ internal sealed class FakeQueryService : IQueryService
         if (MartenFailure is not null)
         {
             throw MartenFailure;
+        }
+
+        if (UseRealClauseGuard)
+        {
+            SqlGuardResult guard = QuerySqlComposer.CheckClause(request.WhereClause, AllowNestedReads);
+
+            if (!guard.Allowed)
+            {
+                return new MartenQueryResult(
+                    request.Alias, [], string.Empty, [], TimeSpan.Zero, 50, true, null,
+                    ExplainResult.Unavailable("The clause was never sent."), null, string.Empty,
+                    SqlRejection.FromGuard(guard));
+            }
         }
 
         return MartenResult ?? new MartenQueryResult(

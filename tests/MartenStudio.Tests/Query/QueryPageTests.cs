@@ -375,6 +375,93 @@ public class QueryPageTests
     }
 
     /// <summary>
+    /// <b>A deep link is attacker-controlled text</b>, and it is the cheapest way to hand somebody a clause
+    /// they did not write: a link in a chat window opens the Query page with the <c>where</c> box already
+    /// filled in. So the one character that defeated three rounds of review has to survive the URL, the
+    /// parameter binding, the editor and the request <em>unchanged</em>, and be refused at the far end.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>%0D</c> is a carriage return, which ends a <c>--</c> comment to Postgres (its lexer's
+    /// <c>non_newline</c> is <c>[^\n\r]</c>) and to nothing else. Everything after it is live SQL: this
+    /// clause closes the bracket the composer wrote and lands the rest of itself outside the tenant and
+    /// soft-delete predicates. A router, a query-string decoder or a textarea that turned the CR into an LF
+    /// on the way would hand the guard a different clause from the one Postgres would run - which is the
+    /// exact shape of the defect this packet exists to close - so the assertion is byte-for-byte equality
+    /// and not "something was sent".
+    /// </para>
+    /// <para>
+    /// The fake runs the real <c>QuerySqlComposer.CheckClause</c> here rather than answering with a canned
+    /// result, so the refusal on screen is the guard's own and the test would fail if the guard ever
+    /// stopped refusing it.
+    /// </para>
+    /// <para>
+    /// The expected clause is written with <c>\r</c> and never as a literal carriage return: the repository
+    /// normalises line endings to LF on checkout, so a literal would silently become something else and the
+    /// test would pass for the wrong reason.
+    /// </para>
+    /// <para>
+    /// <b>The assertion is on the request and not on the rendered <c>value</c> attribute</b>, and that is
+    /// not a convenience. HTML attribute-value normalisation turns a carriage return into a line feed when
+    /// markup is parsed, so the attribute in the rendered DOM really does read <c>--\n)</c> - in bUnit, and
+    /// in a browser parsing the prerendered page. That normalisation only ever weakens the text (a comment
+    /// ends at a line feed too, so the guard reads <c>\n</c> the same way), and it never reaches the run
+    /// path: <c>QueryEditor</c>'s Run button sends the component's own <c>Value</c>, which is the server's
+    /// string, not the textarea's DOM value. Asserting the attribute would have been asserting AngleSharp's
+    /// parser; asserting the request is asserting the studio.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_carriage_return_in_a_where_deep_link_reaches_the_guard_unchanged_and_is_refused()
+    {
+        const string clause = "data is not null --\r) or (true";
+
+        FakeQueryService service = WithPerson();
+        service.UseRealClauseGuard = true;
+
+        using StudioComponentContext context = CreateContext(service);
+        context.Navigate("marten/query?type=person&where=" + Uri.EscapeDataString(clause));
+
+        context.CurrentUri.Should().Contain("%0D", "the carriage return travels percent-encoded");
+
+        var page = context.Render<QueryPage>();
+
+        page.Find(".ms-query-run").Click();
+
+        service.MartenRequests.Should().ContainSingle()
+            .Which.WhereClause.Should().Be(
+                clause, "the carriage return survived the URL, the parameter binding and the request");
+
+        page.Find(".ms-query-error-message").TextContent.Should()
+            .Contain("closes a bracket it never opened", "the real guard refused it")
+            .And.Contain("no capability lifts this one");
+    }
+
+    /// <summary>
+    /// The other half of the same claim: the guard is reached for <em>every</em> clause, and one that is a
+    /// plain filter still runs. Without this the test above would pass just as well against a page that
+    /// refused everything.
+    /// </summary>
+    [Fact]
+    public void A_deep_link_carrying_an_ordinary_clause_is_not_refused()
+    {
+        const string clause = "where data ->> 'Name' = 'Alice'";
+
+        FakeQueryService service = WithPerson();
+        service.UseRealClauseGuard = true;
+
+        using StudioComponentContext context = CreateContext(service);
+        context.Navigate("marten/query?type=person&where=" + Uri.EscapeDataString(clause));
+
+        var page = context.Render<QueryPage>();
+
+        page.Find(".ms-query-run").Click();
+
+        service.MartenRequests.Should().ContainSingle().Which.WhereClause.Should().Be(clause);
+        page.FindAll(".ms-query-error-message").Should().BeEmpty();
+    }
+
+    /// <summary>
     /// A query too long for a URL is simply not put in one; what must never happen is the editor being
     /// emptied because the deep link could not carry what was in it.
     /// </summary>
