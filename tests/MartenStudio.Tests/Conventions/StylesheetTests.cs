@@ -30,6 +30,39 @@ public partial class StylesheetTests
             string.Empty));
 
     /// <summary>
+    /// Every rule in the stylesheet is closed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the cheapest test in the file and it is here because a missing <c>}</c> cost about ten per
+    /// cent of the stylesheet. Chromium supports CSS nesting, so an unclosed rule does not end the
+    /// stylesheet or raise a parse error the way it once would have: <b>everything after it is parsed as
+    /// rules nested inside it</b>, and applies nowhere a visitor ever looks. The rule left open was
+    /// <c>.ms-confirm-dialog:has(.ms-rebuild-scope)</c>, and the six hundred and ninety lines it swallowed
+    /// were the document write controls, the JSON editor, the round-trip preview, the nav badges, the
+    /// Overview's regions, the relationships diagram and the referenced-by panel — all of which rendered
+    /// as unstyled lists and black boxes in a real browser and in no unit test whatsoever.
+    /// </para>
+    /// <para>
+    /// Comments are stripped first, so a brace inside prose is not a brace. Braces inside a string or a
+    /// <c>url()</c> would fool this, and there are none; if one is ever added, this counts characters and
+    /// will need to learn about them rather than being deleted.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_rule_in_the_stylesheet_is_closed()
+    {
+        string css = Css.Value;
+
+        int open = css.Count(static c => c == '{');
+        int close = css.Count(static c => c == '}');
+
+        close.Should().Be(open,
+            "an unclosed rule does not fail to parse - it swallows the rest of the file as nested rules, " +
+            "which apply to nothing and are caught by no unit test");
+    }
+
+    /// <summary>
     /// <c>&lt;FocusOnNavigate Selector="h1" /&gt;</c> focuses the page heading after every navigation,
     /// which is right for a screen reader and drew the user agent's own focus ring — a hard black box
     /// round the title — for everybody else.

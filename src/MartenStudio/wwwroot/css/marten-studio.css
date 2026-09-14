@@ -5899,6 +5899,8 @@ a.ms-event-chip:focus-visible {
    default 420px is too tight for a table list. */
 .ms-confirm-dialog:has(.ms-rebuild-scope) {
     max-width: 44rem;
+}
+
 /* ==========================================================================
    DOCUMENT WRITES (P3)
    ========================================================================== */

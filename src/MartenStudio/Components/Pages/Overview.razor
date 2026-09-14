@@ -268,7 +268,10 @@
                             <li class="ms-overview-list-item" @key="stream.Id">
                                 <a class="ms-overview-list-stream ms-mono ms-truncate" href="@StreamHref(stream.Id)" title="@stream.Id">@stream.Id</a>
                                 <span class="ms-overview-list-name">@(stream.AggregateType ?? "no aggregate type")</span>
-                                <span class="ms-mono">v@stream.Version.ToString(CultureInfo.InvariantCulture)</span>
+                                @* @( ... ) and not a bare @: an '@' with a word character in front of it and
+                                   one behind it is an e-mail address to the Razor parser, and the whole
+                                   expression is emitted as literal text. *@
+                                <span class="ms-mono">v@(stream.Version.ToString(CultureInfo.InvariantCulture))</span>
                                 <TimeAgo Timestamp="stream.LastEvent" />
                             </li>
                         }

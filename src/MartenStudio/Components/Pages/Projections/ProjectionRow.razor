@@ -13,7 +13,10 @@
         }
     </th>
     <td class="ms-table-cell ms-table-cell-mono ms-projection-type" title="@ImplementationType">@ImplementationType</td>
-    <td class="ms-table-cell ms-table-cell-mono">v@Version</td>
+    @* @( ... ) and not a bare @: an '@' with a word character in front of it and one behind it is an
+       e-mail address to the Razor parser, so the bare form here reached the screen as its own source
+       text, in every row of the table. *@
+    <td class="ms-table-cell ms-table-cell-mono">v@(Version)</td>
     <td class="ms-table-cell ms-table-cell-mono">@ShardCount</td>
     <td class="ms-table-cell ms-projection-subscription">@SubscriptionType</td>
     <td class="ms-table-cell ms-table-cell-actions" colspan="4">
