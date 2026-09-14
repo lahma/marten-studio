@@ -22,7 +22,19 @@ internal static class SamplePolicies
     /// <summary>Who may change anything through it.</summary>
     public const string StudioWrite = "MartenStudioWrite";
 
-    /// <summary>Registers both policies.</summary>
+    /// <summary>
+    /// Who may do the host's own irreversible things - generating a million documents, and truncating
+    /// them again.
+    /// </summary>
+    /// <remarks>
+    /// A third policy rather than a reuse of <see cref="StudioWrite" />, because these are not studio
+    /// operations at all: creating and destroying sample data is a host concern (plan §5.5), and the
+    /// studio's own capability model has nothing to say about it. It maps to
+    /// <see cref="DevUsers.DestroyScope" />, which only <c>admin</c> carries.
+    /// </remarks>
+    public const string StudioAdmin = "MartenStudioAdmin";
+
+    /// <summary>Registers all three policies.</summary>
     public static void Configure(AuthorizationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -34,5 +46,9 @@ internal static class SamplePolicies
         options.AddPolicy(StudioWrite, policy => policy
             .RequireAuthenticatedUser()
             .RequireClaim(ScopeClaim, DevUsers.WriteScope));
+
+        options.AddPolicy(StudioAdmin, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireClaim(ScopeClaim, DevUsers.DestroyScope));
     }
 }

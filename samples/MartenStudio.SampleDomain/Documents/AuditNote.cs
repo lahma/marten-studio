@@ -1,3 +1,7 @@
+using System.Text.Json.Serialization;
+
+using MartenStudio.SampleDomain.Generation;
+
 namespace MartenStudio.SampleDomain.Documents;
 
 /// <summary>
@@ -9,7 +13,7 @@ namespace MartenStudio.SampleDomain.Documents;
 /// most stores have none of them. This one has all of them - together with <see cref="MinimalNote" />,
 /// which has none, it brackets the whole range the metadata pane has to survive.
 /// </remarks>
-public sealed class AuditNote
+public sealed class AuditNote : IGeneratedDocument
 {
     public Guid Id { get; set; }
 
@@ -18,6 +22,10 @@ public sealed class AuditNote
     public string Body { get; set; } = string.Empty;
 
     public string Severity { get; set; } = "info";
+
+    /// <summary>Which demo-data generation run wrote this note, or <see langword="null" /> for the seeder's own.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? GeneratedRun { get; set; }
 }
 
 /// <summary>

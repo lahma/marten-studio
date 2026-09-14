@@ -6,10 +6,12 @@ using Marten;
 using MartenStudio;
 using MartenStudio.Sample;
 using MartenStudio.Sample.Auth;
+using MartenStudio.Sample.Generation;
 using MartenStudio.SampleDomain;
 
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 
 SampleOptions sample = SampleOptions.Parse(args);
 
@@ -33,6 +35,12 @@ builder.Services
     });
 
 builder.Services.AddAuthorization(SamplePolicies.Configure);
+
+// One demo-data job per process, whether or not the endpoints that drive it are mapped: the singleton
+// is also what stops a run when the host shuts down, and registering it conditionally would make that
+// depend on a command-line switch.
+builder.Services.AddSingleton<DemoDataJob>();
+builder.Services.AddHostedService(static services => services.GetRequiredService<DemoDataJob>());
 
 #region readme_register
 builder.Services
@@ -94,7 +102,15 @@ else
 
 app.MapLogin();
 
-app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
+// Development, or --allow-data-generation, and nothing else. Outside that the endpoints are not mapped
+// at all, so a POST is a 404 rather than a 403 - there is nothing there to refuse.
+bool dataGeneration = sample.DataGenerationEnabled(app.Environment);
+if (dataGeneration)
+{
+    app.MapDemoData();
+}
+
+app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthorizationService authorization) =>
 {
     ClaimsPrincipal user = context.User;
     string who = user.Identity?.IsAuthenticated == true
@@ -119,8 +135,19 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
 
     AntiforgeryTokenSet tokens = antiforgery.GetAndStoreTokens(context);
 
+    // The same policy the endpoints require, evaluated here so the page can draw the panel for the one
+    // visitor who could use it and say why for everybody else. The gate that matters is still on the
+    // endpoint: this only decides what is rendered.
+    bool isAdmin = (await authorization.AuthorizeAsync(user, SamplePolicies.StudioAdmin)).Succeeded;
+
+    string demoData = DemoDataPanel.Render(
+        dataGeneration,
+        isAdmin,
+        tokens.RequestToken ?? string.Empty,
+        context.Request.Query[DemoDataEndpoints.MessageQueryKey]);
+
     context.Response.ContentType = "text/html; charset=utf-8";
-    return context.Response.WriteAsync($$"""
+    await context.Response.WriteAsync($$"""
         <!DOCTYPE html>
         <html lang="en">
         <head>
@@ -128,8 +155,9 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <title>Marten Studio sample</title>
           <style>
-            body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 42rem; line-height: 1.5; }
+            body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 48rem; line-height: 1.5; padding: 0 1rem; }
             code { background: #f1f5f9; padding: .1rem .3rem; border-radius: 3px; }
+        {{DemoDataPanel.Styles}}
           </style>
         </head>
         <body>
@@ -144,7 +172,9 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
             <input type="hidden" name="{{LoginEndpoints.AntiforgeryFieldName}}" value="{{WebUtility.HtmlEncode(tokens.RequestToken)}}" />
             <button type="submit">Sign out</button>
           </form>
-          <p>Switches: <code>--anonymous</code>, <code>--readonly</code>, <code>--path /ops/marten</code>.</p>
+          <p>Switches: <code>--anonymous</code>, <code>--readonly</code>, <code>--path /ops/marten</code>,
+            <code>--allow-data-generation</code>.</p>
+          {{demoData}}
         </body>
         </html>
         """);

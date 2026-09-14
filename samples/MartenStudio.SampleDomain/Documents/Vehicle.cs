@@ -1,3 +1,7 @@
+using System.Text.Json.Serialization;
+
+using MartenStudio.SampleDomain.Generation;
+
 namespace MartenStudio.SampleDomain.Documents;
 
 /// <summary>
@@ -10,7 +14,7 @@ namespace MartenStudio.SampleDomain.Documents;
 /// <c>mt_doc_type = 'car'</c> added - and it is the shape most likely to be got wrong by a UI that assumes
 /// one alias means one table.
 /// </remarks>
-public abstract class Vehicle
+public abstract class Vehicle : IGeneratedDocument
 {
     public Guid Id { get; set; }
 
@@ -19,6 +23,10 @@ public abstract class Vehicle
     public string Model { get; set; } = string.Empty;
 
     public int Year { get; set; }
+
+    /// <summary>Which demo-data generation run wrote this vehicle, or <see langword="null" /> for the seeder's own.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? GeneratedRun { get; set; }
 }
 
 /// <summary>A car. Shares <see cref="Vehicle" />'s table.</summary>

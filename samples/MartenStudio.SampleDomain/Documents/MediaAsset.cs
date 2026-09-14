@@ -1,3 +1,7 @@
+using System.Text.Json.Serialization;
+
+using MartenStudio.SampleDomain.Generation;
+
 namespace MartenStudio.SampleDomain.Documents;
 
 /// <summary>
@@ -16,7 +20,7 @@ namespace MartenStudio.SampleDomain.Documents;
 /// The seeder writes exactly one of them, once.
 /// </para>
 /// </remarks>
-public sealed class MediaAsset
+public sealed class MediaAsset : IGeneratedDocument
 {
     public Guid Id { get; set; }
 
@@ -29,4 +33,8 @@ public sealed class MediaAsset
 
     /// <summary>The payload, base64-encoded the way a JSON document has to carry binary.</summary>
     public string Base64 { get; set; } = string.Empty;
+
+    /// <summary>Which demo-data generation run wrote this asset, or <see langword="null" /> for the seeder's own.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? GeneratedRun { get; set; }
 }
