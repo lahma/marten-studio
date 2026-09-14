@@ -17,11 +17,14 @@
   capabilities, every one `false` by default, with `All()` as the one-line opt-in.
   `MartenStoreResource` is the record the store and write policies are evaluated against, carrying the
   store name, the database identity, the tenant and the capability being exercised.
-- Eight screens. Overview (one card per registered store, its databases, document and event types, and
+- Nine screens. Overview (one card per registered store, its databases, document and event types, and
   the PostgreSQL version). Documents (collections rail with estimated counts, column chooser, keyset
   paging, a search grammar that compiles to parameterised SQL with an index verdict and a "Show SQL"
-  disclosure, a JSON viewer, and — behind capabilities — editing with a round-trip diff, delete,
-  undelete and bulk delete). Query (a guarded Marten `where` clause mode that needs no capability, and a
+  disclosure, a JSON viewer, a "referenced by" panel counting what points at the document on screen,
+  and — behind capabilities — editing with a round-trip diff, delete, undelete and bulk delete).
+  Relationships (the store's document types as a foreign-key diagram, drawn from what `StoreOptions`
+  declares cross-checked against what `pg_constraint` actually holds, with an accessible table beside it
+  and no JavaScript). Query (a guarded Marten `where` clause mode that needs no capability, and a
   SQL console gated on `RunSql`). Events (streams, stream detail with a timeline and aggregate time
   travel, the global feed, event types, and dead letters). Projections (shard state and progression,
   daemon control, rebuilds behind a typed confirmation, high-water and progression correction). Schema
@@ -55,3 +58,9 @@
   it imposes no middleware-ordering requirement. Sub-path mounting moves the pages, the circuit, the
   framework script and the asset mirror together. No third-party UI, CSS or icon library, and no global
   styles: a host that adds the package and never maps it is the application it was.
+- The sample host carries a demo-data generator, in development or behind `--allow-data-generation`: a
+  cancellable background job with progress, an ETA and the daemon's lag that writes up to a million
+  documents and a million events across a quarter of a million streams, and a truncate that removes
+  exactly what it generated. The studio's own screens are measured against it on every integration run,
+  so a change that makes a page cost more at a million rows fails the build rather than being noticed
+  later.
