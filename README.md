@@ -336,6 +336,21 @@ drops. Saves are optimistically concurrent (`UpdateExpectedVersion` / `UpdateRev
 moved comes back as a conflict with nothing written. With `DeleteDocuments` you get delete (soft where
 the mapping says soft, hard otherwise), undelete, and a bulk delete over the selection.
 
+**Relationships** — the document types of the store as a graph: one node per registered type with its
+collection colour, its .NET type and a `reltuples` estimate, one arrow per foreign key. What
+`StoreOptions` declares and what `pg_constraint` actually holds are cross-checked, so an arrow is
+*declared and enforced*, *declared only* — configured, never applied, nothing enforcing it — or *in the
+database only*, which Marten does not know about and an apply under `CreateOrUpdate` would drop. Keys
+with an end outside the store's document types are listed rather than drawn, and a type hidden by
+`IsDocumentTypeVisible` appears nowhere at all. Clicking a node opens the collection; hovering an arrow
+names the column, the target and the delete action. Beside the picture — and, on a narrow screen,
+instead of it — a table carries the same relationships with the same links, which is also what a screen
+reader gets. There is no pan, no zoom and no JavaScript: the layout is computed on the server and is a
+pure function of the configuration, so the same store draws the same diagram every time. On a document's
+detail page, **Referenced by** names each collection that points at it and how many of its documents do
+— exact up to a thousand and "1,000+" beyond that, so the answer never costs a sequential scan — each row
+linking to that collection already filtered on this document.
+
 **Query** — two modes, and the asymmetry between them is the design. *Mode A, a Marten `where` clause*,
 is a read against one document type and needs no capability, so the service holds it to being a
 *clause*: no `;`, no statement of its own, and — without `RunSql` — no subquery, union, join, `lateral`,

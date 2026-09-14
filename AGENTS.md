@@ -488,6 +488,10 @@ samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpo
 tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in
 docs/                                    Long-form documentation linked from README.md; never packed
 docs/screenshots/                        The eight README screenshots, from the P2 UI verification run
+src/MartenStudio/Services/Relationships/      The relationship graph service, its DTOs and the SVG layout
+src/MartenStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
+tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, page and panel - no database
+tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both ways, visibility, bounded counts
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),

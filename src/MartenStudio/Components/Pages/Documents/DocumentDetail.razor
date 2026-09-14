@@ -5,8 +5,10 @@
 @using MartenStudio.Services.Json
 @using DocumentModel = MartenStudio.Services.Documents.DocumentDetail
 @using RelatedModel = MartenStudio.Services.Documents.RelatedDocuments
+@using ReferencedByModel = MartenStudio.Services.Relationships.ReferencedBy
 @implements IAsyncDisposable
 @inject IDocumentDataService Data
+@inject MartenStudio.Services.Relationships.IRelationshipDataService RelationshipData
 @inject IDocumentWriteService Writes
 @inject DocumentBrowserState Browser
 @inject StudioState State
@@ -131,6 +133,7 @@
             <div class="ms-split-pane ms-doc-detail-meta">
                 <DocumentMetadataPanel Model="detail" />
                 <RelatedDocumentsPanel Model="related" HrefFor="RelatedHref" />
+                <ReferencedBy Model="referencedBy" DocumentId="@Id" HrefFor="ReferencedHref" />
             </div>
         </div>
 
@@ -148,6 +151,7 @@
     private CancellationTokenSource? cts;
     private DocumentDetailResult? result;
     private RelatedModel related = RelatedModel.None;
+    private ReferencedByModel referencedBy = ReferencedByModel.None;
     private IReadOnlyList<DocumentIdProbe> probes = [];
     private bool probing;
     private bool streamExists;
@@ -246,6 +250,7 @@
         loading = true;
         probes = [];
         related = RelatedModel.None;
+        referencedBy = ReferencedByModel.None;
         streamExists = false;
         editing = false;
         editProbe = null;
@@ -272,6 +277,7 @@
                 // the id overload reads the row again to find out what it points at, which is a second
                 // round trip for a document already in hand.
                 related = await Data.GetRelatedAsync(scope, Alias, result.Detail!, token);
+                referencedBy = await RelationshipData.GetReferencedByAsync(scope, Alias, Id, token);
                 streamExists = await Data.StreamExistsAsync(scope, Id, token);
             }
         }
@@ -360,6 +366,15 @@
 
     private string RelatedHref(string alias, string id) =>
         DocumentLinks.ToDocument(Options.Value, State.ActiveScope, alias, id);
+
+    private string ReferencedHref(string alias, string? filter) =>
+        filter is null
+            ? DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias)
+            : DocumentLinks.ToCollection(
+                Options.Value,
+                State.ActiveScope,
+                alias,
+                new Dictionary<string, string?>(StringComparer.Ordinal) { ["q"] = filter });
 
     private static string FileName(DocumentModel detail) => detail.Alias + "-" + detail.Id + ".json";
 

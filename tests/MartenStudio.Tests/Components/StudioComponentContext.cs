@@ -65,6 +65,7 @@ internal class StudioComponentContext : BunitContext
         EventData = new FakeEventDataService();
         ProjectionData = new FakeProjectionDataService();
         NavBadges = new FakeNavIndicatorService();
+        RelationshipData = new FakeRelationshipDataService();
         AuthorizationService = new TestStoreAuthorizationService();
         AuthenticationState = new TestAuthenticationStateProvider();
 
@@ -85,6 +86,10 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<IEventDataService>(EventData);
         Services.AddSingleton<IProjectionDataService>(ProjectionData);
         Services.AddSingleton<INavIndicatorService>(NavBadges);
+
+        // Document detail renders the "referenced by" panel, so every detail test needs this one too. A
+        // test about the relationships screen registers its own instance through the hook, which wins.
+        Services.AddSingleton<MartenStudio.Services.Relationships.IRelationshipDataService>(RelationshipData);
 
         // Every live page builds its own loop from this, so the circuit's container never tracks one.
         Services.AddScoped<StudioLiveUpdatesFactory>();
@@ -148,6 +153,9 @@ internal class StudioComponentContext : BunitContext
 
     /// <summary>What the sidebar's badges are told.</summary>
     public FakeNavIndicatorService NavBadges { get; }
+
+    /// <summary>What document detail's "referenced by" panel and the relationships screen are given.</summary>
+    public FakeRelationshipDataService RelationshipData { get; }
 
     /// <summary>The policy engine, and the record of what it was asked.</summary>
     public TestStoreAuthorizationService AuthorizationService { get; }

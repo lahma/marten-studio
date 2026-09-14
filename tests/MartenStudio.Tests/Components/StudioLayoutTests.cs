@@ -213,6 +213,7 @@ public class StudioLayoutTests
             .Should().Equal(
                 "Overview",
                 "Documents",
+                "Relationships",
                 "Query",
                 "Streams",
                 "Feed",
@@ -240,6 +241,7 @@ public class StudioLayoutTests
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
             "",
             "documents",
+            "relationships",
             "query",
             "events/streams",
             "events/feed",
@@ -265,6 +267,7 @@ public class StudioLayoutTests
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
             "",
             "documents",
+            "relationships",
             "query",
             "events/streams",
             "events/feed",
@@ -390,7 +393,7 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.FindAll(".ms-nav-badge").Should().BeEmpty();
-        layout.FindAll("a.ms-nav-link").Should().HaveCount(11);
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(12);
         layout.Markup.Should().Contain(BodyMarker);
     }
 
