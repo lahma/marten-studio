@@ -335,6 +335,13 @@ tests/MartenStudio.Tests/Services/       Registry, scope resolver, audit log, te
 tests/MartenStudio.Tests/Components/     bUnit: StudioComponentContext, StudioMarkup and the page tests
 tests/MartenStudio.Tests/Support/        Test doubles shared by the tiers - never a mocking library
 tests/MartenStudio.Tests/Verify/         The approved API baseline; never hand-edited (hard rule 7)
+src/MartenStudio/Components/Json/        The JSON toolkit: viewer, raw view, editor, copy menu, diffs
+src/MartenStudio/Services/Json/          Flat model, path expressions, pretty printer, canonicalizer,
+                                         round-trip differ, C# record generator
+src/MartenStudio/Services/Query/         Search grammar, index advisor, the document list request
+tests/MartenStudio.Tests/Json/           Unit and bUnit tests for the JSON toolkit
+tests/MartenStudio.Tests/Sql/            SQL builders, guard theory, grammar, advisor - no database
+tests/MartenStudio.Integration.Tests/Sql/ Live Postgres: read-only session, builders, catalog, estimator
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),
