@@ -886,15 +886,28 @@ public class MartenApiSurfaceTest
     }
 
     /// <summary>
-    /// The one string-query overload that takes a runtime <see cref="Type"/>, which is the whole reason the
-    /// Query screen can run a <c>where</c> clause at all.
+    /// The one string-query overload that takes a runtime <see cref="Type"/> - which the studio no longer
+    /// calls, and the pin is kept to record why.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Every other <c>Query</c>/<c>QueryAsync</c> on <c>IQuerySession</c> is generic in the document type,
     /// and the studio only ever holds an <c>IDocumentType</c> - so without this member the Query screen
     /// would need <c>MakeGenericMethod</c> over a helper, which is what the plan assumed. It does not:
     /// <c>Marten.QuerySessionExtensions.QueryAsync(session, type, sql, token, parameters)</c> exists and
-    /// returns <c>Task&lt;IReadOnlyList&lt;object&gt;&gt;</c>. If it ever moves, Mode A is what breaks.
+    /// returns <c>Task&lt;IReadOnlyList&lt;object&gt;&gt;</c>.
+    /// </para>
+    /// <para>
+    /// <b>Mode A used it and no longer does (P6-fix).</b> The overload composes through
+    /// <c>UserSuppliedQueryHandler</c> and <c>DocumentStorage.Apply</c>, which build
+    /// <c>select … from &lt;table&gt; as d &lt;clause&gt;</c> and nothing else: <b>no tenant filter and no
+    /// soft-delete filter</b>, because a user-supplied string query bypasses the LINQ pipeline that adds
+    /// them. Proven live against Marten 9.35 on a conjoined, soft-deleted collection -
+    /// <c>session("acme").QueryAsync(type, "where 1 = 1")</c> returned acme's live rows, acme's deleted
+    /// rows and globex's rows together. The studio composes and runs its own statement instead; see
+    /// <c>QuerySqlComposer</c>. The pin stays because this is the fact a future reader needs before
+    /// reaching for the overload again.
+    /// </para>
     /// </remarks>
     [Fact]
     public void The_string_query_by_runtime_type_is_QuerySessionExtensions_QueryAsync()

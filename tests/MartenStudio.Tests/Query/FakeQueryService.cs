@@ -45,7 +45,11 @@ internal sealed class FakeQueryService : IQueryService
     /// <summary>Whether the last run saw its token cancelled.</summary>
     public bool Cancelled { get; private set; }
 
-    public FakeQueryService WithType(string alias, string typeName = "Person")
+    public FakeQueryService WithType(
+        string alias,
+        string typeName = "Person",
+        bool conjoined = false,
+        bool softDeleted = false)
     {
         DocumentTypes.Add(new QueryDocumentTypeInfo(
             alias,
@@ -54,7 +58,9 @@ internal sealed class FakeQueryService : IQueryService
             "studio",
             "mt_doc_" + alias,
             "\"studio\".\"mt_doc_" + alias + "\"",
-            ["Name"]));
+            ["Name"],
+            conjoined,
+            softDeleted));
 
         return this;
     }
@@ -82,8 +88,9 @@ internal sealed class FakeQueryService : IQueryService
         }
 
         return MartenResult ?? new MartenQueryResult(
-            request.Alias, [], "select d.id, d.data from \"studio\".\"mt_doc_person\" as d", [],
-            TimeSpan.FromMilliseconds(3), 50, true, null, null);
+            request.Alias, [],
+            "select d.\"id\", d.\"data\"::text\nfrom \"studio\".\"mt_doc_person\" as d\nwhere 1 = 1\nlimit @limit",
+            ["@limit = 50"], TimeSpan.FromMilliseconds(3), 50, true, null, null);
     }
 
     public async Task<SqlConsoleResult> RunSqlAsync(

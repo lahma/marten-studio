@@ -2,9 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 
-using Marten;
 using Marten.Schema;
-using Marten.Services;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
@@ -22,12 +20,19 @@ namespace MartenStudio.Services.Query;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Mode A - a Marten <c>where</c> clause - is a read and needs no capability.</b> It runs through
-/// <c>Marten.QuerySessionExtensions.QueryAsync(session, Type, sql, token, parameters)</c>, which is the
-/// one string-query overload that takes a runtime <see cref="Type" /> rather than a generic parameter -
-/// exactly what a studio that only ever holds an <c>IDocumentType</c> needs, and why no
-/// <c>MakeGenericMethod</c> appears here. Documents come back as CLR objects and are serialized with
-/// <c>store.Options.Serializer()</c> (AGENTS.md hard rule 10), never with a serializer of our own.
+/// <b>Mode A - a Marten <c>where</c> clause - is a read and needs no capability, and it runs the studio's
+/// own composed SQL.</b> It used to run through
+/// <c>Marten.QuerySessionExtensions.QueryAsync(session, Type, sql, token, parameters)</c>, the one
+/// string-query overload that takes a runtime <see cref="Type" />. That overload composes through
+/// <c>UserSuppliedQueryHandler</c> and <c>DocumentStorage.Apply</c>, which produce
+/// <c>select … from &lt;table&gt; as d &lt;clause&gt;</c> with <b>no tenant filter and no soft-delete
+/// filter</b> - so on a conjoined, soft-deleted collection a clause of <c>where 1 = 1</c> typed by
+/// somebody scoped to one tenant returned every tenant's rows and every deleted row. The studio therefore
+/// composes the statement itself (<see cref="QuerySqlComposer.Compose" />), with its own predicates in
+/// front of the visitor's, and runs it on <c>IMartenDatabase.CreateConnection(ConnectionUsage.Read)</c> -
+/// which is also what makes the SQL tab, the command that ran and the statement <c>EXPLAIN</c> planned all
+/// the same text. Rows come back as <c>data::text</c> and are never deserialized, so no property can be
+/// dropped on the way to the screen (AGENTS.md hard rule 10 the easy way: nothing serializes).
 /// </para>
 /// <para>
 /// <b>Mode B - the SQL console - is the one that is gated</b>, in this order, and the order is the
@@ -53,10 +58,12 @@ internal sealed class QueryService : IQueryService
     /// <summary>What the audit ring calls a SQL console run.</summary>
     internal const string RunSqlAction = "RunSql";
 
-    /// <summary>What the audit ring calls a refused Marten where clause.</summary>
+    /// <summary>What the audit ring calls a Marten where clause.</summary>
     /// <remarks>
-    /// Only refusals are recorded under it. A clause that runs is a read like any other page's read, and a
-    /// ring that filled with every filter somebody typed would bury the entries that matter.
+    /// <b>Every run, not only the refusals.</b> A clause is arbitrary SQL against one collection, run with
+    /// no capability; "who read what, with which filter, in which tenant" is exactly the question an
+    /// incident asks, and a read is cheap to record. Refusals are written the same way with
+    /// <c>succeeded: false</c> (hard rule 5).
     /// </remarks>
     internal const string MartenQueryAction = "MartenQuery";
 
@@ -69,6 +76,7 @@ internal sealed class QueryService : IQueryService
     private readonly StudioAuthorization authorization;
     private readonly StudioCapabilityGuard capabilities;
     private readonly StudioActionLog audit;
+    private readonly ColumnCatalog columnCatalog;
     private readonly IOptions<MartenStudioOptions> options;
     private readonly ILogger<QueryService> logger;
     private readonly AuthenticationStateProvider authenticationStateProvider;
@@ -78,6 +86,7 @@ internal sealed class QueryService : IQueryService
         StudioAuthorization authorization,
         StudioCapabilityGuard capabilities,
         StudioActionLog audit,
+        ColumnCatalog columnCatalog,
         IOptions<MartenStudioOptions> options,
         ILogger<QueryService> logger,
         AuthenticationStateProvider authenticationStateProvider)
@@ -86,6 +95,7 @@ internal sealed class QueryService : IQueryService
         this.authorization = authorization;
         this.capabilities = capabilities;
         this.audit = audit;
+        this.columnCatalog = columnCatalog;
         this.options = options;
         this.logger = logger;
         this.authenticationStateProvider = authenticationStateProvider;
@@ -113,7 +123,9 @@ internal sealed class QueryService : IQueryService
                 table.Schema,
                 table.Table,
                 table.QualifiedName,
-                [.. table.DuplicatedColumns.Select(static x => x.MemberPath)]));
+                [.. table.DuplicatedColumns.Select(static x => x.MemberPath)],
+                table.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined,
+                table.SoftDeleteEnabled));
         }
 
         types.Sort(static (left, right) => CompareAliases(left.Alias, right.Alias));
@@ -139,95 +151,164 @@ internal sealed class QueryService : IQueryService
         DocumentTableInfo table = DocumentTableInfo.FromDocumentType(documentType);
         MartenStudioOptions value = options.Value;
         int limit = Math.Clamp(request.PageSize ?? value.DefaultPageSize, 1, value.MaxPageSize);
-
-        ComposedQuery composed = QuerySqlComposer.Compose(table.QualifiedName, request.WhereClause, limit);
+        string? tenantId = scope.TenantId is { Length: > 0 } scoped ? scoped : null;
+        string user = UserName();
+        string clause = request.WhereClause ?? string.Empty;
+        string target = Target(clause);
 
         // A where clause needs no capability, so it has to be a clause. Without RunSql it may read only the
         // table that was picked; with RunSql the nested-read rules are lifted, because everything they
-        // refuse the same person could type into the console. The two shape rules - one statement, and not
-        // a statement of its own - hold either way: Mode A runs through a Marten session rather than the
-        // console's read-only transaction, so a second statement here would really write.
+        // refuse the same person could type into the console. The shape rules - one statement, not a
+        // statement of its own, and a tail the composer can place - hold either way: Mode A runs outside
+        // the console's read-only transaction, so a second statement here would really write.
         bool mayRunSql = await MayRunSqlAsync(scope, cancellationToken).ConfigureAwait(false);
         SqlGuardResult clauseGuard = QuerySqlComposer.CheckClause(request.WhereClause, mayRunSql);
 
         if (!clauseGuard.Allowed)
         {
             SqlRejection rejected = SqlRejection.FromGuard(clauseGuard);
-            string refusedTarget = Target(request.WhereClause);
-            string refusedUser = UserName();
+            ComposedQuery refusedShape = QuerySqlComposer.Compose(
+                table, request.WhereClause, limit, tenantId, request.IncludeDeleted);
 
-            audit.Record(MartenQueryAction, refusedTarget, succeeded: false, rejected.Message, null, scope);
-            logger.SqlRejected(
-                refusedUser, scope.StoreKey, scope.DatabaseId, rejected.Message, request.WhereClause ?? string.Empty);
+            audit.Record(MartenQueryAction, target, succeeded: false, rejected.Message, null, scope);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, rejected.Message, clause);
 
             return new MartenQueryResult(
-                documentType.Alias, [], composed.Statement, [], TimeSpan.Zero, limit, composed.LimitApplied,
-                null, ExplainResult.Unavailable("The clause was never sent."), rejected);
+                documentType.Alias, [], refusedShape.Statement, refusedShape.DescribeParameters(), TimeSpan.Zero,
+                limit, refusedShape.LimitApplied, null,
+                ExplainResult.Unavailable("The clause was never sent."), ScopeOf(refusedShape, table),
+                refusedShape.Predicate, rejected);
         }
 
-        // Tenancy comes from the scope, and only from the scope. ForDatabase(database) is Marten's default
-        // tenant; ForDatabase(tenantId, database) is the one the selector picked. Both are static factories
-        // on Marten.Services.SessionOptions (plan Appendix B).
-        SessionOptions sessionOptions = scope.TenantId is { Length: > 0 } tenantId
-            ? SessionOptions.ForDatabase(tenantId, resolved.Database)
-            : SessionOptions.ForDatabase(resolved.Database);
+        await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-        // Every command the studio issues carries a timeout (plan §4.8). A clause somebody is still writing
-        // is exactly the kind of query that turns into a sequential scan of ten million rows.
-        sessionOptions.Timeout = (int) Math.Ceiling(value.QueryTimeout.TotalSeconds);
+        // The configuration describes the table Marten would create; the studio reads one somebody else
+        // migrated. Reconciling before the predicates are written is what keeps a physical tenant_id or
+        // mt_deleted the mapping has forgotten about from silently going unfiltered. The catalog is cached,
+        // so this is one information_schema read per table per process.
+        table = table.WithPhysicalColumns(
+            await columnCatalog.GetAsync(connection, table.Schema, table.Table, cancellationToken)
+                .ConfigureAwait(false));
 
+        ComposedQuery composed = QuerySqlComposer.Compose(
+            table, request.WhereClause, limit, tenantId, request.IncludeDeleted);
+
+        MartenQueryScope queryScope = ScopeOf(composed, table);
+        string statement = composed.Statement;
         var stopwatch = Stopwatch.StartNew();
-        IReadOnlyList<object> documents;
+        List<MartenQueryRow> rows = [];
 
-        await using (IQuerySession session = resolved.Store.QuerySession(sessionOptions))
+        try
         {
-            try
+            await using NpgsqlCommand command = new(composed.Statement, connection)
             {
-                documents = await session
-                    .QueryAsync(documentType.DocumentType, composed.EffectiveClause, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException
-                && FindPostgresException(exception) is { } postgres)
-            {
-                stopwatch.Stop();
+                // Every command the studio issues carries a timeout (plan §4.8). A clause somebody is still
+                // writing is exactly the kind of query that turns into a sequential scan of ten million rows.
+                CommandTimeout = (int) Math.Ceiling(value.QueryTimeout.TotalSeconds),
+            };
 
-                // A malformed clause is a value, not a failure: it is the single most common thing that
-                // happens on this page, and the person typing needs the SQLSTATE and the position.
-                return new MartenQueryResult(
-                    documentType.Alias,
-                    [],
-                    composed.Statement,
-                    [],
-                    stopwatch.Elapsed,
-                    limit,
-                    composed.LimitApplied,
-                    ToSqlError(postgres),
-                    await TryExplainAsync(scope, composed.Statement, cancellationToken).ConfigureAwait(false));
+            composed.Bind(command);
+
+            await using NpgsqlDataReader reader = await command
+                .ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                rows.Add(ReadRow(reader, composed));
             }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException
+            && FindPostgresException(exception) is { } postgres)
+        {
+            stopwatch.Stop();
+
+            // A malformed clause is a value, not a failure: it is the single most common thing that
+            // happens on this page, and the person typing needs the SQLSTATE and the position.
+            string reason = QuerySqlErrors.Summarize(ToSqlError(postgres));
+
+            audit.Record(MartenQueryAction, target, succeeded: false, reason, null, scope);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, reason, statement);
+
+            return new MartenQueryResult(
+                documentType.Alias,
+                [],
+                composed.Statement,
+                composed.DescribeParameters(),
+                stopwatch.Elapsed,
+                composed.Limit,
+                composed.LimitApplied,
+                ToSqlError(postgres),
+                await TryExplainAsync(scope, composed, cancellationToken).ConfigureAwait(false),
+                queryScope,
+                composed.Predicate);
+        }
+        catch (OperationCanceledException)
+        {
+            audit.Record(MartenQueryAction, target, succeeded: false, "cancelled", null, scope);
+            throw;
         }
 
         stopwatch.Stop();
 
-        Marten.ISerializer serializer = resolved.Store.Options.Serializer();
-        List<MartenQueryRow> rows = new(documents.Count);
+        // Successful reads are audited too. A clause is arbitrary SQL against one collection that needs no
+        // capability at all, so "who read what, in which tenant" is precisely the question an incident asks.
+        long elapsedMilliseconds = (long) stopwatch.Elapsed.TotalMilliseconds;
 
-        foreach (object document in documents)
-        {
-            rows.Add(new MartenQueryRow(IdOf(documentType, document), serializer.ToJson(document)));
-        }
+        audit.Record(
+            MartenQueryAction, target, succeeded: true, Outcome(rows.Count, stopwatch.Elapsed), null, scope);
+        logger.SqlExecuted(
+            user, scope.StoreKey, scope.DatabaseId, elapsedMilliseconds, rows.Count, statement);
 
         return new MartenQueryResult(
             documentType.Alias,
             rows,
             composed.Statement,
-            [],
+            composed.DescribeParameters(),
             stopwatch.Elapsed,
-            limit,
+            composed.Limit,
             composed.LimitApplied,
             null,
-            await TryExplainAsync(scope, composed.Statement, cancellationToken).ConfigureAwait(false));
+            await TryExplainAsync(scope, composed, cancellationToken).ConfigureAwait(false),
+            queryScope,
+            composed.Predicate);
     }
+
+    /// <summary>One row of a composed Mode A read, straight out of the columns the composer selected.</summary>
+    /// <remarks>
+    /// <c>data</c> arrives as text and stays text. There is no CLR type to deserialize into on this path
+    /// and, deliberately, no attempt to find one: the page renders JSON strings, and a document that
+    /// round-tripped through a type would quietly lose every property the type does not have (D7 is about
+    /// making that loss visible when it is unavoidable, not about doing it for a read).
+    /// </remarks>
+    private static MartenQueryRow ReadRow(NpgsqlDataReader reader, ComposedQuery composed)
+    {
+        object? id = reader.IsDBNull(ComposedQuery.IdOrdinal) ? null : reader.GetValue(ComposedQuery.IdOrdinal);
+        string json = reader.IsDBNull(ComposedQuery.DataOrdinal)
+            ? string.Empty
+            : reader.GetString(ComposedQuery.DataOrdinal);
+
+        string? tenant = composed.TenantOrdinal >= 0 && !reader.IsDBNull(composed.TenantOrdinal)
+            ? reader.GetString(composed.TenantOrdinal)
+            : null;
+
+        bool? deleted = composed.DeletedOrdinal >= 0 && !reader.IsDBNull(composed.DeletedOrdinal)
+            ? reader.GetBoolean(composed.DeletedOrdinal)
+            : null;
+
+        return new MartenQueryRow(
+            id is null ? string.Empty : Convert.ToString(id, CultureInfo.InvariantCulture) ?? string.Empty,
+            json,
+            tenant,
+            deleted);
+    }
+
+    private static MartenQueryScope ScopeOf(ComposedQuery composed, DocumentTableInfo table) =>
+        new(composed.TenantId, composed.CrossTenant, composed.Deleted, table.SoftDeleteEnabled);
+
+    private static string Outcome(int rows, TimeSpan duration) =>
+        rows.ToString(CultureInfo.InvariantCulture) + " rows in " +
+        ((long) duration.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + " ms";
 
     /// <inheritdoc />
     public async Task<SqlConsoleResult> RunSqlAsync(
@@ -295,13 +376,20 @@ internal sealed class QueryService : IQueryService
     /// The plan for a composed Mode A statement, or the reason there is not one.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Every refusal is caught here and becomes a value. A plan is a courtesy on a page whose main job
     /// already succeeded, and a studio that threw away a working result because the explain was not
     /// permitted would be worse than one that says "no plan, and here is why".
+    /// </para>
+    /// <para>
+    /// <b>The same statement, with the same values bound.</b> The composed statement carries <c>@tenant</c>
+    /// and <c>@limit</c>, so the explain has to bind them too - otherwise Postgres answers "there is no
+    /// parameter $1" and the page would be showing a plan for something other than what ran.
+    /// </para>
     /// </remarks>
     private async Task<ExplainResult> TryExplainAsync(
         StudioScope scope,
-        string statement,
+        ComposedQuery composed,
         CancellationToken cancellationToken)
     {
         if (!capabilities.IsEnabled(StudioCapability.RunSql))
@@ -317,9 +405,10 @@ internal sealed class QueryService : IQueryService
         {
             SqlConsoleResult result = await ExecuteStatementAsync(
                     scope,
-                    QuerySqlComposer.Explain(statement, json: true),
+                    QuerySqlComposer.Explain(composed.Statement, json: true),
                     ExplainAction,
-                    cancellationToken)
+                    cancellationToken,
+                    composed.Bind)
                 .ConfigureAwait(false);
 
             if (result.Rejection is { } rejection)
@@ -347,14 +436,24 @@ internal sealed class QueryService : IQueryService
     }
 
     /// <summary>
-    /// The gate, and then the statement. Everything that reaches Postgres from this service goes through
-    /// here.
+    /// The gate, and then the statement. Everything that reaches Postgres through the console path goes
+    /// through here.
     /// </summary>
+    /// <param name="scope">The scope the statement runs in.</param>
+    /// <param name="statement">The statement, exactly as it will be sent.</param>
+    /// <param name="action">What the audit ring calls it.</param>
+    /// <param name="cancellationToken">The token.</param>
+    /// <param name="bind">
+    /// Binds the statement's parameters, when it has any. The console itself never does - what somebody
+    /// typed is sent verbatim - but a Mode A <c>EXPLAIN</c> has to bind the very same values the query
+    /// bound, or it would be planning a different statement.
+    /// </param>
     private async Task<SqlConsoleResult> ExecuteStatementAsync(
         StudioScope scope,
         string statement,
         string action,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<NpgsqlCommand>? bind = null)
     {
         MartenStudioOptions value = options.Value;
         string target = Target(statement);
@@ -402,7 +501,7 @@ internal sealed class QueryService : IQueryService
             return SqlConsoleResult.Refused(rejection, value.MaxSqlConsoleRows);
         }
 
-        return await RunAsync(resolved, scope, statement, action, value, user, cancellationToken)
+        return await RunAsync(resolved, scope, statement, action, value, user, bind, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -413,6 +512,7 @@ internal sealed class QueryService : IQueryService
         string action,
         MartenStudioOptions value,
         string user,
+        Action<NpgsqlCommand>? bind,
         CancellationToken cancellationToken)
     {
         List<string> notices = [];
@@ -443,7 +543,7 @@ internal sealed class QueryService : IQueryService
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             SqlResultSet result = await session
-                .ExecuteAsync(connection, statement, cancellationToken)
+                .ExecuteAsync(connection, statement, bind, cancellationToken)
                 .ConfigureAwait(false);
 
             long elapsed = (long) result.Duration.TotalMilliseconds;
@@ -457,8 +557,7 @@ internal sealed class QueryService : IQueryService
             }
             else
             {
-                string outcome = result.Rows.Count.ToString(CultureInfo.InvariantCulture) + " rows in " +
-                    elapsed.ToString(CultureInfo.InvariantCulture) + " ms";
+                string outcome = Outcome(result.Rows.Count, result.Duration);
 
                 audit.Record(action, target, succeeded: true, outcome, StudioCapability.RunSql, scope);
                 logger.SqlExecuted(user, scope.StoreKey, scope.DatabaseId, elapsed, result.Rows.Count, statement);
@@ -596,38 +695,6 @@ internal sealed class QueryService : IQueryService
             || underlying == typeof(DateTimeOffset)
             || underlying == typeof(DateOnly)
             || underlying == typeof(Guid);
-    }
-
-    /// <summary>
-    /// The document's id as text, read through <c>IDocumentType.IdMember</c> - which is the only thing
-    /// that knows where an id lives on a type the studio has never seen.
-    /// </summary>
-    /// <remarks>
-    /// A strong-typed id renders as whatever its own <c>ToString()</c> says, which is what a link to the
-    /// document viewer needs anyway. A member that will not read is an empty id rather than a failed
-    /// query: one unreadable row must not lose the other forty-nine.
-    /// </remarks>
-    private static string IdOf(IDocumentType documentType, object document)
-    {
-        try
-        {
-            object? value = documentType.IdMember switch
-            {
-                PropertyInfo property => property.GetValue(document),
-                FieldInfo field => field.GetValue(document),
-                _ => null,
-            };
-
-            return value is null ? string.Empty : Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
-        }
-        catch (TargetInvocationException)
-        {
-            return string.Empty;
-        }
-        catch (MethodAccessException)
-        {
-            return string.Empty;
-        }
     }
 
     /// <summary>

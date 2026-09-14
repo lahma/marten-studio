@@ -1,3 +1,5 @@
+using System.Reflection;
+
 using Bunit;
 
 using MartenStudio.Components.Pages.Query;
@@ -5,6 +7,8 @@ using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
+
+using Microsoft.JSInterop;
 
 using QueryPage = MartenStudio.Components.Pages.Query.Query;
 
@@ -67,8 +71,9 @@ public class QueryPageTests
         service.MartenResult = new MartenQueryResult(
             "person",
             [new MartenQueryRow("42", """{"Name":"Alice"}""")],
-            "select d.id, d.data from \"studio\".\"mt_doc_person\" as d where data ->> 'Name' = 'Alice' limit 50",
-            [],
+            "select d.\"id\", d.\"data\"::text\nfrom \"studio\".\"mt_doc_person\" as d\nwhere 1 = 1\n" +
+            "  and (\n    data ->> 'Name' = 'Alice'\n  )\nlimit @limit",
+            ["@limit = 50"],
             TimeSpan.FromMilliseconds(4),
             50,
             true,
@@ -84,8 +89,10 @@ public class QueryPageTests
         service.MartenRequests[0].Alias.Should().Be("person");
         service.MartenRequests[0].WhereClause.Should().Be("where data ->> 'Name' = 'Alice'");
         service.MartenRequests[0].PageSize.Should().Be(context.Options.DefaultPageSize);
+        service.MartenRequests[0].IncludeDeleted.Should().Be(DeletedFilter.Exclude, "that is the default");
 
-        page.Find(".ms-query-sql").TextContent.Should().Contain("mt_doc_person").And.Contain("limit 50");
+        page.Find(".ms-query-sql").TextContent.Should().Contain("mt_doc_person").And.Contain("limit @limit");
+        page.Find(".ms-query-sql-note").TextContent.Should().Contain("@limit = 50", "the bindings are listed");
         page.Find(".ms-query-row-id a").GetAttribute("href").Should().Be("documents/person/doc?id=42");
         page.FindAll(".ms-json-tree").Should().NotBeEmpty("each row renders the document in the JSON viewer");
     }
@@ -98,19 +105,23 @@ public class QueryPageTests
     public void A_malformed_clause_comes_back_as_a_postgres_error_with_the_position_highlighted()
     {
         const string clause = "where data ->> 'Name' == 'Alice'";
-        const string statement = "select d.id, d.data from \"studio\".\"mt_doc_person\" as d " + clause + " limit 50";
+        const string predicate = "data ->> 'Name' == 'Alice'";
+        const string statement = "select d.\"id\", d.\"data\"::text\nfrom \"studio\".\"mt_doc_person\" as d\n" +
+            "where 1 = 1\n  and (\n    " + predicate + "\n  )\nlimit @limit";
 
         FakeQueryService service = WithPerson();
         service.MartenResult = new MartenQueryResult(
             "person",
             [],
             statement,
-            [],
+            ["@limit = 50"],
             TimeSpan.FromMilliseconds(2),
             50,
             true,
             new SqlError("42601", "syntax error at or near \"=\"", statement.IndexOf("==", StringComparison.Ordinal) + 2, null, null),
-            null);
+            null,
+            null,
+            predicate);
 
         using StudioComponentContext context = CreateContext(service);
 
@@ -382,6 +393,150 @@ public class QueryPageTests
         page.Find("#ms-query-where").GetAttribute("value").Should().Be(huge);
         service.MartenRequests.Should().ContainSingle().Which.WhereClause.Should().Be(huge);
     }
+
+    // ------------------------------------------------------------------------------------------------
+    // Tenancy and soft delete - the half of a Mode A result that is about who may see what
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The tri-state is offered only where there is something to ask about, and what it is set to reaches
+    /// the service rather than only the screen.
+    /// </summary>
+    [Fact]
+    public void The_deleted_tri_state_appears_only_for_a_soft_deleted_type_and_travels_with_the_request()
+    {
+        FakeQueryService service = new FakeQueryService()
+            .WithType("person")
+            .WithType("invoice", "Invoice", softDeleted: true);
+
+        using StudioComponentContext context = CreateContext(service);
+
+        var page = context.Render<QueryPage>();
+
+        page.FindAll("#ms-query-deleted").Should().BeEmpty("person is not soft-deleted");
+
+        page.Find("#ms-query-type").Change("invoice");
+        page.Find("#ms-query-deleted").Change(nameof(DeletedFilter.Only));
+        RunEditor(page, "ms-query-where", "where 1 = 1");
+
+        service.MartenRequests.Should().ContainSingle()
+            .Which.IncludeDeleted.Should().Be(DeletedFilter.Only);
+    }
+
+    /// <summary>
+    /// A grid that is quietly showing every tenant is the failure the chips exist to prevent, so the page
+    /// says it twice: as a warning chip beside the row count, and as a message in the Messages tab.
+    /// </summary>
+    [Fact]
+    public void A_cross_tenant_result_says_so_in_the_header_and_in_the_messages()
+    {
+        FakeQueryService service = new FakeQueryService().WithType("person", conjoined: true);
+        service.MartenResult = new MartenQueryResult(
+            "person",
+            [new MartenQueryRow("42", """{"Name":"Alice"}""", "acme"), new MartenQueryRow("43", "{}", "globex")],
+            "select …",
+            [],
+            TimeSpan.FromMilliseconds(1),
+            50,
+            true,
+            null,
+            null,
+            new MartenQueryScope(null, CrossTenant: true, DeletedFilter.Exclude, SoftDeleted: false));
+
+        using StudioComponentContext context = CreateContext(service);
+
+        var page = context.Render<QueryPage>();
+        RunEditor(page, "ms-query-where", "where 1 = 1");
+
+        page.Find(".ms-query-scope-chip").TextContent.Trim().Should().Be("all tenants");
+        page.Find(".ms-query-scope-chip").ClassList.Should().Contain("ms-chip-warning");
+        page.FindAll(".ms-query-row-tenant").Select(x => x.TextContent).Should().Equal("acme", "globex");
+    }
+
+    [Fact]
+    public void A_tenanted_result_names_the_tenant_it_was_filtered_to()
+    {
+        FakeQueryService service = new FakeQueryService().WithType("person", conjoined: true, softDeleted: true);
+        service.MartenResult = new MartenQueryResult(
+            "person",
+            [new MartenQueryRow("42", "{}", "acme", IsDeleted: true)],
+            "select …",
+            ["@tenant = 'acme'", "@limit = 50"],
+            TimeSpan.FromMilliseconds(1),
+            50,
+            true,
+            null,
+            null,
+            new MartenQueryScope("acme", CrossTenant: false, DeletedFilter.Only, SoftDeleted: true));
+
+        using StudioComponentContext context = CreateContext(service);
+
+        var page = context.Render<QueryPage>();
+        RunEditor(page, "ms-query-where", "where 1 = 1");
+
+        page.FindAll(".ms-query-scope-chip").Select(x => x.TextContent.Trim())
+            .Should().Equal("tenant acme", "deleted only");
+        page.Find(".ms-query-row-deleted").TextContent.Should().Be("deleted");
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Losing the browser
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The editor is disposed when its page closes, which is exactly when the circuit has usually already
+    /// gone - and a disconnected circuit answers interop with <c>JSDisconnectedException</c>, which derives
+    /// from <see cref="Exception" /> and from none of the types a <c>catch (JSException)</c> list names.
+    /// Unhandled, it escapes <c>DisposeAsync</c> and takes the <see cref="DotNetObjectReference{T}" /> with
+    /// it - an interop registration leaked per page view, for a page that was only being closed.
+    /// </summary>
+    [Fact]
+    public async Task The_editor_survives_a_circuit_that_disconnected_before_it_was_disposed()
+    {
+        using StudioComponentContext context = CreateContext(WithPerson());
+
+        context.JSInterop.Setup<bool>("martenStudio.query.enhanceEditor", _ => true).SetResult(true);
+        context.JSInterop.SetupVoid("martenStudio.query.releaseEditor", _ => true)
+            .SetException(new JSDisconnectedException("The circuit has disconnected."));
+
+        IRenderedComponent<QueryEditor> editor = context.Render<QueryEditor>(
+            parameters => parameters.Add(p => p.EditorId, "ms-query-where"));
+
+        QueryEditor instance = editor.Instance;
+
+        Func<Task> dispose = context.DisposeComponentsAsync;
+
+        await dispose.Should().NotThrowAsync(
+            "a page being closed must not turn into an unhandled exception on the server");
+
+        context.JSInterop.Invocations["martenStudio.query.releaseEditor"].Should().ContainSingle(
+            "otherwise this test never reaches the throwing call and proves nothing");
+
+        SelfReferenceOf(instance).Should().BeNull(
+            "the DotNetObjectReference is released in a finally, whatever JavaScript did");
+    }
+
+    /// <summary>
+    /// The same, for the registration call: a circuit can disconnect between the render and the first
+    /// <c>OnAfterRenderAsync</c>, and the only cost of that is keyboard chords the page never promised.
+    /// </summary>
+    [Fact]
+    public void The_editor_still_renders_when_registering_its_key_handler_disconnects()
+    {
+        using StudioComponentContext context = CreateContext(WithPerson());
+
+        context.JSInterop.Setup<bool>("martenStudio.query.enhanceEditor", _ => true)
+            .SetException(new JSDisconnectedException("The circuit has disconnected."));
+
+        var page = context.Render<QueryPage>();
+
+        page.Find("#ms-query-where").Should().NotBeNull("the textarea and its buttons still work");
+    }
+
+    private static object? SelfReferenceOf(QueryEditor editor) =>
+        typeof(QueryEditor)
+            .GetField("selfReference", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(editor);
 
     private static void RunEditor(IRenderedComponent<QueryPage> page, string editorId, string text)
     {

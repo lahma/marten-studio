@@ -31,6 +31,21 @@ public class QueryTag
     public string Label { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// A conjoined-tenancy, soft-deleted document type - the shape that proved Mode A was leaking.
+/// </summary>
+/// <remarks>
+/// Both at once, and deliberately. Marten's string-query path composes neither a tenant filter nor a
+/// soft-delete filter, so this is the one collection where "the studio composes its own statement" is the
+/// difference between showing one tenant's live rows and showing everybody's, deleted included.
+/// </remarks>
+public class QueryTicket
+{
+    public Guid Id { get; set; }
+
+    public string Subject { get; set; } = string.Empty;
+}
+
 /// <summary>An event, so the event tables exist and the <c>mt_events</c> example is a statement that runs.</summary>
 /// <param name="Name">Who joined.</param>
 public record QueryPersonJoined(string Name);
@@ -83,8 +98,30 @@ internal sealed class QueryHarness : IAsyncDisposable
     /// <summary>The schema this harness owns.</summary>
     public string Schema { get; }
 
-    /// <summary>The scope every call is made for.</summary>
+    /// <summary>The scope every call is made for: no tenant, which is the cross-tenant view.</summary>
     public StudioScope Scope { get; } = new(MartenStoreRegistry.DefaultStoreKey, string.Empty, null);
+
+    /// <summary>The same scope, narrowed to one tenant the way the scope selector narrows it.</summary>
+    public static StudioScope ScopeFor(string tenantId) =>
+        new(MartenStoreRegistry.DefaultStoreKey, string.Empty, tenantId);
+
+    /// <summary>The tenant that owns most of the seeded tickets.</summary>
+    public const string Acme = "acme";
+
+    /// <summary>The other tenant, which nothing scoped to <see cref="Acme" /> may ever see.</summary>
+    public const string Globex = "globex";
+
+    /// <summary>The live ticket <see cref="Acme" /> owns.</summary>
+    public static Guid AcmeLive { get; } = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+
+    /// <summary>The soft-deleted ticket <see cref="Acme" /> owns.</summary>
+    public static Guid AcmeDeleted { get; } = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000002");
+
+    /// <summary>The live ticket <see cref="Globex" /> owns.</summary>
+    public static Guid GlobexLive { get; } = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000001");
+
+    /// <summary>The soft-deleted ticket <see cref="Globex" /> owns.</summary>
+    public static Guid GlobexDeleted { get; } = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
 
     /// <summary>The registered query service - the same object a host would resolve.</summary>
     public IQueryService Queries => scope.ServiceProvider.GetRequiredService<IQueryService>();
@@ -124,6 +161,7 @@ internal sealed class QueryHarness : IAsyncDisposable
             options.AutoCreateSchemaObjects = AutoCreate.All;
             options.Schema.For<QueryPerson>().Duplicate(x => x.Name);
             options.RegisterDocumentType<QueryTag>();
+            options.Schema.For<QueryTicket>().MultiTenanted().SoftDeleted();
         });
 
         services.AddMartenStudio(options =>
@@ -161,6 +199,31 @@ internal sealed class QueryHarness : IAsyncDisposable
         session.Events.StartStream(Guid.NewGuid(), new QueryPersonJoined("Alice"));
 
         await session.SaveChangesAsync();
+
+        await SeedTicketsAsync(Acme, AcmeLive, AcmeDeleted);
+        await SeedTicketsAsync(Globex, GlobexLive, GlobexDeleted);
+    }
+
+    /// <summary>
+    /// One live and one soft-deleted ticket per tenant, written through Marten so the tenancy and the
+    /// delete are exactly what Marten's own write path produces.
+    /// </summary>
+    private async Task SeedTicketsAsync(string tenantId, Guid live, Guid deleted)
+    {
+        await using (IDocumentSession session = Store.LightweightSession(tenantId))
+        {
+            session.Store(
+                new QueryTicket { Id = live, Subject = tenantId + " live" },
+                new QueryTicket { Id = deleted, Subject = tenantId + " deleted" });
+
+            await session.SaveChangesAsync();
+        }
+
+        await using IDocumentSession remover = Store.LightweightSession(tenantId);
+
+        remover.Delete<QueryTicket>(deleted);
+
+        await remover.SaveChangesAsync();
     }
 
     public async ValueTask DisposeAsync()

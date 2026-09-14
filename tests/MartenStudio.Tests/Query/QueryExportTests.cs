@@ -97,4 +97,97 @@ public class QueryExportTests
         csv[0].Should().Be("id,document");
         csv[2].Should().Contain("\"\"Bob, of course\"\"", "a comma inside a field means the field is quoted");
     }
+
+    // ------------------------------------------------------------------------------------------------
+    // CSV formula injection. RFC 4180 says nothing about this, and it is the thing that gets people hurt.
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A spreadsheet reads a cell beginning <c>=</c>, <c>@</c>, a tab or a carriage return as a formula,
+    /// and <c>=cmd|' /C calc'!A0</c> is the canonical demonstration: a string somebody stored in a document
+    /// becomes a program on the machine of whoever opened the export. The apostrophe is what stops it.
+    /// </summary>
+    [Theory]
+    [InlineData("=cmd|' /C calc'!A0")]
+    [InlineData("@SUM(1+9)*cmd|' /C calc'!A0")]
+    [InlineData("\t=1+1")]
+    [InlineData("\r=1+1")]
+    [InlineData("=1+1")]
+    [InlineData("-2+3")]
+    [InlineData("+1-1")]
+    [InlineData("-cmd|' /C calc'!A0")]
+    public void A_cell_that_a_spreadsheet_would_run_is_prefixed_with_an_apostrophe(string dangerous)
+    {
+        QueryExport.Neutralize(dangerous).Should().Be("'" + dangerous);
+    }
+
+    /// <summary>
+    /// The deliberate exception, and the trade-off it buys: a cell that is <em>entirely</em> a plain number
+    /// is left alone, so an export of negative numbers is still an export of numbers rather than of text.
+    /// Anything else starting with a sign - which is every shape that is a formula rather than a number -
+    /// is prefixed.
+    /// </summary>
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("-1.5")]
+    [InlineData("+3.25")]
+    [InlineData("-1.5e-10")]
+    [InlineData("42")]
+    [InlineData("")]
+    [InlineData("Alice")]
+    [InlineData("""{"Name":"Alice"}""")]
+    public void A_value_that_is_not_a_formula_is_left_exactly_as_it_is(string safe)
+    {
+        QueryExport.Neutralize(safe).Should().Be(safe);
+    }
+
+    /// <summary>
+    /// Both paths, because a column name is as attacker-controlled as a value: <c>select 1 as "=cmd…"</c>
+    /// is one statement away in the console the very same page runs.
+    /// </summary>
+    [Fact]
+    public void Both_the_header_and_the_cells_are_neutralised()
+    {
+        SqlResultColumn[] columns = [new("=cmd|' /C calc'!A0", "text"), new("note", "text")];
+        IReadOnlyList<IReadOnlyList<SqlCell>> rows =
+        [
+            [new SqlCell("=1+1", SqlCellKind.Text, false, 4), new SqlCell("-1", SqlCellKind.Number, false, 2)],
+        ];
+
+        string[] lines = QueryExport.ToCsv(columns, rows).Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+
+        lines[0].Should().Be("'=cmd|' /C calc'!A0,note");
+        lines[1].Should().Be("'=1+1,-1", "the number stays a number");
+    }
+
+    /// <summary>
+    /// The apostrophe goes <em>inside</em> the quotes, because that is where the spreadsheet looks. Putting
+    /// it in front of the opening quote would put it outside the value altogether.
+    /// </summary>
+    [Fact]
+    public void A_dangerous_cell_that_also_needs_quoting_keeps_the_apostrophe_inside_the_quotes()
+    {
+        IReadOnlyList<IReadOnlyList<SqlCell>> rows =
+        [
+            [new SqlCell("=HYPERLINK(\"http://x\",\"a,b\")", SqlCellKind.Text, false, 28)],
+        ];
+
+        string[] lines = QueryExport
+            .ToCsv([new SqlResultColumn("c", "text")], rows)
+            .Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+
+        lines[1].Should().StartWith("\"'=HYPERLINK");
+    }
+
+    /// <summary>The Marten mode's two columns go through the same escape, id included.</summary>
+    [Fact]
+    public void The_marten_csv_neutralises_the_id_as_well_as_the_document()
+    {
+        IReadOnlyList<MartenQueryRow> rows = [new("=cmd|' /C calc'!A0", """{"Name":"Alice"}""")];
+
+        string[] lines = QueryExport.ToCsv(rows).Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+
+        lines[1].Should().StartWith("'=cmd|");
+        lines[1].Should().Contain("""{""Name"":""Alice""}""", "a JSON object is not formula-shaped");
+    }
 }

@@ -86,6 +86,16 @@
                                 <option value="@size" @key="size">@size.ToString(CultureInfo.InvariantCulture)</option>
                             }
                         </select>
+
+                        @if (SelectedType is { SoftDeleted: true })
+                        {
+                            <label class="ms-form-label" for="ms-query-deleted">Deleted</label>
+                            <select id="ms-query-deleted" class="ms-select ms-query-deleted" value="@deletedFilter" @onchange="OnDeletedChangedAsync">
+                                <option value="@nameof(DeletedFilter.Exclude)">Live only</option>
+                                <option value="@nameof(DeletedFilter.Include)">Live and deleted</option>
+                                <option value="@nameof(DeletedFilter.Only)">Deleted only</option>
+                            </select>
+                        }
                     </div>
 
                     <QueryEditor EditorId="ms-query-where"
@@ -105,9 +115,13 @@
                                  OnSave="BeginSaveAsync" />
 
                     <p class="ms-muted ms-query-note">
-                        The clause runs as <code>session.Query(type, "where …")</code>. Parameters are not
-                        supported here in this release - write the values into the clause, and remember that
-                        it is SQL against the <code>data</code> column.
+                        Your predicate is parenthesised after the studio's own - the tenant when this
+                        collection is tenanted, and <code>mt_deleted = false</code> when it is soft-deleted -
+                        so a clause can narrow what you see but never widen it. A trailing
+                        <code>order by …</code>, <code>limit n</code> or <code>offset n</code> is lifted out
+                        of the predicate and placed on the statement; a <code>limit</code> of your own is
+                        clamped down to the Rows selector, never up. Everything else is SQL against this one
+                        table, values written into the clause rather than bound.
                     </p>
 
                     @if (documentTypes.Count == 0)
@@ -126,6 +140,7 @@
                         <QueryStats RowCount="result.Rows.Count"
                                     DurationMilliseconds="result.Duration.TotalMilliseconds"
                                     Truncated="result.Truncated"
+                                    Chips="@ScopeChips(result)"
                                     Sql="@result.GeneratedSql"
                                     SqlNote="@MartenSqlNote(result)"
                                     Plan="@result.Plan?.PlanJson"
@@ -164,6 +179,14 @@
                                             <tr class="ms-table-row" @key="current.Id">
                                                 <td class="ms-table-cell ms-table-cell-mono ms-query-row-id">
                                                     <a class="ms-details-link" href="@DocumentLink(result.Alias, current.Id)">@current.Id</a>
+                                                    @if (current.TenantId is { Length: > 0 } rowTenant)
+                                                    {
+                                                        <span class="ms-chip ms-query-row-tenant">@rowTenant</span>
+                                                    }
+                                                    @if (current.IsDeleted == true)
+                                                    {
+                                                        <span class="ms-chip ms-chip-warning ms-query-row-deleted">deleted</span>
+                                                    }
                                                 </td>
                                                 <td class="ms-table-cell ms-query-row-document">
                                                     <JsonView Json="@current.Json"
@@ -285,6 +308,7 @@
     private string whereText = string.Empty;
     private string sqlText = string.Empty;
     private int pageSize;
+    private DeletedFilter deletedFilter = DeletedFilter.Exclude;
 
     private IReadOnlyList<QueryDocumentTypeInfo> documentTypes = [];
     private QueryExamples examples = QueryExamples.None;
@@ -329,6 +353,25 @@
 
     /// <summary>Whether the SQL console is available at all in this process.</summary>
     private bool SqlEnabled => Capabilities.IsEnabled(StudioCapability.RunSql);
+
+    /// <summary>
+    /// The picked document type, which is what says whether this collection is tenanted or soft-deleted.
+    /// </summary>
+    private QueryDocumentTypeInfo? SelectedType
+    {
+        get
+        {
+            foreach (QueryDocumentTypeInfo type in documentTypes)
+            {
+                if (string.Equals(type.Alias, alias, StringComparison.OrdinalIgnoreCase))
+                {
+                    return type;
+                }
+            }
+
+            return null;
+        }
+    }
 
     protected override void OnInitialized()
     {
@@ -491,7 +534,24 @@
     {
         alias = args.Value?.ToString();
         martenResult = null;
+
+        // A different collection is a different question about deleted rows, and the control that answers
+        // it may not even be on screen for the new type. Carrying "deleted only" across would run a query
+        // nobody asked for against a table that may not be soft-deleted at all.
+        deletedFilter = DeletedFilter.Exclude;
+
         PushUrl();
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnDeletedChangedAsync(ChangeEventArgs args)
+    {
+        deletedFilter = Enum.TryParse(args.Value?.ToString(), ignoreCase: true, out DeletedFilter parsed)
+            ? parsed
+            : DeletedFilter.Exclude;
+
+        martenResult = null;
 
         await InvokeAsync(StateHasChanged);
     }
@@ -597,7 +657,7 @@
         try
         {
             MartenQueryResult result = await Queries.RunMartenQueryAsync(
-                scope, new MartenQueryRequest(alias, whereText, pageSize), cts.Token);
+                scope, new MartenQueryRequest(alias, whereText, pageSize, deletedFilter), cts.Token);
 
             martenResult = result;
 
@@ -609,7 +669,7 @@
             else if (result.Error is { } error)
             {
                 martenError = Describe(error);
-                martenErrorPosition = ClausePosition(error.Position, result.GeneratedSql, whereText);
+                martenErrorPosition = ClausePosition(error.Position, result.GeneratedSql, result.Predicate, whereText);
             }
             else
             {
@@ -807,8 +867,12 @@
         {
             await Toasts.Error("This browser would not take the download.");
         }
-        catch (InvalidOperationException)
+        catch (Exception exception) when (exception is JSDisconnectedException
+            or InvalidOperationException or ObjectDisposedException or OperationCanceledException)
         {
+            // The circuit went away between the click and the call. There is nobody left to toast at, and
+            // JSDisconnectedException derives from Exception rather than from JSException, so it has to be
+            // named or it escapes the handler and kills what is left of the circuit.
         }
     }
 
@@ -862,28 +926,39 @@
     /// Where a Postgres error in the composed statement falls in the clause the person actually typed.
     /// </summary>
     /// <remarks>
-    /// Postgres reports a one-based position into the whole statement, and the statement starts with a
-    /// select clause the studio composed. Subtracting where the clause begins puts the caret under the
-    /// character they wrote; when that cannot be worked out, there is simply no caret.
+    /// Two hops, because the studio composes rather than appends. Postgres reports a one-based position
+    /// into the whole statement; the visitor's predicate sits at a known offset inside it, after the select
+    /// clause and the studio's own tenant and soft-delete terms; and the predicate itself sits at a known
+    /// offset inside what they typed, after any <c>where</c> they wrote. Subtracting the first and adding
+    /// the second puts the caret under their own character. Anything that cannot be worked out - an error
+    /// in the composed part of the statement, a predicate the composer rewrote - is simply no caret, which
+    /// is better than a caret pointing at the wrong thing.
     /// </remarks>
-    internal static int ClausePosition(int postgresPosition, string statement, string clause)
+    internal static int ClausePosition(int postgresPosition, string statement, string predicate, string clause)
     {
-        if (postgresPosition <= 0 || string.IsNullOrEmpty(clause))
+        if (postgresPosition <= 0 || string.IsNullOrEmpty(clause) || string.IsNullOrEmpty(predicate))
         {
             return -1;
         }
 
-        int offset = statement.IndexOf(clause.Trim(), StringComparison.Ordinal);
-        int zeroBased = postgresPosition - 1;
+        int inStatement = statement.IndexOf(predicate, StringComparison.Ordinal);
+        int predicateInClause = clause.IndexOf(predicate, StringComparison.Ordinal);
 
-        if (offset < 0)
+        if (inStatement < 0 || predicateInClause < 0)
         {
-            return zeroBased <= clause.Length ? zeroBased : -1;
+            return -1;
         }
 
-        int inClause = zeroBased - offset;
+        int inPredicate = postgresPosition - 1 - inStatement;
 
-        return inClause >= 0 && inClause <= clause.Length ? inClause : -1;
+        if (inPredicate < 0 || inPredicate > predicate.Length)
+        {
+            return -1;
+        }
+
+        int inClause = predicateInClause + inPredicate;
+
+        return inClause <= clause.Length ? inClause : -1;
     }
 
     private string DocumentLink(string documentAlias, string id) =>
@@ -934,16 +1009,57 @@
         return rows;
     }
 
+    /// <summary>
+    /// The chips beside the row count: which tenant, and what happened to soft-deleted rows.
+    /// </summary>
+    /// <remarks>
+    /// The cross-tenant chip is a warning on purpose. Reading every tenant at once is a thing the store
+    /// policy may well allow, and it is still the single most misreadable grid the studio can draw.
+    /// </remarks>
+    internal static IReadOnlyList<(string Text, bool Warning)> ScopeChips(MartenQueryResult result)
+    {
+        List<(string Text, bool Warning)> chips = [];
+        MartenQueryScope scope = result.ScopeOrPlain;
+
+        if (scope.CrossTenant)
+        {
+            chips.Add(("all tenants", true));
+        }
+        else if (scope.TenantId is { Length: > 0 } tenant)
+        {
+            chips.Add(("tenant " + tenant, false));
+        }
+
+        if (scope.SoftDeleted)
+        {
+            chips.Add(scope.Deleted switch
+            {
+                DeletedFilter.Only => ("deleted only", true),
+                DeletedFilter.Include => ("live and deleted", true),
+                _ => ("live only", false),
+            });
+        }
+
+        return chips;
+    }
+
     private static string MartenSqlNote(MartenQueryResult result)
     {
-        string note = "Composed the way Marten's own string-query handler composes it. The select list is " +
-            "id and data; Marten's own can carry extra metadata columns, which changes the columns and " +
-            "never the rows.";
+        string note = "This is the statement that ran, character for character - the studio composes it " +
+            "rather than handing the clause to Marten, which composes neither the tenant nor the " +
+            "soft-delete predicate for a string query. The plan below is for this same statement.";
 
-        return result.LimitApplied
-            ? note + " A limit of " + result.RowLimit.ToString(CultureInfo.InvariantCulture) +
-                " was appended because the clause carried none."
-            : note;
+        if (result.Parameters.Count > 0)
+        {
+            note += " Bound: " + string.Join(", ", result.Parameters) + ".";
+        }
+
+        if (!result.LimitApplied)
+        {
+            note += " The row cap is the limit your clause carried, clamped to the Rows selector.";
+        }
+
+        return note;
     }
 
     private static string? PlanNote(ExplainResult? plan)
@@ -964,6 +1080,21 @@
     private static IReadOnlyList<string> MartenMessages(MartenQueryResult result)
     {
         List<string> messages = [];
+        MartenQueryScope scope = result.ScopeOrPlain;
+
+        if (scope.CrossTenant)
+        {
+            messages.Add(
+                "This collection is tenanted and no tenant is selected, so these rows come from every " +
+                "tenant. Pick one in the scope selector to filter them.");
+        }
+
+        if (scope.SoftDeleted && scope.Deleted != DeletedFilter.Exclude)
+        {
+            messages.Add(scope.Deleted == DeletedFilter.Only
+                ? "Only soft-deleted documents are shown."
+                : "Soft-deleted documents are included; each one carries a 'deleted' chip.");
+        }
 
         if (result.Rejection is { } rejection)
         {

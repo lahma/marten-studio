@@ -31,6 +31,12 @@ internal interface IQueryService
     /// Runs a Marten <c>where</c> clause, and - when the SQL console capability is granted - fetches the
     /// plan for it.
     /// </summary>
+    /// <remarks>
+    /// The clause is a predicate the studio composes <em>into</em> its own statement, behind its own
+    /// tenant and soft-delete predicates. It is not passed to Marten's string-query overload, which
+    /// composes neither and would return every tenant's rows and every deleted row - see
+    /// <c>QuerySqlComposer</c>. Every run is audited, successes included.
+    /// </remarks>
     /// <exception cref="StudioNotAuthorizedException">The visitor may not have this scope.</exception>
     /// <exception cref="KeyNotFoundException">No such store, database or document alias.</exception>
     Task<MartenQueryResult> RunMartenQueryAsync(

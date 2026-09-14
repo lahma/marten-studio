@@ -20,6 +20,13 @@
         {
             <span class="ms-chip ms-chip-warning ms-query-truncated">capped</span>
         }
+        @foreach ((string Text, bool Warning) chip in Chips)
+        {
+            (string Text, bool Warning) current = chip;
+            <span class="ms-chip @(current.Warning ? "ms-chip-warning" : "") ms-query-scope-chip" @key="current.Text">
+                @current.Text
+            </span>
+        }
     </div>
 
     <div class="ms-query-tabs" role="tablist" aria-label="Query details">
@@ -107,6 +114,18 @@
     /// <summary>Whether the result was capped.</summary>
     [Parameter]
     public bool Truncated { get; set; }
+
+    /// <summary>
+    /// What the studio's own predicates did to this result - the tenant it was filtered to, whether it
+    /// crossed every tenant, what it did about soft-deleted rows.
+    /// </summary>
+    /// <remarks>
+    /// These live in the summary beside the row count rather than in a tab, because they change what the
+    /// rows underneath <em>are</em>. A grid that is quietly showing every tenant, or quietly hiding the
+    /// deleted rows somebody is looking for, is the one failure a stats strip has to prevent.
+    /// </remarks>
+    [Parameter]
+    public IReadOnlyList<(string Text, bool Warning)> Chips { get; set; } = [];
 
     /// <summary>The statement that ran.</summary>
     [Parameter]

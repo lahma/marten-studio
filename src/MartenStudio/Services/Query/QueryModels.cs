@@ -26,6 +26,13 @@ internal enum QueryMode
 /// <param name="Table">The table name, normally <c>mt_doc_&lt;alias&gt;</c>.</param>
 /// <param name="QualifiedTableName">The quoted, schema-qualified table name, as the examples show it.</param>
 /// <param name="DuplicatedColumns">The duplicated fields, which are the properties a filter can index.</param>
+/// <param name="Conjoined">
+/// Whether the collection is tenanted. The page says so, because a clause against a conjoined collection
+/// read with no tenant selected is a cross-tenant read and the grid must not imply otherwise.
+/// </param>
+/// <param name="SoftDeleted">
+/// Whether the collection is soft-deleted, which is what puts the deleted tri-state on the toolbar.
+/// </param>
 internal sealed record QueryDocumentTypeInfo(
     string Alias,
     string TypeName,
@@ -33,54 +40,111 @@ internal sealed record QueryDocumentTypeInfo(
     string Schema,
     string Table,
     string QualifiedTableName,
-    IReadOnlyList<string> DuplicatedColumns);
+    IReadOnlyList<string> DuplicatedColumns,
+    bool Conjoined = false,
+    bool SoftDeleted = false);
 
 /// <summary>What the Marten mode was asked to run.</summary>
 /// <param name="Alias">The document alias picked in the type list.</param>
 /// <param name="WhereClause">
-/// The clause as typed. <c>where …</c>, <c>order by …</c> or a bare predicate are all accepted, which is
-/// what <c>session.Query&lt;T&gt;("where …")</c> itself accepts; an empty clause matches everything.
+/// The clause as typed. <c>where …</c>, a bare predicate, and a trailing <c>order by …</c>,
+/// <c>limit n</c> or <c>offset n</c> are all accepted; an empty clause matches everything. The predicate
+/// is parenthesised <em>after</em> the studio's own tenant and soft-delete predicates, and the tail is
+/// lifted out of it - see <see cref="QuerySqlComposer.TryPartition" />.
 /// </param>
 /// <param name="PageSize">
 /// How many rows to ask for. Defaults to <see cref="MartenStudioOptions.DefaultPageSize" /> and is
 /// clamped to <see cref="MartenStudioOptions.MaxPageSize" /> in the service - a page size that arrived
 /// from a browser is a number somebody can type (plan §4.8).
 /// </param>
-internal sealed record MartenQueryRequest(string Alias, string? WhereClause, int? PageSize = null);
+/// <param name="IncludeDeleted">
+/// What to do about soft-deleted rows, the same tri-state the documents browser offers. Ignored on a
+/// collection that is not soft-deleted, which has no <c>mt_deleted</c> column to ask about.
+/// </param>
+internal sealed record MartenQueryRequest(
+    string Alias,
+    string? WhereClause,
+    int? PageSize = null,
+    DeletedFilter IncludeDeleted = DeletedFilter.Exclude);
 
 /// <summary>One document the Marten mode returned.</summary>
 /// <param name="Id">The document's id, as text, so it can go into a link.</param>
 /// <param name="Json">
-/// The document as <em>Marten's own serializer</em> writes it (AGENTS.md hard rule 10) - not the raw
-/// <c>data</c> column, because the document has been through the CLR type on the way here.
+/// The <c>data</c> column exactly as Postgres holds it, read as <c>data::text</c>. Nothing deserializes
+/// it: the studio never had the CLR type in its hands on this path, so no property can be dropped on the
+/// way to the screen and no serializer of ours can disagree with the one Marten wrote it with
+/// (AGENTS.md hard rule 10).
 /// </param>
-internal sealed record MartenQueryRow(string Id, string Json);
+/// <param name="TenantId">
+/// The row's tenant, on a conjoined collection. <see langword="null" /> when the collection is not
+/// tenanted - and the one thing that makes a cross-tenant read legible rather than merely wrong.
+/// </param>
+/// <param name="IsDeleted">
+/// Whether the row is soft-deleted, on a soft-deleted collection; <see langword="null" /> otherwise.
+/// </param>
+internal sealed record MartenQueryRow(string Id, string Json, string? TenantId = null, bool? IsDeleted = null);
+
+/// <summary>
+/// What the studio's own predicates did to a Mode A run - the half of the result that is about who may
+/// see what rather than about what was asked.
+/// </summary>
+/// <remarks>
+/// This exists because Marten's string-query path composes neither predicate. Mode A used to run through
+/// <c>session.QueryAsync(type, clause)</c>, which returns every tenant's rows and every soft-deleted row
+/// whatever the session's tenant is; the studio now composes and runs its own statement, and this record
+/// is what the page shows so that a grid can never quietly be broader than it looks.
+/// </remarks>
+/// <param name="TenantId">The tenant the rows were filtered to, or <see langword="null" />.</param>
+/// <param name="CrossTenant">
+/// Whether this was a tenanted collection read across every tenant, because no tenant was in scope. The
+/// results header says so out loud.
+/// </param>
+/// <param name="Deleted">What was done about soft-deleted rows.</param>
+/// <param name="SoftDeleted">Whether the collection is soft-deleted at all.</param>
+internal sealed record MartenQueryScope(
+    string? TenantId,
+    bool CrossTenant,
+    DeletedFilter Deleted,
+    bool SoftDeleted)
+{
+    /// <summary>A single-tenant collection with no soft delete: nothing to say.</summary>
+    public static MartenQueryScope Plain { get; } = new(null, false, DeletedFilter.Exclude, false);
+}
 
 /// <summary>
 /// What the Marten mode came back with: rows, the SQL it composed, and - when the console capability is
 /// granted - the plan Postgres would use.
 /// </summary>
 /// <param name="Alias">The alias the request named, echoed so a stale result cannot be mislabelled.</param>
-/// <param name="Rows">The documents, already serialized.</param>
+/// <param name="Rows">The documents, as their <c>data</c> column holds them.</param>
 /// <param name="GeneratedSql">
-/// The statement the studio composed from the document type and the clause. This is the shape Marten's
-/// own string-query handler builds; see <see cref="QuerySqlComposer" /> for what is and is not identical.
+/// The statement the studio composed and ran, character for character. It is the studio's own statement
+/// rather than Marten's - see <see cref="QuerySqlComposer" /> for why - which is what makes this text, the
+/// command that executed and the statement <c>EXPLAIN</c> planned all the same thing.
 /// </param>
 /// <param name="Parameters">
-/// The parameters bound to the statement. Always empty in v1: the where clause is run without
-/// parameters, which is documented on the page rather than implied.
+/// The values bound to it, described. The tenant, the row cap and the offset are parameters (AGENTS.md
+/// hard rule 4); the predicate is the visitor's own SQL and is not.
 /// </param>
 /// <param name="Duration">How long the query itself took.</param>
 /// <param name="RowLimit">The row cap that was in force.</param>
 /// <param name="LimitApplied">
-/// Whether the studio appended <c>limit</c> to the clause. It does not when the clause already has one.
+/// Whether the cap is the studio's page size. It is not when the clause carried a <c>limit</c> of its own
+/// - which is clamped down to the page size and never up.
 /// </param>
 /// <param name="Error">The Postgres error, when the clause did not run.</param>
 /// <param name="Plan">The plan, when one was asked for and could be fetched.</param>
+/// <param name="Scope">
+/// What the studio's own tenant and soft-delete predicates did, so the page can say it.
+/// </param>
+/// <param name="Predicate">
+/// The visitor's predicate as it appears inside the parentheses, which is what turns a Postgres error
+/// position in the composed statement back into a caret under the character they typed.
+/// </param>
 /// <param name="Rejection">
 /// Why the clause was never sent. A <c>where</c> clause runs without a capability, so it is held to being
-/// a fragment of one statement that reads only the table it filters - see
-/// <see cref="QuerySqlComposer.CheckClause" />.
+/// a fragment of one statement that reads only the table it filters, with a tail the composer can place -
+/// see <see cref="QuerySqlComposer.CheckClause" />.
 /// </param>
 internal sealed record MartenQueryResult(
     string Alias,
@@ -92,13 +156,22 @@ internal sealed record MartenQueryResult(
     bool LimitApplied,
     SqlError? Error,
     ExplainResult? Plan,
+    MartenQueryScope? Scope = null,
+    string Predicate = "",
     SqlRejection? Rejection = null)
 {
     /// <summary>Whether the clause ran without a Postgres error.</summary>
     public bool Succeeded => Error is null && Rejection is null;
 
     /// <summary>Whether the result was cut off by the row cap.</summary>
-    public bool Truncated => Rows.Count >= RowLimit;
+    /// <remarks>
+    /// A cap of zero - which a clause of <c>limit 0</c> asks for - is not a truncation: nothing was cut
+    /// off, nothing was asked for.
+    /// </remarks>
+    public bool Truncated => RowLimit > 0 && Rows.Count >= RowLimit;
+
+    /// <summary>The scope facts, with the do-nothing default for a plain collection.</summary>
+    public MartenQueryScope ScopeOrPlain => Scope ?? MartenQueryScope.Plain;
 }
 
 /// <summary>

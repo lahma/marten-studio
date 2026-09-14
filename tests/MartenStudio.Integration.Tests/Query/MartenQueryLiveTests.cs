@@ -77,11 +77,61 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
         result.Rows[0].Json.Should().Contain("Alice");
 
         result.GeneratedSql.Should()
-            .StartWith("select d.id, d.data from ")
-            .And.Contain($"\"{harness.Schema}\".\"mt_doc_{alias}\" as d")
-            .And.Contain("where data ->> 'Name' = 'Alice'");
+            .StartWith("select d.\"id\", d.\"data\"::text\n")
+            .And.Contain($"from \"{harness.Schema}\".\"mt_doc_{alias}\" as d\n")
+            .And.Contain("and (\n    data ->> 'Name' = 'Alice'\n  )")
+            .And.EndWith("limit @limit");
 
-        result.Parameters.Should().BeEmpty("parameters are not supported in a where clause in this release");
+        result.Parameters.Should().Equal(
+            ["@limit = 50"], "the row cap is a parameter, not text in the statement");
+        result.Predicate.Should().Be("data ->> 'Name' = 'Alice'");
+    }
+
+    /// <summary>
+    /// The SQL tab is not a rendering of what ran, it <em>is</em> what ran. The studio's own log writes the
+    /// statement it sent under 9204, so comparing the two proves it from an independent direction - and it
+    /// is what makes the EXPLAIN on the same page a plan for the same statement rather than for a
+    /// lookalike.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_sql_the_page_shows_is_the_statement_that_was_sent()
+    {
+        string alias = await PersonAliasAsync();
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            harness.Scope, new MartenQueryRequest(alias, "where data ->> 'Name' = 'Alice'"), Token);
+
+        result.Succeeded.Should().BeTrue();
+
+        harness.Logs.Should().Contain(
+            x => x.EventId == 9204 && x.Message.Contains(result.GeneratedSql, StringComparison.Ordinal),
+            "9204 carries the statement the studio actually executed");
+
+        result.Plan!.HasPlan.Should().BeTrue(
+            result.Plan.UnavailableReason ?? "EXPLAIN planned the same text, with the same values bound");
+    }
+
+    /// <summary>
+    /// A successful read is audited too - not only the refusals. A clause is arbitrary SQL against one
+    /// collection that needs no capability at all, so "who read what, with which filter" is exactly the
+    /// question an incident asks.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_successful_clause_is_audited_as_9204_with_the_clause_in_the_ring()
+    {
+        string alias = await PersonAliasAsync();
+
+        await harness.Queries.RunMartenQueryAsync(
+            harness.Scope, new MartenQueryRequest(alias, "where data ->> 'Name' = 'Alice'"), Token);
+
+        StudioActionLogEntry entry = harness.Audit.GetLatest()
+            .First(x => x.Action == "MartenQuery");
+
+        entry.Succeeded.Should().BeTrue();
+        entry.Target.Should().Contain("where data ->> 'Name' = 'Alice'", "the ring records the filter, not the SQL");
+        entry.Message.Should().Contain("rows in");
+
+        harness.Logs.Should().Contain(x => x.EventId == 9204);
     }
 
     /// <summary>
@@ -125,7 +175,50 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
         result.Rows.Should().HaveCount(2, "the row cap is a server-side clamp");
         result.LimitApplied.Should().BeTrue();
         result.Truncated.Should().BeTrue();
-        result.GeneratedSql.Should().EndWith("where 1 = 1 limit 2");
+        result.GeneratedSql.Should().EndWith("where 1 = 1\nlimit @limit");
+        result.Parameters.Should().Equal("@limit = 2");
+    }
+
+    /// <summary>
+    /// A <c>limit</c> the visitor wrote is honoured and clamped <em>down</em> to the Rows selector - a
+    /// clause is not a way past a server-side cap (plan §4.8).
+    /// </summary>
+    [PostgresFact]
+    public async Task A_limit_and_an_order_by_in_the_clause_are_lifted_out_and_the_limit_is_clamped()
+    {
+        string alias = await PersonAliasAsync();
+
+        MartenQueryResult ordered = await harness.Queries.RunMartenQueryAsync(
+            harness.Scope,
+            new MartenQueryRequest(alias, "where 1 = 1 order by data ->> 'Name' desc limit 2", PageSize: 50),
+            Token);
+
+        ordered.Error.Should().BeNull(ordered.Error?.MessageText ?? string.Empty);
+        ordered.Rows.Should().HaveCount(2);
+        ordered.Rows[0].Json.Should().Contain("Carla", "the order by was placed on the statement, not dropped");
+        ordered.LimitApplied.Should().BeFalse("the clause carried its own limit");
+        ordered.RowLimit.Should().Be(2);
+        ordered.GeneratedSql.Should().Contain("order by data ->> 'Name' desc\nlimit @limit");
+
+        MartenQueryResult clamped = await harness.Queries.RunMartenQueryAsync(
+            harness.Scope, new MartenQueryRequest(alias, "where 1 = 1 limit 10000", PageSize: 2), Token);
+
+        clamped.RowLimit.Should().Be(2, "a clause cannot raise the cap");
+        clamped.Rows.Should().HaveCount(2);
+    }
+
+    [PostgresFact]
+    public async Task A_tail_the_composer_cannot_place_is_refused_before_anything_is_sent()
+    {
+        string alias = await PersonAliasAsync();
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            harness.Scope, new MartenQueryRequest(alias, "where 1 = 1 limit all"), Token);
+
+        result.Rejection.Should().NotBeNull();
+        result.Rejection!.Token.Should().Be("limit");
+        result.Error.Should().BeNull("nothing was sent");
+        result.Rows.Should().BeEmpty();
     }
 
     /// <summary>
@@ -341,6 +434,156 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
             result.Rejection.Should().BeNull(example.Snippet);
             result.Error.Should().BeNull(example.Snippet + " => " + (result.Error?.MessageText ?? string.Empty));
         }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Tenancy and soft delete. This is B1: Marten's own string query composes neither predicate, so the
+    // studio composes and runs its own statement. These are the tests that would have caught the leak.
+    // ------------------------------------------------------------------------------------------------
+
+    private async Task<string> TicketAliasAsync(StudioScope scope)
+    {
+        IReadOnlyList<QueryDocumentTypeInfo> types = await harness.Queries.ListDocumentTypesAsync(scope, Token);
+
+        return types.Single(x => x.TypeName == nameof(QueryTicket)).Alias;
+    }
+
+    [PostgresFact]
+    public async Task The_picker_says_which_collections_are_tenanted_and_soft_deleted()
+    {
+        IReadOnlyList<QueryDocumentTypeInfo> types = await harness.Queries.ListDocumentTypesAsync(harness.Scope, Token);
+
+        QueryDocumentTypeInfo ticket = types.Single(x => x.TypeName == nameof(QueryTicket));
+        QueryDocumentTypeInfo person = types.Single(x => x.TypeName == nameof(QueryPerson));
+
+        ticket.Conjoined.Should().BeTrue();
+        ticket.SoftDeleted.Should().BeTrue();
+        person.Conjoined.Should().BeFalse();
+        person.SoftDeleted.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The live proof. Scoped to <c>acme</c>, the most permissive clause anybody can write returns acme's
+    /// live rows and nothing else - not globex's, and not acme's own deleted one. Through Marten's
+    /// string-query overload this returned all four.
+    /// </summary>
+    [PostgresFact]
+    public async Task As_one_tenant_a_clause_that_matches_everything_returns_only_that_tenants_live_rows()
+    {
+        StudioScope acme = QueryHarness.ScopeFor(QueryHarness.Acme);
+        string alias = await TicketAliasAsync(acme);
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            acme, new MartenQueryRequest(alias, "where 1 = 1"), Token);
+
+        result.Error.Should().BeNull(result.Error?.MessageText ?? string.Empty);
+        result.Rows.Select(x => x.Id).Should().Equal(QueryHarness.AcmeLive.ToString());
+        result.Rows[0].TenantId.Should().Be(QueryHarness.Acme);
+        result.Rows[0].IsDeleted.Should().BeFalse();
+
+        result.ScopeOrPlain.TenantId.Should().Be(QueryHarness.Acme);
+        result.ScopeOrPlain.CrossTenant.Should().BeFalse();
+        result.GeneratedSql.Should()
+            .Contain("and d.\"tenant_id\" = @tenant")
+            .And.Contain("and d.\"mt_deleted\" = false");
+        result.Parameters.Should().Contain("@tenant = 'acme'");
+    }
+
+    /// <summary>
+    /// A clause naming another tenant is <c>and</c>-ed with the studio's own predicate rather than
+    /// replacing it, so the two together match nothing. This is the shape somebody probes with.
+    /// </summary>
+    [PostgresFact]
+    public async Task As_one_tenant_a_clause_naming_another_tenant_returns_nothing()
+    {
+        StudioScope acme = QueryHarness.ScopeFor(QueryHarness.Acme);
+        string alias = await TicketAliasAsync(acme);
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            acme, new MartenQueryRequest(alias, $"where d.tenant_id = '{QueryHarness.Globex}'"), Token);
+
+        result.Error.Should().BeNull(result.Error?.MessageText ?? string.Empty);
+        result.Rows.Should().BeEmpty("the scope's own tenant predicate still stands in front of the clause");
+    }
+
+    /// <summary>
+    /// An <c>or true</c> cannot widen the read either: the visitor's predicate is parenthesised and comes
+    /// last, so it can narrow what the studio's own terms let through and never add to it.
+    /// </summary>
+    [PostgresFact]
+    public async Task As_one_tenant_an_or_true_clause_still_sees_only_that_tenant()
+    {
+        StudioScope acme = QueryHarness.ScopeFor(QueryHarness.Acme);
+        string alias = await TicketAliasAsync(acme);
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            acme, new MartenQueryRequest(alias, "where 1 = 2 or true"), Token);
+
+        result.Error.Should().BeNull(result.Error?.MessageText ?? string.Empty);
+        result.Rows.Select(x => x.TenantId).Should().AllBe(QueryHarness.Acme);
+        result.Rows.Should().ContainSingle();
+    }
+
+    [PostgresFact]
+    public async Task Include_deleted_shows_only_that_tenants_deleted_rows()
+    {
+        StudioScope acme = QueryHarness.ScopeFor(QueryHarness.Acme);
+        string alias = await TicketAliasAsync(acme);
+
+        MartenQueryResult only = await harness.Queries.RunMartenQueryAsync(
+            acme, new MartenQueryRequest(alias, null, null, DeletedFilter.Only), Token);
+
+        only.Error.Should().BeNull(only.Error?.MessageText ?? string.Empty);
+        only.Rows.Select(x => x.Id).Should().Equal(QueryHarness.AcmeDeleted.ToString());
+        only.Rows[0].IsDeleted.Should().BeTrue();
+        only.ScopeOrPlain.Deleted.Should().Be(DeletedFilter.Only);
+
+        MartenQueryResult both = await harness.Queries.RunMartenQueryAsync(
+            acme, new MartenQueryRequest(alias, null, null, DeletedFilter.Include), Token);
+
+        both.Rows.Select(x => x.Id).Should().BeEquivalentTo(
+            [QueryHarness.AcmeLive.ToString(), QueryHarness.AcmeDeleted.ToString()]);
+        both.Rows.Select(x => x.TenantId).Should().AllBe(QueryHarness.Acme, "including deleted is not including tenants");
+        both.GeneratedSql.Should().NotContain("mt_deleted\" =");
+    }
+
+    /// <summary>
+    /// With no tenant in scope the studio reads across every tenant - a cross-tenant view the store policy
+    /// may well allow - and <em>says so</em>, because a grid that quietly mixes tenants is the failure the
+    /// flag exists for. Deleted rows are still excluded: that is a separate question.
+    /// </summary>
+    [PostgresFact]
+    public async Task With_no_tenant_in_scope_every_tenants_live_rows_appear_and_the_result_says_so()
+    {
+        string alias = await TicketAliasAsync(harness.Scope);
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            harness.Scope, new MartenQueryRequest(alias, "where 1 = 1"), Token);
+
+        result.Error.Should().BeNull(result.Error?.MessageText ?? string.Empty);
+        result.Rows.Select(x => x.Id).Should().BeEquivalentTo(
+            [QueryHarness.AcmeLive.ToString(), QueryHarness.GlobexLive.ToString()]);
+
+        result.ScopeOrPlain.CrossTenant.Should().BeTrue();
+        result.ScopeOrPlain.TenantId.Should().BeNull();
+        result.GeneratedSql.Should().NotContain("@tenant");
+    }
+
+    /// <summary>
+    /// The document is the <c>data</c> column as Postgres holds it, not a round trip through the CLR type -
+    /// so nothing can be dropped on the way to the screen.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_row_json_is_the_data_column_itself()
+    {
+        StudioScope acme = QueryHarness.ScopeFor(QueryHarness.Acme);
+        string alias = await TicketAliasAsync(acme);
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            acme, new MartenQueryRequest(alias, null), Token);
+
+        result.Rows.Should().ContainSingle();
+        result.Rows[0].Json.Should().Contain("acme live");
     }
 
     [PostgresFact]

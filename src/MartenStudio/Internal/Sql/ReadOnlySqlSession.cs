@@ -159,9 +159,25 @@ internal sealed class ReadOnlySqlSession
     /// <summary>
     /// Runs one statement and rolls back. The connection must already be open; it is not disposed here.
     /// </summary>
+    public Task<SqlResultSet> ExecuteAsync(
+        NpgsqlConnection connection,
+        string sql,
+        CancellationToken cancellationToken = default) =>
+        ExecuteAsync(connection, sql, null, cancellationToken);
+
+    /// <summary>
+    /// The same run, with the statement's parameters bound by <paramref name="bind" />.
+    /// </summary>
+    /// <remarks>
+    /// The SQL console itself never binds anything - what somebody typed is sent verbatim, which is the
+    /// whole contract of a console. The hook exists for a statement the <em>studio</em> composed and wants
+    /// planned: a Mode A <c>EXPLAIN</c> carries the same <c>@tenant</c> and <c>@limit</c> the query did,
+    /// and without them Postgres answers "there is no parameter $1" instead of a plan.
+    /// </remarks>
     public async Task<SqlResultSet> ExecuteAsync(
         NpgsqlConnection connection,
         string sql,
+        Action<NpgsqlCommand>? bind,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
@@ -190,7 +206,7 @@ internal sealed class ReadOnlySqlSession
                 await SetLocalAsync(connection, transaction, "role", role, cancellationToken).ConfigureAwait(false);
             }
 
-            return await ReadAsync(connection, transaction, sql, cancellationToken).ConfigureAwait(false);
+            return await ReadAsync(connection, transaction, sql, bind, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -217,6 +233,7 @@ internal sealed class ReadOnlySqlSession
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         string sql,
+        Action<NpgsqlCommand>? bind,
         CancellationToken cancellationToken)
     {
         List<SqlResultColumn> columns = [];
@@ -230,6 +247,8 @@ internal sealed class ReadOnlySqlSession
             // produces 57014 with a message, while a client-side timeout only breaks the connection.
             CommandTimeout = (int)Math.Ceiling(options.StatementTimeout.TotalSeconds) + 5,
         };
+
+        bind?.Invoke(command);
 
         try
         {

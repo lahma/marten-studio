@@ -1,110 +1,344 @@
+using JasperFx.MultiTenancy;
+
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
+using MartenStudio.Services.Query;
 
 namespace MartenStudio.Tests.Query;
 
 /// <summary>
-/// The statement behind a Marten <c>where</c> clause.
+/// The statement behind a Marten <c>where</c> clause - the studio's own statement, not Marten's.
 /// </summary>
 /// <remarks>
-/// These are the rules Marten's own <c>UserSuppliedQueryHandler</c> applies, read from the 9.35 assembly:
-/// a clause starting with <c>select</c> is the whole statement, <c>where</c> and <c>order</c> are appended
-/// after a space, and anything else gets <c>where</c> put in front of it unless it already contains one.
-/// The studio shows the person the SQL behind their clause, so getting this wrong would mean showing them
-/// a statement that is not the one that ran.
+/// <para>
+/// Mode A used to hand the clause to <c>session.QueryAsync(type, clause)</c>, and these tests used to
+/// assert that the studio <em>imitated</em> what Marten composed for it. That was the bug: Marten's
+/// string-query path composes <c>select … from &lt;table&gt; as d &lt;clause&gt;</c> and nothing else - no
+/// tenant filter, no soft-delete filter - so a clause of <c>where 1 = 1</c> run by somebody scoped to one
+/// tenant returned every tenant's rows and every soft-deleted row. The studio now composes and runs its
+/// own statement, so what these tests pin is that the tenant and soft-delete predicates are there, that
+/// they come <em>before</em> the visitor's parenthesised predicate, and that the text is the text that
+/// runs.
+/// </para>
 /// </remarks>
 public class QuerySqlComposerTests
 {
-    private const string Table = "\"studio\".\"mt_doc_person\"";
+    private const string Qualified = "\"studio\".\"mt_doc_person\"";
+
+    /// <summary>
+    /// The visitor's predicate as the composer writes it: parenthesised, indented, and with the closing
+    /// bracket on a line of its own so that a clause ending in a <c>--</c> comment does not eat it.
+    /// </summary>
+    private static string Predicate(string predicate) => "and (\n    " + predicate + "\n  )";
+
+    /// <summary>A document table, tenanted and soft-deleted to taste.</summary>
+    private static DocumentTableInfo Table(bool conjoined = false, bool softDeleted = false)
+    {
+        List<DocumentMetadataColumnInfo> metadata = [];
+
+        if (softDeleted)
+        {
+            metadata.Add(new DocumentMetadataColumnInfo(DocumentMetadataColumn.IsSoftDeleted, "mt_deleted"));
+            metadata.Add(new DocumentMetadataColumnInfo(DocumentMetadataColumn.SoftDeletedAt, "mt_deleted_at"));
+        }
+
+        if (conjoined)
+        {
+            metadata.Add(new DocumentMetadataColumnInfo(DocumentMetadataColumn.TenantId, "tenant_id"));
+        }
+
+        return new DocumentTableInfo
+        {
+            Schema = "studio",
+            Table = "mt_doc_person",
+            Alias = "person",
+            TenancyStyle = conjoined ? TenancyStyle.Conjoined : TenancyStyle.Single,
+            SoftDeleteEnabled = softDeleted,
+            MetadataColumns = metadata,
+        };
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The shape of the composed statement
+    // ------------------------------------------------------------------------------------------------
 
     [Fact]
-    public void A_where_clause_is_appended_to_the_document_select()
+    public void A_where_clause_becomes_a_parenthesised_predicate_on_the_studios_own_select()
     {
-        var composed = QuerySqlComposer.Compose(Table, "where data ->> 'Name' = 'Alice'", 50);
+        ComposedQuery composed = QuerySqlComposer.Compose(Table(), "where data ->> 'Name' = 'Alice'", 50);
 
         composed.Statement.Should().Be(
-            "select d.id, d.data from \"studio\".\"mt_doc_person\" as d where data ->> 'Name' = 'Alice' limit 50");
+            """
+            select d."id", d."data"::text
+            from "studio"."mt_doc_person" as d
+            where 1 = 1
+              and (
+                data ->> 'Name' = 'Alice'
+              )
+            limit @limit
+            """.ReplaceLineEndings("\n"));
+
+        composed.Predicate.Should().Be("data ->> 'Name' = 'Alice'", "the leading `where` is normalised away");
+        composed.Limit.Should().Be(50);
+        composed.LimitApplied.Should().BeTrue();
     }
 
     [Fact]
-    public void A_bare_predicate_gets_a_where_in_front_of_it()
+    public void A_bare_predicate_needs_no_where_to_be_normalised()
     {
-        QuerySqlComposer.Statement(Table, "d.data ->> 'Name' = 'Alice'").Should().Be(
-            "select d.id, d.data from \"studio\".\"mt_doc_person\" as d where d.data ->> 'Name' = 'Alice'");
+        QuerySqlComposer.Compose(Table(), "d.data ->> 'Name' = 'Alice'", 50).Predicate
+            .Should().Be("d.data ->> 'Name' = 'Alice'");
     }
 
     [Fact]
-    public void An_order_by_is_appended_without_a_where()
+    public void An_empty_clause_composes_a_statement_with_no_predicate_term_at_all()
     {
-        QuerySqlComposer.Statement(Table, "order by d.id desc").Should().Be(
-            "select d.id, d.data from \"studio\".\"mt_doc_person\" as d order by d.id desc");
-    }
+        ComposedQuery composed = QuerySqlComposer.Compose(Table(), null, 10);
 
-    [Fact]
-    public void An_empty_clause_selects_the_whole_table()
-    {
-        QuerySqlComposer.Statement(Table, string.Empty).Should().Be(
-            "select d.id, d.data from \"studio\".\"mt_doc_person\" as d");
-    }
-
-    [Fact]
-    public void A_clause_that_is_already_a_select_is_the_whole_statement()
-    {
-        QuerySqlComposer.Statement(Table, "select count(*) from other").Should().Be("select count(*) from other");
-    }
-
-    [Fact]
-    public void A_with_followed_by_select_is_the_whole_statement_too()
-    {
-        const string cte = "with x as (select 1) select * from x";
-
-        QuerySqlComposer.Statement(Table, cte).Should().Be(cte);
-    }
-
-    /// <summary>
-    /// The row cap is a server-side clamp (plan §4.8), but a clause that already carries a <c>limit</c> is
-    /// left alone: appending a second one is a syntax error, and silently changing somebody's own limit
-    /// would make the answer a different question from the one they asked.
-    /// </summary>
-    [Fact]
-    public void The_row_cap_is_appended_only_when_the_clause_has_no_limit_of_its_own()
-    {
-        var capped = QuerySqlComposer.Compose(Table, "where age > 30", 25);
-
-        capped.LimitApplied.Should().BeTrue();
-        capped.EffectiveClause.Should().Be("where age > 30 limit 25");
-
-        var own = QuerySqlComposer.Compose(Table, "where age > 30 limit 3", 25);
-
-        own.LimitApplied.Should().BeFalse();
-        own.EffectiveClause.Should().Be("where age > 30 limit 3");
-        own.Statement.Should().EndWith("limit 3");
-    }
-
-    /// <summary>
-    /// A bare <c>limit 10</c> would arrive at Postgres as <c>… as d where limit 10</c>, because Marten puts
-    /// <c>where</c> in front of anything that does not start with <c>where</c> or <c>order</c>. So an empty
-    /// clause becomes an explicit <c>where 1 = 1</c>, and the SQL tab shows the statement that really ran.
-    /// </summary>
-    [Fact]
-    public void An_empty_clause_still_gets_the_row_cap_and_a_where_Marten_will_accept()
-    {
-        var composed = QuerySqlComposer.Compose(Table, null, 10);
-
-        composed.EffectiveClause.Should().Be("where 1 = 1 limit 10");
         composed.Statement.Should().Be(
-            "select d.id, d.data from \"studio\".\"mt_doc_person\" as d where 1 = 1 limit 10");
+            """
+            select d."id", d."data"::text
+            from "studio"."mt_doc_person" as d
+            where 1 = 1
+            limit @limit
+            """.ReplaceLineEndings("\n"));
+
+        composed.Predicate.Should().BeEmpty();
     }
 
     /// <summary>
-    /// <c>limit</c> is not one of the words Marten appends after a space, so neither is it one here: the
-    /// composed statement has to be the one that runs, broken or not.
+    /// The one that was live-proven broken. A conjoined, soft-deleted collection read as one tenant has to
+    /// carry both predicates, and they have to come <em>before</em> the visitor's - a parenthesised
+    /// predicate cannot reach around an <c>and</c> that precedes it, however much <c>or</c> is inside it.
     /// </summary>
     [Fact]
-    public void A_clause_that_is_only_a_limit_is_composed_the_way_Marten_composes_it()
+    public void A_conjoined_soft_deleted_table_carries_both_predicates_in_front_of_the_visitors()
     {
-        QuerySqlComposer.Statement(Table, "limit 5").Should().Be(
-            "select d.id, d.data from \"studio\".\"mt_doc_person\" as d where limit 5");
+        ComposedQuery composed = QuerySqlComposer.Compose(
+            Table(conjoined: true, softDeleted: true), "where 1 = 1 or true", 50, "acme");
+
+        composed.Statement.Should().Be(
+            """
+            select d."id", d."data"::text, d."tenant_id", d."mt_deleted"
+            from "studio"."mt_doc_person" as d
+            where 1 = 1
+              and d."tenant_id" = @tenant
+              and d."mt_deleted" = false
+              and (
+                1 = 1 or true
+              )
+            limit @limit
+            """.ReplaceLineEndings("\n"));
+
+        composed.TenantId.Should().Be("acme");
+        composed.CrossTenant.Should().BeFalse();
+        composed.Deleted.Should().Be(DeletedFilter.Exclude);
+        composed.TenantOrdinal.Should().Be(2);
+        composed.DeletedOrdinal.Should().Be(3);
+    }
+
+    /// <summary>
+    /// Even a clause naming another tenant cannot widen the read: the studio's own predicate is still
+    /// <c>and</c>-ed in front of it, so the two together match nothing.
+    /// </summary>
+    [Fact]
+    public void A_clause_naming_another_tenant_is_anded_with_the_scopes_own_tenant_and_not_instead_of_it()
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(
+            Table(conjoined: true), "where d.tenant_id = 'globex'", 50, "acme");
+
+        composed.Statement.Should()
+            .Contain("and d.\"tenant_id\" = @tenant\n")
+            .And.Contain(Predicate("d.tenant_id = 'globex'"));
+
+        composed.Parameters.Should().ContainSingle(x => x.Name == "tenant")
+            .Which.Value.Should().Be("acme");
+    }
+
+    [Fact]
+    public void A_conjoined_table_read_with_no_tenant_in_scope_says_so_rather_than_filtering()
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(Table(conjoined: true), null, 50, tenantId: null);
+
+        composed.Statement.Should().NotContain("@tenant");
+        composed.CrossTenant.Should().BeTrue("the results header has to say the rows come from every tenant");
+        composed.TenantId.Should().BeNull();
+    }
+
+    [Fact]
+    public void A_single_tenant_table_is_never_filtered_by_the_scopes_tenant()
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(Table(), null, 50, "acme");
+
+        composed.Statement.Should().NotContain("@tenant", "there is no tenant_id column to filter on");
+        composed.CrossTenant.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(nameof(DeletedFilter.Exclude), "and d.\"mt_deleted\" = false")]
+    [InlineData(nameof(DeletedFilter.Only), "and d.\"mt_deleted\" = true")]
+    public void The_soft_delete_predicate_follows_the_tri_state(string filter, string expected)
+    {
+        var parsed = Enum.Parse<DeletedFilter>(filter);
+
+        QuerySqlComposer.Compose(Table(softDeleted: true), null, 50, null, parsed).Statement
+            .Should().Contain(expected);
+    }
+
+    [Fact]
+    public void Including_deleted_emits_no_predicate_but_still_selects_the_column()
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(
+            Table(softDeleted: true), null, 50, null, DeletedFilter.Include);
+
+        composed.Statement.Should().NotContain("mt_deleted\" =");
+        composed.Statement.Should().Contain("d.\"mt_deleted\"\n", "every row still says whether it is deleted");
+        composed.DeletedOrdinal.Should().Be(2, "there is no tenant_id column in front of it here");
+    }
+
+    [Fact]
+    public void A_table_that_is_not_soft_deleted_ignores_the_tri_state_entirely()
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(Table(), null, 50, null, DeletedFilter.Only);
+
+        composed.Statement.Should().NotContain("mt_deleted");
+        composed.Deleted.Should().Be(DeletedFilter.Exclude);
+        composed.DeletedOrdinal.Should().Be(-1);
+    }
+
+    /// <summary>
+    /// Fail closed. A table the mapping calls conjoined but that has no <c>tenant_id</c> column cannot be
+    /// read honestly, and composing without the predicate is precisely the leak this file exists to stop.
+    /// </summary>
+    [Fact]
+    public void A_conjoined_table_with_no_tenant_column_refuses_to_compose()
+    {
+        var broken = new DocumentTableInfo
+        {
+            Schema = "studio",
+            Table = "mt_doc_person",
+            Alias = "person",
+            TenancyStyle = TenancyStyle.Conjoined,
+        };
+
+        Action compose = () => QuerySqlComposer.Compose(broken, null, 50, "acme");
+
+        compose.Should().Throw<ArgumentException>().WithMessage("*tenant*");
+    }
+
+    [Fact]
+    public void The_table_is_quoted_and_the_clause_never_is()
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(Table(), "where a = 'x'", 5);
+
+        composed.Statement.Should().Contain(Qualified);
+        composed.Statement.Should().Contain(Predicate("a = 'x'"));
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // order by / limit / offset - split off deterministically rather than left in the predicate
+    // ------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_trailing_order_by_is_lifted_out_of_the_predicate_and_placed_on_the_statement()
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(Table(), "where age > 30 order by d.id desc", 25);
+
+        composed.Statement.Should().Be(
+            """
+            select d."id", d."data"::text
+            from "studio"."mt_doc_person" as d
+            where 1 = 1
+              and (
+                age > 30
+              )
+            order by d.id desc
+            limit @limit
+            """.ReplaceLineEndings("\n"));
+
+        composed.OrderBy.Should().Be("d.id desc");
+    }
+
+    [Fact]
+    public void A_clause_that_is_only_an_order_by_has_no_predicate_term()
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(Table(), "order by mt_last_modified desc", 25);
+
+        composed.Predicate.Should().BeEmpty();
+        composed.OrderBy.Should().Be("mt_last_modified desc");
+        composed.Statement.Should().Contain("order by mt_last_modified desc\nlimit @limit");
+    }
+
+    /// <summary>
+    /// A <c>limit</c> the visitor wrote is honoured, and clamped <em>down</em> to the studio's cap. Never
+    /// up: the Rows selector is a server-side clamp (plan §4.8), and a clause is not a way past it.
+    /// </summary>
+    [Theory]
+    [InlineData("where age > 30 limit 3", 3, false)]
+    [InlineData("where age > 30 limit 10000", 25, false)]
+    [InlineData("where age > 30", 25, true)]
+    public void A_limit_in_the_clause_is_clamped_down_and_never_up(string clause, int expected, bool applied)
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(Table(), clause, 25);
+
+        composed.Limit.Should().Be(expected);
+        composed.LimitApplied.Should().Be(applied);
+        composed.Parameters.Should().ContainSingle(x => x.Name == "limit").Which.Value.Should().Be(expected);
+    }
+
+    [Fact]
+    public void An_offset_is_bound_as_a_parameter_too()
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(Table(), "where a = 1 order by b limit 5 offset 10", 50);
+
+        composed.Statement.Should().EndWith("order by b\nlimit @limit\noffset @offset");
+        composed.Offset.Should().Be(10);
+        composed.Parameters.Select(x => x.Name).Should().Equal("limit", "offset");
+    }
+
+    /// <summary>
+    /// The split is at parenthesis depth zero, which is what keeps a window function, an ordered aggregate
+    /// and a subquery's own <c>limit</c> in the predicate where they belong.
+    /// </summary>
+    [Theory]
+    [InlineData("where rank() over (order by d.id) = 1")]
+    [InlineData("where d.id in (select id from t limit 5)")]
+    [InlineData("where (data ->> 'x') = (select x from t offset 1)")]
+    public void A_nested_order_by_or_limit_is_not_a_split_point(string clause)
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(Table(), clause, 50);
+
+        composed.OrderBy.Should().BeNull();
+        composed.Statement.Should().Contain(Predicate(clause["where ".Length..]));
+    }
+
+    [Fact]
+    public void A_column_called_order_is_not_a_split_point_either()
+    {
+        QuerySqlComposer.TryPartition("where \"order\" > 5", out ClauseParts parts, out _).Should().BeTrue();
+
+        parts.Predicate.Should().Be("\"order\" > 5");
+        parts.OrderBy.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("where a = 1 limit 5 limit 6", "limit")]
+    [InlineData("where a = 1 limit all", "limit")]
+    [InlineData("where a = 1 limit 5 order by b", "order by")]
+    [InlineData("where a = 1 offset -1", "offset")]
+    [InlineData("where a = 1 order by", "order by")]
+    public void A_tail_the_composer_cannot_place_is_refused_by_name(string clause, string token)
+    {
+        QuerySqlComposer.TryPartition(clause, out _, out SqlGuardResult rejection).Should().BeFalse(clause);
+
+        rejection.Allowed.Should().BeFalse();
+        rejection.Token.Should().Be(token);
+        rejection.Position.Should().BeGreaterThanOrEqualTo(0);
+
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: false).Allowed.Should().BeFalse(
+            "the guard asks the same question, so the page refuses before anything is sent");
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: true).Allowed.Should().BeFalse(
+            "RunSql lifts the nested-read rules, not the rule that the tail has to be placeable");
     }
 
     // ------------------------------------------------------------------------------------------------
@@ -112,9 +346,9 @@ public class QuerySqlComposerTests
     // ------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The clause runs through a Marten session rather than the console's read-only transaction, so a
-    /// second statement in it would execute. <c>1 = 1; drop table x</c> is one Npgsql command holding two
-    /// statements, and Postgres runs both.
+    /// The clause runs outside the console's read-only transaction, so a second statement in it would
+    /// execute. <c>1 = 1; drop table x</c> is one Npgsql command holding two statements, and Postgres runs
+    /// both.
     /// </summary>
     [Theory]
     [InlineData("where a = 1; drop table x")]
@@ -131,9 +365,9 @@ public class QuerySqlComposerTests
     }
 
     /// <summary>
-    /// The two shape rules hold even for somebody who may run SQL: Mode A goes through a Marten session
-    /// rather than the console's read-only transaction, so a second statement here would really write -
-    /// which is more than <c>RunSql</c> grants anywhere else.
+    /// The two shape rules hold even for somebody who may run SQL: Mode A does not run inside the console's
+    /// read-only transaction, so a second statement here would really write - which is more than
+    /// <c>RunSql</c> grants anywhere else.
     /// </summary>
     [Theory]
     [InlineData("where a = 1; drop table x")]
@@ -172,6 +406,7 @@ public class QuerySqlComposerTests
     [InlineData("where name = 'it''s; fine'")]
     [InlineData("order by mt_last_modified desc")]
     [InlineData("age > 30 and name like 'A%'")]
+    [InlineData("where age > 30 order by age desc limit 5 offset 2")]
     [InlineData(null)]
     [InlineData("")]
     public void A_clause_that_reads_only_its_own_collection_is_allowed_without_RunSql(string? clause)
@@ -202,7 +437,9 @@ public class QuerySqlComposerTests
 
     /// <summary>
     /// With <c>RunSql</c> the same clauses run: a subquery is the point of the mode for somebody who could
-    /// have typed the whole thing into the console anyway.
+    /// have typed the whole thing into the console anyway. What it does <em>not</em> lift is the tenant and
+    /// soft-delete predicates, which are composed in either way - see
+    /// <see cref="A_conjoined_soft_deleted_table_carries_both_predicates_in_front_of_the_visitors" />.
     /// </summary>
     [Theory]
     [InlineData("where id in (select id from other.t)")]
@@ -227,6 +464,23 @@ public class QuerySqlComposerTests
     public void A_keyword_inside_a_literal_is_not_a_refusal(string clause)
     {
         QuerySqlComposer.CheckClause(clause, allowNestedReads: false).Allowed.Should().BeTrue(clause);
+    }
+
+    /// <summary>
+    /// A <c>limit</c> in a string is not a <c>limit</c>, which the partition has to agree with or it would
+    /// cut somebody's predicate in half.
+    /// </summary>
+    [Theory]
+    [InlineData("where name = 'a limit b'")]
+    [InlineData("where \"limit\" = 1")]
+    [InlineData("where x = 1 -- limit 5")]
+    [InlineData("where x = $tag$ limit $tag$")]
+    public void A_limit_inside_a_literal_is_not_a_split_point(string clause)
+    {
+        QuerySqlComposer.TryPartition(clause, out ClauseParts parts, out _).Should().BeTrue(clause);
+
+        parts.Limit.Should().BeNull(clause);
+        parts.Predicate.Should().Be(clause["where ".Length..].Trim());
     }
 
     /// <summary>
@@ -278,15 +532,6 @@ public class QuerySqlComposerTests
         explained.Should().NotContain("analyze");
     }
 
-    [Fact]
-    public void The_composed_statement_quotes_the_table_and_never_the_clause()
-    {
-        var composed = QuerySqlComposer.Compose("\"s\".\"t\"", "where a = 'x'", 5);
-
-        composed.Statement.Should().Contain("\"s\".\"t\"");
-        composed.Statement.Should().Contain("where a = 'x'");
-    }
-
     /// <summary>
     /// The two denylists are one list. The console's set is the base and the composer adds only what a
     /// <c>where</c> clause needs on top of it, so a function added to <c>ReadOnlySqlGuard</c> reaches the
@@ -307,9 +552,9 @@ public class QuerySqlComposerTests
     }
 
     /// <summary>
-    /// The console allows <c>pg_sleep</c> because <c>statement_timeout</c> bounds it inside the read-only
-    /// transaction. A Marten string query has neither, so Mode A refuses it - which is the one deliberate
-    /// disagreement between the two lists and is therefore worth pinning.
+    /// The console allows <c>pg_sleep</c> because a server-side <c>statement_timeout</c> bounds it inside
+    /// the read-only transaction. A Mode A read carries only a client-side <c>CommandTimeout</c>, so it
+    /// refuses it - the one deliberate disagreement between the two lists, and therefore worth pinning.
     /// </summary>
     [Fact]
     public void Pg_sleep_is_the_one_the_console_allows_and_a_clause_does_not()
