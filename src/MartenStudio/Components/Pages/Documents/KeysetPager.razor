@@ -41,9 +41,12 @@
                class="ms-input ms-input-mono ms-pager-jump-input"
                type="text"
                placeholder="Jump to id"
-               value="@jump"
-               @oninput="args => jump = args.Value?.ToString() ?? string.Empty" />
-        <button type="submit" class="ms-btn ms-btn-sm" disabled="@(jump.Length == 0)">Go</button>
+               @bind="jump"
+               @bind:event="onchange" />
+        @* The button is not disabled on `jump.Length`: with `onchange` the field only reaches the server on
+           blur, so a disabled-until-typed button would still be disabled when it was pressed. An empty jump
+           is refused in the handler instead, where the check can be right. *@
+        <button type="submit" class="ms-btn ms-btn-sm">Go</button>
     </form>
 </div>
 

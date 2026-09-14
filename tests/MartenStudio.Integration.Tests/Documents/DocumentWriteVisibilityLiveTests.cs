@@ -95,6 +95,58 @@ public class DocumentWriteVisibilityLiveTests(PostgresFixture postgres) : Docume
     }
 
     /// <summary>
+    /// Marten's own bookkeeping is not one of this application's collections, and no capability the
+    /// documents browser owns answers for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The demo store registers async projections, so Marten maps <c>DeadLetterEvent</c> for free and the
+    /// type arrives in <c>AllKnownDocumentTypes()</c> looking exactly like one of the host's own
+    /// collections — alias <c>deadletterevent</c>, an ordinary <c>mt_doc_*</c> table, a CLR type the
+    /// serializer can construct. The documents rail already leaves it out; without the same filter on the
+    /// write side, a hand-typed URL would make those rows editable under <c>EditDocuments</c> and
+    /// deletable under <c>DeleteDocuments</c>.
+    /// </para>
+    /// <para>
+    /// That is not a smaller version of the dead-letter screen — it is a different capability answering
+    /// for the same data, which is the whole failure mode D4 exists to prevent. Discarding a dead letter
+    /// is <c>ManageDeadLetters</c>, and it stays that way.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task Martens_own_dead_letter_collection_is_not_writable_through_the_document_path()
+    {
+        Users.SignIn("ops");
+        var service = CreateService();
+
+        // Every capability is on and nothing is hidden: the refusal has to come from the type itself.
+        StudioOptions.IsDocumentTypeVisible = null;
+
+        const string alias = "deadletterevent";
+        var id = Guid.NewGuid().ToString();
+
+        // The premise, asserted rather than assumed: Marten really does map the type under really this
+        // alias. Without it a refusal could just as well mean "no such alias", and the test would pass
+        // while the filter did nothing.
+        Store.Options.AllKnownDocumentTypes().Should().Contain(
+            x => x.DocumentType == typeof(JasperFx.Events.Daemon.DeadLetterEvent) &&
+                 x.Alias == alias,
+            "excluding the table name from discovery is not enough: an async projection maps the type");
+
+        var preview = await service.PreviewAsync(ScopeFor(), alias, id, "{}", Token);
+        preview.Status.Should().Be(WritePreviewStatus.Refused);
+        preview.Reason.Should().Contain("read-only");
+
+        var save = await service.SaveAsync(
+            ScopeFor(), alias, id, "{}", DocumentConcurrencyToken.None, acknowledgeDrops: true, Token);
+        save.Status.Should().Be(WriteStatus.Refused);
+
+        (await service.DeleteAsync(ScopeFor(), alias, id, Token)).Outcome.Should().Be(DeleteOutcome.Refused);
+        (await service.UndeleteAsync(ScopeFor(), alias, id, Token)).Outcome.Should().Be(DeleteOutcome.Refused);
+        (await service.BulkDeleteAsync(ScopeFor(), alias, [id], Token)).Accepted.Should().BeFalse();
+    }
+
+    /// <summary>
     /// The gate is about the type and nothing else: a collection the host did not hide is exactly as
     /// writable as it was.
     /// </summary>

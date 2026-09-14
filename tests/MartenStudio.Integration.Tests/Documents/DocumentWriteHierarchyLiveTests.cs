@@ -267,11 +267,19 @@ public class DocumentWriteHierarchyLiveTests(PostgresFixture postgres) : Documen
     }
 
     /// <summary>
-    /// The overload that would allow a body rewrite does not cause one: on the ordinary path there is
-    /// nothing to acknowledge, because nothing but two columns is being written.
+    /// There is only one undelete now, and it never rewrites the body.
     /// </summary>
+    /// <remarks>
+    /// The studio used to carry a second overload that allowed a body rewrite for a document type whose
+    /// id it could not turn into <c>x =&gt; x.Id == id</c> — an F# discriminated-union id, say. That path
+    /// deserialized the document and stored it back, rewriting <c>data</c> wholesale to clear one
+    /// boolean, and a type the studio cannot address by id is exactly the type most likely to lose
+    /// something on the way through. It was deleted; such a type is refused outright and told to go
+    /// through Marten. This test pins the remaining behaviour: repeated undeletes of a document carrying
+    /// a member the CLR type has no property for leave <c>data</c> byte-for-byte alone.
+    /// </remarks>
     [PostgresFact]
-    public async Task Acknowledging_a_rewrite_changes_nothing_when_no_rewrite_is_needed()
+    public async Task An_undelete_never_rewrites_the_body_even_across_repeats()
     {
         var service = CreateService();
 
@@ -284,12 +292,12 @@ public class DocumentWriteHierarchyLiveTests(PostgresFixture postgres) : Documen
 
         var before = await StoredJsonAsync(NoteTable, id);
 
-        var undeleted = await service.UndeleteAsync(ScopeFor(), NoteAlias, id, acknowledgeDrops: true, Token);
+        (await service.UndeleteAsync(ScopeFor(), NoteAlias, id, Token)).Outcome.Should().Be(DeleteOutcome.Undeleted);
+        (await service.UndeleteAsync(ScopeFor(), NoteAlias, id, Token)).Outcome.Should().Be(DeleteOutcome.Undeleted);
 
-        undeleted.Outcome.Should().Be(DeleteOutcome.Undeleted);
         (await IsDeletedAsync(NoteTable, id)).Should().BeFalse();
         (await StoredJsonAsync(NoteTable, id)).Should().Be(
-            before, "permission to rewrite the body is not a reason to rewrite the body");
+            before, "undelete is two columns; it is never a rewrite of the document");
     }
 
     /// <summary>A string id that is not there is not found, and nothing is written.</summary>

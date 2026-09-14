@@ -5764,4 +5764,186 @@ a.ms-event-chip:focus-visible {
    default 420px is too tight for a table list. */
 .ms-confirm-dialog:has(.ms-rebuild-scope) {
     max-width: 44rem;
+/* ==========================================================================
+   DOCUMENT WRITES (P3)
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The three controls on the detail header
+   -------------------------------------------------------------------------- */
+
+.ms-doc-write-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    margin-left: var(--ms-space-sm);
+    padding-left: var(--ms-space-sm);
+    border-left: 1px solid var(--ms-color-border);
+}
+
+/* The delete and undelete buttons sit next to Copy and Download, and a destructive action that looks
+   exactly like a clipboard one is a destructive action somebody presses by accident. */
+.ms-doc-undelete-btn {
+    color: var(--ms-color-success);
+}
+
+/* --------------------------------------------------------------------------
+   The editor in place of the viewer
+   -------------------------------------------------------------------------- */
+
+.ms-doc-edit {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-doc-edit-refusal,
+.ms-doc-write-error {
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-doc-deleted-banner {
+    margin-bottom: var(--ms-space-sm);
+}
+
+/* --------------------------------------------------------------------------
+   Concurrency conflict
+   -------------------------------------------------------------------------- */
+
+.ms-doc-conflict {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-doc-conflict-message {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: var(--ms-font-size-sm);
+    min-width: 0;
+}
+
+.ms-doc-conflict-actions {
+    display: inline-flex;
+    gap: var(--ms-space-xs);
+    flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
+   The round-trip preview dialog
+   -------------------------------------------------------------------------- */
+
+.ms-write-preview {
+    max-width: 720px;
+    padding: var(--ms-space-md);
+}
+
+.ms-write-preview > h3 {
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-lg);
+}
+
+/* The two sections are separated by a rule rather than by spacing alone: "what you changed" and "what
+   saving loses" are different questions, and a reader who skims them as one list has been misled. */
+.ms-write-preview-section + .ms-write-preview-section {
+    margin-top: var(--ms-space-md);
+    padding-top: var(--ms-space-md);
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-write-preview-title {
+    margin: 0 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ms-write-preview-caveat {
+    margin: var(--ms-space-md) 0 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-write-preview-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--ms-space-sm);
+    margin-top: var(--ms-space-md);
+    padding-top: var(--ms-space-sm);
+    border-top: 1px solid var(--ms-color-border);
+}
+
+/* --------------------------------------------------------------------------
+   List selection and the bulk bar
+   -------------------------------------------------------------------------- */
+
+.ms-doc-col-select,
+.ms-doc-cell-select {
+    width: 1%;
+    padding-right: 0;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.ms-doc-select,
+.ms-doc-select-all {
+    cursor: pointer;
+    margin: 0;
+    vertical-align: middle;
+}
+
+.ms-doc-row-selected > td {
+    background-color: var(--ms-color-primary-light);
+}
+
+/* Sticky, because a selection is built by scrolling: a bar that scrolls away with the rows means
+   choosing forty documents and then going to look for the button. */
+.ms-doc-bulk-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-top: var(--ms-space-sm);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    background-color: var(--ms-color-surface);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-md);
+    box-shadow: var(--ms-shadow-md);
+}
+
+.ms-doc-bulk-count {
+    font-weight: var(--ms-font-weight-semibold);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-doc-bulk-warning {
+    flex: 1 1 240px;
+    min-width: 0;
+    color: var(--ms-color-danger);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-doc-bulk-actions {
+    display: inline-flex;
+    gap: var(--ms-space-xs);
+    margin-left: auto;
+}
+
+@media (max-width: 900px) {
+    .ms-doc-write-actions {
+        margin-left: 0;
+        padding-left: 0;
+        border-left: none;
+    }
+
+    .ms-doc-bulk-actions {
+        margin-left: 0;
+    }
 }

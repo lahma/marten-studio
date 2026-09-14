@@ -1,0 +1,115 @@
+@using MartenStudio.Services
+@inject StudioCapabilityGuard Capabilities
+
+@*
+    The three controls that change a document: Edit, Delete and Undelete.
+
+    The gating rule is the plan's, and it has three levels rather than two on purpose (D4). Under
+    `ReadOnly` nothing is rendered at all - a studio a host mounted read-only should not read like a
+    product with the buttons greyed out, because there is nothing the person looking at it can do about
+    it. With `ReadOnly` off and one capability off, the control *is* rendered, disabled, naming the exact
+    option a host would set: that is the case where somebody can act on it. And for a collection the
+    studio only discovered - a table no mapping claims - nothing is rendered either, because there is no
+    CLR type to write it as and no amount of configuration changes that.
+
+    None of this is the enforcement. `IDocumentWriteService` refuses on its own, in the service layer,
+    for every one of these reasons and several this component cannot see (AGENTS.md hard rule 5). What is
+    here is the part a person reads.
+*@
+
+@if (!Capabilities.ReadOnly && Writable)
+{
+    <div class="ms-doc-write-actions">
+        @if (!Editing)
+        {
+            <button type="button"
+                    class="ms-btn ms-btn-sm ms-doc-edit-btn"
+                    disabled="@(!EditAllowed)"
+                    title="@EditTitle"
+                    @onclick="OnEdit">Edit</button>
+        }
+
+        @if (IsDeleted && SoftDeleteType)
+        {
+            <button type="button"
+                    class="ms-btn ms-btn-sm ms-doc-undelete-btn"
+                    disabled="@(!DeleteAllowed || Busy)"
+                    title="@DeleteTitle"
+                    @onclick="OnUndelete">Undelete</button>
+        }
+        else if (!IsDeleted)
+        {
+            <button type="button"
+                    class="ms-btn ms-btn-sm ms-btn-danger ms-doc-delete-btn"
+                    disabled="@(!DeleteAllowed || Busy)"
+                    title="@DeleteTitle"
+                    @onclick="OnDelete">@(SoftDeleteType ? "Soft-delete" : "Delete")</button>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>
+    /// Whether this collection can be written at all: a registered mapping, and not one of Marten's own
+    /// bookkeeping types. A discovered table has no CLR type to deserialize into and dead letters answer
+    /// to <c>ManageDeadLetters</c> on a screen of their own, so neither gets these buttons.
+    /// </summary>
+    [Parameter]
+    public bool Writable { get; set; }
+
+    /// <summary>Whether the collection's delete style is soft, which is what makes undelete possible.</summary>
+    [Parameter]
+    public bool SoftDeleteType { get; set; }
+
+    /// <summary>Whether this row is soft-deleted right now.</summary>
+    [Parameter]
+    public bool IsDeleted { get; set; }
+
+    /// <summary>Whether the editor is already open, in which case Edit is not offered again.</summary>
+    [Parameter]
+    public bool Editing { get; set; }
+
+    /// <summary>Whether a write is in flight.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>
+    /// Why editing is impossible for this particular document even though the capability is on - a type
+    /// the round trip could not construct, most often. Non-null disables Edit and becomes its title.
+    /// </summary>
+    [Parameter]
+    public string? EditRefusal { get; set; }
+
+    /// <summary>Opens the editor.</summary>
+    [Parameter]
+    public EventCallback OnEdit { get; set; }
+
+    /// <summary>Opens the delete confirmation.</summary>
+    [Parameter]
+    public EventCallback OnDelete { get; set; }
+
+    /// <summary>Brings a soft-deleted document back.</summary>
+    [Parameter]
+    public EventCallback OnUndelete { get; set; }
+
+    private bool EditCapability => Capabilities.IsEnabled(StudioCapability.EditDocuments);
+
+    private bool DeleteAllowed => Capabilities.IsEnabled(StudioCapability.DeleteDocuments);
+
+    private bool EditAllowed => EditCapability && EditRefusal is null && !Busy;
+
+    private string EditTitle => EditCapability
+        ? EditRefusal ?? "Edit this document's JSON"
+        : Requires(StudioCapability.EditDocuments);
+
+    private string DeleteTitle => DeleteAllowed
+        ? IsDeleted
+            ? "Clear the deleted flag on this row"
+            : SoftDeleteType
+                ? "Mark this document deleted; it can be undeleted"
+                : "Remove this row from the table"
+        : Requires(StudioCapability.DeleteDocuments);
+
+    private static string Requires(StudioCapability capability) =>
+        "Requires " + StudioCapabilityGuard.OptionName(capability);
+}

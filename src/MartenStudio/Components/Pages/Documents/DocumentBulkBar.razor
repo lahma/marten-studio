@@ -1,0 +1,70 @@
+@using System.Globalization
+@using MartenStudio.Services.Documents
+
+@*
+    What a selection can do, pinned to the bottom of the list while there is one.
+
+    It is sticky rather than inline because the selection is built by scrolling: a bar that scrolls away
+    with the rows means choosing forty documents and then hunting for the button. And it states the count
+    rather than saying "selected items", because the number is the thing worth checking before pressing a
+    button that deletes them.
+*@
+
+@if (Count > 0)
+{
+    <div class="ms-doc-bulk-bar" role="region" aria-label="Selected documents">
+        <span class="ms-doc-bulk-count">
+            @Count.ToString("N0", CultureInfo.InvariantCulture) selected
+        </span>
+
+        @if (OverCap)
+        {
+            <span class="ms-doc-bulk-warning">
+                The studio deletes at most @Cap.ToString("N0", CultureInfo.InvariantCulture) documents at
+                once. Narrow the selection, or use a migration.
+            </span>
+        }
+
+        <div class="ms-doc-bulk-actions">
+            <button type="button"
+                    class="ms-btn ms-btn-sm ms-btn-danger ms-doc-bulk-delete"
+                    disabled="@(OverCap || Busy)"
+                    title="@(OverCap ? $"At most {Cap} documents at once" : "Delete every selected document")"
+                    @onclick="OnDelete">
+                @(Busy ? "Deleting..." : "Delete")
+            </button>
+            <button type="button" class="ms-btn ms-btn-sm" disabled="@Busy" @onclick="OnCopyIds">Copy ids</button>
+            <button type="button" class="ms-btn ms-btn-sm" disabled="@Busy" @onclick="OnClear">Clear</button>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>How many documents are selected.</summary>
+    [Parameter]
+    public int Count { get; set; }
+
+    /// <summary>Whether a bulk delete is in flight.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Opens the confirmation.</summary>
+    [Parameter]
+    public EventCallback OnDelete { get; set; }
+
+    /// <summary>Copies the selected ids, one per line.</summary>
+    [Parameter]
+    public EventCallback OnCopyIds { get; set; }
+
+    /// <summary>Drops the selection.</summary>
+    [Parameter]
+    public EventCallback OnClear { get; set; }
+
+    /// <summary>
+    /// The most ids one call will take. The same number the service refuses above, said here so that the
+    /// refusal is not the first time anybody hears about it.
+    /// </summary>
+    private static int Cap => DocumentWriteService.MaxBulkDeleteIds;
+
+    private bool OverCap => Count > Cap;
+}

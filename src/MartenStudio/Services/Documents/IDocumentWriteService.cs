@@ -114,9 +114,11 @@ internal interface IDocumentWriteService
     /// <c>UndoDeleteWhere&lt;T&gt;(x =&gt; x.Id == id)</c>, which is an
     /// <c>update … set mt_deleted = false, mt_deleted_at = null</c> and never touches <c>data</c> — so
     /// bringing a row back cannot lose a property the CLR type has no member for. The one case that
-    /// cannot go that way is a document whose id the studio cannot build a typed expression for, and
-    /// that one is refused here and offered through
-    /// <see cref="UndeleteAsync(StudioScope, string, string, bool, CancellationToken)" /> instead.
+    /// cannot go that way is a document whose id the studio cannot build a typed expression for — an F#
+    /// discriminated-union id, say — and that one is <b>refused outright</b>, naming the id type. The
+    /// alternative would be to deserialize the document and store it back, rewriting <c>data</c>
+    /// wholesale to clear one boolean; a type the studio cannot address by id is exactly the type most
+    /// likely to lose something on the way through, so the studio does not offer it at all.
     /// </para>
     /// </remarks>
     /// <param name="scope">The store, database and tenant to write to.</param>
@@ -129,39 +131,6 @@ internal interface IDocumentWriteService
         StudioScope scope,
         string alias,
         string id,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// The same undelete, with permission to rewrite the document body if that is the only way left.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A separate overload rather than an optional parameter, because a caller that wrote
-    /// <c>UndeleteAsync(scope, alias, id, token)</c> must keep compiling and must keep meaning "do not
-    /// rewrite anything".
-    /// </para>
-    /// <para>
-    /// The fallback path deserializes the stored document and stores it back — the same round trip a save
-    /// does, with the same loss — and is only reached for a document type whose id the studio cannot turn
-    /// into a LINQ expression. It runs the round-trip differ first and refuses unless
-    /// <paramref name="acknowledgeDrops" /> says the caller has seen what it would cost.
-    /// </para>
-    /// </remarks>
-    /// <param name="scope">The store, database and tenant to write to.</param>
-    /// <param name="alias">The collection alias.</param>
-    /// <param name="id">The document id.</param>
-    /// <param name="acknowledgeDrops">
-    /// Whether the caller has seen what a body rewrite would change and wants it anyway. Ignored on the
-    /// ordinary path, which changes nothing but the deleted flag.
-    /// </param>
-    /// <param name="cancellationToken">Cancels the undelete.</param>
-    /// <exception cref="StudioCapabilityDeniedException"><c>DeleteDocuments</c> is not enabled.</exception>
-    /// <exception cref="StudioNotAuthorizedException">The visitor may not have this scope.</exception>
-    Task<DeleteResult> UndeleteAsync(
-        StudioScope scope,
-        string alias,
-        string id,
-        bool acknowledgeDrops,
         CancellationToken cancellationToken = default);
 
     /// <summary>

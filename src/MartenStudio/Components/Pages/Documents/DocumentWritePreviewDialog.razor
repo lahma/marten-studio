@@ -1,0 +1,99 @@
+@using MartenStudio.Components.Json
+@using MartenStudio.Services.Documents
+
+@*
+    What saving would do, in two answers that are not the same answer (D7).
+
+    "What your edit changes" is the diff a person expects and can check against what they typed. "What
+    the round trip loses" is the one only the studio can compute: Marten has no untyped store API, so a
+    save deserializes the JSON into the document's CLR type and serializes that back, and anything the
+    type has no member for is gone. The two are shown as separate, separately titled sections because
+    conflating them is how an edit that quietly eats a legacy property looks like an edit that changed
+    one field.
+*@
+
+@if (IsOpen && Preview is { } preview)
+{
+    <div class="ms-confirm-overlay ms-write-preview-overlay">
+        <div class="ms-confirm-dialog ms-write-preview"
+             role="dialog"
+             aria-modal="true"
+             aria-label="What saving this document would do">
+            <h3>What saving would do</h3>
+
+            <section class="ms-write-preview-section ms-write-preview-loss">
+                <h4 class="ms-write-preview-title">What the round trip loses</h4>
+                <RoundTripDiff Edited="@preview.EditedJson"
+                               RoundTripped="@preview.RoundTrippedJson"
+                               DocumentTypeName="@preview.DocumentTypeName" />
+            </section>
+
+            <section class="ms-write-preview-section ms-write-preview-change">
+                <h4 class="ms-write-preview-title">What your edit changes</h4>
+                <JsonDiff Before="@preview.StoredJson"
+                          After="@preview.EditedJson"
+                          RemovedTitle="Removed"
+                          ChangedTitle="Changed"
+                          AddedTitle="Added"
+                          EmptyText="You have not changed anything: this would rewrite the document as it already is." />
+            </section>
+
+            @if (preview.Reason is { Length: > 0 } caveat)
+            {
+                <p class="ms-alert ms-alert-warning ms-write-preview-caveat" role="note">@caveat</p>
+            }
+
+            <div class="ms-write-preview-actions">
+                <button type="button" class="ms-button" @onclick="OnCancel">Back to the editor</button>
+                <button type="button" class="@ConfirmClass" @onclick="OnConfirm">@ConfirmLabel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Whether the dialog is open.</summary>
+    [Parameter]
+    public bool IsOpen { get; set; }
+
+    /// <summary>
+    /// The preview to render, as a <c>WritePreview</c>. Typed <see cref="object" /> — see
+    /// <see cref="DocumentComponentModel" /> for why a component parameter cannot name an internal type.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Raised when the save is confirmed from here.</summary>
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    /// <summary>Raised when the dialog is dismissed.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private WritePreview? Preview => Model as WritePreview;
+
+    /// <summary>
+    /// The confirm button states the price rather than asking a question: a person who has just read a
+    /// list of dropped members should not then press a button that says "OK".
+    /// </summary>
+    private string ConfirmLabel
+    {
+        get
+        {
+            if (Preview is not { } preview || !preview.HasDrops)
+            {
+                return "Save";
+            }
+
+            int count = preview.DroppedPaths.Length;
+            return count == 1
+                ? "Save (1 property will be dropped)"
+                : $"Save ({count} properties will be dropped)";
+        }
+    }
+
+    private string ConfirmClass => Preview is { HasDrops: true }
+        ? "ms-button ms-button-danger"
+        : "ms-button ms-button-primary";
+}

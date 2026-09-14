@@ -15,11 +15,17 @@
     <div class="ms-search-strip-row">
         <span class="ms-verdict-badge ms-verdict-badge-@Level" title="@VerdictTitle">@VerdictText</span>
 
-        @foreach (SearchChip chip in Verdict.Chips)
+        @* Keyed by position, never by the chip. SearchChip is a record, so two identical terms - `?q=foo
+           foo`, `?q=is:deleted is:deleted`, or the `..` that parses into two of the same thing - are equal
+           to each other and the renderer throws "more than one sibling has the same key value", which on a
+           Blazor Server circuit is a 500 and a dead page from a search box. *@
+        @for (int index = 0; index < Verdict.Chips.Count; index++)
         {
+            SearchChip chip = Verdict.Chips[index];
+
             <span class="ms-search-chip ms-search-chip-@chip.Kind.ToString().ToLowerInvariant() ms-verdict-@chip.Level.ToString().ToLowerInvariant()"
                   title="@chip.Reason"
-                  @key="chip">
+                  @key="index">
                 @chip.Text
             </span>
         }
@@ -33,11 +39,13 @@
     @if (Verdict.Chips.Count > 0)
     {
         <ul class="ms-verdict-reasons">
-            @foreach (SearchChip chip in Verdict.Chips)
+            @for (int index = 0; index < Verdict.Chips.Count; index++)
             {
+                SearchChip chip = Verdict.Chips[index];
+
                 @if (chip.Level != IndexVerdictLevel.Green)
                 {
-                    <li class="ms-verdict-reason ms-verdict-@chip.Level.ToString().ToLowerInvariant()" @key="chip">
+                    <li class="ms-verdict-reason ms-verdict-@chip.Level.ToString().ToLowerInvariant()" @key="index">
                         <span class="ms-verdict-reason-text">@chip.Reason</span>
                         @if (chip.Suggestion is { Length: > 0 } suggestion)
                         {

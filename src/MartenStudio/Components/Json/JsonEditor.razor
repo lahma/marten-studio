@@ -19,15 +19,19 @@
 
 <div class="ms-editor">
     <div class="ms-toolbar ms-editor-toolbar">
-        <button type="button" class="ms-btn ms-btn-sm" @onclick="FormatAsync">Format</button>
-        <button type="button" class="ms-btn ms-btn-sm" @onclick="ValidateAsync">Validate</button>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@Busy" @onclick="FormatAsync">Format</button>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@Busy" @onclick="ValidateAsync">Validate</button>
+        @if (OnPreview.HasDelegate)
+        {
+            <button type="button" class="ms-btn ms-btn-sm ms-editor-preview" disabled="@Busy" @onclick="PreviewAsync">@PreviewLabel</button>
+        }
         <div class="ms-toolbar-spacer"></div>
         @if (IsDirty)
         {
             <span class="ms-pill ms-editor-dirty">unsaved changes</span>
         }
-        <button type="button" class="ms-btn ms-btn-sm" @onclick="CancelAsync">Cancel</button>
-        <button type="button" class="ms-btn ms-btn-sm ms-btn-primary" @onclick="SaveAsync">Save</button>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@Busy" @onclick="CancelAsync">Cancel</button>
+        <button type="button" class="ms-btn ms-btn-sm ms-btn-primary ms-editor-save" disabled="@Busy" @onclick="SaveAsync">@SaveLabel</button>
     </div>
 
     <div class="ms-editor-body">
@@ -133,9 +137,40 @@
     [Parameter]
     public int MaxLines { get; set; } = 2_000;
 
+    /// <summary>
+    /// What the Save button says. A page that has run a round-trip preview replaces it with what the
+    /// save would actually cost ("Save (2 properties will be dropped)"), which is the difference between
+    /// a button that asks for confirmation and a button that states the price.
+    /// </summary>
+    [Parameter]
+    public string SaveLabel { get; set; } = "Save";
+
+    /// <summary>What the preview button says, when one is rendered.</summary>
+    [Parameter]
+    public string PreviewLabel { get; set; } = "Preview changes";
+
+    /// <summary>
+    /// Whether a write is in flight. Every toolbar button is disabled while it is, so a second Save
+    /// cannot be queued behind the first one.
+    /// </summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
     /// <summary>Raised with the edited text.</summary>
     [Parameter]
     public EventCallback<string> OnSave { get; set; }
+
+    /// <summary>
+    /// Raised with the edited text when the preview button is pressed. No delegate, no button.
+    /// </summary>
+    /// <remarks>
+    /// It lives on the editor rather than in the page's own toolbar because only the editor can read the
+    /// textarea's live value before acting on it (see <see cref="CommitAsync" />). A preview button
+    /// somewhere else on the page would diff the text as of the last <c>change</c> event, which is one
+    /// keystroke behind whenever it matters.
+    /// </remarks>
+    [Parameter]
+    public EventCallback<string> OnPreview { get; set; }
 
     /// <summary>Raised when the edit is abandoned.</summary>
     [Parameter]
@@ -391,6 +426,26 @@
         }
 
         await OnSave.InvokeAsync(_text);
+    }
+
+    private async Task PreviewAsync()
+    {
+        if (!await CommitAsync())
+        {
+            _status = string.Empty;
+            _caretSource = null;
+            _caretLine = null;
+            _error = "The editor's current text could not be read from the browser, so there is nothing " +
+                "to preview. Click in the document and try again.";
+            return;
+        }
+
+        if (ValidateBeforeSave && !Validate())
+        {
+            return;
+        }
+
+        await OnPreview.InvokeAsync(_text);
     }
 
     private async Task CancelAsync()

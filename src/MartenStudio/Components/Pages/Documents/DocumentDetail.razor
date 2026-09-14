@@ -7,8 +7,10 @@
 @using RelatedModel = MartenStudio.Services.Documents.RelatedDocuments
 @implements IAsyncDisposable
 @inject IDocumentDataService Data
+@inject IDocumentWriteService Writes
 @inject DocumentBrowserState Browser
 @inject StudioState State
+@inject StudioCapabilityGuard Capabilities
 @inject ToastService Toasts
 @inject NavigationManager Navigation
 @inject IOptions<MartenStudioOptions> Options
@@ -19,9 +21,11 @@
     right. The id is in the query string, not in the path, because Marten ids are frequently strings with
     a slash in them and the studio's router has no catch-all segment (D9).
 
-    Nothing here writes. The edit, delete and undelete controls belong to a later packet; what this screen
-    owes them is that everything they need - the round-tripped JSON, the version, the delete state - is
-    already on the page and already correct.
+    This is also where a document is edited and deleted. The editor takes the place of the viewer in the
+    left pane rather than opening over it, so the metadata panel beside it keeps answering about the same
+    row while it is being changed; the flow itself lives in `DocumentEditPane`, and the buttons that start
+    it in `DocumentWriteActions`. Everything those two do is refused again by `IDocumentWriteService`,
+    which is the only thing standing between a circuit and the store (AGENTS.md hard rule 5).
 *@
 
 <PageTitle>@(Alias) @Id</PageTitle>
@@ -65,32 +69,60 @@
 
                 <span class="ms-doc-detail-nav">
                     <a class="ms-btn ms-btn-sm @(previousId is null ? "ms-btn-disabled" : null)"
-                       href="@(previousId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, previousId, From))"
+                       href="@(previousId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, previousId, SafeFrom))"
                        aria-disabled="@(previousId is null ? "true" : "false")"
                        title="The previous document on the list you came from">◀</a>
                     <a class="ms-btn ms-btn-sm @(nextId is null ? "ms-btn-disabled" : null)"
-                       href="@(nextId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, nextId, From))"
+                       href="@(nextId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, nextId, SafeFrom))"
                        aria-disabled="@(nextId is null ? "true" : "false")"
                        title="The next document on the list you came from">▶</a>
                 </span>
+
+                <DocumentWriteActions Writable="@IsWritable(detail)"
+                                      SoftDeleteType="@IsSoftDeleteType(detail)"
+                                      IsDeleted="detail.IsDeleted"
+                                      Editing="editing"
+                                      Busy="writing"
+                                      EditRefusal="@editRefusal"
+                                      OnEdit="StartEditAsync"
+                                      OnDelete="OpenDeleteDialog"
+                                      OnUndelete="UndeleteAsync" />
             </div>
         </div>
 
         @if (detail.IsDeleted)
         {
-            <div class="ms-alert ms-alert-warning" role="status">
+            <div class="ms-alert ms-alert-warning ms-doc-deleted-banner" role="status">
                 This document is soft-deleted: the row is still in the table, and Marten's own queries do
                 not return it.
             </div>
         }
 
+        @if (writeError is { Length: > 0 } failure)
+        {
+            <div class="ms-alert ms-alert-error ms-doc-write-error" role="alert">@failure</div>
+        }
+
         <div class="ms-split ms-doc-detail-split">
             <div class="ms-split-pane ms-doc-detail-json">
-                <JsonView Json="@detail.Json"
-                          DocumentType="detail.ClrType"
-                          NamingPolicy="detail.NamingPolicy"
-                          Label="@($"{Alias} {detail.Id}")"
-                          DownloadFileName="@FileName(detail)" />
+                @if (editing)
+                {
+                    <DocumentEditPane @key="@(detail.Alias + '/' + detail.Id)"
+                                      Alias="@detail.Alias"
+                                      Id="@detail.Id"
+                                      Json="@Pretty(detail.Json)"
+                                      Model="editProbe"
+                                      OnFinished="FinishEditAsync"
+                                      OnCancelled="CancelEditAsync" />
+                }
+                else
+                {
+                    <JsonView Json="@detail.Json"
+                              DocumentType="detail.ClrType"
+                              NamingPolicy="detail.NamingPolicy"
+                              Label="@($"{Alias} {detail.Id}")"
+                              DownloadFileName="@FileName(detail)" />
+                }
             </div>
 
             <div class="ms-split-pane ms-doc-detail-meta">
@@ -98,6 +130,14 @@
                 <RelatedDocumentsPanel Model="related" HrefFor="RelatedHref" />
             </div>
         </div>
+
+        <ConfirmDialog IsOpen="deleteDialogOpen"
+                       Title="@(IsSoftDeleteType(detail) ? "Soft-delete this document?" : "Delete this document?")"
+                       Message="@DeleteMessage(detail)"
+                       ConfirmationPhrase="@detail.Id"
+                       ConfirmText="@(IsSoftDeleteType(detail) ? "Soft-delete" : "Delete")"
+                       OnConfirm="DeleteAsync"
+                       OnCancel="CloseDeleteDialog" />
     }
 </div>
 
@@ -112,6 +152,12 @@
     private string? loadedSignature;
     private string? previousId;
     private string? nextId;
+    private bool editing;
+    private bool writing;
+    private bool deleteDialogOpen;
+    private string? writeError;
+    private string? editRefusal;
+    private WritePreview? editProbe;
 
     /// <summary>The collection alias from the route.</summary>
     [Parameter]
@@ -191,6 +237,11 @@
         probes = [];
         related = RelatedModel.None;
         streamExists = false;
+        editing = false;
+        editProbe = null;
+        editRefusal = null;
+        writeError = null;
+        deleteDialogOpen = false;
         StateHasChanged();
 
         try
@@ -273,9 +324,17 @@
 
     private int Hue => Services.CollectionColorizer.HueFor(Alias);
 
-    private string BackHref => From is { Length: > 0 }
-        ? From
-        : DocumentLinks.ToCollection(Options.Value, State.ActiveScope, Alias);
+    /// <summary>
+    /// The <c>?from=</c> the link carried, but only when it is a return link this page may render.
+    /// </summary>
+    /// <remarks>
+    /// It arrives from the query string, so it arrives from whoever wrote the link. See
+    /// <see cref="SafeReturnLink" /> for what is accepted and why the rule is an allow-list.
+    /// </remarks>
+    private string? SafeFrom => SafeReturnLink.Sanitize(From, Options.Value);
+
+    private string BackHref =>
+        SafeFrom ?? DocumentLinks.ToCollection(Options.Value, State.ActiveScope, Alias);
 
     private string QueryHref(DocumentModel detail) =>
         DocumentLinks.ToQuery(Options.Value, State.ActiveScope, Alias, $"id = '{detail.Id}'");
@@ -315,6 +374,282 @@
         }
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // Writes
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Whether this collection can be written through the document path at all.
+    /// </summary>
+    /// <remarks>
+    /// A table the studio only discovered has no mapping, so there is no CLR type to deserialize the
+    /// edit into. Marten's own bookkeeping - <c>DeadLetterEvent</c> - is excluded for a different reason:
+    /// it has a screen of its own gated on <c>ManageDeadLetters</c>, and reaching the same rows here
+    /// would put a second capability in charge of the same data. The write service refuses both cases on
+    /// its own; this is what stops the buttons being drawn in the first place.
+    /// </remarks>
+    private static bool IsWritable(DocumentModel detail) =>
+        detail.IsRegistered &&
+        (detail.ClrType is null || !CollectionAliases.IsMartenInfrastructure(detail.ClrType));
+
+    /// <summary>
+    /// Whether a delete here marks the row or removes it, read from the row's own columns rather than
+    /// from a flag.
+    /// </summary>
+    /// <remarks>
+    /// <c>mt_deleted</c> is structural: Marten's <c>DocumentTable</c> emits it if and only if the delete
+    /// style is soft (Appendix B addendum). <c>Metadata.IsSoftDeleted.Enabled</c> deliberately is not
+    /// used - it reports true for types that are not soft-deleted at all - and the page has the physical
+    /// column list already, so asking the table is both cheaper and harder to get wrong.
+    /// </remarks>
+    private static bool IsSoftDeleteType(DocumentModel detail)
+    {
+        foreach (PhysicalColumnValue column in detail.Columns)
+        {
+            if (string.Equals(column.Name, "mt_deleted", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string DeleteMessage(DocumentModel detail) => IsSoftDeleteType(detail)
+        ? $"'{detail.Alias}' is soft-deleted, so this marks the document as deleted: the row stays in " +
+          $"{detail.TableName}, Marten's own queries stop returning it, and it can be undeleted."
+        : $"'{detail.Alias}' is not soft-deleted, so this removes the row from {detail.TableName}. " +
+          "There is no undo.";
+
+    /// <summary>
+    /// Opens the editor, but only after the round trip has been asked whether this document can survive
+    /// one.
+    /// </summary>
+    /// <remarks>
+    /// The probe is a <c>PreviewAsync</c> of the document exactly as it is stored, which answers two
+    /// questions at once: whether the CLR type can be constructed from this JSON at all
+    /// (<c>TypeIsConstructible</c>), and what version the save will be checked against. A type that
+    /// cannot be constructed is refused <em>here</em> rather than after somebody has typed an edit into
+    /// it, and the Edit button then carries the reason as its title.
+    /// </remarks>
+    private async Task StartEditAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || result?.Detail is not { } detail || writing)
+        {
+            return;
+        }
+
+        writing = true;
+        writeError = null;
+        editRefusal = null;
+        StateHasChanged();
+
+        try
+        {
+            WritePreview probe = await Writes.PreviewAsync(
+                scope,
+                Alias,
+                detail.Id,
+                detail.Json,
+                cts?.Token ?? CancellationToken.None);
+
+            if (probe.Status != WritePreviewStatus.Ready || !probe.TypeIsConstructible)
+            {
+                editRefusal = probe.Reason ?? "This document cannot be edited through the studio.";
+                writeError = editRefusal;
+                return;
+            }
+
+            editProbe = probe;
+            editing = true;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // A capability turned off since the page loaded, or a policy that says no. Both are a
+            // sentence on the page, never an unhandled exception on the circuit (plan §4.8).
+            writeError = exception.Message;
+        }
+        finally
+        {
+            writing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task FinishEditAsync()
+    {
+        editing = false;
+        editProbe = null;
+        await ReloadDocumentAsync();
+    }
+
+    private Task CancelEditAsync()
+    {
+        editing = false;
+        editProbe = null;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void OpenDeleteDialog() => deleteDialogOpen = true;
+
+    private void CloseDeleteDialog() => deleteDialogOpen = false;
+
+    private async Task DeleteAsync()
+    {
+        deleteDialogOpen = false;
+
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || result?.Detail is not { } detail || writing)
+        {
+            return;
+        }
+
+        writing = true;
+        writeError = null;
+        StateHasChanged();
+
+        try
+        {
+            DeleteResult deleted = await Writes.DeleteAsync(
+                scope,
+                Alias,
+                detail.Id,
+                cts?.Token ?? CancellationToken.None);
+
+            await ReportAsync(deleted);
+
+            if (deleted.Outcome == DeleteOutcome.HardDeleted)
+            {
+                // The row is gone, so there is no document to come back to. The list is.
+                Navigation.NavigateTo(BackHref);
+                return;
+            }
+
+            // Only a write that changed something is worth re-reading, and a reload would clear the
+            // refusal the page has just put on screen.
+            if (deleted.Changed)
+            {
+                await ReloadDocumentAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            writeError = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            writing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UndeleteAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || result?.Detail is not { } detail || writing)
+        {
+            return;
+        }
+
+        writing = true;
+        writeError = null;
+        StateHasChanged();
+
+        try
+        {
+            DeleteResult undeleted = await Writes.UndeleteAsync(
+                scope,
+                Alias,
+                detail.Id,
+                cts?.Token ?? CancellationToken.None);
+
+            await ReportAsync(undeleted);
+
+            if (undeleted.Changed)
+            {
+                await ReloadDocumentAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            writeError = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            writing = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Names the outcome rather than saying "done": the four of them are not the same thing.</summary>
+    private async Task ReportAsync(DeleteResult outcome)
+    {
+        switch (outcome.Outcome)
+        {
+            case DeleteOutcome.SoftDeleted:
+                await Toasts.Success($"{outcome.Id} is marked deleted. It can be undeleted.");
+                break;
+
+            case DeleteOutcome.HardDeleted:
+                await Toasts.Success($"{outcome.Id} was removed from the table.");
+                break;
+
+            case DeleteOutcome.Undeleted:
+                await Toasts.Success(outcome.Reason ?? $"{outcome.Id} is back.");
+                break;
+
+            case DeleteOutcome.NotFound:
+                writeError = outcome.Reason;
+                await Toasts.Info(outcome.Reason ?? "There was no such document.");
+                break;
+
+            default:
+                writeError = outcome.Reason;
+                await Toasts.Error(outcome.Reason ?? "The write was refused.");
+                break;
+        }
+    }
+
+    private Task ReloadDocumentAsync()
+    {
+        loadedSignature = null;
+        return LoadAsync();
+    }
+
+    /// <summary>
+    /// The stored document as something a person can edit. <c>jsonb</c> comes back without the
+    /// whitespace it was written with, so an unformatted document would be one very long line.
+    /// </summary>
+    private static string Pretty(string json)
+    {
+        try
+        {
+            return JsonPrettyPrinter.PrettyPrint(json);
+        }
+        catch (JsonException)
+        {
+            // A row whose `data` the studio cannot parse still opens in the editor as it is stored: the
+            // editor's own Validate button is a better place to find out than a blank pane is.
+            return json;
+        }
+    }
+
     private async Task CopyAsync(string text, string what)
     {
         if (await CopyTextAsync(text))
@@ -339,17 +674,11 @@
         {
             return await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
         }
-        catch (JSException)
+        catch (Exception exception) when (DocumentsInterop.IsUnavailable(exception))
         {
-            await Toasts.Error("This browser refused the clipboard.");
-            return false;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-        catch (InvalidOperationException)
-        {
+            // One filter for the whole family. JSDisconnectedException derives from Exception rather
+            // than from JSException, so a `catch (JSException)` misses the commonest case of all - a
+            // circuit that closed while the call was in flight.
             return false;
         }
     }
@@ -362,14 +691,7 @@
                 "martenStudio.download.text",
                 new object?[] { FileName(detail), "application/json", detail.Json });
         }
-        catch (JSException)
-        {
-            await Toasts.Error("This browser refused the download.");
-        }
-        catch (JsonException)
-        {
-        }
-        catch (InvalidOperationException)
+        catch (Exception exception) when (DocumentsInterop.IsUnavailable(exception))
         {
         }
     }

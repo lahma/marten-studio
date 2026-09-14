@@ -17,8 +17,8 @@
                class="ms-input ms-doc-search-input"
                type="search"
                placeholder="@Placeholder"
-               value="@draft"
-               @oninput="OnInput" />
+               @bind="draft"
+               @bind:event="onchange" />
         <button type="submit" class="ms-btn ms-btn-primary ms-btn-sm">Search</button>
         @if (!string.IsNullOrEmpty(Search))
         {
@@ -208,7 +208,10 @@
         _ => "Only the live documents - what Marten itself returns"
     };
 
-    private void OnInput(ChangeEventArgs args) => draft = args.Value?.ToString() ?? string.Empty;
+    @* `onchange`, not `oninput`. On a Blazor Server circuit `oninput` is a round trip per keystroke against
+       a value the server then re-renders, so a fast typist loses characters to the race between the two -
+       and a search box is exactly where people type fast. The form submits on Enter, and the browser fires
+       `change` before `submit`, so the term that is searched for is still the term on screen. *@
 
     private async Task SubmitAsync() => await OnSearch.InvokeAsync(draft);
 

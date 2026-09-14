@@ -17,6 +17,17 @@
     <table class="ms-table ms-doc-table">
         <thead>
             <tr>
+                @if (Selectable)
+                {
+                    <th class="ms-doc-col-select" scope="col">
+                        <input type="checkbox"
+                               class="ms-doc-select-all"
+                               aria-label="Select every document on this page"
+                               title="Select every document on this page"
+                               checked="@PageIsSelected"
+                               @onchange="ToggleAllAsync" />
+                    </th>
+                }
                 <th class="ms-doc-col-expand" scope="col"><span class="ms-sr-only">Expand</span></th>
                 @foreach (DocumentColumnHeader header in Page.Columns)
                 {
@@ -46,10 +57,20 @@
 
             @foreach (DocumentRow row in Page.Rows)
             {
-                <tr class="ms-doc-row @(row.IsDeleted ? "ms-doc-row-deleted" : null)"
+                <tr class="ms-doc-row @(row.IsDeleted ? "ms-doc-row-deleted" : null) @(IsSelected(row.Id) ? "ms-doc-row-selected" : null)"
                     @key="row.Id"
                     @onkeydown="args => OnRowKeyAsync(args, row.Id)"
                     tabindex="0">
+                    @if (Selectable)
+                    {
+                        <td class="ms-doc-cell-select">
+                            <input type="checkbox"
+                                   class="ms-doc-select"
+                                   aria-label="@($"Select {row.Id}")"
+                                   checked="@IsSelected(row.Id)"
+                                   @onchange="() => SelectAsync(row.Id)" />
+                        </td>
+                    }
                     <td class="ms-doc-cell-expand">
                         <button type="button"
                                 class="ms-doc-expander"
@@ -158,6 +179,29 @@
     [Parameter]
     public EventCallback<string> OnToggleExpand { get; set; }
 
+    /// <summary>
+    /// Whether the selection column is drawn at all. The list page turns it on only when
+    /// <c>DeleteDocuments</c> is enabled and the collection is one the studio could write - there is no
+    /// point offering a selection whose only action is refused.
+    /// </summary>
+    [Parameter]
+    public bool Selectable { get; set; }
+
+    /// <summary>The ids currently selected, across pages.</summary>
+    [Parameter]
+    public IReadOnlyCollection<string> Selected { get; set; } = [];
+
+    /// <summary>Selects or deselects one id.</summary>
+    [Parameter]
+    public EventCallback<string> OnToggleSelect { get; set; }
+
+    /// <summary>
+    /// Selects or deselects every id on this page. The argument is what the page should become, so the
+    /// header checkbox is a switch rather than a toggle whose meaning depends on what it last did.
+    /// </summary>
+    [Parameter]
+    public EventCallback<bool> OnToggleSelectPage { get; set; }
+
     /// <summary>The page, read back into the type it really is.</summary>
     private DocumentPage Page => DocumentComponentModel.Read(Model, EmptyPage);
 
@@ -165,9 +209,37 @@
 
     private SortDirection SortDirectionValue => DocumentComponentModel.Direction(Direction);
 
-    private int ColumnSpan => Page.Columns.Count + 2;
+    private int ColumnSpan => Page.Columns.Count + (Selectable ? 3 : 2);
 
     private bool IsExpanded(string id) => Expanded.Contains(id, StringComparer.Ordinal);
+
+    private bool IsSelected(string id) => Selected.Contains(id, StringComparer.Ordinal);
+
+    /// <summary>Whether every row on this page is selected, which is what the header checkbox shows.</summary>
+    private bool PageIsSelected
+    {
+        get
+        {
+            if (Page.Rows.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (DocumentRow row in Page.Rows)
+            {
+                if (!IsSelected(row.Id))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
+    private Task SelectAsync(string id) => OnToggleSelect.InvokeAsync(id);
+
+    private Task ToggleAllAsync() => OnToggleSelectPage.InvokeAsync(!PageIsSelected);
 
     private bool IsSorted(DocumentColumnHeader header) =>
         string.Equals(header.Key, SortKey, StringComparison.OrdinalIgnoreCase);
@@ -213,8 +285,9 @@
     private async Task ToggleAsync(string id) => await OnToggleExpand.InvokeAsync(id);
 
     /// <summary>
-    /// Space opens the preview, the way the chevron does. The key handler is on the row rather than on the
-    /// document, so it never fights the search box or the JSON viewer's own keys.
+    /// Space opens the preview, the way the chevron does, and <c>x</c> selects the row. The key handler is
+    /// on the row rather than on the document, so it never fights the search box or the JSON viewer's own
+    /// keys.
     /// </summary>
     private async Task OnRowKeyAsync(KeyboardEventArgs args, string id)
     {
@@ -222,6 +295,12 @@
             string.Equals(args.Key, "Spacebar", StringComparison.Ordinal))
         {
             await ToggleAsync(id);
+            return;
+        }
+
+        if (Selectable && string.Equals(args.Key, "x", StringComparison.OrdinalIgnoreCase))
+        {
+            await SelectAsync(id);
         }
     }
 }

@@ -1,0 +1,364 @@
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Json
+@implements IDisposable
+@inject IDocumentWriteService Writes
+@inject StudioState State
+@inject ToastService Toasts
+
+@*
+    The edit flow, from the editor to the store, in one component.
+
+    It sits where the JSON viewer was: editing a document is not a modal on top of reading one, it is the
+    same pane in a different mode, which is what keeps the metadata panel beside it answering about the
+    same row.
+
+    Three things happen here that a plain "save the textarea" would not do, and each is the point of a
+    plan decision:
+
+      * Every save is previewed first (D7). `PreviewAsync` deserializes the edit into the document's CLR
+        type and serializes it back, and the difference between those two is what the save would silently
+        cost. When it costs nothing the save goes straight through; when it costs something the dialog
+        opens and the save waits for somebody to have read it.
+
+      * The version travels with the edit. `PreviewAsync` reports the row's `mt_version`/revision as it
+        was when the editor opened, and `SaveAsync` is given it back as `expectedToken`. A row somebody
+        else wrote in between comes back as `Conflict`, never as a lost update - and the conflict carries
+        the *current* token, so "overwrite" is one round trip rather than a retry loop.
+
+      * Nothing here decides whether the write is allowed. The service does that, and it does it again
+        for a circuit that has been open since before the capability was turned off.
+*@
+
+<div class="ms-doc-edit">
+    @if (conflict is { } clash)
+    {
+        <div class="ms-alert ms-alert-warning ms-doc-conflict" role="alert">
+            <div class="ms-doc-conflict-message">
+                <strong>This document changed while you were editing.</strong>
+                <span>@clash.Reason</span>
+            </div>
+            <div class="ms-doc-conflict-actions">
+                <button type="button" class="ms-btn ms-btn-sm" disabled="@busy" @onclick="ReloadAsync">
+                    Reload
+                </button>
+                <button type="button" class="ms-btn ms-btn-sm ms-btn-danger" disabled="@busy" @onclick="OverwriteAsync">
+                    Overwrite
+                </button>
+            </div>
+        </div>
+    }
+
+    @if (refusal is { Length: > 0 } message)
+    {
+        <div class="ms-alert ms-alert-error ms-doc-edit-refusal" role="alert">@message</div>
+    }
+
+    <JsonEditor Json="@Json"
+                Label="@($"{Alias} {Id}")"
+                SaveLabel="@SaveLabel"
+                Busy="busy"
+                OnPreview="PreviewAsync"
+                OnSave="SaveAsync"
+                OnCancel="CancelAsync" />
+</div>
+
+<DocumentWritePreviewDialog IsOpen="dialogOpen"
+                            Model="preview"
+                            OnConfirm="ConfirmSaveAsync"
+                            OnCancel="CloseDialog" />
+
+@code {
+    /// <summary>
+    /// Cancels the write in flight when the pane goes away. A save that outlives its circuit is a write
+    /// nobody will ever be told the outcome of (plan §4.8).
+    /// </summary>
+    private readonly CancellationTokenSource cancellation = new();
+
+    private WritePreview? preview;
+    private WriteResult? conflict;
+    private string? refusal;
+    private string? acknowledgedJson;
+    private bool dialogOpen;
+    private bool busy;
+
+    /// <summary>The collection alias.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Alias { get; set; } = string.Empty;
+
+    /// <summary>The document id.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>The document to edit, pretty-printed.</summary>
+    [Parameter]
+    public string? Json { get; set; }
+
+    /// <summary>
+    /// The probe <c>WritePreview</c> the page took when Edit was pressed, which is where the version the
+    /// save is checked against comes from. Typed <see cref="object" /> — see
+    /// <see cref="DocumentComponentModel" />.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Raised when the document was written, or when the edit was abandoned for a reload.</summary>
+    [Parameter]
+    public EventCallback OnFinished { get; set; }
+
+    /// <summary>Raised when the edit was abandoned without writing anything.</summary>
+    [Parameter]
+    public EventCallback OnCancelled { get; set; }
+
+    /// <summary>The token the save is checked against, as the probe reported it.</summary>
+    private DocumentConcurrencyToken Token =>
+        (Model as WritePreview)?.CurrentToken ?? DocumentConcurrencyToken.None;
+
+    /// <summary>
+    /// The Save button states the price when a preview has found one. Before any preview it just says
+    /// "Save", because promising "nothing will be dropped" before looking would be a promise the studio
+    /// has not checked.
+    /// </summary>
+    private string SaveLabel
+    {
+        get
+        {
+            if (preview is not { Status: WritePreviewStatus.Ready, HasDrops: true } ready)
+            {
+                return "Save";
+            }
+
+            int count = ready.DroppedPaths.Length;
+            return count == 1
+                ? "Save (1 property will be dropped)"
+                : $"Save ({count} properties will be dropped)";
+        }
+    }
+
+    /// <summary>The preview button: run the round trip and show it, without saving anything.</summary>
+    private async Task PreviewAsync(string edited)
+    {
+        WritePreview? built = await RunPreviewAsync(edited);
+
+        if (built is { Status: WritePreviewStatus.Ready })
+        {
+            dialogOpen = true;
+        }
+    }
+
+    /// <summary>
+    /// The save path, which is the preview path with a commit on the end. A save whose round trip drops
+    /// nothing never sees the dialog; one that drops something opens it and stops, and the acknowledgement
+    /// is remembered against the exact text it was given for - so editing after acknowledging asks again.
+    /// </summary>
+    private async Task SaveAsync(string edited)
+    {
+        WritePreview? built = await RunPreviewAsync(edited);
+
+        if (built is not { Status: WritePreviewStatus.Ready })
+        {
+            return;
+        }
+
+        if (built.HasDrops && !string.Equals(acknowledgedJson, edited, StringComparison.Ordinal))
+        {
+            dialogOpen = true;
+            return;
+        }
+
+        await CommitAsync(built, built.HasDrops);
+    }
+
+    /// <summary>The dialog's confirm button: the acknowledgement, and then the write.</summary>
+    private async Task ConfirmSaveAsync()
+    {
+        dialogOpen = false;
+
+        if (preview is not { Status: WritePreviewStatus.Ready } ready || ready.EditedJson is not { } edited)
+        {
+            return;
+        }
+
+        acknowledgedJson = edited;
+        await CommitAsync(ready, ready.HasDrops);
+    }
+
+    private void CloseDialog() => dialogOpen = false;
+
+    /// <summary>
+    /// Runs the round trip against the current text and keeps the answer. A refusal - an edit that is not
+    /// valid JSON, a type that cannot be constructed, a hierarchy row whose subclass this process does not
+    /// have - is rendered where the editor is, not in a toast that scrolls away.
+    /// </summary>
+    private async Task<WritePreview?> RunPreviewAsync(string edited)
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || busy)
+        {
+            return null;
+        }
+
+        busy = true;
+        refusal = null;
+        conflict = null;
+
+        try
+        {
+            WritePreview built = await Writes.PreviewAsync(scope, Alias, Id, edited, cancellation.Token);
+            preview = built;
+
+            if (built.Status == WritePreviewStatus.Ready)
+            {
+                return built;
+            }
+
+            refusal = built.Reason;
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception exception)
+        {
+            // A capability that was turned off since the circuit opened, a policy that says no, a
+            // database that went away: all of them are a sentence on the page rather than a broken
+            // circuit (plan §4.8).
+            refusal = exception.Message;
+            return null;
+        }
+        finally
+        {
+            busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CommitAsync(WritePreview ready, bool acknowledgeDrops)
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || ready.EditedJson is not { } edited || busy)
+        {
+            return;
+        }
+
+        busy = true;
+        refusal = null;
+        conflict = null;
+
+        try
+        {
+            DocumentConcurrencyToken expected = ready.CurrentToken.IsKnown ? ready.CurrentToken : Token;
+
+            WriteResult result = await Writes.SaveAsync(
+                scope,
+                Alias,
+                Id,
+                edited,
+                expected,
+                acknowledgeDrops,
+                cancellation.Token);
+
+            switch (result.Status)
+            {
+                case WriteStatus.Saved:
+                    await Toasts.Success(Describe(ready));
+                    await OnFinished.InvokeAsync();
+                    break;
+
+                case WriteStatus.Conflict:
+                    conflict = result;
+                    break;
+
+                default:
+                    refusal = result.Reason;
+                    break;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            refusal = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Discards the edit and puts the page back on the stored document.</summary>
+    private async Task ReloadAsync()
+    {
+        conflict = null;
+        preview = null;
+        acknowledgedJson = null;
+        await OnFinished.InvokeAsync();
+    }
+
+    /// <summary>
+    /// Takes the edit as it stands and writes it over whatever is there now. The preview is re-run first,
+    /// which is what makes it an overwrite rather than a retry: it reads the row again, so the token the
+    /// save carries is the one the other writer left, and the round trip is recomputed against the
+    /// document as it is now rather than as it was when the editor opened.
+    /// </summary>
+    private async Task OverwriteAsync()
+    {
+        if (preview?.EditedJson is not { } edited)
+        {
+            return;
+        }
+
+        conflict = null;
+
+        WritePreview? rebuilt = await RunPreviewAsync(edited);
+
+        if (rebuilt is not { Status: WritePreviewStatus.Ready })
+        {
+            return;
+        }
+
+        acknowledgedJson = edited;
+        await CommitAsync(rebuilt, rebuilt.HasDrops);
+    }
+
+    private async Task CancelAsync()
+    {
+        preview = null;
+        conflict = null;
+        refusal = null;
+        acknowledgedJson = null;
+        await OnCancelled.InvokeAsync();
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        cancellation.Cancel();
+        cancellation.Dispose();
+    }
+
+    /// <summary>What the toast says a save actually did.</summary>
+    private static string Describe(WritePreview ready)
+    {
+        JsonDiffResult edit = ready.EditDiff;
+
+        int changed = edit.Changed.IsDefaultOrEmpty ? 0 : edit.Changed.Length;
+        int added = edit.Added.IsDefaultOrEmpty ? 0 : edit.Added.Length;
+        int removed = edit.Dropped.IsDefaultOrEmpty ? 0 : edit.Dropped.Length;
+        int dropped = ready.DroppedPaths.Length;
+
+        string body = changed + added + removed == 0
+            ? "Saved; the document is unchanged"
+            : $"Saved: {changed} changed, {added} added, {removed} removed";
+
+        return dropped == 0
+            ? body + "."
+            : body + $", {dropped} dropped by the round trip.";
+    }
+}

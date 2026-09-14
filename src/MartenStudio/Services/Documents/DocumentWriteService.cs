@@ -305,19 +305,10 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     }
 
     /// <inheritdoc />
-    public Task<DeleteResult> UndeleteAsync(
-        StudioScope scope,
-        string alias,
-        string id,
-        CancellationToken cancellationToken = default) =>
-        UndeleteAsync(scope, alias, id, acknowledgeDrops: false, cancellationToken);
-
-    /// <inheritdoc />
     public async Task<DeleteResult> UndeleteAsync(
         StudioScope scope,
         string alias,
         string id,
-        bool acknowledgeDrops,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
@@ -331,7 +322,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
 
         try
         {
-            result = await UndeleteCoreAsync(resolved, alias, id, acknowledgeDrops, cancellationToken).ConfigureAwait(false);
+            result = await UndeleteCoreAsync(resolved, alias, id, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -789,7 +780,6 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         ResolvedScope resolved,
         string alias,
         string id,
-        bool acknowledgeDrops,
         CancellationToken cancellationToken)
     {
         var described = TryFindTarget(resolved, alias);
@@ -836,27 +826,28 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             return DeleteResult.Undeleted(alias, id, "The document was not deleted; nothing was changed.");
         }
 
-        var queued = false;
-
         await using (var session = OpenSession(resolved))
         {
-            if (TypedIds.TryConvert(writeTarget.IdMemberType, row.IdValue, out var typedId) &&
-                TypedSessionWrites.TryQueueUndoDelete(session, writeTarget.ClrType, writeTarget.IdMember, typedId))
+            // `UndoDeleteWhere<T>(x => x.Id == id)` is an `update … set mt_deleted = false` and touches
+            // nothing else, which is the only undelete worth having: the row comes back exactly as it
+            // was. When the id cannot be turned into that predicate — an F# discriminated-union id, a
+            // value object with no shape Marten's LINQ parser takes — there is no honest fallback. The
+            // one the studio used to have deserialized the document and stored it back, which rewrites
+            // `data` wholesale to clear one boolean; a type that cannot be addressed by id is exactly
+            // the type most likely to lose something on the way through. Refusing and naming the type is
+            // the answer that cannot silently cost anybody their document.
+            if (!TypedIds.TryConvert(writeTarget.IdMemberType, row.IdValue, out var typedId) ||
+                !TypedSessionWrites.TryQueueUndoDelete(session, writeTarget.ClrType, writeTarget.IdMember, typedId))
             {
-                await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-                queued = true;
+                return DeleteResult.Refused(
+                    alias,
+                    id,
+                    $"The studio cannot construct an id value of type '{writeTarget.IdMemberType.Name}' for " +
+                    $"'{writeTarget.TypeName}', so it has no way to bring this document back without " +
+                    "rewriting its JSON. Undelete it through Marten. Nothing was changed.");
             }
-        }
 
-        if (!queued)
-        {
-            var fallback = await UndeleteByRewritingAsync(resolved, writeTarget, alias, id, acknowledgeDrops, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (fallback is not null)
-            {
-                return fallback;
-            }
+            await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
         await using (var connection = await OpenReadConnectionAsync(resolved, cancellationToken).ConfigureAwait(false))
@@ -874,97 +865,6 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         }
 
         return DeleteResult.Undeleted(alias, id);
-    }
-
-    /// <summary>
-    /// The undelete of last resort: deserialize the document and store it back, because Marten's upsert
-    /// clears <c>mt_deleted</c> on every write.
-    /// </summary>
-    /// <remarks>
-    /// Only reached for a document type whose id the studio cannot turn into
-    /// <c>x =&gt; x.Id == id</c> — an F# discriminated-union id, or a value object with no constructor
-    /// Marten's own rules would accept. It is a <em>full rewrite of the document body</em>, so it runs
-    /// the round-trip differ first and refuses unless the caller has acknowledged what that would change.
-    /// Returns the refusal, or <see langword="null" /> when the write was queued and committed.
-    /// </remarks>
-    private async Task<DeleteResult?> UndeleteByRewritingAsync(
-        ResolvedScope resolved,
-        WriteTarget writeTarget,
-        string alias,
-        string id,
-        bool acknowledgeDrops,
-        CancellationToken cancellationToken)
-    {
-        object document;
-        DocumentConcurrencyToken token;
-        Type documentType;
-        JsonDiffResult diff;
-
-        await using (var connection = await OpenReadConnectionAsync(resolved, cancellationToken).ConfigureAwait(false))
-        {
-            var load = await LoadAsync(connection, writeTarget, id, resolved.TenantId, cancellationToken).ConfigureAwait(false);
-
-            if (load.Error is not null)
-            {
-                return DeleteResult.Refused(alias, id, load.Error);
-            }
-
-            if (load.Row is null)
-            {
-                return DeleteResult.NotFound(alias, id);
-            }
-
-            var runtime = ResolveRuntimeType(writeTarget, load.Row.DocType);
-            if (runtime.Type is null)
-            {
-                return DeleteResult.Refused(alias, id, runtime.Refusal!);
-            }
-
-            documentType = runtime.Type;
-            var serializer = resolved.Store.Options.Serializer();
-
-            if (!TryDeserialize(serializer, documentType, load.Row.Json, out var deserialized, out var error, out var auditError))
-            {
-                return DeleteResult.Refused(alias, id, error, auditError);
-            }
-
-            document = deserialized;
-            token = load.Row.Token;
-
-            try
-            {
-                diff = RoundTripDiffer.Diff(load.Row.Json, serializer.ToJson(document));
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                return DeleteResult.Refused(
-                    alias,
-                    id,
-                    $"'{documentType.Name}' could not be serialized back, so the document cannot be brought " +
-                    $"back without losing it: {ex.Message}",
-                    $"'{documentType.Name}' could not be serialized back ({ex.GetType().Name}).");
-            }
-        }
-
-        var changes = diff.Dropped.Length + diff.Changed.Length;
-
-        if (!acknowledgeDrops && (changes > 0 || diff.IsFaulted))
-        {
-            return DeleteResult.Refused(
-                alias,
-                id,
-                string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"The studio cannot bring a '{writeTarget.TypeName}' back without rewriting its JSON, and " +
-                    $"the rewrite would change {changes} value{(changes == 1 ? string.Empty : "s")}. Nothing was changed."));
-        }
-
-        await using var session = OpenSession(resolved);
-
-        QueueStore(session, writeTarget, documentType, document, token);
-        await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-
-        return null;
     }
 
     private async Task<BulkDeleteResult> BulkDeleteCoreAsync(
@@ -1348,10 +1248,22 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     /// The mapping for one alias, or nothing.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> is honoured here as well as on the read
     /// side: a type a host hid from the studio must not be writable through a hand-typed alias either.
     /// A hidden type answers exactly as an unmapped one does — the refusal is the same sentence — so the
     /// gate does not tell a visitor which types exist and are merely hidden.
+    /// </para>
+    /// <para>
+    /// So is <see cref="CollectionAliases.IsMartenInfrastructure" />, and for a reason that is not
+    /// cosmetic. A store with an async projection gets the <c>DeadLetterEvent</c> mapping for free, so
+    /// the type arrives in <c>AllKnownDocumentTypes()</c> looking exactly like one of the host's own
+    /// collections. Dead letters have a screen of their own whose actions are gated on
+    /// <c>ManageDeadLetters</c>; the same rows reached through the document path would be editable and
+    /// deletable under <c>EditDocuments</c> and <c>DeleteDocuments</c> instead — a different capability
+    /// answering for the same data, which is the whole failure mode D4 exists to prevent. The documents
+    /// browser already leaves it out of the rail; this is the half that refuses the hand-typed URL.
+    /// </para>
     /// </remarks>
     private IDocumentType? FindDocumentType(IDocumentStore store, string alias)
     {
@@ -1362,6 +1274,11 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             if (!string.Equals(documentType.Alias, alias, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
+            }
+
+            if (CollectionAliases.IsMartenInfrastructure(documentType.DocumentType))
+            {
+                return null;
             }
 
             return isVisible is not null && !isVisible(documentType.DocumentType) ? null : documentType;

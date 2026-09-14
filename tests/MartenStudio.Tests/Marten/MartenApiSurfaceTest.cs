@@ -1,3 +1,5 @@
+using System.Data.Common;
+using System.Linq.Expressions;
 using System.Reflection;
 
 using JasperFx;
@@ -18,6 +20,8 @@ using Marten.Storage.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+
+using Polly;
 
 using JasperFxCoordinator = JasperFx.Events.Daemon.IProjectionCoordinator;
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
@@ -233,6 +237,160 @@ public class MartenApiSurfaceTest
         RequireProperty(typeof(DuplicatedField), "MemberName").PropertyType.Should().Be<string>();
         RequireProperty(typeof(DuplicatedField), "PgType").PropertyType.Should().Be<string>();
         RequireProperty(typeof(DuplicatedField), "DbType").PropertyType.Should().Be<NpgsqlTypes.NpgsqlDbType>();
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // The document write path (W3-fix)
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The two operations the studio deletes and undeletes with, neither of which needs the document.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Delete&lt;T&gt;(object id)</c> — the overload whose single parameter really is
+    /// <see cref="object" /> rather than the method's own type parameter — is what lets the studio delete
+    /// by id without deserializing a row whose body no CLR type can read any more. It resolves the
+    /// storage from the runtime type of the id it is handed, so a strong-typed id works by being passed
+    /// as itself.
+    /// </para>
+    /// <para>
+    /// <c>UndoDeleteWhere&lt;T&gt;(Expression&lt;Func&lt;T, bool&gt;&gt;)</c> is the whole of undelete. It
+    /// is an <c>update … set mt_deleted = false, mt_deleted_at = null where …</c> and never touches
+    /// <c>data</c>, which is why bringing a row back cannot lose a member the CLR type has no property
+    /// for. If it ever goes, the studio has no honest undelete left: the alternative is deserializing the
+    /// document and storing it back, which rewrites the body wholesale to clear one boolean.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Delete_by_id_and_UndoDeleteWhere_are_what_the_write_service_deletes_and_undeletes_with()
+    {
+        var operations = typeof(IDocumentOperations);
+
+        var deleteById = AllMethods(operations)
+            .Where(x => x.Name == nameof(IDocumentOperations.Delete))
+            .Where(x => x.IsGenericMethodDefinition)
+            .Where(x => x.GetParameters() is [{ } parameter] && parameter.ParameterType == typeof(object))
+            .ToArray();
+
+        deleteById.Should().ContainSingle(
+            "Delete<T>(object id) is how a row is removed without reading it; Delete<T>(T entity) is not a substitute");
+        deleteById[0].GetGenericArguments().Should().ContainSingle();
+
+        var undo = RequireMethod(operations, nameof(IDocumentOperations.UndoDeleteWhere), [null]);
+
+        undo.IsGenericMethodDefinition.Should().BeTrue();
+
+        var documentType = undo.GetGenericArguments().Should().ContainSingle().Subject;
+
+        undo.GetParameters()[0].ParameterType.Should().Be(
+            typeof(Expression<>).MakeGenericType(typeof(Func<,>).MakeGenericType(documentType, typeof(bool))),
+            "the studio builds x => x.Id == id and hands it straight over");
+    }
+
+    /// <summary>
+    /// <c>AllKnownDocumentTypes()</c> answers with <b>root mappings only</b>.
+    /// </summary>
+    /// <remarks>
+    /// A <c>SubClassMapping</c> is not an <see cref="IDocumentType" /> at all, so the alias <c>vehicle</c>
+    /// resolves to <c>Vehicle</c> and there is no entry for <c>car</c> to find. A write path that took the
+    /// mapping's own type at face value would deserialize a <c>Car</c> row as a <c>Vehicle</c> and store
+    /// it back stamped <c>mt_doc_type = 'BASE'</c> — the row would silently stop being a <c>Car</c>, and
+    /// for a marker subclass with no members of its own the round-trip differ would report nothing
+    /// dropped, because nothing in the JSON was.
+    /// </remarks>
+    [Fact]
+    public void AllKnownDocumentTypes_answers_with_root_mappings_only()
+    {
+        RequireMethod(typeof(IReadOnlyStoreOptions), "AllKnownDocumentTypes")
+            .ReturnType.Should().Be<IReadOnlyList<IDocumentType>>();
+
+        var subClassMapping = MartenType("Marten.Schema.SubClassMapping");
+
+        typeof(IDocumentType).IsAssignableFrom(subClassMapping).Should().BeFalse(
+            "a subclass mapping is not an IDocumentType, which is why AllKnownDocumentTypes() cannot return one");
+    }
+
+    /// <summary>
+    /// <c>IDocumentType.TypeFor(alias)</c> is the reverse lookup that settles what a hierarchy row really
+    /// is, and it has two behaviours the studio depends on and one it has to guard.
+    /// </summary>
+    /// <remarks>
+    /// <c>"BASE"</c> — the value Marten's own <c>DocTypeArgument</c> writes for an instance of the root
+    /// type — maps to the root. A subclass alias maps to that subclass. And an alias it does not know
+    /// <b>throws</b> <see cref="ArgumentOutOfRangeException" /> rather than answering <see langword="null" />,
+    /// which is why the studio's call is wrapped: a row stamped by an older version of the application
+    /// with a subclass that has since been removed has to be a refusal a person can read, not an
+    /// unhandled exception on a circuit.
+    /// </remarks>
+    [Fact]
+    public void TypeFor_maps_BASE_to_the_root_and_throws_for_an_alias_it_does_not_know()
+    {
+        var mapping = new DocumentMapping<SampleRoot>(new StoreOptions());
+        mapping.SubClasses.Add(typeof(SampleLeaf), "leaf");
+
+        // Read through the interface on purpose: IDocumentType is all the studio ever holds, and a member
+        // that moved off it onto the concrete mapping would be a break the studio feels and this would not.
+        typeof(IDocumentType).IsInstanceOfType(mapping).Should().BeTrue();
+
+        mapping.IsHierarchy().Should().BeTrue();
+        mapping.TypeFor("BASE").Should().Be<SampleRoot>();
+        mapping.TypeFor("leaf").Should().Be<SampleLeaf>();
+
+        mapping.Invoking(x => x.TypeFor("no-such-subclass"))
+            .Should().Throw<ArgumentOutOfRangeException>(
+                "an unknown discriminator is a refusal the studio has to catch, not a null to test for");
+    }
+
+    /// <summary>
+    /// Marten's default resilience pipeline retries three times, and that is why a lock-taking statement
+    /// runs on <c>IQuerySession.Connection</c> rather than through the session's own execute methods.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Everything that goes through <c>session.ExecuteReaderAsync</c> runs under
+    /// <c>StoreOptions.ResiliencePipeline</c>, whose default handles <see cref="NpgsqlException" /> with
+    /// three retries (<c>Marten.Util.ResilientPipelineBuilderExtensions.AddMartenDefaults</c>). That is
+    /// right for an ordinary read and exactly wrong for <c>select … for update</c> under a
+    /// <c>lock_timeout</c>: the timeout is <c>55P03</c>, which aborts the transaction, so the retry comes
+    /// back as <c>25P02</c> — "current transaction is aborted" — and the error that said <em>why</em> is
+    /// gone. The screen would get an unhandled exception where it should have got "somebody else is
+    /// editing this".
+    /// </para>
+    /// <para>
+    /// The pipeline is asserted by <em>running</em> it rather than by reading a number off it: Polly
+    /// builds the strategy into a delegate chain, so the attempt count is not a property anywhere, and a
+    /// reflection assertion would pass against a pipeline that had been changed to retry once.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task The_default_resilience_pipeline_retries_three_times_which_is_why_locks_bypass_it()
+    {
+        // Both members exist and are public; the studio uses the first and deliberately avoids the second.
+        RequireProperty(typeof(IQuerySession), "Connection").PropertyType.Should().Be<NpgsqlConnection>();
+        RequireMethod(typeof(IQuerySession), "ExecuteReaderAsync", typeof(NpgsqlCommand), typeof(CancellationToken))
+            .ReturnType.Should().Be<Task<DbDataReader>>();
+
+        var property = typeof(StoreOptions).GetProperty(
+            "ResiliencePipeline",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+
+        property.Should().NotBeNull("Marten runs the session's execute methods through this pipeline");
+        property!.PropertyType.FullName.Should().Be("Polly.ResiliencePipeline");
+
+        var pipeline = (ResiliencePipeline) property.GetValue(new StoreOptions())!;
+
+        var attempts = 0;
+
+        var run = async () => await pipeline.ExecuteAsync(_ =>
+        {
+            attempts++;
+            throw new NpgsqlException("the studio's own probe, never sent anywhere");
+        });
+
+        await run.Should().ThrowAsync<NpgsqlException>();
+
+        attempts.Should().Be(4, "one attempt and three retries");
     }
 
     // --------------------------------------------------------------------------------------------
@@ -1138,6 +1296,15 @@ public class MartenApiSurfaceTest
     {
         public Guid Id { get; set; }
     }
+
+    /// <summary>A hierarchy root, for the TypeFor probe. Never stored anywhere.</summary>
+    internal class SampleRoot
+    {
+        public Guid Id { get; set; }
+    }
+
+    /// <summary>Its one subclass.</summary>
+    internal class SampleLeaf: SampleRoot;
 
     private sealed class NullShardObserver : IObserver<ShardState>
     {

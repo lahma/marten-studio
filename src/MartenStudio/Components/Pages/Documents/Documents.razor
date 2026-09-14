@@ -6,8 +6,11 @@
 @using MartenStudio.Services.Query
 @implements IAsyncDisposable
 @inject IDocumentDataService Data
+@inject IDocumentWriteService Writes
 @inject DocumentBrowserState Browser
 @inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject ToastService Toasts
 @inject NavigationManager Navigation
 @inject IOptions<MartenStudioOptions> Options
 @inject IJSRuntime JsRuntime
@@ -57,6 +60,13 @@
     private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
     private readonly List<string> pinned = [];
 
+    /// <summary>
+    /// The bulk selection. It survives paging on purpose - selecting a page, moving to the next one and
+    /// selecting that is the only way to act on more than one page - and is dropped whenever the
+    /// collection or the scope changes, because an id selected in one collection means nothing in another.
+    /// </summary>
+    private readonly HashSet<string> selected = new(StringComparer.Ordinal);
+
     private CancellationTokenSource? cts;
     private CollectionRail rail = new([]);
     private CollectionInfo? collection;
@@ -66,6 +76,9 @@
     private bool loading = true;
     private string? loadedSignature;
     private bool preferencesLoaded;
+    private bool bulkDialogOpen;
+    private bool bulkDeleting;
+    private string? selectionKey;
 
     /// <summary>The collection alias from the route, or <see langword="null"/> for the index.</summary>
     [Parameter]
@@ -204,6 +217,7 @@
         loading = true;
         loadError = null;
         expanded.Clear();
+        ForgetSelectionIfCollectionChanged();
         StateHasChanged();
 
         try
@@ -363,7 +377,11 @@
                                    EmptyText="@EmptyText()"
                                    HrefFor="DetailHref"
                                    OnSort="SortAsync"
-                                   OnToggleExpand="ToggleExpandAsync" />
+                                   OnToggleExpand="ToggleExpandAsync"
+                                   Selectable="Selectable"
+                                   Selected="selected"
+                                   OnToggleSelect="ToggleSelectAsync"
+                                   OnToggleSelectPage="ToggleSelectPageAsync" />
 
                     <KeysetPager OffsetPaging="OffsetPaging"
                                  Page="CurrentPage"
@@ -377,6 +395,23 @@
                                  OnNext="NextPageAsync"
                                  OnPage="GoToPageAsync"
                                  OnJumpToId="JumpToIdAsync" />
+
+                    @if (Selectable)
+                    {
+                        <DocumentBulkBar Count="selected.Count"
+                                         Busy="bulkDeleting"
+                                         OnDelete="OpenBulkDialogAsync"
+                                         OnCopyIds="CopySelectedIdsAsync"
+                                         OnClear="ClearSelectionAsync" />
+
+                        <ConfirmDialog IsOpen="bulkDialogOpen"
+                                       Title="@BulkTitle"
+                                       Message="@BulkMessage"
+                                       ConfirmationPhrase="@Alias"
+                                       ConfirmText="Delete"
+                                       OnConfirm="BulkDeleteAsync"
+                                       OnCancel="CloseBulkDialog" />
+                    }
                 }
             }
         </div>;
@@ -574,6 +609,177 @@
         return Task.CompletedTask;
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // Bulk delete
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Whether the selection column and the action bar are drawn at all.
+    /// </summary>
+    /// <remarks>
+    /// Three conditions, and each removes a different kind of pointless control. Under <c>ReadOnly</c>
+    /// or without <c>DeleteDocuments</c> there is nothing a selection could do, and the plan's gating
+    /// rule for a list-wide action is to hide it rather than to draw checkboxes leading to a disabled
+    /// button (D4). A discovered table has no mapping to delete through, and Marten's own bookkeeping
+    /// answers to <c>ManageDeadLetters</c> on another screen. The service refuses all of them regardless.
+    /// </remarks>
+    private bool Selectable =>
+        Capabilities.IsEnabled(StudioCapability.DeleteDocuments) &&
+        collection is { IsRegistered: true } &&
+        list.State == DocumentListState.Loaded &&
+        !IsInfrastructure;
+
+    private bool IsInfrastructure =>
+        list.DocumentClrType is { } type && CollectionAliases.IsMartenInfrastructure(type);
+
+    private string BulkTitle => selected.Count == 1
+        ? "Delete 1 document?"
+        : $"Delete {selected.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} documents?";
+
+    private string BulkMessage => collection is { Flags.SoftDeleted: true }
+        ? $"'{Alias}' is soft-deleted, so these rows stay in the table and Marten's own queries stop " +
+          "returning them. Each one can be undeleted from its own page."
+        : $"'{Alias}' is not soft-deleted, so these rows are removed from the table. There is no undo.";
+
+    /// <summary>
+    /// Drops the selection when the question changed. Paging, sorting and filtering all keep it: those
+    /// are still the same collection, and losing forty ticked boxes by pressing Next is its own bug.
+    /// </summary>
+    private void ForgetSelectionIfCollectionChanged()
+    {
+        string key = string.Join(
+            '',
+            Alias,
+            State.ActiveScope?.StoreKey,
+            State.ActiveScope?.DatabaseId,
+            State.ActiveScope?.TenantId);
+
+        if (string.Equals(key, selectionKey, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        selectionKey = key;
+        selected.Clear();
+        bulkDialogOpen = false;
+    }
+
+    private Task ToggleSelectAsync(string id)
+    {
+        if (!selected.Remove(id))
+        {
+            selected.Add(id);
+        }
+
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task ToggleSelectPageAsync(bool select)
+    {
+        foreach (DocumentRow row in list.Rows)
+        {
+            if (select)
+            {
+                selected.Add(row.Id);
+            }
+            else
+            {
+                selected.Remove(row.Id);
+            }
+        }
+
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task ClearSelectionAsync()
+    {
+        selected.Clear();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task CopySelectedIdsAsync()
+    {
+        string text = string.Join('\n', selected);
+
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
+            await Toasts.Success($"Copied {selected.Count} id{(selected.Count == 1 ? string.Empty : "s")}.");
+        }
+        catch (Exception exception) when (DocumentsInterop.IsUnavailable(exception))
+        {
+            await Toasts.Error("This browser refused the clipboard.");
+        }
+    }
+
+    private Task OpenBulkDialogAsync()
+    {
+        bulkDialogOpen = true;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void CloseBulkDialog() => bulkDialogOpen = false;
+
+    private async Task BulkDeleteAsync()
+    {
+        bulkDialogOpen = false;
+
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || Alias is not { Length: > 0 } alias || selected.Count == 0 || bulkDeleting)
+        {
+            return;
+        }
+
+        bulkDeleting = true;
+        StateHasChanged();
+
+        // A snapshot, so a checkbox ticked while the delete is in flight is not silently included in it.
+        string[] ids = [.. selected];
+
+        try
+        {
+            BulkDeleteResult result = await Writes.BulkDeleteAsync(scope, alias, ids, cts?.Token ?? CancellationToken.None);
+
+            if (!result.Accepted)
+            {
+                loadError = result.Reason;
+                await Toasts.Error(result.Reason ?? "The delete was refused.");
+                return;
+            }
+
+            // Only what actually went is dropped from the selection: a refused id stays ticked, which is
+            // what lets somebody see which ones did not go and try them again.
+            foreach (DeleteResult outcome in result.Results)
+            {
+                if (outcome.Changed || outcome.Outcome == DeleteOutcome.NotFound)
+                {
+                    selected.Remove(outcome.Id);
+                }
+            }
+
+            await Toasts.Success(result.Summary());
+            await ReloadAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            loadError = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            bulkDeleting = false;
+            StateHasChanged();
+        }
+    }
+
     private Task RunAnywayAsync()
     {
         if (Alias is { Length: > 0 } alias)
@@ -736,17 +942,10 @@
         {
             return await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { key });
         }
-        catch (JSException)
+        catch (Exception exception) when (DocumentsInterop.IsUnavailable(exception))
         {
-            return null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (InvalidOperationException)
-        {
-            // Prerendering: there is no browser to ask yet.
+            // Prerendering, a closed circuit, or a browser that refused: none of them is a preference,
+            // and none of them is worth breaking the page for.
             return null;
         }
     }
@@ -757,13 +956,7 @@
         {
             await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", new object?[] { key, value });
         }
-        catch (JSException)
-        {
-        }
-        catch (JsonException)
-        {
-        }
-        catch (InvalidOperationException)
+        catch (Exception exception) when (DocumentsInterop.IsUnavailable(exception))
         {
         }
     }
