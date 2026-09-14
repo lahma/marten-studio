@@ -1,0 +1,53 @@
+<span class="ms-state-indicator ms-state-@StateClass" title="@State">
+    <span class="ms-state-dot"></span>
+    @if (ShowLabel)
+    {
+        <span class="ms-state-label">@DisplayState</span>
+    }
+</span>
+
+@code {
+    [Parameter]
+    public string? State { get; set; }
+
+    [Parameter]
+    public bool ShowLabel { get; set; } = true;
+
+    private string DisplayState => string.IsNullOrWhiteSpace(State) ? "Unknown" : State;
+
+    private string StateClass
+    {
+        get
+        {
+            string normalized = (State ?? string.Empty).Trim().ToLowerInvariant();
+            if (normalized.Contains("error") || normalized.Contains("failed") || normalized.Contains("shutdown"))
+            {
+                return "error";
+            }
+
+            // "overdue" is a cluster node that has missed a check-in: not a fault yet, but not healthy
+            // either, which is the same amber the paused states wear.
+            if (normalized.Contains("pause") || normalized.Contains("standby") || normalized.Contains("blocked")
+                || normalized.Contains("overdue"))
+            {
+                return "paused";
+            }
+
+            // Checked before "running", so that a state whose name contains both reads as executing.
+            if (normalized.Contains("executing"))
+            {
+                return "executing";
+            }
+
+            // "alive" is a cluster node that is checking in, which is the healthy green the running
+            // states wear.
+            if (normalized.Contains("normal") || normalized.Contains("running") || normalized.Contains("complete")
+                || normalized.Contains("alive"))
+            {
+                return "success";
+            }
+
+            return "info";
+        }
+    }
+}

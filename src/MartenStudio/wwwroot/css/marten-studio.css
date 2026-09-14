@@ -1,0 +1,1910 @@
+/*
+ * Marten Studio stylesheet. Hand-rolled, prefixed ms-, driven by the design tokens below;
+ * ported from the Quartz.NET dashboard (Apache-2.0) and extended. No third-party CSS is ever
+ * added here (AGENTS.md hard rule 3).
+ */
+
+/* ==========================================================================
+   1. DESIGN TOKENS (Custom Properties)
+   ========================================================================== */
+
+:root {
+    /* --- Colors --- */
+    --ms-color-primary: #2563eb;
+    --ms-color-primary-hover: #1d4ed8;
+    --ms-color-primary-light: #dbeafe;
+    --ms-color-secondary: #64748b;
+    --ms-color-secondary-hover: #475569;
+
+    --ms-color-bg: #f8fafc;
+    --ms-color-surface: #ffffff;
+    --ms-color-surface-hover: #f1f5f9;
+    --ms-color-surface-alt: #f1f5f9;
+    --ms-color-border: #e2e8f0;
+    --ms-color-border-strong: #cbd5e1;
+
+    --ms-color-text: #0f172a;
+    --ms-color-text-secondary: #475569;
+    --ms-color-text-muted: #94a3b8;
+    --ms-color-text-inverse: #ffffff;
+
+    --ms-color-success: #16a34a;
+    --ms-color-success-bg: #dcfce7;
+    --ms-color-warning: #ca8a04;
+    --ms-color-warning-bg: #fef9c3;
+    --ms-color-danger: #dc2626;
+    --ms-color-danger-bg: #fee2e2;
+    --ms-color-danger-hover: #b91c1c;
+    --ms-color-info: #2563eb;
+    --ms-color-info-bg: #dbeafe;
+    --ms-color-executing: #7c3aed;
+    --ms-color-executing-bg: #ede9fe;
+
+    /* --- Spacing (4px increments) --- */
+    --ms-space-xs: 4px;
+    --ms-space-sm: 8px;
+    --ms-space-md: 16px;
+    --ms-space-lg: 24px;
+    --ms-space-xl: 32px;
+    --ms-space-2xl: 48px;
+
+    /* --- Typography --- */
+    --ms-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji",
+        "Segoe UI Emoji";
+    --ms-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo,
+        Courier, monospace;
+    --ms-font-size-xs: 0.75rem;
+    --ms-font-size-sm: 0.8125rem;
+    --ms-font-size-base: 0.875rem;
+    --ms-font-size-lg: 1rem;
+    --ms-font-size-xl: 1.25rem;
+    --ms-font-size-2xl: 1.5rem;
+    --ms-font-weight-normal: 400;
+    --ms-font-weight-medium: 500;
+    --ms-font-weight-semibold: 600;
+    --ms-font-weight-bold: 700;
+    --ms-line-height: 1.5;
+
+    /* --- Border radius --- */
+    --ms-radius-sm: 4px;
+    --ms-radius-md: 6px;
+    --ms-radius-lg: 8px;
+    --ms-radius-full: 9999px;
+
+    /* --- Shadows --- */
+    --ms-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --ms-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+        0 2px 4px -2px rgba(0, 0, 0, 0.1);
+    --ms-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+        0 4px 6px -4px rgba(0, 0, 0, 0.1);
+
+    /* --- Transitions --- */
+    --ms-transition-fast: 150ms ease;
+    --ms-transition-base: 200ms ease;
+
+    /* --- Layout --- */
+    --ms-sidebar-width: 240px;
+    --ms-sidebar-collapsed-width: 56px;
+    --ms-header-height: 56px;
+}
+
+/* --- Dark mode --- */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ms-color-primary: #3b82f6;
+        --ms-color-primary-hover: #60a5fa;
+        --ms-color-primary-light: #1e3a5f;
+        --ms-color-secondary: #94a3b8;
+        --ms-color-secondary-hover: #cbd5e1;
+
+        --ms-color-bg: #0f172a;
+        --ms-color-surface: #1e293b;
+        --ms-color-surface-hover: #334155;
+        --ms-color-surface-alt: #1e293b;
+        --ms-color-border: #334155;
+        --ms-color-border-strong: #475569;
+
+        --ms-color-text: #f1f5f9;
+        --ms-color-text-secondary: #94a3b8;
+        --ms-color-text-muted: #64748b;
+        --ms-color-text-inverse: #0f172a;
+
+        --ms-color-success: #22c55e;
+        --ms-color-success-bg: #14532d;
+        --ms-color-warning: #eab308;
+        --ms-color-warning-bg: #422006;
+        --ms-color-danger: #ef4444;
+        --ms-color-danger-bg: #450a0a;
+        --ms-color-danger-hover: #f87171;
+        --ms-color-info: #3b82f6;
+        --ms-color-info-bg: #1e3a5f;
+        --ms-color-executing: #a78bfa;
+        --ms-color-executing-bg: #3b0764;
+
+        --ms-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --ms-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4),
+            0 2px 4px -2px rgba(0, 0, 0, 0.3);
+        --ms-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4),
+            0 4px 6px -4px rgba(0, 0, 0, 0.3);
+    }
+}
+
+body{
+    margin:0;
+}
+
+/* Explicit theme override */
+.ms-studio[data-theme="light"] {
+    --ms-color-primary: #2563eb;
+    --ms-color-primary-hover: #1d4ed8;
+    --ms-color-primary-light: #dbeafe;
+    --ms-color-secondary: #64748b;
+    --ms-color-secondary-hover: #475569;
+
+    --ms-color-bg: #f8fafc;
+    --ms-color-surface: #ffffff;
+    --ms-color-surface-hover: #f1f5f9;
+    --ms-color-surface-alt: #f1f5f9;
+    --ms-color-border: #e2e8f0;
+    --ms-color-border-strong: #cbd5e1;
+
+    --ms-color-text: #0f172a;
+    --ms-color-text-secondary: #475569;
+    --ms-color-text-muted: #94a3b8;
+    --ms-color-text-inverse: #ffffff;
+
+    --ms-color-success: #16a34a;
+    --ms-color-success-bg: #dcfce7;
+    --ms-color-warning: #ca8a04;
+    --ms-color-warning-bg: #fef9c3;
+    --ms-color-danger: #dc2626;
+    --ms-color-danger-bg: #fee2e2;
+    --ms-color-danger-hover: #b91c1c;
+    --ms-color-info: #2563eb;
+    --ms-color-info-bg: #dbeafe;
+    --ms-color-executing: #7c3aed;
+    --ms-color-executing-bg: #ede9fe;
+
+    --ms-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --ms-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+        0 2px 4px -2px rgba(0, 0, 0, 0.1);
+    --ms-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+        0 4px 6px -4px rgba(0, 0, 0, 0.1);
+}
+
+.ms-studio[data-theme="dark"] {
+    --ms-color-primary: #3b82f6;
+    --ms-color-primary-hover: #60a5fa;
+    --ms-color-primary-light: #1e3a5f;
+    --ms-color-secondary: #94a3b8;
+    --ms-color-secondary-hover: #cbd5e1;
+
+    --ms-color-bg: #0f172a;
+    --ms-color-surface: #1e293b;
+    --ms-color-surface-hover: #334155;
+    --ms-color-surface-alt: #1e293b;
+    --ms-color-border: #334155;
+    --ms-color-border-strong: #475569;
+
+    --ms-color-text: #f1f5f9;
+    --ms-color-text-secondary: #94a3b8;
+    --ms-color-text-muted: #64748b;
+    --ms-color-text-inverse: #0f172a;
+
+    --ms-color-success: #22c55e;
+    --ms-color-success-bg: #14532d;
+    --ms-color-warning: #eab308;
+    --ms-color-warning-bg: #422006;
+    --ms-color-danger: #ef4444;
+    --ms-color-danger-bg: #450a0a;
+    --ms-color-danger-hover: #f87171;
+    --ms-color-info: #3b82f6;
+    --ms-color-info-bg: #1e3a5f;
+    --ms-color-executing: #a78bfa;
+    --ms-color-executing-bg: #3b0764;
+
+    --ms-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --ms-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4),
+        0 2px 4px -2px rgba(0, 0, 0, 0.3);
+    --ms-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4),
+        0 4px 6px -4px rgba(0, 0, 0, 0.3);
+}
+
+/* ==========================================================================
+   2. ROOT & LAYOUT
+   ========================================================================== */
+
+.ms-studio {
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-base);
+    line-height: var(--ms-line-height);
+    color: var(--ms-color-text);
+    background-color: var(--ms-color-bg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+}
+
+.ms-studio *,
+.ms-studio *::before,
+.ms-studio *::after {
+    box-sizing: border-box;
+}
+
+.ms-layout {
+    display: grid;
+    grid-template-columns: var(--ms-sidebar-width) 1fr;
+    grid-template-rows: auto 1fr;
+    min-height: 100vh;
+}
+
+.ms-layout.ms-sidebar-collapsed {
+    grid-template-columns: var(--ms-sidebar-collapsed-width) 1fr;
+}
+
+/* ==========================================================================
+   3. SIDEBAR
+   ========================================================================== */
+
+.ms-sidebar {
+    grid-row: 1 / -1;
+    background-color: var(--ms-color-surface);
+    border-right: 1px solid var(--ms-color-border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    width: var(--ms-sidebar-width);
+    transition: width var(--ms-transition-base);
+}
+
+.ms-sidebar-collapsed .ms-sidebar {
+    width: var(--ms-sidebar-collapsed-width);
+}
+
+.ms-sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-md);
+    border-bottom: 1px solid var(--ms-color-border);
+    font-weight: var(--ms-font-weight-bold);
+    font-size: var(--ms-font-size-lg);
+    color: var(--ms-color-text);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.ms-sidebar-brand-logo {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+}
+
+.ms-sidebar-nav {
+    flex: 1;
+    padding: var(--ms-space-sm) 0;
+    list-style: none;
+    margin: 0;
+}
+
+.ms-sidebar-section {
+    padding: var(--ms-space-sm) var(--ms-space-md) var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* ==========================================================================
+   4. NAVIGATION ITEMS
+   ========================================================================== */
+
+.ms-nav-item {
+    margin: 1px var(--ms-space-sm);
+}
+
+.ms-nav-link {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+    text-decoration: none;
+    border-radius: var(--ms-radius-md);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-medium);
+    transition: background-color var(--ms-transition-fast),
+        color var(--ms-transition-fast);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.ms-nav-link:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-nav-link:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+.ms-nav-active .ms-nav-link,
+.ms-nav-link.ms-nav-active {
+    background-color: var(--ms-color-primary-light);
+    color: var(--ms-color-primary);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-nav-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.ms-nav-active .ms-nav-icon {
+    opacity: 1;
+}
+
+/* ==========================================================================
+   5. HEADER
+   ========================================================================== */
+
+.ms-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--ms-space-sm) var(--ms-space-lg);
+    min-height: var(--ms-header-height);
+    background-color: var(--ms-color-surface);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-header-left {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-md);
+}
+
+.ms-header-right {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-md);
+    flex-wrap: wrap;
+}
+
+.ms-header-title {
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text);
+    margin: 0;
+}
+
+.ms-header-control {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-header-control-label {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-header-select {
+    min-width: 110px;
+    max-width: 320px;
+}
+
+/* ==========================================================================
+   6. MAIN CONTENT
+   ========================================================================== */
+
+.ms-main {
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+}
+
+.ms-content {
+    flex: 1;
+    padding: var(--ms-space-lg);
+    overflow-y: auto;
+}
+
+.ms-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+}
+
+.ms-page > h1 {
+    margin: 0;
+    font-size: var(--ms-font-size-2xl);
+    font-weight: var(--ms-font-weight-bold);
+    letter-spacing: -0.01em;
+}
+
+.ms-page > h2 {
+    margin: var(--ms-space-sm) 0 0;
+    font-size: var(--ms-font-size-lg);
+}
+
+.ms-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-md);
+    flex-wrap: wrap;
+}
+
+.ms-row > h2 {
+    margin: 0;
+}
+
+.ms-grid {
+    display: grid;
+    gap: var(--ms-space-md);
+}
+
+.ms-grid-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ms-section {
+    background-color: var(--ms-color-surface);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    padding: var(--ms-space-md);
+    box-shadow: var(--ms-shadow-sm);
+}
+
+.ms-section + .ms-section {
+    margin-top: var(--ms-space-md);
+}
+
+.ms-section > h2 {
+    margin: 0 0 var(--ms-space-md);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-bottom: var(--ms-space-sm);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-actions {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-group-actions {
+    display: flex;
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-muted {
+    color: var(--ms-color-text-muted);
+    margin: 0;
+}
+
+.ms-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--ms-space-lg);
+}
+
+.ms-page-title {
+    font-size: var(--ms-font-size-xl);
+    font-weight: var(--ms-font-weight-bold);
+    color: var(--ms-color-text);
+    margin: 0;
+}
+
+/* ==========================================================================
+   7. STAT CARDS
+   ========================================================================== */
+
+.ms-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--ms-space-md);
+    margin-bottom: var(--ms-space-lg);
+}
+
+.ms-stat-card {
+    --ms-stat-accent: var(--ms-color-info);
+    --ms-stat-accent-bg: var(--ms-color-info-bg);
+    background-color: var(--ms-color-surface);
+    border: 1px solid var(--ms-color-border);
+    border-top: 3px solid var(--ms-stat-accent);
+    border-radius: var(--ms-radius-lg);
+    padding: var(--ms-space-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    box-shadow: var(--ms-shadow-sm);
+    transition: box-shadow var(--ms-transition-fast), transform var(--ms-transition-fast);
+}
+
+.ms-stat-card:hover {
+    box-shadow: var(--ms-shadow-md);
+    transform: translateY(-1px);
+}
+
+.ms-stat-card-header,
+.ms-stat-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-stat-card-title,
+.ms-stat-label {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-stat-card-value,
+.ms-stat-value {
+    font-size: var(--ms-font-size-2xl);
+    font-weight: var(--ms-font-weight-bold);
+    font-family: var(--ms-font-mono);
+    color: var(--ms-color-text);
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+}
+
+.ms-stat-card-icon,
+.ms-stat-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--ms-radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: var(--ms-font-size-lg);
+    background-color: var(--ms-stat-accent-bg);
+    color: var(--ms-stat-accent);
+}
+
+.ms-stat-icon-success {
+    background-color: var(--ms-color-success-bg);
+    color: var(--ms-color-success);
+}
+
+.ms-stat-icon-warning {
+    background-color: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+}
+
+.ms-stat-icon-danger {
+    background-color: var(--ms-color-danger-bg);
+    color: var(--ms-color-danger);
+}
+
+.ms-stat-icon-info {
+    background-color: var(--ms-color-info-bg);
+    color: var(--ms-color-info);
+}
+
+/* A stat card that is also a link to the page it summarises: the anchor carries no styling of its
+   own, so the card inside it looks the same as one that is not a link. */
+.ms-stat-card-link {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+}
+
+.ms-stat-card-info {
+    --ms-stat-accent: var(--ms-color-info);
+    --ms-stat-accent-bg: var(--ms-color-info-bg);
+}
+
+.ms-stat-card-success {
+    --ms-stat-accent: var(--ms-color-success);
+    --ms-stat-accent-bg: var(--ms-color-success-bg);
+}
+
+.ms-stat-card-warning {
+    --ms-stat-accent: var(--ms-color-warning);
+    --ms-stat-accent-bg: var(--ms-color-warning-bg);
+}
+
+.ms-stat-card-error,
+.ms-stat-card-danger {
+    --ms-stat-accent: var(--ms-color-danger);
+    --ms-stat-accent-bg: var(--ms-color-danger-bg);
+}
+
+/* ==========================================================================
+   8. BADGE (copy badge)
+   ========================================================================== */
+
+.ms-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    line-height: 1;
+    max-width: 100%;
+}
+
+.ms-badge-group {
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    padding: 3px 6px;
+    border-radius: var(--ms-radius-sm) 0 0 var(--ms-radius-sm);
+    border: 1px solid var(--ms-color-border);
+    border-right: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-badge-name {
+    background-color: var(--ms-color-primary-light);
+    color: var(--ms-color-primary);
+    padding: 3px 6px;
+    border-radius: 0 var(--ms-radius-sm) var(--ms-radius-sm) 0;
+    border: 1px solid var(--ms-color-border);
+    font-weight: var(--ms-font-weight-medium);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-copy-badge {
+    display: inline-flex;
+    align-items: stretch;
+    max-width: min(100%, 520px);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    box-shadow: var(--ms-shadow-sm);
+    overflow: hidden;
+}
+
+.ms-copy-badge-value {
+    display: inline-block;
+    min-width: 0;
+    padding: 6px var(--ms-space-sm);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ms-copy-badge-copy {
+    border: 0;
+    border-left: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-semibold);
+    padding: 0 var(--ms-space-sm);
+    cursor: pointer;
+    transition: background-color var(--ms-transition-fast), color var(--ms-transition-fast);
+}
+
+.ms-copy-badge-copy:hover {
+    background-color: var(--ms-color-primary-light);
+    color: var(--ms-color-primary);
+}
+
+.ms-copy-badge-copy:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+/* ==========================================================================
+   9. STATE DOT (status indicator)
+   ========================================================================== */
+
+.ms-state-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--ms-radius-full);
+    flex-shrink: 0;
+}
+
+.ms-state-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+    white-space: nowrap;
+}
+
+.ms-state-dot-lg {
+    width: 10px;
+    height: 10px;
+}
+
+.ms-state-dot.ms-state-running,
+.ms-state-dot.ms-state-success,
+.ms-state-indicator.ms-state-success .ms-state-dot {
+    background-color: var(--ms-color-success);
+    box-shadow: 0 0 0 3px var(--ms-color-success-bg);
+}
+
+.ms-state-dot.ms-state-paused,
+.ms-state-indicator.ms-state-paused .ms-state-dot {
+    background-color: var(--ms-color-warning);
+    box-shadow: 0 0 0 3px var(--ms-color-warning-bg);
+}
+
+.ms-state-dot.ms-state-error,
+.ms-state-indicator.ms-state-error .ms-state-dot {
+    background-color: var(--ms-color-danger);
+    box-shadow: 0 0 0 3px var(--ms-color-danger-bg);
+}
+
+.ms-state-dot.ms-state-complete {
+    background-color: var(--ms-color-secondary);
+    box-shadow: 0 0 0 3px var(--ms-color-surface-alt);
+}
+
+.ms-state-dot.ms-state-standby {
+    background-color: var(--ms-color-warning);
+    box-shadow: 0 0 0 3px var(--ms-color-warning-bg);
+}
+
+/*
+ * On its way down but not down yet: amber like standby, because both mean "alive and firing nothing",
+ * and grey is reserved for the scheduler that has actually stopped.
+ */
+.ms-state-dot.ms-state-shutting-down {
+    background-color: var(--ms-color-warning);
+    box-shadow: 0 0 0 3px var(--ms-color-warning-bg);
+}
+
+.ms-state-dot.ms-state-shutdown {
+    background-color: var(--ms-color-text-muted);
+    box-shadow: 0 0 0 3px var(--ms-color-surface-alt);
+}
+
+/* ms-state-created is a scheduler built but never started: the same "nothing yet" blue as waiting. */
+.ms-state-dot.ms-state-created,
+.ms-state-dot.ms-state-waiting,
+.ms-state-dot.ms-state-info,
+.ms-state-indicator.ms-state-info .ms-state-dot {
+    background-color: var(--ms-color-info);
+    box-shadow: 0 0 0 3px var(--ms-color-info-bg);
+}
+
+.ms-state-dot.ms-state-blocked {
+    background-color: var(--ms-color-danger);
+    box-shadow: 0 0 0 3px var(--ms-color-danger-bg);
+}
+
+.ms-state-dot.ms-state-normal {
+    background-color: var(--ms-color-success);
+    box-shadow: 0 0 0 3px var(--ms-color-success-bg);
+}
+
+/*
+ * Violet rather than the info blue: blue is the fallback for a state the dashboard cannot classify, and
+ * executing has to stay distinguishable from "unrecognised" as well as from normal, paused and error.
+ */
+.ms-state-indicator.ms-state-executing .ms-state-dot {
+    background-color: var(--ms-color-executing);
+    box-shadow: 0 0 0 3px var(--ms-color-executing-bg);
+}
+
+.ms-state-label {
+    display: inline-flex;
+    align-items: center;
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    color: var(--ms-color-text-secondary);
+    letter-spacing: 0.02em;
+}
+
+/* ==========================================================================
+   10. DATA TABLE
+   ========================================================================== */
+
+.ms-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background-color: var(--ms-color-surface);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    overflow: hidden;
+    font-size: var(--ms-font-size-sm);
+    box-shadow: var(--ms-shadow-sm);
+}
+
+.ms-section .ms-table {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-table-header,
+.ms-table thead {
+    background-color: var(--ms-color-surface-alt);
+}
+
+.ms-table-header th,
+.ms-table thead th {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    text-align: left;
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-bottom: 1px solid var(--ms-color-border);
+    white-space: nowrap;
+    user-select: none;
+}
+
+.ms-table-header th.ms-sortable {
+    cursor: pointer;
+    transition: color var(--ms-transition-fast);
+}
+
+.ms-table-header th.ms-sortable:hover {
+    color: var(--ms-color-text);
+}
+
+.ms-table-header th.ms-sorted-asc::after {
+    content: " \25B2";
+    font-size: 0.6em;
+}
+
+.ms-table-header th.ms-sorted-desc::after {
+    content: " \25BC";
+    font-size: 0.6em;
+}
+
+.ms-table-row,
+.ms-table tbody tr {
+    border-bottom: 1px solid var(--ms-color-border);
+    transition: background-color var(--ms-transition-fast);
+}
+
+.ms-table-row:last-child,
+.ms-table tbody tr:last-child {
+    border-bottom: none;
+}
+
+.ms-table-row:hover,
+.ms-table tbody tr:hover {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-table tbody tr.ms-row-link {
+    cursor: pointer;
+}
+
+.ms-table tbody tr.ms-row-link:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+    background-color: var(--ms-color-primary-soft);
+}
+
+.ms-table-cell,
+.ms-table td {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    color: var(--ms-color-text);
+    vertical-align: middle;
+}
+
+.ms-table tbody td,
+.ms-table tbody th {
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-table tbody tr:last-child td,
+.ms-table tbody tr:last-child th {
+    border-bottom: none;
+}
+
+.ms-table tbody th {
+    width: 32%;
+    min-width: 160px;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    text-align: left;
+    vertical-align: top;
+    font-size: var(--ms-font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--ms-color-text-secondary);
+    border-right: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface-alt);
+}
+
+.ms-table td > a {
+    color: var(--ms-color-primary);
+    text-decoration: none;
+}
+
+.ms-table td > a:hover {
+    text-decoration: underline;
+}
+
+.ms-table-cell-mono {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-table-cell-actions,
+.ms-actions {
+    text-align: right;
+    white-space: normal;
+}
+
+.ms-table-empty {
+    padding: var(--ms-space-2xl) var(--ms-space-md);
+    text-align: center;
+    color: var(--ms-color-text-muted);
+}
+
+/* ==========================================================================
+   11. PAGINATION
+   ========================================================================== */
+
+.ms-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    flex-wrap: wrap;
+    padding: var(--ms-space-sm) 0;
+    margin-top: var(--ms-space-md);
+}
+
+.ms-pagination-info {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.ms-pagination .ms-button {
+    min-width: 36px;
+    height: 32px;
+    padding: 0 var(--ms-space-sm);
+}
+
+.ms-pagination-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    height: 32px;
+    padding: 0 var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text-secondary);
+    border-radius: var(--ms-radius-sm);
+    font-size: var(--ms-font-size-sm);
+    cursor: pointer;
+    transition: all var(--ms-transition-fast);
+}
+
+.ms-pagination-btn:hover:not(:disabled) {
+    background-color: var(--ms-color-surface-hover);
+    border-color: var(--ms-color-border-strong);
+    color: var(--ms-color-text);
+}
+
+.ms-pagination-btn:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+.ms-pagination-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.ms-pagination-btn.ms-active {
+    background-color: var(--ms-color-primary);
+    border-color: var(--ms-color-primary);
+    color: var(--ms-color-text-inverse);
+}
+
+/* ==========================================================================
+   12. DIALOG / MODAL
+   ========================================================================== */
+
+.ms-dialog-backdrop,
+.ms-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    animation: ms-fade-in var(--ms-transition-base);
+}
+
+.ms-dialog,
+.ms-confirm-dialog {
+    background-color: var(--ms-color-surface);
+    border-radius: var(--ms-radius-lg);
+    box-shadow: var(--ms-shadow-lg);
+    width: 100%;
+    max-width: 480px;
+    max-height: 90vh;
+    overflow-y: auto;
+    animation: ms-slide-up var(--ms-transition-base);
+}
+
+.ms-dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--ms-space-md) var(--ms-space-lg);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-dialog-title {
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text);
+    margin: 0;
+}
+
+.ms-dialog-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: none;
+    color: var(--ms-color-text-muted);
+    border-radius: var(--ms-radius-sm);
+    cursor: pointer;
+    font-size: var(--ms-font-size-lg);
+    transition: all var(--ms-transition-fast);
+}
+
+.ms-dialog-close:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-dialog-body {
+    padding: var(--ms-space-lg);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-base);
+}
+
+.ms-dialog-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-md) var(--ms-space-lg);
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-confirm-dialog {
+    max-width: 420px;
+    padding: var(--ms-space-lg);
+}
+
+.ms-confirm-dialog > h3 {
+    margin: 0;
+    font-size: var(--ms-font-size-lg);
+}
+
+.ms-confirm-dialog > p {
+    margin: var(--ms-space-sm) 0 var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+/* ==========================================================================
+   13. BUTTONS
+   ========================================================================== */
+
+.ms-btn,
+.ms-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ms-space-xs);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-medium);
+    cursor: pointer;
+    transition: all var(--ms-transition-fast);
+    text-decoration: none;
+    white-space: nowrap;
+    line-height: 1.4;
+    min-height: 32px;
+    box-shadow: var(--ms-shadow-sm);
+}
+
+.ms-btn:hover,
+.ms-button:hover {
+    background-color: var(--ms-color-surface-hover);
+    border-color: var(--ms-color-border-strong);
+    transform: translateY(-1px);
+    box-shadow: var(--ms-shadow-md);
+}
+
+.ms-btn:focus-visible,
+.ms-button:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+}
+
+.ms-btn:disabled,
+.ms-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.ms-btn-primary,
+.ms-button-primary {
+    background-color: var(--ms-color-primary);
+    border-color: var(--ms-color-primary);
+    color: var(--ms-color-text-inverse);
+}
+
+.ms-btn-primary:hover,
+.ms-button-primary:hover {
+    background-color: var(--ms-color-primary-hover);
+    border-color: var(--ms-color-primary-hover);
+}
+
+.ms-btn-danger,
+.ms-button-danger {
+    background-color: var(--ms-color-danger);
+    border-color: var(--ms-color-danger);
+    color: var(--ms-color-text-inverse);
+}
+
+.ms-btn-danger:hover,
+.ms-button-danger:hover {
+    background-color: var(--ms-color-danger-hover);
+    border-color: var(--ms-color-danger-hover);
+}
+
+.ms-btn-ghost {
+    background-color: transparent;
+    border-color: transparent;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-btn-ghost:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-btn-sm {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-btn-icon {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: var(--ms-radius-sm);
+}
+
+/* ==========================================================================
+   14. SEARCH / FILTER INPUT
+   ========================================================================== */
+
+.ms-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.ms-search-icon {
+    position: absolute;
+    left: var(--ms-space-sm);
+    color: var(--ms-color-text-muted);
+    pointer-events: none;
+    width: 16px;
+    height: 16px;
+}
+
+.ms-search .ms-input {
+    padding-left: var(--ms-space-xl);
+}
+
+.ms-input.ms-search-filter {
+    width: min(100%, 360px);
+    min-height: 36px;
+    padding-left: calc(var(--ms-space-xl) + var(--ms-space-sm));
+    padding-right: var(--ms-space-md);
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: left var(--ms-space-sm) center;
+    background-size: 16px 16px;
+}
+
+.ms-input.ms-search-filter::-webkit-search-decoration,
+.ms-input.ms-search-filter::-webkit-search-cancel-button,
+.ms-input.ms-search-filter::-webkit-search-results-button,
+.ms-input.ms-search-filter::-webkit-search-results-decoration {
+    -webkit-appearance: none;
+}
+
+.ms-details-link {
+    color: var(--ms-color-primary);
+    font-size: var(--ms-font-size-sm);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.ms-details-link:hover {
+    text-decoration: underline;
+}
+
+.ms-entity-table {
+    table-layout: fixed;
+}
+
+.ms-entity-table th.ms-col-state,
+.ms-entity-table td.ms-col-state {
+    width: 160px;
+    white-space: nowrap;
+}
+
+.ms-entity-table th.ms-col-details,
+.ms-entity-table td.ms-col-details {
+    width: 140px;
+    white-space: nowrap;
+}
+
+.ms-entity-table th.ms-col-actions,
+.ms-entity-table td.ms-col-actions {
+    width: 340px;
+    white-space: nowrap;
+}
+
+.ms-entity-table td.ms-col-key > a {
+    display: inline-block;
+    max-width: 100%;
+}
+
+.ms-entity-table td.ms-col-actions {
+    text-align: right;
+}
+
+.ms-entity-table td.ms-col-actions .ms-actions {
+    justify-content: flex-end;
+    white-space: nowrap;
+}
+
+/* ==========================================================================
+   15. TOASTS
+   ========================================================================== */
+
+.ms-toast-stack {
+    position: fixed;
+    right: var(--ms-space-md);
+    bottom: var(--ms-space-md);
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    width: min(420px, calc(100vw - (var(--ms-space-md) * 2)));
+}
+
+.ms-toast {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left-width: 4px;
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    box-shadow: var(--ms-shadow-md);
+    color: var(--ms-color-text);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-toast-info {
+    border-left-color: var(--ms-color-info);
+}
+
+.ms-toast-success {
+    border-left-color: var(--ms-color-success);
+}
+
+.ms-toast-error {
+    border-left-color: var(--ms-color-danger);
+}
+
+.ms-toast-close {
+    border: 0;
+    background: transparent;
+    color: var(--ms-color-text-muted);
+    cursor: pointer;
+    font-size: var(--ms-font-size-lg);
+    line-height: 1;
+    padding: 0;
+}
+
+.ms-scheduler-controls {
+    margin-bottom: var(--ms-space-md);
+}
+
+/* ==========================================================================
+   16. ALERTS
+   ========================================================================== */
+
+.ms-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-radius: var(--ms-radius-md);
+    border: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface);
+    font-size: var(--ms-font-size-sm);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-error-alert {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-radius: var(--ms-radius-md);
+    border: 1px solid var(--ms-color-danger);
+    background-color: var(--ms-color-danger-bg);
+    color: var(--ms-color-danger);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-alert-error {
+    background-color: var(--ms-color-danger-bg);
+    border-color: var(--ms-color-danger);
+    color: var(--ms-color-danger);
+}
+
+.ms-alert-success {
+    background-color: var(--ms-color-success-bg);
+    border-color: var(--ms-color-success);
+    color: var(--ms-color-success);
+}
+
+.ms-alert-warning {
+    background-color: var(--ms-color-warning-bg);
+    border-color: var(--ms-color-warning);
+    color: var(--ms-color-warning);
+}
+
+.ms-alert-info {
+    background-color: var(--ms-color-info-bg);
+    border-color: var(--ms-color-info);
+    color: var(--ms-color-info);
+}
+
+.ms-alert-icon {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin-top: 1px;
+}
+
+.ms-alert-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.ms-alert-dismiss {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: inherit;
+    opacity: 0.6;
+    cursor: pointer;
+    padding: 0;
+    font-size: var(--ms-font-size-lg);
+    line-height: 1;
+}
+
+.ms-alert-dismiss:hover {
+    opacity: 1;
+}
+
+/* ==========================================================================
+   17. SPINNER
+   ========================================================================== */
+
+.ms-spinner {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border: 3px solid var(--ms-color-border);
+    border-top-color: var(--ms-color-primary);
+    border-radius: var(--ms-radius-full);
+    animation: ms-spin 0.6s linear infinite;
+}
+
+.ms-spinner-sm {
+    width: 16px;
+    height: 16px;
+    border-width: 2px;
+}
+
+.ms-spinner-lg {
+    width: 40px;
+    height: 40px;
+    border-width: 4px;
+}
+
+.ms-spinner-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--ms-space-2xl);
+}
+
+.ms-loading-spinner {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+    padding: var(--ms-space-sm) 0;
+}
+
+/* ==========================================================================
+   18. TAG
+   ========================================================================== */
+
+.ms-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 2px var(--ms-space-sm);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-full);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    white-space: nowrap;
+}
+
+.ms-tag-cron {
+    background-color: var(--ms-color-info-bg);
+    border-color: var(--ms-color-info);
+    color: var(--ms-color-info);
+}
+
+.ms-tag-simple {
+    background-color: var(--ms-color-success-bg);
+    border-color: var(--ms-color-success);
+    color: var(--ms-color-success);
+}
+
+.ms-tag-daily {
+    background-color: var(--ms-color-warning-bg);
+    border-color: var(--ms-color-warning);
+    color: var(--ms-color-warning);
+}
+
+.ms-tag-calendar {
+    background-color: var(--ms-color-primary-light);
+    border-color: var(--ms-color-primary);
+    color: var(--ms-color-primary);
+}
+
+/* ==========================================================================
+   19. EMPTY STATE
+   ========================================================================== */
+
+.ms-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--ms-space-2xl) var(--ms-space-md);
+    text-align: center;
+    color: var(--ms-color-text-muted);
+}
+
+.ms-empty-icon {
+    font-size: 2.5rem;
+    margin-bottom: var(--ms-space-md);
+    opacity: 0.5;
+}
+
+.ms-empty-title {
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text-secondary);
+    margin: 0 0 var(--ms-space-xs);
+}
+
+.ms-empty-description {
+    font-size: var(--ms-font-size-sm);
+    margin: 0;
+    max-width: 360px;
+}
+
+/* ==========================================================================
+   20. TIME AGO
+   ========================================================================== */
+
+.ms-time-ago {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-muted);
+    white-space: nowrap;
+}
+
+/* ==========================================================================
+   21. FORM CONTROLS
+   ========================================================================== */
+
+.ms-form-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-form-label {
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-medium);
+    color: var(--ms-color-text);
+}
+
+.ms-input {
+    padding: var(--ms-space-sm) var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+    line-height: 1.4;
+    transition: border-color var(--ms-transition-fast),
+        box-shadow var(--ms-transition-fast);
+    outline: none;
+    width: 100%;
+}
+
+.ms-input:hover {
+    border-color: var(--ms-color-border-strong);
+}
+
+.ms-input:focus {
+    border-color: var(--ms-color-primary);
+    box-shadow: 0 0 0 3px var(--ms-color-primary-light);
+}
+
+.ms-input::placeholder {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-input-mono {
+    font-family: var(--ms-font-mono);
+}
+
+.ms-select {
+    padding: var(--ms-space-sm) var(--ms-space-lg) var(--ms-space-sm) var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+    line-height: 1.4;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M3 4.5L6 7.5L9 4.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    cursor: pointer;
+    transition: border-color var(--ms-transition-fast),
+        box-shadow var(--ms-transition-fast);
+    outline: none;
+}
+
+.ms-select:hover {
+    border-color: var(--ms-color-border-strong);
+}
+
+.ms-select:focus {
+    border-color: var(--ms-color-primary);
+    box-shadow: 0 0 0 3px var(--ms-color-primary-light);
+}
+
+.ms-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    background-color: var(--ms-color-surface);
+    overflow: hidden;
+}
+
+.ms-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-list li:last-child {
+    border-bottom: none;
+}
+
+.ms-list-item-main {
+    min-width: 0;
+}
+
+.ms-list-item-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-list li:hover {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-list a {
+    color: var(--ms-color-primary);
+    text-decoration: none;
+}
+
+.ms-list a:hover {
+    text-decoration: underline;
+}
+
+.ms-cron-next-fires {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-cron-next-fires .ms-list li {
+    justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.ms-job-data-map-editor {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+/* ==========================================================================
+   22. TOOLTIP
+   ========================================================================== */
+
+.ms-tooltip {
+    position: relative;
+    display: inline-flex;
+}
+
+.ms-tooltip-content {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    background-color: var(--ms-color-text);
+    color: var(--ms-color-text-inverse);
+    font-size: var(--ms-font-size-xs);
+    border-radius: var(--ms-radius-sm);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--ms-transition-fast);
+    z-index: 100;
+}
+
+.ms-tooltip-content::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: var(--ms-color-text);
+}
+
+.ms-tooltip:hover .ms-tooltip-content {
+    opacity: 1;
+}
+
+/* ==========================================================================
+   23. UTILITIES
+   ========================================================================== */
+
+.ms-mono {
+    font-family: var(--ms-font-mono);
+}
+
+.ms-text-muted {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-text-success {
+    color: var(--ms-color-success);
+}
+
+.ms-text-warning {
+    color: var(--ms-color-warning);
+}
+
+.ms-text-danger {
+    color: var(--ms-color-danger);
+}
+
+.ms-text-info {
+    color: var(--ms-color-info);
+}
+
+.ms-truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+}
+
+.ms-flex {
+    display: flex;
+}
+
+.ms-flex-col {
+    display: flex;
+    flex-direction: column;
+}
+
+.ms-items-center {
+    align-items: center;
+}
+
+.ms-gap-xs {
+    gap: var(--ms-space-xs);
+}
+
+.ms-gap-sm {
+    gap: var(--ms-space-sm);
+}
+
+.ms-gap-md {
+    gap: var(--ms-space-md);
+}
+
+/* ==========================================================================
+   24. ANIMATIONS
+   ========================================================================== */
+
+@keyframes ms-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes ms-fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes ms-slide-up {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes ms-slide-in {
+    from {
+        opacity: 0;
+        transform: translateX(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* ==========================================================================
+   25. RESPONSIVE (1024px+ breakpoint)
+   ========================================================================== */
+
+@media (max-width: 1024px) {
+    .ms-layout {
+        grid-template-columns: var(--ms-sidebar-collapsed-width) 1fr;
+    }
+
+    .ms-sidebar {
+        width: var(--ms-sidebar-collapsed-width);
+    }
+
+    .ms-sidebar-brand-text,
+    .ms-nav-link-text,
+    .ms-sidebar-section {
+        display: none;
+    }
+
+    .ms-nav-link {
+        justify-content: center;
+        padding: var(--ms-space-sm);
+    }
+
+    .ms-stat-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .ms-grid-4 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ms-live-event {
+        grid-template-columns: 1fr;
+        align-items: flex-start;
+    }
+}

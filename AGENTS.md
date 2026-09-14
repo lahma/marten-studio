@@ -302,6 +302,13 @@ build/Extensions/                        Vendored Cake helpers (StringExtensions
 src/                                     The shipped library, and nothing else
 src/MartenStudio/                        The Razor Class Library: public API, Internal/ (guard, SQL
                                          builders), Components/, Services/, wwwroot/
+src/MartenStudio/Components/             route table, links, shell — pages come later
+src/MartenStudio/Components/Shared/      small building-block components
+src/MartenStudio/Internal/               startup authorization guard, endpoint marker,
+                                         mapped-endpoint tracking; later SQL builders
+src/MartenStudio/Services/               toast service; scoped state and data services come later
+src/MartenStudio/wwwroot/                static web assets, packed under `_content/MartenStudio/`
+src/MartenStudio/wwwroot/css/            the one stylesheet
 samples/                                 Demo host and demo domain; never packed
 samples/MartenStudio.Sample/             The sample ASP.NET Core host (D18) - README snippet regions
 samples/MartenStudio.SampleDomain/       The demo domain, shared with the integration tests; deliberately

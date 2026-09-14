@@ -1,0 +1,40 @@
+@if (IsOpen)
+{
+    <div class="ms-confirm-overlay">
+        <div class="ms-confirm-dialog">
+            <h3>@Title</h3>
+            <p>@Message</p>
+            <div class="ms-confirm-actions">
+                <button type="button" class="ms-button ms-button-danger" @onclick="ConfirmAsync">Confirm</button>
+                <button type="button" class="ms-button" @onclick="CancelAsync">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public bool IsOpen { get; set; }
+
+    [Parameter]
+    public string Title { get; set; } = "Confirm action";
+
+    [Parameter]
+    public string Message { get; set; } = "Are you sure?";
+
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private async Task ConfirmAsync()
+    {
+        await OnConfirm.InvokeAsync();
+    }
+
+    private async Task CancelAsync()
+    {
+        await OnCancel.InvokeAsync();
+    }
+}

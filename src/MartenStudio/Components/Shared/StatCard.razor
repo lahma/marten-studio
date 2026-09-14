@@ -1,0 +1,24 @@
+<div class="ms-stat-card ms-stat-card-@Color">
+    <div class="ms-stat-card-header">
+        <span class="ms-stat-card-title">@Title</span>
+        @if (!string.IsNullOrWhiteSpace(Icon))
+        {
+            <span class="ms-stat-card-icon">@Icon</span>
+        }
+    </div>
+    <div class="ms-stat-card-value">@Value</div>
+</div>
+
+@code {
+    [Parameter]
+    public string Title { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Value { get; set; } = "0";
+
+    [Parameter]
+    public string Icon { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Color { get; set; } = "info";
+}

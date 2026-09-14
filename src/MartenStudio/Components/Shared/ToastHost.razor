@@ -1,0 +1,40 @@
+@using MartenStudio.Services
+@implements IDisposable
+@inject ToastService Toasts
+
+@if (Toasts.Messages.Count > 0)
+{
+    <div class="ms-toast-stack" role="status" aria-live="polite" aria-atomic="false">
+        @foreach (ToastMessage toast in Toasts.Messages)
+        {
+            <div class="ms-toast @GetToastClass(toast.Level)">
+                <span>@toast.Message</span>
+                <button type="button" class="ms-toast-close" @onclick="() => Toasts.Dismiss(toast.Id)" aria-label="Dismiss notification">&times;</button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        Toasts.Changed += OnToastsChanged;
+    }
+
+    private Task OnToastsChanged() => InvokeAsync(StateHasChanged);
+
+    private static string GetToastClass(ToastLevel level)
+    {
+        return level switch
+        {
+            ToastLevel.Success => "ms-toast-success",
+            ToastLevel.Error => "ms-toast-error",
+            _ => "ms-toast-info"
+        };
+    }
+
+    public void Dispose()
+    {
+        Toasts.Changed -= OnToastsChanged;
+    }
+}
