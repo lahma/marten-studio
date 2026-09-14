@@ -1,0 +1,989 @@
+@page "/marten/query"
+@using System.Globalization
+@using Microsoft.Extensions.Options
+@using MartenStudio.Internal.Sql
+@using MartenStudio.Services.Query
+@implements IAsyncDisposable
+@inject IQueryService Queries
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject ToastService Toasts
+@inject NavigationManager Navigation
+@inject IJSRuntime JsRuntime
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    Two modes, and the asymmetry between them is the design.
+
+    A Marten `where` clause is a read against one document type the host registered: no capability needed,
+    the same thing the documents list does with a search box. Because it needs no capability, the service
+    holds it to being a *clause* - no second statement, and not a statement of its own - which is what keeps
+    this mode from being an ungated SQL console (QuerySqlComposer.RejectionFor).
+
+    The SQL console is arbitrary SQL against the whole database, so it is gated on RunSql, resolved with
+    write-policy semantics, checked by the statement guard, run inside a read-only transaction and audited
+    statement by statement (D13). The README says it plainly: grant RunSql to people you would give psql to.
+*@
+
+<PageTitle>Query</PageTitle>
+
+@* This packet owns wwwroot/css/parts/query.css and must not edit the shared stylesheet, so the page asks
+   for its own part here. When that part is folded into marten-studio.css, delete these three lines - and
+   until it is, the page is styled. *@
+<HeadContent>
+    <link rel="stylesheet" href="_content/MartenStudio/css/parts/query.css" />
+</HeadContent>
+
+<div class="ms-page ms-query-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Query</h1>
+    </div>
+
+    <div class="ms-query-modes" role="tablist" aria-label="Query mode">
+        <button type="button"
+                role="tab"
+                id="ms-query-mode-marten"
+                class="ms-query-mode @(mode == QueryMode.Marten ? "ms-query-mode-active" : "")"
+                aria-selected="@(mode == QueryMode.Marten ? "true" : "false")"
+                @onclick="() => SwitchModeAsync(QueryMode.Marten)">
+            Marten where clause
+        </button>
+        <button type="button"
+                role="tab"
+                id="ms-query-mode-sql"
+                class="ms-query-mode @(mode == QueryMode.Sql ? "ms-query-mode-active" : "")"
+                aria-selected="@(mode == QueryMode.Sql ? "true" : "false")"
+                @onclick="() => SwitchModeAsync(QueryMode.Sql)">
+            SQL console
+        </button>
+    </div>
+
+    @if (pageError is { Length: > 0 })
+    {
+        <ErrorAlert Message="@pageError" OnRetry="ReloadAsync" />
+    }
+
+    <div class="ms-query-layout">
+        <div class="ms-query-main">
+            @if (!loaded)
+            {
+                <LoadingSpinner />
+            }
+            else if (mode == QueryMode.Marten)
+            {
+                <div class="ms-query-mode-panel ms-query-panel-marten">
+                    <div class="ms-query-toolbar">
+                        <label class="ms-form-label" for="ms-query-type">Document type</label>
+                        <select id="ms-query-type" class="ms-select ms-query-type" value="@alias" @onchange="OnTypeChangedAsync">
+                            @foreach (QueryDocumentTypeInfo type in documentTypes)
+                            {
+                                <option value="@type.Alias" title="@type.FullTypeName" @key="type.Alias">
+                                    @type.Alias - @type.TypeName
+                                </option>
+                            }
+                        </select>
+
+                        <label class="ms-form-label" for="ms-query-page-size">Rows</label>
+                        <select id="ms-query-page-size" class="ms-select ms-query-page-size" value="@pageSize" @onchange="OnPageSizeChangedAsync">
+                            @foreach (int size in PageSizes)
+                            {
+                                <option value="@size" @key="size">@size.ToString(CultureInfo.InvariantCulture)</option>
+                            }
+                        </select>
+                    </div>
+
+                    <QueryEditor EditorId="ms-query-where"
+                                 Label="Marten where clause"
+                                 Placeholder="where data ->> 'Name' = 'Alice'"
+                                 Rows="6"
+                                 Value="@whereText"
+                                 ValueChanged="OnWhereChangedAsync"
+                                 Running="running"
+                                 ElapsedMilliseconds="elapsedMilliseconds"
+                                 Disabled="@(documentTypes.Count == 0)"
+                                 ErrorMessage="@martenError"
+                                 ErrorPosition="martenErrorPosition"
+                                 Status="@status"
+                                 OnRun="RunMartenAsync"
+                                 OnCancel="CancelAsync"
+                                 OnSave="BeginSaveAsync" />
+
+                    <p class="ms-muted ms-query-note">
+                        The clause runs as <code>session.Query(type, "where …")</code>. Parameters are not
+                        supported here in this release - write the values into the clause, and remember that
+                        it is SQL against the <code>data</code> column.
+                    </p>
+
+                    @if (documentTypes.Count == 0)
+                    {
+                        <div class="ms-empty ms-query-empty">
+                            <p class="ms-empty-title">No document type to query</p>
+                            <p class="ms-empty-description">
+                                This store registered no document type you are allowed to see. Marten learns
+                                them from the host's <code>StoreOptions</code>;
+                                <code>MartenStudioOptions.IsDocumentTypeVisible</code> can also be hiding them.
+                            </p>
+                        </div>
+                    }
+                    else if (martenResult is { } result)
+                    {
+                        <QueryStats RowCount="result.Rows.Count"
+                                    DurationMilliseconds="result.Duration.TotalMilliseconds"
+                                    Truncated="result.Truncated"
+                                    Sql="@result.GeneratedSql"
+                                    SqlNote="@MartenSqlNote(result)"
+                                    Plan="@result.Plan?.PlanJson"
+                                    PlanUnavailable="@PlanNote(result.Plan)"
+                                    Messages="@MartenMessages(result)" />
+
+                        @if (result.Succeeded)
+                        {
+                            <div class="ms-query-toolbar ms-query-export">
+                                <button type="button" class="ms-btn ms-btn-sm" @onclick="ExportMartenJsonAsync">Export JSON</button>
+                                <button type="button" class="ms-btn ms-btn-sm" @onclick="ExportMartenCsvAsync">Export CSV</button>
+                            </div>
+
+                            @if (result.Rows.Count == 0)
+                            {
+                                <div class="ms-empty ms-query-empty">
+                                    <p class="ms-empty-title">No document matched</p>
+                                    <p class="ms-empty-description">
+                                        The clause ran; nothing in this collection satisfies it.
+                                    </p>
+                                </div>
+                            }
+                            else
+                            {
+                                <table class="ms-table ms-query-marten-rows">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">id</th>
+                                            <th scope="col">document</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (MartenQueryRow row in result.Rows)
+                                        {
+                                            MartenQueryRow current = row;
+                                            <tr class="ms-table-row" @key="current.Id">
+                                                <td class="ms-table-cell ms-table-cell-mono ms-query-row-id">
+                                                    <a class="ms-details-link" href="@DocumentLink(result.Alias, current.Id)">@current.Id</a>
+                                                </td>
+                                                <td class="ms-table-cell ms-query-row-document">
+                                                    <JsonView Json="@current.Json"
+                                                              Label="Document"
+                                                              AutoExpandDepth="1"
+                                                              ShowSearch="false"
+                                                              ShowToolbar="false"
+                                                              DownloadFileName="document.json" />
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                        }
+                    }
+                    else
+                    {
+                        <ExamplesPanel Title="Try one of these"
+                                       Examples="@ExampleTuples(examples.Where)"
+                                       OnPick="OnExamplePickedAsync" />
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="ms-query-mode-panel ms-query-panel-sql">
+                    @if (!SqlEnabled)
+                    {
+                        <CapabilityDisabled Capability="@nameof(StudioCapability.RunSql)" Action="Running SQL" />
+                        <p class="ms-muted ms-query-sql-warning">@RunSqlWarning</p>
+                    }
+                    else
+                    {
+                        <QueryEditor EditorId="ms-query-sql"
+                                     Label="SQL statement"
+                                     Placeholder="select count(*) from …"
+                                     Rows="8"
+                                     Value="@sqlText"
+                                     ValueChanged="OnSqlChangedAsync"
+                                     Running="running"
+                                     ElapsedMilliseconds="elapsedMilliseconds"
+                                     ErrorMessage="@sqlError"
+                                     ErrorPosition="sqlErrorPosition"
+                                     Status="@status"
+                                     OnRun="RunSqlAsync"
+                                     OnCancel="CancelAsync"
+                                     OnSave="BeginSaveAsync" />
+
+                        <p class="ms-muted ms-query-note">
+                            One statement at a time, inside <code>BEGIN; SET TRANSACTION READ ONLY</code> with
+                            a statement timeout, and the transaction is always rolled back. The row cap stops
+                            the reader; no <code>limit</code> is ever appended to what you typed.
+                        </p>
+
+                        @if (sqlResult is { } result)
+                        {
+                            <QueryStats RowCount="result.Rows.Count"
+                                        DurationMilliseconds="result.Duration.TotalMilliseconds"
+                                        Truncated="result.Truncated"
+                                        Sql="@sqlText"
+                                        PlanUnavailable="Run an EXPLAIN statement to see a plan here."
+                                        Messages="@result.Notices" />
+
+                            @if (result.Succeeded)
+                            {
+                                <div class="ms-query-toolbar ms-query-export">
+                                    <button type="button" class="ms-btn ms-btn-sm" @onclick="ExportSqlJsonAsync">Export JSON</button>
+                                    <button type="button" class="ms-btn ms-btn-sm" @onclick="ExportSqlCsvAsync">Export CSV</button>
+                                </div>
+
+                                <ResultGrid Columns="@GridColumns(result)"
+                                            Rows="@GridRows(result)"
+                                            Truncated="result.Truncated"
+                                            RowLimit="result.RowLimit"
+                                            EmptyTitle="Nothing to show"
+                                            EmptyText="That statement returned no result set." />
+                            }
+                        }
+                        else
+                        {
+                            <ExamplesPanel Title="Try one of these"
+                                           Examples="@ExampleTuples(examples.Sql)"
+                                           OnPick="OnExamplePickedAsync" />
+                        }
+                    }
+                </div>
+            }
+        </div>
+
+        <aside class="ms-query-side" aria-label="Saved and recent queries">
+            <SavedQueryDrawer @ref="drawer"
+                              StoreKey="@State.ActiveScope?.StoreKey"
+                              Mode="@mode.ToString()"
+                              OnPick="OnPickedAsync" />
+        </aside>
+    </div>
+</div>
+
+@code {
+    /// <summary>The longest query text that is put into the deep link; a longer one is simply omitted.</summary>
+    internal const int MaxUrlQueryLength = 4 * 1024;
+
+    /// <summary>What the README says about the SQL console, repeated where the capability is refused.</summary>
+    internal const string RunSqlWarning =
+        "The SQL console runs whatever it is given inside a read-only transaction with a statement " +
+        "timeout, and it can read every table the connection's role can reach. Grant it only to people " +
+        "you would give psql to.";
+
+    private static readonly int[] PageSizes = [25, 50, 100, 250, 500];
+
+    private readonly CancellationTokenSource pageCts = new();
+
+    private SavedQueryDrawer? drawer;
+    private CancellationTokenSource? runCts;
+
+    private QueryMode mode = QueryMode.Marten;
+    private string? alias;
+    private string whereText = string.Empty;
+    private string sqlText = string.Empty;
+    private int pageSize;
+
+    private IReadOnlyList<QueryDocumentTypeInfo> documentTypes = [];
+    private QueryExamples examples = QueryExamples.None;
+    private MartenQueryResult? martenResult;
+    private SqlConsoleResult? sqlResult;
+
+    private string? pageError;
+    private string? martenError;
+    private int martenErrorPosition = -1;
+    private string? sqlError;
+    private int sqlErrorPosition = -1;
+    private string? status;
+
+    private bool running;
+    private long elapsedMilliseconds;
+    private bool loaded;
+
+    private string? appliedMode;
+    private string? appliedType;
+    private string? appliedWhere;
+    private string? appliedSql;
+
+    /// <summary>The mode from the deep link: <c>marten</c> or <c>sql</c>.</summary>
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "mode")]
+    public string? ModeParameter { get; set; }
+
+    /// <summary>The document alias from the deep link.</summary>
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "type")]
+    public string? TypeParameter { get; set; }
+
+    /// <summary>The where clause from the deep link.</summary>
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "where")]
+    public string? WhereParameter { get; set; }
+
+    /// <summary>The SQL statement from the deep link.</summary>
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "sql")]
+    public string? SqlParameter { get; set; }
+
+    /// <summary>Whether the SQL console is available at all in this process.</summary>
+    private bool SqlEnabled => Capabilities.IsEnabled(StudioCapability.RunSql);
+
+    protected override void OnInitialized()
+    {
+        pageSize = Options.Value.DefaultPageSize;
+        State.ScopeChanged += OnScopeChangedAsync;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await State.EnsureInitializedAsync(pageCts.Token);
+        await LoadAsync();
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Only what actually changed in the URL is applied, so pushing the deep link after a run does not
+        // overwrite an editor holding text too long to travel in a query string.
+        if (!string.Equals(ModeParameter, appliedMode, StringComparison.Ordinal))
+        {
+            appliedMode = ModeParameter;
+            mode = ParseMode(ModeParameter);
+        }
+
+        if (!string.Equals(TypeParameter, appliedType, StringComparison.Ordinal))
+        {
+            appliedType = TypeParameter;
+
+            if (!string.IsNullOrWhiteSpace(TypeParameter))
+            {
+                alias = TypeParameter;
+            }
+        }
+
+        if (!string.Equals(WhereParameter, appliedWhere, StringComparison.Ordinal))
+        {
+            appliedWhere = WhereParameter;
+
+            if (WhereParameter is not null)
+            {
+                whereText = WhereParameter;
+            }
+        }
+
+        if (!string.Equals(SqlParameter, appliedSql, StringComparison.Ordinal))
+        {
+            appliedSql = SqlParameter;
+
+            if (SqlParameter is not null)
+            {
+                sqlText = SqlParameter;
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        await pageCts.CancelAsync();
+        pageCts.Dispose();
+
+        if (runCts is not null)
+        {
+            try
+            {
+                await runCts.CancelAsync();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The run finished and disposed it between the check and the cancel.
+            }
+
+            runCts = null;
+        }
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        martenResult = null;
+        sqlResult = null;
+
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ReloadAsync() => await LoadAsync();
+
+    /// <summary>
+    /// The document types and the examples for whatever the studio is currently pointed at. A store that
+    /// cannot be reached breaks this region and nothing else (plan §4.8).
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        pageError = null;
+        loaded = false;
+
+        if (scope is null)
+        {
+            documentTypes = [];
+            examples = QueryExamples.None;
+            loaded = true;
+            return;
+        }
+
+        try
+        {
+            documentTypes = await Queries.ListDocumentTypesAsync(scope, pageCts.Token);
+            examples = await Queries.BuildExamplesAsync(scope, pageCts.Token);
+
+            bool known = false;
+            foreach (QueryDocumentTypeInfo type in documentTypes)
+            {
+                known |= string.Equals(type.Alias, alias, StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (!known && documentTypes.Count > 0)
+            {
+                alias = documentTypes[0].Alias;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The circuit is going away, or the scope moved under us.
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            documentTypes = [];
+            examples = QueryExamples.None;
+            pageError = "You are not authorized to read this store.";
+        }
+        catch (Exception exception)
+        {
+            documentTypes = [];
+            examples = QueryExamples.None;
+            pageError = exception.Message;
+        }
+        finally
+        {
+            loaded = true;
+        }
+    }
+
+    private async Task SwitchModeAsync(QueryMode next)
+    {
+        if (mode == next)
+        {
+            return;
+        }
+
+        mode = next;
+        status = null;
+        PushUrl();
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnTypeChangedAsync(ChangeEventArgs args)
+    {
+        alias = args.Value?.ToString();
+        martenResult = null;
+        PushUrl();
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnPageSizeChangedAsync(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+        {
+            pageSize = parsed;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task OnWhereChangedAsync(string value)
+    {
+        whereText = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnSqlChangedAsync(string value)
+    {
+        sqlText = value;
+        return Task.CompletedTask;
+    }
+
+    private async Task OnExamplePickedAsync((string Snippet, string? Alias) example)
+    {
+        Apply(example.Snippet, example.Alias);
+
+        PushUrl();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnPickedAsync((string Text, string? Alias) picked)
+    {
+        Apply(picked.Text, picked.Alias);
+
+        PushUrl();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void Apply(string text, string? pickedAlias)
+    {
+        if (mode == QueryMode.Marten)
+        {
+            whereText = text;
+
+            if (!string.IsNullOrWhiteSpace(pickedAlias))
+            {
+                alias = pickedAlias;
+            }
+        }
+        else
+        {
+            sqlText = text;
+        }
+    }
+
+    private async Task BeginSaveAsync(string text)
+    {
+        if (drawer is not null)
+        {
+            await drawer.BeginSaveAsync(text, mode == QueryMode.Marten ? alias : null);
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (runCts is null)
+        {
+            return;
+        }
+
+        // A real cancellation: the token is the one handed to Npgsql, so the command itself is cancelled
+        // rather than the page merely forgetting about it.
+        try
+        {
+            await runCts.CancelAsync();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private async Task RunMartenAsync(string text)
+    {
+        whereText = text;
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || string.IsNullOrWhiteSpace(alias) || running)
+        {
+            return;
+        }
+
+        martenError = null;
+        martenErrorPosition = -1;
+        status = null;
+        PushUrl();
+
+        using CancellationTokenSource cts = StartRun();
+
+        try
+        {
+            MartenQueryResult result = await Queries.RunMartenQueryAsync(
+                scope, new MartenQueryRequest(alias, whereText, pageSize), cts.Token);
+
+            martenResult = result;
+
+            if (result.Rejection is { } rejection)
+            {
+                martenError = rejection.Message;
+                martenErrorPosition = rejection.Position;
+            }
+            else if (result.Error is { } error)
+            {
+                martenError = Describe(error);
+                martenErrorPosition = ClausePosition(error.Position, result.GeneratedSql, whereText);
+            }
+            else
+            {
+                status = Summary(result.Rows.Count, result.Duration);
+
+                if (drawer is not null)
+                {
+                    await drawer.RecordRunAsync(whereText, alias);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            status = "Cancelled.";
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            martenError = "You are not authorized to read this store.";
+        }
+        catch (KeyNotFoundException exception)
+        {
+            martenError = exception.Message;
+        }
+        catch (Exception exception)
+        {
+            martenError = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            EndRun();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RunSqlAsync(string text)
+    {
+        sqlText = text;
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || string.IsNullOrWhiteSpace(sqlText) || running)
+        {
+            return;
+        }
+
+        sqlError = null;
+        sqlErrorPosition = -1;
+        status = null;
+        PushUrl();
+
+        using CancellationTokenSource cts = StartRun();
+
+        try
+        {
+            SqlConsoleResult result = await Queries.RunSqlAsync(scope, new SqlConsoleRequest(sqlText), cts.Token);
+
+            sqlResult = result;
+
+            if (result.Rejection is { } rejection)
+            {
+                sqlError = rejection.Message;
+                sqlErrorPosition = rejection.Position;
+            }
+            else if (result.Error is { } error)
+            {
+                sqlError = Describe(error);
+
+                // Postgres counts from one; the editor's caret convention is zero-based.
+                sqlErrorPosition = error.Position > 0 ? error.Position - 1 : -1;
+            }
+            else
+            {
+                status = Summary(result.Rows.Count, result.Duration);
+
+                if (drawer is not null)
+                {
+                    await drawer.RecordRunAsync(sqlText, null);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            status = "Cancelled.";
+        }
+        catch (StudioCapabilityDeniedException exception)
+        {
+            // The service refuses whatever the page rendered: a circuit is a long-lived object a client
+            // can drive, so hiding the tab is a convenience and this is the actual refusal.
+            sqlError = exception.Message;
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            sqlError = "You are not authorized to run SQL against this store.";
+        }
+        catch (Exception exception)
+        {
+            sqlError = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            EndRun();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private CancellationTokenSource StartRun()
+    {
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(pageCts.Token);
+
+        runCts = cts;
+        running = true;
+        elapsedMilliseconds = 0;
+
+        _ = TickAsync(cts.Token);
+
+        return cts;
+    }
+
+    private void EndRun()
+    {
+        running = false;
+        runCts = null;
+    }
+
+    /// <summary>
+    /// Keeps the "Running… N ms" label moving while a query is in flight.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="Task" /> that is deliberately not awaited, and never an <c>async void</c>: everything
+    /// it can throw is caught here, so nothing escapes to the synchronization context and kills the
+    /// circuit (AGENTS.md hard rule 6).
+    /// </remarks>
+    private async Task TickAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
+            System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            while (running && await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+            // The circuit went away while the timer was waiting.
+        }
+    }
+
+    private async Task ExportMartenJsonAsync()
+    {
+        if (martenResult is { } result)
+        {
+            await DownloadAsync("marten-query.json", "application/json", QueryExport.ToJson(result.Rows));
+        }
+    }
+
+    private async Task ExportMartenCsvAsync()
+    {
+        if (martenResult is { } result)
+        {
+            await DownloadAsync("marten-query.csv", "text/csv", QueryExport.ToCsv(result.Rows));
+        }
+    }
+
+    private async Task ExportSqlJsonAsync()
+    {
+        if (sqlResult is { } result)
+        {
+            await DownloadAsync("sql-console.json", "application/json", QueryExport.ToJson(result.Columns, result.Rows));
+        }
+    }
+
+    private async Task ExportSqlCsvAsync()
+    {
+        if (sqlResult is { } result)
+        {
+            await DownloadAsync("sql-console.csv", "text/csv", QueryExport.ToCsv(result.Columns, result.Rows));
+        }
+    }
+
+    private async Task DownloadAsync(string fileName, string mime, string content)
+    {
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("martenStudio.download.text", fileName, mime, content);
+        }
+        catch (JSException)
+        {
+            await Toasts.Error("This browser would not take the download.");
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private void PushUrl()
+    {
+        string modeValue = mode.ToString().ToLowerInvariant();
+        string? typeValue = mode == QueryMode.Marten ? NullIfBlank(alias) : null;
+        string? whereValue = mode == QueryMode.Marten ? Capped(whereText) : null;
+        string? sqlValue = mode == QueryMode.Sql ? Capped(sqlText) : null;
+
+        // Recorded before navigating, so OnParametersSet sees its own values arrive and leaves the editor
+        // alone - including when the text was too long to travel and the parameter is absent.
+        appliedMode = modeValue;
+        appliedType = typeValue;
+        appliedWhere = whereValue;
+        appliedSql = sqlValue;
+
+        Navigation.NavigateTo(
+            Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["mode"] = modeValue,
+                ["type"] = typeValue,
+                ["where"] = whereValue,
+                ["sql"] = sqlValue,
+            }),
+            replace: true);
+    }
+
+    private static string Summary(int rows, TimeSpan duration) =>
+        rows.ToString(CultureInfo.InvariantCulture) + " rows in " +
+        duration.TotalMilliseconds.ToString("0.##", CultureInfo.InvariantCulture) + " ms";
+
+    private static string? Capped(string? text) =>
+        string.IsNullOrEmpty(text) || text.Length > MaxUrlQueryLength ? null : text;
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static QueryMode ParseMode(string? value) =>
+        string.Equals(value, "sql", StringComparison.OrdinalIgnoreCase) ? QueryMode.Sql : QueryMode.Marten;
+
+    private string Describe(SqlError error)
+    {
+        string? headline = QuerySqlErrors.Describe(error, Options.Value.QueryTimeout);
+
+        return headline is null
+            ? QuerySqlErrors.Summarize(error)
+            : headline + " (" + QuerySqlErrors.Summarize(error) + ")";
+    }
+
+    /// <summary>
+    /// Where a Postgres error in the composed statement falls in the clause the person actually typed.
+    /// </summary>
+    /// <remarks>
+    /// Postgres reports a one-based position into the whole statement, and the statement starts with a
+    /// select clause the studio composed. Subtracting where the clause begins puts the caret under the
+    /// character they wrote; when that cannot be worked out, there is simply no caret.
+    /// </remarks>
+    internal static int ClausePosition(int postgresPosition, string statement, string clause)
+    {
+        if (postgresPosition <= 0 || string.IsNullOrEmpty(clause))
+        {
+            return -1;
+        }
+
+        int offset = statement.IndexOf(clause.Trim(), StringComparison.Ordinal);
+        int zeroBased = postgresPosition - 1;
+
+        if (offset < 0)
+        {
+            return zeroBased <= clause.Length ? zeroBased : -1;
+        }
+
+        int inClause = zeroBased - offset;
+
+        return inClause >= 0 && inClause <= clause.Length ? inClause : -1;
+    }
+
+    private string DocumentLink(string documentAlias, string id) =>
+        StudioLink.To(Options.Value, "documents/" + Uri.EscapeDataString(documentAlias) + "/doc") +
+        "?id=" + Uri.EscapeDataString(id);
+
+    private static IReadOnlyList<(string Title, string Snippet, string? Alias)> ExampleTuples(
+        IReadOnlyList<QueryExample> source)
+    {
+        List<(string Title, string Snippet, string? Alias)> tuples = new(source.Count);
+
+        foreach (QueryExample example in source)
+        {
+            tuples.Add((example.Title, example.Snippet, example.Alias));
+        }
+
+        return tuples;
+    }
+
+    private static IReadOnlyList<(string Name, string Type)> GridColumns(SqlConsoleResult result)
+    {
+        List<(string Name, string Type)> columns = new(result.Columns.Count);
+
+        foreach (SqlResultColumn column in result.Columns)
+        {
+            columns.Add((column.Name, column.PostgresType));
+        }
+
+        return columns;
+    }
+
+    private static IReadOnlyList<IReadOnlyList<(string Text, string Kind)>> GridRows(SqlConsoleResult result)
+    {
+        List<IReadOnlyList<(string Text, string Kind)>> rows = new(result.Rows.Count);
+
+        foreach (IReadOnlyList<SqlCell> row in result.Rows)
+        {
+            List<(string Text, string Kind)> cells = new(row.Count);
+
+            foreach (SqlCell cell in row)
+            {
+                cells.Add((cell.Text, cell.Kind.ToString().ToLowerInvariant()));
+            }
+
+            rows.Add(cells);
+        }
+
+        return rows;
+    }
+
+    private static string MartenSqlNote(MartenQueryResult result)
+    {
+        string note = "Composed the way Marten's own string-query handler composes it. The select list is " +
+            "id and data; Marten's own can carry extra metadata columns, which changes the columns and " +
+            "never the rows.";
+
+        return result.LimitApplied
+            ? note + " A limit of " + result.RowLimit.ToString(CultureInfo.InvariantCulture) +
+                " was appended because the clause carried none."
+            : note;
+    }
+
+    private static string? PlanNote(ExplainResult? plan)
+    {
+        if (plan is null)
+        {
+            return "No plan was fetched for this query.";
+        }
+
+        if (plan.Error is { } error)
+        {
+            return "The plan could not be fetched: " + QuerySqlErrors.Summarize(error);
+        }
+
+        return plan.UnavailableReason;
+    }
+
+    private static IReadOnlyList<string> MartenMessages(MartenQueryResult result)
+    {
+        List<string> messages = [];
+
+        if (result.Rejection is { } rejection)
+        {
+            messages.Add(rejection.Message);
+        }
+
+        if (result.Error is { } error)
+        {
+            messages.Add(QuerySqlErrors.Summarize(error));
+        }
+
+        if (result.Plan?.UnavailableReason is { Length: > 0 } reason)
+        {
+            messages.Add(reason);
+        }
+
+        return messages;
+    }
+}

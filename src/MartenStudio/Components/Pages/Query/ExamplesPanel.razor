@@ -1,0 +1,70 @@
+@*
+    What the page shows before anything has been run.
+
+    The examples are built from *this* store's aliases, tables and duplicated fields (QueryExampleBuilder),
+    which is the whole reason a Marten UI beats pgAdmin: a person who has never seen this database gets
+    three clauses and three statements that already run against it. Generic examples would have to be
+    edited before they did anything, which is the same as no examples.
+*@
+
+<div class="ms-query-examples">
+    <h2 class="ms-query-examples-title">@Title</h2>
+    <p class="ms-muted ms-query-examples-intro">@Intro</p>
+
+    @if (Examples.Count == 0)
+    {
+        <p class="ms-muted ms-query-examples-empty">
+            This store has no document type to build an example from.
+        </p>
+    }
+    else
+    {
+        <ul class="ms-query-example-list">
+            @for (int index = 0; index < Examples.Count; index++)
+            {
+                int current = index;
+                (string Title, string Snippet, string? Alias) example = Examples[index];
+                <li class="ms-query-example" @key="current">
+                    <button type="button" class="ms-query-example-button" @onclick="() => PickAsync(current)">
+                        <span class="ms-query-example-title">@example.Title</span>
+                        <code class="ms-code ms-query-example-snippet">@example.Snippet</code>
+                        @if (!string.IsNullOrWhiteSpace(example.Alias))
+                        {
+                            <span class="ms-badge ms-query-example-alias">@example.Alias</span>
+                        }
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    /// <summary>The heading over the list.</summary>
+    [Parameter]
+    public string Title { get; set; } = "Examples";
+
+    /// <summary>One line saying where the examples came from.</summary>
+    [Parameter]
+    public string Intro { get; set; } = "Built from this store's own aliases and tables. Click one to load it.";
+
+    /// <summary>The examples: what each demonstrates, the text, and the alias it is about.</summary>
+    [Parameter]
+    public IReadOnlyList<(string Title, string Snippet, string? Alias)> Examples { get; set; } = [];
+
+    /// <summary>Raised with the snippet and its alias when one is picked.</summary>
+    [Parameter]
+    public EventCallback<(string Snippet, string? Alias)> OnPick { get; set; }
+
+    private async Task PickAsync(int index)
+    {
+        if (index < 0 || index >= Examples.Count)
+        {
+            return;
+        }
+
+        (string _, string snippet, string? alias) = Examples[index];
+
+        await OnPick.InvokeAsync((snippet, alias));
+    }
+}

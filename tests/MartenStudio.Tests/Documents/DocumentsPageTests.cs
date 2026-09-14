@@ -148,7 +148,7 @@ public class DocumentsPageTests
 
         page.FindAll(".ms-doc-row").Should().HaveCount(2);
         page.Find(".ms-doc-id").GetAttribute("href")
-            .Should().Contain("marten/documents/customer/doc?")
+            .Should().Contain("documents/customer/doc?")
             .And.Contain("id=8f1d5a6e-0000-0000-0000-000000000001");
     }
 

@@ -1,0 +1,305 @@
+@using MartenStudio.Services.Query
+@inject IJSRuntime JsRuntime
+
+@*
+    Recent and saved queries, kept in the browser rather than on the server.
+
+    A query somebody is in the middle of writing is theirs: it is not worth a database table, and a
+    server-side list would be one more thing a shared studio leaks between colleagues. So both lists live
+    in martenStudio.prefs (localStorage, cookie fallback), keyed by store and mode, and the export button
+    is how they move between machines.
+
+    Every JS call is guarded: during prerendering there is no browser, and a browser can refuse storage
+    outright. Both cases mean "no lists", never an exception on a circuit.
+*@
+
+<div class="ms-query-drawer">
+    <div class="ms-query-drawer-header">
+        <h2 class="ms-query-drawer-title">@Title</h2>
+        <div class="ms-query-drawer-actions">
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="ExportAsync">Export</button>
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="ToggleImport">Import</button>
+        </div>
+    </div>
+
+    @if (naming)
+    {
+        <div class="ms-query-drawer-save">
+            <label class="ms-form-label" for="ms-query-save-name">Name this query</label>
+            <input id="ms-query-save-name"
+                   class="ms-input ms-query-save-name"
+                   value="@pendingName"
+                   @onchange="OnNameChanged" />
+            <button type="button" class="ms-btn ms-btn-sm ms-btn-primary" @onclick="ConfirmSaveAsync">Save</button>
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="CancelSave">Cancel</button>
+        </div>
+    }
+
+    @if (importing)
+    {
+        <div class="ms-query-drawer-import">
+            <label class="ms-form-label" for="ms-query-import">Paste an exported list</label>
+            <textarea id="ms-query-import"
+                      class="ms-input ms-input-mono ms-query-import-input"
+                      rows="4"
+                      spellcheck="false"
+                      value="@importText"
+                      @onchange="OnImportTextChanged"></textarea>
+            <button type="button" class="ms-btn ms-btn-sm ms-btn-primary" @onclick="ImportAsync">Import</button>
+            @if (!string.IsNullOrWhiteSpace(importMessage))
+            {
+                <span class="ms-query-drawer-message">@importMessage</span>
+            }
+        </div>
+    }
+
+    <h3 class="ms-query-drawer-section">Saved</h3>
+    @if (saved.Count == 0)
+    {
+        <p class="ms-muted ms-query-drawer-empty">Nothing saved yet. Ctrl+S in the editor names and keeps one.</p>
+    }
+    else
+    {
+        <ul class="ms-query-drawer-list ms-query-drawer-saved">
+            @foreach (SavedQuery query in saved)
+            {
+                SavedQuery current = query;
+                <li class="ms-query-drawer-item" @key="current.Name">
+                    <button type="button" class="ms-query-drawer-pick" title="@current.Text" @onclick="() => PickAsync(current)">
+                        @current.Name
+                    </button>
+                    <button type="button"
+                            class="ms-btn ms-btn-sm ms-btn-ghost ms-query-drawer-remove"
+                            aria-label="@("Forget " + current.Name)"
+                            @onclick="() => RemoveAsync(current)">
+                        ×
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+
+    <h3 class="ms-query-drawer-section">Recent</h3>
+    @if (recent.Count == 0)
+    {
+        <p class="ms-muted ms-query-drawer-empty">Nothing run yet in this mode.</p>
+    }
+    else
+    {
+        <ul class="ms-query-drawer-list ms-query-drawer-recent">
+            @foreach (SavedQuery query in recent)
+            {
+                SavedQuery current = query;
+                <li class="ms-query-drawer-item" @key="current.Text">
+                    <button type="button" class="ms-query-drawer-pick" title="@current.Text" @onclick="() => PickAsync(current)">
+                        @current.Name
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    private List<SavedQuery> recent = [];
+    private List<SavedQuery> saved = [];
+    private string? loadedKey;
+    private bool naming;
+    private bool importing;
+    private string pendingName = string.Empty;
+    private string pendingText = string.Empty;
+    private string? pendingAlias;
+    private string importText = string.Empty;
+    private string? importMessage;
+
+    /// <summary>The heading over the two lists.</summary>
+    [Parameter]
+    public string Title { get; set; } = "Queries";
+
+    /// <summary>The store the lists are keyed by, so two stores never share a history.</summary>
+    [Parameter]
+    public string? StoreKey { get; set; }
+
+    /// <summary>The mode the lists are keyed by: <c>marten</c> or <c>sql</c>.</summary>
+    [Parameter]
+    public string Mode { get; set; } = "marten";
+
+    /// <summary>Raised with the text and alias of the query that was picked.</summary>
+    [Parameter]
+    public EventCallback<(string Text, string? Alias)> OnPick { get; set; }
+
+    /// <summary>How many recent and saved queries are being shown, for a test and for the page.</summary>
+    internal int Count => recent.Count + saved.Count;
+
+    /// <summary>Opens the name prompt for the text in the editor.</summary>
+    public Task BeginSaveAsync(string text, string? alias)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return Task.CompletedTask;
+        }
+
+        pendingText = text;
+        pendingAlias = alias;
+        pendingName = SavedQueryStore.DefaultName(text);
+        naming = true;
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Puts a query that has just been run at the head of the recent list.</summary>
+    public async Task RecordRunAsync(string text, string? alias)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        recent = [.. SavedQueryStore.AddRecent(
+            recent, new SavedQuery(SavedQueryStore.DefaultName(text), CurrentMode, alias, text))];
+
+        await WriteAsync(SavedQueryStore.RecentKey(StoreKey, CurrentMode), recent);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        string key = SavedQueryStore.RecentKey(StoreKey, CurrentMode);
+
+        if (string.Equals(loadedKey, key, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        loadedKey = key;
+        recent = [.. await ReadAsync(key)];
+        saved = [.. await ReadAsync(SavedQueryStore.SavedKey(StoreKey, CurrentMode))];
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private QueryMode CurrentMode =>
+        string.Equals(Mode, nameof(QueryMode.Sql), StringComparison.OrdinalIgnoreCase) ? QueryMode.Sql : QueryMode.Marten;
+
+    private async Task PickAsync(SavedQuery query) => await OnPick.InvokeAsync((query.Text, query.Alias));
+
+    private Task OnNameChanged(ChangeEventArgs args)
+    {
+        pendingName = args.Value?.ToString() ?? string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private Task OnImportTextChanged(ChangeEventArgs args)
+    {
+        importText = args.Value?.ToString() ?? string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private async Task ConfirmSaveAsync()
+    {
+        naming = false;
+
+        saved = [.. SavedQueryStore.Save(saved, new SavedQuery(pendingName, CurrentMode, pendingAlias, pendingText))];
+
+        await WriteAsync(SavedQueryStore.SavedKey(StoreKey, CurrentMode), saved);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void CancelSave() => naming = false;
+
+    private void ToggleImport()
+    {
+        importing = !importing;
+        importMessage = null;
+    }
+
+    private async Task RemoveAsync(SavedQuery query)
+    {
+        saved = [.. SavedQueryStore.Remove(saved, query.Name)];
+
+        await WriteAsync(SavedQueryStore.SavedKey(StoreKey, CurrentMode), saved);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ExportAsync()
+    {
+        string json = SavedQueryStore.Serialize([.. saved, .. recent]);
+
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>(
+                "martenStudio.download.text",
+                "marten-studio-queries.json",
+                "application/json",
+                json);
+        }
+        catch (JSException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private async Task ImportAsync()
+    {
+        IReadOnlyList<SavedQuery> imported = SavedQueryStore.Deserialize(importText);
+
+        if (imported.Count == 0)
+        {
+            importMessage = "That is not a list of queries this studio wrote.";
+            return;
+        }
+
+        foreach (SavedQuery query in imported)
+        {
+            saved = [.. SavedQueryStore.Save(saved, query with { Mode = CurrentMode })];
+        }
+
+        await WriteAsync(SavedQueryStore.SavedKey(StoreKey, CurrentMode), saved);
+
+        importMessage = imported.Count + " imported.";
+        importing = false;
+        importText = string.Empty;
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task<IReadOnlyList<SavedQuery>> ReadAsync(string key)
+    {
+        try
+        {
+            string? stored = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { key });
+
+            return SavedQueryStore.Deserialize(stored);
+        }
+        catch (JSException)
+        {
+            return [];
+        }
+        catch (InvalidOperationException)
+        {
+            // Prerendering: there is no browser to ask yet, and the next render asks again.
+            loadedKey = null;
+            return [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
+    }
+
+    private async Task WriteAsync(string key, IReadOnlyList<SavedQuery> queries)
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", key, SavedQueryStore.Serialize(queries));
+        }
+        catch (JSException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+}

@@ -1,0 +1,294 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JsRuntime
+
+@*
+    A textarea, and deliberately nothing more (AGENTS.md hard rule 3, D2): an embeddable class library
+    that fetches CodeMirror or Monaco has changed its host's page, which is the one thing this project
+    refuses to do.
+
+    Two rules about how it is wired, and both matter on a Blazor Server circuit:
+
+    - it binds on `change`, never on `input`, so typing does not become one round trip per keystroke; and
+    - the Ctrl+Enter / Esc / Ctrl+S chords come from a listener registered in JavaScript rather than from
+      @onkeydown, for the same reason - an @onkeydown on a textarea sends *every* keypress to the server.
+      The listener carries the textarea's live value with it, because `change` has not fired yet when the
+      chord arrives.
+*@
+
+<div class="ms-query-editor">
+    <div class="ms-query-editor-toolbar">
+        @if (Running)
+        {
+            <button type="button" class="ms-btn ms-btn-sm ms-btn-danger" @onclick="CancelAsync">Cancel</button>
+            <span class="ms-query-running" role="status" aria-live="polite">
+                Running… @ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) ms
+            </span>
+        }
+        else
+        {
+            <button type="button"
+                    class="ms-btn ms-btn-sm ms-btn-primary ms-query-run"
+                    disabled="@Disabled"
+                    @onclick="RunClickAsync">
+                Run
+            </button>
+            <button type="button" class="ms-btn ms-btn-sm" disabled="@Disabled" @onclick="SaveClickAsync">Save…</button>
+        }
+
+        <span class="ms-query-editor-hint">
+            <kbd class="ms-query-kbd">Ctrl</kbd>+<kbd class="ms-query-kbd">Enter</kbd> runs,
+            <kbd class="ms-query-kbd">Esc</kbd> cancels,
+            <kbd class="ms-query-kbd">Ctrl</kbd>+<kbd class="ms-query-kbd">S</kbd> saves.
+        </span>
+    </div>
+
+    <textarea @ref="textArea"
+              id="@EditorId"
+              class="ms-query-editor-input ms-input ms-input-mono"
+              rows="@Rows"
+              spellcheck="false"
+              autocapitalize="off"
+              autocomplete="off"
+              autocorrect="off"
+              placeholder="@Placeholder"
+              aria-label="@Label"
+              aria-describedby="@statusId"
+              value="@Value"
+              @onchange="OnChangedAsync"></textarea>
+
+    <div id="@statusId" class="ms-query-editor-status" role="status" aria-live="polite">
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="ms-alert ms-alert-error ms-query-error" role="alert">
+                <div class="ms-query-error-message">@ErrorMessage</div>
+                @if (CaretSource is not null)
+                {
+                    <pre class="ms-code ms-query-caret"><code>@CaretSource
+@CaretLine</code></pre>
+                }
+            </div>
+        }
+        else if (!string.IsNullOrWhiteSpace(Status))
+        {
+            <span class="ms-query-editor-ok">@Status</span>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly string statusId = "ms-query-status-" + Guid.NewGuid().ToString("N")[..8];
+
+    private ElementReference textArea;
+    private DotNetObjectReference<QueryEditor>? selfReference;
+    private bool registered;
+
+    /// <summary>The text in the editor. Bound on <c>change</c>.</summary>
+    [Parameter]
+    public string? Value { get; set; }
+
+    /// <summary>Raised when the textarea's value changes, so the page can keep the deep link in step.</summary>
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>Raised with the live text when Run or Ctrl+Enter happens.</summary>
+    [Parameter]
+    public EventCallback<string> OnRun { get; set; }
+
+    /// <summary>Raised when Esc happens while something is running.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    /// <summary>Raised with the live text when Save or Ctrl+S happens.</summary>
+    [Parameter]
+    public EventCallback<string> OnSave { get; set; }
+
+    /// <summary>Whether a query is in flight, which swaps Run for Cancel.</summary>
+    [Parameter]
+    public bool Running { get; set; }
+
+    /// <summary>How long the running query has been going.</summary>
+    [Parameter]
+    public long ElapsedMilliseconds { get; set; }
+
+    /// <summary>Whether Run is available at all - false while the page has nothing to run against.</summary>
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    /// <summary>The accessible name of the textarea.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Query";
+
+    /// <summary>The placeholder shown in an empty editor.</summary>
+    [Parameter]
+    public string? Placeholder { get; set; }
+
+    /// <summary>How tall the textarea is, in rows.</summary>
+    [Parameter]
+    public int Rows { get; set; } = 8;
+
+    /// <summary>The element id, so a test and a label can find this editor among several.</summary>
+    [Parameter]
+    public string EditorId { get; set; } = "ms-query-editor";
+
+    /// <summary>What went wrong, shown under the editor with a caret at <see cref="ErrorPosition" />.</summary>
+    [Parameter]
+    public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// Where the error is, as a zero-based character offset into <see cref="Value" />, or a negative
+    /// number when there is no position to point at.
+    /// </summary>
+    /// <remarks>
+    /// Postgres reports a <em>one-based</em> position and the statement guard a zero-based one; the page
+    /// normalises both to this before handing it over, so there is exactly one convention in the markup.
+    /// </remarks>
+    [Parameter]
+    public int ErrorPosition { get; set; } = -1;
+
+    /// <summary>A one-line note under the editor when there is no error.</summary>
+    [Parameter]
+    public string? Status { get; set; }
+
+    /// <summary>The line the error is on, or <see langword="null" />.</summary>
+    internal string? CaretSource { get; private set; }
+
+    /// <summary>Spaces and a caret under the offending character.</summary>
+    internal string? CaretLine { get; private set; }
+
+    protected override void OnParametersSet() => BuildCaret();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || registered)
+        {
+            return;
+        }
+
+        selfReference ??= DotNetObjectReference.Create(this);
+
+        try
+        {
+            registered = await JsRuntime.InvokeAsync<bool>(
+                "martenStudio.query.enhanceEditor", new object?[] { textArea, selfReference });
+        }
+        catch (JSException)
+        {
+            // Prerendering, or a lib module that does not carry the query helpers yet. The buttons still
+            // work; only the keyboard chords are missing, and the hint above them is the only thing that
+            // was promising more.
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    /// <summary>Ctrl+Enter, from the browser, with the textarea's live value.</summary>
+    [JSInvokable]
+    public async Task RunAsync(string? value)
+    {
+        await InvokeAsync(async () =>
+        {
+            await CommitAsync(value);
+
+            if (!Disabled && !Running)
+            {
+                await OnRun.InvokeAsync(Value ?? string.Empty);
+            }
+        });
+    }
+
+    /// <summary>Esc, from the browser.</summary>
+    [JSInvokable]
+    public async Task CancelAsync()
+    {
+        await InvokeAsync(() => OnCancel.InvokeAsync());
+    }
+
+    /// <summary>Ctrl+S, from the browser, with the textarea's live value.</summary>
+    [JSInvokable]
+    public async Task SaveAsync(string? value)
+    {
+        await InvokeAsync(async () =>
+        {
+            await CommitAsync(value);
+            await OnSave.InvokeAsync(Value ?? string.Empty);
+        });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (registered)
+        {
+            try
+            {
+                await JsRuntime.InvokeVoidAsync("martenStudio.query.releaseEditor", new object?[] { textArea });
+            }
+            catch (JSException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
+                // The circuit is already gone, which is the usual way a page is disposed.
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        selfReference?.Dispose();
+        selfReference = null;
+    }
+
+    private async Task OnChangedAsync(ChangeEventArgs args) =>
+        await CommitAsync(args.Value?.ToString());
+
+    private async Task RunClickAsync()
+    {
+        // A click blurs the textarea first, so `change` has already delivered the text; the live value is
+        // only fetched for the keyboard path.
+        await OnRun.InvokeAsync(Value ?? string.Empty);
+    }
+
+    private async Task SaveClickAsync() => await OnSave.InvokeAsync(Value ?? string.Empty);
+
+    private async Task CommitAsync(string? value)
+    {
+        if (value is null || string.Equals(value, Value, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Value = value;
+        BuildCaret();
+        await ValueChanged.InvokeAsync(value);
+    }
+
+    /// <summary>
+    /// Turns a character offset into the line it is on and a caret under it, the way the JSON editor
+    /// points at a parse error.
+    /// </summary>
+    private void BuildCaret()
+    {
+        CaretSource = null;
+        CaretLine = null;
+
+        string text = Value ?? string.Empty;
+        if (ErrorPosition < 0 || ErrorPosition > text.Length || text.Length == 0)
+        {
+            return;
+        }
+
+        string normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        int position = Math.Min(ErrorPosition, normalized.Length - 1);
+        int start = normalized.LastIndexOf('\n', Math.Max(position - 1, 0)) + 1;
+        int end = normalized.IndexOf('\n', position);
+
+        if (position == 0)
+        {
+            start = 0;
+        }
+
+        CaretSource = end < 0 ? normalized[start..] : normalized[start..end];
+        CaretLine = new string(' ', Math.Clamp(position - start, 0, CaretSource.Length)) + "^";
+    }
+}

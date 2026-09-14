@@ -17,7 +17,7 @@ public class DocumentLinksTests
     {
         var url = DocumentLinks.ToCollection(Options, new StudioScope("default", "localhost.marten", "acme"), "customer");
 
-        url.Should().StartWith("marten/documents/customer?");
+        url.Should().StartWith("documents/customer?");
         url.Should().Contain("store=default");
         url.Should().Contain("db=localhost.marten");
         url.Should().Contain("tenant=acme");
@@ -29,7 +29,7 @@ public class DocumentLinksTests
         // D9: the router has no catch-all segment and Marten ids are frequently strings with a '/' in them.
         var url = DocumentLinks.ToDocument(Options, null, "product", "SKU/001");
 
-        url.Should().StartWith("marten/documents/product/doc?");
+        url.Should().StartWith("documents/product/doc?");
         url.Should().Contain("id=SKU%2F001");
     }
 
@@ -38,7 +38,7 @@ public class DocumentLinksTests
     {
         var url = DocumentLinks.ToCollection(Options, null, "odd/alias");
 
-        url.Should().Be("marten/documents/odd%2Falias");
+        url.Should().Be("documents/odd%2Falias");
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public class DocumentLinksTests
     {
         var url = DocumentLinks.ToQuery(Options, null, "customer", "Email = 'a@b.c'");
 
-        url.Should().StartWith("marten/query?");
+        url.Should().StartWith("query?");
         url.Should().Contain("type=customer");
         url.Should().Contain("where=");
     }

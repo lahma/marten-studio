@@ -1,0 +1,563 @@
+/*
+ * Marten Studio - the Query page.
+ *
+ * Every rule here is prefixed ms-query- so that folding this file into marten-studio.css is a paste
+ * rather than a merge, and so that nothing on this page can restyle a shared component by accident
+ * (AGENTS.md hard rule 3: hand-rolled, ms-prefixed, driven by the tokens in marten-studio.css).
+ * No token is defined here; every colour, space, radius and font comes from the --ms-* set.
+ */
+
+/* --------------------------------------------------------------------------
+   Page frame and mode switch
+   -------------------------------------------------------------------------- */
+
+.ms-query-modes {
+    display: flex;
+    gap: var(--ms-space-xs);
+    border-bottom: 1px solid var(--ms-color-border);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-query-mode {
+    appearance: none;
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: var(--ms-radius-md) var(--ms-radius-md) 0 0;
+    color: var(--ms-color-text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-weight: var(--ms-font-weight-medium);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    margin-bottom: -1px;
+}
+
+.ms-query-mode:hover {
+    background: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-query-mode-active,
+.ms-query-mode-active:hover {
+    background: var(--ms-color-surface);
+    border-color: var(--ms-color-border);
+    color: var(--ms-color-text);
+}
+
+.ms-query-layout {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--ms-space-lg);
+}
+
+.ms-query-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.ms-query-side {
+    flex: 0 0 240px;
+    max-width: 240px;
+}
+
+@media (max-width: 1024px) {
+    .ms-query-layout {
+        flex-direction: column;
+    }
+
+    .ms-query-side {
+        flex: 1 1 auto;
+        max-width: none;
+        width: 100%;
+    }
+}
+
+.ms-query-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-query-type {
+    min-width: 220px;
+}
+
+.ms-query-note {
+    font-size: var(--ms-font-size-xs);
+    margin: var(--ms-space-xs) 0 var(--ms-space-md);
+}
+
+.ms-query-sql-warning {
+    font-size: var(--ms-font-size-sm);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-query-empty {
+    margin-top: var(--ms-space-md);
+}
+
+/* --------------------------------------------------------------------------
+   Editor
+   -------------------------------------------------------------------------- */
+
+.ms-query-editor {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-query-editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-query-editor-hint {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    margin-left: auto;
+}
+
+.ms-query-kbd {
+    background: var(--ms-color-surface-alt);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-sm);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    padding: 0 var(--ms-space-xs);
+}
+
+.ms-query-editor-input {
+    display: block;
+    width: 100%;
+    border: none;
+    border-radius: 0;
+    resize: vertical;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    line-height: var(--ms-line-height);
+    padding: var(--ms-space-sm);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text);
+}
+
+.ms-query-editor-input:focus {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+.ms-query-editor-status {
+    padding: var(--ms-space-sm);
+    min-height: var(--ms-space-lg);
+}
+
+.ms-query-editor-ok {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-query-running {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-query-error-message {
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-query-caret {
+    margin: var(--ms-space-xs) 0 0;
+    overflow-x: auto;
+    white-space: pre;
+}
+
+/* --------------------------------------------------------------------------
+   Stats, tabs
+   -------------------------------------------------------------------------- */
+
+.ms-query-stats {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    margin-top: var(--ms-space-md);
+}
+
+.ms-query-stats-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-md);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-query-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+}
+
+.ms-query-stat-label {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ms-query-stat-value {
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-query-tabs {
+    display: flex;
+    gap: var(--ms-space-xs);
+    padding: var(--ms-space-xs) var(--ms-space-sm) 0;
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-query-tab {
+    appearance: none;
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: var(--ms-radius-sm) var(--ms-radius-sm) 0 0;
+    color: var(--ms-color-text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--ms-font-size-xs);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    margin-bottom: -1px;
+}
+
+.ms-query-tab-active,
+.ms-query-tab:hover {
+    background: var(--ms-color-surface-alt);
+    border-color: var(--ms-color-border);
+    color: var(--ms-color-text);
+}
+
+.ms-query-tab-count {
+    margin-left: var(--ms-space-xs);
+}
+
+.ms-query-tab-panel {
+    padding: var(--ms-space-sm) var(--ms-space-md) var(--ms-space-md);
+    max-height: 24rem;
+    overflow: auto;
+}
+
+.ms-query-sql {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ms-query-sql-note,
+.ms-query-no-plan,
+.ms-query-no-messages {
+    font-size: var(--ms-font-size-xs);
+    margin: var(--ms-space-sm) 0 0;
+}
+
+.ms-query-messages {
+    margin: 0;
+    padding-left: var(--ms-space-lg);
+}
+
+.ms-query-message {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* --------------------------------------------------------------------------
+   Results
+   -------------------------------------------------------------------------- */
+
+.ms-query-grid-scroll {
+    overflow-x: auto;
+    margin-top: var(--ms-space-md);
+}
+
+.ms-query-grid th {
+    white-space: nowrap;
+    text-align: left;
+    vertical-align: bottom;
+}
+
+.ms-query-grid-name {
+    display: block;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-query-grid-type {
+    display: block;
+    color: var(--ms-color-text-muted);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+}
+
+.ms-query-grid-ordinal {
+    color: var(--ms-color-text-muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    width: 1%;
+}
+
+.ms-query-grid-footer {
+    font-size: var(--ms-font-size-xs);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-query-truncated {
+    margin-left: var(--ms-space-xs);
+}
+
+.ms-query-cell {
+    max-width: 32rem;
+}
+
+.ms-query-cell-text {
+    display: inline-block;
+    max-width: 32rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+}
+
+.ms-query-cell-number .ms-query-cell-text,
+.ms-query-cell-timestamp .ms-query-cell-text,
+.ms-query-cell-uuid .ms-query-cell-text,
+.ms-query-cell-binary .ms-query-cell-text {
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-query-cell-number {
+    text-align: right;
+}
+
+/* NULL is drawn as its own thing: on a results grid the difference between "no value" and "the empty
+   string" is frequently the answer to the question being asked. */
+.ms-query-null {
+    color: var(--ms-color-text-muted);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-style: italic;
+}
+
+.ms-query-json-chip {
+    appearance: none;
+    cursor: pointer;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-query-json-panel {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    margin-top: var(--ms-space-md);
+}
+
+.ms-query-json-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-query-json-panel-title {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-query-marten-rows {
+    margin-top: var(--ms-space-md);
+    table-layout: fixed;
+    width: 100%;
+}
+
+.ms-query-row-id {
+    width: 18rem;
+    vertical-align: top;
+    word-break: break-all;
+}
+
+.ms-query-row-document {
+    vertical-align: top;
+}
+
+.ms-query-export {
+    margin-top: var(--ms-space-md);
+}
+
+/* --------------------------------------------------------------------------
+   Examples
+   -------------------------------------------------------------------------- */
+
+.ms-query-examples {
+    border: 1px dashed var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-md);
+    padding: var(--ms-space-md);
+    margin-top: var(--ms-space-md);
+}
+
+.ms-query-examples-title {
+    font-size: var(--ms-font-size-lg);
+    margin: 0 0 var(--ms-space-xs);
+}
+
+.ms-query-examples-intro,
+.ms-query-examples-empty {
+    font-size: var(--ms-font-size-xs);
+    margin: 0 0 var(--ms-space-sm);
+}
+
+.ms-query-example-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ms-query-example-button {
+    appearance: none;
+    background: var(--ms-color-surface);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    font: inherit;
+    padding: var(--ms-space-sm);
+    text-align: left;
+    width: 100%;
+}
+
+.ms-query-example-button:hover {
+    background: var(--ms-color-surface-hover);
+    border-color: var(--ms-color-border-strong);
+}
+
+.ms-query-example-title {
+    color: var(--ms-color-text-secondary);
+    flex: 0 0 14rem;
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-query-example-snippet {
+    flex: 1 1 18rem;
+    overflow-x: auto;
+    white-space: pre;
+}
+
+/* --------------------------------------------------------------------------
+   Saved and recent queries
+   -------------------------------------------------------------------------- */
+
+.ms-query-drawer {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    padding: var(--ms-space-sm);
+}
+
+.ms-query-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-query-drawer-title {
+    font-size: var(--ms-font-size-base);
+    margin: 0;
+}
+
+.ms-query-drawer-actions {
+    display: flex;
+    gap: var(--ms-space-xs);
+}
+
+.ms-query-drawer-section {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    letter-spacing: 0.04em;
+    margin: var(--ms-space-md) 0 var(--ms-space-xs);
+    text-transform: uppercase;
+}
+
+.ms-query-drawer-empty {
+    font-size: var(--ms-font-size-xs);
+    margin: 0;
+}
+
+.ms-query-drawer-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ms-query-drawer-item {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-query-drawer-pick {
+    appearance: none;
+    background: transparent;
+    border: none;
+    border-radius: var(--ms-radius-sm);
+    color: var(--ms-color-text);
+    cursor: pointer;
+    flex: 1 1 auto;
+    font: inherit;
+    font-size: var(--ms-font-size-xs);
+    overflow: hidden;
+    padding: var(--ms-space-xs);
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-query-drawer-pick:hover {
+    background: var(--ms-color-surface-hover);
+}
+
+.ms-query-drawer-save,
+.ms-query-drawer-import {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-query-drawer-message {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-query-import-input {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    width: 100%;
+}

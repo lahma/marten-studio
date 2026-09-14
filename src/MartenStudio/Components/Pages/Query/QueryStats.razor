@@ -1,0 +1,132 @@
+@using System.Globalization
+
+@*
+    What the run cost, and the three things a person asks next: what SQL was that, what will Postgres do
+    with it, and did the server say anything. Tabs rather than three stacked panels, because the SQL is
+    the one people want and the other two are occasional.
+*@
+
+<div class="ms-query-stats">
+    <div class="ms-query-stats-summary">
+        <span class="ms-query-stat">
+            <span class="ms-query-stat-label">Rows</span>
+            <span class="ms-query-stat-value">@RowCount.ToString(CultureInfo.InvariantCulture)</span>
+        </span>
+        <span class="ms-query-stat">
+            <span class="ms-query-stat-label">Duration</span>
+            <span class="ms-query-stat-value">@DurationMilliseconds.ToString("0.##", CultureInfo.InvariantCulture) ms</span>
+        </span>
+        @if (Truncated)
+        {
+            <span class="ms-chip ms-chip-warning ms-query-truncated">capped</span>
+        }
+    </div>
+
+    <div class="ms-query-tabs" role="tablist" aria-label="Query details">
+        @foreach (string tab in Tabs)
+        {
+            string current = tab;
+            <button type="button"
+                    role="tab"
+                    class="ms-query-tab @(string.Equals(selected, current, StringComparison.Ordinal) ? "ms-query-tab-active" : "")"
+                    id="@("ms-query-tab-" + current.ToLowerInvariant())"
+                    aria-selected="@(string.Equals(selected, current, StringComparison.Ordinal) ? "true" : "false")"
+                    @key="current"
+                    @onclick="() => Select(current)">
+                @current
+                @if (string.Equals(current, MessagesTab, StringComparison.Ordinal) && Messages.Count > 0)
+                {
+                    <span class="ms-badge ms-query-tab-count">@Messages.Count.ToString(CultureInfo.InvariantCulture)</span>
+                }
+            </button>
+        }
+    </div>
+
+    <div class="ms-query-tab-panel" role="tabpanel" aria-labelledby="@("ms-query-tab-" + selected.ToLowerInvariant())">
+        @if (string.Equals(selected, SqlTab, StringComparison.Ordinal))
+        {
+            <pre class="ms-code ms-query-sql"><code>@Sql</code></pre>
+
+            @if (!string.IsNullOrWhiteSpace(SqlNote))
+            {
+                <p class="ms-muted ms-query-sql-note">@SqlNote</p>
+            }
+        }
+        else if (string.Equals(selected, PlanTab, StringComparison.Ordinal))
+        {
+            @if (!string.IsNullOrWhiteSpace(Plan))
+            {
+                <JsonView Json="@Plan" Label="Query plan" AutoExpandDepth="3" ShowSearch="false" DownloadFileName="plan.json" />
+            }
+            else
+            {
+                <p class="ms-muted ms-query-no-plan">@(PlanUnavailable ?? "No plan was fetched for this query.")</p>
+            }
+        }
+        else
+        {
+            @if (Messages.Count == 0)
+            {
+                <p class="ms-muted ms-query-no-messages">Postgres raised no notices.</p>
+            }
+            else
+            {
+                <ul class="ms-query-messages">
+                    @foreach (string message in Messages)
+                    {
+                        <li class="ms-query-message" @key="message">@message</li>
+                    }
+                </ul>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>The tab showing the statement that ran.</summary>
+    public const string SqlTab = "SQL";
+
+    /// <summary>The tab showing the plan.</summary>
+    public const string PlanTab = "Plan";
+
+    /// <summary>The tab showing anything Postgres raised as a notice.</summary>
+    public const string MessagesTab = "Messages";
+
+    private static readonly string[] Tabs = [SqlTab, PlanTab, MessagesTab];
+
+    private string selected = SqlTab;
+
+    /// <summary>How many rows came back.</summary>
+    [Parameter]
+    public int RowCount { get; set; }
+
+    /// <summary>How long the statement took.</summary>
+    [Parameter]
+    public double DurationMilliseconds { get; set; }
+
+    /// <summary>Whether the result was capped.</summary>
+    [Parameter]
+    public bool Truncated { get; set; }
+
+    /// <summary>The statement that ran.</summary>
+    [Parameter]
+    public string? Sql { get; set; }
+
+    /// <summary>A note under the SQL, for anything the composed statement does not say for itself.</summary>
+    [Parameter]
+    public string? SqlNote { get; set; }
+
+    /// <summary>The plan, as <c>EXPLAIN (FORMAT JSON)</c> returned it.</summary>
+    [Parameter]
+    public string? Plan { get; set; }
+
+    /// <summary>Why there is no plan, when there is none.</summary>
+    [Parameter]
+    public string? PlanUnavailable { get; set; }
+
+    /// <summary>Anything Postgres raised while the statement ran.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Messages { get; set; } = [];
+
+    private void Select(string tab) => selected = tab;
+}
