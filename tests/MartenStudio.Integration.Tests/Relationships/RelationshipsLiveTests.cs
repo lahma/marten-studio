@@ -2,9 +2,16 @@ using Marten;
 using Marten.Linq.SoftDeletes;
 using Marten.Schema;
 
+using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.SampleDomain.Documents;
+using MartenStudio.Services;
+using MartenStudio.Services.Live;
 using MartenStudio.Services.Relationships;
+
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 using Npgsql;
 
@@ -383,7 +390,83 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
         ReferencedBy referenced = await ReferencedByAsync(Guid.NewGuid().ToString(), alias: "product");
 
         referenced.Entries.Should().BeEmpty("no document type has a foreign key to product");
+
+        // The identity is the assertion: ReferencedBy.None is returned by the branch that answers before
+        // a connection is opened. Every other path builds a `new ReferencedBy(entries)`, so this is what
+        // says the detail page of a type nothing points at costs a graph lookup and nothing else.
+        referenced.Should().BeSameAs(ReferencedBy.None);
     }
+
+    /// <summary>
+    /// The foreign-key graph behind the inbound panel is read once per scope, not once per document.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every document-detail load used to pay for a full <c>pg_constraint</c> read and a whole graph
+    /// build before it could discover that nothing points at the type on screen. Neither half depends on
+    /// the document, so both go through the single-flight snapshot cache the live pages already share
+    /// (D10) — after the scope has been resolved, never before, because resolving is where the store
+    /// policy is applied.
+    /// </para>
+    /// <para>
+    /// <b>Proved by making the database disagree with the cache.</b> The constraint is dropped between
+    /// two reads through the same service: a cached graph still reports it, and a service with a cache of
+    /// its own — the anti-vacuity half — reports the drop that really happened. The cache here is built
+    /// with a five-minute life rather than the container's one second, so the test is about the sharing
+    /// and not about the clock.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task The_inbound_panel_reads_the_foreign_key_graph_once_per_scope()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        string id = fixture.OrderedCustomerId.ToString();
+
+        using IServiceScope scope = Services.CreateScope();
+
+        RelationshipDataService shared = Build(scope, TimeSpan.FromMinutes(5));
+
+        Entry(await shared.GetReferencedByAsync(Scope, "customer", id, token), "order").Physical.Should()
+            .BeTrue("the migration applied the key this test is about");
+
+        await ExecuteAsync($"alter table \"{Schema}\".\"mt_doc_order\" drop constraint mt_doc_order_customer_id_fkey");
+
+        try
+        {
+            Entry(await shared.GetReferencedByAsync(Scope, "customer", id, token), "order").Physical.Should()
+                .BeTrue("the graph was read once and the second call was served from the cache");
+
+            // The anti-vacuity half: a service whose cache is empty reads pg_constraint and sees the drop,
+            // so the assertion above is about the cache rather than about a read that never notices.
+            RelationshipDataService fresh = Build(scope, TimeSpan.FromMinutes(5));
+
+            Entry(await fresh.GetReferencedByAsync(Scope, "customer", id, token), "order").Physical.Should()
+                .BeFalse("nothing in the database is enforcing it any more");
+        }
+        finally
+        {
+            await ExecuteAsync(
+                $"alter table \"{Schema}\".\"mt_doc_order\" add constraint mt_doc_order_customer_id_fkey " +
+                $"foreign key (customer_id) references \"{Schema}\".\"mt_doc_customer\" (id)");
+        }
+
+        Entry(await Build(scope, TimeSpan.FromMinutes(5)).GetReferencedByAsync(Scope, "customer", id, token), "order")
+            .Physical.Should().BeTrue("the test put it back");
+    }
+
+    /// <summary>
+    /// The real service, with a cache of this test's own rather than the container's one-second one.
+    /// </summary>
+    /// <param name="scope">A DI scope to take the resolver, catalog and options from.</param>
+    /// <param name="timeToLive">How long this instance's cached graph is good for.</param>
+    private static RelationshipDataService Build(IServiceScope scope, TimeSpan timeToLive) =>
+        new RelationshipDataService(
+            scope.ServiceProvider.GetRequiredService<IOptions<MartenStudioOptions>>(),
+            scope.ServiceProvider.GetRequiredService<StudioScopeResolver>(),
+            scope.ServiceProvider.GetRequiredService<ColumnCatalog>(),
+            new StudioSnapshotCache(TimeProvider.System, timeToLive),
+            scope.ServiceProvider.GetRequiredService<ILogger<RelationshipDataService>>(),
+            TimeProvider.System);
 
     [PostgresFact]
     public async Task A_malformed_id_is_reported_on_the_row_rather_than_thrown()

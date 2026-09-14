@@ -48,8 +48,8 @@ public class ReferencedByTests
         string href = panel.FindAll(".ms-referenced-link")[1].GetAttribute("href") ?? string.Empty;
 
         href.Should().Be($"documents/order?q=CustomerId%20%3D%20%22{CustomerId}%22",
-            "the filter is written with the .NET member, because the list's grammar resolves a member to " +
-            "its duplicated column and would read a column name as a JSON property that does not exist");
+            "the filter is written with the .NET member - the name a person reads in the search box; " +
+            "FindDuplicated would have resolved the column name just as well");
     }
 
     [Fact]
@@ -61,8 +61,8 @@ public class ReferencedByTests
             [new ReferencedByEntry("note", "order_id", null, 120, 2, false, false, true)]));
 
         panel.Find(".ms-referenced-link").GetAttribute("href").Should().Be("documents/note",
-            "a filter written with the column name would answer 'nothing found' about data that is " +
-            "plainly there");
+            "no member means no DuplicatedField behind the column, so neither name resolves and a filter " +
+            "written with either would answer 'nothing found' about data that is plainly there");
     }
 
     [Fact]
@@ -116,6 +116,32 @@ public class ReferencedByTests
         panel.FindAll(".ms-referenced-item").Should().HaveCount(2);
         panel.TextOfAll(".ms-referenced-count").Should().Equal(["?", "3"]);
         panel.Find(".ms-badge").TextContent.Trim().Should().Be("not counted");
+    }
+
+    /// <summary>
+    /// Two keys from the same collection through the same primary column are two rows, not a crash.
+    /// </summary>
+    /// <remarks>
+    /// The rows were keyed on <c>FromAlias + '.' + Column</c>, which is not unique: a composite foreign
+    /// key and a single-column one can lead with the same column, and so can two composites that differ
+    /// only further along. A duplicate <c>@key</c> is not a rendering glitch — Blazor throws while
+    /// diffing, which takes the circuit down and leaves the page dead with nothing on screen to say why.
+    /// The ordinal is unique by construction, which is why the graph's edges and the unmatched rows
+    /// already use it.
+    /// </remarks>
+    [Fact]
+    public void Two_keys_from_one_collection_on_the_same_column_are_two_rows()
+    {
+        using var context = new StudioComponentContext();
+
+        var panel = Render(context, new ReferencedBy(
+            [
+                new ReferencedByEntry("order", "customer_id", "CustomerId", 215, 3, false, true, true),
+                new ReferencedByEntry("order", "customer_id", null, 215, 7, false, false, true),
+            ]));
+
+        panel.FindAll(".ms-referenced-item").Should().HaveCount(2);
+        panel.TextOfAll(".ms-referenced-count").Should().Equal(["3", "7"]);
     }
 
     [Fact]

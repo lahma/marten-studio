@@ -88,39 +88,10 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     /// </remarks>
     private const int RailSpeculativeTimeoutSeconds = 2;
 
-    /// <summary>
-    /// How many 8 KB heap pages a never-analysed table may occupy before the rail stops guessing at all.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Four thousand and ninety-six pages is thirty-two megabytes, which a sequential scan reads in well
-    /// under the two seconds above and which no realistic demo or test database exceeds while still having
-    /// never been analysed.
-    /// </para>
-    /// <para>
-    /// It guards what the row probe cannot see. <c>ExactCountThreshold</c> is a number of rows, and a
-    /// collection of very large documents can be several gigabytes of heap while holding far fewer rows
-    /// than the threshold — so the probe would say "small enough" and the <c>count(*)</c> behind it would
-    /// read the lot. <c>relpages</c> costs nothing to consult: it is in the same <c>pg_class</c> row the
-    /// estimate already came from.
-    /// </para>
-    /// <para>
-    /// It is a guard against a large number and never evidence of a small one: <c>relpages</c> is also
-    /// <c>0</c> on a table nobody has vacuumed, which is the same table this branch is about. Where it
-    /// says nothing, the probe decides.
-    /// </para>
-    /// </remarks>
-    private const long MaxSpeculativePages = 4_096;
-
     /// <summary>Why a tenant-scoped visitor gets no number beside a conjoined collection.</summary>
     internal const string CrossTenantEstimateNote =
         "No estimate in this scope: pg_class.reltuples counts every tenant's rows, and this collection is " +
         "conjoined-tenanted. Ask for the exact count to get this tenant's.";
-
-    /// <summary>Why a never-analysed table with a big heap gets no number either.</summary>
-    internal const string LargeHeapNote =
-        "Estimate only: Postgres has never analysed this collection, and its table is already too large " +
-        "for the studio to count it while drawing a rail. Ask for the exact count, or run ANALYZE.";
 
     /// <summary>How many JSON keys the column chooser offers from a sampled page.</summary>
     private const int MaxJsonSuggestions = 50;
@@ -371,13 +342,6 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             return DocumentCount.Unavailable;
         }
     }
-
-    /// <inheritdoc />
-    public async Task<IReadOnlyList<RecentDocument>> GetRecentAsync(
-        StudioScope scope,
-        int limit,
-        CancellationToken cancellationToken = default) =>
-        (await ListRecentAsync(scope, limit, cancellationToken).ConfigureAwait(false)).Rows;
 
     /// <inheritdoc />
     public async Task<RecentDocuments> ListRecentAsync(
@@ -786,6 +750,26 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     /// the estimate with <see cref="DocumentCount.IsExactRefused"/> set, which is a value the page renders
     /// and not a failure.
     /// </para>
+    /// <para>
+    /// <b>A tenant-scoped visitor is never shown the whole-table estimate of a conjoined collection.</b>
+    /// <c>~24 documents</c> over a grid of twelve is the cardinality disclosure
+    /// <see cref="CrossTenantEstimateNote"/> closed on the rail, and it changes answer the next time
+    /// autovacuum runs. The rule here is one line: for that visitor the collection is treated exactly as
+    /// one Postgres has never analysed, so <c>reltuples</c> is neither shown nor compared against the
+    /// threshold, and the only number on offer is this tenant's own <c>count(*)</c> — which Marten makes
+    /// index-backed by putting <c>tenant_id</c> first in a conjoined table's primary key, and which the
+    /// whole-table probe still bounds. Above that bound the header says nothing and says why, and the
+    /// "=" button answers in scope, as it does on the rail.
+    /// </para>
+    /// <para>
+    /// <b>And a never-analysed table whose heap is already beyond
+    /// <see cref="CountEstimator.MaxSpeculativePages"/> is declined before the probe.</b> That probe is
+    /// bounded by <c>min(threshold, table)</c> and not by the threshold: a table with fewer rows than the
+    /// threshold has to be read in full for the probe to find that out, so on a few-rows/huge-heap
+    /// collection the probe reads the whole heap and the <c>count(*)</c> behind it reads it again. The
+    /// rail declined that already; pressing "=" still pays for it, because a button somebody pressed is a
+    /// different question from a page somebody opened.
+    /// </para>
     /// </remarks>
     private async Task<DocumentCount> EstimateAsync(
         NpgsqlConnection connection,
@@ -794,24 +778,45 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         DeletedFilter deleted,
         CancellationToken cancellationToken)
     {
+        var crossTenant = tenantId is not null && table.TenancyStyle == TenancyStyle.Conjoined;
+
         CountEstimator estimator = Counter();
 
         try
         {
-            DocumentCount estimate = await estimator
-                .EstimateAsync(connection, table.Schema, table.Table, cancellationToken)
+            (DocumentCount estimate, var pages) = await estimator
+                .EstimateWithPagesAsync(connection, table.Schema, table.Table, cancellationToken)
                 .ConfigureAwait(false);
 
-            // An estimate is the answer, whatever its size: that is D8, and there is no longer a request
-            // flag that can override it - see the note on DocumentListRequest.
-            if (!estimate.IsUnknown)
+            if (crossTenant)
             {
+                // Whatever reltuples said, it is every tenant's rows and this visitor is in one of them.
+                // Dropping it here rather than returning early is what keeps the tenant's own count: the
+                // path below is already scoped by tenant and by the soft-delete tri-state.
+                estimate = DocumentCount.Unknown;
+            }
+            else if (!estimate.IsUnknown)
+            {
+                // An estimate is the answer, whatever its size: that is D8, and there is no longer a
+                // request flag that can override it - see the note on DocumentListRequest.
                 return estimate;
             }
 
-            return await CountWithinThresholdAsync(
+            if (pages > CountEstimator.MaxSpeculativePages)
+            {
+                return DocumentCount.RefusedExact(DocumentCount.Unknown, 0, CountEstimator.LargeHeapNote);
+            }
+
+            DocumentCount counted = await CountWithinThresholdAsync(
                     estimator, connection, table, estimate, tenantId, deleted, cancellationToken)
                 .ConfigureAwait(false);
+
+            // A refusal above the threshold carries the threshold's own sentence, which is a true but
+            // useless account of why a tenant-scoped visitor has no number: the reason they have none is
+            // that the cheap answer is not theirs to see.
+            return crossTenant && counted.IsExactRefused
+                ? DocumentCount.RefusedExact(DocumentCount.Unknown, 0, CrossTenantEstimateNote)
+                : counted;
         }
         catch (Exception exception) when (IsTimeout(exception))
         {
@@ -1362,7 +1367,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     /// per circuit rather than through the snapshot cache.
     /// <b>2. <see cref="MartenStudioOptions.ExactCountThreshold"/></b> bounds what each one may cost, asked
     /// through <c>select 1 … offset N limit 1</c>, whose work is the threshold and not the collection.
-    /// <b>3. <see cref="MaxSpeculativePages"/></b> is the guard for what the probe cannot see: a table of
+    /// <b>3. <see cref="CountEstimator.MaxSpeculativePages"/></b> is the guard for what the probe cannot see: a table of
     /// very large documents can be gigabytes of heap and still hold fewer rows than the threshold, so
     /// <c>relpages</c> — which costs nothing, being in the same <c>pg_class</c> row — declines it first.
     /// Every statement this method issues also carries <see cref="RailSpeculativeTimeoutSeconds"/> rather
@@ -1407,9 +1412,9 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             return DocumentCount.Estimate(estimate.Rows);
         }
 
-        if (estimate.Pages > MaxSpeculativePages)
+        if (estimate.Pages > CountEstimator.MaxSpeculativePages)
         {
-            return DocumentCount.RefusedExact(DocumentCount.Unknown, 0, LargeHeapNote);
+            return DocumentCount.RefusedExact(DocumentCount.Unknown, 0, CountEstimator.LargeHeapNote);
         }
 
         if (!budget())

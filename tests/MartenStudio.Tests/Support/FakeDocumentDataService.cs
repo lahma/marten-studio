@@ -124,11 +124,6 @@ internal sealed class FakeDocumentDataService : IDocumentDataService
         string id,
         CancellationToken cancellationToken = default) => Task.FromResult(Probes);
 
-    public Task<IReadOnlyList<RecentDocument>> GetRecentAsync(
-        StudioScope scope,
-        int limit,
-        CancellationToken cancellationToken = default) => Task.FromResult(RecentResult.Rows);
-
     public Task<RecentDocuments> ListRecentAsync(
         StudioScope scope,
         int limit,

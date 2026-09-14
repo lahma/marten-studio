@@ -96,8 +96,8 @@ internal sealed class StudioResponsivenessProbe : IDisposable
             Token));
 
     /// <summary>The <c>_recent</c> pseudo-collection.</summary>
-    public Task<(TimeSpan Median, IReadOnlyList<RecentDocument> Result)> RecentAsync(int limit = 15) =>
-        ResponsivenessBudgets.MeasureAsync(() => documents.Service.GetRecentAsync(Scope, limit, Token));
+    public Task<(TimeSpan Median, RecentDocuments Result)> RecentAsync(int limit = 15) =>
+        ResponsivenessBudgets.MeasureAsync(() => documents.Service.ListRecentAsync(Scope, limit, Token));
 
     /// <summary>The newest page of the global event feed.</summary>
     public Task<(TimeSpan Median, EventPage Result)> FeedFirstPageAsync(int pageSize = 50) =>

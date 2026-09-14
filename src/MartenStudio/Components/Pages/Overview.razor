@@ -763,9 +763,12 @@
     /// the sweep.
     /// </para>
     /// <para>
-    /// With no per-store policy configured nothing is asked at all - the same fast path
-    /// <see cref="StudioAuthorization.FilterAsync{T}" /> takes, and the reason an application that never
-    /// set the option pays nothing for this panel.
+    /// <b>Through <see cref="StudioAuthorization.FilterAsync{T}" />, which is where that rule lives.</b>
+    /// The bound is its <c>take</c> argument rather than a loop here, because the per-entry overload
+    /// fetches the authentication state on every call and a sweep wants it once - and because the
+    /// Activity screen filters the same ring and the two must not drift. With no per-store policy
+    /// configured nothing is asked at all, which is the reason an application that never set the option
+    /// pays nothing for this panel.
     /// </para>
     /// </remarks>
     private async Task<List<StudioActionLogEntry>> ReadActivityAsync(CancellationToken cancellationToken)
@@ -774,31 +777,11 @@
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!Authorization.IsEnabled)
-        {
-            return entries.Count <= RecentCount ? [.. entries] : [.. entries.Take(RecentCount)];
-        }
-
-        List<StudioActionLogEntry> allowed = new(RecentCount);
-
-        foreach (StudioActionLogEntry entry in entries)
-        {
-            if (allowed.Count == RecentCount)
-            {
-                break;
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-
-            StudioScope entryScope = new(entry.StoreKey, entry.DatabaseId, entry.TenantId);
-
-            if (await Authorization.IsAuthorizedAsync(entryScope, capability: null, cancellationToken))
-            {
-                allowed.Add(entry);
-            }
-        }
-
-        return allowed;
+        return await Authorization.FilterAsync(
+            entries,
+            static entry => new StudioScope(entry.StoreKey, entry.DatabaseId, entry.TenantId),
+            RecentCount,
+            cancellationToken);
     }
 
     private string Link(string route) => EventLinks.To(Options.Value, route, State.ActiveScope);

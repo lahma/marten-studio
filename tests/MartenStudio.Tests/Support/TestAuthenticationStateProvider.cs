@@ -15,6 +15,17 @@ namespace MartenStudio.Tests.Support;
 public sealed class TestAuthenticationStateProvider : AuthenticationStateProvider
 {
     private AuthenticationState state = new(new ClaimsPrincipal(new ClaimsIdentity()));
+    private int reads;
+
+    /// <summary>
+    /// How many times the principal has been asked for.
+    /// </summary>
+    /// <remarks>
+    /// A host's provider is allowed to be expensive — rebuilding the principal, re-reading a cookie — so
+    /// "how many times did this screen ask" is a real property of a sweep over five hundred audit
+    /// entries, not an implementation detail. It is the difference between one fetch and one per entry.
+    /// </remarks>
+    public int Reads => Volatile.Read(ref reads);
 
     /// <summary>Signs in as <paramref name="name" /> with the given claims.</summary>
     public void SignIn(string name, params (string Type, string Value)[] claims)
@@ -36,5 +47,10 @@ public sealed class TestAuthenticationStateProvider : AuthenticationStateProvide
         NotifyAuthenticationStateChanged(Task.FromResult(state));
     }
 
-    public override Task<AuthenticationState> GetAuthenticationStateAsync() => Task.FromResult(state);
+    /// <inheritdoc />
+    public override Task<AuthenticationState> GetAuthenticationStateAsync()
+    {
+        Interlocked.Increment(ref reads);
+        return Task.FromResult(state);
+    }
 }

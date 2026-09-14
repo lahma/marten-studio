@@ -116,9 +116,16 @@ internal interface IEventDataService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// How many dead letters there are, for the badge. Zero and "could not tell" are different answers,
-    /// so a failure is <see langword="null" /> rather than zero.
+    /// How many dead letters there are, for the badge. Zero and "no number" are different answers, so
+    /// both a failure and a refusal are <see langword="null" /> rather than zero.
     /// </summary>
+    /// <remarks>
+    /// The number is the whole database's: <c>mt_doc_deadletterevent</c> is single-tenanted on every
+    /// store and has no <c>tenant_id</c> column to narrow by. A scope pinned to a tenant therefore gets
+    /// <see langword="null" /> and no badge, because the only count available is of other tenants'
+    /// failures as much as their own — see <see cref="ListDeadLettersAsync" />, which narrows on the
+    /// document's own <c>TenantId</c> property and so shows something different.
+    /// </remarks>
     Task<long?> CountDeadLettersAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
     /// <summary>The event a dead letter is about, so its body can be shown beside the exception.</summary>

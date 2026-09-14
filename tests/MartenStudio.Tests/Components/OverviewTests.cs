@@ -447,10 +447,20 @@ public class OverviewTests
             context.ActionLog.Record("Archive stream", "order-" + index.ToString(CultureInfo.InvariantCulture), succeeded: true);
         }
 
+        // Writing the ring reads the visitor too - the audit entry records who did it - so the panel's
+        // own reads are the ones after this point.
+        int beforeRender = context.AuthenticationState.Reads;
+
         var page = context.Render<Overview>();
 
         page.TextOfAll(".ms-overview-activity .ms-overview-list-name").Should().HaveCount(15);
         context.AuthorizationService.Calls.Should().HaveCount(15, "the sweep stops at the fifteenth row it can draw");
+
+        // ... and the principal is read once for the sweep rather than once per entry. The per-entry
+        // overload calls GetAuthenticationStateAsync every time, which on a host whose provider rebuilds
+        // the principal is fifteen of those per refresh interval per circuit for one panel.
+        (context.AuthenticationState.Reads - beforeRender).Should().Be(1,
+            "StudioAuthorization.FilterAsync fetches the visitor once and then asks the policy per entry");
     }
 
     /// <summary>

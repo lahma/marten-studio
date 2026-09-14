@@ -11,11 +11,16 @@
     exact where a person needs it exact - three orders or three hundred, before they delete a customer -
     and stops rather than paying for a sequential scan to say "lots".
 
-    Each row links to the pointing collection already filtered on this id. The filter is written with the
-    .NET member, not with the column, because the documents list's search grammar resolves a member to its
-    duplicated column and would read a column name as a JSON property that does not exist - so a row whose
-    member could not be resolved links to the unfiltered collection instead of to a link that answers
-    "nothing found" about data that is plainly there.
+    Each row links to the pointing collection already filtered on this id, written with the .NET member.
+    Either name would resolve where there is one - DocumentTableInfo.FindDuplicated matches the normalised
+    *column* name as well as the member path - so this is a choice about what a person reads in the search
+    box, not a workaround.
+
+    What decides the link is whether the row has a member at all. `Member` is non-null exactly when Marten
+    duplicated one into that column, which is the same condition FindDuplicated needs: a physical-only key
+    on a column with no DuplicatedField behind it resolves under neither name, and the grammar would read
+    the column name as a JSON property that does not exist. Such a row links to the *unfiltered*
+    collection rather than to a link that answers "nothing found" about data that is plainly there.
 *@
 
 @if (Referenced.Error is { Length: > 0 } error)
@@ -27,9 +32,15 @@ else if (Referenced.Entries.Count > 0)
     <section class="ms-referenced" aria-label="Referenced by">
         <h3 class="ms-doc-meta-title">Referenced by</h3>
         <ul class="ms-referenced-list">
-            @foreach (ReferencedByEntry entry in Referenced.Entries)
+            @* Keyed on the ordinal, as the graph's edges and the unmatched-key rows are: the natural key
+               is not one. Two edges from the same collection can share a primary column while differing
+               in the rest of a composite key, so FromAlias + '.' + Column repeats - and a duplicate @key
+               takes the circuit down. The list is rebuilt whole on every read, so position is stable. *@
+            @for (int ordinal = 0; ordinal < Referenced.Entries.Count; ordinal++)
             {
-                <li class="ms-referenced-item" @key="entry.FromAlias + '.' + entry.Column">
+                ReferencedByEntry entry = Referenced.Entries[ordinal];
+
+                <li class="ms-referenced-item" @key="ordinal">
                     <a class="ms-referenced-link" href="@Href(entry)" title="@Title(entry)">
                         <CollectionChip Alias="@entry.FromAlias" Hue="@entry.Hue" Small="true" />
                         <span class="ms-referenced-count">@Count(entry)</span>
@@ -83,9 +94,19 @@ else if (Referenced.Entries.Count > 0)
     /// The search expression that shows exactly the rows this count counted, or <see langword="null" />.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The value is quoted, and an embedded quote is doubled, because that is how the grammar spells an
     /// escaped quote — and because quoting is what forces the literal to be compared as text, which is the
     /// one form that converts cleanly to every id column type the studio supports.
+    /// </para>
+    /// <para>
+    /// <see langword="null" /> when the entry has no member, because that is exactly the entry nothing
+    /// can filter. <c>DocumentTableInfo.FindDuplicated</c> resolves a path or a normalised column name
+    /// against the same set of duplicated columns, and <c>Member</c> is non-null precisely when that set
+    /// has an entry for this column — so a row without one is a physical-only key on a plain column, and
+    /// spelling the filter with the column name instead would produce a JSON path that matches nothing.
+    /// The unfiltered link is the honest answer there.
+    /// </para>
     /// </remarks>
     private string? Filter(ReferencedByEntry entry) =>
         entry.Member is { Length: > 0 } member && DocumentId.Length > 0

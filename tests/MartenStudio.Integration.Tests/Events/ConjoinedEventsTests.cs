@@ -417,6 +417,44 @@ public class ConjoinedEventsTests(ConjoinedStoreFixture fixture) : IClassFixture
     }
 
     /// <summary>
+    /// A tenant-pinned visitor gets no dead-letter count, because the only one available is everyone's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The count is a <c>count(*)</c> over <c>mt_doc_deadletterevent</c>, which is single-tenanted on
+    /// every store and has no <c>tenant_id</c> column to narrow by — the list above it narrows on the
+    /// document's own <c>TenantId</c> <em>property</em>, which a count cannot do without reading every
+    /// body. So the badge over a tenant-scoped page would have counted this tenant's failures and the
+    /// other tenant's together, under a page showing only the first: two questions under one number, and
+    /// a cardinality disclosure about a tenant the visitor is not scoped to.
+    /// </para>
+    /// <para>
+    /// <see langword="null" /> is the same answer "could not count" gives, and the badge draws nothing
+    /// for it. That is the honest shape: the studio has no number it is willing to show here.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_tenant_scoped_visitor_is_given_no_dead_letter_count_at_all()
+    {
+        long? everyone = await Events.Service.CountDeadLettersAsync(
+            ConjoinedEventsFixture.ScopeFor(null), Token);
+
+        everyone.Should().BeGreaterThan(1, "both tenants have a dead letter, and this is the whole database");
+
+        long? scoped = await Events.Service.CountDeadLettersAsync(
+            ConjoinedEventsFixture.ScopeFor(ConjoinedEventsFixture.TenantA), Token);
+
+        scoped.Should().BeNull("the only count available counts the other tenant's failures too");
+
+        // ... and the list this badge sits over does answer, in scope, which is why withholding the
+        // number is a refusal rather than a hole.
+        DeadLetterPage page = await Events.Service.ListDeadLettersAsync(
+            ConjoinedEventsFixture.ScopeFor(ConjoinedEventsFixture.TenantA), new DeadLetterQuery(), Token);
+
+        page.Rows.Should().NotBeEmpty().And.OnlyContain(x => x.TenantId == ConjoinedEventsFixture.TenantA);
+    }
+
+    /// <summary>
     /// Discarding another tenant's dead letter is refused and the row survives. The refusal is audited as
     /// a scope denial (9203) rather than as an ordinary failed action, because that is what it is.
     /// </summary>

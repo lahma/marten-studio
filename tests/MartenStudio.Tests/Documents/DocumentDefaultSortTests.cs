@@ -100,17 +100,47 @@ public class DocumentDefaultSortTests
         DocumentDataService.DefaultSort.Should().Be(DocumentColumn.ById);
 
     /// <summary>
-    /// Descending, because on every identity Marten ships that is "newest first".
+    /// And descending, which is a constant and is asserted as one.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A btree walks either way, so the direction costs nothing — it is chosen to keep the behaviour
     /// people had from <c>mt_last_modified desc</c>. Marten's default identity for a <c>Guid</c> is
     /// <c>CombGuidIdGeneration</c>, whose values increase with time, and HiLo, <c>Identity</c> and
     /// <c>Sequence</c> are monotonic by construction.
+    /// </para>
+    /// <para>
+    /// The name used to say "which on every Marten identity is newest first", which is a claim about
+    /// identity generators that this assertion does not touch — and one that is <em>false</em> the moment
+    /// the application assigns the id itself, because a <c>Guid.NewGuid()</c> is version-4 random. What
+    /// the studio does about that is
+    /// <see cref="Sorting_by_id_says_that_descending_is_only_newest_first_where_Marten_assigned_it" />,
+    /// which is the sentence a person actually reads.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void And_descending_which_on_every_Marten_identity_is_newest_first() =>
+    public void And_the_default_direction_is_descending() =>
         DocumentDataService.DefaultDirection.Should().Be(SortDirection.Descending);
+
+    /// <summary>
+    /// The chip beside the default sort says what "descending" does and does not mean.
+    /// </summary>
+    /// <remarks>
+    /// The default order is <c>id desc</c> and a list read top-down will be taken for newest-first. That
+    /// holds for every identity Marten assigns and for nothing else: an application writing
+    /// <c>Guid.NewGuid()</c> gets v4 randomness that orders arbitrarily while looking chronological. The
+    /// verdict is the one place the screen can say so, so it says so.
+    /// </remarks>
+    [Fact]
+    public void Sorting_by_id_says_that_descending_is_only_newest_first_where_Marten_assigned_it()
+    {
+        IndexVerdict verdict = IndexAdvisor.EvaluateSort(SqlTestTables.FullyFeatured(), [], DocumentColumn.ById);
+
+        verdict.Level.Should().Be(IndexVerdictLevel.Green, "the primary key is indexed whoever wrote the id");
+        verdict.Reason.Should().Contain("primary key");
+        verdict.Reason.Should().Contain("Marten assigned the id");
+        verdict.Reason.Should().Contain("Guid.NewGuid()", "the caveat has to name the case it is about");
+    }
 
     /// <summary>
     /// The same answer whatever the collection keeps, including one that has <c>mt_last_modified</c>.

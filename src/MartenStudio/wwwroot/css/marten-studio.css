@@ -6310,13 +6310,12 @@ a.ms-event-chip:focus-visible {
 }
 
 /*
- * Relationships (P10). Hand-rolled, prefixed ms-, driven by the design tokens in marten-studio.css;
- * no third-party CSS, ever (AGENTS.md hard rule 3).
+ * Relationships (P10). Hand-rolled, prefixed ms-, driven by the design tokens above; no third-party CSS,
+ * ever (AGENTS.md hard rule 3).
  *
- * This file is a *part*: the studio serves one stylesheet, and the orchestrator folds this block into
- * marten-studio.css, which this packet does not edit because three other packets are editing it at the
- * same time. Nothing here declares a token of its own - every colour, space and radius below is one the
- * shared file already defines, which is what makes it work in both themes without a single
+ * Folded into this file from the part P10 delivered separately, because three packets were editing the
+ * stylesheet at once. Nothing here declares a token of its own - every colour, space and radius below is
+ * one the top of this file already defines, which is what makes it work in both themes without a single
  * prefers-color-scheme rule of its own.
  */
 

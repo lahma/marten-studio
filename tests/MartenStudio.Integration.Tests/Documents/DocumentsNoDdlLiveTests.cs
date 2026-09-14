@@ -55,7 +55,7 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
         CollectionRail rail = await host.DocumentsAsync(x => x.GetCollectionsAsync(Scope));
         DocumentPage page = await host.DocumentsAsync(x => x.ListAsync(Scope, "numbered", new DocumentListRequest()));
         DocumentDetailResult detail = await host.DocumentsAsync(x => x.GetDocumentAsync(Scope, "numbered", "1"));
-        IReadOnlyList<RecentDocument> recent = await host.DocumentsAsync(x => x.GetRecentAsync(Scope, 20));
+        RecentDocuments recent = await host.DocumentsAsync(x => x.ListRecentAsync(Scope, 20));
 
         // Each answered, rather than failing in a way that would make the counts trivially unchanged.
         rail.Error.Should().BeNull();
@@ -64,7 +64,7 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
         // The table itself was never created either, so the reads that touch it say so as values.
         page.State.Should().Be(DocumentListState.Failed);
         detail.Found.Should().BeFalse();
-        recent.Should().BeEmpty();
+        recent.Rows.Should().BeEmpty();
 
         SchemaObjects after = await host.ReadObjectsAsync();
 

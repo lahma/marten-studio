@@ -70,11 +70,23 @@ public class GraphLayoutTests
         second.ViewBox.Should().Be(first.ViewBox);
     }
 
+    /// <summary>
+    /// The same graph in different string instances lays out identically, so nothing keys off identity.
+    /// </summary>
+    /// <remarks>
+    /// This used to be called <c>Two_runs_of_a_fresh_process_would_agree_…</c>, which it cannot show: a
+    /// second process is the one thing a single-process assertion cannot reach, and .NET randomises
+    /// string hashing per process, so a layout that iterated a <c>Dictionary&lt;string, …&gt;</c> would
+    /// agree with itself here and disagree tomorrow. What this proves is the narrower and still useful
+    /// half — object identity is not an input. The cross-process half is
+    /// <see cref="The_demo_shape_lays_out_to_the_coordinates_checked_in_here" />, whose expected values
+    /// are in the file rather than in this process.
+    /// </remarks>
     [Fact]
-    public void Two_runs_of_a_fresh_process_would_agree_because_nothing_is_hashed_by_reference()
+    public void The_same_graph_in_different_string_instances_lays_out_identically()
     {
         // The same graph described in a different object identity: if anything in the layout keyed off a
-        // reference or a runtime hash code, this would drift from the run above.
+        // reference, this would drift from the run above.
         GraphLayoutResult first = GraphLayout.Compute(
             ["order", "customer"], [new GraphLink("order", "customer")]);
 
@@ -84,6 +96,41 @@ public class GraphLayoutTests
 
         second.Nodes.Should().Equal(first.Nodes);
         second.Edges.Should().Equal(first.Edges);
+    }
+
+    /// <summary>
+    /// The picture, against coordinates that live in this file rather than in this process.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// "The same store draws the same diagram in every session, in every process and in a screenshot
+    /// taken a year ago" is the claim <c>GraphLayout</c>'s own remarks make, and it is not something two
+    /// calls inside one process can show — per-process string-hash randomisation is exactly the thing
+    /// that would make such a pair agree and a later run differ. A checked-in expectation is the only
+    /// form of the assertion that crosses a process boundary, because the expected values were written
+    /// down by a different run.
+    /// </para>
+    /// <para>
+    /// It is deliberately the smallest interesting shape. A layout change that means to move things is
+    /// meant to fail here and be re-approved; a forty-node baseline would be unreadable when it did.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_demo_shape_lays_out_to_the_coordinates_checked_in_here()
+    {
+        GraphLayoutResult layout = GraphLayout.Compute(
+            ["customer", "order"], [new GraphLink("order", "customer")]);
+
+        layout.ViewBox.Should().Be("0 0 560 168");
+
+        // Layer 0 on the left, layer 1 to the right of it, both on the same row.
+        Box(layout, "customer").X.Should().Be(52);
+        Box(layout, "customer").Y.Should().Be(52);
+        Box(layout, "order").X.Should().Be(332);
+        Box(layout, "order").Y.Should().Be(52);
+
+        // Right-to-left, because the arrow points the way the reference does.
+        layout.Edges.Should().ContainSingle().Which.Path.Should().Be("M 332 84 C 280 84, 280 84, 228 84");
     }
 
     [Fact]

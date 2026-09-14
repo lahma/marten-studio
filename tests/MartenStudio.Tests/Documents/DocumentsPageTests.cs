@@ -406,6 +406,97 @@ public class DocumentsPageTests
         page.TextOfAll(".ms-doc-table tbody .ms-collection-alias").Should().Equal("customer", "order");
     }
 
+    /// <summary>
+    /// The <c>_recent</c> region draws the reason it has no rows, rather than an empty table.
+    /// </summary>
+    /// <remarks>
+    /// "Nothing has been written lately" and "this read did not finish" are the same empty table without
+    /// this, which is the studio being quietly wrong about the one thing the region exists to say. The
+    /// markup for it shipped in <c>cbf5112</c> with nothing asserting it.
+    /// </remarks>
+    [Fact]
+    public void The_recent_region_draws_its_notice_where_the_rows_would_be()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Rail = FakeDocuments.Rail();
+        context.Data.RecentResult = RecentDocuments.Failed("42P01: relation \"mt_doc_customer\" does not exist");
+
+        var page = Render(context, CollectionAliases.Recent);
+
+        page.Find(".ms-doc-table .ms-table-empty").TextContent.Should()
+            .Contain("does not exist")
+            .And.NotContain("nothing to order by", "the generic empty text is for a store that keeps no timestamps");
+    }
+
+    /// <summary>
+    /// A <c>_recent</c> read abandoned by <c>statement_timeout</c> says so, and names what would fix it.
+    /// </summary>
+    /// <remarks>
+    /// <c>RecentDocuments.TooLarge()</c> is the <c>57014</c> answer: <c>TooLargeToScan</c> and the notice
+    /// travel together, so the region reads as a bounded read that stopped rather than as an empty store.
+    /// </remarks>
+    [Fact]
+    public void A_recent_read_that_ran_out_of_time_says_so_and_names_the_fix()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Rail = FakeDocuments.Rail();
+        context.Data.RecentResult = RecentDocuments.TooLarge();
+
+        context.Data.RecentResult.TooLargeToScan.Should()
+            .BeTrue("this test is about the timeout branch and not about any other empty one");
+
+        var page = Render(context, CollectionAliases.Recent);
+
+        page.Find(".ms-doc-table .ms-table-empty").TextContent.Should()
+            .Contain("Too large to scan")
+            .And.Contain("IndexLastModified");
+    }
+
+    /// <summary>
+    /// The list header's title says why the number beside it is the only one on offer.
+    /// </summary>
+    /// <remarks>
+    /// Both branches, because they are different markup: an estimate the studio declined to improve on
+    /// draws the number with a <c>~</c>, and a refusal with no number at all draws "unknown size". Each
+    /// takes its title from <c>DocumentCount.Reason</c>, which is where the sentence lives so that the
+    /// rail's badge and this header cannot drift.
+    /// </remarks>
+    [Fact]
+    public void The_list_header_title_says_why_an_exact_count_was_declined()
+    {
+        using (var context = new DocumentsComponentContext())
+        {
+            context.Data.Rail = FakeDocuments.Rail();
+            context.Data.Page = FakeDocuments.Page() with
+            {
+                Estimate = DocumentCount.RefusedExact(DocumentCount.Estimate(5_000_000), 100_000),
+            };
+
+            var page = Render(context, "customer");
+
+            page.Find(".ms-page-header .ms-doc-subtitle").GetAttribute("title").Should()
+                .Contain("Estimate only")
+                .And.Contain("ExactCountThreshold");
+        }
+
+        using (var context = new DocumentsComponentContext())
+        {
+            context.Data.Rail = FakeDocuments.Rail();
+            context.Data.Page = FakeDocuments.Page() with
+            {
+                Estimate = DocumentCount.RefusedExact(
+                    DocumentCount.Unknown, 0, DocumentDataService.CrossTenantEstimateNote),
+            };
+
+            var page = Render(context, "customer");
+
+            var header = page.Find(".ms-page-header .ms-doc-subtitle");
+
+            header.TextContent.Trim().Should().Be("unknown size");
+            header.GetAttribute("title").Should().Contain("conjoined-tenanted").And.Contain("exact count");
+        }
+    }
+
     [Fact]
     public void An_unregistered_collection_is_marked_read_only()
     {

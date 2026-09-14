@@ -2,6 +2,7 @@ using Marten.Schema;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Live;
 using MartenStudio.Services.Schema;
 
 using Microsoft.Extensions.Logging;
@@ -37,6 +38,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
     private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioScopeResolver resolver;
     private readonly ColumnCatalog columnCatalog;
+    private readonly StudioSnapshotCache cache;
     private readonly ILogger<RelationshipDataService> logger;
     private readonly TimeProvider timeProvider;
 
@@ -44,8 +46,9 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         IOptions<MartenStudioOptions> options,
         StudioScopeResolver resolver,
         ColumnCatalog columnCatalog,
+        StudioSnapshotCache cache,
         ILogger<RelationshipDataService> logger)
-        : this(options, resolver, columnCatalog, logger, TimeProvider.System)
+        : this(options, resolver, columnCatalog, cache, logger, TimeProvider.System)
     {
     }
 
@@ -53,12 +56,14 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         IOptions<MartenStudioOptions> options,
         StudioScopeResolver resolver,
         ColumnCatalog columnCatalog,
+        StudioSnapshotCache cache,
         ILogger<RelationshipDataService> logger,
         TimeProvider timeProvider)
     {
         this.options = options;
         this.resolver = resolver;
         this.columnCatalog = columnCatalog;
+        this.cache = cache;
         this.logger = logger;
         this.timeProvider = timeProvider;
     }
@@ -132,38 +137,60 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
         try
         {
+            // Before the cache and never inside it: resolving is where the store, database and tenant
+            // policies are applied, so a cache hit is only ever handed to somebody who has just passed
+            // the same check for the same scope (the rule StudioSnapshotCache's own remarks state).
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
-            string[] schemas = SchemaDeclarationReader.SchemaNames(resolved.Store.Options);
+            RelationshipGraph graph = await cache
+                .GetAsync(CacheKey(scope), token => ReadGraphAsync(resolved, token), cancellationToken)
+                .ConfigureAwait(false);
+
+            List<RelationshipEdge> inbound = [];
+            foreach (RelationshipEdge edge in graph.Edges)
+            {
+                if (string.Equals(edge.ToAlias, alias, StringComparison.OrdinalIgnoreCase))
+                {
+                    inbound.Add(edge);
+                }
+            }
+
+            if (inbound.Count == 0)
+            {
+                // Nothing points here, so there is nothing to count and no connection to open. Most
+                // document types are in this state, and every one of their detail pages used to pay for a
+                // connection and a bounded count loop to find it out.
+                return ReferencedBy.None;
+            }
+
+            // Built from the graph's own nodes rather than from AllKnownDocumentTypes(): the builder
+            // drops Marten's infrastructure types and everything IsDocumentTypeVisible hid, and a
+            // dictionary keyed by hidden aliases is one lookup away from putting a hidden collection on
+            // screen. Every edge's ends are visible nodes by construction, so nothing is lost.
+            Dictionary<string, IDocumentType> byAlias = new(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> drawn = new(StringComparer.OrdinalIgnoreCase);
+
+            foreach (RelationshipNode node in graph.Nodes)
+            {
+                drawn.Add(node.Alias);
+            }
+
+            foreach (IDocumentType documentType in resolved.Store.Options.AllKnownDocumentTypes())
+            {
+                if (drawn.Contains(documentType.Alias))
+                {
+                    byAlias[documentType.Alias] = documentType;
+                }
+            }
 
             await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-            IReadOnlyList<PhysicalForeignKey> physical = await RelationshipQueries
-                .ReadForeignKeysAsync(connection, schemas, CommandTimeoutSeconds, cancellationToken)
-                .ConfigureAwait(false);
-
-            // The same graph the screen draws, so the two can never disagree about what points where -
-            // and with no estimates, because the counts this panel shows are its own bounded ones.
-            RelationshipGraph graph = RelationshipGraphBuilder.Build(
-                resolved.Store.Options,
-                options.Value.IsDocumentTypeVisible,
-                physical,
-                new Dictionary<string, long>(StringComparer.Ordinal),
-                timeProvider.GetUtcNow());
-
-            Dictionary<string, IDocumentType> byAlias = new(StringComparer.OrdinalIgnoreCase);
-            foreach (IDocumentType documentType in resolved.Store.Options.AllKnownDocumentTypes())
-            {
-                byAlias[documentType.Alias] = documentType;
-            }
-
             List<ReferencedByEntry> entries = [];
 
-            foreach (RelationshipEdge edge in graph.Edges)
+            foreach (RelationshipEdge edge in inbound)
             {
-                if (!string.Equals(edge.ToAlias, alias, StringComparison.OrdinalIgnoreCase) ||
-                    !byAlias.TryGetValue(edge.FromAlias, out IDocumentType? source))
+                if (!byAlias.TryGetValue(edge.FromAlias, out IDocumentType? source))
                 {
                     continue;
                 }
@@ -188,6 +215,54 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             return ReferencedBy.Failed(Describe(exception));
         }
     }
+
+    /// <summary>
+    /// The foreign-key graph alone — no row counts — for one scope, shared between the circuits that ask
+    /// for it at once.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The <c>pg_constraint</c> read and the whole graph build are what every document-detail load paid
+    /// for, on every navigation, even for a document type nothing points at: the panel needs the graph to
+    /// find that out. Neither half depends on the document, and both are the same for every visitor of
+    /// the same scope, so they belong behind the single-flight cache the live pages already share (D10)
+    /// rather than behind a short-circuit — the graph is what would have to be read to know whether a
+    /// short-circuit applied, since a foreign key somebody added by hand is physical-only and appears in
+    /// no <c>StoreOptions</c>.
+    /// </para>
+    /// <para>
+    /// The estimates are deliberately empty. The diagram's node counts are a separate read that changes
+    /// every time anything is written, and folding them in here would tie a picture of the schema to a
+    /// number that moves - so <see cref="GetGraphAsync"/> keeps its own uncached read and this answers
+    /// only the question the detail page asks: what points at what.
+    /// </para>
+    /// </remarks>
+    private async Task<RelationshipGraph> ReadGraphAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    {
+        string[] schemas = SchemaDeclarationReader.SchemaNames(resolved.Store.Options);
+
+        await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        IReadOnlyList<PhysicalForeignKey> physical = await RelationshipQueries
+            .ReadForeignKeysAsync(connection, schemas, CommandTimeoutSeconds, cancellationToken)
+            .ConfigureAwait(false);
+
+        // The same graph the screen draws, so the two can never disagree about what points where.
+        return RelationshipGraphBuilder.Build(
+            resolved.Store.Options,
+            options.Value.IsDocumentTypeVisible,
+            physical,
+            new Dictionary<string, long>(StringComparer.Ordinal),
+            timeProvider.GetUtcNow());
+    }
+
+    /// <summary>
+    /// One key per scope, in the shape the other services use so that the cache's prefix invalidation
+    /// reaches it when anything in that scope is changed.
+    /// </summary>
+    private static string CacheKey(StudioScope scope) =>
+        scope.StoreKey + "|" + scope.DatabaseId + "|" + (scope.TenantId ?? string.Empty) + "|relationship-graph";
 
     /// <summary>
     /// How many of one collection's documents point at one id, bounded by the cap.

@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 using JasperFx.Events;
 
 using MartenStudio.Services;
@@ -93,8 +95,13 @@ internal sealed class FakeEventDataService : IEventDataService
     /// lands is to decide the order they finish in. <see cref="Counts" /> is captured when the call is
     /// made rather than when it returns, so a test can change the answer while a call is held and the
     /// held call still returns what the scope it was asked for would have reported.
+    /// <para>
+    /// Concurrent, because the thing it models is two overlapping reads: the held call and the one that
+    /// overtakes it run on different threads, and a <c>Queue&lt;T&gt;</c> being read by both is a fake
+    /// whose own data structure is the race the test is trying to arrange.
+    /// </para>
     /// </remarks>
-    public Queue<TaskCompletionSource> CountsGates { get; } = new();
+    public ConcurrentQueue<TaskCompletionSource> CountsGates { get; } = new();
 
     /// <summary>What the Overview's streams panel is given.</summary>
     public RecentStreams Recent { get; set; } = RecentStreams.Empty;
@@ -200,9 +207,11 @@ internal sealed class FakeEventDataService : IEventDataService
     {
         EventStoreCounts answer = Counts;
 
-        if (CountsGates.Count > 0)
+        if (CountsGates.TryDequeue(out TaskCompletionSource? gate))
         {
-            await CountsGates.Dequeue().Task;
+            // With the token: a held gate that nobody completes must end when the caller's region is
+            // cancelled, the way a real read does, rather than hanging the test host until it is killed.
+            await gate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
         return answer;

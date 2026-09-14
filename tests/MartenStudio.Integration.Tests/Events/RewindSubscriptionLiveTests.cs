@@ -252,11 +252,19 @@ public class RewindSubscriptionLiveTests(PostgresFixture postgres) : IAsyncLifet
     /// coordinator lookup and no event-store read.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The name is checked first, before the tenant proof that opens a connection - so the cheapest
     /// possible answer to "rewind something that is not there" is the one that is given.
+    /// </para>
+    /// <para>
+    /// What is passed is a <em>shard identity</em>, <c>Name:All</c>, which Marten itself would have
+    /// matched and the studio deliberately does not: every screen that offers this action offers the
+    /// projection's name. It was called "an inline or live name" until the P5 review pointed out that it
+    /// passes neither.
+    /// </para>
     /// </remarks>
     [PostgresFact]
-    public async Task An_inline_or_live_name_is_refused_the_same_way()
+    public async Task A_shard_identity_is_refused_the_same_way_as_a_name_that_is_not_there()
     {
         CancellationToken token = TestContext.Current.CancellationToken;
 

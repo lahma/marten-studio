@@ -628,15 +628,16 @@ public class DocumentDataServiceLiveTests(DocumentDataServiceLiveTests.Fixture f
     {
         using var documents = Documents();
 
-        IReadOnlyList<RecentDocument> recent = await documents.Service.GetRecentAsync(
+        RecentDocuments recent = await documents.Service.ListRecentAsync(
             Scope, 40, TestContext.Current.CancellationToken);
 
-        recent.Should().NotBeEmpty();
-        recent.Select(x => x.Alias).Distinct().Should().HaveCountGreaterThan(1);
-        recent.Should().BeInDescendingOrder(x => x.LastModified);
+        recent.Notice.Should().BeNull();
+        recent.Rows.Should().NotBeEmpty();
+        recent.Rows.Select(x => x.Alias).Distinct().Should().HaveCountGreaterThan(1);
+        recent.Rows.Should().BeInDescendingOrder(x => x.LastModified);
 
         // minimalnote has no mt_last_modified, so there is no honest way to place it in this list.
-        recent.Should().NotContain(x => x.Alias == "minimalnote");
+        recent.Rows.Should().NotContain(x => x.Alias == "minimalnote");
     }
 
     [PostgresFact]

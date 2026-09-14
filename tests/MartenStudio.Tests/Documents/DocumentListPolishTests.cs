@@ -251,6 +251,70 @@ public class DocumentListPolishTests
         button.GetAttribute("title").Should().Contain("Count the rows exactly");
     }
 
+    /// <summary>
+    /// An estimate the studio has already declined to improve on does not offer a button that would
+    /// decline it again.
+    /// </summary>
+    /// <remarks>
+    /// The collection is above <c>ExactCountThreshold</c>, so <c>CountExactAsync</c> answers with the
+    /// same estimate and the same "estimate only" title. Pressing "=" and watching nothing change is a
+    /// worse screen than not offering it: the title already says why the number is the only one there is.
+    /// </remarks>
+    [Fact]
+    public void An_estimate_the_studio_already_refused_to_improve_on_offers_no_exact_count_button()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Rail = FakeDocuments.Rail(documents:
+        [
+            FakeDocuments.Collection("customer") with
+            {
+                Count = DocumentCount.RefusedExact(DocumentCount.Estimate(5_000_000), 100_000),
+            },
+        ]);
+
+        var page = context.Render<ListPage>();
+
+        page.Find(".ms-rail-badge-count").TextContent.Trim().Should().Be("~5,000,000",
+            "the number itself is still true; it is simply the cheap one");
+
+        page.FindAll(".ms-rail-item .ms-rail-action").Select(x => x.GetAttribute("title"))
+            .Should().NotContain(x => x!.Contains("Count the rows exactly", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A refusal with <em>no number</em> keeps the button, because pressing it is the whole point.
+    /// </summary>
+    /// <remarks>
+    /// This is the conjoined-collection-under-a-tenant case:
+    /// <c>RefusedExact(Unknown, 0, CrossTenantEstimateNote)</c>. The rail withholds the whole-table
+    /// estimate precisely so that the visitor asks for their own tenant's count, and the note says so —
+    /// so a rule that hid the button on every refusal would take away the thing the note points at. The
+    /// never-analysed-but-huge-heap refusal is the same shape for the same reason.
+    /// </remarks>
+    [Fact]
+    public void A_refusal_with_no_number_keeps_the_button_that_answers_it()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Rail = FakeDocuments.Rail(documents:
+        [
+            FakeDocuments.Collection("customer", conjoined: true) with
+            {
+                Count = DocumentCount.RefusedExact(
+                    DocumentCount.Unknown, 0, DocumentDataService.CrossTenantEstimateNote),
+            },
+        ]);
+
+        var page = context.Render<ListPage>();
+
+        IElement badge = page.Find(".ms-rail-badge-count");
+        badge.TextContent.Trim().Should().Be("?");
+        badge.GetAttribute("title").Should().Contain("conjoined-tenanted");
+
+        IElement? button = page.Nodes.QuerySelector(".ms-rail-item .ms-rail-action");
+        button.Should().NotBeNull();
+        button!.GetAttribute("title").Should().Contain("Count the rows exactly");
+    }
+
     /// <summary>A read that was refused draws nothing, which is a different fact and looks like one.</summary>
     [Fact]
     public void An_unavailable_count_still_draws_no_badge_at_all()

@@ -141,8 +141,17 @@
 
                 @* Offered for an unknown count as well as for an estimate: a "?" a person cannot resolve is
                    a dead end, and an unanalysed table is precisely the one where the exact count is the
-                   only number available. *@
-                @if ((collection.Count.IsEstimate || collection.Count.IsUnknown) && OnExactCount.HasDelegate)
+                   only number available.
+
+                   Withheld from an estimate the studio has already declined to improve on: the collection
+                   is above ExactCountThreshold, pressing it runs the same refusal again, and a button that
+                   does nothing twice is worse than no button. An *unknown* refusal keeps it - that is the
+                   conjoined-under-a-tenant case, RefusedExact(Unknown, ...), where pressing it is exactly
+                   what gets this tenant's count, and the large-heap case, where it is what pays for the
+                   scan the rail would not pay for on its own. *@
+                @if ((collection.Count.IsEstimate || collection.Count.IsUnknown) &&
+                     !(collection.Count.IsExactRefused && !collection.Count.IsUnknown) &&
+                     OnExactCount.HasDelegate)
                 {
                     <button type="button"
                             class="ms-rail-action"

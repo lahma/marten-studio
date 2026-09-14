@@ -81,12 +81,22 @@ public class DocumentRecentLiveTests(DocumentRecentLiveTests.Fixture fixture)
             await take.ExecuteNonQueryAsync(Token);
         }
 
+        var started = System.Diagnostics.Stopwatch.StartNew();
         RecentDocuments blocked = await documents.Service.ListRecentAsync(Scope, 15, Token);
+        started.Stop();
 
         blocked.TooLargeToScan.Should().BeTrue();
         blocked.Rows.Should().BeEmpty();
         blocked.Notice.Should().Be(RecentDocuments.TooLargeNotice);
         blocked.Notice.Should().Contain("IndexLastModified", "the region says what would fix it");
+
+        // Which 57014 this is: the server's statement_timeout, not Npgsql cancelling the command from the
+        // client. Both surface as the same SQLSTATE, so the elapsed time is the only thing that tells them
+        // apart - and only the server-side one is what the region's bound actually relies on. The fixture
+        // sets QueryTimeout to one second; the host's CommandTimeout default is thirty.
+        started.Elapsed.Should().BeLessThan(
+            TimeSpan.FromSeconds(3),
+            "the statement_timeout this region sets is one second; a client-side cancel would be thirty");
 
         await holding.RollbackAsync(Token);
 
@@ -96,25 +106,5 @@ public class DocumentRecentLiveTests(DocumentRecentLiveTests.Fixture fixture)
 
         afterwards.TooLargeToScan.Should().BeFalse();
         afterwards.Rows.Should().NotBeEmpty();
-    }
-
-    /// <summary>
-    /// The list-shaped overload still answers, and still cannot tell the two empties apart.
-    /// </summary>
-    /// <remarks>
-    /// Kept so that the pages which have not moved over yet go on compiling and behaving as they did. It
-    /// is the reason <see cref="IDocumentDataService.ListRecentAsync" /> was added beside
-    /// <see cref="IDocumentDataService.GetRecentAsync" /> rather than replacing it: changing the return
-    /// type would have meant editing a page this packet does not own.
-    /// </remarks>
-    [PostgresFact]
-    public async Task The_rows_only_overload_returns_the_same_rows()
-    {
-        using var documents = Documents();
-
-        IReadOnlyList<RecentDocument> rows = await documents.Service.GetRecentAsync(Scope, 15, Token);
-        RecentDocuments full = await documents.Service.ListRecentAsync(Scope, 15, Token);
-
-        rows.Select(x => x.Id).Should().Equal(full.Rows.Select(x => x.Id));
     }
 }

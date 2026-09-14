@@ -143,6 +143,17 @@ internal static class IndexAdvisor
     }
 
     /// <summary>Evaluates a sort key, which is a separate question from any filter.</summary>
+    /// <remarks>
+    /// The <c>id</c> verdict says more than "this is indexed" because the default order is <c>id desc</c>
+    /// and a person reading a list top-down will take it for newest-first. That is true of every identity
+    /// <em>Marten</em> assigns and of nothing else: an application that sets its own
+    /// <c>Guid.NewGuid()</c> gets version-4 randomness, and a descending sort over it is an arbitrary
+    /// order that looks chronological because the newest rows are not at the bottom. Saying so on the
+    /// chip is the only place a person finds out.
+    /// </remarks>
+    /// <param name="table">The collection.</param>
+    /// <param name="indexes">The indexes the database actually has.</param>
+    /// <param name="sort">The column being sorted on.</param>
     public static IndexVerdict EvaluateSort(
         DocumentTableInfo table,
         IReadOnlyList<PostgresIndex> indexes,
@@ -154,7 +165,12 @@ internal static class IndexAdvisor
         switch (sort)
         {
             case DocumentColumn.Id:
-                return new IndexVerdict(IndexVerdictLevel.Green, "id is the primary key.", null);
+                return new IndexVerdict(
+                    IndexVerdictLevel.Green,
+                    "id is the primary key. Descending is newest-first only where Marten assigned the id " +
+                    "- a Comb Guid, HiLo, Identity or Sequence; an application that writes its own " +
+                    "Guid.NewGuid() gets v4 randomness, which orders arbitrarily.",
+                    null);
 
             case DocumentColumn.Metadata metadata:
             {

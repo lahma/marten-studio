@@ -130,19 +130,9 @@ internal interface IDocumentDataService
         string id,
         CancellationToken cancellationToken = default);
 
-    /// <summary>The <c>_recent</c> pseudo-collection: the most recently modified documents of any type.</summary>
-    /// <remarks>
-    /// The rows of <see cref="ListRecentAsync"/> and nothing else. Prefer that one on a page: this
-    /// overload cannot tell "nothing has changed lately" from "the scan ran out of time", and on a large
-    /// store the second is the one that happens.
-    /// </remarks>
-    Task<IReadOnlyList<RecentDocument>> GetRecentAsync(
-        StudioScope scope,
-        int limit,
-        CancellationToken cancellationToken = default);
-
     /// <summary>
-    /// The same read, with the reason there are no rows when there are none.
+    /// The <c>_recent</c> pseudo-collection: the most recently modified documents of any type, with the
+    /// reason there are no rows when there are none.
     /// </summary>
     /// <remarks>
     /// Every branch of the union is <c>order by mt_last_modified desc limit n</c> and Marten declares no

@@ -75,8 +75,8 @@ public class LargeDataSetLiveTests(LargeDataSetFixture fixture) : IClassFixture<
         deep.Rows.Should().NotBeEmpty();
         report.Check("customer deep keyset page", deepTime, ResponsivenessBudgets.DocumentPage);
 
-        (TimeSpan recentTime, IReadOnlyList<RecentDocument> recent) = await probe.RecentAsync();
-        recent.Should().NotBeEmpty();
+        (TimeSpan recentTime, RecentDocuments recent) = await probe.RecentAsync();
+        recent.Rows.Should().NotBeEmpty();
         report.Check("_recent", recentTime, ResponsivenessBudgets.RecentDocuments);
 
         (TimeSpan feedTime, EventPage feed) = await probe.FeedFirstPageAsync();

@@ -508,6 +508,114 @@ public class DocumentCountThresholdLiveTests(DocumentCountThresholdLiveTests.Fix
         asked.Value.Should().NotBe(WideTenantedRows * 2);
     }
 
+    /// <summary>
+    /// The list header never shows a tenant-scoped visitor the whole-table estimate of a conjoined
+    /// collection: it shows their own count, or nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rail closed this and the header did not, so opening a conjoined collection under a tenant
+    /// scope drew <c>~24 documents</c> over a grid of twelve — every tenant's cardinality in the title of
+    /// a page showing one tenant's rows, and a number that changes meaning the next time autovacuum runs.
+    /// </para>
+    /// <para>
+    /// Both halves of the rule, because the header is not the rail: the rail draws every collection on
+    /// every page load and answers nothing at all here, while the header is one collection the visitor
+    /// asked for, so it pays for the tenant's own count where the whole-table probe says the table is
+    /// small — Marten puts <c>tenant_id</c> first in a conjoined primary key, so that count is
+    /// index-backed. Above the probe's bound it says nothing, with the conjoined reason rather than the
+    /// threshold's.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_tenant_scoped_list_header_gets_no_whole_table_estimate_for_a_conjoined_collection()
+    {
+        using var documents = Documents();
+
+        DocumentPage everyone = await documents.Service.ListAsync(
+            Scope, "tenantedthing", new DocumentListRequest { PageSize = 5 }, Token);
+
+        everyone.Estimate.IsEstimate.Should().BeTrue("with no tenant in scope the whole-table estimate is the answer");
+        everyone.Estimate.Value.Should().Be(TenantedRows * 2);
+
+        // Below the threshold: the visitor's own number, exactly, and never the whole table's.
+        DocumentPage acme = await documents.Service.ListAsync(
+            MartenFixture.ScopeFor("acme"), "tenantedthing", new DocumentListRequest { PageSize = 5 }, Token);
+
+        acme.State.Should().Be(DocumentListState.Loaded, acme.Error);
+        acme.Rows.Should().HaveCount(5, "the rows themselves are tenant-scoped and unaffected");
+
+        acme.Estimate.Value.Should().Be(TenantedRows, "the header and the grid have to agree about what is counted");
+        acme.Estimate.IsEstimate.Should().BeFalse("reltuples was never consulted for this visitor");
+        acme.Estimate.IsExactRefused.Should().BeFalse();
+
+        // Above it: nothing, and the conjoined reason rather than the threshold's - the visitor has no
+        // number because the cheap one is not theirs to see, not because the table is large.
+        DocumentPage wide = await documents.Service.ListAsync(
+            MartenFixture.ScopeFor("acme"), "widetenantedthing", new DocumentListRequest { PageSize = 5 }, Token);
+
+        wide.State.Should().Be(DocumentListState.Loaded, wide.Error);
+        wide.Estimate.IsUnknown.Should().BeTrue();
+        wide.Estimate.IsExactRefused.Should().BeTrue();
+        wide.Estimate.Value.Should().NotBe(WideTenantedRows * 2, "that number is every tenant's, not this one's");
+        wide.Estimate.Reason.Should().Contain("conjoined").And.Contain("exact count");
+
+        // ... and pressing "=" answers it, in scope, which is what the reason tells them to do.
+        DocumentCount asked = await documents.Service.CountExactAsync(
+            MartenFixture.ScopeFor("acme"), "widetenantedthing", Token);
+
+        asked.Value.Should().Be(WideTenantedRows);
+
+        // A single-tenanted collection under the same scope is unaffected: there is nothing to narrow by.
+        DocumentPage single = await documents.Service.ListAsync(
+            MartenFixture.ScopeFor("acme"), "tinything", new DocumentListRequest { PageSize = 5 }, Token);
+
+        single.Estimate.IsEstimate.Should().BeTrue();
+        single.Estimate.Value.Should().Be(TinyRows);
+    }
+
+    /// <summary>
+    /// The list header declines a never-analysed collection with a large heap, before the row probe.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The probe is bounded by <c>min(threshold, table)</c> and not by the threshold: a table holding
+    /// fewer rows than the threshold has to be read in full for the probe to find that out. So on the
+    /// few-rows/huge-heap shape <c>MaxSpeculativePages</c> exists for, the probe reads the whole heap and
+    /// the <c>count(*)</c> behind it reads it again — twice the work the guard was added to avoid, paid
+    /// by anyone who opens the collection.
+    /// </para>
+    /// <para>
+    /// The rail declined this already; the header did not. Pressing "=" still counts it, because a button
+    /// somebody pressed is a different question from a page somebody opened.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_list_header_over_a_never_analysed_collection_with_a_large_heap_is_declined_too()
+    {
+        (await RealCountAsync("mt_doc_heavything")).Should().Be(
+            HeavyRows, "the row count is below the threshold, so only relpages can decline this");
+
+        using var documents = Documents();
+
+        DocumentPage page = await documents.Service.ListAsync(
+            Scope, "heavything", new DocumentListRequest { PageSize = 5 }, Token);
+
+        page.State.Should().Be(DocumentListState.Loaded, page.Error);
+        page.Rows.Should().NotBeEmpty("the page itself is keyset-paged and unaffected");
+
+        page.Estimate.IsUnknown.Should().BeTrue();
+        page.Estimate.IsExactRefused.Should().BeTrue();
+        page.Estimate.Value.Should().NotBe(HeavyRows, "a count(*) would have answered {0}; none ran", HeavyRows);
+        page.Estimate.Reason.Should().Contain("too large").And.Contain("ANALYZE");
+
+        // ... and the button still answers, which is what the note tells the visitor to do.
+        DocumentCount asked = await documents.Service.CountExactAsync(Scope, "heavything", Token);
+
+        asked.Value.Should().Be(HeavyRows);
+        asked.IsEstimate.Should().BeFalse();
+    }
+
     private async Task AssertNeverAnalysedAsync(string table)
     {
         await using NpgsqlConnection connection = await Postgres.OpenAsync(Token);

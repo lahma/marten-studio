@@ -109,6 +109,9 @@ public class NavIndicatorNoDdlLiveTests(PostgresFixture fixture)
         DeadLetterPage page = await host.EventsAsync(x => x.ListDeadLettersAsync(Scope, new DeadLetterQuery()));
         ProjectionsView projections = await host.ProjectionsAsync(x => x.GetProjectionsAsync(Scope));
 
+        page.Should().BeSameAs(DeadLetterPage.Empty,
+            "the list's own catalog probe is what answers here - EventStoreShape.EventTablesExist speaks " +
+            "for mt_events and mt_streams, which is not the table this read is about");
         page.Error.Should().BeNull("an absent table is an empty page, not a failure");
         page.Rows.Should().BeEmpty();
 

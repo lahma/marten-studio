@@ -203,7 +203,11 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         }
 
         return await authorization
-            .FilterAsync(listings, x => new StudioScope(storeKey, x.Identity, null), cancellationToken)
+            .FilterAsync(
+                listings,
+                x => new StudioScope(storeKey, x.Identity, null),
+                take: null,
+                cancellationToken)
             .ConfigureAwait(false);
     }
 }

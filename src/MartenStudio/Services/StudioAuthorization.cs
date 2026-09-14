@@ -135,27 +135,57 @@ internal sealed class StudioAuthorization
     /// The scopes of <paramref name="scopes" /> the visitor may see, in the order they arrived.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Listings are filtered rather than annotated, because an entry in a picker is one the visitor can
     /// select - and the count of tenants in a process is itself something a tenant should not learn.
+    /// </para>
+    /// <para>
+    /// <b>The principal is fetched once for the whole sweep.</b>
+    /// <see cref="AuthenticationStateProvider.GetAuthenticationStateAsync" /> is not free and is not
+    /// promised to be cheap - a host's provider may rebuild the principal - so the per-entry overload
+    /// that fetches it every time is the wrong one for a list. That is the reason this method exists
+    /// beside <see cref="IsAuthorizedAsync(StudioScope, string?, CancellationToken)" /> rather than every
+    /// caller writing its own loop, and the reason <paramref name="take" /> is here rather than a caller
+    /// stopping the sweep itself.
+    /// </para>
     /// </remarks>
+    /// <typeparam name="T">Whatever is being filtered - a listing row, an audit entry.</typeparam>
+    /// <param name="scopes">The candidates, in the order they should be returned.</param>
+    /// <param name="scopeOf">The store, database and tenant one candidate is about.</param>
+    /// <param name="take">
+    /// Stop after this many are allowed, or <see langword="null" /> for all of them. A panel that draws
+    /// fifteen rows out of a five-hundred-entry ring must not pay five hundred policy evaluations per
+    /// refresh to find them: the entry after the last one drawn is the last one worth asking about.
+    /// </param>
+    /// <param name="cancellationToken">Checked between entries, so a page that went away stops asking.</param>
     public async ValueTask<List<T>> FilterAsync<T>(
         IReadOnlyList<T> scopes,
         Func<T, StudioScope> scopeOf,
+        int? take = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scopes);
         ArgumentNullException.ThrowIfNull(scopeOf);
 
+        var limit = take is { } wanted ? Math.Max(wanted, 0) : int.MaxValue;
+
         if (!IsEnabled)
         {
-            return [.. scopes];
+            // The fast path takes the bound too, or "ask nothing" and "ask as far as fifteen" would
+            // disagree about how many rows a panel gets.
+            return scopes.Count <= limit ? [.. scopes] : [.. scopes.Take(limit)];
         }
 
         AuthenticationState state = await authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
 
-        List<T> allowed = new(scopes.Count);
+        List<T> allowed = new(Math.Min(scopes.Count, limit));
         foreach (T candidate in scopes)
         {
+            if (allowed.Count >= limit)
+            {
+                break;
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
             if (await IsAuthorizedAsync(state.User, scopeOf(candidate), capability: null, cancellationToken).ConfigureAwait(false))
             {

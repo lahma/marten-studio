@@ -457,17 +457,28 @@ internal sealed class EventDataService : IEventDataService
                 return EventStoreCounts.NoEventStorage;
             }
 
-            // Estimates only (D8): these numbers feed the Overview's tiles and the nav badge's gate, both
-            // of which are read on every interval, and an exact count of mt_events is exactly the
-            // sequential scan a dashboard must never run on a timer. A never-analysed store reports the
-            // count as unknown, which the tiles draw as such.
-            var estimator = new CountEstimator { CommandTimeoutSeconds = CommandTimeoutSeconds };
+            // Estimates first, always (D8): these numbers feed the Overview's tiles and the nav badge's
+            // gate, both of which are read on every interval, and an exact count of mt_events is exactly
+            // the sequential scan a dashboard must never run on a timer.
+            //
+            // The one case that is paid for is the one where there is no estimate at all. reltuples is -1
+            // until the first ANALYZE, which is the state of every freshly seeded store - the D18
+            // zero-config sample included - so estimating alone made the tiles read "unknown" over an
+            // event store that plainly has events in it, until autovacuum next ran. EstimateOrCountAsync
+            // upgrades that case and only that case, behind both of the bounds the documents rail uses:
+            // relpages first, then the offset/limit row probe against ExactCountThreshold. A store big
+            // enough for the count to matter is a store that fails one of them.
+            var estimator = new CountEstimator
+            {
+                CommandTimeoutSeconds = CommandTimeoutSeconds,
+                ExactCountThreshold = Math.Max(options.Value.ExactCountThreshold, 0),
+            };
 
             DocumentCount streams = await estimator
-                .EstimateAsync(connection, table.Schema, EventTableInfo.StreamsTable, cancellationToken)
+                .EstimateOrCountAsync(connection, table.Schema, EventTableInfo.StreamsTable, cancellationToken)
                 .ConfigureAwait(false);
             DocumentCount events = await estimator
-                .EstimateAsync(connection, table.Schema, EventTableInfo.EventsTable, cancellationToken)
+                .EstimateOrCountAsync(connection, table.Schema, EventTableInfo.EventsTable, cancellationToken)
                 .ConfigureAwait(false);
 
             return new EventStoreCounts(Convert(streams), Convert(events), TablesExist: true, Error: null);
@@ -477,6 +488,9 @@ internal sealed class EventDataService : IEventDataService
             return EventStoreCounts.Failed(Describe(exception, "count the event store"));
         }
 
+        // The last arm is the never-analysed store that was small enough to count: an exact number, drawn
+        // without the tilde. IsUnavailable covers Unknown - which is a kind of it - and both refusals,
+        // whose value is Unknown too.
         static EventStoreCount Convert(DocumentCount count) => count switch
         {
             { IsUnavailable: true } => EventStoreCount.Unknown,
@@ -794,30 +808,30 @@ internal sealed class EventDataService : IEventDataService
 
             int pageSize = Math.Clamp(query.PageSize, 1, MaxDeadLetterPageSize);
 
-            // Hard rule 14, and the one read in this service that cannot be re-expressed as the studio's
-            // own SQL: the tenant axis of a dead letter is a property *inside* the JSON body, so this has
-            // to be a Marten query (D6) - and every Marten query opens with EnsureStorageExistsAsync for
-            // its document type, which on a database that has never run the daemon creates
-            // mt_doc_deadletterevent and Marten's whole helper-function set under the database's own
-            // AutoCreate. Proven live: it is what NavIndicatorNoDdlLiveTests found on its first run.
-            // So the table is probed through the shared, expiring column catalog first - the same probe
-            // CountDeadLettersAsync makes - and its absence is a real empty page rather than a migration.
+            // Hard rule 14, asked of the table this read is actually about, and the one read in this
+            // service that cannot be re-expressed as the studio's own SQL: the tenant axis of a dead
+            // letter is a property *inside* the JSON body, so this has to be a Marten query (D6) - and
+            // every Marten query opens with EnsureStorageExistsAsync for its document type, which on a
+            // database that never ran the daemon creates mt_doc_deadletterevent and Marten's whole
+            // helper-function set under the database's own AutoCreate. Proven live: it is what
+            // NavIndicatorNoDdlLiveTests found on its first run.
+            //
+            // The screen above gates on EventStoreShape.EventTablesExist, which answers for mt_events and
+            // mt_streams - so a database with an event store but no dead-letter table would pass that gate
+            // and reach the session. That it normally has one is only because Marten happens to register
+            // DeadLetterEvent through DependentTypes(), which is not a guarantee this file may lean on. So
+            // the same catalog read CountDeadLettersAsync does settles it here too: one information_schema
+            // lookup through the shared, expiring ColumnCatalog, and no Marten call.
             //
             // What the probe cannot prevent is Marten applying a *pending change* to a table that does
             // exist; that is true of any Marten session read and is the reason the studio reads documents
             // with its own SQL everywhere it can.
             await using (NpgsqlConnection probe = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false))
             {
-                TableColumns deadLetters = await catalog
-                    .GetAsync(
-                        probe,
-                        resolved.Store.Options.Events.DatabaseSchemaName,
-                        EventTableInfo.DeadLetterTable,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (!deadLetters.Exists)
+                if (!await DeadLetterTableExistsAsync(resolved, probe, cancellationToken).ConfigureAwait(false))
                 {
+                    // No table means the daemon never recorded one, which is an empty page rather than a
+                    // failure - and a store with no async projections never creates it at all.
                     return DeadLetterPage.Empty;
                 }
             }
@@ -890,6 +904,35 @@ internal sealed class EventDataService : IEventDataService
         }
     }
 
+    /// <summary>
+    /// Whether <c>mt_doc_deadletterevent</c> is actually in this database, asked of the catalog.
+    /// </summary>
+    /// <remarks>
+    /// One rule for both dead-letter reads. The table is created by Marten's own registration of
+    /// <c>DeadLetterEvent</c> and only when something applies it, so a database with an event store need
+    /// not have it — and a read that assumes otherwise is a read that hands Marten the chance to create
+    /// it (AGENTS.md hard rule 14). The lookup goes through <see cref="ColumnCatalog"/>, which is shared
+    /// and expiring, so the second caller inside the window pays nothing.
+    /// </remarks>
+    /// <param name="resolved">The scope, already resolved — which is where the store policy was applied.</param>
+    /// <param name="connection">An open connection to that scope's database.</param>
+    /// <param name="cancellationToken">The usual.</param>
+    private async Task<bool> DeadLetterTableExistsAsync(
+        ResolvedScope resolved,
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        TableColumns table = await catalog
+            .GetAsync(
+                connection,
+                resolved.Store.Options.Events.DatabaseSchemaName,
+                EventTableInfo.DeadLetterTable,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return table.Exists;
+    }
+
     /// <inheritdoc />
     public async Task<long?> CountDeadLettersAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
@@ -899,22 +942,29 @@ internal sealed class EventDataService : IEventDataService
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
-            await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
-
             // Marten registers DeadLetterEvent into the *event* store's schema, single-tenanted
             // (StoreOptions.ApplyConfiguration: Schema.For<DeadLetterEvent>().DatabaseSchemaName(
             // Events.DatabaseSchemaName).SingleTenanted()), which is why the count is scoped by the event
-            // schema rather than by the document schema - and why it is not scoped by tenant at all:
-            // mt_doc_deadletterevent has no tenant_id column on any store. The list narrows by the
-            // document's TenantId property; a count cannot without reading the bodies, so this is the
-            // whole database's number and the badge it feeds says "dead letters", not "yours".
+            // schema rather than by the document schema - and why it cannot be scoped by tenant:
+            // mt_doc_deadletterevent has no tenant_id column on any store, and the only tenant a row
+            // carries is a property inside its JSON body.
+            //
+            // So a tenant-pinned visitor gets no number at all. The list below them narrows on that
+            // property and shows their own failures; a whole-database count over the badge would be
+            // other tenants' failures under their own page's heading - the same two-questions-under-one-
+            // number disclosure the documents rail closed with CrossTenantEstimateNote, and a count they
+            // could not act on. Counting their own would mean data->>'TenantId' with no index behind it,
+            // on a badge that polls: not a trade a nav indicator gets to make (D8).
+            if (resolved.TenantId is not null)
+            {
+                return null;
+            }
+
+            await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+
             string schema = resolved.Store.Options.Events.DatabaseSchemaName;
 
-            TableColumns table = await catalog
-                .GetAsync(connection, schema, EventTableInfo.DeadLetterTable, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (!table.Exists)
+            if (!await DeadLetterTableExistsAsync(resolved, connection, cancellationToken).ConfigureAwait(false))
             {
                 // No table means the daemon never recorded one, which is a real zero rather than a
                 // failure - and a store with no async projections never creates it at all.
