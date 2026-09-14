@@ -93,6 +93,55 @@ model, the phased delivery plan — lives in the approved plan at
     whose expected output the orchestrator can state outright — copy these files with these renames, emit
     this class from this table, run this command and paste the output. If a step needs a decision the
     packet does not make, the correct behaviour is to stop and report the question, never to guess.
+14. **A read or navigation path never calls `AllSchemaNames()`, `AllObjects()`, `ToDatabaseScript()` or
+    `CreateMigrationAsync()` — and nothing may describe `CreateOrUpdate` as additive.** The first two
+    *apply migrations*: `IMartenDatabase.AllSchemaNames()` is
+    `AllObjects().Select(x => x.Identifier.Schema).Distinct()`, `AllObjects()` is
+    `BuildFeatureSchemas().SelectMany(x => x.Objects)`, and Marten's `BuildFeatureSchemas()` is
+    `StorageFeatures.AllActiveFeatures(this)` — which reaches `database.Sequences` whenever any document
+    type has a numeric or HiLo id. That property is a `Lazy<SequenceFactory>` whose factory calls
+    `generateOrUpdateFeature(...)` and blocks on it, so it runs `Migrator.ApplyAllAsync` under the
+    database's own `AutoCreate`, the default being `CreateOrUpdate`. **A single `AllSchemaNames()` call on
+    an empty schema creates `mt_hilo` and `mt_get_next_hi`** — proven live by the P7 review, 2026-09-14,
+    which is a studio that wrote DDL because somebody opened a tab. The last two are merely slow and
+    connection-hungry. Schema names, declared indexes, managed tables and installed functions all come
+    from `SchemaDeclarationReader`, which reads `IReadOnlyStoreOptions`, `IDocumentType` and the event
+    store's own feature schema and touches no connection; `CheckAsync`, `PreviewAsync` and `DdlAsync` are
+    behind buttons and say on the button what they may create. Everything schema-related is **per
+    database, never per store**: the same four members exist on `IMartenDatabase` (through
+    `Weasel.Core.Migrations.IDatabase`) and answer only for the database the visitor resolved, whereas
+    `store.Storage`'s apply reaches *every* database a `DynamicMultiple` store knows about.
+    And the wording half of the rule, because it was got wrong once: **`AutoCreate.CreateOrUpdate` is not
+    additive.** Weasel's `TableDelta.WriteUpdate` — which is what an `Update` delta writes, and `Update` is
+    exactly what `CreateOrUpdate` allows — "emits `drop index` for every physical index the configuration
+    does not declare, `drop column` for every extra column, `alter column … type` for a changed one,
+    `alter table … drop constraint … CASCADE` for a changed primary key, and for a changed partition
+    scheme a `create table … as select` / `drop table … cascade` pair that copies the whole table out and
+    back. Only `Invalid` is refused, and `Invalid` is a much narrower thing than 'this will lose
+    something'." No screen, comment or doc may tell a person that an apply leaves their hand-made index
+    alone. Apply runs under `CreateOrUpdate` and never `AutoCreate.All`, the preview is rendered under the
+    same mode so what is read is what is run, `MigrationRisk` lists the destructive statements in the
+    dialog before the typed confirmation, and the typed string travels to the service rather than being
+    re-supplied by the page.
+15. **Open Marten sessions only with `SessionOptions.ForDatabase(resolved.TenantId, resolved.Database)`**
+    (or `ForDatabase(resolved.Database)` where the scope has no tenant), never
+    `Store.QuerySession(tenantId)` / `LightweightSession(tenantId)` — those ignore the selected database
+    and throw `DefaultTenantUsageDisabledException` on a `MultiTenantedDatabases` store. An unpinned
+    session on a multi-database store reads the store's default rather than the database the scope
+    selector named and the audit entry recorded, which is the same class of bug as reading another
+    tenant's rows. **Never run a user-supplied clause through `Query<T>(string)` /
+    `QueryAsync(Type, string)`**: Marten's `UserSuppliedQueryHandler` adds no tenant and no soft-delete
+    predicate, so a where clause typed into the studio reads every tenant's rows and every deleted one —
+    live-proven by the P6 review. A document type that Marten registers `SingleTenanted()` regardless of
+    the store (`DeadLetterEvent` is one) has no `tenant_id` column at all and gets no predicate from
+    Marten either: filter on the document's own `TenantId` property, and prove a sequence is in scope
+    before handing it to an API that has no tenant predicate of its own. **Catch interop loss with
+    `catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))`** and never with a ladder of
+    `catch` clauses: `JSDisconnectedException` derives from `Exception` and *not* from `JSException`, so
+    `catch (JSException) { } catch (InvalidOperationException) { }` misses exactly the case that happens
+    on every closed browser tab — and an exception escaping a component's `DisposeAsync` takes the rest of
+    that disposal with it, leaving the `DotNetObjectReference` that pins the component undisposed and the
+    page's `CancellationTokenSource` uncancelled. A filter still rethrows anything that is a real bug.
 
 ## Design decisions (D1–D23)
 

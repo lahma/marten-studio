@@ -252,7 +252,12 @@ public class FeedTests
 
         await dispose.Should().NotThrowAsync();
 
-        js.TriedToUnwatch.Should().BeTrue("the reference is handed back before it is dropped");
+        js.TriedToUnwatch.Should().BeTrue("the watch token is handed back before the reference is dropped");
+
+        // Keyed on the token, not on the reference: Blazor marshals a DotNetObjectReference as an id and
+        // the browser makes a new wrapper for every call, so a watcher keyed on one can never be removed.
+        js.WatchToken.Should().NotBeNullOrWhiteSpace();
+        js.UnwatchToken.Should().Be(js.WatchToken);
 
         // A disposed DotNetObjectReference throws from Value; an undisposed one would answer the page.
         var reference = (DotNetObjectReference<Feed>) js.DotNetReference!;

@@ -111,7 +111,6 @@ export function afterWebStarted() {
     window.martenStudio.visibility = window.martenStudio.visibility || (function () {
         const watchers = new Map();
         let listening = false;
-        let legacySequence = 0;
 
         function drop(token) {
             if (watchers.delete(token) && watchers.size === 0) {
@@ -162,20 +161,11 @@ export function afterWebStarted() {
 
         return {
             /*
-             * watch(token, dotNetRef) - the token is what unwatch(token) is called with later.
-             *
-             * watch(dotNetRef) is the deprecated one-argument form, kept working for callers that have
-             * not been moved over yet. It registers under a synthetic token, so the watcher does receive
-             * visibility changes; what it cannot do is be removed by handing the reference back, because
-             * that reference is a different object by then. Such a watcher is dropped by the rejected
-             * promise above the first time the document's visibility changes after its circuit closes.
+             * watch(token, dotNetRef) - the token is what unwatch(token) is called with later. There is
+             * no one-argument form: a DotNetObjectReference cannot be matched back to the one handed in,
+             * so a caller that passes only a reference has no way to unregister itself.
              */
             watch: function (token, dotNetRef) {
-                if (dotNetRef === undefined || dotNetRef === null) {
-                    dotNetRef = token;
-                    token = "legacy:" + (++legacySequence);
-                }
-
                 if (!dotNetRef || typeof token !== "string" || watchers.has(token)) {
                     return document.hidden === true;
                 }
@@ -185,23 +175,11 @@ export function afterWebStarted() {
                 return document.hidden === true;
             },
             unwatch: function (token) {
-                if (typeof token === "string") {
-                    drop(token);
+                if (typeof token !== "string") {
                     return;
                 }
 
-                // The deprecated form: a DotNetObjectReference cannot be matched back to the one that
-                // was handed in, so every synthetic-token watcher is released. There is at most one per
-                // page in the callers this shim exists for.
-                for (const key of Array.from(watchers.keys())) {
-                    if (key.startsWith("legacy:")) {
-                        watchers.delete(key);
-                    }
-                }
-
-                if (watchers.size === 0) {
-                    stop();
-                }
+                drop(token);
             }
         };
     })();

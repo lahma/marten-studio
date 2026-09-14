@@ -147,6 +147,30 @@ internal sealed class ConjoinedEventsFixture : IAsyncDisposable
         return value is true;
     }
 
+    /// <summary>
+    /// Clears <c>mt_events.is_skipped</c> again, so a test that skips an event puts the fixture back.
+    /// </summary>
+    /// <remarks>
+    /// Marten excludes skipped events from its own stream fetch, so an event left skipped here is an
+    /// event the aggregate replay further down this class cannot reach - and the seed has exactly one
+    /// stream per tenant, so the skip lands on the same stream the replay reads. xUnit does not promise
+    /// an order within a class, so that is a test that passes or fails on which one ran first. The fix is
+    /// that the mutating test undoes its mutation, not that the reading test asks for a different version.
+    /// </remarks>
+    public async Task ResetSkippedAsync(long sequence, CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            $"update {MartenStudio.Internal.Sql.SqlIdentifier.Qualify(Schema, "mt_events")} set is_skipped = FALSE where seq_id = @seq",
+            connection);
+
+        command.Parameters.AddWithValue("seq", sequence);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     /// <summary>Whether a dead letter row still exists, read without any tenant filter at all.</summary>
     public async Task<bool> DeadLetterExistsAsync(Guid id, CancellationToken cancellationToken)
     {
@@ -513,16 +537,29 @@ public class ConjoinedEventsTests(ConjoinedStoreFixture fixture) : IClassFixture
     }
 
     /// <summary>And its own tenant's event still skips, which is the feature.</summary>
+    /// <remarks>
+    /// The flag goes back afterwards, however the assertions go. The seed gives each tenant one stream,
+    /// Marten's stream fetch excludes skipped events, and the replay further down reads that same stream
+    /// at the version this skip would remove - so an event left skipped makes the replay test pass or
+    /// fail on which of the two xUnit happened to run first.
+    /// </remarks>
     [PostgresFact]
     public async Task Skipping_its_own_tenants_event_still_works()
     {
-        await Events.Service.SkipEventAsync(
-            ConjoinedEventsFixture.ScopeFor(ConjoinedEventsFixture.TenantA), Events.SequenceA, Token);
+        try
+        {
+            await Events.Service.SkipEventAsync(
+                ConjoinedEventsFixture.ScopeFor(ConjoinedEventsFixture.TenantA), Events.SequenceA, Token);
 
-        (await Events.IsSkippedAsync(Events.SequenceA, Token)).Should().BeTrue();
+            (await Events.IsSkippedAsync(Events.SequenceA, Token)).Should().BeTrue();
 
-        Events.Audit.GetLatest().Should().Contain(x =>
-            x.Action == "Skip event" && x.Succeeded && x.Message == "marked as skipped");
+            Events.Audit.GetLatest().Should().Contain(x =>
+                x.Action == "Skip event" && x.Succeeded && x.Message == "marked as skipped");
+        }
+        finally
+        {
+            await Events.ResetSkippedAsync(Events.SequenceA, Token);
+        }
     }
 
     // ------------------------------------------------------------------------------------------------

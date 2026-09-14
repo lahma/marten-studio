@@ -29,7 +29,13 @@ internal sealed class DisconnectingJsRuntime : IJSRuntime
     /// <summary>The .NET reference the page handed the browser.</summary>
     public object? DotNetReference { get; private set; }
 
-    /// <summary>Whether the page tried to give the reference back before disposing it.</summary>
+    /// <summary>The token <c>visibility.watch</c> was keyed on.</summary>
+    public string? WatchToken { get; private set; }
+
+    /// <summary>The token <c>visibility.unwatch</c> was given, if the call got that far.</summary>
+    public string? UnwatchToken { get; private set; }
+
+    /// <summary>Whether the page tried to give the watch token back before disposing the reference.</summary>
     public bool TriedToUnwatch => Calls.Contains("martenStudio.visibility.unwatch");
 
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
@@ -44,11 +50,17 @@ internal sealed class DisconnectingJsRuntime : IJSRuntime
 
         if (identifier == "martenStudio.visibility.watch")
         {
-            DotNetReference = args?.Length > 0 ? args[0] : null;
+            WatchToken = args?.Length > 0 ? args[0] as string : null;
+            DotNetReference = args?.Length > 1 ? args[1] : null;
 
             // The tab starts visible, so follow mode is not paused and the page behaves normally until
             // the circuit goes.
             return ValueTask.FromResult((TValue) (object) false);
+        }
+
+        if (identifier == "martenStudio.visibility.unwatch")
+        {
+            UnwatchToken = args?.Length > 0 ? args[0] as string : null;
         }
 
         return ValueTask.FromException<TValue>(

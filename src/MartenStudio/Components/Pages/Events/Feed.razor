@@ -143,6 +143,18 @@
     private readonly List<EventRow> rows = [];
     private readonly List<EventRow> pending = [];
 
+    /// <summary>
+    /// What the browser-side watcher list is keyed on for this page.
+    /// </summary>
+    /// <remarks>
+    /// Not the <see cref="DotNetObjectReference{TValue}" />: Blazor marshals one as an id and the browser
+    /// materialises a fresh JS wrapper for every call, so the object that reaches <c>unwatch</c> is never
+    /// the object that reached <c>watch</c>. Keyed on a reference, <c>unwatch</c> removed nothing and the
+    /// document listener stayed attached for the life of the page. A string generated here survives the
+    /// round trip unchanged - the same token <c>StudioLiveUpdates</c> uses.
+    /// </remarks>
+    private readonly string watchToken = Guid.NewGuid().ToString("N");
+
     private List<string> availableTypes = [];
     private EventStoreShape? shape;
     private EventDataError? error;
@@ -290,14 +302,16 @@
             return;
         }
 
-        // One visibility watcher for the page's whole life. The JS module holds the references in a set
-        // and removes its own listener when the last one goes, so a closed circuit leaves nothing behind.
+        // One visibility watcher for the page's whole life, keyed on a string token rather than on the
+        // .NET reference. The JS module holds the watchers in a map and removes its own listener when the
+        // last one goes, so a closed circuit leaves nothing behind - but only if unwatch can find the
+        // entry, which a re-marshalled DotNetObjectReference cannot.
         selfReference = DotNetObjectReference.Create(this);
 
         try
         {
             tabHidden = await JsRuntime.InvokeAsync<bool>(
-                "martenStudio.visibility.watch", pageCancellation.Token, selfReference);
+                "martenStudio.visibility.watch", pageCancellation.Token, watchToken, selfReference);
         }
         catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
         {
@@ -733,8 +747,8 @@
     /// order, and all of them however the interop call goes.
     /// </summary>
     /// <remarks>
-    /// The <c>finally</c> blocks are the point. Handing the reference back is a best-effort courtesy to a
-    /// browser that may already be gone, but disposing the <see cref="DotNetObjectReference{TValue}" />
+    /// The <c>finally</c> blocks are the point. Handing the watch token back is a best-effort courtesy to
+    /// a browser that may already be gone, but disposing the <see cref="DotNetObjectReference{TValue}" />
     /// and the page's <see cref="CancellationTokenSource" /> is not optional: an undisposed reference pins
     /// this component - and everything it holds - for the life of the process, and an uncancelled token
     /// leaves whatever is mid-read running against a circuit nobody is on. Before this, an exception out
@@ -761,7 +775,7 @@
             {
                 try
                 {
-                    await JsRuntime.InvokeAsync<bool>("martenStudio.visibility.unwatch", selfReference);
+                    await JsRuntime.InvokeVoidAsync("martenStudio.visibility.unwatch", watchToken);
                 }
                 catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
                 {

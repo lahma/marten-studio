@@ -761,6 +761,170 @@ public class MartenApiSurfaceTest
     }
 
     // --------------------------------------------------------------------------------------------
+    // Declared schema, without a connection (P7-fix)
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The declared index surface <c>SchemaDeclarationReader</c> reads instead of calling
+    /// <c>AllObjects()</c>.
+    /// </summary>
+    /// <remarks>
+    /// AGENTS.md hard rule 14: <c>AllSchemaNames()</c> and <c>AllObjects()</c> run Weasel migrations
+    /// through Marten's lazy <c>Sequences</c> feature, so a navigation that wanted the list of indexes
+    /// created <c>mt_hilo</c> as a side effect. These members are in-memory object graphs and are the
+    /// whole of what a read path is allowed to use. <c>Indexes</c> and <c>ForeignKeys</c> are
+    /// <c>IList&lt;&gt;</c> rather than read-only collections, which is Marten's shape and not a
+    /// suggestion that a reader may add to them.
+    /// </remarks>
+    [Fact]
+    public void IDocumentType_declares_its_indexes_and_foreign_keys_in_memory()
+    {
+        var documentType = typeof(IDocumentType);
+
+        RequireProperty(documentType, "Indexes").PropertyType
+            .Should().Be<IList<Weasel.Postgresql.Tables.IndexDefinition>>();
+        RequireProperty(documentType, "ForeignKeys").PropertyType
+            .Should().Be<IList<Weasel.Postgresql.Tables.ForeignKey>>();
+        RequireProperty(documentType, "TenancyStyle").PropertyType.Should().Be<TenancyStyle>();
+
+        RequireMethod(documentType, "IndexesFor", typeof(string)).ReturnType
+            .Should().Be<IEnumerable<DocumentIndex>>();
+    }
+
+    /// <summary>
+    /// The four <c>DocumentMapping</c> members that decide which indexes and columns a table really has.
+    /// </summary>
+    /// <remarks>
+    /// None of them is on <see cref="IDocumentType" />, so reading them means casting to the concrete
+    /// public <see cref="DocumentMapping" /> - which AGENTS.md hard rule 10 already requires for
+    /// <c>DeleteStyle</c>. <c>IgnoredIndexes</c> is the escape hatch a host uses to build an index out of
+    /// band; an index on that list is one no migration will drop, which is the difference between advice
+    /// that is true and advice that is alarming. <c>PrimaryKeyTenancyOrdering</c> decides whether a
+    /// conjoined table gets a separate <c>tenant_id</c> index at all.
+    /// </remarks>
+    [Fact]
+    public void DocumentMapping_carries_the_ignored_indexes_the_delete_style_and_the_tenancy_shape()
+    {
+        var mapping = typeof(DocumentMapping);
+
+        mapping.IsPublic.Should().BeTrue("the studio has to cast IDocumentType to it");
+
+        RequireProperty(mapping, "IgnoredIndexes").PropertyType.Should().Be<IList<string>>();
+        RequireProperty(mapping, "DeleteStyle").PropertyType.Should().Be<DeleteStyle>();
+        RequireProperty(mapping, "TenancyStyle").PropertyType.Should().Be<TenancyStyle>();
+        RequireProperty(mapping, "PrimaryKeyTenancyOrdering").PropertyType
+            .Should().Be<PrimaryKeyTenancyOrdering>();
+
+        RequireMethod(mapping, "IgnoreIndex", typeof(string)).ReturnType.Should().Be(typeof(void));
+    }
+
+    /// <summary>
+    /// <c>DocumentIndex</c>'s constructor, which is how the studio renders the DDL for a structural index
+    /// Marten adds without declaring it on <c>IDocumentType.Indexes</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>mt_doc_type</c> on a hierarchy, <c>mt_deleted</c> on a soft-deleted type and <c>tenant_id</c> on
+    /// a conjoined one are added inside <c>Marten.Storage.DocumentTable</c>'s constructor, which is
+    /// <c>internal</c> and builds a table by connecting to nothing - but only reachable by building the
+    /// table. Constructing the same <see cref="DocumentIndex" /> the mapping would produce gives the
+    /// identical name and DDL with no database and no internal type.
+    /// </remarks>
+    [Fact]
+    public void DocumentIndex_is_constructible_from_a_mapping_and_columns()
+    {
+        var index = typeof(DocumentIndex);
+
+        index.IsPublic.Should().BeTrue();
+        index.Should().BeAssignableTo<Weasel.Postgresql.Tables.IndexDefinition>();
+
+        var constructor = index.GetConstructor([typeof(DocumentMapping), typeof(string[])]);
+
+        constructor.Should().NotBeNull("the studio builds the structural indexes DocumentTable would add");
+        constructor!.GetParameters()[1].IsDefined(typeof(ParamArrayAttribute), inherit: false)
+            .Should().BeTrue("the columns are a params array");
+    }
+
+    /// <summary>
+    /// A table carries its own ignored-index list, which is what the event-store tables hand back.
+    /// </summary>
+    [Fact]
+    public void Weasel_Table_carries_its_ignored_indexes()
+    {
+        RequireProperty(typeof(Weasel.Postgresql.Tables.Table), "IgnoredIndexes").PropertyType
+            .Should().BeAssignableTo<System.Collections.IEnumerable>();
+
+        RequireProperty(typeof(Weasel.Postgresql.Tables.Table), "Indexes").PropertyType
+            .Should().BeAssignableTo<System.Collections.IEnumerable>();
+    }
+
+    /// <summary>
+    /// The event store declares its own schema objects, and its ignored indexes, without a connection.
+    /// </summary>
+    /// <remarks>
+    /// <c>EventGraph</c> implements <c>Weasel.Core.Migrations.IFeatureSchema</c> in a partial file, and
+    /// its <c>Objects</c> are built by constructors alone - <c>StreamsTable</c>, <c>EventsTable</c> and
+    /// the progression tables. That is the event-store half of reading the declared schema off the
+    /// options rather than off the database. <c>IReadOnlyEventStoreOptions.IgnoredIndexes</c> is the
+    /// read side of <c>IEventStoreOptions.IgnoreIndex</c>, which a host calls to build an index itself.
+    /// </remarks>
+    [Fact]
+    public void The_event_store_is_a_feature_schema_and_declares_its_ignored_indexes()
+    {
+        var eventGraph = MartenType("Marten.Events.EventGraph");
+
+        eventGraph.Should().BeAssignableTo<Weasel.Core.Migrations.IFeatureSchema>(
+            "the declared event-store objects are read off the options, never off the database");
+
+        // Implemented explicitly, so the cast is the only way in: there is no EventGraph.Objects.
+        eventGraph.GetProperty("Objects", MemberFlags).Should().BeNull(
+            "EventGraph implements IFeatureSchema explicitly - read Objects through the interface");
+        RequireProperty(typeof(Weasel.Core.Migrations.IFeatureSchema), "Objects").PropertyType
+            .Should().Be<Weasel.Core.ISchemaObject[]>();
+
+        RequireProperty(typeof(MartenReadOnlyEventStoreOptions), "IgnoredIndexes").PropertyType
+            .Should().Be<IReadOnlyList<string>>();
+
+        RequireMethod(typeof(global::Marten.Events.IEventStoreOptions), "IgnoreIndex", typeof(string))
+            .ReturnType.Should().Be<global::Marten.Events.IEventStoreOptions>();
+
+        RequireMethod(typeof(MartenRegistry.DocumentMappingExpression<SampleDocument>), "IgnoreIndex", typeof(string))
+            .ReturnType.Should().Be<MartenRegistry.DocumentMappingExpression<SampleDocument>>();
+    }
+
+    /// <summary>
+    /// What a refused migration throws, and what it does <em>not</em> derive from.
+    /// </summary>
+    /// <remarks>
+    /// A direct subclass of <see cref="Exception" /> - neither a <c>NpgsqlException</c> nor a
+    /// <c>MartenCommandException</c> - so the apply path has to name it to tell "Weasel judged this
+    /// migration invalid" apart from "the database refused the statement". Catching it by a base type
+    /// that happens to work today is how the two get conflated.
+    /// </remarks>
+    [Fact]
+    public void SchemaMigrationException_is_a_plain_Exception()
+    {
+        var exception = typeof(Weasel.Core.SchemaMigrationException);
+
+        exception.BaseType.Should().Be<Exception>(
+            "the apply path distinguishes a refused migration from a database error");
+        exception.Namespace.Should().Be("Weasel.Core");
+    }
+
+    /// <summary>
+    /// The tracker knows which database it belongs to, which is how a daemon is matched to a scope.
+    /// </summary>
+    /// <remarks>
+    /// It holds <c>IDatabase.Identifier</c> - the coordinator's own identity - and not
+    /// <c>DatabaseId.Identity</c>, which is derived from the connection string. Matching on the wrong one
+    /// silently hands a multi-database store the main database's daemon (P5 review).
+    /// </remarks>
+    [Fact]
+    public void ShardStateTracker_names_its_database()
+    {
+        RequireProperty(typeof(ShardStateTracker), "DatabaseIdentifier").PropertyType.Should().Be<string>();
+    }
+
+    // --------------------------------------------------------------------------------------------
     // The compile-time half
     // --------------------------------------------------------------------------------------------
 
