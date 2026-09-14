@@ -1,7 +1,10 @@
+using JasperFx.Events;
+
 using Marten;
 using Marten.Schema;
 
 using MartenStudio.SampleDomain.Documents;
+using MartenStudio.SampleDomain.Events;
 
 namespace MartenStudio.SampleDomain;
 
@@ -36,6 +39,10 @@ public sealed class SampleDataSeeder : IInitialData
     public async Task Populate(IDocumentStore store, CancellationToken cancellation)
     {
         ArgumentNullException.ThrowIfNull(store);
+
+        // Before the marker check, not after it: the events have an idempotency guard of their own, and a
+        // database that an older build already marked as seeded would otherwise never get them.
+        await SeedEventsAsync(store, cancellation);
 
         await using IDocumentSession session = store.LightweightSession();
 
@@ -132,6 +139,103 @@ public sealed class SampleDataSeeder : IInitialData
             await tenantSession.SaveChangesAsync(cancellation);
         }
     }
+
+    /// <summary>
+    /// Appends the demo's order streams, one of them poisoned and one of them archived.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Separate from the documents above and idempotent on its own terms, because appending is not
+    /// upserting: running it twice would double every stream rather than replace it. The guard is the
+    /// first stream's own state, so this is safe to call directly - which the integration suite does,
+    /// against a store the sample host never touched.
+    /// </para>
+    /// <para>
+    /// Correlation, causation and headers are set on every session: <c>SampleStore.Configure</c> turns
+    /// those columns on, and a column that is enabled and always null tells a studio nothing.
+    /// </para>
+    /// <para>
+    /// This runs from <c>IInitialData</c>, which is before the daemon starts. That is fine and is the
+    /// point: the projections screen opens on a daemon that has a backlog to work through.
+    /// </para>
+    /// </remarks>
+    /// <param name="store">The store to append to.</param>
+    /// <param name="cancellation">Cancels the seeding.</param>
+    /// <returns>How many streams were appended - zero when the events were already there.</returns>
+    public static async Task<int> SeedEventsAsync(IDocumentStore store, CancellationToken cancellation = default)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        await using (IQuerySession probe = store.QuerySession())
+        {
+            StreamState? existing = await probe.Events.FetchStreamStateAsync(OrderStreamId(1), cancellation);
+            if (existing is not null)
+            {
+                return 0;
+            }
+        }
+
+        DateTimeOffset day = new(2026, 2, 1, 8, 0, 0, TimeSpan.Zero);
+
+        await using IDocumentSession session = store.LightweightSession();
+
+        session.CorrelationId = "sample-seed";
+        session.CausationId = "SampleDataSeeder.SeedEventsAsync";
+        session.SetHeader("source", "marten-studio-sample");
+
+        for (int i = 1; i <= OrderStreamCount; i++)
+        {
+            // Five orders a day across five days, so DailySales has more than one row to roll up into.
+            DateTimeOffset placedAt = day.AddDays((i - 1) / 5).AddHours(i % 5);
+
+            List<object> events =
+            [
+                new OrderPlaced(OrderStreamId(i), $"Customer {i % 25 + 1:00}", placedAt),
+                new ItemAdded($"SKU-{i:000}", i % 3 + 1, 19.90m + i, placedAt.AddMinutes(1))
+            ];
+
+            // One stream carries the SKU that ShipmentTracker throws on. That is the whole dead-letter
+            // story: nothing writes a dead letter here, the daemon does.
+            if (i == PoisonedOrderIndex)
+            {
+                events.Add(new ItemAdded(ItemAdded.PoisonSku, 1, 999m, placedAt.AddMinutes(2)));
+            }
+
+            if (i % 5 == 0)
+            {
+                events.Add(new OrderShipped($"Carrier {i % 3 + 1}", placedAt.AddHours(6)));
+            }
+            else if (i % 7 == 0)
+            {
+                events.Add(new OrderCancelled("Out of stock", placedAt.AddHours(2)));
+            }
+
+            session.Events.StartStream(OrderStreamId(i), events);
+        }
+
+        await session.SaveChangesAsync(cancellation);
+
+        // One archived stream, so the events screens have a stream that is deliberately out of the
+        // default view. Archiving is queued on a session like any other operation.
+        await using IDocumentSession archiving = store.LightweightSession();
+        archiving.CorrelationId = "sample-seed";
+        archiving.Events.ArchiveStream(OrderStreamId(ArchivedOrderIndex));
+        await archiving.SaveChangesAsync(cancellation);
+
+        return OrderStreamCount;
+    }
+
+    /// <summary>How many order streams <see cref="SeedEventsAsync" /> appends.</summary>
+    public const int OrderStreamCount = 25;
+
+    /// <summary>The order whose stream carries the poisoned item.</summary>
+    public const int PoisonedOrderIndex = 13;
+
+    /// <summary>The order whose stream is archived after it is written.</summary>
+    public const int ArchivedOrderIndex = 24;
+
+    /// <summary>The stream id of demo order <paramref name="index" />, stable across runs.</summary>
+    public static Guid OrderStreamId(int index) => DeterministicGuid("order-stream", index);
 
     private static readonly string[] Cities = ["Helsinki", "Tampere", "Turku", "Oulu"];
 

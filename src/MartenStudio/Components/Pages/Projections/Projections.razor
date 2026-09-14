@@ -1,0 +1,700 @@
+@page "/marten/projections"
+@using System.Globalization
+@using MartenStudio.Services
+@using MartenStudio.Services.Live
+@using MartenStudio.Services.Projections
+@using Microsoft.Extensions.Options
+@implements IAsyncDisposable
+@inject IProjectionDataService ProjectionData
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject StudioLiveUpdates Live
+@inject ToastService Toasts
+@inject IOptions<MartenStudioOptions> Options
+
+@* This page's own stylesheet, pulled in here rather than added to marten-studio.css so that the
+   projections rules travel with the projections screen and a host that never opens it never parses
+   them. *@
+<HeadContent>
+    <link rel="stylesheet" href="_content/MartenStudio/css/parts/projections.css" />
+</HeadContent>
+
+<PageTitle>Projections</PageTitle>
+
+<div class="ms-page ms-projections">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Projections</h1>
+        <div class="ms-projections-toolbar">
+            @if (view is not null)
+            {
+                <span class="ms-badge ms-projections-freshness" title="@FreshnessTitle">@FreshnessLabel</span>
+            }
+            <button type="button" class="ms-button ms-projections-refresh" @onclick="RefreshAsync">Refresh</button>
+        </div>
+    </div>
+
+    @if (loading && view is null)
+    {
+        <LoadingSpinner />
+    }
+    else if (loadError is { Length: > 0 } && view is null)
+    {
+        <ErrorAlert Message="@loadError" OnRetry="RefreshAsync" />
+    }
+    else if (view is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No Marten store to show</p>
+            <p class="ms-empty-description">
+                Nothing has been selected yet, or this application registered no Marten store you are
+                authorized to see.
+            </p>
+        </div>
+    }
+    else
+    {
+        @if (loadError is { Length: > 0 })
+        {
+            @* The page keeps what it had and says the refresh failed: a database that comes back is one
+               the next tick renders (plan section 4.8). *@
+            <ErrorAlert Message="@($"The last refresh failed: {loadError}")" OnRetry="RefreshAsync" />
+        }
+
+        @if (view.NoDaemonAnywhere)
+        {
+            <div class="ms-alert ms-alert-warning ms-no-daemon-banner" role="alert">
+                <div class="ms-alert-content">
+                    <p>
+                        This store has asynchronous projections, no daemon is hosted in this process, and no
+                        shard has ever advanced. Nothing appears to be running these projections anywhere.
+                    </p>
+                    <p class="ms-muted">
+                        If the daemon runs in another process, this is only a fact about <em>this</em> one -
+                        the progress below comes from the database either way.
+                    </p>
+                </div>
+            </div>
+        }
+
+        <DaemonStatusCard IsHostedHere="view.Daemon.IsHostedHere"
+                          IsRunning="view.Daemon.IsRunning"
+                          Mode="@view.Daemon.Mode"
+                          AgentCount="view.Daemon.Agents.Count"
+                          HasAnyPaused="view.Daemon.HasAnyPaused"
+                          HighWaterAge="@HighWaterAgeText"
+                          HighWaterMark="view.HighWaterMark"
+                          Explanation="@view.Daemon.Explanation">
+            @if (!Capabilities.ReadOnly)
+            {
+                <div class="ms-daemon-actions ms-actions">
+                    <button type="button"
+                            class="ms-button ms-daemon-start-all"
+                            disabled="@(!ControlEnabled)"
+                            title="@ControlTitle"
+                            @onclick="StartAllAsync">
+                        Start all
+                    </button>
+                    <button type="button"
+                            class="ms-button ms-daemon-stop-all"
+                            disabled="@(!ControlEnabled)"
+                            title="@ControlTitle"
+                            @onclick="StopAllAsync">
+                        Stop all
+                    </button>
+                    <button type="button"
+                            class="ms-button ms-daemon-restart-high-water"
+                            disabled="@(!ControlEnabled)"
+                            title="@ControlTitle"
+                            @onclick="RestartHighWaterAsync">
+                        Restart high water
+                    </button>
+                    <button type="button"
+                            class="ms-button ms-daemon-advance-high-water"
+                            disabled="@(!CorrectEnabled)"
+                            title="@CorrectTitle"
+                            @onclick="() => AskAsync(PendingAction.AdvanceHighWaterMark)">
+                        Advance high water mark
+                    </button>
+                    <button type="button"
+                            class="ms-button ms-daemon-correct-progression"
+                            disabled="@(!CorrectEnabled)"
+                            title="@CorrectTitle"
+                            @onclick="() => AskAsync(PendingAction.CorrectProgression)">
+                        Correct progression
+                    </button>
+                </div>
+
+                @if (!Capabilities.IsEnabled(StudioCapability.ControlDaemon))
+                {
+                    <CapabilityDisabled Capability="@nameof(StudioCapability.ControlDaemon)"
+                                        Action="Starting and stopping projection shards" />
+                }
+
+                @if (!Capabilities.IsEnabled(StudioCapability.CorrectProgression))
+                {
+                    <CapabilityDisabled Capability="@nameof(StudioCapability.CorrectProgression)"
+                                        Action="Advancing the high water mark and correcting progression" />
+                }
+
+                @if (!view.Daemon.IsHostedHere)
+                {
+                    <p class="ms-muted ms-daemon-unavailable">
+                        Start, stop and rebuild are unavailable because no async daemon is hosted in this
+                        process. Progress below is read from the database and is current either way.
+                    </p>
+                }
+            }
+        </DaemonStatusCard>
+
+        @if (operations.Count > 0)
+        {
+            <section class="ms-operations" aria-label="Running operations">
+                @foreach (StudioOperation operation in operations)
+                {
+                    <OperationStatus @key="operation.Id"
+                                     Id="@operation.Id"
+                                     Kind="@operation.Kind"
+                                     Target="@operation.Target"
+                                     State="@operation.State.ToString()"
+                                     IsRunning="operation.IsRunning"
+                                     Message="@operation.Message"
+                                     ElapsedMilliseconds="operation.ElapsedMilliseconds" />
+                }
+            </section>
+        }
+
+        @if (view.Projections.Count == 0)
+        {
+            <div class="ms-empty">
+                <p class="ms-empty-title">No projections registered</p>
+                <p class="ms-empty-description">
+                    This store's <code>StoreOptions</code> registers no projection. Marten Studio shows what
+                    the host configured - add one with <code>opts.Projections.Add(...)</code> or
+                    <code>opts.Projections.Snapshot&lt;T&gt;(...)</code> and it appears here.
+                </p>
+            </div>
+        }
+        else
+        {
+            <table class="ms-table ms-projections-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Projection / shard</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Version</th>
+                        <th scope="col">Shards</th>
+                        <th scope="col">Progress</th>
+                        <th scope="col">Lag</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Last advanced</th>
+                        <th scope="col">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (ProjectionInfo projection in OrderedProjections)
+                    {
+                        <ProjectionRow @key="projection.Name"
+                                       Name="@projection.Name"
+                                       Lifecycle="@projection.Lifecycle.ToString()"
+                                       IsAsync="projection.IsAsync"
+                                       SubscriptionType="@projection.SubscriptionType"
+                                       Version="projection.Version"
+                                       ImplementationType="@projection.ImplementationTypeName"
+                                       ShardCount="projection.ShardNames.Count">
+                            <Actions>
+                                @if (!Capabilities.ReadOnly)
+                                {
+                                    <button type="button"
+                                            class="ms-button ms-button-danger ms-btn-sm ms-projection-rebuild"
+                                            disabled="@(!RebuildEnabled)"
+                                            title="@RebuildTitle"
+                                            @onclick="() => OpenRebuildAsync(projection.Name)">
+                                        Rebuild
+                                    </button>
+                                }
+                            </Actions>
+                        </ProjectionRow>
+
+                        @foreach (ShardProgress shard in ShardsOf(projection))
+                        {
+                            <tr class="ms-table-row ms-shard-row ms-shard-row-@shard.Severity.ToString().ToLowerInvariant()"
+                                @key="shard.ShardName"
+                                data-shard="@shard.ShardName">
+                                <td class="ms-table-cell ms-table-cell-mono ms-shard-name">
+                                    @shard.ShardName
+                                    @if (shard.IsLive)
+                                    {
+                                        <span class="ms-badge ms-shard-live" title="Pushed by the in-process daemon's tracker">live</span>
+                                    }
+                                    @if (shard.TenantId is { Length: > 0 })
+                                    {
+                                        <span class="ms-badge ms-shard-tenant">@shard.TenantId</span>
+                                    }
+                                </td>
+                                <td class="ms-table-cell" colspan="3">
+                                    @if (!shard.HasProgressRow)
+                                    {
+                                        <span class="ms-muted">never started</span>
+                                    }
+                                </td>
+                                <td class="ms-table-cell ms-shard-progress-cell">
+                                    <ShardProgressBar ShardName="@shard.ShardName"
+                                                      Sequence="shard.Sequence"
+                                                      HighWater="shard.HighWater"
+                                                      Severity="@shard.Severity.ToString().ToLowerInvariant()" />
+                                </td>
+                                <td class="ms-table-cell ms-table-cell-mono ms-shard-lag ms-lag-@shard.Severity.ToString().ToLowerInvariant()">
+                                    @shard.Lag.ToString("N0", CultureInfo.InvariantCulture)
+                                </td>
+                                <td class="ms-table-cell ms-shard-status">
+                                    <StateIndicator State="@(shard.AgentStatus ?? "Unknown")" />
+                                    @if (shard.PauseReason is { Length: > 0 })
+                                    {
+                                        <span class="ms-badge ms-chip-warning ms-shard-pause">@shard.PauseReason</span>
+                                    }
+                                    @if (shard.Failure is { Length: > 0 })
+                                    {
+                                        <span class="ms-text-danger ms-shard-failure" title="@shard.Failure">@shard.Failure</span>
+                                    }
+                                    @if (shard.SkippedCount is > 0)
+                                    {
+                                        <span class="ms-badge ms-shard-skipped" title="Skipped events become dead letters">
+                                            @shard.SkippedCount skipped
+                                        </span>
+                                    }
+                                </td>
+                                <td class="ms-table-cell ms-table-cell-mono ms-shard-last-advanced">
+                                    @(shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never")
+                                </td>
+                                <td class="ms-table-cell ms-table-cell-actions">
+                                    @if (!Capabilities.ReadOnly)
+                                    {
+                                        <button type="button"
+                                                class="ms-btn ms-btn-sm ms-shard-start"
+                                                disabled="@(!ControlEnabled)"
+                                                title="@ControlTitle"
+                                                @onclick="() => StartAgentAsync(shard.ShardName)">
+                                            Start
+                                        </button>
+                                        <button type="button"
+                                                class="ms-btn ms-btn-sm ms-shard-stop"
+                                                disabled="@(!ControlEnabled)"
+                                                title="@ControlTitle"
+                                                @onclick="() => StopAgentAsync(shard.ShardName)">
+                                            Stop
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+
+            <p class="ms-muted ms-projections-footnote">
+                Lag is the high water mark minus the shard's own sequence. Amber above
+                @ProjectionLagThresholds.Amber.ToString("N0", CultureInfo.InvariantCulture) events, red above
+                @ProjectionLagThresholds.Red.ToString("N0", CultureInfo.InvariantCulture).
+            </p>
+        }
+    }
+
+    <RebuildDialog IsOpen="rebuild is not null"
+                   ProjectionName="@(rebuild?.ProjectionName ?? string.Empty)"
+                   EventsToReplay="rebuild?.EventsToReplay ?? 0"
+                   Shards="rebuild?.ShardNames ?? []"
+                   Tables="rebuild?.TablesAffected ?? []"
+                   Lifecycle="@(rebuild?.Lifecycle.ToString() ?? string.Empty)"
+                   IsAsync="@(rebuild?.Lifecycle == JasperFx.Events.Projections.ProjectionLifecycle.Async)"
+                   OnConfirm="ConfirmRebuildAsync"
+                   OnCancel="CancelRebuild" />
+
+    <ConfirmDialog IsOpen="pending is not PendingAction.None"
+                   Title="@PendingTitle"
+                   Message="@PendingMessage"
+                   OnConfirm="ConfirmPendingAsync"
+                   OnCancel="CancelPending" />
+</div>
+
+@code {
+    /// <summary>The two progression corrections, which are confirmed but not typed out.</summary>
+    private enum PendingAction
+    {
+        None,
+        AdvanceHighWaterMark,
+        CorrectProgression
+    }
+
+    private readonly CancellationTokenSource pageCancellation = new();
+
+    private ProjectionsView? view;
+    private IReadOnlyList<StudioOperation> operations = [];
+    private RebuildScope? rebuild;
+    private PendingAction pending = PendingAction.None;
+    private IDisposable? liveLease;
+    private bool loading = true;
+    private bool started;
+    private string? loadError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        Live.Failed += OnRefreshFailedAsync;
+
+        await LoadAsync(pageCancellation.Token);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || started)
+        {
+            return;
+        }
+
+        started = true;
+
+        // The tracker lease and the polling loop are both started after the first render: neither needs
+        // to exist for the page to draw, and neither may delay it.
+        await SubscribeToLiveStateAsync();
+        await Live.StartAsync(Options.Value.RefreshInterval, TickAsync, pageCancellation.Token);
+    }
+
+    /// <summary>
+    /// One poll. The only place this page re-renders from, which is what throttles it: the interval is
+    /// validated to be at least a second, so the tracker's sub-second pushes are folded into the next
+    /// tick rather than each causing a render.
+    /// </summary>
+    private async Task TickAsync(CancellationToken cancellationToken)
+    {
+        await LoadAsync(cancellationToken);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadAsync(CancellationToken cancellationToken)
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            view = null;
+            loading = false;
+            return;
+        }
+
+        try
+        {
+            view = await ProjectionData.GetProjectionsAsync(scope, cancellationToken);
+            operations = ProjectionData.RunningOperations(scope);
+            loadError = null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // On the page, not only in the log: a failure the visitor cannot see is a page that silently
+            // shows yesterday's numbers.
+            loadError = exception.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        loading = view is null;
+        await LoadAsync(pageCancellation.Token);
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        ReleaseLease();
+        await SubscribeToLiveStateAsync();
+        await LoadAsync(pageCancellation.Token);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnRefreshFailedAsync(Exception exception)
+    {
+        loadError = exception.Message;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SubscribeToLiveStateAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
+
+        try
+        {
+            liveLease = await ProjectionData.SubscribeToLiveStateAsync(scope, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // Watching the tracker is an optimisation; the database rows are the page.
+            loadError = exception.Message;
+        }
+    }
+
+    private void ReleaseLease()
+    {
+        liveLease?.Dispose();
+        liveLease = null;
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Gating. The service refuses regardless of what is rendered; this decides what is offered.
+    // ------------------------------------------------------------------------------------------------
+
+    private bool DaemonHostedHere => view?.Daemon.IsHostedHere == true;
+
+    private bool ControlEnabled => Capabilities.IsEnabled(StudioCapability.ControlDaemon) && DaemonHostedHere;
+
+    private bool RebuildEnabled => Capabilities.IsEnabled(StudioCapability.RebuildProjections) && DaemonHostedHere;
+
+    private bool CorrectEnabled => Capabilities.IsEnabled(StudioCapability.CorrectProgression);
+
+    private string ControlTitle => Title(StudioCapability.ControlDaemon, needsDaemon: true);
+
+    private string RebuildTitle => Title(StudioCapability.RebuildProjections, needsDaemon: true);
+
+    private string CorrectTitle => Title(StudioCapability.CorrectProgression, needsDaemon: false);
+
+    private string Title(StudioCapability capability, bool needsDaemon)
+    {
+        if (!Capabilities.IsEnabled(capability))
+        {
+            return $"Set {StudioCapabilityGuard.OptionName(capability)} to true to enable this.";
+        }
+
+        return needsDaemon && !DaemonHostedHere
+            ? "No async daemon is hosted in this process, so there is nothing here to ask."
+            : string.Empty;
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Actions
+    // ------------------------------------------------------------------------------------------------
+
+    private Task StartAgentAsync(string shardName) =>
+        RunAsync($"Started {shardName}", (scope, token) => ProjectionData.StartAgentAsync(scope, shardName, token));
+
+    private Task StopAgentAsync(string shardName) =>
+        RunAsync($"Stopped {shardName}", (scope, token) => ProjectionData.StopAgentAsync(scope, shardName, token));
+
+    private Task StartAllAsync() =>
+        RunAsync("Started every shard", (scope, token) => ProjectionData.StartAllAsync(scope, token));
+
+    private Task StopAllAsync() =>
+        RunAsync("Stopped every shard", (scope, token) => ProjectionData.StopAllAsync(scope, token));
+
+    private Task RestartHighWaterAsync() =>
+        RunAsync("Restarted the high water agent", (scope, token) => ProjectionData.RestartHighWaterAgentAsync(scope, token));
+
+    private async Task OpenRebuildAsync(string projectionName)
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
+
+        try
+        {
+            rebuild = await ProjectionData.DescribeRebuildAsync(scope, projectionName, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            await Toasts.Error(exception.Message);
+        }
+    }
+
+    private void CancelRebuild() => rebuild = null;
+
+    private async Task ConfirmRebuildAsync()
+    {
+        RebuildScope? scope = rebuild;
+        if (scope is null)
+        {
+            return;
+        }
+
+        rebuild = null;
+        await RunAsync(
+            $"Rebuild of {scope.ProjectionName} started",
+            async (studioScope, token) =>
+            {
+                OperationHandle handle = await ProjectionData.RebuildAsync(studioScope, scope.ProjectionName, token);
+                await Toasts.Info($"Rebuild {handle.Id} runs in the background; it will finish even if you leave this page.");
+            });
+    }
+
+    private Task AskAsync(PendingAction action)
+    {
+        pending = action;
+        return Task.CompletedTask;
+    }
+
+    private void CancelPending() => pending = PendingAction.None;
+
+    private async Task ConfirmPendingAsync()
+    {
+        PendingAction action = pending;
+        pending = PendingAction.None;
+
+        switch (action)
+        {
+            case PendingAction.AdvanceHighWaterMark:
+                await RunAsync(
+                    "High water mark advanced to the latest event",
+                    (scope, token) => ProjectionData.AdvanceHighWaterMarkAsync(scope, token));
+                break;
+
+            case PendingAction.CorrectProgression:
+                await RunAsync(
+                    "Progression corrected",
+                    (scope, token) => ProjectionData.CorrectProgressionAsync(scope, token));
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    private string PendingTitle => pending switch
+    {
+        PendingAction.AdvanceHighWaterMark => "Advance the high water mark?",
+        PendingAction.CorrectProgression => "Correct the progression?",
+        _ => string.Empty
+    };
+
+    private string PendingMessage => pending switch
+    {
+        PendingAction.AdvanceHighWaterMark =>
+            "This moves the high water mark to the latest event sequence. Every async projection then treats "
+            + "the events it has not processed as already gone: they will never be projected. This exists for "
+            + "retrofitting projections onto a very large event store, and it is not reversible.",
+        PendingAction.CorrectProgression =>
+            "This pulls the high water mark and every shard's progression back to the highest real event "
+            + "sequence. It only does anything if progression somehow ran ahead of the events themselves.",
+        _ => string.Empty
+    };
+
+    /// <summary>
+    /// Runs one action: report it, refresh, and put any refusal on the screen rather than in the log.
+    /// </summary>
+    private async Task RunAsync(string success, Func<StudioScope, CancellationToken, Task> action)
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await action(scope, pageCancellation.Token);
+            await Toasts.Success(success);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            await Toasts.Error(exception.Message);
+        }
+
+        await LoadAsync(pageCancellation.Token);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Shaping
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Projections worst first, by the lag of their worst shard, then by name. A projection with nothing
+    /// to do sorts under one that is behind, which is the order an operations screen is read in.
+    /// </summary>
+    private IEnumerable<ProjectionInfo> OrderedProjections
+    {
+        get
+        {
+            if (view is null)
+            {
+                return [];
+            }
+
+            return view.Projections
+                .OrderByDescending(WorstLagOf)
+                .ThenBy(static x => x.Name, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private long WorstLagOf(ProjectionInfo projection)
+    {
+        long worst = 0;
+        foreach (ShardProgress shard in ShardsOf(projection))
+        {
+            worst = Math.Max(worst, shard.Lag);
+        }
+
+        return worst;
+    }
+
+    /// <summary>The progress rows belonging to one projection, worst first.</summary>
+    private IEnumerable<ShardProgress> ShardsOf(ProjectionInfo projection)
+    {
+        if (view is null)
+        {
+            return [];
+        }
+
+        return view.Progress.Where(x => string.Equals(x.ProjectionName, projection.Name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string FreshnessLabel => view?.Daemon.IsHostedHere == true ? "live + polling" : "polling";
+
+    private string FreshnessTitle => view is null
+        ? string.Empty
+        : $"Read {State.FormatInSelectedTimeZone(view.ReadAt)}; refreshed every {Options.Value.RefreshInterval.TotalSeconds:0.#} s and paused while this tab is hidden.";
+
+    private string HighWaterAgeText
+    {
+        get
+        {
+            if (view?.Daemon.HighWaterAge(DateTimeOffset.UtcNow) is not { } age)
+            {
+                return string.Empty;
+            }
+
+            return age < TimeSpan.FromMinutes(1)
+                ? string.Create(CultureInfo.InvariantCulture, $"{age.TotalSeconds:0} s ago")
+                : string.Create(CultureInfo.InvariantCulture, $"{age.TotalMinutes:0} min ago");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+        Live.Failed -= OnRefreshFailedAsync;
+
+        await Live.DisposeAsync();
+
+        ReleaseLease();
+
+        await pageCancellation.CancelAsync();
+        pageCancellation.Dispose();
+    }
+}

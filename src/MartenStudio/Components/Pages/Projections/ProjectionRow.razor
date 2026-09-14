@@ -1,0 +1,63 @@
+@* One projection, as the table's group header row: what the host registered, and what can be done to it.
+
+   Parameters are primitives and callbacks for the same reason as everywhere else on this screen - a
+   public [Parameter] cannot have an internal type, and every DTO here is internal (plan D12). *@
+
+<tr class="ms-table-row ms-projection-row" data-projection="@Name">
+    <th scope="rowgroup" class="ms-table-cell ms-projection-name">
+        <span class="ms-mono">@Name</span>
+        <span class="ms-badge ms-lifecycle ms-lifecycle-@Lifecycle.ToLowerInvariant()">@Lifecycle</span>
+        @if (!IsAsync)
+        {
+            <span class="ms-muted ms-projection-note">the async daemon does not run this</span>
+        }
+    </th>
+    <td class="ms-table-cell ms-table-cell-mono ms-projection-type" title="@ImplementationType">@ImplementationType</td>
+    <td class="ms-table-cell ms-table-cell-mono">v@Version</td>
+    <td class="ms-table-cell ms-table-cell-mono">@ShardCount</td>
+    <td class="ms-table-cell ms-projection-subscription">@SubscriptionType</td>
+    <td class="ms-table-cell ms-table-cell-actions" colspan="4">
+        @Actions
+    </td>
+</tr>
+
+@code {
+    /// <summary>The projection's registered name, which is what a rebuild is asked for by.</summary>
+    [Parameter]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Inline, Async or Live.</summary>
+    [Parameter]
+    public string Lifecycle { get; set; } = string.Empty;
+
+    /// <summary>Whether the daemon is the thing that runs it.</summary>
+    [Parameter]
+    public bool IsAsync { get; set; }
+
+    /// <summary>What JasperFx calls this subscription - Projection, Subscription, and so on.</summary>
+    [Parameter]
+    public string SubscriptionType { get; set; } = string.Empty;
+
+    /// <summary>The projection version the host declared.</summary>
+    [Parameter]
+    public uint Version { get; set; }
+
+    /// <summary>The CLR type the host registered.</summary>
+    [Parameter]
+    public string ImplementationType { get; set; } = string.Empty;
+
+    /// <summary>How many shards it runs as.</summary>
+    [Parameter]
+    public int ShardCount { get; set; }
+
+    /// <summary>
+    /// The buttons for this projection, rendered by the page.
+    /// </summary>
+    /// <remarks>
+    /// The page decides what is offered, because the page is what knows the capabilities, the write
+    /// policy and whether a daemon is hosted here. A row that decided that for itself would be a second
+    /// place for the gating to be wrong.
+    /// </remarks>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+}

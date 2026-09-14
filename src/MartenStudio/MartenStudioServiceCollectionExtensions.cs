@@ -4,6 +4,8 @@ using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Documents;
+using MartenStudio.Services.Live;
+using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -124,6 +126,19 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<IStoreInfoService, StoreInfoService>();
         services.TryAddSingleton<ColumnCatalog>();
         services.TryAddScoped<IDocumentWriteService, DocumentWriteService>();
+
+        // Projections and the async daemon. The three singletons are process-wide on purpose: one
+        // snapshot per interval however many circuits are watching, one tracker subscription per
+        // database however many pages are open, and a rebuild that outlives the circuit that started it.
+        services.TryAddSingleton<StudioSnapshotCache>();
+        services.TryAddSingleton<StudioLiveState>();
+        services.TryAddSingleton<StudioOperationTracker>();
+        services.TryAddScoped<DaemonAccessor>();
+        services.TryAddScoped<IProjectionDataService, ProjectionDataService>();
+
+        // Transient: a polling loop belongs to one page, and two pages on one circuit each need their
+        // own timer and their own .NET object reference.
+        services.TryAddTransient<StudioLiveUpdates>();
 
         return services;
     }

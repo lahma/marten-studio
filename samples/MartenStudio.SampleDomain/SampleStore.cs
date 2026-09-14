@@ -1,8 +1,10 @@
 using JasperFx;
+using JasperFx.Events.Projections;
 
 using Marten;
 
 using MartenStudio.SampleDomain.Documents;
+using MartenStudio.SampleDomain.Events;
 
 namespace MartenStudio.SampleDomain;
 
@@ -54,5 +56,23 @@ public static class SampleStore
 
         opts.Schema.For<Invoice>()
             .MultiTenanted();
+
+        // --- Events ---
+        // Everything below is about the event store, its projections and the async daemon. The document
+        // section above is a different packet's; keep the two apart.
+
+        // Correlation, causation and headers are off by default, and a studio that cannot show them
+        // cannot show what a real event store looks like. The seeder sets all three on every append.
+        opts.Events.MetadataConfig.EnableAll();
+
+        // A projection that throws must produce a dead letter and let the shard carry on, rather than
+        // pausing it. ShipmentTracker throws on one event on purpose; without this the demo would come
+        // up with a stopped shard instead of the dead letter it is meant to demonstrate.
+        opts.Projections.Errors.SkipApplyErrors = true;
+
+        // Three registrations, three lifecycles, so the projections screen has each of them to draw.
+        opts.Projections.Add(new OrderSummaryProjection(), ProjectionLifecycle.Inline);
+        opts.Projections.Add(new DailySalesProjection(), ProjectionLifecycle.Async);
+        opts.Projections.Add(new ShipmentTracker(), ProjectionLifecycle.Async);
     }
 }

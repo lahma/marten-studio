@@ -1,0 +1,251 @@
+using JasperFx.Events.Projections;
+
+namespace MartenStudio.Services.Projections;
+
+/// <summary>
+/// One projection as the store was <em>configured</em>, before anything is known about what it has
+/// actually done.
+/// </summary>
+/// <remarks>
+/// Read from <c>store.Options.Events.Projections()</c>, which answers
+/// <c>JasperFx.Events.Subscriptions.ISubscriptionSource</c>. The static model is the list: a projection
+/// that has never run still has a row, and a row with no progress behind it is a fact about the store
+/// rather than an empty result.
+/// </remarks>
+/// <param name="Name">The projection's name, which is also what a rebuild is asked for by.</param>
+/// <param name="Lifecycle">Inline, Async or Live - the property of the registration, not of the type.</param>
+/// <param name="SubscriptionType">Projection, Subscription, or whatever else JasperFx calls it.</param>
+/// <param name="Version">The projection version, bumped by a host to force a rebuild.</param>
+/// <param name="ImplementationTypeName">The CLR type the host registered, for the person reading the row.</param>
+/// <param name="ShardNames">
+/// Every shard this projection runs as, by <c>ShardName.Identity</c> (<c>{Projection}:{Key}</c>). A
+/// projection that is not sharded has exactly one, called <c>All</c>; a composite projection bundles its
+/// stages and reports one.
+/// </param>
+internal sealed record ProjectionInfo(
+    string Name,
+    ProjectionLifecycle Lifecycle,
+    string SubscriptionType,
+    uint Version,
+    string ImplementationTypeName,
+    IReadOnlyList<string> ShardNames)
+{
+    /// <summary>Whether the async daemon is the thing that runs this projection.</summary>
+    public bool IsAsync => Lifecycle == ProjectionLifecycle.Async;
+}
+
+/// <summary>How far behind a shard is, as the table colours it.</summary>
+internal enum LagSeverity
+{
+    /// <summary>Keeping up, or close enough.</summary>
+    Ok,
+
+    /// <summary>Behind by more than <see cref="ProjectionLagThresholds.Amber" /> events.</summary>
+    Warning,
+
+    /// <summary>Behind by more than <see cref="ProjectionLagThresholds.Red" /> events.</summary>
+    Critical
+}
+
+/// <summary>
+/// Where the two lag colours change.
+/// </summary>
+/// <remarks>
+/// Constants for now, deliberately. A real threshold depends on how fast the store is written to, and a
+/// host-configurable one would need a unit ("events" or "seconds behind") that the studio cannot compute
+/// honestly yet. These two numbers are the ones an operator recognises: a thousand events behind is worth
+/// looking at, a hundred thousand is worth acting on.
+/// </remarks>
+internal static class ProjectionLagThresholds
+{
+    /// <summary>Above this many events behind, the row is amber.</summary>
+    public const long Amber = 1_000;
+
+    /// <summary>Above this many events behind, the row is red.</summary>
+    public const long Red = 100_000;
+
+    /// <summary>The severity of one lag.</summary>
+    public static LagSeverity Severity(long lag) => lag switch
+    {
+        > Red => LagSeverity.Critical,
+        > Amber => LagSeverity.Warning,
+        _ => LagSeverity.Ok
+    };
+}
+
+/// <summary>
+/// One shard's progress, as the database records it and the tracker refines it.
+/// </summary>
+/// <param name="ShardName">The shard identity, <c>{Projection}:{Key}</c>.</param>
+/// <param name="ProjectionName">The projection the shard belongs to.</param>
+/// <param name="Sequence">The event sequence this shard has processed up to, or zero when it has never run.</param>
+/// <param name="HighWater">The store's high-water mark, which is what the lag is measured against.</param>
+/// <param name="AgentStatus">What the daemon says the agent is doing, or <see langword="null" /> when nothing said.</param>
+/// <param name="PauseReason">Why it is paused, when it is.</param>
+/// <param name="Failure">The failure that stopped it, flattened to a sentence.</param>
+/// <param name="LastAdvanced">When this shard last moved.</param>
+/// <param name="SkippedCount">How many events were skipped, which is how many dead letters this shard wrote.</param>
+/// <param name="TenantId">The tenant the row is for, under tenant-partitioned progression.</param>
+/// <param name="HasProgressRow">
+/// Whether the database has a progression row for this shard at all. <see langword="false" /> is not the
+/// same as sequence zero: one means "never started", the other means "started and has processed nothing",
+/// and an operations screen that draws them the same way is lying (plan section 4.8).
+/// </param>
+/// <param name="IsLive">Whether the numbers came from the in-process tracker rather than the database.</param>
+internal sealed record ShardProgress(
+    string ShardName,
+    string ProjectionName,
+    long Sequence,
+    long HighWater,
+    string? AgentStatus,
+    string? PauseReason,
+    string? Failure,
+    DateTimeOffset? LastAdvanced,
+    long? SkippedCount,
+    string? TenantId,
+    bool HasProgressRow,
+    bool IsLive)
+{
+    /// <summary>How many events this shard has still to process. Never negative.</summary>
+    public long Lag => Math.Max(0, HighWater - Sequence);
+
+    /// <summary>The colour this row wears.</summary>
+    public LagSeverity Severity => ProjectionLagThresholds.Severity(Lag);
+
+    /// <summary>Whether the shard is paused, by whatever name the daemon gave it.</summary>
+    public bool IsPaused =>
+        PauseReason is { Length: > 0 }
+        || (AgentStatus is { Length: > 0 } status
+            && status.Contains("pause", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Whether the shard reported a failure.</summary>
+    public bool HasFailed => Failure is { Length: > 0 };
+}
+
+/// <summary>Whether the async daemon is running in this process at all.</summary>
+internal enum DaemonHostingState
+{
+    /// <summary>A coordinator is registered here and answered for this database.</summary>
+    Hosted,
+
+    /// <summary>
+    /// No coordinator is registered for this store, so the daemon - if there is one - is somewhere else.
+    /// </summary>
+    /// <remarks>
+    /// A value, not an error (AGENTS.md hard rule 11). The alternative is
+    /// <c>store.BuildProjectionDaemonAsync()</c>, which starts a second daemon beside the host's own and
+    /// the two then fight over the same advisory locks until one hangs.
+    /// </remarks>
+    NotHostedInThisProcess
+}
+
+/// <summary>One running agent, as the daemon reports it.</summary>
+/// <param name="ShardName">The shard identity the agent runs.</param>
+/// <param name="Status">The agent's own status.</param>
+/// <param name="Position">The sequence the agent has reached.</param>
+/// <param name="HighWaterMark">The high-water mark the agent last saw.</param>
+internal sealed record DaemonAgentInfo(string ShardName, string Status, long Position, long HighWaterMark);
+
+/// <summary>
+/// What the daemon card draws.
+/// </summary>
+/// <param name="Hosting">Whether a daemon is reachable from this process.</param>
+/// <param name="IsRunning">Whether that daemon is running. Meaningless when it is not hosted here.</param>
+/// <param name="Mode">The configured <c>DaemonMode</c> - Disabled, Solo or HotCold.</param>
+/// <param name="Agents">The agents the daemon currently has, when it could be asked.</param>
+/// <param name="HasAnyPaused">Whether the daemon reports any paused shard.</param>
+/// <param name="HighWaterLastPolledAt">When the high-water agent last polled, when the daemon says.</param>
+/// <param name="Explanation">Plain words for whoever is reading the card, especially when it is not hosted here.</param>
+internal sealed record DaemonStatus(
+    DaemonHostingState Hosting,
+    bool IsRunning,
+    string Mode,
+    IReadOnlyList<DaemonAgentInfo> Agents,
+    bool HasAnyPaused,
+    DateTimeOffset? HighWaterLastPolledAt,
+    string Explanation)
+{
+    /// <summary>Whether this process can be asked to start, stop or rebuild anything.</summary>
+    public bool IsHostedHere => Hosting == DaemonHostingState.Hosted;
+
+    /// <summary>How long ago the high-water mark was polled, against <paramref name="now" />.</summary>
+    public TimeSpan? HighWaterAge(DateTimeOffset now) =>
+        HighWaterLastPolledAt is { } polled && polled <= now ? now - polled : null;
+}
+
+/// <summary>
+/// Everything the projections page renders for one scope.
+/// </summary>
+/// <param name="Projections">The static model, one row per registered projection.</param>
+/// <param name="Progress">Shard progress, sorted by lag descending.</param>
+/// <param name="Daemon">The daemon card.</param>
+/// <param name="HighWaterMark">The store's highest event sequence, which every lag is measured against.</param>
+/// <param name="ReadAt">When this was read, so a stale poll can be told apart from a stalled shard.</param>
+internal sealed record ProjectionsView(
+    IReadOnlyList<ProjectionInfo> Projections,
+    IReadOnlyList<ShardProgress> Progress,
+    DaemonStatus Daemon,
+    long HighWaterMark,
+    DateTimeOffset ReadAt)
+{
+    /// <summary>An empty view, for a scope that could not be read.</summary>
+    public static ProjectionsView Empty { get; } = new(
+        [],
+        [],
+        new DaemonStatus(DaemonHostingState.NotHostedInThisProcess, false, "Unknown", [], false, null, "Nothing has been read yet."),
+        0,
+        DateTimeOffset.MinValue);
+
+    /// <summary>
+    /// Whether to warn that nothing anywhere appears to be running these projections.
+    /// </summary>
+    /// <remarks>
+    /// Three things have to be true at once: the store has async projections, no daemon is hosted in this
+    /// process, and no shard has ever advanced. Any one of them alone is ordinary - a host that runs its
+    /// daemon in another process is a supported deployment, and the studio must not call it broken.
+    /// </remarks>
+    public bool NoDaemonAnywhere =>
+        !Daemon.IsHostedHere
+        && Projections.Any(static x => x.IsAsync)
+        && !Progress.Any(static x => x.HasProgressRow && x.Sequence > 0);
+}
+
+/// <summary>
+/// The projection facts the Overview page's tiles need, without the whole table.
+/// </summary>
+/// <param name="ProjectionCount">How many projections are registered.</param>
+/// <param name="AsyncProjectionCount">How many of them the daemon is responsible for.</param>
+/// <param name="MaxLag">The worst lag of any shard.</param>
+/// <param name="WorstShardName">The shard that lag belongs to, or <see langword="null" /> when nothing lags.</param>
+/// <param name="PausedCount">How many shards are paused.</param>
+/// <param name="FailedCount">How many shards reported a failure.</param>
+/// <param name="Daemon">The daemon card's state, so the tile can say "not hosted in this process".</param>
+/// <param name="Error">What went wrong reading this, or <see langword="null" />. "Cannot report" is a value.</param>
+internal sealed record ProjectionSummary(
+    int ProjectionCount,
+    int AsyncProjectionCount,
+    long MaxLag,
+    string? WorstShardName,
+    int PausedCount,
+    int FailedCount,
+    DaemonStatus Daemon,
+    string? Error)
+{
+    /// <summary>The colour the Overview tile wears.</summary>
+    public LagSeverity Severity => ProjectionLagThresholds.Severity(MaxLag);
+}
+
+/// <summary>
+/// What a rebuild would cost, shown before the confirm box is typed into.
+/// </summary>
+/// <param name="ProjectionName">The projection that would be rebuilt.</param>
+/// <param name="EventsToReplay">The high-water mark: every event up to it is replayed.</param>
+/// <param name="ShardNames">The shards that would restart.</param>
+/// <param name="TablesAffected">The tables Marten would rewrite, by name.</param>
+/// <param name="Lifecycle">The projection's lifecycle, because rebuilding an inline projection is a different question.</param>
+internal sealed record RebuildScope(
+    string ProjectionName,
+    long EventsToReplay,
+    IReadOnlyList<string> ShardNames,
+    IReadOnlyList<string> TablesAffected,
+    ProjectionLifecycle Lifecycle);

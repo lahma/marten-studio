@@ -1,0 +1,278 @@
+/*
+ * Marten Studio - the projections screen.
+ *
+ * Loaded by Components/Pages/Projections/Projections.razor through <HeadContent>, not by
+ * marten-studio.css: a host that never opens this page never parses these rules, and the projections
+ * packet owns one file rather than a slice of the shared stylesheet.
+ *
+ * Every rule is prefixed ms- and every colour comes from the tokens in marten-studio.css (AGENTS.md
+ * hard rule 3). The three added here are lag thresholds, which have no equivalent token because they
+ * are a scale rather than a status: keeping up, behind, badly behind.
+ */
+
+.ms-projections {
+    --ms-lag-ok: var(--ms-color-success, #16a34a);
+    --ms-lag-warning: var(--ms-color-warning, #d97706);
+    --ms-lag-critical: var(--ms-color-danger, #dc2626);
+    --ms-shard-track: var(--ms-color-surface-alt, #f1f5f9);
+    --ms-shard-indent: 1.5rem;
+}
+
+/* --- toolbar ------------------------------------------------------------------------------------ */
+
+.ms-projections-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.ms-projections-freshness {
+    text-transform: lowercase;
+}
+
+.ms-projections-footnote {
+    margin-top: 0.75rem;
+    font-size: 0.8125rem;
+}
+
+/* --- the daemon card ---------------------------------------------------------------------------- */
+
+.ms-daemon-card {
+    border: 1px solid var(--ms-color-border, #e2e8f0);
+    border-left-width: 4px;
+    border-radius: 6px;
+    background: var(--ms-color-surface, #fff);
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.ms-daemon-success { border-left-color: var(--ms-lag-ok); }
+.ms-daemon-paused { border-left-color: var(--ms-lag-warning); }
+.ms-daemon-error { border-left-color: var(--ms-lag-critical); }
+.ms-daemon-info { border-left-color: var(--ms-color-border-strong, #cbd5e1); }
+
+.ms-daemon-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.ms-daemon-headline {
+    font-weight: 600;
+}
+
+.ms-daemon-facts {
+    margin: 0.5rem 0;
+}
+
+.ms-daemon-explanation,
+.ms-daemon-unavailable {
+    margin: 0.5rem 0 0;
+    max-width: 68ch;
+    font-size: 0.8125rem;
+}
+
+.ms-daemon-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+/* A disabled control on this page always says why: hover text names the exact option (D4). */
+.ms-daemon-actions .ms-button[disabled],
+.ms-projections-table .ms-btn[disabled],
+.ms-projections-table .ms-button[disabled] {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* --- operations --------------------------------------------------------------------------------- */
+
+.ms-operations {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.ms-operation {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--ms-color-border, #e2e8f0);
+    border-radius: 6px;
+    background: var(--ms-color-surface, #fff);
+}
+
+.ms-operation-detail {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    font-size: 0.8125rem;
+}
+
+.ms-operation-running { border-left: 3px solid var(--ms-lag-warning); }
+.ms-operation-succeeded { border-left: 3px solid var(--ms-lag-ok); }
+.ms-operation-failed { border-left: 3px solid var(--ms-lag-critical); }
+.ms-operation-cancelled { border-left: 3px solid var(--ms-color-border-strong, #cbd5e1); }
+
+/* --- the table ---------------------------------------------------------------------------------- */
+
+.ms-projections-table {
+    width: 100%;
+}
+
+.ms-projection-row > * {
+    border-top: 2px solid var(--ms-color-border, #e2e8f0);
+    background: var(--ms-color-surface-alt, #f1f5f9);
+}
+
+.ms-projection-name {
+    text-align: left;
+    font-weight: 600;
+}
+
+.ms-projection-note {
+    margin-left: 0.5rem;
+    font-size: 0.75rem;
+}
+
+.ms-projection-type {
+    max-width: 18rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-lifecycle {
+    margin-left: 0.5rem;
+}
+
+.ms-lifecycle-inline { border-color: var(--ms-color-border-strong, #cbd5e1); }
+.ms-lifecycle-async { border-color: var(--ms-color-primary, #2563eb); }
+.ms-lifecycle-live { border-color: var(--ms-color-secondary, #64748b); }
+
+.ms-shard-name {
+    padding-left: var(--ms-shard-indent);
+}
+
+.ms-shard-live,
+.ms-shard-tenant,
+.ms-shard-skipped,
+.ms-shard-pause {
+    margin-left: 0.375rem;
+    font-size: 0.6875rem;
+}
+
+.ms-shard-failure {
+    display: inline-block;
+    max-width: 24rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+}
+
+.ms-shard-lag {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-lag-ok { color: var(--ms-color-text-secondary, #475569); }
+.ms-lag-warning { color: var(--ms-lag-warning); font-weight: 600; }
+.ms-lag-critical { color: var(--ms-lag-critical); font-weight: 700; }
+
+.ms-shard-row-warning > .ms-shard-lag,
+.ms-shard-row-critical > .ms-shard-lag {
+    font-variant-numeric: tabular-nums;
+}
+
+/* --- the progress bar --------------------------------------------------------------------------- */
+
+.ms-shard-progress {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 12rem;
+}
+
+.ms-shard-progress-bar {
+    flex: 1 1 auto;
+    height: 0.5rem;
+    min-width: 6rem;
+    border-radius: 999px;
+    background: var(--ms-shard-track);
+    overflow: hidden;
+}
+
+.ms-shard-progress-fill {
+    display: block;
+    height: 100%;
+    background: var(--ms-lag-ok);
+    transition: width 200ms linear;
+}
+
+.ms-shard-warning .ms-shard-progress-fill { background: var(--ms-lag-warning); }
+.ms-shard-critical .ms-shard-progress-fill { background: var(--ms-lag-critical); }
+
+.ms-shard-progress-numbers {
+    flex: 0 0 auto;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--ms-color-text-secondary, #475569);
+}
+
+.ms-shard-progress-separator {
+    margin: 0 0.125rem;
+}
+
+/* --- the rebuild dialog ------------------------------------------------------------------------- */
+
+.ms-rebuild-dialog {
+    max-width: 44rem;
+}
+
+.ms-rebuild-summary {
+    max-width: 60ch;
+}
+
+.ms-rebuild-scope {
+    margin: 0.75rem 0;
+}
+
+.ms-rebuild-inline-warning {
+    margin: 0.75rem 0;
+}
+
+.ms-rebuild-input {
+    width: 100%;
+    margin: 0.25rem 0 0.75rem;
+}
+
+.ms-no-daemon-banner {
+    margin-bottom: 1rem;
+}
+
+/* Motion is a nicety; a person who asked for less of it gets none. */
+@media (prefers-reduced-motion: reduce) {
+    .ms-shard-progress-fill {
+        transition: none;
+    }
+}
+
+@media (max-width: 900px) {
+    .ms-projections-table .ms-projection-type,
+    .ms-projections-table .ms-shard-last-advanced {
+        display: none;
+    }
+
+    .ms-shard-progress {
+        min-width: 8rem;
+    }
+}

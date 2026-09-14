@@ -184,10 +184,11 @@ public class StudioLayoutTests
 
         layout.TextOfAll(".ms-sidebar-section").Should().Equal("Data", "Events", "Operations", "System");
 
-        // Only Overview and Activity have an @page in this release; the rest are visible and disabled, so
-        // the information architecture is legible from the first version.
+        // Only the pages that have an @page yet are links; the rest are visible and disabled, so the
+        // information architecture is legible from the first version. This list grows one packet at a
+        // time - Projections joined it in P5.
         layout.TextOfAll(".ms-nav-link:not(.ms-nav-link-disabled) .ms-nav-link-text")
-            .Should().Equal("Overview", "Activity");
+            .Should().Equal("Overview", "Projections", "Activity");
 
         layout.FindAll(".ms-nav-link-disabled").Should().OnlyContain(x =>
             x.GetAttribute("title") == "Coming in a later release" && x.GetAttribute("aria-disabled") == "true");
@@ -203,7 +204,7 @@ public class StudioLayoutTests
 
         // In custom-path mode the shell roots the document at the studio itself, so links are relative to
         // the studio root and an empty href resolves to it.
-        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal("", "activity");
+        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal("", "projections", "activity");
     }
 
     [Fact]
@@ -213,7 +214,8 @@ public class StudioLayoutTests
 
         var layout = RenderLayout(context);
 
-        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal("marten", "marten/activity");
+        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href"))
+            .Should().Equal("marten", "marten/projections", "marten/activity");
     }
 
     // -------------------------------------------------------------------------------------------

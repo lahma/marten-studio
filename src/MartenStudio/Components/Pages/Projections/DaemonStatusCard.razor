@@ -1,0 +1,107 @@
+@* The daemon card: whether the async daemon is running here, and in plain words when it is not.
+
+   "Not hosted in this process" is a value, not a failure (AGENTS.md hard rule 11): an application whose
+   daemon runs elsewhere is a supported deployment, and the page still renders every progress row out of
+   the database. Only the buttons go away. *@
+
+<section class="ms-daemon-card ms-daemon-@StateClass" aria-label="Async daemon">
+    <header class="ms-daemon-card-header">
+        <span class="ms-state-indicator">
+            <span class="ms-state-dot ms-state-@StateClass" aria-hidden="true"></span>
+            <span class="ms-state-label ms-daemon-headline">@Headline</span>
+        </span>
+        <span class="ms-badge ms-daemon-mode" title="MartenStudioOptions cannot change this: it is the host's AddAsyncDaemon setting">
+            Mode: @Mode
+        </span>
+    </header>
+
+    <div class="ms-kv ms-daemon-facts">
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">Hosting</span>
+            <span class="ms-kv-value">@(IsHostedHere ? "This process" : "Not this process")</span>
+        </div>
+        @if (IsHostedHere)
+        {
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Agents</span>
+                <span class="ms-kv-value ms-mono">@AgentCount</span>
+            </div>
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Paused shards</span>
+                <span class="ms-kv-value">@(HasAnyPaused ? "yes" : "none")</span>
+            </div>
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">High water polled</span>
+                <span class="ms-kv-value">@(string.IsNullOrWhiteSpace(HighWaterAge) ? "unknown" : HighWaterAge)</span>
+            </div>
+        }
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">High water mark</span>
+            <span class="ms-kv-value ms-mono">@HighWaterMark.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</span>
+        </div>
+    </div>
+
+    @if (!IsHostedHere)
+    {
+        <p class="ms-muted ms-daemon-explanation">@Explanation</p>
+    }
+
+    @if (ChildContent is not null)
+    {
+        <div class="ms-daemon-card-content">@ChildContent</div>
+    }
+</section>
+
+@code {
+    /// <summary>Whether a coordinator answered for this database in this process.</summary>
+    [Parameter]
+    public bool IsHostedHere { get; set; }
+
+    /// <summary>Whether that daemon says it is running.</summary>
+    [Parameter]
+    public bool IsRunning { get; set; }
+
+    /// <summary>The configured daemon mode - Disabled, Solo or HotCold.</summary>
+    [Parameter]
+    public string Mode { get; set; } = "Unknown";
+
+    /// <summary>How many agents the daemon currently has.</summary>
+    [Parameter]
+    public int AgentCount { get; set; }
+
+    /// <summary>Whether any shard is paused.</summary>
+    [Parameter]
+    public bool HasAnyPaused { get; set; }
+
+    /// <summary>How long ago the high-water agent polled, already formatted.</summary>
+    [Parameter]
+    public string? HighWaterAge { get; set; }
+
+    /// <summary>The store's highest event sequence.</summary>
+    [Parameter]
+    public long HighWaterMark { get; set; }
+
+    /// <summary>Plain words about the state, shown when the daemon is not hosted here.</summary>
+    [Parameter]
+    public string Explanation { get; set; } = string.Empty;
+
+    /// <summary>The controls the page puts inside the card, so the card owns no gating of its own.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private string Headline => (IsHostedHere, IsRunning, HasAnyPaused) switch
+    {
+        (false, _, _) => "Not hosted in this process",
+        (true, false, _) => "Hosted, stopped",
+        (true, true, true) => "Hosted, running, paused shards",
+        _ => "Hosted and running"
+    };
+
+    private string StateClass => (IsHostedHere, IsRunning, HasAnyPaused) switch
+    {
+        (false, _, _) => "info",
+        (true, false, _) => "error",
+        (true, true, true) => "paused",
+        _ => "success"
+    };
+}

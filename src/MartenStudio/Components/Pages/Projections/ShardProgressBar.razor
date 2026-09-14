@@ -1,0 +1,54 @@
+@* One shard's position against the high-water mark, as a bar and a number.
+
+   Every parameter is a primitive on purpose: the Razor compiler emits a public component class, and a
+   public [Parameter] cannot have an internal type - which every DTO in this assembly is. The page holds
+   the ShardProgress record and hands this the four numbers it draws. *@
+
+<div class="ms-shard-progress ms-shard-@Severity">
+    <div class="ms-shard-progress-bar" role="progressbar"
+         aria-valuenow="@Sequence" aria-valuemin="0" aria-valuemax="@Math.Max(HighWater, Sequence)"
+         aria-label="@($"{ShardName} has processed {Sequence} of {HighWater} events")">
+        <span class="ms-shard-progress-fill" style="width: @PercentText"></span>
+    </div>
+    <div class="ms-shard-progress-numbers">
+        <span class="ms-mono ms-shard-progress-sequence">@Sequence.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</span>
+        <span class="ms-shard-progress-separator">/</span>
+        <span class="ms-mono ms-shard-progress-high-water">@HighWater.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</span>
+    </div>
+</div>
+
+@code {
+    /// <summary>The shard this bar is about, for the accessible label.</summary>
+    [Parameter]
+    public string ShardName { get; set; } = string.Empty;
+
+    /// <summary>The event sequence the shard has reached.</summary>
+    [Parameter]
+    public long Sequence { get; set; }
+
+    /// <summary>The store's high-water mark, which is what "done" means here.</summary>
+    [Parameter]
+    public long HighWater { get; set; }
+
+    /// <summary><c>ok</c>, <c>warning</c> or <c>critical</c> - the lag colour, decided by the service.</summary>
+    [Parameter]
+    public string Severity { get; set; } = "ok";
+
+    /// <summary>
+    /// A shard that has never run and a store with no events both render as a full bar rather than an
+    /// empty one: nothing outstanding is nothing outstanding, and an empty bar reads as "stuck".
+    /// </summary>
+    private string PercentText
+    {
+        get
+        {
+            if (HighWater <= 0)
+            {
+                return "100%";
+            }
+
+            double ratio = Math.Clamp((double) Sequence / HighWater, 0d, 1d);
+            return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{ratio * 100:0.##}%");
+        }
+    }
+}

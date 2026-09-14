@@ -1,0 +1,74 @@
+@* One long-running operation, watched by id.
+
+   A rebuild runs detached in StudioOperationTracker: it does not belong to the circuit that started it,
+   which is why this shows an id and a state rather than a spinner tied to a button. Closing the tab and
+   coming back finds the same row. *@
+
+<div class="ms-operation ms-operation-@State.ToLowerInvariant()" role="status" data-operation="@Id">
+    <span class="ms-state-indicator">
+        <span class="ms-state-dot ms-state-@StateClass" aria-hidden="true"></span>
+        <span class="ms-state-label">@Kind @Target - @State</span>
+    </span>
+
+    <span class="ms-muted ms-operation-detail">
+        <span class="ms-mono">@Id</span>
+        <span class="ms-operation-elapsed">@Elapsed</span>
+        @if (!string.IsNullOrWhiteSpace(Message))
+        {
+            <span class="ms-operation-message">@Message</span>
+        }
+    </span>
+
+    @if (IsRunning && OnCancel.HasDelegate)
+    {
+        <button type="button" class="ms-btn ms-btn-sm ms-operation-cancel" @onclick="CancelAsync">Cancel</button>
+    }
+</div>
+
+@code {
+    /// <summary>The handle the tracker gave out.</summary>
+    [Parameter]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>What sort of operation it is.</summary>
+    [Parameter]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>What it is being done to.</summary>
+    [Parameter]
+    public string Target { get; set; } = string.Empty;
+
+    /// <summary>Running, Succeeded, Failed or Cancelled.</summary>
+    [Parameter]
+    public string State { get; set; } = "Running";
+
+    /// <summary>Whether it is still going.</summary>
+    [Parameter]
+    public bool IsRunning { get; set; }
+
+    /// <summary>The outcome or the failure.</summary>
+    [Parameter]
+    public string? Message { get; set; }
+
+    /// <summary>How long it has taken, in milliseconds.</summary>
+    [Parameter]
+    public long ElapsedMilliseconds { get; set; }
+
+    /// <summary>Asks the tracker to cancel it. Absent when the page offers no cancellation.</summary>
+    [Parameter]
+    public EventCallback<string> OnCancel { get; set; }
+
+    private string Elapsed => ElapsedMilliseconds <= 0
+        ? string.Empty
+        : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{ElapsedMilliseconds / 1000d:0.0} s");
+
+    private string StateClass => State switch
+    {
+        "Succeeded" => "success",
+        "Failed" => "error",
+        "Cancelled" => "paused",
+        _ => "executing"
+    };
+
+    private async Task CancelAsync() => await OnCancel.InvokeAsync(Id);
+}

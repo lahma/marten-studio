@@ -37,6 +37,7 @@ builder.Services.AddAuthorization(SamplePolicies.Configure);
 builder.Services
     .AddMarten(options => SampleStore.Configure(options, connectionString))
     .UseLightweightSessions()
+    .AddAsyncDaemon(JasperFx.Events.Daemon.DaemonMode.Solo)
     .InitializeWith(new SampleDataSeeder());
 
 builder.Services.AddMartenStudio(options =>
