@@ -62,6 +62,13 @@ internal sealed class MultiDatabaseEventsFixture : IAsyncDisposable
     /// <summary>The stream seeded into <see cref="DatabaseB" />.</summary>
     public Guid StreamInB { get; } = Guid.CreateVersion7();
 
+    /// <summary>
+    /// A second stream in <see cref="DatabaseB" />, for the archive test alone: archiving hides a stream
+    /// from aggregate replay, and the tests in this class run in no fixed order, so the stream the other
+    /// tests read must never be the one that gets archived.
+    /// </summary>
+    public Guid ArchiveTargetInB { get; } = Guid.CreateVersion7();
+
     /// <summary>The dead letter seeded into <see cref="DatabaseA" />.</summary>
     public Guid DeadLetterInA { get; } = Guid.CreateVersion7();
 
@@ -136,6 +143,10 @@ internal sealed class MultiDatabaseEventsFixture : IAsyncDisposable
     {
         await SeedOneAsync(DatabaseA, StreamInA, DeadLetterInA, "alpha");
         await SeedOneAsync(DatabaseB, StreamInB, DeadLetterInB, "beta");
+
+        await using IDocumentSession session = SessionFor(DatabaseB);
+        session.Events.StartStream<OrderSummary>(ArchiveTargetInB, new OrderPlaced("customer-beta-archived"));
+        await session.SaveChangesAsync();
     }
 
     private async Task SeedOneAsync(IMartenDatabase database, Guid streamId, Guid deadLetterId, string label)
@@ -288,9 +299,11 @@ public class MultiDatabaseEventsTests(MultiDatabaseStoreFixture fixture) : IClas
         CancellationToken token = TestContext.Current.CancellationToken;
 
         await Events.Service.ArchiveStreamAsync(
-            MultiDatabaseEventsFixture.ScopeFor(Events.DatabaseB), Events.StreamInB.ToString(), token);
+            MultiDatabaseEventsFixture.ScopeFor(Events.DatabaseB), Events.ArchiveTargetInB.ToString(), token);
 
-        (await IsArchivedAsync(Events.DatabaseB, Events.StreamInB)).Should().BeTrue("the scope named B");
+        (await IsArchivedAsync(Events.DatabaseB, Events.ArchiveTargetInB)).Should().BeTrue("the scope named B");
+        (await IsArchivedAsync(Events.DatabaseB, Events.StreamInB)).Should().BeFalse(
+            "only the stream the call named is archived");
         (await IsArchivedAsync(Events.DatabaseA, Events.StreamInA)).Should().BeFalse(
             "A is the store's default and nothing asked for it");
 

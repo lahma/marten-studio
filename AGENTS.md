@@ -482,6 +482,10 @@ src/MartenStudio/Components/Pages/Documents/  The documents browser: collections
 src/MartenStudio/Components/Pages/Query/  The query screen: mode switch, editor, result grid, saved queries
 tests/MartenStudio.Tests/Query/            Composer, guard, export, saved queries, the page - no database
 tests/MartenStudio.Integration.Tests/Query/  Live Postgres: Marten where-clause mode and the SQL console
+samples/MartenStudio.SampleDomain/Generation/  The demo data generator: size presets, the generator,
+                                         truncation, the word lists and the run marker
+samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpoints, progress, daemon lag
+tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),
