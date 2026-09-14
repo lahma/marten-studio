@@ -1,0 +1,69 @@
+@inject IJSRuntime JsRuntime
+
+@*
+    Copy and download for one block of SQL. Both calls are guarded: JavaScript interop is unavailable
+    during prerendering and a browser can refuse the clipboard outright, and neither is a reason for a
+    page to stop working.
+*@
+
+<button type="button" class="ms-button" disabled="@Disabled" @onclick="CopyAsync">@copyLabel</button>
+<button type="button" class="ms-button" disabled="@Disabled" @onclick="DownloadAsync">Download .sql</button>
+
+@code {
+    private string copyLabel = "Copy SQL";
+
+    /// <summary>The text the buttons act on.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>The file name the download offers.</summary>
+    [Parameter]
+    public string FileName { get; set; } = "marten-studio.sql";
+
+    /// <summary>Whether there is anything to act on.</summary>
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    protected override void OnParametersSet() => copyLabel = "Copy SQL";
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { Text });
+            copyLabel = copied ? "Copied" : "Copy failed";
+        }
+        catch (JSException)
+        {
+            copyLabel = "Copy failed";
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            copyLabel = "Copy failed";
+        }
+        catch (InvalidOperationException)
+        {
+            copyLabel = "Copy failed";
+        }
+    }
+
+    private async Task DownloadAsync()
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync(
+                "martenStudio.download.text",
+                new object?[] { FileName, "application/sql", Text });
+        }
+        catch (JSException)
+        {
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+}

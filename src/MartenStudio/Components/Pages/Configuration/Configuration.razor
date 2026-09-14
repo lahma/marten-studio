@@ -1,0 +1,381 @@
+@page "/marten/config"
+@using MartenStudio.Services.Configuration
+@implements IDisposable
+@inject IConfigurationService ConfigurationData
+@inject StudioState State
+
+<PageTitle>Configuration</PageTitle>
+
+@* Linked from the page body rather than from <HeadContent>: HeadContent renders into the single head
+   section outlet and the last provider wins, so a page that used it would replace the layout's link to
+   marten-studio.css and lose the whole design system. *@
+<link rel="stylesheet" href="_content/MartenStudio/css/parts/schema.css" />
+
+<div class="ms-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Configuration</h1>
+    </div>
+
+    <p class="ms-schema-note">
+        Everything below is what this application told Marten, read back out. Marten Studio never changes
+        it, and never shows a connection string or a credential - a database is identified here by its
+        server, port, name and schema.
+    </p>
+
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (error is { Length: > 0 })
+    {
+        <ErrorAlert Message="@error" OnRetry="LoadAsync" />
+    }
+    else if (configuration is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No Marten store to show</p>
+            <p class="ms-empty-description">
+                This application registered no Marten store that you are authorized to see.
+            </p>
+        </div>
+    }
+    else
+    {
+        <section class="ms-config-card">
+            <div class="ms-config-card-header">
+                <h2 class="ms-config-card-title">Store</h2>
+                <span class="ms-config-card-subtitle">@configuration.Store.StoreKey</span>
+            </div>
+            <div class="ms-config-card-body">
+                <div class="ms-config-grid">
+                    @foreach (ConfigurationValue value in configuration.Store.Values)
+                    {
+                        <ConfigurationValueRow Name="@value.Name" Value="@value.Value" Member="@value.Member" @key="value.Name" />
+                    }
+                </div>
+
+                <h3 class="ms-config-group-title">Databases</h3>
+                @if (configuration.Store.DatabaseNotice is { Length: > 0 } notice)
+                {
+                    <div class="ms-alert ms-alert-warning" role="status">
+                        <div class="ms-alert-content">
+                            <p>The database list could not be read: @notice</p>
+                        </div>
+                    </div>
+                }
+                else if (configuration.Store.Databases.Count == 0)
+                {
+                    <p class="ms-schema-note">This store reported no databases.</p>
+                }
+                else
+                {
+                    <table class="ms-table">
+                        <thead>
+                            <tr>
+                                <th>Identity</th>
+                                <th>Engine</th>
+                                <th>Server</th>
+                                <th>Port</th>
+                                <th>Database</th>
+                                <th>Schema</th>
+                                <th>Tenants</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (ConfiguredDatabase database in configuration.Store.Databases)
+                            {
+                                <tr class="ms-table-row" @key="database.Identity">
+                                    <td class="ms-table-cell ms-table-cell-mono">@database.Identity</td>
+                                    <td class="ms-table-cell">@database.Engine</td>
+                                    <td class="ms-table-cell ms-table-cell-mono">@database.Server</td>
+                                    <td class="ms-table-cell ms-num">@(database.Port?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "default")</td>
+                                    <td class="ms-table-cell ms-table-cell-mono">@database.DatabaseName</td>
+                                    <td class="ms-table-cell ms-table-cell-mono">@database.Schema</td>
+                                    <td class="ms-table-cell ms-table-cell-mono">@(database.TenantIds.Count == 0 ? "-" : string.Join(", ", database.TenantIds))</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </section>
+
+        <section class="ms-config-card">
+            <div class="ms-config-card-header">
+                <h2 class="ms-config-card-title">Event store</h2>
+                <span class="ms-config-card-subtitle">
+                    @configuration.Events.KnownEventTypeCount event types, @configuration.Events.ProjectionCount projections
+                </span>
+            </div>
+            <div class="ms-config-card-body">
+                <div class="ms-config-grid">
+                    @foreach (ConfigurationValue value in configuration.Events.Values)
+                    {
+                        <ConfigurationValueRow Name="@value.Name" Value="@value.Value" Member="@value.Member" @key="value.Name" />
+                    }
+                </div>
+
+                <h3 class="ms-config-group-title">Event metadata</h3>
+                <div class="ms-config-grid">
+                    @foreach (ConfigurationValue value in configuration.Events.Metadata)
+                    {
+                        <ConfigurationValueRow Name="@value.Name" Value="@value.Value" Member="@value.Member" @key="value.Name" />
+                    }
+                </div>
+
+                <h3 class="ms-config-group-title">Async daemon</h3>
+                <div class="ms-config-grid">
+                    @foreach (ConfigurationValue value in configuration.Events.Daemon)
+                    {
+                        <ConfigurationValueRow Name="@value.Name" Value="@value.Value" Member="@value.Member" @key="value.Name" />
+                    }
+                </div>
+            </div>
+        </section>
+
+        <h2 class="ms-section-title">Document types</h2>
+        <SearchFilter Placeholder="Filter by alias, type or table" OnFilterChanged="OnFilterChangedAsync" />
+
+        @if (FilteredDocumentTypes.Count == 0)
+        {
+            <div class="ms-empty">
+                <p class="ms-empty-title">No document type matches</p>
+                <p class="ms-empty-description">
+                    @(configuration.DocumentTypes.Count == 0
+                        ? "This store has no registered document types."
+                        : "No registered document type matches that filter.")
+                </p>
+            </div>
+        }
+
+        @foreach (DocumentTypeConfiguration documentType in FilteredDocumentTypes)
+        {
+            <section class="ms-config-card" @key="documentType.Alias">
+                <button type="button" class="ms-config-card-header" @onclick="() => ToggleAsync(documentType.Alias)">
+                    <h3 class="ms-config-card-title">@documentType.Alias</h3>
+                    <span class="ms-config-card-subtitle">@documentType.TypeName - @documentType.Table</span>
+                </button>
+
+                @if (IsExpanded(documentType.Alias))
+                {
+                    <div class="ms-config-card-body">
+                        <div class="ms-config-grid">
+                            @foreach (ConfigurationValue value in documentType.Values)
+                            {
+                                <ConfigurationValueRow Name="@value.Name" Value="@value.Value" Member="@value.Member" @key="value.Name" />
+                            }
+                        </div>
+
+                        <h4 class="ms-config-group-title">Metadata columns</h4>
+                        <p class="ms-schema-note ms-mono">
+                            @(documentType.MetadataColumns.Count == 0 ? "id, data only" : string.Join(", ", documentType.MetadataColumns))
+                        </p>
+
+                        <h4 class="ms-config-group-title">Duplicated fields</h4>
+                        @if (documentType.DuplicatedFields.Count == 0)
+                        {
+                            <p class="ms-schema-note">None. <code>StoreOptions.Schema.For&lt;T&gt;().Duplicate(x =&gt; x.Property)</code> adds one.</p>
+                        }
+                        else
+                        {
+                            <table class="ms-table">
+                                <thead>
+                                    <tr>
+                                        <th>Member</th>
+                                        <th>Column</th>
+                                        <th>Postgres type</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (DuplicatedFieldConfiguration field in documentType.DuplicatedFields)
+                                    {
+                                        <tr class="ms-table-row" @key="field.Column">
+                                            <td class="ms-table-cell ms-table-cell-mono">@field.Member</td>
+                                            <td class="ms-table-cell ms-table-cell-mono">@field.Column</td>
+                                            <td class="ms-table-cell ms-table-cell-mono">@field.PgType</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+
+                        <h4 class="ms-config-group-title">Indexes</h4>
+                        @if (documentType.Indexes.Count == 0)
+                        {
+                            <p class="ms-schema-note">None beyond the primary key.</p>
+                        }
+                        else
+                        {
+                            <table class="ms-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Definition</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (ConfiguredIndex index in documentType.Indexes)
+                                    {
+                                        <tr class="ms-table-row" @key="index.Name">
+                                            <td class="ms-table-cell ms-table-cell-mono">@index.Name</td>
+                                            <td class="ms-table-cell ms-index-definition">@index.Definition</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+
+                        <h4 class="ms-config-group-title">Foreign keys</h4>
+                        @if (documentType.ForeignKeys.Count == 0)
+                        {
+                            <p class="ms-schema-note">None.</p>
+                        }
+                        else
+                        {
+                            <table class="ms-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Columns</th>
+                                        <th>References</th>
+                                        <th>On delete</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (ConfiguredForeignKey key in documentType.ForeignKeys)
+                                    {
+                                        <tr class="ms-table-row" @key="key.Name">
+                                            <td class="ms-table-cell ms-table-cell-mono">@key.Name</td>
+                                            <td class="ms-table-cell ms-table-cell-mono">@key.Columns</td>
+                                            <td class="ms-table-cell ms-table-cell-mono">@key.LinkedTable (@key.LinkedColumns)</td>
+                                            <td class="ms-table-cell">@key.OnDelete</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+
+                        <h4 class="ms-config-group-title">Subclasses</h4>
+                        @if (documentType.SubClasses.Count == 0)
+                        {
+                            <p class="ms-schema-note">None; this type is not a hierarchy.</p>
+                        }
+                        else
+                        {
+                            <ul class="ms-suggestion-list">
+                                @foreach (ConfiguredSubClass subClass in documentType.SubClasses)
+                                {
+                                    <li @key="subClass.Alias">
+                                        <code class="ms-suggestion-line">@subClass.Alias - @subClass.TypeName</code>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                }
+            </section>
+        }
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
+
+    private StudioConfiguration? configuration;
+    private string filter = string.Empty;
+    private string? error;
+    private bool loading = true;
+
+    private List<DocumentTypeConfiguration> FilteredDocumentTypes
+    {
+        get
+        {
+            if (configuration is null)
+            {
+                return [];
+            }
+
+            if (string.IsNullOrWhiteSpace(filter))
+            {
+                return [.. configuration.DocumentTypes];
+            }
+
+            string needle = filter.Trim();
+            List<DocumentTypeConfiguration> matches = [];
+            foreach (DocumentTypeConfiguration documentType in configuration.DocumentTypes)
+            {
+                if (documentType.Matches(needle))
+                {
+                    matches.Add(documentType);
+                }
+            }
+
+            return matches;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+
+        // Idempotent, and normally already done by StudioLayout. Called here so the page also works when
+        // it is the only thing rendered, which is what a component test does.
+        await State.EnsureInitializedAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StudioScope? scope = State.ActiveScope;
+            configuration = scope is null ? null : await ConfigurationData.DescribeAsync(scope, lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page rather than only in the log: a failure the visitor cannot see is a page that
+            // silently shows nothing.
+            error = exception.Message;
+        }
+        finally
+        {
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private bool IsExpanded(string alias) => expanded.Contains(alias);
+
+    private Task ToggleAsync(string alias)
+    {
+        if (!expanded.Remove(alias))
+        {
+            expanded.Add(alias);
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnFilterChangedAsync(string value)
+    {
+        filter = value;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnScopeChangedAsync() => await LoadAsync();
+
+    public void Dispose()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

@@ -1,0 +1,66 @@
+@*
+    The migration script, with copy and download.
+
+    Two naming notes. It is MigrationPreviewPanel rather than MigrationPreview because the record it
+    renders is called MigrationPreview, and two types of that name in scope would be one ambiguity for
+    every reader. And its parameters are primitives rather than that record, because the Razor compiler
+    emits a public component class and a public [Parameter] cannot have an internal type - the same
+    reason CapabilityDisabled takes a capability name instead of the enum. The data seam is internal by
+    design (plan D12), so every component in this repository takes primitives.
+*@
+
+@if (Notice is { Length: > 0 })
+{
+    <div class="ms-alert ms-alert-warning" role="status">
+        <div class="ms-alert-content">
+            <p>@Notice</p>
+        </div>
+    </div>
+}
+
+@if (HasSql)
+{
+    <div class="ms-schema-toolbar">
+        <span class="ms-schema-note">
+            @ObjectSummary Nothing below has been run: producing this reads the catalog and writes to a
+            string.
+        </span>
+        <span class="ms-schema-toolbar-spacer"></span>
+        <SqlActions Text="@Sql" FileName="@FileName" />
+    </div>
+
+    <SqlText Sql="@Sql" Label="Migration SQL" />
+}
+else if (Notice is null)
+{
+    <div class="ms-empty">
+        <p class="ms-empty-title">Nothing to apply</p>
+        <p class="ms-empty-description">
+            Marten has no changes to make to this database - the preview is empty.
+        </p>
+    </div>
+}
+
+@code {
+    /// <summary>The migration script, exactly as it would be executed.</summary>
+    [Parameter]
+    public string? Sql { get; set; }
+
+    /// <summary>How many schema objects the script touches.</summary>
+    [Parameter]
+    public int ObjectCount { get; set; }
+
+    /// <summary>What could not be rendered, or <see langword="null" />.</summary>
+    [Parameter]
+    public string? Notice { get; set; }
+
+    /// <summary>The file name the download offers.</summary>
+    [Parameter]
+    public string FileName { get; set; } = "marten-migration.sql";
+
+    private bool HasSql => !string.IsNullOrWhiteSpace(Sql);
+
+    private string ObjectSummary => ObjectCount == 1
+        ? "One schema object would change."
+        : $"{ObjectCount} schema objects would change.";
+}

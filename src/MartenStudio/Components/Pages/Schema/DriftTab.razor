@@ -1,0 +1,362 @@
+@using MartenStudio.Services.Schema
+@implements IDisposable
+@inject ISchemaDataService SchemaData
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject ToastService Toasts
+
+@*
+    Nothing here runs on navigation. Creating a migration opens connections and reads the whole catalog
+    of every schema the store owns, which on a large database is seconds - so the tab arrives with two
+    buttons and a sentence, and the visitor decides when to pay for it (packet P7, acceptance 7).
+*@
+
+<div class="ms-schema-toolbar">
+    <span class="ms-drift-badge @BadgeClass">@check.BadgeText</span>
+    <button type="button" class="ms-button ms-button-primary" disabled="@busy" @onclick="CheckAsync">
+        Check schema
+    </button>
+    <button type="button" class="ms-button" disabled="@busy" @onclick="PreviewAsync">
+        Preview migration
+    </button>
+    <span class="ms-schema-toolbar-spacer"></span>
+    @if (busy)
+    {
+        <span class="ms-schema-progress">
+            <span class="ms-spinner ms-spinner-sm"></span>
+            <span>@progress</span>
+        </span>
+    }
+</div>
+
+@if (error is { Length: > 0 })
+{
+    <ErrorAlert Message="@error" OnRetry="CheckAsync" />
+}
+
+@if (check.Status is SchemaCheckStatus.NotChecked && !previewed)
+{
+    <div class="ms-empty">
+        <p class="ms-empty-title">Not checked yet</p>
+        <p class="ms-empty-description">
+            <strong>Check schema</strong> asks Marten whether this database matches its configuration
+            (<code>AssertDatabaseMatchesConfigurationAsync</code>) and lists the objects that differ.
+            <strong>Preview migration</strong> renders the SQL that would bring it into line, without
+            running any of it.
+        </p>
+    </div>
+}
+
+@if (check.Status is not SchemaCheckStatus.NotChecked)
+{
+    <div class="ms-kv">
+        <div class="ms-kv-row">
+            <span class="ms-kv-key">Verdict</span>
+            <span class="ms-kv-value">@check.BadgeText</span>
+        </div>
+        @if (check.Schemas.Count > 0)
+        {
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Schemas</span>
+                <span class="ms-kv-value ms-mono">@string.Join(", ", check.Schemas)</span>
+            </div>
+        }
+        @if (check.AssertionMessage is { Length: > 0 } assertion)
+        {
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Marten says</span>
+                <span class="ms-kv-value">@assertion</span>
+            </div>
+        }
+        @if (check.Reason is { Length: > 0 } reason)
+        {
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Could not report</span>
+                <span class="ms-kv-value">@reason</span>
+            </div>
+        }
+    </div>
+
+    @if (check.Objects.Count > 0)
+    {
+        <table class="ms-table">
+            <thead>
+                <tr>
+                    <th>Object</th>
+                    <th>Kind</th>
+                    <th>Difference</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (SchemaObjectDifference difference in check.Objects)
+                {
+                    <tr class="ms-table-row" @key="difference.Name">
+                        <td class="ms-table-cell ms-table-cell-mono">@difference.Name</td>
+                        <td class="ms-table-cell">@difference.Kind</td>
+                        <td class="ms-table-cell">@difference.Difference</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@if (previewed)
+{
+    <h2 class="ms-section-title">Migration preview</h2>
+    <MigrationPreviewPanel Sql="@preview.Sql"
+                           ObjectCount="@preview.ObjectCount"
+                           Notice="@preview.Notice"
+                           FileName="@FileName" />
+
+    @if (preview.Deltas.Count > 0)
+    {
+        <table class="ms-table">
+            <thead>
+                <tr>
+                    <th>Object</th>
+                    <th>Kind</th>
+                    <th>Difference</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (SchemaObjectDifference delta in preview.Deltas)
+                {
+                    <tr class="ms-table-row" @key="delta.Name">
+                        <td class="ms-table-cell ms-table-cell-mono">@delta.Name</td>
+                        <td class="ms-table-cell">@delta.Kind</td>
+                        <td class="ms-table-cell">@delta.Difference</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+<h2 class="ms-section-title">Apply</h2>
+
+@if (!Capabilities.IsEnabled(StudioCapability.ApplySchemaChanges))
+{
+    <CapabilityDisabled Capability="@nameof(StudioCapability.ApplySchemaChanges)" Action="Applying schema changes" />
+}
+else
+{
+    <p class="ms-schema-note">
+        Applying runs Marten's own migration for <strong>this database only</strong>, with
+        <code>AutoCreate.CreateOrUpdate</code> - the same mode the preview above was rendered with, so what
+        runs is what you read. It never uses <code>AutoCreate.All</code>, which would drop and recreate
+        every object Marten manages. The SQL is written to the audit log under event id 9206.
+    </p>
+
+    <button type="button"
+            class="ms-button ms-button-danger"
+            disabled="@(busy || !preview.HasSql)"
+            @onclick="OpenApplyAsync">
+        Apply @(preview.HasSql ? preview.ObjectCount.ToString(System.Globalization.CultureInfo.InvariantCulture) + " change(s)" : "changes")
+    </button>
+
+    @if (!preview.HasSql)
+    {
+        <p class="ms-schema-note">Preview the migration first; there is nothing to apply until there is.</p>
+    }
+
+    @if (applyResult is { } result)
+    {
+        <div class="ms-alert @(result.Succeeded ? "ms-alert-success" : "ms-alert-error")" role="status">
+            <div class="ms-alert-content">
+                <p>@result.Message</p>
+                @if (result.IsInsufficientPrivilege)
+                {
+                    <p class="ms-muted">
+                        PostgreSQL refused this with <code>42501</code>, which means the role this
+                        application connects as may not change the schema. Grant that role rights on the
+                        schema, or run the migration from a deployment step that connects as an owner -
+                        nothing about Marten Studio's own configuration will change this.
+                    </p>
+                }
+            </div>
+        </div>
+    }
+}
+
+<ConfirmDialog IsOpen="@applyOpen"
+               Title="Apply schema changes"
+               Message="@ConfirmMessage"
+               ConfirmationPhrase="@databaseIdentity"
+               OnConfirm="ApplyAsync"
+               OnCancel="CancelApply" />
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private SchemaCheck check = SchemaCheck.NotChecked;
+    private MigrationPreview preview = MigrationPreview.None;
+    private SchemaApplyResult? applyResult;
+    private string? error;
+    private string progress = string.Empty;
+    private string databaseIdentity = string.Empty;
+    private bool previewed;
+    private bool busy;
+    private bool applyOpen;
+
+    private string BadgeClass => check.Status switch
+    {
+        SchemaCheckStatus.Matches => "ms-drift-badge-ok",
+        SchemaCheckStatus.Differences => "ms-drift-badge-warn",
+        _ => "ms-drift-badge-unknown",
+    };
+
+    private string FileName => "marten-migration-" + Sanitize(databaseIdentity) + ".sql";
+
+    private string ConfirmMessage =>
+        $"This runs {preview.ObjectCount} schema change(s) against {databaseIdentity}. " +
+        "It cannot be undone from here.";
+
+    private async Task CheckAsync()
+    {
+        await RunAsync("Reading the catalog...", async token =>
+        {
+            StudioScope? scope = State.ActiveScope;
+            if (scope is null)
+            {
+                return;
+            }
+
+            check = await SchemaData.CheckAsync(scope, token);
+            databaseIdentity = await SchemaData.DatabaseIdentityAsync(scope, token);
+        });
+    }
+
+    private async Task PreviewAsync()
+    {
+        await RunAsync("Building the migration...", async token =>
+        {
+            StudioScope? scope = State.ActiveScope;
+            if (scope is null)
+            {
+                return;
+            }
+
+            preview = await SchemaData.PreviewAsync(scope, token);
+            databaseIdentity = await SchemaData.DatabaseIdentityAsync(scope, token);
+            previewed = true;
+        });
+    }
+
+    private async Task OpenApplyAsync()
+    {
+        if (string.IsNullOrEmpty(databaseIdentity))
+        {
+            StudioScope? scope = State.ActiveScope;
+            if (scope is not null)
+            {
+                databaseIdentity = await SchemaData.DatabaseIdentityAsync(scope, lifetime.Token);
+            }
+        }
+
+        applyOpen = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task CancelApply()
+    {
+        applyOpen = false;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ApplyAsync()
+    {
+        applyOpen = false;
+
+        await RunAsync("Applying...", async token =>
+        {
+            StudioScope? scope = State.ActiveScope;
+            if (scope is null)
+            {
+                return;
+            }
+
+            applyResult = await SchemaData.ApplyAsync(scope, databaseIdentity, token);
+
+            if (applyResult.Succeeded)
+            {
+                await Toasts.Success(applyResult.Message);
+
+                // The database has moved, so the two things on screen that described the old one are now
+                // wrong. Re-checking is cheaper than leaving a stale "3 differences" badge up.
+                check = await SchemaData.CheckAsync(scope, token);
+                preview = await SchemaData.PreviewAsync(scope, token);
+            }
+            else
+            {
+                await Toasts.Error(applyResult.Message);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Runs one action with the progress line up and every failure on screen.
+    /// </summary>
+    /// <remarks>
+    /// The capability and authorization refusals are caught by name, because their messages are the
+    /// whole point: one names the option a host would set, the other deliberately says nothing about
+    /// which store, database or tenant was refused.
+    /// </remarks>
+    private async Task RunAsync(string message, Func<CancellationToken, Task> action)
+    {
+        busy = true;
+        progress = message;
+        error = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            await action(lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The circuit is going away; there is nobody to tell.
+        }
+        catch (StudioCapabilityDeniedException denied)
+        {
+            error = denied.Message;
+        }
+        catch (StudioNotAuthorizedException notAuthorized)
+        {
+            error = notAuthorized.Message;
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+            progress = string.Empty;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string Sanitize(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "database";
+        }
+
+        Span<char> buffer = stackalloc char[value.Length];
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            buffer[i] = char.IsLetterOrDigit(c) || c is '-' or '_' ? c : '-';
+        }
+
+        return new string(buffer);
+    }
+
+    public void Dispose()
+    {
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

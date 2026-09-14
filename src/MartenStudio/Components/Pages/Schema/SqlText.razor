@@ -1,0 +1,93 @@
+@using MartenStudio.Services.Schema
+
+@*
+    A block of SQL, tokenized and coloured on the server. No highlighter runs in the browser, so there
+    is nothing here that can collide with the host page's own scripts (AGENTS.md hard rule 3).
+*@
+
+<div class="@RootClass">
+    <div class="ms-sql-body" role="group" aria-label="@Label">
+        @foreach (SqlLine line in document.Lines)
+        {
+            <div class="ms-sql-line" @key="line.Number">
+                @if (ShowLineNumbers)
+                {
+                    <span class="ms-sql-gutter" aria-hidden="true">@line.Number</span>
+                }
+                <span class="ms-sql-text">@Tokens(line)</span>
+            </div>
+        }
+    </div>
+
+    @if (document.Truncated)
+    {
+        <p class="ms-sql-footnote">
+            Showing the first @document.Lines.Length of @document.TotalLines lines. Copy or download to get
+            the whole script.
+        </p>
+    }
+</div>
+
+@code {
+    private SqlDocument document = SqlDocument.Empty;
+    private string? rendered;
+    private bool hasRendered;
+
+    /// <summary>The SQL to show.</summary>
+    [Parameter]
+    public string? Sql { get; set; }
+
+    /// <summary>Whether the line-number gutter is shown.</summary>
+    [Parameter]
+    public bool ShowLineNumbers { get; set; } = true;
+
+    /// <summary>Whether long lines wrap instead of scrolling.</summary>
+    [Parameter]
+    public bool Wrap { get; set; }
+
+    /// <summary>The most lines to put in the DOM.</summary>
+    [Parameter]
+    public int MaxLines { get; set; } = SqlTokenizer.DefaultMaxLines;
+
+    /// <summary>The accessible name of the block.</summary>
+    [Parameter]
+    public string Label { get; set; } = "SQL";
+
+    private string RootClass => "ms-sql" + (Wrap ? " ms-sql-wrap" : string.Empty);
+
+    protected override void OnParametersSet()
+    {
+        // Re-tokenizing a megabyte of DDL because the wrap toggle moved would be a waste; the rendered
+        // document is keyed on the text alone.
+        if (hasRendered && ReferenceEquals(rendered, Sql))
+        {
+            return;
+        }
+
+        hasRendered = true;
+        rendered = Sql;
+        document = SqlTokenizer.Tokenize(Sql, MaxLines);
+    }
+
+    private static RenderFragment Tokens(SqlLine line) => builder =>
+    {
+        foreach (SqlToken token in line.Tokens)
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", CssClass(token.Kind));
+            builder.AddContent(2, token.Text);
+            builder.CloseElement();
+        }
+    };
+
+    private static string CssClass(SqlTokenKind kind) => kind switch
+    {
+        SqlTokenKind.Keyword => "ms-sql-keyword",
+        SqlTokenKind.String => "ms-sql-string",
+        SqlTokenKind.Identifier => "ms-sql-identifier",
+        SqlTokenKind.Comment => "ms-sql-comment",
+        SqlTokenKind.Number => "ms-sql-number",
+        SqlTokenKind.Operator => "ms-sql-operator",
+        _ => "ms-sql-plain",
+    };
+}

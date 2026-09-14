@@ -1,0 +1,210 @@
+@page "/marten/schema"
+@using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.Extensions.Options
+@implements IDisposable
+@inject StudioState State
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+
+<PageTitle>Schema</PageTitle>
+
+@* The stylesheet is linked from the page body rather than from <HeadContent>, because HeadContent
+   renders into the single head section outlet and the last provider wins - a page that used it would
+   replace the layout's link to marten-studio.css and lose the whole design system. *@
+<link rel="stylesheet" href="_content/MartenStudio/css/parts/schema.css" />
+
+<div class="ms-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Schema</h1>
+    </div>
+
+    <nav class="ms-tabs" aria-label="Schema sections">
+        @foreach (TabDefinition tab in Tabs)
+        {
+            <a class="@TabClass(tab.Key)"
+               href="@TabLink(tab.Key)"
+               aria-current="@AriaCurrent(tab.Key)"
+               @key="tab.Key">@tab.Label</a>
+        }
+    </nav>
+
+    @if (State.ActiveScope is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No Marten store to show</p>
+            <p class="ms-empty-description">
+                This application registered no Marten store that you are authorized to see.
+            </p>
+        </div>
+    }
+    else
+    {
+        @* Keyed on the scope as well as the tab: switching store, database or tenant has to tear the tab
+           down and build it again, because every one of them holds data read for the old scope. *@
+        <div @key="TabInstanceKey">
+            @switch (ActiveTab)
+            {
+                case TablesTabKey:
+                    <TablesTab CollectionLink="CollectionLink" />
+                    break;
+
+                case IndexesTabKey:
+                    <IndexesTab />
+                    break;
+
+                case FunctionsTabKey:
+                    <FunctionsTab />
+                    break;
+
+                case DdlTabKey:
+                    <DdlTab />
+                    break;
+
+                default:
+                    <DriftTab />
+                    break;
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private const string DriftTabKey = "drift";
+    private const string TablesTabKey = "tables";
+    private const string IndexesTabKey = "indexes";
+    private const string FunctionsTabKey = "functions";
+    private const string DdlTabKey = "ddl";
+
+    private sealed record TabDefinition(string Key, string Label);
+
+    private static readonly TabDefinition[] Tabs =
+    [
+        new(DriftTabKey, "Drift"),
+        new(TablesTabKey, "Tables"),
+        new(IndexesTabKey, "Indexes"),
+        new(FunctionsTabKey, "Functions"),
+        new(DdlTabKey, "DDL"),
+    ];
+
+    /// <summary>
+    /// The selected tab, from <c>?tab=</c>.
+    /// </summary>
+    /// <remarks>
+    /// Deep-linkable on purpose (plan D9): a link someone pastes into a chat has to reopen the same
+    /// thing, and "the Indexes tab of the schema screen for this database" is exactly the sort of thing
+    /// people paste.
+    /// </remarks>
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? Tab { get; set; }
+
+    /// <summary>
+    /// The tab that is actually rendered.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Tab" /> is preferred, with the query string read directly as a fallback: the studio
+    /// matches routes itself rather than through the built-in <c>Router</c> (see
+    /// <see cref="StudioRouteTable" />), so the query-parameter supplier is one more piece of framework
+    /// machinery this page would rather not depend on being wired up.
+    /// </remarks>
+    private string ActiveTab
+    {
+        get
+        {
+            string? requested = Tab ?? FromQueryString();
+            foreach (TabDefinition tab in Tabs)
+            {
+                if (string.Equals(tab.Key, requested, StringComparison.OrdinalIgnoreCase))
+                {
+                    return tab.Key;
+                }
+            }
+
+            return DriftTabKey;
+        }
+    }
+
+    private string ScopeKey
+    {
+        get
+        {
+            StudioScope? scope = State.ActiveScope;
+            return scope is null ? "none" : scope.StoreKey + "|" + scope.DatabaseId + "|" + scope.TenantId;
+        }
+    }
+
+    private string TabInstanceKey => ActiveTab + "|" + ScopeKey;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        Navigation.LocationChanged += OnLocationChanged;
+
+        // Idempotent, and normally already done by StudioLayout. Called here so the page also works when
+        // it is the only thing rendered, which is what a component test does.
+        await State.EnsureInitializedAsync();
+    }
+
+    private bool IsActive(string key) => string.Equals(ActiveTab, key, StringComparison.Ordinal);
+
+    private string TabClass(string key) => IsActive(key) ? "ms-tab ms-tab-active" : "ms-tab";
+
+    private string? AriaCurrent(string key) => IsActive(key) ? "page" : null;
+
+    /// <summary>A link to one tab, carrying the scope so the link reopens the same thing.</summary>
+    private string TabLink(string key) => Link("schema", ("tab", key));
+
+    /// <summary>A link to a document collection, carrying the scope.</summary>
+    private string CollectionLink(string alias) => Link("documents/" + Uri.EscapeDataString(alias));
+
+    private string Link(string subPath, params (string Name, string? Value)[] extra)
+    {
+        string path = StudioLink.To(Options.Value, subPath);
+        Dictionary<string, string?> query = new(StringComparer.Ordinal);
+
+        StudioScope? scope = State.ActiveScope;
+        if (scope is not null)
+        {
+            query["store"] = scope.StoreKey;
+
+            if (!string.IsNullOrEmpty(scope.DatabaseId))
+            {
+                query["db"] = scope.DatabaseId;
+            }
+
+            if (!string.IsNullOrEmpty(scope.TenantId))
+            {
+                query["tenant"] = scope.TenantId;
+            }
+        }
+
+        foreach ((string name, string? value) in extra)
+        {
+            query[name] = value;
+        }
+
+        return QueryHelpers.AddQueryString(path, query);
+    }
+
+    private string? FromQueryString()
+    {
+        string query = new Uri(Navigation.Uri).Query;
+        if (query.Length == 0)
+        {
+            return null;
+        }
+
+        return QueryHelpers.ParseQuery(query).TryGetValue("tab", out Microsoft.Extensions.Primitives.StringValues values)
+            ? values.ToString()
+            : null;
+    }
+
+    private Task OnScopeChangedAsync() => InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+}

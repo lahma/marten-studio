@@ -1,0 +1,149 @@
+@using MartenStudio.Services.Schema
+@implements IDisposable
+@inject ISchemaDataService SchemaData
+@inject StudioState State
+
+@*
+    The functions Marten installs in this store's schemas: the jsonb and immutable-cast helpers its
+    generated SQL calls, and the event store's own mt_quick_append_events, mt_archive_stream and
+    progression functions. This is where to read the one that is actually installed when an append or a
+    patch does something surprising. Every body below is dollar-quoted, which is why the tokenizer knows
+    about $function$ (Services/Schema/SqlTokenizer.cs).
+
+    Marten 9.35 does NOT install a per-document mt_upsert_<alias> function - the upsert is written inline
+    by its generated code - so do not expect one here. SchemaLiveTests asserts that, so this comment stops
+    being true loudly rather than quietly.
+*@
+
+@if (loading)
+{
+    <LoadingSpinner />
+}
+else if (catalog.Reason is { Length: > 0 } reason)
+{
+    <ErrorAlert Message="@reason" OnRetry="LoadAsync" />
+}
+else if (catalog.Functions.Count == 0)
+{
+    <div class="ms-empty">
+        <p class="ms-empty-title">No functions</p>
+        <p class="ms-empty-description">
+            Nothing has been created yet in this store's schemas. The Drift tab will show what Marten
+            would create.
+        </p>
+    </div>
+}
+else
+{
+    <div class="ms-schema-summary">
+        <span><strong>@catalog.Functions.Count</strong> functions</span>
+        <span><strong>@DeclaredCount</strong> declared by this store's configuration</span>
+    </div>
+
+    <SearchFilter Placeholder="Filter by name" OnFilterChanged="OnFilterChangedAsync" />
+
+    @foreach (FunctionInfo function in Filtered)
+    {
+        <details class="ms-function" @key="function.Schema + function.Signature">
+            <summary class="ms-function-summary">
+                <span>@function.QualifiedName</span>
+                @if (!function.DeclaredByMarten)
+                {
+                    <span class="ms-index-flag ms-index-flag-info">undeclared</span>
+                }
+            </summary>
+            <div class="ms-function-body">
+                <SqlText Sql="@function.Definition" Label="@function.Signature" Wrap="true" ShowLineNumbers="false" />
+            </div>
+        </details>
+    }
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private SchemaFunctions catalog = SchemaFunctions.Empty;
+    private string filter = string.Empty;
+    private bool loading = true;
+
+    private int DeclaredCount
+    {
+        get
+        {
+            int count = 0;
+            foreach (FunctionInfo function in catalog.Functions)
+            {
+                if (function.DeclaredByMarten)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+    }
+
+    private List<FunctionInfo> Filtered
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(filter))
+            {
+                return [.. catalog.Functions];
+            }
+
+            string needle = filter.Trim();
+            List<FunctionInfo> matches = [];
+            foreach (FunctionInfo function in catalog.Functions)
+            {
+                if (function.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                    || function.Schema.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                {
+                    matches.Add(function);
+                }
+            }
+
+            return matches;
+        }
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private Task OnFilterChangedAsync(string value)
+    {
+        filter = value;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StudioScope? scope = State.ActiveScope;
+            catalog = scope is null
+                ? SchemaFunctions.Empty
+                : await SchemaData.FunctionsAsync(scope, lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            catalog = SchemaFunctions.Unavailable(exception.Message);
+        }
+        finally
+        {
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

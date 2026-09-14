@@ -3,10 +3,12 @@ using System.Text.RegularExpressions;
 using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
+using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
+using MartenStudio.Services.Schema;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -131,6 +133,8 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<IStoreInfoService, StoreInfoService>();
         services.TryAddScoped<IDocumentWriteService, DocumentWriteService>();
         services.TryAddScoped<IEventDataService, EventDataService>();
+        services.TryAddScoped<ISchemaDataService, SchemaDataService>();
+        services.TryAddScoped<IConfigurationService, ConfigurationService>();
 
         // Projections and the async daemon. The three singletons are process-wide on purpose: one
         // snapshot per interval however many circuits are watching, one tracker subscription per

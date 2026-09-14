@@ -186,10 +186,19 @@ public class StudioLayoutTests
 
         // Only the pages that have an @page yet are links; the rest are visible and disabled, so the
         // information architecture is legible from the first version. This list grows one packet at a
-        // time - Projections joined it in P5, the four Events screens in P4.
+        // time - Projections joined it in P5, the four Events screens in P4, Schema and Configuration
+        // in P7.
         layout.TextOfAll(".ms-nav-link:not(.ms-nav-link-disabled) .ms-nav-link-text")
             .Should().Equal(
-                "Overview", "Streams", "Feed", "Event types", "Dead letters", "Projections", "Activity");
+                "Overview",
+                "Streams",
+                "Feed",
+                "Event types",
+                "Dead letters",
+                "Projections",
+                "Schema",
+                "Configuration",
+                "Activity");
 
         layout.FindAll(".ms-nav-link-disabled").Should().OnlyContain(x =>
             x.GetAttribute("title") == "Coming in a later release" && x.GetAttribute("aria-disabled") == "true");
@@ -206,7 +215,15 @@ public class StudioLayoutTests
         // In custom-path mode the shell roots the document at the studio itself, so links are relative to
         // the studio root and an empty href resolves to it.
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
-            "", "events/streams", "events/feed", "events/types", "events/dead-letters", "projections", "activity");
+            "",
+            "events/streams",
+            "events/feed",
+            "events/types",
+            "events/dead-letters",
+            "projections",
+            "schema",
+            "config",
+            "activity");
     }
 
     [Fact]
@@ -223,6 +240,8 @@ public class StudioLayoutTests
             "marten/events/types",
             "marten/events/dead-letters",
             "marten/projections",
+            "marten/schema",
+            "marten/config",
             "marten/activity");
     }
 

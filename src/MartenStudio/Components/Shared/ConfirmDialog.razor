@@ -9,14 +9,17 @@
             {
                 @* Type-to-confirm. The point is not that it is hard to defeat - it is that the person has
                    to read what they are about to change and write it out, which is what stops the wrong
-                   row being archived from a list of forty that look alike. *@
-                <p class="ms-muted">
+                   row being archived from a list of forty that look alike, and the wrong database having
+                   a migration applied to it. Where a service checks the same string again, this is the
+                   part a person reads, not the part that enforces it. *@
+                <label class="ms-confirm-label" for="ms-confirm-input">
                     Type <code>@ConfirmationPhrase</code> to confirm.
-                </p>
-                <input type="text"
-                       class="ms-input ms-input-mono"
-                       aria-label="@($"Type {ConfirmationPhrase} to confirm")"
+                </label>
+                <input id="ms-confirm-input"
+                       class="ms-input ms-input-mono ms-confirm-input"
+                       type="text"
                        autocomplete="off"
+                       spellcheck="false"
                        value="@typed"
                        @oninput="OnTypedAsync" />
             }
@@ -51,6 +54,11 @@
     /// What the visitor has to type before the confirm button works, or <see langword="null" /> for a
     /// plain confirmation.
     /// </summary>
+    /// <remarks>
+    /// The stream detail screen asks for the stream id before archiving it; the schema screen asks for
+    /// the database identity before applying a migration to it. Where a service checks the same string
+    /// again, the dialog is the convenience and the service is the refusal.
+    /// </remarks>
     [Parameter]
     public string? ConfirmationPhrase { get; set; }
 
@@ -69,14 +77,16 @@
     private bool CanConfirm =>
         !RequiresTypedConfirmation || string.Equals(typed.Trim(), ConfirmationPhrase, StringComparison.Ordinal);
 
-    /// <summary>Clears whatever was typed whenever the dialog opens, so the last answer cannot carry over.</summary>
     protected override void OnParametersSet()
     {
-        if (IsOpen != wasOpen)
+        // Re-opening the dialog starts from an empty box: a typed confirmation that survived the last
+        // cancel would be a typed confirmation nobody typed.
+        if (IsOpen && !wasOpen)
         {
-            wasOpen = IsOpen;
             typed = string.Empty;
         }
+
+        wasOpen = IsOpen;
     }
 
     private Task OnTypedAsync(ChangeEventArgs args)

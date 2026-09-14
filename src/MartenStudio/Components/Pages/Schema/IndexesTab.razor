@@ -1,0 +1,199 @@
+@using MartenStudio.Services.Schema
+@implements IDisposable
+@inject ISchemaDataService SchemaData
+@inject StudioState State
+
+@*
+    Both directions of the join: what Postgres has that the configuration does not ask for, and what the
+    configuration asks for that Postgres does not have. Every suggestion is a StoreOptions line, never
+    DDL - an index the studio created directly would be one the host's own configuration knows nothing
+    about, so the next migration would report drift for it and AutoCreate.All would drop it again.
+*@
+
+@if (loading)
+{
+    <LoadingSpinner />
+}
+else if (indexes.Reason is { Length: > 0 } reason)
+{
+    <ErrorAlert Message="@reason" OnRetry="LoadAsync" />
+}
+else
+{
+    <div class="ms-schema-summary">
+        <span><strong>@indexes.Indexes.Count</strong> indexes</span>
+        <span><strong>@indexes.NeverUsedCount</strong> never scanned</span>
+        <span><strong>@indexes.Missing.Count</strong> declared but missing</span>
+        <span><strong>@indexes.Unindexed.Count</strong> collections with only a primary key</span>
+    </div>
+
+    @if (indexes.Missing.Count > 0)
+    {
+        <h2 class="ms-section-title">Declared but missing</h2>
+        <p class="ms-schema-note">
+            The store's configuration asks for these and the database does not have them. The Drift tab
+            will show the same thing as pending changes.
+        </p>
+        <table class="ms-table">
+            <thead>
+                <tr>
+                    <th>Index</th>
+                    <th>Table</th>
+                    <th>Collection</th>
+                    <th>Would be created as</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (MissingIndex missing in indexes.Missing)
+                {
+                    <tr class="ms-table-row" @key="missing.Schema + missing.Table + missing.Name">
+                        <td class="ms-table-cell ms-table-cell-mono">@missing.Name</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@(missing.Schema + "." + missing.Table)</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@missing.CollectionAlias</td>
+                        <td class="ms-table-cell ms-index-definition">@missing.Definition</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (indexes.Unindexed.Count > 0)
+    {
+        <h2 class="ms-section-title">Collections with only a primary key</h2>
+        <p class="ms-schema-note">
+            Every filter on one of these is a sequential scan over the whole table. Each line below is the
+            <code>StoreOptions</code> registration that would add an index, in the order worth trying them:
+            a computed index on the property being filtered, a duplicated column when that property is
+            also sorted or joined on, a GIN index for containment queries across the whole document, and
+            the <code>mt_last_modified</code> index that only helps a "recently changed" listing.
+        </p>
+
+        @foreach (UnindexedCollection collection in indexes.Unindexed)
+        {
+            <div class="ms-config-card" @key="collection.QualifiedName">
+                <div class="ms-config-card-header">
+                    <h3 class="ms-config-card-title">@collection.Alias</h3>
+                    <span class="ms-config-card-subtitle">@collection.QualifiedName</span>
+                </div>
+                <div class="ms-config-card-body">
+                    <ul class="ms-suggestion-list">
+                        @foreach (string suggestion in collection.Suggestions)
+                        {
+                            <li @key="suggestion"><code class="ms-suggestion-line">@suggestion</code></li>
+                        }
+                    </ul>
+                </div>
+            </div>
+        }
+    }
+
+    <h2 class="ms-section-title">Indexes in the database</h2>
+
+    @if (indexes.Indexes.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No indexes</p>
+            <p class="ms-empty-description">Nothing has been created yet in this store's schemas.</p>
+        </div>
+    }
+    else
+    {
+        <table class="ms-table">
+            <thead>
+                <tr>
+                    <th>Index</th>
+                    <th>Table</th>
+                    <th>Flags</th>
+                    <th class="ms-num">Size</th>
+                    <th class="ms-num">Scans</th>
+                    <th class="ms-num">Tuples read</th>
+                    <th>Definition</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (IndexInfo index in indexes.Indexes)
+                {
+                    <tr class="ms-table-row" @key="index.Schema + index.Table + index.Name">
+                        <td class="ms-table-cell ms-table-cell-mono">@index.Name</td>
+                        <td class="ms-table-cell ms-table-cell-mono">
+                            @(index.Schema + "." + index.Table)
+                            @if (index.CollectionAlias is { Length: > 0 } alias)
+                            {
+                                <span class="ms-index-flag">@alias</span>
+                            }
+                        </td>
+                        <td class="ms-table-cell">
+                            @if (index.IsPrimaryKey)
+                            {
+                                <span class="ms-index-flag">primary key</span>
+                            }
+                            @if (index.IsUnique && !index.IsPrimaryKey)
+                            {
+                                <span class="ms-index-flag">unique</span>
+                            }
+                            @if (!index.DeclaredByMarten)
+                            {
+                                <span class="ms-index-flag ms-index-flag-info">undeclared</span>
+                            }
+                            @if (index.NeverUsed && !index.IsConstraint)
+                            {
+                                <span class="ms-index-flag ms-index-flag-warn">never used</span>
+                            }
+                        </td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(index.Bytes)</td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.Scans)</td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.TuplesRead)</td>
+                        <td class="ms-table-cell">
+                            <div class="ms-index-definition">@index.Definition</div>
+                            @if (index.Suggestion is { Length: > 0 } suggestion)
+                            {
+                                <p class="ms-suggestion">@suggestion</p>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private SchemaIndexes indexes = SchemaIndexes.Empty;
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StudioScope? scope = State.ActiveScope;
+            indexes = scope is null
+                ? SchemaIndexes.Empty
+                : await SchemaData.IndexesAsync(scope, lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            indexes = SchemaIndexes.Unavailable(exception.Message);
+        }
+        finally
+        {
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

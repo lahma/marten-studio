@@ -1,0 +1,482 @@
+/* ==========================================================================
+   Marten Studio - Schema and Configuration screens (packet P7).
+
+   Every rule here belongs to /marten/schema or /marten/config. It is a separate
+   file rather than an addition to marten-studio.css so that the token sheet stays
+   the one place the design system lives and page-sized additions do not have to be
+   merged into it packet by packet. Only --ms-* tokens defined there are used; no
+   colour literal appears below except inside a token fallback.
+
+   The page links this file itself, from its own markup rather than from
+   <HeadContent>: HeadContent renders into the one head section outlet, and the
+   last component to provide it wins - a page that used it would replace the
+   layout's link to marten-studio.css and take the whole stylesheet with it.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Tabs
+   -------------------------------------------------------------------------- */
+
+.ms-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    border-bottom: 1px solid var(--ms-color-border);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: var(--ms-radius-md) var(--ms-radius-md) 0 0;
+    color: var(--ms-color-text-secondary);
+    text-decoration: none;
+    font-weight: var(--ms-font-weight-medium);
+    transition: background-color var(--ms-transition-fast), color var(--ms-transition-fast);
+}
+
+.ms-tab:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-tab-active {
+    background-color: var(--ms-color-surface);
+    border-color: var(--ms-color-border);
+    color: var(--ms-color-text);
+    margin-bottom: -1px;
+    padding-bottom: calc(var(--ms-space-sm) + 1px);
+}
+
+.ms-tab-count {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Toolbars, notes and progress
+   -------------------------------------------------------------------------- */
+
+.ms-schema-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-schema-toolbar-spacer {
+    flex: 1 1 auto;
+}
+
+.ms-schema-note {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    margin: 0 0 var(--ms-space-md);
+    max-width: 70ch;
+}
+
+.ms-schema-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-schema-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-lg);
+    margin-bottom: var(--ms-space-md);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   Drift badge
+   -------------------------------------------------------------------------- */
+
+.ms-drift-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 3px 10px;
+    border-radius: var(--ms-radius-full);
+    border: 1px solid var(--ms-color-border);
+    font-weight: var(--ms-font-weight-semibold);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-drift-badge-ok {
+    background-color: var(--ms-color-success-bg);
+    color: var(--ms-color-success);
+    border-color: var(--ms-color-success);
+}
+
+.ms-drift-badge-warn {
+    background-color: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+    border-color: var(--ms-color-warning);
+}
+
+.ms-drift-badge-unknown {
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   SQL block. The tokens are produced server-side by Services/Schema/SqlTokenizer.cs;
+   nothing in the browser highlights anything (AGENTS.md hard rule 3).
+   -------------------------------------------------------------------------- */
+
+.ms-sql {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface-alt);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    overflow: hidden;
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-sql-body {
+    overflow-x: auto;
+    max-height: 32rem;
+    overflow-y: auto;
+    padding: var(--ms-space-sm) 0;
+}
+
+.ms-sql-line {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    white-space: pre;
+    line-height: 1.45;
+    padding: 0 var(--ms-space-sm);
+}
+
+.ms-sql-line:hover {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-sql-gutter {
+    flex: 0 0 auto;
+    min-width: 3.5ch;
+    text-align: right;
+    color: var(--ms-color-text-muted);
+    user-select: none;
+}
+
+.ms-sql-text {
+    white-space: pre;
+}
+
+.ms-sql-wrap .ms-sql-line,
+.ms-sql-wrap .ms-sql-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ms-sql-keyword {
+    color: var(--ms-color-primary);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-sql-string {
+    color: var(--ms-color-success);
+}
+
+.ms-sql-identifier {
+    color: var(--ms-color-executing);
+}
+
+.ms-sql-comment {
+    color: var(--ms-color-text-muted);
+    font-style: italic;
+}
+
+.ms-sql-number {
+    color: var(--ms-color-warning);
+}
+
+.ms-sql-operator {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-sql-plain {
+    color: var(--ms-color-text);
+}
+
+.ms-sql-footnote {
+    margin: 0;
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-top: 1px solid var(--ms-color-border);
+    color: var(--ms-color-text-muted);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* --------------------------------------------------------------------------
+   Tables tab
+   -------------------------------------------------------------------------- */
+
+.ms-num {
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.ms-schema-estimate {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-collection-link {
+    color: var(--ms-color-primary);
+    text-decoration: none;
+    font-family: var(--ms-font-mono);
+}
+
+.ms-collection-link:hover {
+    text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------------
+   Indexes tab
+   -------------------------------------------------------------------------- */
+
+.ms-index-flag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: var(--ms-radius-sm);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    margin-right: var(--ms-space-xs);
+}
+
+.ms-index-flag-warn {
+    background-color: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+}
+
+.ms-index-flag-info {
+    background-color: var(--ms-color-info-bg);
+    color: var(--ms-color-info);
+}
+
+.ms-index-definition {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+    word-break: break-word;
+}
+
+.ms-suggestion {
+    margin: var(--ms-space-xs) 0 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    max-width: 80ch;
+}
+
+.ms-suggestion-list {
+    list-style: none;
+    margin: var(--ms-space-xs) 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+}
+
+.ms-suggestion-line {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    background-color: var(--ms-color-surface-alt);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    padding: 2px 6px;
+    display: inline-block;
+    word-break: break-word;
+}
+
+/* --------------------------------------------------------------------------
+   Functions tab
+   -------------------------------------------------------------------------- */
+
+.ms-function {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    margin-bottom: var(--ms-space-sm);
+    overflow: hidden;
+}
+
+.ms-function-summary {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-function-summary:hover {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-function-body {
+    padding: 0 var(--ms-space-md) var(--ms-space-sm);
+}
+
+/* --------------------------------------------------------------------------
+   Confirm dialog: the typed-confirmation input added for the schema apply.
+   These two rules extend Components/Shared/ConfirmDialog.razor and live here
+   because marten-studio.css is shared and this packet does not edit it.
+   -------------------------------------------------------------------------- */
+
+.ms-confirm-label {
+    display: block;
+    margin-bottom: var(--ms-space-xs);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-confirm-input {
+    width: 100%;
+    margin-bottom: var(--ms-space-md);
+}
+
+/* --------------------------------------------------------------------------
+   Configuration page
+   -------------------------------------------------------------------------- */
+
+.ms-config-card {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    background-color: var(--ms-color-surface);
+    margin-bottom: var(--ms-space-md);
+    overflow: hidden;
+}
+
+.ms-config-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-bottom: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface-alt);
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+}
+
+.ms-config-card-header:hover {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-config-card-title {
+    margin: 0;
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-config-card-subtitle {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-config-card-body {
+    padding: var(--ms-space-md);
+}
+
+.ms-config-group-title {
+    margin: var(--ms-space-md) 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ms-config-group-title:first-child {
+    margin-top: 0;
+}
+
+.ms-config-grid {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    overflow: hidden;
+}
+
+.ms-config-row {
+    display: grid;
+    grid-template-columns: 14rem 1fr auto;
+    gap: var(--ms-space-md);
+    align-items: baseline;
+    padding: var(--ms-space-xs) var(--ms-space-md);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-config-row:last-child {
+    border-bottom: none;
+}
+
+.ms-config-name {
+    color: var(--ms-color-text-secondary);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-config-value {
+    font-family: var(--ms-font-mono);
+    color: var(--ms-color-text);
+    word-break: break-word;
+}
+
+.ms-config-member {
+    display: block;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+    word-break: break-word;
+}
+
+.ms-copy-inline {
+    border: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text-secondary);
+    border-radius: var(--ms-radius-sm);
+    font-size: var(--ms-font-size-xs);
+    padding: 1px 6px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.ms-copy-inline:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+@media (max-width: 1024px) {
+    .ms-config-row {
+        grid-template-columns: 1fr;
+        gap: var(--ms-space-xs);
+    }
+
+    .ms-sql-body {
+        max-height: 24rem;
+    }
+}

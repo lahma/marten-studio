@@ -1,0 +1,84 @@
+@using MartenStudio.Services.Schema
+@implements IDisposable
+@inject ISchemaDataService SchemaData
+@inject StudioState State
+
+@*
+    The whole creation script for this store's schema objects, as Marten would write it into a new
+    database. This is the thing to hand a DBA who wants to review before anything is applied, which is
+    why it is copyable and downloadable rather than only readable.
+*@
+
+@if (loading)
+{
+    <LoadingSpinner />
+}
+else if (script.Reason is { Length: > 0 } reason)
+{
+    <ErrorAlert Message="@reason" OnRetry="LoadAsync" />
+}
+else
+{
+    <div class="ms-schema-toolbar">
+        <span class="ms-schema-note">
+            @SchemaFormat.Bytes(script.Bytes) of DDL, from
+            <code>IMartenDatabase.ToDatabaseScript()</code>. It describes what Marten <em>would</em>
+            create; the Drift tab says what is actually missing.
+        </span>
+        <span class="ms-schema-toolbar-spacer"></span>
+        <SqlActions Text="@script.Text" FileName="marten-schema.sql" Disabled="@(!script.HasText)" />
+    </div>
+
+    @if (script.HasText)
+    {
+        <SqlText Sql="@script.Text" Label="Database script" />
+    }
+    else
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">Nothing to script</p>
+            <p class="ms-empty-description">This store configures no schema objects.</p>
+        </div>
+    }
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private DdlScript script = DdlScript.Empty;
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StudioScope? scope = State.ActiveScope;
+            script = scope is null
+                ? DdlScript.Empty
+                : await SchemaData.DdlAsync(scope, lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            script = DdlScript.Unavailable(exception.Message);
+        }
+        finally
+        {
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

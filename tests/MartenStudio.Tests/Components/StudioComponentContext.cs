@@ -34,7 +34,16 @@ internal class StudioComponentContext : BunitContext
     /// <summary>The policy name <see cref="WithPolicy" /> configures.</summary>
     public const string StorePolicyName = "MartenStoreOwner";
 
-    public StudioComponentContext()
+    /// <param name="configure">
+    /// Extra registrations, applied after the studio's own and before anything is resolved.
+    /// </param>
+    /// <remarks>
+    /// The hook exists because bUnit locks its service provider the first time anything is resolved from
+    /// it, and this constructor resolves three services at the end - so a page test that needs its own
+    /// area's <c>Fake*DataService</c> has no way to add one afterwards. Every page area needs exactly
+    /// this, which is why it is a parameter here rather than a duplicate of this class per area.
+    /// </remarks>
+    public StudioComponentContext(Action<IServiceCollection>? configure = null)
     {
         Options = new MartenStudioOptions();
         Catalog = new FakeStudioScopeCatalog();
@@ -59,6 +68,8 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<ToastService>();
         Services.AddSingleton<StudioActionLogService>();
         Services.AddSingleton<StudioActionLog>();
+
+        configure?.Invoke(Services);
 
         State = Services.GetRequiredService<StudioState>();
         State.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;

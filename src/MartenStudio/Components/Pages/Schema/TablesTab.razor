@@ -1,0 +1,163 @@
+@using MartenStudio.Services.Schema
+@implements IDisposable
+@inject ISchemaDataService SchemaData
+@inject StudioState State
+
+@*
+    Every ordinary table in the schemas this store owns, largest first, joined to what the statistics
+    collector has recorded. A document table is linked to its collection, which is the whole reason this
+    screen beats \dt+ - the studio knows which mt_doc_* table belongs to which registered type.
+*@
+
+@if (loading)
+{
+    <LoadingSpinner />
+}
+else if (tables.Reason is { Length: > 0 } reason)
+{
+    <ErrorAlert Message="@reason" OnRetry="LoadAsync" />
+}
+else if (tables.Tables.Count == 0)
+{
+    <div class="ms-empty">
+        <p class="ms-empty-title">No tables</p>
+        <p class="ms-empty-description">
+            Nothing has been created yet in @(tables.Schemas.Count == 0 ? "this store's schemas" : string.Join(", ", tables.Schemas)).
+            The Drift tab will show what Marten would create.
+        </p>
+    </div>
+}
+else
+{
+    <div class="ms-schema-summary">
+        <span><strong>@tables.Tables.Count</strong> tables</span>
+        <span><strong>@SchemaFormat.Bytes(TotalBytes)</strong> in this store's schemas</span>
+        <span><strong>@SchemaFormat.Bytes(tables.DatabaseBytes)</strong> in the whole database</span>
+        <span class="ms-mono">@string.Join(", ", tables.Schemas)</span>
+    </div>
+
+    <p class="ms-schema-note">
+        Row counts are <code>pg_class.reltuples</code> estimates (D8) and the scan counters come from
+        <code>pg_stat_user_tables</code>, which <code>pg_stat_reset()</code> and a crash both zero.
+    </p>
+
+    <table class="ms-table">
+        <thead>
+            <tr>
+                <th>Table</th>
+                <th>Collection</th>
+                <th class="ms-num">Total</th>
+                <th class="ms-num">Heap</th>
+                <th class="ms-num">Indexes</th>
+                <th class="ms-num">Rows</th>
+                <th class="ms-num">Live</th>
+                <th class="ms-num">Dead</th>
+                <th class="ms-num">Seq scans</th>
+                <th class="ms-num">Index scans</th>
+                <th>Last vacuum</th>
+                <th>Last analyze</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (TableStats table in tables.Tables)
+            {
+                <tr class="ms-table-row" @key="table.QualifiedName">
+                    <td class="ms-table-cell ms-table-cell-mono">@table.QualifiedName</td>
+                    <td class="ms-table-cell">
+                        @if (table.CollectionAlias is { Length: > 0 } alias)
+                        {
+                            @* The Documents page arrives with packet P2; the link is written now so the
+                               scope travels with it when it does (plan D9). *@
+                            <a class="ms-collection-link" href="@CollectionLink(alias)" title="@table.DocumentTypeName">@alias</a>
+                        }
+                        else if (table.IsEventTable)
+                        {
+                            <span class="ms-index-flag ms-index-flag-info">event store</span>
+                        }
+                        else
+                        {
+                            <span class="ms-text-muted">-</span>
+                        }
+                    </td>
+                    <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.TotalBytes)</td>
+                    <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.HeapBytes)</td>
+                    <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.IndexBytes)</td>
+                    <td class="ms-table-cell ms-num ms-schema-estimate">@SchemaFormat.Estimate(table.EstimatedRows)</td>
+                    <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.LiveRows)</td>
+                    <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.DeadRows)</td>
+                    <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.SequentialScans)</td>
+                    <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.IndexScans)</td>
+                    <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastVacuum)</td>
+                    <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastAnalyze)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private SchemaTables tables = SchemaTables.Empty;
+    private bool loading = true;
+
+    /// <summary>
+    /// Where a collection link points, scope query and all.
+    /// </summary>
+    /// <remarks>
+    /// Supplied by the page rather than built here, because the studio's links go through
+    /// <c>StudioLink.To</c> to honour a custom mount path, and the scope has to travel in the query
+    /// string for the link to reopen the same thing (plan D9).
+    /// </remarks>
+    [Parameter]
+    [EditorRequired]
+    public Func<string, string> CollectionLink { get; set; } = static alias => alias;
+
+    private long TotalBytes
+    {
+        get
+        {
+            long total = 0;
+            foreach (TableStats table in tables.Tables)
+            {
+                total += table.TotalBytes;
+            }
+
+            return total;
+        }
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StudioScope? scope = State.ActiveScope;
+            tables = scope is null
+                ? SchemaTables.Empty
+                : await SchemaData.TablesAsync(scope, lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            tables = SchemaTables.Unavailable(exception.Message);
+        }
+        finally
+        {
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

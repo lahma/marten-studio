@@ -1,0 +1,65 @@
+@inject IJSRuntime JsRuntime
+
+@*
+    One configured value, the member it came from, and a copy button. The member name is the reason this
+    screen exists: "Stream identity: Guid" is a fact, and "Stream identity: Guid, from
+    StoreOptions.Events.StreamIdentity" is a fact somebody can act on without going to look for it.
+
+    Three strings rather than the ConfigurationValue record: the Razor compiler emits a public component
+    class and a public [Parameter] cannot have an internal type, and the data seam is internal by design
+    (plan D12). Every component in this repository takes primitives for the same reason.
+*@
+
+<div class="ms-config-row">
+    <span class="ms-config-name">@Name</span>
+    <span class="ms-config-value">
+        @Value
+        <code class="ms-config-member">@Member</code>
+    </span>
+    <button type="button"
+            class="ms-copy-inline"
+            aria-label="@($"Copy the value of {Name}")"
+            @onclick="CopyAsync">@label</button>
+</div>
+
+@code {
+    private string label = "Copy";
+
+    /// <summary>What the value is, in the studio's words.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>What it is set to.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Value { get; set; } = string.Empty;
+
+    /// <summary>The <c>StoreOptions</c> member it was read from.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Member { get; set; } = string.Empty;
+
+    protected override void OnParametersSet() => label = "Copy";
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { Value });
+            label = copied ? "Copied" : "Failed";
+        }
+        catch (JSException)
+        {
+            label = "Failed";
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            label = "Failed";
+        }
+        catch (InvalidOperationException)
+        {
+            label = "Failed";
+        }
+    }
+}
