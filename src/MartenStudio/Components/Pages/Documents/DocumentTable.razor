@@ -1,0 +1,227 @@
+@using System.Text.Json
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Json
+@using MartenStudio.Services.Query
+@inject StudioState State
+
+@*
+    The document list itself. Sortable headers, an expander per row, and the badges that say what a row is
+    rather than what it contains: deleted, which tenant, which subclass.
+
+    Every timestamp is rendered twice - relative in the cell, absolute in the title, in the time zone the
+    header selected. "3m ago" is what you want while you are looking at it; the exact instant is what you
+    want when you paste it into a ticket.
+*@
+
+<div class="ms-table-wrap">
+    <table class="ms-table ms-doc-table">
+        <thead>
+            <tr>
+                <th class="ms-doc-col-expand" scope="col"><span class="ms-sr-only">Expand</span></th>
+                @foreach (DocumentColumnHeader header in Page.Columns)
+                {
+                    <th scope="col" class="ms-doc-col ms-doc-col-@header.Kind.ToString().ToLowerInvariant()" @key="header.Key">
+                        <button type="button"
+                                class="ms-doc-sort @(IsSorted(header) ? "ms-doc-sort-on" : null)"
+                                title="@SortTitle(header)"
+                                @onclick="() => SortAsync(header)">
+                            @header.Label
+                            @if (IsSorted(header))
+                            {
+                                <span class="ms-doc-sort-arrow" aria-hidden="true">@(SortDirectionValue == SortDirection.Ascending ? "▲" : "▼")</span>
+                            }
+                        </button>
+                    </th>
+                }
+                <th class="ms-doc-col-size" scope="col">size</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Page.Rows.Count == 0)
+            {
+                <tr>
+                    <td class="ms-table-empty" colspan="@ColumnSpan">@EmptyText</td>
+                </tr>
+            }
+
+            @foreach (DocumentRow row in Page.Rows)
+            {
+                <tr class="ms-doc-row @(row.IsDeleted ? "ms-doc-row-deleted" : null)"
+                    @key="row.Id"
+                    @onkeydown="args => OnRowKeyAsync(args, row.Id)"
+                    tabindex="0">
+                    <td class="ms-doc-cell-expand">
+                        <button type="button"
+                                class="ms-doc-expander"
+                                aria-expanded="@(IsExpanded(row.Id) ? "true" : "false")"
+                                aria-label="@(IsExpanded(row.Id) ? "Collapse preview" : "Expand preview")"
+                                @onclick="() => ToggleAsync(row.Id)">@(IsExpanded(row.Id) ? "▾" : "▸")</button>
+                    </td>
+
+                    @for (int index = 0; index < Page.Columns.Count; index++)
+                    {
+                        DocumentColumnHeader header = Page.Columns[index];
+                        string? value = index < row.Cells.Count ? row.Cells[index] : null;
+
+                        <td class="ms-doc-cell ms-doc-cell-@header.Kind.ToString().ToLowerInvariant()" @key="header.Key">
+                            @if (header.Kind == DocumentColumnKind.Id)
+                            {
+                                <a class="ms-doc-id" href="@HrefFor(row.Id)" title="@row.Id">@row.Id</a>
+
+                                @if (row.IsDeleted)
+                                {
+                                    <span class="ms-badge ms-badge-deleted" title="Soft-deleted: still in the table, hidden from Marten's own queries">deleted</span>
+                                }
+                                @if (row.TenantId is { Length: > 0 } tenant)
+                                {
+                                    <span class="ms-badge ms-badge-tenant" title="tenant_id">@tenant</span>
+                                }
+                                @if (row.DocumentTypeAlias is { Length: > 0 } subclass)
+                                {
+                                    <span class="ms-badge ms-badge-subclass" title="mt_doc_type">@subclass</span>
+                                }
+                            }
+                            else if (IsTimestamp(header))
+                            {
+                                @RenderTimestamp(value)
+                            }
+                            else if (IsVersion(header))
+                            {
+                                <span class="ms-mono" title="@value">@Shorten(value)</span>
+                            }
+                            else
+                            {
+                                <span class="@(header.Kind == DocumentColumnKind.Json ? "ms-mono" : null)" title="@value">@value</span>
+                            }
+                        </td>
+                    }
+
+                    <td class="ms-doc-cell-size" title="octet_length(data::text)">@JsonModelBuilder.FormatBytes(row.SizeBytes)</td>
+                </tr>
+
+                @if (IsExpanded(row.Id))
+                {
+                    <DocumentPreviewRow @key="@(row.Id + "/preview")"
+                                        Json="@row.Json"
+                                        Id="@row.Id"
+                                        SizeBytes="row.SizeBytes"
+                                        ColumnSpan="ColumnSpan"
+                                        DocumentType="DocumentType"
+                                        NamingPolicy="NamingPolicy" />
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    /// <summary>
+    /// The page to draw, as a <see cref="DocumentPage" />. Typed <see cref="object" /> — see
+    /// <see cref="DocumentComponentModel" /> for why.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>The sort column's key.</summary>
+    [Parameter]
+    public string? SortKey { get; set; }
+
+    /// <summary>The sort direction, as the URL spells it: <c>asc</c> or <c>desc</c>.</summary>
+    [Parameter]
+    public string? Direction { get; set; }
+
+    /// <summary>The rows whose preview is open.</summary>
+    [Parameter]
+    public IReadOnlyCollection<string> Expanded { get; set; } = [];
+
+    /// <summary>The CLR type, for the preview's copy menu.</summary>
+    [Parameter]
+    public Type? DocumentType { get; set; }
+
+    /// <summary>The serializer's naming policy.</summary>
+    [Parameter]
+    public JsonNamingPolicy? NamingPolicy { get; set; }
+
+    /// <summary>The message shown when there are no rows.</summary>
+    [Parameter]
+    public string EmptyText { get; set; } = "No documents match.";
+
+    /// <summary>Builds the detail link for one id.</summary>
+    [Parameter]
+    public Func<string, string> HrefFor { get; set; } = static _ => "#";
+
+    /// <summary>Sorts by a column, named by its key.</summary>
+    [Parameter]
+    public EventCallback<string> OnSort { get; set; }
+
+    /// <summary>Opens or closes a row's preview.</summary>
+    [Parameter]
+    public EventCallback<string> OnToggleExpand { get; set; }
+
+    /// <summary>The page, read back into the type it really is.</summary>
+    private DocumentPage Page => DocumentComponentModel.Read(Model, EmptyPage);
+
+    private static readonly DocumentPage EmptyPage = new();
+
+    private SortDirection SortDirectionValue => DocumentComponentModel.Direction(Direction);
+
+    private int ColumnSpan => Page.Columns.Count + 2;
+
+    private bool IsExpanded(string id) => Expanded.Contains(id, StringComparer.Ordinal);
+
+    private bool IsSorted(DocumentColumnHeader header) =>
+        string.Equals(header.Key, SortKey, StringComparison.OrdinalIgnoreCase);
+
+    private string SortTitle(DocumentColumnHeader header) =>
+        IsSorted(header) && SortDirectionValue == SortDirection.Descending
+            ? $"Sort by {header.Label}, ascending"
+            : $"Sort by {header.Label}, descending";
+
+    private static bool IsTimestamp(DocumentColumnHeader header) =>
+        header.Column is DocumentColumn.Metadata metadata &&
+        metadata.Column is Internal.Sql.DocumentMetadataColumn.LastModified
+            or Internal.Sql.DocumentMetadataColumn.CreatedAt
+            or Internal.Sql.DocumentMetadataColumn.SoftDeletedAt;
+
+    private static bool IsVersion(DocumentColumnHeader header) =>
+        header.Column is DocumentColumn.Metadata { Column: Internal.Sql.DocumentMetadataColumn.Version };
+
+    /// <summary>A version is a GUID, and the first eight characters are enough to tell two of them apart.</summary>
+    private static string Shorten(string? value) =>
+        value is { Length: > 8 } ? value[..8] : value ?? string.Empty;
+
+    private RenderFragment RenderTimestamp(string? value) => builder =>
+    {
+        if (!DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out DateTimeOffset parsed))
+        {
+            builder.AddContent(0, value);
+            return;
+        }
+
+        builder.OpenElement(1, "span");
+        builder.AddAttribute(2, "title", State.FormatInSelectedTimeZone(parsed));
+        builder.OpenComponent<TimeAgo>(3);
+        builder.AddComponentParameter(4, nameof(TimeAgo.Timestamp), parsed);
+        builder.CloseComponent();
+        builder.CloseElement();
+    };
+
+    private async Task SortAsync(DocumentColumnHeader header) => await OnSort.InvokeAsync(header.Key);
+
+    private async Task ToggleAsync(string id) => await OnToggleExpand.InvokeAsync(id);
+
+    /// <summary>
+    /// Space opens the preview, the way the chevron does. The key handler is on the row rather than on the
+    /// document, so it never fights the search box or the JSON viewer's own keys.
+    /// </summary>
+    private async Task OnRowKeyAsync(KeyboardEventArgs args, string id)
+    {
+        if (string.Equals(args.Key, " ", StringComparison.Ordinal) ||
+            string.Equals(args.Key, "Spacebar", StringComparison.Ordinal))
+        {
+            await ToggleAsync(id);
+        }
+    }
+}

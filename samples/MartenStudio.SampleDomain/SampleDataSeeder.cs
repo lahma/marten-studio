@@ -34,7 +34,10 @@ public sealed class SeedMarker
 public sealed class SampleDataSeeder : IInitialData
 {
     /// <summary>Bumped when the data below changes, so an existing database is re-seeded.</summary>
-    private const int SeedVersion = 1;
+    private const int SeedVersion = 2;
+
+    /// <summary>How big <see cref="MediaAsset" />'s decoded payload is: base64 makes it about 2 MB.</summary>
+    private const int MediaAssetBytes = 1_500_000;
 
     public async Task Populate(IDocumentStore store, CancellationToken cancellation)
     {
@@ -50,6 +53,15 @@ public sealed class SampleDataSeeder : IInitialData
         if (marker is not null && marker.Version >= SeedVersion)
         {
             return;
+        }
+
+        if (marker is not null)
+        {
+            // Re-seeding, not seeding. Writing the same ids again is not enough: Order uses optimistic
+            // concurrency, so storing one whose mt_version this session never read fails the check and
+            // takes the whole batch with it. Clearing the demo's own collections first is what makes a
+            // version bump a thing a developer can actually run.
+            await ClearAsync(store, cancellation);
         }
 
         // A fixed seed, so two runs of the demo describe the same data and a screenshot stays true.
@@ -94,6 +106,81 @@ public sealed class SampleDataSeeder : IInitialData
         }
 
         session.Store(orders.ToArray());
+
+        // A hierarchy: cars and trucks share the vehicle table and are told apart by mt_doc_type. Stored
+        // as the concrete types, which is what makes Marten write the discriminator.
+        List<Car> cars = [];
+        List<Truck> trucks = [];
+
+        for (int i = 1; i <= 6; i++)
+        {
+            cars.Add(new Car
+            {
+                Id = DeterministicGuid("car", i),
+                Make = Makes[i % Makes.Length],
+                Model = $"C{i:00}",
+                Year = 2018 + (i % 8),
+                Doors = i % 2 == 0 ? 5 : 3,
+                IsConvertible = i % 5 == 0
+            });
+        }
+
+        for (int i = 1; i <= 4; i++)
+        {
+            trucks.Add(new Truck
+            {
+                Id = DeterministicGuid("truck", i),
+                Make = Makes[(i + 1) % Makes.Length],
+                Model = $"T{i:00}",
+                Year = 2015 + i,
+                PayloadTonnes = 3.5m * i,
+                Axles = 2 + (i % 3)
+            });
+        }
+
+        session.Store(cars.ToArray());
+        session.Store(trucks.ToArray());
+
+        // A string primary key the application assigns, through UseIdentityKey().
+        List<Product> products = [];
+        for (int i = 1; i <= 12; i++)
+        {
+            products.Add(new Product
+            {
+                Id = $"SKU-{i:000}",
+                Name = $"Product {i:00}",
+                Category = Categories[i % Categories.Length],
+                Price = 9.90m + (i * 3),
+                Discontinued = i % 7 == 0
+            });
+        }
+
+        session.Store(products.ToArray());
+
+        // Every optional metadata column on, and every one off, so both ends of the range have rows.
+        List<AuditNote> auditNotes = [];
+        for (int i = 1; i <= 8; i++)
+        {
+            auditNotes.Add(new AuditNote
+            {
+                Id = DeterministicGuid("audit", i),
+                Subject = $"Audit note {i:00}",
+                Body = $"Something worth writing down happened, for the {i} time.",
+                Severity = i % 4 == 0 ? "warning" : "info"
+            });
+        }
+
+        session.Store(auditNotes.ToArray());
+
+        session.Store(new MinimalNote
+        {
+            Id = DeterministicGuid("minimal", 1),
+            Text = "This collection's table is id and data and nothing else."
+        });
+
+        // One two-megabyte document, written once. Seeding fifty of them would make every `dotnet run` of
+        // the sample a hundred-megabyte write for no extra demonstration.
+        session.Store(BuildMediaAsset());
 
         session.Store(new SeedMarker
         {
@@ -237,7 +324,51 @@ public sealed class SampleDataSeeder : IInitialData
     /// <summary>The stream id of demo order <paramref name="index" />, stable across runs.</summary>
     public static Guid OrderStreamId(int index) => DeterministicGuid("order-stream", index);
 
+    /// <summary>
+    /// Empties the demo's own collections, and only those: a sample store may be sharing a database with
+    /// something that is not a demo.
+    /// </summary>
+    private static async Task ClearAsync(IDocumentStore store, CancellationToken cancellation)
+    {
+        Type[] seeded =
+        [
+            typeof(Customer), typeof(Order), typeof(Invoice), typeof(Product),
+            typeof(Vehicle), typeof(AuditNote), typeof(MinimalNote), typeof(MediaAsset),
+        ];
+
+        foreach (Type type in seeded)
+        {
+            await store.Advanced.Clean.DeleteDocumentsByTypeAsync(type, cancellation);
+        }
+    }
+
     private static readonly string[] Cities = ["Helsinki", "Tampere", "Turku", "Oulu"];
+
+    private static readonly string[] Makes = ["Volvo", "Scania", "Toyota", "Ford"];
+
+    private static readonly string[] Categories = ["tools", "hardware", "consumables"];
+
+    /// <summary>
+    /// The one big document, built from a deterministic byte pattern rather than from randomness so that
+    /// two runs of the demo produce the same bytes and the same size on every screen that reports it.
+    /// </summary>
+    private static MediaAsset BuildMediaAsset()
+    {
+        byte[] payload = new byte[MediaAssetBytes];
+        for (int i = 0; i < payload.Length; i++)
+        {
+            payload[i] = (byte) (i * 31 % 251);
+        }
+
+        return new MediaAsset
+        {
+            Id = DeterministicGuid("media", 1),
+            FileName = "sample-asset.bin",
+            ContentType = "application/octet-stream",
+            ByteCount = payload.Length,
+            Base64 = Convert.ToBase64String(payload)
+        };
+    }
 
     /// <summary>
     /// The same id on every run, so re-seeding replaces rows rather than adding a second set of them.

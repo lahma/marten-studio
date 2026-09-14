@@ -50,8 +50,8 @@ public class FeedTests
         IRenderedComponent<Feed> page = context.Render<Feed>();
 
         page.FindAll("a").Select(x => x.GetAttribute("href")).Should()
-            .Contain(x => x!.StartsWith("marten/events/streams/s?id=order-17", StringComparison.Ordinal))
-            .And.Contain(x => x!.StartsWith("marten/events/feed?types=OrderPlaced", StringComparison.Ordinal));
+            .Contain(x => x!.StartsWith("events/streams/s?id=order-17", StringComparison.Ordinal))
+            .And.Contain(x => x!.StartsWith("events/feed?types=OrderPlaced", StringComparison.Ordinal));
     }
 
     [Fact]

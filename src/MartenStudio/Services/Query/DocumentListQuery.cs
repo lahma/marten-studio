@@ -57,11 +57,34 @@ internal abstract record DocumentColumn
     public sealed record Duplicated(string ColumnName) : DocumentColumn;
 
     /// <summary>A JSON property, reached with <c>#&gt;&gt;</c> and a <c>text[]</c> parameter.</summary>
+    /// <remarks>
+    /// Equality is over the <em>segments</em>, not over the list instance. A record's generated equality
+    /// would compare <see cref="IReadOnlyList{T}"/> by reference, so two columns naming the same property
+    /// - one parsed from <c>?cols=</c> and one built from a sampled key - would be different columns, and
+    /// the same property would be selected twice.
+    /// </remarks>
     /// <param name="Path">The path segments, for example <c>["Address", "City"]</c>.</param>
     public sealed record JsonPath(IReadOnlyList<string> Path) : DocumentColumn
     {
         /// <summary>A display label for the column header.</summary>
         public string Label => string.Join('.', Path);
+
+        /// <inheritdoc />
+        public bool Equals(JsonPath? other) =>
+            other is not null && Path.SequenceEqual(other.Path, StringComparer.Ordinal);
+
+        /// <inheritdoc />
+        public override int GetHashCode()
+        {
+            var hash = new HashCode();
+
+            foreach (var segment in Path)
+            {
+                hash.Add(segment, StringComparer.Ordinal);
+            }
+
+            return hash.ToHashCode();
+        }
     }
 }
 

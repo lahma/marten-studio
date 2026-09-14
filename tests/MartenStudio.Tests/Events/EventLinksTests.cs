@@ -19,7 +19,7 @@ public class EventLinksTests
         // A Marten stream key is frequently a string containing '/', which a route segment cannot hold.
         string link = EventLinks.ToStream(DefaultPath, Scope, "orders/2026/17");
 
-        link.Should().StartWith("marten/events/streams/s?id=");
+        link.Should().StartWith("events/streams/s?id=");
         link.Should().Contain("id=orders%2F2026%2F17");
     }
 
@@ -50,7 +50,7 @@ public class EventLinksTests
             scope: null,
             [new("types", "OrderPlaced"), new("stream", null), new("range", "   ")]);
 
-        link.Should().Be("marten/events/feed?types=OrderPlaced");
+        link.Should().Be("events/feed?types=OrderPlaced");
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public class EventLinksTests
         string link = EventLinks.To(
             DefaultPath, EventLinks.FeedRoute, scope: null, [new("stream", "a&follow=1")]);
 
-        link.Should().Be("marten/events/feed?stream=a%26follow%3D1");
+        link.Should().Be("events/feed?stream=a%26follow%3D1");
     }
 
     [Theory]

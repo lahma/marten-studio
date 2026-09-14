@@ -57,6 +57,38 @@ public static class SampleStore
         opts.Schema.For<Invoice>()
             .MultiTenanted();
 
+        // A hierarchy: one table, three .NET types, told apart by mt_doc_type. The subclasses are named
+        // explicitly rather than discovered, because AddSubClassHierarchy() with no arguments scans the
+        // application assembly and a demo should show what it is doing.
+        opts.Schema.For<Vehicle>()
+            .AddSubClassHierarchy(typeof(Car), typeof(Truck));
+
+        // A string primary key the application assigns. The column is varchar, not uuid, which is the case
+        // that makes "type the id parameter from the column" more than a theoretical nicety.
+        opts.Schema.For<Product>()
+            .UseIdentityKey()
+            .Duplicate(x => x.Category);
+
+        // Every optional metadata column on at once.
+        opts.Schema.For<AuditNote>()
+            .Metadata(m =>
+            {
+                m.CausationId.Enabled = true;
+                m.CorrelationId.Enabled = true;
+                m.Headers.Enabled = true;
+                m.LastModifiedBy.Enabled = true;
+                m.CreatedAt.Enabled = true;
+            });
+
+        // ... and every optional metadata column off, leaving a table of id and data. Per type rather than
+        // through opts.Policies, which would strip them from the whole store and take the rest of the demo
+        // with it.
+        opts.Schema.For<MinimalNote>()
+            .Metadata(m => m.DisableInformationalFields());
+
+        // A two-megabyte document, so the list view can be seen not fetching it.
+        opts.Schema.For<MediaAsset>();
+
         // --- Events ---
         // Everything below is about the event store, its projections and the async daemon. The document
         // section above is a different packet's; keep the two apart.

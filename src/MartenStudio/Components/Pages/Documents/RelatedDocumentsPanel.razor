@@ -1,0 +1,65 @@
+@using MartenStudio.Services.Documents
+@using RelatedModel = MartenStudio.Services.Documents.RelatedDocuments
+
+@*
+    Outbound related documents, from the foreign keys StoreOptions declares.
+
+    Outbound only in v1, and declared only: Marten knows which column points where because the host wrote
+    ForeignKey<T>(...), and following that is a single indexed read. Finding what points *at* this document
+    would mean scanning every other collection's columns, which is the kind of query this studio exists to
+    talk people out of.
+
+    A link whose target row is missing is still shown, marked. A dangling reference is a fact about the
+    data, and hiding it would hide the one thing worth finding.
+*@
+
+@if (Related.Error is { Length: > 0 } error)
+{
+    <ErrorAlert Message="@error" />
+}
+else if (Related.Links.Count > 0)
+{
+    <section class="ms-related" aria-label="Related documents">
+        <h3 class="ms-doc-meta-title">Related</h3>
+        <ul class="ms-related-list">
+            @foreach (RelatedDocumentLink link in Related.Links)
+            {
+                <li class="ms-related-item" @key="link.ColumnName">
+                    <span class="ms-related-column ms-mono" title="Declared with ForeignKey in StoreOptions">@link.ColumnName</span>
+                    <span class="ms-related-arrow" aria-hidden="true">→</span>
+                    <CollectionChip Alias="@link.TargetAlias" Hue="@link.Hue" Title="@link.TargetTypeName" Small="true" />
+
+                    @if (link.TargetId is null)
+                    {
+                        <span class="ms-text-muted">null</span>
+                    }
+                    else if (link.Exists)
+                    {
+                        <a class="ms-doc-id" href="@HrefFor(link.TargetAlias, link.TargetId)">@link.TargetId</a>
+                    }
+                    else
+                    {
+                        <span class="ms-mono ms-related-missing" title="No row with this id is in that collection">@link.TargetId</span>
+                        <span class="ms-badge ms-badge-warning">missing</span>
+                    }
+                </li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    /// <summary>
+    /// What this document points at, as a <c>RelatedDocuments</c>. Typed <see cref="object" /> — see
+    /// <see cref="DocumentComponentModel" /> for why.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>The links, read back into the type they really are.</summary>
+    private RelatedModel Related => DocumentComponentModel.Read(Model, RelatedModel.None);
+
+    /// <summary>Builds a detail link for a collection and an id.</summary>
+    [Parameter]
+    public Func<string, string, string> HrefFor { get; set; } = static (_, _) => "#";
+}

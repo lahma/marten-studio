@@ -1,0 +1,71 @@
+@using System.Text.Json
+@using MartenStudio.Services.Json
+
+@*
+    The expanded preview under a row.
+
+    Compact on purpose: depth 1, no toolbar, no search, and a 2 KiB budget. Above that the viewer falls
+    back to its own truncated raw view rather than building a tree nobody asked for - the preview exists to
+    answer "is this the document I meant", and the detail page is one click away for everything else.
+
+    Expansion is a button and a keyboard action, never a hover: a preview that appears when the pointer
+    passes over a row is a preview that cannot be reached from a keyboard and cannot be read on a touch
+    screen.
+*@
+
+<tr class="ms-doc-preview-row">
+    <td class="ms-doc-preview-cell" colspan="@ColumnSpan">
+        @if (Json is { Length: > 0 })
+        {
+            <JsonView Json="@Json"
+                      DocumentType="DocumentType"
+                      NamingPolicy="NamingPolicy"
+                      Label="@($"Preview of {Id}")"
+                      Class="ms-json-preview"
+                      ShowToolbar="false"
+                      ShowSearch="false"
+                      AutoExpandDepth="1"
+                      MaxBytesForTree="PreviewBytes"
+                      MaxBytesForRaw="PreviewBytes"
+                      MaxVisibleRows="200" />
+        }
+        else
+        {
+            <p class="ms-doc-preview-empty">
+                This document is @SizeText, which is over the studio's inline budget, so the list did not
+                fetch it. Open it to read it.
+            </p>
+        }
+    </td>
+</tr>
+
+@code {
+    /// <summary>The preview's byte budget: about 2 KiB, per plan section 3.2.</summary>
+    private const int PreviewBytes = 2048;
+
+    /// <summary>The document's JSON, or <see langword="null"/> when it was too big to inline.</summary>
+    [Parameter]
+    public string? Json { get; set; }
+
+    /// <summary>The row's id, for the viewer's accessible name.</summary>
+    [Parameter]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>How many bytes the document is, for the "too large" message.</summary>
+    [Parameter]
+    public long SizeBytes { get; set; }
+
+    /// <summary>How many columns the table has, so the preview spans the whole row.</summary>
+    [Parameter]
+    public int ColumnSpan { get; set; } = 1;
+
+    /// <summary>The CLR type, so the copy menu can offer a Marten LINQ path.</summary>
+    [Parameter]
+    public Type? DocumentType { get; set; }
+
+    /// <summary>The serializer's naming policy.</summary>
+    [Parameter]
+    public JsonNamingPolicy? NamingPolicy { get; set; }
+
+    private string SizeText => JsonModelBuilder.FormatBytes(SizeBytes);
+}

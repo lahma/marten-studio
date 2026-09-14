@@ -1,0 +1,136 @@
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Query
+
+@*
+    The column chooser. Three sources, in one list: the metadata columns the store actually kept, the
+    duplicated fields, and the top-level JSON keys sampled from the page that is on screen.
+
+    The JSON keys are sampled rather than discovered (plan section 3.2): finding out what properties exist
+    in a collection means reading every document in it, which is the query this whole screen exists to help
+    people avoid. The page in front of you is a perfectly good sample of the shape you are looking at.
+*@
+
+<details class="ms-column-chooser" open="@Open">
+    <summary class="ms-column-chooser-summary">Columns (@Selected.Count)</summary>
+
+    <div class="ms-column-chooser-body">
+        <fieldset class="ms-column-chooser-group">
+            <legend>Columns</legend>
+            @foreach (DocumentColumnHeader header in Available)
+            {
+                <label class="ms-column-chooser-option" @key="header.Key">
+                    <input type="checkbox"
+                           checked="@IsSelected(header.Key)"
+                           disabled="@(header.Kind == DocumentColumnKind.Id)"
+                           @onchange="args => ToggleAsync(header.Key, args)" />
+                    <span class="ms-column-chooser-label">@header.Label</span>
+                    <span class="ms-column-chooser-kind">@KindLabel(header.Kind)</span>
+                </label>
+            }
+        </fieldset>
+
+        @if (JsonSuggestions.Count > 0)
+        {
+            <fieldset class="ms-column-chooser-group">
+                <legend>JSON properties on this page</legend>
+                @foreach (JsonPropertySuggestion suggestion in JsonSuggestions)
+                {
+                    <label class="ms-column-chooser-option" @key="suggestion.Name">
+                        <input type="checkbox"
+                               checked="@IsSelected(JsonKey(suggestion.Name))"
+                               @onchange="args => ToggleAsync(JsonKey(suggestion.Name), args)" />
+                        <span class="ms-column-chooser-label">@suggestion.Name</span>
+                        <span class="ms-column-chooser-kind" title="Seen in @suggestion.Frequency of the documents on this page">@suggestion.Frequency</span>
+                    </label>
+                }
+            </fieldset>
+        }
+
+        <div class="ms-column-chooser-actions">
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="ResetAsync">Reset to default</button>
+        </div>
+    </div>
+</details>
+
+@code {
+    /// <summary>
+    /// Every column this collection could show, as an <c>IReadOnlyList&lt;DocumentColumnHeader&gt;</c>.
+    /// Typed <see cref="object" /> — see <see cref="DocumentComponentModel" /> for why.
+    /// </summary>
+    [Parameter]
+    public object? AvailableModel { get; set; }
+
+    /// <summary>The columns currently shown, in the same shape.</summary>
+    [Parameter]
+    public object? SelectedModel { get; set; }
+
+    /// <summary>
+    /// Top-level JSON keys sampled from the loaded page, as an
+    /// <c>IReadOnlyList&lt;JsonPropertySuggestion&gt;</c>.
+    /// </summary>
+    [Parameter]
+    public object? SuggestionsModel { get; set; }
+
+    /// <summary>Whether the disclosure starts open.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>
+    /// The new selection, as column keys. Empty means "back to this collection's default set", which is
+    /// what the Reset button sends.
+    /// </summary>
+    [Parameter]
+    public EventCallback<IReadOnlyList<string>> OnChanged { get; set; }
+
+    private IReadOnlyList<DocumentColumnHeader> Available =>
+        DocumentComponentModel.ReadList<DocumentColumnHeader>(AvailableModel);
+
+    private IReadOnlyList<DocumentColumnHeader> Selected =>
+        DocumentComponentModel.ReadList<DocumentColumnHeader>(SelectedModel);
+
+    private IReadOnlyList<JsonPropertySuggestion> JsonSuggestions =>
+        DocumentComponentModel.ReadList<JsonPropertySuggestion>(SuggestionsModel);
+
+    private bool IsSelected(string key) =>
+        Selected.Any(x => string.Equals(x.Key, key, StringComparison.OrdinalIgnoreCase));
+
+    private static string JsonKey(string name) =>
+        DocumentColumnKeys.KeyFor(new DocumentColumn.JsonPath([name]));
+
+    private static string KindLabel(DocumentColumnKind kind) => kind switch
+    {
+        DocumentColumnKind.Id => "key",
+        DocumentColumnKind.Metadata => "metadata",
+        DocumentColumnKind.Duplicated => "duplicated",
+        _ => "json"
+    };
+
+    private async Task ToggleAsync(string key, ChangeEventArgs args)
+    {
+        bool wanted = args.Value is bool value && value;
+
+        List<string> keys = [.. Selected.Select(x => x.Key)];
+
+        if (wanted)
+        {
+            if (!keys.Contains(key, StringComparer.OrdinalIgnoreCase))
+            {
+                keys.Add(key);
+            }
+        }
+        else
+        {
+            keys.RemoveAll(x => string.Equals(x, key, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // The id is not optional: it is the link to the document and the tiebreaker of every sort.
+        if (!keys.Contains(DocumentColumnKeys.Id, StringComparer.OrdinalIgnoreCase))
+        {
+            keys.Insert(0, DocumentColumnKeys.Id);
+        }
+
+        await OnChanged.InvokeAsync(keys);
+    }
+
+    private async Task ResetAsync() => await OnChanged.InvokeAsync([]);
+}

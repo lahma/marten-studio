@@ -1,0 +1,782 @@
+@page "/marten/documents"
+@page "/marten/documents/{Alias}"
+@using System.Text.Json
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Query
+@implements IAsyncDisposable
+@inject IDocumentDataService Data
+@inject DocumentBrowserState Browser
+@inject StudioState State
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+@inject IJSRuntime JsRuntime
+
+<PageTitle>@(Alias is { Length: > 0 } ? Alias + " — Documents" : "Documents")</PageTitle>
+
+<div class="ms-page ms-doc-page">
+    <div class="ms-doc-layout">
+        <div class="ms-doc-rail">
+            <CollectionsRail Model="rail"
+                             ActiveAlias="@Alias"
+                             Pinned="pinned"
+                             HrefFor="RailHref"
+                             OnTogglePin="TogglePinAsync"
+                             OnExactCount="ExactCountAsync"
+                             OnRetry="ReloadAsync" />
+        </div>
+
+        <div class="ms-doc-main">
+            @if (Alias is null or { Length: 0 })
+            {
+                <div class="ms-page-header">
+                    <h1 class="ms-page-title">Documents</h1>
+                </div>
+                <div class="ms-empty">
+                    <p class="ms-empty-title">Pick a collection</p>
+                    <p class="ms-empty-description">
+                        Every document type this application registered with Marten is on the left, with the
+                        tables the database has that no mapping claims underneath them. Everything the studio
+                        shows here it learned from <code>StoreOptions</code>.
+                    </p>
+                </div>
+            }
+            else if (string.Equals(Alias, CollectionAliases.Recent, StringComparison.OrdinalIgnoreCase))
+            {
+                @RenderRecent()
+            }
+            else
+            {
+                @RenderCollection()
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
+    private readonly List<string> pinned = [];
+
+    private CancellationTokenSource? cts;
+    private CollectionRail rail = new([]);
+    private CollectionInfo? collection;
+    private DocumentPage list = new();
+    private IReadOnlyList<RecentDocument> recent = [];
+    private string? loadError;
+    private bool loading = true;
+    private string? loadedSignature;
+    private bool preferencesLoaded;
+
+    /// <summary>The collection alias from the route, or <see langword="null"/> for the index.</summary>
+    [Parameter]
+    public string? Alias { get; set; }
+
+    /// <summary>The store key, so a pasted link reopens the same store (D9).</summary>
+    [SupplyParameterFromQuery(Name = "store")]
+    public string? StoreKey { get; set; }
+
+    /// <summary>The database identity.</summary>
+    [SupplyParameterFromQuery(Name = "db")]
+    public string? DatabaseId { get; set; }
+
+    /// <summary>The tenant, or empty for all of them.</summary>
+    [SupplyParameterFromQuery(Name = "tenant")]
+    public string? TenantId { get; set; }
+
+    /// <summary>The search box's contents.</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Search { get; set; }
+
+    /// <summary>The sort column's key.</summary>
+    [SupplyParameterFromQuery(Name = "sort")]
+    public string? Sort { get; set; }
+
+    /// <summary>The sort direction.</summary>
+    [SupplyParameterFromQuery(Name = "dir")]
+    public string? Dir { get; set; }
+
+    /// <summary>The keyset cursor.</summary>
+    [SupplyParameterFromQuery(Name = "cursor")]
+    public string? Cursor { get; set; }
+
+    /// <summary>The one-based page number, in offset mode.</summary>
+    [SupplyParameterFromQuery(Name = "page")]
+    public int? PageNumber { get; set; }
+
+    /// <summary>Rows per page.</summary>
+    [SupplyParameterFromQuery(Name = "size")]
+    public int? Size { get; set; }
+
+    /// <summary>The chosen columns, comma-separated.</summary>
+    [SupplyParameterFromQuery(Name = "cols")]
+    public string? Cols { get; set; }
+
+    /// <summary>The deleted tri-state.</summary>
+    [SupplyParameterFromQuery(Name = "deleted")]
+    public string? Deleted { get; set; }
+
+    /// <summary>The paging mode: <c>offset</c> switches to numbered pages.</summary>
+    [SupplyParameterFromQuery(Name = "paging")]
+    public string? Paging { get; set; }
+
+    protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await State.EnsureInitializedAsync();
+        await ApplyScopeFromUrlAsync();
+
+        string signature = Signature();
+        if (string.Equals(signature, loadedSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        loadedSignature = signature;
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || preferencesLoaded)
+        {
+            return;
+        }
+
+        preferencesLoaded = true;
+        await LoadPinsAsync();
+        await ApplyStoredColumnsAsync();
+    }
+
+    private string Signature() => string.Join(
+        '\u001f',
+        Alias,
+        State.ActiveScope?.StoreKey,
+        State.ActiveScope?.DatabaseId,
+        State.ActiveScope?.TenantId,
+        Search,
+        Sort,
+        Dir,
+        Cursor,
+        PageNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        Size?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        Cols,
+        Deleted,
+        Paging,
+        Browser.HasAcceptedVerdict(Alias) ? "run" : "hold");
+
+    /// <summary>
+    /// Points the studio at the scope the URL names, when it names one. The listing validates it, so a
+    /// pasted link to a store the visitor may not see quietly stays on the one they are allowed.
+    /// </summary>
+    private async Task ApplyScopeFromUrlAsync()
+    {
+        if (StoreKey is null && DatabaseId is null && TenantId is null)
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+
+        bool differs = (StoreKey is not null && !string.Equals(StoreKey, active?.StoreKey, StringComparison.OrdinalIgnoreCase))
+            || (DatabaseId is not null && !string.Equals(DatabaseId, active?.DatabaseId, StringComparison.OrdinalIgnoreCase))
+            || (TenantId is not null && !string.Equals(NullIfBlank(TenantId), active?.TenantId, StringComparison.Ordinal));
+
+        if (differs)
+        {
+            await State.SetScopeAsync(StoreKey ?? active?.StoreKey, DatabaseId ?? active?.DatabaseId, TenantId);
+        }
+    }
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            loading = false;
+            return;
+        }
+
+        CancellationToken token = ResetCancellation();
+
+        loading = true;
+        loadError = null;
+        expanded.Clear();
+        StateHasChanged();
+
+        try
+        {
+            rail = await Data.GetCollectionsAsync(scope, token);
+            collection = rail.Find(Alias);
+
+            if (Alias is { Length: > 0 } alias)
+            {
+                if (string.Equals(alias, CollectionAliases.Recent, StringComparison.OrdinalIgnoreCase))
+                {
+                    recent = await Data.GetRecentAsync(scope, PageSize, token);
+                }
+                else
+                {
+                    list = await Data.ListAsync(scope, alias, BuildRequest(), token);
+                    Browser.RememberPage(alias, [.. list.Rows.Select(static x => x.Id)], CurrentRelativeUrl());
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer load replaced this one; its result is the one that matters.
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            loadError = "You are not authorized for this store, database or tenant.";
+        }
+        catch (Exception exception)
+        {
+            loadError = exception.Message;
+        }
+        finally
+        {
+            loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private DocumentListRequest BuildRequest() => new()
+    {
+        Search = Search,
+        SortKey = Sort,
+        Direction = DocumentLinks.ParseDirection(Dir),
+        Cursor = DocumentLinks.Decode(Cursor),
+        Offset = OffsetPaging ? Math.Max(0, (CurrentPage - 1) * PageSize) : 0,
+        UseOffsetPaging = OffsetPaging,
+        PageSize = PageSize,
+        Deleted = DocumentLinks.ParseDeleted(Deleted),
+        ColumnKeys = DocumentLinks.ParseColumns(Cols),
+        RunAnyway = Browser.HasAcceptedVerdict(Alias)
+    };
+
+    private bool OffsetPaging => string.Equals(Paging, "offset", StringComparison.OrdinalIgnoreCase);
+
+    private int CurrentPage => Math.Max(1, PageNumber ?? 1);
+
+    private int PageSize => Math.Clamp(Size ?? Options.Value.DefaultPageSize, 1, Options.Value.MaxPageSize);
+
+    private CancellationToken ResetCancellation()
+    {
+        CancellationTokenSource? previous = cts;
+        cts = new CancellationTokenSource();
+        previous?.Cancel();
+        previous?.Dispose();
+        return cts.Token;
+    }
+
+    private Task OnScopeChangedAsync() => InvokeAsync(async () =>
+    {
+        loadedSignature = null;
+        await OnParametersSetAsync();
+    });
+
+    private Task ReloadAsync()
+    {
+        loadedSignature = null;
+        return LoadAsync();
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Rendering
+    // ------------------------------------------------------------------------------------------------
+
+    private RenderFragment RenderCollection() =>
+        @<div class="ms-doc-collection">
+            <div class="ms-page-header">
+                <h1 class="ms-page-title">
+                    <CollectionChip Alias="@Alias" Hue="@(collection?.Hue ?? 0)" Title="@collection?.FullTypeName" />
+                </h1>
+                @if (collection is { IsRegistered: false })
+                {
+                    <span class="ms-badge ms-badge-warning" title="No StoreOptions mapping claims this table">read-only</span>
+                }
+                @if (collection is { IsSubclass: true, RootAlias: { } root })
+                {
+                    <span class="ms-doc-subtitle">a subclass of <a href="@CollectionHref(root)">@root</a>, in the same table</span>
+                }
+                @if (!list.Estimate.IsUnavailable)
+                {
+                    <span class="ms-doc-subtitle" title="@(list.Estimate.IsEstimate ? "Estimated from pg_class.reltuples (D8)" : "Exact count")">
+                        @(list.Estimate.IsEstimate ? "~" : string.Empty)@list.Estimate.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) documents
+                    </span>
+                }
+            </div>
+
+            @if (loading)
+            {
+                <LoadingSpinner />
+            }
+            else if (loadError is { Length: > 0 } error)
+            {
+                <ErrorAlert Message="@error" OnRetry="ReloadAsync" />
+            }
+            else
+            {
+                <DocumentToolbar Alias="@Alias"
+                                 Search="@Search"
+                                 SoftDeleted="@(collection?.Flags.SoftDeleted ?? false)"
+                                 Deleted="@Deleted"
+                                 PageSize="PageSize"
+                                 MaxPageSize="Options.Value.MaxPageSize"
+                                 MaxOffset="Internal.Sql.DocumentQueryBuilder.MaxOffset"
+                                 OffsetPaging="OffsetPaging"
+                                 AvailableModel="list.AvailableColumns"
+                                 SelectedModel="list.Columns"
+                                 SuggestionsModel="list.JsonSuggestions"
+                                 QueryHref="@QueryHref()"
+                                 OnSearch="SearchAsync"
+                                 OnDeletedChanged="DeletedChangedAsync"
+                                 OnPageSizeChanged="PageSizeChangedAsync"
+                                 OnPagingChanged="PagingChangedAsync"
+                                 OnColumnsChanged="ColumnsChangedAsync" />
+
+                <SearchGrammarStrip Model="list.Verdict"
+                                    Sql="@list.Sql"
+                                    ParameterNames="list.ParameterNames"
+                                    Blocked="@(list.State == DocumentListState.BlockedByVerdict)"
+                                    OnRunAnyway="RunAnywayAsync" />
+
+                @if (list.State == DocumentListState.Failed)
+                {
+                    <ErrorAlert Message="@(list.Error ?? "This read failed.")" OnRetry="ReloadAsync" />
+                    @if (list.Suggestion is { Length: > 0 } suggestion)
+                    {
+                        <pre class="ms-code"><code>@suggestion</code></pre>
+                    }
+                }
+                else if (list.State == DocumentListState.Loaded)
+                {
+                    <DocumentTable Model="list"
+                                   SortKey="@list.SortKey"
+                                   Direction="@DocumentLinks.DirectionToken(list.Direction)"
+                                   Expanded="expanded"
+                                   DocumentType="list.DocumentClrType"
+                                   NamingPolicy="list.NamingPolicy"
+                                   EmptyText="@EmptyText()"
+                                   HrefFor="DetailHref"
+                                   OnSort="SortAsync"
+                                   OnToggleExpand="ToggleExpandAsync" />
+
+                    <KeysetPager OffsetPaging="OffsetPaging"
+                                 Page="CurrentPage"
+                                 PageSize="PageSize"
+                                 MaxOffset="Internal.Sql.DocumentQueryBuilder.MaxOffset"
+                                 HasMore="list.HasMore"
+                                 HasPrevious="@(cursorHistory.Count > 0)"
+                                 RowCount="list.Rows.Count"
+                                 OnFirst="FirstPageAsync"
+                                 OnPrevious="PreviousPageAsync"
+                                 OnNext="NextPageAsync"
+                                 OnPage="GoToPageAsync"
+                                 OnJumpToId="JumpToIdAsync" />
+                }
+            }
+        </div>;
+
+    private RenderFragment RenderRecent() =>
+        @<div class="ms-doc-collection">
+            <div class="ms-page-header">
+                <h1 class="ms-page-title">Recent</h1>
+                <span class="ms-doc-subtitle">
+                    The most recently written documents across every collection that keeps
+                    <code>mt_last_modified</code>.
+                </span>
+            </div>
+
+            @if (loading)
+            {
+                <LoadingSpinner />
+            }
+            else if (loadError is { Length: > 0 } error)
+            {
+                <ErrorAlert Message="@error" OnRetry="ReloadAsync" />
+            }
+            else
+            {
+                <div class="ms-table-wrap">
+                    <table class="ms-table ms-doc-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">collection</th>
+                                <th scope="col">id</th>
+                                <th scope="col">last modified</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (recent.Count == 0)
+                            {
+                                <tr>
+                                    <td class="ms-table-empty" colspan="3">
+                                        No collection in this store keeps <code>mt_last_modified</code>, so there is
+                                        nothing to order by.
+                                    </td>
+                                </tr>
+                            }
+                            @foreach (RecentDocument document in recent)
+                            {
+                                <tr @key="document.Alias + '/' + document.Id">
+                                    <td><CollectionChip Alias="@document.Alias" Hue="@document.Hue" Small="true" /></td>
+                                    <td>
+                                        <a class="ms-doc-id" href="@DocumentLinks.ToDocument(Options.Value, State.ActiveScope, document.Alias, document.Id)">@document.Id</a>
+                                    </td>
+                                    <td title="@State.FormatInSelectedTimeZone(document.LastModified)">
+                                        <TimeAgo Timestamp="document.LastModified" />
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>;
+
+    private string EmptyText() => list.Verdict.HasErrors
+        ? "The search could not be parsed, so nothing was filtered."
+        : "No documents match.";
+
+    // ------------------------------------------------------------------------------------------------
+    // Links
+    // ------------------------------------------------------------------------------------------------
+
+    private readonly List<string?> cursorHistory = [];
+
+    private string RailHref(string alias) =>
+        DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias);
+
+    private string CollectionHref(string alias) =>
+        DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias);
+
+    private string DetailHref(string id) =>
+        DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias ?? string.Empty, id, CurrentRelativeUrl());
+
+    private string QueryHref() =>
+        DocumentLinks.ToQuery(Options.Value, State.ActiveScope, Alias ?? string.Empty, Search);
+
+    private string CurrentRelativeUrl() => Navigation.ToBaseRelativePath(Navigation.Uri);
+
+    /// <summary>
+    /// Navigates to this collection with some of the list state replaced. Everything not named keeps its
+    /// current value, which is what makes every control on the page composable with every other.
+    /// </summary>
+    private void Navigate(
+        string? search = null,
+        bool searchSet = false,
+        string? sort = null,
+        string? dir = null,
+        string? cursor = null,
+        bool cursorSet = false,
+        int? pageNumber = null,
+        int? size = null,
+        string? cols = null,
+        bool colsSet = false,
+        string? deleted = null,
+        string? paging = null,
+        bool pagingSet = false)
+    {
+        Dictionary<string, string?> query = new(StringComparer.Ordinal);
+
+        Add(query, "q", searchSet ? search : Search);
+        Add(query, "sort", sort ?? Sort);
+        Add(query, "dir", dir ?? Dir);
+        Add(query, "cursor", cursorSet ? cursor : Cursor);
+        Add(query, "page", (pageNumber ?? PageNumber)?.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Add(query, "size", (size ?? Size)?.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Add(query, "cols", colsSet ? cols : Cols);
+        Add(query, "deleted", deleted ?? Deleted);
+        Add(query, "paging", pagingSet ? paging : Paging);
+
+        Navigation.NavigateTo(DocumentLinks.ToCollection(Options.Value, State.ActiveScope, Alias ?? string.Empty, query));
+    }
+
+    private static void Add(Dictionary<string, string?> query, string key, string? value)
+    {
+        if (!string.IsNullOrEmpty(value))
+        {
+            query[key] = value;
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Handlers
+    // ------------------------------------------------------------------------------------------------
+
+    private Task SearchAsync(string? text)
+    {
+        // A new search is a new question, so a previously accepted red verdict does not carry over to it.
+        if (Alias is { Length: > 0 } alias)
+        {
+            Browser.ForgetVerdict(alias);
+        }
+
+        cursorHistory.Clear();
+        Navigate(search: text, searchSet: true, cursor: null, cursorSet: true, pageNumber: 1);
+        return Task.CompletedTask;
+    }
+
+    private Task DeletedChangedAsync(string token)
+    {
+        cursorHistory.Clear();
+        Navigate(deleted: token, cursor: null, cursorSet: true, pageNumber: 1);
+        return Task.CompletedTask;
+    }
+
+    private Task PageSizeChangedAsync(int size)
+    {
+        cursorHistory.Clear();
+        Navigate(size: size, cursor: null, cursorSet: true, pageNumber: 1);
+        return Task.CompletedTask;
+    }
+
+    private Task PagingChangedAsync(bool offset)
+    {
+        cursorHistory.Clear();
+        Navigate(paging: offset ? "offset" : null, pagingSet: true, cursor: null, cursorSet: true, pageNumber: 1);
+        return Task.CompletedTask;
+    }
+
+    private async Task ColumnsChangedAsync(IReadOnlyList<string> keys)
+    {
+        string value = DocumentLinks.FormatColumns(keys);
+
+        await SaveColumnPreferenceAsync(value);
+
+        Navigate(cols: value, colsSet: true);
+    }
+
+    private Task SortAsync(string columnKey)
+    {
+        bool sameColumn = string.Equals(columnKey, list.SortKey, StringComparison.OrdinalIgnoreCase);
+        SortDirection direction = sameColumn && list.Direction == SortDirection.Descending
+            ? SortDirection.Ascending
+            : SortDirection.Descending;
+
+        cursorHistory.Clear();
+        Navigate(sort: columnKey, dir: DocumentLinks.DirectionToken(direction), cursor: null, cursorSet: true, pageNumber: 1);
+        return Task.CompletedTask;
+    }
+
+    private Task ToggleExpandAsync(string id)
+    {
+        if (!expanded.Remove(id))
+        {
+            expanded.Add(id);
+        }
+
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task RunAnywayAsync()
+    {
+        if (Alias is { Length: > 0 } alias)
+        {
+            Browser.AcceptVerdict(alias);
+        }
+
+        return ReloadAsync();
+    }
+
+    private Task FirstPageAsync()
+    {
+        cursorHistory.Clear();
+        Navigate(cursor: null, cursorSet: true, pageNumber: 1);
+        return Task.CompletedTask;
+    }
+
+    private Task PreviousPageAsync()
+    {
+        if (cursorHistory.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        string? previous = cursorHistory[^1];
+        cursorHistory.RemoveAt(cursorHistory.Count - 1);
+        Navigate(cursor: previous, cursorSet: true);
+        return Task.CompletedTask;
+    }
+
+    private Task NextPageAsync()
+    {
+        if (list.NextCursor is not { } next)
+        {
+            return Task.CompletedTask;
+        }
+
+        cursorHistory.Add(Cursor);
+        Navigate(cursor: DocumentLinks.Encode(next), cursorSet: true);
+        return Task.CompletedTask;
+    }
+
+    private Task GoToPageAsync(int pageNumber)
+    {
+        Navigate(pageNumber: pageNumber);
+        return Task.CompletedTask;
+    }
+
+    private Task JumpToIdAsync(string id)
+    {
+        Navigation.NavigateTo(DetailHref(id));
+        return Task.CompletedTask;
+    }
+
+    private async Task ExactCountAsync(string alias)
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
+
+        try
+        {
+            Internal.Sql.DocumentCount exact = await Data.CountExactAsync(scope, alias, cts?.Token ?? CancellationToken.None);
+            rail = ReplaceCount(rail, alias, exact);
+            StateHasChanged();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            loadError = exception.Message;
+            StateHasChanged();
+        }
+    }
+
+    private static CollectionRail ReplaceCount(CollectionRail rail, string alias, Internal.Sql.DocumentCount count)
+    {
+        List<CollectionGroup> groups = [];
+
+        foreach (CollectionGroup group in rail.Groups)
+        {
+            List<CollectionInfo> collections = [];
+
+            foreach (CollectionInfo info in group.Collections)
+            {
+                collections.Add(string.Equals(info.Alias, alias, StringComparison.OrdinalIgnoreCase)
+                    ? info with { Count = count }
+                    : info);
+            }
+
+            groups.Add(group with { Collections = collections });
+        }
+
+        return rail with { Groups = groups };
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Browser preferences
+    // ------------------------------------------------------------------------------------------------
+
+    private string PinKey => "ms_doc_pins_" + (State.ActiveScope?.StoreKey ?? "default");
+
+    private string ColumnKey => "ms_doc_cols_" + (State.ActiveScope?.StoreKey ?? "default") + "_" + (Alias ?? string.Empty);
+
+    private async Task LoadPinsAsync()
+    {
+        string? stored = await ReadPreferenceAsync(PinKey);
+        if (string.IsNullOrWhiteSpace(stored))
+        {
+            return;
+        }
+
+        pinned.Clear();
+        pinned.AddRange(stored.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        StateHasChanged();
+    }
+
+    private async Task TogglePinAsync(string alias)
+    {
+        if (!pinned.Remove(alias))
+        {
+            pinned.Add(alias);
+        }
+
+        await WritePreferenceAsync(PinKey, string.Join(',', pinned));
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Applies the columns this browser remembered for this collection, by putting them in the URL.
+    /// </summary>
+    /// <remarks>
+    /// Through the URL rather than straight into the request, so that the address bar always describes
+    /// what is on screen: a column set that only existed in local storage would make a link somebody
+    /// pastes show a different table from the one they were looking at.
+    /// </remarks>
+    private async Task ApplyStoredColumnsAsync()
+    {
+        if (Alias is null or { Length: 0 } || !string.IsNullOrEmpty(Cols))
+        {
+            return;
+        }
+
+        string? stored = await ReadPreferenceAsync(ColumnKey);
+
+        if (!string.IsNullOrWhiteSpace(stored))
+        {
+            Navigate(cols: stored, colsSet: true);
+        }
+    }
+
+    private Task SaveColumnPreferenceAsync(string value) => WritePreferenceAsync(ColumnKey, value);
+
+    private async Task<string?> ReadPreferenceAsync(string key)
+    {
+        try
+        {
+            return await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { key });
+        }
+        catch (JSException)
+        {
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            // Prerendering: there is no browser to ask yet.
+            return null;
+        }
+    }
+
+    private async Task WritePreferenceAsync(string key, string value)
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", new object?[] { key, value });
+        }
+        catch (JSException)
+        {
+        }
+        catch (JsonException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        if (cts is { } source)
+        {
+            await source.CancelAsync();
+            source.Dispose();
+            cts = null;
+        }
+    }
+}

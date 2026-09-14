@@ -1,0 +1,167 @@
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Json
+@using DocumentModel = MartenStudio.Services.Documents.DocumentDetail
+
+@*
+    "Explain this document" (plan section 3.4, differentiator 6).
+
+    Not a metadata dump: the point is that a Marten document is a jsonb blob *plus* a set of columns
+    somebody configured, and the only way to know whether the two still agree is to put them side by side.
+    A duplicated column that has drifted from its JSON means something wrote the row without going through
+    Marten's upsert function, and this pane is the only screen in any tool that will tell you so.
+
+    The type alias is deliberately spelled out too: the table and the mt_upsert_ function are what a person
+    needs in psql five minutes later.
+*@
+
+<aside class="ms-doc-meta" aria-label="Document metadata">
+    @if (Detail.DotNetTypeMismatch)
+    {
+        <div class="ms-alert ms-alert-warning" role="alert">
+            <strong>mt_dotnet_type does not match this mapping.</strong>
+            The row says <code>@Detail.StoredDotNetType</code>, while <code>StoreOptions</code> maps this
+            collection to <code>@Detail.ExpectedDotNetType</code>. Marten will deserialize it into the
+            mapped type, so any property the stored type had and the mapped one does not is dropped on the
+            next write.
+        </div>
+    }
+
+    @if (!Detail.IsRegistered)
+    {
+        <div class="ms-alert ms-alert-info" role="status">
+            No <code>StoreOptions</code> mapping claims this table, so the studio knows only what the columns
+            say. It is read-only.
+        </div>
+    }
+
+    <section class="ms-doc-meta-section">
+        <h3 class="ms-doc-meta-title">Storage</h3>
+        <div class="ms-kv">
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Table</span>
+                <span class="ms-kv-value ms-mono">@Detail.TableName</span>
+            </div>
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Upsert function</span>
+                @if (Detail.UpsertFunction is { Length: > 0 } upsert)
+                {
+                    <span class="ms-kv-value ms-mono" title="Marten writes this collection through this function; the studio never calls it directly">@upsert</span>
+                }
+                else
+                {
+                    <span class="ms-kv-value ms-text-muted" title="Marten 9 generates the write SQL inline and creates no per-document upsert function">none — written with inline SQL</span>
+                }
+            </div>
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">JSON size</span>
+                <span class="ms-kv-value" title="octet_length(data::text)">@JsonModelBuilder.FormatBytes(Detail.TextBytes)</span>
+            </div>
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Stored size</span>
+                <span class="ms-kv-value" title="pg_column_size(data) - the on-disk width of the jsonb value, compression included">@JsonModelBuilder.FormatBytes(Detail.StoredBytes)</span>
+            </div>
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">id column</span>
+                <span class="ms-kv-value ms-mono">@Detail.IdColumnType.ToString().ToLowerInvariant()</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="ms-doc-meta-section">
+        <h3 class="ms-doc-meta-title">Columns</h3>
+        <table class="ms-table ms-doc-meta-table">
+            <thead>
+                <tr>
+                    <th scope="col">column</th>
+                    <th scope="col">value</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (PhysicalColumnValue column in Detail.Columns)
+                {
+                    <tr @key="column.Name" class="ms-doc-meta-row-@column.Role.ToString().ToLowerInvariant()">
+                        <th scope="row" class="ms-mono">@column.Name</th>
+                        <td>
+                            @if (column.Role == PhysicalColumnRole.Data)
+                            {
+                                <span class="ms-text-muted">the document, shown on the left</span>
+                            }
+                            else if (column.Value is null)
+                            {
+                                <span class="ms-json-null">null</span>
+                            }
+                            else
+                            {
+                                <span class="ms-mono">@column.Value</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+
+    @if (Detail.Duplicated.Count > 0)
+    {
+        <section class="ms-doc-meta-section">
+            <h3 class="ms-doc-meta-title">Duplicated fields</h3>
+            <table class="ms-table ms-doc-meta-table">
+                <thead>
+                    <tr>
+                        <th scope="col"><span class="ms-sr-only">Agreement</span></th>
+                        <th scope="col">column</th>
+                        <th scope="col">member</th>
+                        <th scope="col">column value</th>
+                        <th scope="col">in the JSON</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (DuplicatedFieldAgreement field in Detail.Duplicated)
+                    {
+                        <tr @key="field.ColumnName">
+                            <td>
+                                <span class="ms-agree-dot ms-agree-@field.State.ToString().ToLowerInvariant()"
+                                      title="@AgreementTitle(field)"
+                                      role="img"
+                                      aria-label="@AgreementTitle(field)"></span>
+                            </td>
+                            <th scope="row" class="ms-mono">@field.ColumnName</th>
+                            <td class="ms-mono">@field.MemberPath</td>
+                            <td class="ms-mono">@(field.ColumnValue ?? "null")</td>
+                            <td class="ms-mono">@(field.JsonValue ?? "null")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    }
+</aside>
+
+@code {
+    /// <summary>
+    /// The document to explain, as a <c>DocumentDetail</c>. Typed <see cref="object" /> — see
+    /// <see cref="DocumentComponentModel" /> for why.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    private static readonly DocumentModel EmptyDetail = new()
+    {
+        Alias = string.Empty,
+        Id = string.Empty,
+        Json = "{}",
+        TableName = string.Empty,
+        UpsertFunction = string.Empty
+    };
+
+    /// <summary>The document, read back into the type it really is.</summary>
+    private DocumentModel Detail => DocumentComponentModel.Read(Model, EmptyDetail);
+
+    private static string AgreementTitle(DuplicatedFieldAgreement field) => field.State switch
+    {
+        AgreementState.Agrees => "The column and the JSON agree.",
+        AgreementState.Differs =>
+            "The column and the JSON disagree. Something wrote this row without going through Marten's upsert function.",
+        _ => "The studio could not resolve which JSON property this column shadows, so it will not judge."
+    };
+}

@@ -522,6 +522,18 @@ internal static class DocumentQueryBuilder
                        builder.Add(NpgsqlDbType.Boolean, deleted.Value);
             }
 
+            case DocumentPredicate.SubclassIs subclass:
+            {
+                var column = table.MetadataColumnName(DocumentMetadataColumn.DocumentType)
+                    ?? throw new ArgumentException(
+                        $"'{table.Alias}' is not a hierarchy, so it has no mt_doc_type column to filter on.",
+                        nameof(predicate));
+
+                // Marten writes the discriminator lower-cased, and compares it the same way.
+                return Column(column) + " = " +
+                       builder.Add(NpgsqlDbType.Varchar, subclass.Alias.ToLowerInvariant());
+            }
+
             case DocumentPredicate.Contains contains:
                 return DataRef + " @> " + builder.Add(NpgsqlDbType.Text, contains.Json) + "::jsonb";
 

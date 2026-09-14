@@ -1,0 +1,234 @@
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Query
+
+@*
+    The row above the table: the search box and its grammar hint, the include-deleted tri-state (only where
+    there is anything to include), the page size, the paging mode and the column chooser.
+
+    The tri-state is deliberately three states and not a checkbox. "Live only", "live and deleted" and
+    "deleted only" are three different questions, and a collection where rows exist but are hidden is
+    exactly the state somebody is trying to see when they look for a document that is not there.
+*@
+
+<div class="ms-doc-toolbar">
+    <form class="ms-doc-search" @onsubmit="SubmitAsync" @onsubmit:preventDefault="true">
+        <label class="ms-sr-only" for="ms-doc-search-input">Search @Alias</label>
+        <input id="ms-doc-search-input"
+               class="ms-input ms-doc-search-input"
+               type="search"
+               placeholder="@Placeholder"
+               value="@draft"
+               @oninput="OnInput" />
+        <button type="submit" class="ms-btn ms-btn-primary ms-btn-sm">Search</button>
+        @if (!string.IsNullOrEmpty(Search))
+        {
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="ClearAsync">Clear</button>
+        }
+        <details class="ms-doc-search-help">
+            <summary>Syntax</summary>
+            <ul class="ms-doc-search-help-list">
+                <li><code>id:&lt;value&gt;</code> — the primary key</li>
+                <li><code>field = value</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>!=</code> — dotted paths allowed</li>
+                <li><code>field ~ text</code> — contains, case-insensitive</li>
+                <li><code>@("@>") {"status":"open"}</code> — jsonb containment, the one filter a GIN index serves</li>
+                <li><code>is:deleted</code>, <code>is:not-deleted</code>, <code>tenant:acme</code></li>
+                <li>anything else — a substring of the whole document</li>
+            </ul>
+        </details>
+    </form>
+
+    <div class="ms-doc-toolbar-controls">
+        @if (SoftDeleted)
+        {
+            <div class="ms-segmented" role="group" aria-label="Deleted documents">
+                @foreach (DeletedFilter option in DeletedOptions)
+                {
+                    <button type="button"
+                            class="ms-segmented-option @(DeletedFilterValue == option ? "ms-segmented-option-on" : null)"
+                            aria-pressed="@(DeletedFilterValue == option ? "true" : "false")"
+                            title="@DeletedTitle(option)"
+                            @key="option"
+                            @onclick="() => DeletedChangedAsync(option)">
+                        @DeletedLabel(option)
+                    </button>
+                }
+            </div>
+        }
+
+        <div class="ms-header-control">
+            <label class="ms-header-control-label" for="ms-doc-page-size">Rows</label>
+            <select id="ms-doc-page-size" class="ms-select" value="@PageSize" @onchange="PageSizeChangedAsync">
+                @foreach (int size in PageSizes())
+                {
+                    <option value="@size">@size</option>
+                }
+            </select>
+        </div>
+
+        <div class="ms-segmented" role="group" aria-label="Paging mode">
+            <button type="button"
+                    class="ms-segmented-option @(OffsetPaging ? null : "ms-segmented-option-on")"
+                    title="Keyset paging: the next page starts after the last row, which stays correct while rows are being written"
+                    @onclick="() => PagingChangedAsync(false)">Keyset</button>
+            <button type="button"
+                    class="ms-segmented-option @(OffsetPaging ? "ms-segmented-option-on" : null)"
+                    title="Offset paging: numbered pages, capped at @MaxOffset rows in"
+                    @onclick="() => PagingChangedAsync(true)">Pages</button>
+        </div>
+
+        <ColumnChooser AvailableModel="AvailableModel"
+                       SelectedModel="SelectedModel"
+                       SuggestionsModel="SuggestionsModel"
+                       OnChanged="OnColumnsChanged" />
+
+        <a class="ms-btn ms-btn-sm" href="@QueryHref" title="Open this filter on the query screen">Open in Query</a>
+    </div>
+</div>
+
+@code {
+    private static readonly DeletedFilter[] DeletedOptions =
+        [DeletedFilter.Exclude, DeletedFilter.Include, DeletedFilter.Only];
+
+    private string draft = string.Empty;
+    private string? lastSearch;
+
+    /// <summary>The collection being browsed, for labels.</summary>
+    [Parameter]
+    public string Alias { get; set; } = string.Empty;
+
+    /// <summary>The search text currently in the URL.</summary>
+    [Parameter]
+    public string? Search { get; set; }
+
+    /// <summary>Whether the collection is soft-deleted, which is what makes the tri-state meaningful.</summary>
+    [Parameter]
+    public bool SoftDeleted { get; set; }
+
+    /// <summary>The tri-state's current value, as the URL spells it: <c>exclude</c>, <c>include</c> or <c>only</c>.</summary>
+    [Parameter]
+    public string? Deleted { get; set; }
+
+    /// <summary>Rows per page.</summary>
+    [Parameter]
+    public int PageSize { get; set; }
+
+    /// <summary>The largest page the host allows.</summary>
+    [Parameter]
+    public int MaxPageSize { get; set; } = 500;
+
+    /// <summary>The offset cap, named in the paging tooltip.</summary>
+    [Parameter]
+    public int MaxOffset { get; set; }
+
+    /// <summary>Whether the page is in offset mode.</summary>
+    [Parameter]
+    public bool OffsetPaging { get; set; }
+
+    /// <summary>
+    /// Every column the chooser may offer. Typed <see cref="object" /> — see
+    /// <see cref="DocumentComponentModel" /> for why.
+    /// </summary>
+    [Parameter]
+    public object? AvailableModel { get; set; }
+
+    /// <summary>The columns currently shown.</summary>
+    [Parameter]
+    public object? SelectedModel { get; set; }
+
+    /// <summary>JSON keys sampled from the loaded page.</summary>
+    [Parameter]
+    public object? SuggestionsModel { get; set; }
+
+    /// <summary>Where "Open in Query" points.</summary>
+    [Parameter]
+    public string QueryHref { get; set; } = "#";
+
+    /// <summary>Submits a new search.</summary>
+    [Parameter]
+    public EventCallback<string?> OnSearch { get; set; }
+
+    /// <summary>Changes the deleted tri-state, by its URL token.</summary>
+    [Parameter]
+    public EventCallback<string> OnDeletedChanged { get; set; }
+
+    /// <summary>Changes the page size.</summary>
+    [Parameter]
+    public EventCallback<int> OnPageSizeChanged { get; set; }
+
+    /// <summary>Switches between keyset and offset paging.</summary>
+    [Parameter]
+    public EventCallback<bool> OnPagingChanged { get; set; }
+
+    /// <summary>Changes the selected columns.</summary>
+    [Parameter]
+    public EventCallback<IReadOnlyList<string>> OnColumnsChanged { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        // The draft is what the visitor is typing; it is only replaced when the URL's search itself
+        // changed, so a re-render while they type does not reset the box under their cursor.
+        if (!string.Equals(lastSearch, Search, StringComparison.Ordinal))
+        {
+            lastSearch = Search;
+            draft = Search ?? string.Empty;
+        }
+    }
+
+    private DeletedFilter DeletedFilterValue => DocumentComponentModel.Deleted(Deleted);
+
+    private string Placeholder => $"Search {Alias} — id:… · field = value · @> {{\"k\":\"v\"}} · is:deleted";
+
+    private IEnumerable<int> PageSizes()
+    {
+        foreach (int size in new[] { 25, 50, 100, 200, 500 })
+        {
+            if (size <= MaxPageSize)
+            {
+                yield return size;
+            }
+        }
+
+        if (PageSize > 0 && PageSize <= MaxPageSize && !new[] { 25, 50, 100, 200, 500 }.Contains(PageSize))
+        {
+            yield return PageSize;
+        }
+    }
+
+    private static string DeletedLabel(DeletedFilter filter) => filter switch
+    {
+        DeletedFilter.Include => "All",
+        DeletedFilter.Only => "Deleted",
+        _ => "Live"
+    };
+
+    private static string DeletedTitle(DeletedFilter filter) => filter switch
+    {
+        DeletedFilter.Include => "Live and soft-deleted documents together",
+        DeletedFilter.Only => "Only the soft-deleted documents",
+        _ => "Only the live documents - what Marten itself returns"
+    };
+
+    private void OnInput(ChangeEventArgs args) => draft = args.Value?.ToString() ?? string.Empty;
+
+    private async Task SubmitAsync() => await OnSearch.InvokeAsync(draft);
+
+    private async Task ClearAsync()
+    {
+        draft = string.Empty;
+        await OnSearch.InvokeAsync(null);
+    }
+
+    private async Task DeletedChangedAsync(DeletedFilter filter) =>
+        await OnDeletedChanged.InvokeAsync(DocumentLinks.DeletedToken(filter));
+
+    private async Task PagingChangedAsync(bool offset) => await OnPagingChanged.InvokeAsync(offset);
+
+    private async Task PageSizeChangedAsync(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int size))
+        {
+            await OnPageSizeChanged.InvokeAsync(size);
+        }
+    }
+}

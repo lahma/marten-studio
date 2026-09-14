@@ -1,0 +1,238 @@
+@using MartenStudio.Services.Documents
+
+@*
+    The left rail. Four bands, always in the same order: what the visitor pinned, the Recent
+    pseudo-collection, everything StoreOptions knows about (subclasses nested under their root), and the
+    mt_doc_* tables the database has that no mapping claims.
+
+    The "Discovered" band is a differentiator, not a curiosity (plan section 3.4): a table Marten used to
+    manage and no longer does is invisible in every other tool, and it is exactly the thing somebody is
+    looking for when they open a database browser.
+*@
+
+<nav class="ms-rail" aria-label="Document collections">
+    @if (Rail.Error is { Length: > 0 } error)
+    {
+        <ErrorAlert Message="@error" OnRetry="OnRetry" />
+    }
+
+    @foreach (RailBand band in Bands())
+    {
+        <section class="ms-rail-group" @key="band.Key">
+            <h2 class="ms-rail-title">
+                <span class="ms-rail-name">@band.Title</span>
+                <span class="ms-rail-count">@band.Collections.Count</span>
+            </h2>
+
+            @if (band.Collections.Count == 0)
+            {
+                <p class="ms-rail-empty">@band.EmptyText</p>
+            }
+            else
+            {
+                <ul class="ms-rail-list">
+                    @foreach (CollectionInfo collection in band.Collections)
+                    {
+                        <li class="ms-rail-item" @key="band.Key + '/' + collection.Alias">
+                            @RenderEntry(collection, band.Key)
+
+                            @if (collection.SubCollections.Count > 0)
+                            {
+                                <ul class="ms-rail-list ms-rail-sublist">
+                                    @foreach (CollectionInfo subclass in collection.SubCollections)
+                                    {
+                                        <li class="ms-rail-item" @key="band.Key + '/' + subclass.Alias">
+                                            @RenderEntry(subclass, band.Key)
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    }
+</nav>
+
+@code {
+    /// <summary>
+    /// What the data service found, as a <see cref="CollectionRail" />. Typed
+    /// <see cref="object" /> — see <see cref="DocumentComponentModel" /> for why.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>The alias the page is currently showing, which is drawn as the active entry.</summary>
+    [Parameter]
+    public string? ActiveAlias { get; set; }
+
+    /// <summary>The aliases the visitor pinned, read from this browser's local storage.</summary>
+    [Parameter]
+    public IReadOnlyCollection<string> Pinned { get; set; } = [];
+
+    /// <summary>Builds the link for one collection, from its alias.</summary>
+    [Parameter]
+    public Func<string, string> HrefFor { get; set; } = static _ => "#";
+
+    /// <summary>Pins or unpins a collection.</summary>
+    [Parameter]
+    public EventCallback<string> OnTogglePin { get; set; }
+
+    /// <summary>Asks for an exact <c>count(*)</c> for one collection (D8).</summary>
+    [Parameter]
+    public EventCallback<string> OnExactCount { get; set; }
+
+    /// <summary>Reloads the rail after a failure.</summary>
+    [Parameter]
+    public EventCallback OnRetry { get; set; }
+
+    /// <summary>The rail, read back into the type it really is.</summary>
+    private CollectionRail Rail => DocumentComponentModel.Read(Model, EmptyRail);
+
+    private static readonly CollectionRail EmptyRail = new([]);
+
+    private sealed record RailBand(string Key, string Title, IReadOnlyList<CollectionInfo> Collections, string EmptyText);
+
+    /// <summary>
+    /// One rail entry. An inline template rather than a child component: it is rendered from three places
+    /// in this file and from nowhere else, and a component would add a parameter-diffing lifecycle to a
+    /// line of markup.
+    /// </summary>
+    private RenderFragment RenderEntry(CollectionInfo collection, string bandKey) =>
+        @<div class="ms-rail-entry">
+            <a class="@EntryClass(collection)" href="@HrefFor(collection.Alias)">
+                <CollectionChip Alias="@collection.Alias"
+                                Hue="@collection.Hue"
+                                Title="@(collection.FullTypeName ?? collection.Table)" />
+
+                @if (collection.ClrTypeName is { Length: > 0 } typeName)
+                {
+                    <span class="ms-rail-type">@typeName</span>
+                }
+
+                @if (CountText(collection) is { Length: > 0 } count)
+                {
+                    <span class="ms-rail-badge-count" title="@(collection.Count.IsEstimate ? "Estimated from pg_class.reltuples" : "Exact count")">@count</span>
+                }
+            </a>
+
+            <span class="ms-rail-flags">
+                @if (collection.Flags.SoftDeleted)
+                {
+                    <span class="ms-rail-flag ms-rail-flag-delete" title="Soft-deleted: rows are flagged, not removed">D</span>
+                }
+                @if (collection.Flags.Conjoined)
+                {
+                    <span class="ms-rail-flag ms-rail-flag-tenant" title="Conjoined multi-tenancy: every row carries a tenant_id">T</span>
+                }
+                @if (collection.Flags.OptimisticConcurrency)
+                {
+                    <span class="ms-rail-flag ms-rail-flag-concurrency" title="Optimistic concurrency: writes check mt_version">C</span>
+                }
+                @if (collection.Flags.Hierarchy)
+                {
+                    <span class="ms-rail-flag ms-rail-flag-hierarchy" title="Hierarchy: several .NET types share this table">H</span>
+                }
+                @if (!collection.IsRegistered && collection.Alias != CollectionAliases.Recent)
+                {
+                    <span class="ms-rail-flag ms-rail-flag-discovered" title="No StoreOptions mapping claims this table - read-only">?</span>
+                }
+
+                @if (collection.Count.IsEstimate && OnExactCount.HasDelegate)
+                {
+                    <button type="button"
+                            class="ms-rail-action"
+                            title="Count the rows exactly. On a large collection this is a sequential scan."
+                            @onclick="() => ExactCountAsync(collection.Alias)">=</button>
+                }
+
+                @if (OnTogglePin.HasDelegate && collection.Alias != CollectionAliases.Recent && bandKey != "pinned")
+                {
+                    <button type="button"
+                            class="ms-rail-action @(IsPinned(collection.Alias) ? "ms-rail-action-on" : null)"
+                            title="@(IsPinned(collection.Alias) ? "Unpin" : "Pin to the top of the rail")"
+                            aria-pressed="@(IsPinned(collection.Alias) ? "true" : "false")"
+                            @onclick="() => TogglePinAsync(collection.Alias)">@(IsPinned(collection.Alias) ? "★" : "☆")</button>
+                }
+                else if (OnTogglePin.HasDelegate && bandKey == "pinned")
+                {
+                    <button type="button"
+                            class="ms-rail-action ms-rail-action-on"
+                            title="Unpin"
+                            aria-pressed="true"
+                            @onclick="() => TogglePinAsync(collection.Alias)">★</button>
+                }
+            </span>
+        </div>;
+
+    private IEnumerable<RailBand> Bands()
+    {
+        yield return new RailBand(
+            "pinned",
+            "Pinned",
+            PinnedCollections(),
+            "Nothing pinned yet. Use the pin beside a collection to keep it here.");
+
+        foreach (CollectionGroup group in Rail.Groups)
+        {
+            yield return new RailBand(
+                group.Kind.ToString().ToLowerInvariant(),
+                group.Title,
+                group.Collections,
+                group.Kind == CollectionGroupKind.Documents
+                    ? "This store registers no document types."
+                    : "Nothing here.");
+        }
+    }
+
+    /// <summary>
+    /// The pinned band, built from the real entries rather than from the stored aliases: a pin for a
+    /// collection that has since been removed from StoreOptions simply does not appear, which is the right
+    /// behaviour for a preference that lives in somebody's browser.
+    /// </summary>
+    private IReadOnlyList<CollectionInfo> PinnedCollections()
+    {
+        if (Pinned.Count == 0)
+        {
+            return [];
+        }
+
+        List<CollectionInfo> pinned = [];
+
+        foreach (string alias in Pinned)
+        {
+            if (Rail.Find(alias) is { } collection)
+            {
+                pinned.Add(collection with { SubCollections = [] });
+            }
+        }
+
+        return pinned;
+    }
+
+    private bool IsPinned(string alias) => Pinned.Contains(alias, StringComparer.OrdinalIgnoreCase);
+
+    private string EntryClass(CollectionInfo collection) =>
+        string.Equals(collection.Alias, ActiveAlias, StringComparison.OrdinalIgnoreCase)
+            ? "ms-rail-link ms-rail-link-active"
+            : "ms-rail-link";
+
+    private static string CountText(CollectionInfo collection)
+    {
+        if (collection.Count.IsUnavailable)
+        {
+            return string.Empty;
+        }
+
+        string value = collection.Count.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+
+        // The tilde is load-bearing: D8 says counts are reltuples estimates, and a number that looks
+        // exact when it is not is how a dashboard loses somebody's trust the first time they check it.
+        return collection.Count.IsEstimate ? "~" + value : value;
+    }
+
+    private async Task TogglePinAsync(string alias) => await OnTogglePin.InvokeAsync(alias);
+
+    private async Task ExactCountAsync(string alias) => await OnExactCount.InvokeAsync(alias);
+}

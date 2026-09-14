@@ -1,0 +1,123 @@
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Query
+
+@*
+    The parse strip and the index verdict (plan section 3.4, differentiator 2).
+
+    Three things happen here that a generic SQL browser cannot do. The search is echoed back as the studio
+    understood it, so a typo is visible before it becomes an empty result set. Each term carries a verdict
+    from the store's declared indexes cross-checked with pg_indexes. And a red verdict is not run: the page
+    says what it would cost and offers the StoreOptions line that would fix it, with "Run anyway" for the
+    times the answer is worth the scan.
+*@
+
+<div class="ms-search-strip ms-verdict-@Level" role="status">
+    <div class="ms-search-strip-row">
+        <span class="ms-verdict-badge ms-verdict-badge-@Level" title="@VerdictTitle">@VerdictText</span>
+
+        @foreach (SearchChip chip in Verdict.Chips)
+        {
+            <span class="ms-search-chip ms-search-chip-@chip.Kind.ToString().ToLowerInvariant() ms-verdict-@chip.Level.ToString().ToLowerInvariant()"
+                  title="@chip.Reason"
+                  @key="chip">
+                @chip.Text
+            </span>
+        }
+
+        @if (Verdict.Chips.Count == 0)
+        {
+            <span class="ms-search-chip ms-search-chip-empty">no filter — the whole collection</span>
+        }
+    </div>
+
+    @if (Verdict.Chips.Count > 0)
+    {
+        <ul class="ms-verdict-reasons">
+            @foreach (SearchChip chip in Verdict.Chips)
+            {
+                @if (chip.Level != IndexVerdictLevel.Green)
+                {
+                    <li class="ms-verdict-reason ms-verdict-@chip.Level.ToString().ToLowerInvariant()" @key="chip">
+                        <span class="ms-verdict-reason-text">@chip.Reason</span>
+                        @if (chip.Suggestion is { Length: > 0 } suggestion)
+                        {
+                            <code class="ms-code-inline">@suggestion</code>
+                        }
+                    </li>
+                }
+            }
+        </ul>
+    }
+
+    @if (Blocked)
+    {
+        <div class="ms-verdict-blocked">
+            <span>
+                This filter reads every row of the collection, so the studio has not run it. Narrow it, add
+                the index below, or run it anyway.
+            </span>
+            <button type="button" class="ms-btn ms-btn-primary ms-btn-sm" @onclick="RunAnywayAsync">Run anyway</button>
+        </div>
+    }
+
+    @if (Sql is { Length: > 0 })
+    {
+        @* D14: there is no live SQL tail, and this is what answers the question people actually have. *@
+        <details class="ms-sql-disclosure">
+            <summary>Show SQL</summary>
+            <pre class="ms-code ms-code-sql"><code>@Sql</code></pre>
+            @if (ParameterNames.Count > 0)
+            {
+                <p class="ms-sql-parameters">Parameters: @string.Join(", ", ParameterNames)</p>
+            }
+        </details>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// The verdict on the current search, as a <see cref="SearchVerdict" />. Typed
+    /// <see cref="object" /> — see <see cref="DocumentComponentModel" /> for why.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>The statement that ran, or would have run.</summary>
+    [Parameter]
+    public string? Sql { get; set; }
+
+    /// <summary>The parameter names in it.</summary>
+    [Parameter]
+    public IReadOnlyList<string> ParameterNames { get; set; } = [];
+
+    /// <summary>Whether the read was withheld because the verdict is red.</summary>
+    [Parameter]
+    public bool Blocked { get; set; }
+
+    /// <summary>Runs the search despite a red verdict.</summary>
+    [Parameter]
+    public EventCallback OnRunAnyway { get; set; }
+
+    /// <summary>The verdict, read back into the type it really is.</summary>
+    private SearchVerdict Verdict => DocumentComponentModel.Read(Model, SearchVerdict.Empty);
+
+    private string Level => Verdict.Level.ToString().ToLowerInvariant();
+
+    private string VerdictText => Verdict.HasErrors
+        ? "cannot parse"
+        : Verdict.Level switch
+        {
+            IndexVerdictLevel.Green => "indexed",
+            IndexVerdictLevel.Amber => "partly indexed",
+            _ => "full scan"
+        };
+
+    private string VerdictTitle => Verdict.Level switch
+    {
+        IndexVerdictLevel.Green => "An index can serve every term of this filter.",
+        IndexVerdictLevel.Amber => "An index names the column but may not be used for this filter.",
+        _ => "Nothing serves this filter: every row of the collection is read."
+    };
+
+    private async Task RunAnywayAsync() => await OnRunAnyway.InvokeAsync();
+}

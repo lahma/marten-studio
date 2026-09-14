@@ -117,9 +117,12 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddSingleton<StudioCapabilityGuard>();
         services.TryAddSingleton<StudioActionLogService>();
 
-        // The information_schema reader, singleton because what it caches - a table's physical columns -
-        // changes only with a schema migration and is the same answer for every circuit.
+        // Both read the database's catalog and cache what it said, keyed by database identity.
+        // Singletons because what they cache - a table's physical columns, a table's indexes - changes
+        // only with a schema migration and is the same answer for every circuit; a per-circuit cache
+        // would ask information_schema once per visitor per page.
         services.TryAddSingleton<ColumnCatalog>();
+        services.TryAddSingleton<IndexCatalog>();
 
         // Scoped, because all five are about one circuit: what it is pointed at, who is driving it, and
         // what it has been told.
@@ -131,6 +134,8 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<StudioActionLog>();
         services.TryAddScoped<ToastService>();
         services.TryAddScoped<IStoreInfoService, StoreInfoService>();
+        services.TryAddScoped<IDocumentDataService, DocumentDataService>();
+        services.TryAddScoped<DocumentBrowserState>();
         services.TryAddScoped<IDocumentWriteService, DocumentWriteService>();
         services.TryAddScoped<IEventDataService, EventDataService>();
         services.TryAddScoped<ISchemaDataService, SchemaDataService>();

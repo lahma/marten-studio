@@ -127,6 +127,7 @@ internal static class IndexAdvisor
 
             DocumentPredicate.Tenant => EvaluateTenant(table, indexes),
             DocumentPredicate.IsDeleted => EvaluateDeleted(table, indexes),
+            DocumentPredicate.SubclassIs => EvaluateSubclass(table, indexes),
             DocumentPredicate.Contains => EvaluateContainment(table, indexes),
 
             DocumentPredicate.FreeText => new IndexVerdict(
@@ -233,6 +234,34 @@ internal static class IndexAdvisor
             },
             _ => new IndexVerdict(IndexVerdictLevel.Red, "No index covers tenant_id.", null),
         };
+    }
+
+    /// <summary>
+    /// A subclass filter. Marten creates no index on <c>mt_doc_type</c>, so this is normally amber rather
+    /// than red: the column is on every row of a table the page was going to read anyway, and the scan is
+    /// the hierarchy's own cost rather than something the filter added.
+    /// </summary>
+    private static IndexVerdict EvaluateSubclass(DocumentTableInfo table, IReadOnlyList<PostgresIndex> indexes)
+    {
+        var column = table.MetadataColumnName(DocumentMetadataColumn.DocumentType);
+
+        if (column is null)
+        {
+            return new IndexVerdict(
+                IndexVerdictLevel.Red,
+                $"'{table.Alias}' is not a hierarchy, so it has no mt_doc_type column.",
+                null);
+        }
+
+        var verdict = ForColumn(indexes, column);
+
+        return verdict.Level == IndexVerdictLevel.Green
+            ? verdict with { Reason = $"{column} leads an index." }
+            : new IndexVerdict(
+                IndexVerdictLevel.Amber,
+                $"A subclass shares its root's table and is found by scanning {column}; Marten creates no " +
+                "index on it.",
+                null);
     }
 
     private static IndexVerdict EvaluateDeleted(DocumentTableInfo table, IReadOnlyList<PostgresIndex> indexes)

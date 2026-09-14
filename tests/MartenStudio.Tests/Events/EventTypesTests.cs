@@ -82,7 +82,7 @@ public class EventTypesTests
         IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
 
         page.Find("a.ms-event-chip").GetAttribute("href").Should()
-            .StartWith("marten/events/feed?types=OrderPlaced");
+            .StartWith("events/feed?types=OrderPlaced");
     }
 
     [Fact]

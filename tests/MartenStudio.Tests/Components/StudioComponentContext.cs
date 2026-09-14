@@ -43,9 +43,11 @@ internal class StudioComponentContext : BunitContext
     /// </param>
     /// <remarks>
     /// The hook exists because bUnit locks its service provider the first time anything is resolved from
-    /// it, and this constructor resolves three services at the end - so a page test that needs its own
-    /// area's <c>Fake*DataService</c> has no way to add one afterwards. Every page area needs exactly
-    /// this, which is why it is a parameter here rather than a duplicate of this class per area.
+    /// it, so a page test that needs its own area's <c>Fake*DataService</c> has to be able to add one
+    /// while the collection is still open. Nothing in this constructor resolves anything (every property
+    /// below is resolved on first use), so the hook and a derived context both still work. Every page
+    /// area needs exactly this, which is why it is a parameter here rather than a duplicate of this class
+    /// per area.
     /// </remarks>
     public StudioComponentContext(Action<IServiceCollection>? configure = null)
     {
@@ -67,14 +69,26 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<IAuthorizationService>(AuthorizationService);
         Services.AddSingleton<AuthenticationStateProvider>(AuthenticationState);
         Services.AddSingleton<StudioAuthorization>();
-        Services.AddSingleton<StudioState>();
+
+        // The time zone is pinned here rather than by resolving the state in this constructor: bUnit
+        // seals its service provider the moment anything is resolved from it, and a derived context - one
+        // per area, each with its own fake data service - has to be able to add services after this
+        // constructor has run.
+        Services.AddSingleton(static provider =>
+        {
+            StudioState state = ActivatorUtilities.CreateInstance<StudioState>(provider);
+            state.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;
+            return state;
+        });
+
         Services.AddSingleton<StudioCapabilityGuard>();
         Services.AddSingleton<ToastService>();
         Services.AddSingleton<StudioActionLogService>();
         Services.AddSingleton<StudioActionLog>();
 
         // What the layout reads to decide whether to draw the "served to anyone" banner. The real
-        // singleton, so a test says what it says by handing it real endpoint metadata.
+        // singleton, so a test says what it says by handing it real endpoint metadata. Constructed
+        // here rather than resolved, so it does not seal the service provider either.
         MappedEndpoints = new MartenStudioMappedEndpoints();
         Services.AddSingleton(MappedEndpoints);
 
@@ -85,11 +99,6 @@ internal class StudioComponentContext : BunitContext
             provider.GetRequiredService<ComponentStatePersistenceManager>().State);
 
         configure?.Invoke(Services);
-
-        State = Services.GetRequiredService<StudioState>();
-        State.SelectedTimeZoneId = TimeZoneInfo.Utc.Id;
-        Toasts = Services.GetRequiredService<ToastService>();
-        ActionLog = Services.GetRequiredService<StudioActionLog>();
     }
 
     /// <summary>The options an application would have configured.</summary>
@@ -108,14 +117,17 @@ internal class StudioComponentContext : BunitContext
     public TestAuthenticationStateProvider AuthenticationState { get; }
 
     /// <summary>The circuit's scope state, as the components see it.</summary>
-    public StudioState State { get; }
+    /// <remarks>
+    /// Resolved on first use, not in the constructor: see the note there about bUnit's service provider.
+    /// </remarks>
+    public StudioState State => Services.GetRequiredService<StudioState>();
 
     /// <summary>What the startup guard observed about the mapping, as the layout reads it.</summary>
     public MartenStudioMappedEndpoints MappedEndpoints { get; }
 
-    public ToastService Toasts { get; }
+    public ToastService Toasts => Services.GetRequiredService<ToastService>();
 
-    public StudioActionLog ActionLog { get; }
+    public StudioActionLog ActionLog => Services.GetRequiredService<StudioActionLog>();
 
     /// <summary>Where the browser is now.</summary>
     public string CurrentUri => Services.GetRequiredService<NavigationManager>().Uri;

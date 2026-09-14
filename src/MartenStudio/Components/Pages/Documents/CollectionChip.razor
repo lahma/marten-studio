@@ -1,0 +1,30 @@
+@*
+    A collection's name with its stable colour. The hue is a pure function of the alias
+    (CollectionColorizer), so the same collection is the same colour on every page, in every session and
+    in every process - which is the whole reason the colour is worth having in a mixed list.
+*@
+
+<span class="ms-collection-chip @(Small ? "ms-collection-chip-sm" : null)"
+      style="--ms-collection-hue: @Hue"
+      title="@(Title ?? Alias)">
+    <span class="ms-collection-dot" aria-hidden="true"></span>
+    <span class="ms-collection-alias">@Alias</span>
+</span>
+
+@code {
+    /// <summary>The alias to show.</summary>
+    [Parameter]
+    public string Alias { get; set; } = string.Empty;
+
+    /// <summary>The collection's hue, from <see cref="MartenStudio.Services.CollectionColorizer" />.</summary>
+    [Parameter]
+    public int Hue { get; set; }
+
+    /// <summary>The tooltip, normally the .NET type name.</summary>
+    [Parameter]
+    public string? Title { get; set; }
+
+    /// <summary>Whether to render the compact form used inside table cells.</summary>
+    [Parameter]
+    public bool Small { get; set; }
+}

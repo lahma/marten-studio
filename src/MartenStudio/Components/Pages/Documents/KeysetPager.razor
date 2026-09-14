@@ -1,0 +1,122 @@
+@*
+    Paging, both ways.
+
+    Keyset is the default because it is the only one that stays correct: `offset 10000` makes Postgres read
+    and throw away ten thousand rows, and a row written between two page views silently shifts everything
+    after it. The cursor is (sort value, id) with the id as a mandatory tiebreaker, so a page boundary in
+    the middle of a millisecond does not drop rows.
+
+    Offset paging is still offered, because numbered pages are what people reach for and "page 7" is a
+    thing they can say to each other. It is capped, and the cap says so out loud rather than silently
+    returning nothing.
+*@
+
+<div class="ms-pager" role="navigation" aria-label="Document pages">
+    @if (OffsetPaging)
+    {
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(Page <= 1)" @onclick="() => GoToPageAsync(1)">First</button>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(Page <= 1)" @onclick="() => GoToPageAsync(Page - 1)">Prev</button>
+        <span class="ms-pager-position">Page @Page</span>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(!HasMore || AtOffsetCap)" @onclick="() => GoToPageAsync(Page + 1)">Next</button>
+
+        @if (AtOffsetCap)
+        {
+            <span class="ms-pager-note" role="status">
+                Offset paging stops at @MaxOffset rows: past that Postgres is reading and discarding rows to
+                find the page. Switch to keyset paging to keep going.
+            </span>
+        }
+    }
+    else
+    {
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(!HasPrevious)" @onclick="FirstAsync">First</button>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(!HasPrevious)" @onclick="PreviousAsync">Prev</button>
+        <span class="ms-pager-position">@PositionText</span>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(!HasMore)" @onclick="NextAsync">Next</button>
+    }
+
+    <form class="ms-pager-jump" @onsubmit="JumpAsync" @onsubmit:preventDefault="true">
+        <label class="ms-sr-only" for="ms-pager-jump-input">Jump to id</label>
+        <input id="ms-pager-jump-input"
+               class="ms-input ms-input-mono ms-pager-jump-input"
+               type="text"
+               placeholder="Jump to id"
+               value="@jump"
+               @oninput="args => jump = args.Value?.ToString() ?? string.Empty" />
+        <button type="submit" class="ms-btn ms-btn-sm" disabled="@(jump.Length == 0)">Go</button>
+    </form>
+</div>
+
+@code {
+    private string jump = string.Empty;
+
+    /// <summary>Whether the page is in offset mode.</summary>
+    [Parameter]
+    public bool OffsetPaging { get; set; }
+
+    /// <summary>The one-based page number, in offset mode.</summary>
+    [Parameter]
+    public int Page { get; set; } = 1;
+
+    /// <summary>Rows per page.</summary>
+    [Parameter]
+    public int PageSize { get; set; }
+
+    /// <summary>The offset the builder refuses to go past.</summary>
+    [Parameter]
+    public int MaxOffset { get; set; }
+
+    /// <summary>Whether another page exists.</summary>
+    [Parameter]
+    public bool HasMore { get; set; }
+
+    /// <summary>Whether this is not the first page.</summary>
+    [Parameter]
+    public bool HasPrevious { get; set; }
+
+    /// <summary>How many rows are on this page, for the position text.</summary>
+    [Parameter]
+    public int RowCount { get; set; }
+
+    /// <summary>Goes to the first page.</summary>
+    [Parameter]
+    public EventCallback OnFirst { get; set; }
+
+    /// <summary>Goes back one page.</summary>
+    [Parameter]
+    public EventCallback OnPrevious { get; set; }
+
+    /// <summary>Goes forward one page.</summary>
+    [Parameter]
+    public EventCallback OnNext { get; set; }
+
+    /// <summary>Goes to a numbered page, in offset mode.</summary>
+    [Parameter]
+    public EventCallback<int> OnPage { get; set; }
+
+    /// <summary>Opens a document by id, whatever page it is on.</summary>
+    [Parameter]
+    public EventCallback<string> OnJumpToId { get; set; }
+
+    private bool AtOffsetCap => Page * Math.Max(PageSize, 1) >= MaxOffset;
+
+    private string PositionText => RowCount == 0 ? "no rows" : $"{RowCount} rows";
+
+    private async Task FirstAsync() => await OnFirst.InvokeAsync();
+
+    private async Task PreviousAsync() => await OnPrevious.InvokeAsync();
+
+    private async Task NextAsync() => await OnNext.InvokeAsync();
+
+    private async Task GoToPageAsync(int page) => await OnPage.InvokeAsync(Math.Max(1, page));
+
+    private async Task JumpAsync()
+    {
+        if (jump.Length == 0)
+        {
+            return;
+        }
+
+        await OnJumpToId.InvokeAsync(jump.Trim());
+    }
+}

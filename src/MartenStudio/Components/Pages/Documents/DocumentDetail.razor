@@ -1,0 +1,429 @@
+@page "/marten/documents/{Alias}/doc"
+@using System.Text.Json
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Json
+@using DocumentModel = MartenStudio.Services.Documents.DocumentDetail
+@using RelatedModel = MartenStudio.Services.Documents.RelatedDocuments
+@implements IAsyncDisposable
+@inject IDocumentDataService Data
+@inject DocumentBrowserState Browser
+@inject StudioState State
+@inject ToastService Toasts
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+@inject IJSRuntime JsRuntime
+
+@*
+    One document, in two panes: the JSON on the left and everything the database knows about the row on the
+    right. The id is in the query string, not in the path, because Marten ids are frequently strings with
+    a slash in them and the studio's router has no catch-all segment (D9).
+
+    Nothing here writes. The edit, delete and undelete controls belong to a later packet; what this screen
+    owes them is that everything they need - the round-tripped JSON, the version, the delete state - is
+    already on the page and already correct.
+*@
+
+<PageTitle>@(Alias) @Id</PageTitle>
+
+<div class="ms-page ms-doc-detail-page">
+    <nav class="ms-breadcrumb" aria-label="Breadcrumb">
+        <a href="@DocumentLinks.ToIndex(Options.Value, State.ActiveScope)">Documents</a>
+        <span aria-hidden="true">/</span>
+        <a href="@BackHref">@Alias</a>
+        <span aria-hidden="true">/</span>
+        <span class="ms-mono">@Id</span>
+    </nav>
+
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (result?.NotFound is { } missing)
+    {
+        @RenderNotFound(missing)
+    }
+    else if (result?.Detail is { } detail)
+    {
+        <div class="ms-page-header ms-doc-detail-header">
+            <h1 class="ms-page-title">
+                <CollectionChip Alias="@Alias" Hue="@Hue" Title="@detail.ClrType?.FullName" />
+                <span class="ms-mono ms-doc-detail-id">@detail.Id</span>
+            </h1>
+
+            <div class="ms-doc-detail-actions">
+                <button type="button" class="ms-btn ms-btn-sm" @onclick='() => CopyAsync(detail.Json, "JSON")'>Copy JSON</button>
+                <button type="button" class="ms-btn ms-btn-sm" @onclick='() => CopyAsync(detail.Id, "id")'>Copy id</button>
+                <button type="button" class="ms-btn ms-btn-sm" title="A C# record that would deserialize this document" @onclick="() => CopyRecordAsync(detail)">Copy as C# record</button>
+                <button type="button" class="ms-btn ms-btn-sm" @onclick="() => DownloadAsync(detail)">Download</button>
+                <a class="ms-btn ms-btn-sm" href="@QueryHref(detail)">Open in Query</a>
+
+                @if (streamExists)
+                {
+                    <a class="ms-btn ms-btn-sm" href="@DocumentLinks.ToStream(Options.Value, State.ActiveScope, detail.Id)" title="An event stream with this id exists">View stream</a>
+                }
+
+                <span class="ms-doc-detail-nav">
+                    <a class="ms-btn ms-btn-sm @(previousId is null ? "ms-btn-disabled" : null)"
+                       href="@(previousId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, previousId, From))"
+                       aria-disabled="@(previousId is null ? "true" : "false")"
+                       title="The previous document on the list you came from">◀</a>
+                    <a class="ms-btn ms-btn-sm @(nextId is null ? "ms-btn-disabled" : null)"
+                       href="@(nextId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, nextId, From))"
+                       aria-disabled="@(nextId is null ? "true" : "false")"
+                       title="The next document on the list you came from">▶</a>
+                </span>
+            </div>
+        </div>
+
+        @if (detail.IsDeleted)
+        {
+            <div class="ms-alert ms-alert-warning" role="status">
+                This document is soft-deleted: the row is still in the table, and Marten's own queries do
+                not return it.
+            </div>
+        }
+
+        <div class="ms-split ms-doc-detail-split">
+            <div class="ms-split-pane ms-doc-detail-json">
+                <JsonView Json="@detail.Json"
+                          DocumentType="detail.ClrType"
+                          NamingPolicy="detail.NamingPolicy"
+                          Label="@($"{Alias} {detail.Id}")"
+                          DownloadFileName="@FileName(detail)" />
+            </div>
+
+            <div class="ms-split-pane ms-doc-detail-meta">
+                <DocumentMetadataPanel Model="detail" />
+                <RelatedDocumentsPanel Model="related" HrefFor="RelatedHref" />
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private CancellationTokenSource? cts;
+    private DocumentDetailResult? result;
+    private RelatedModel related = RelatedModel.None;
+    private IReadOnlyList<DocumentIdProbe> probes = [];
+    private bool probing;
+    private bool streamExists;
+    private bool loading = true;
+    private string? loadedSignature;
+    private string? previousId;
+    private string? nextId;
+
+    /// <summary>The collection alias from the route.</summary>
+    [Parameter]
+    public string Alias { get; set; } = string.Empty;
+
+    /// <summary>The document id. In the query string, never in the path (D9).</summary>
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? Id { get; set; }
+
+    /// <summary>The list URL this document was opened from, so "back" returns to the same page of it.</summary>
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? From { get; set; }
+
+    /// <summary>The store key.</summary>
+    [SupplyParameterFromQuery(Name = "store")]
+    public string? StoreKey { get; set; }
+
+    /// <summary>The database identity.</summary>
+    [SupplyParameterFromQuery(Name = "db")]
+    public string? DatabaseId { get; set; }
+
+    /// <summary>The tenant.</summary>
+    [SupplyParameterFromQuery(Name = "tenant")]
+    public string? TenantId { get; set; }
+
+    protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await State.EnsureInitializedAsync();
+        await ApplyScopeFromUrlAsync();
+
+        string signature = string.Join('\u001f', Alias, Id, State.ActiveScope?.StoreKey, State.ActiveScope?.DatabaseId, State.ActiveScope?.TenantId);
+
+        if (string.Equals(signature, loadedSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        loadedSignature = signature;
+        await LoadAsync();
+    }
+
+    private async Task ApplyScopeFromUrlAsync()
+    {
+        if (StoreKey is null && DatabaseId is null && TenantId is null)
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+
+        bool differs = (StoreKey is not null && !string.Equals(StoreKey, active?.StoreKey, StringComparison.OrdinalIgnoreCase))
+            || (DatabaseId is not null && !string.Equals(DatabaseId, active?.DatabaseId, StringComparison.OrdinalIgnoreCase))
+            || (TenantId is not null && !string.Equals(string.IsNullOrWhiteSpace(TenantId) ? null : TenantId, active?.TenantId, StringComparison.Ordinal));
+
+        if (differs)
+        {
+            await State.SetScopeAsync(StoreKey ?? active?.StoreKey, DatabaseId ?? active?.DatabaseId, TenantId);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || string.IsNullOrEmpty(Id))
+        {
+            loading = false;
+            result = DocumentDetailResult.Missing("This link carries no document id.");
+            return;
+        }
+
+        CancellationToken token = ResetCancellation();
+
+        loading = true;
+        probes = [];
+        related = RelatedModel.None;
+        streamExists = false;
+        StateHasChanged();
+
+        try
+        {
+            result = await Data.GetDocumentAsync(scope, Alias, Id, token);
+
+            (previousId, nextId) = Browser.Neighbours(Alias, Id);
+
+            if (result.Found)
+            {
+                related = await Data.GetRelatedAsync(scope, Alias, Id, token);
+                streamExists = await Data.StreamExistsAsync(scope, Id, token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            result = DocumentDetailResult.Missing("You are not authorized for this store, database or tenant.");
+        }
+        catch (Exception exception)
+        {
+            result = DocumentDetailResult.Missing(exception.Message);
+        }
+        finally
+        {
+            loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private RenderFragment RenderNotFound(DocumentNotFound missing) =>
+        @<div class="ms-empty">
+            <p class="ms-empty-title">No such document</p>
+            <p class="ms-empty-description">@missing.Message</p>
+
+            @if (missing.Sql is { Length: > 0 } sql)
+            {
+                <pre class="ms-code"><code>@sql</code></pre>
+            }
+
+            @if (missing.IdWasMalformed || probes.Count > 0)
+            {
+                <div class="ms-doc-probe">
+                    <button type="button" class="ms-btn ms-btn-sm" disabled="@probing" @onclick="ProbeAsync">
+                        Search other collections for this id
+                    </button>
+
+                    @if (probes.Count > 0)
+                    {
+                        <ul class="ms-doc-probe-list">
+                            @foreach (DocumentIdProbe probe in probes)
+                            {
+                                <li @key="probe.Alias">
+                                    <CollectionChip Alias="@probe.Alias" Hue="@probe.Hue" Small="true" />
+                                    @if (probe.Found)
+                                    {
+                                        <a class="ms-doc-id" href="@DocumentLinks.ToDocument(Options.Value, State.ActiveScope, probe.Alias, Id!)">found</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="ms-text-muted">not there</span>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    }
+                    else if (!probing)
+                    {
+                        <p class="ms-text-muted">
+                            Only collections whose <code>id</code> column could hold this value are probed.
+                        </p>
+                    }
+                </div>
+            }
+
+            <p><a class="ms-btn ms-btn-sm" href="@BackHref">Back to @Alias</a></p>
+        </div>;
+
+    private int Hue => Services.CollectionColorizer.HueFor(Alias);
+
+    private string BackHref => From is { Length: > 0 }
+        ? From
+        : DocumentLinks.ToCollection(Options.Value, State.ActiveScope, Alias);
+
+    private string QueryHref(DocumentModel detail) =>
+        DocumentLinks.ToQuery(Options.Value, State.ActiveScope, Alias, $"id = '{detail.Id}'");
+
+    private string RelatedHref(string alias, string id) =>
+        DocumentLinks.ToDocument(Options.Value, State.ActiveScope, alias, id);
+
+    private static string FileName(DocumentModel detail) => detail.Alias + "-" + detail.Id + ".json";
+
+    private async Task ProbeAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || string.IsNullOrEmpty(Id) || probing)
+        {
+            return;
+        }
+
+        probing = true;
+        StateHasChanged();
+
+        try
+        {
+            probes = await Data.ProbeIdAsync(scope, Id, cts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            probing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CopyAsync(string text, string what)
+    {
+        if (await CopyTextAsync(text))
+        {
+            await Toasts.Success($"Copied the {what}.");
+        }
+    }
+
+    private async Task CopyRecordAsync(DocumentModel detail)
+    {
+        string code = CSharpRecordGenerator.Generate(detail.Json, detail.ClrType?.Name ?? Pascal(detail.Alias));
+
+        if (await CopyTextAsync(code))
+        {
+            await Toasts.Success("Copied a C# record for this document.");
+        }
+    }
+
+    private async Task<bool> CopyTextAsync(string text)
+    {
+        try
+        {
+            return await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
+        }
+        catch (JSException)
+        {
+            await Toasts.Error("This browser refused the clipboard.");
+            return false;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private async Task DownloadAsync(DocumentModel detail)
+    {
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>(
+                "martenStudio.download.text",
+                new object?[] { FileName(detail), "application/json", detail.Json });
+        }
+        catch (JSException)
+        {
+            await Toasts.Error("This browser refused the download.");
+        }
+        catch (JsonException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private static string Pascal(string alias)
+    {
+        if (alias.Length == 0)
+        {
+            return "Document";
+        }
+
+        Span<char> buffer = stackalloc char[alias.Length];
+        int length = 0;
+        bool upper = true;
+
+        foreach (char c in alias)
+        {
+            if (c is '_' or '-' or ' ')
+            {
+                upper = true;
+                continue;
+            }
+
+            buffer[length++] = upper ? char.ToUpperInvariant(c) : c;
+            upper = false;
+        }
+
+        return length == 0 ? "Document" : new string(buffer[..length]);
+    }
+
+    private CancellationToken ResetCancellation()
+    {
+        CancellationTokenSource? previous = cts;
+        cts = new CancellationTokenSource();
+        previous?.Cancel();
+        previous?.Dispose();
+        return cts.Token;
+    }
+
+    private Task OnScopeChangedAsync() => InvokeAsync(async () =>
+    {
+        loadedSignature = null;
+        await OnParametersSetAsync();
+    });
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        if (cts is { } source)
+        {
+            await source.CancelAsync();
+            source.Dispose();
+            cts = null;
+        }
+    }
+}

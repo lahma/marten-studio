@@ -102,6 +102,18 @@ internal abstract record DocumentPredicate
     /// <summary><c>tenant:&lt;id&gt;</c>.</summary>
     /// <param name="TenantId">The tenant.</param>
     public sealed record Tenant(string TenantId) : DocumentPredicate;
+
+    /// <summary>
+    /// <c>mt_doc_type = &lt;alias&gt;</c> — one subclass of a hierarchy.
+    /// </summary>
+    /// <remarks>
+    /// Not something the grammar produces: a hierarchy's subclasses share their root's table and are told
+    /// apart by the discriminator column, so browsing <c>/marten/documents/car</c> is browsing the vehicle
+    /// table with this predicate added. It is a predicate rather than a flag on the query so that it goes
+    /// through the same allow-listed builder, gets its own index verdict, and shows up in "Show SQL".
+    /// </remarks>
+    /// <param name="Alias">The subclass alias, as <c>IDocumentType.AliasFor</c> reports it.</param>
+    public sealed record SubclassIs(string Alias) : DocumentPredicate;
 }
 
 /// <summary>Something the parser could not make sense of, and where it is.</summary>

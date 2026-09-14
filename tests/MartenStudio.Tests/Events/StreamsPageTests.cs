@@ -22,11 +22,11 @@ public class StreamsPageTests
         IRenderedComponent<Streams> page = context.Render<Streams>();
 
         page.Find("tbody tr a").GetAttribute("href").Should()
-            .StartWith("marten/events/streams/s?id=" + StreamId);
+            .StartWith("events/streams/s?id=" + StreamId);
         page.TextOfAll(".ms-event-chip").Should().Contain("Order");
         page.Markup.Should().Contain("Open in feed");
         page.FindAll("a").Select(x => x.GetAttribute("href")).Should()
-            .Contain(x => x!.StartsWith("marten/events/feed?stream=", StringComparison.Ordinal));
+            .Contain(x => x!.StartsWith("events/feed?stream=", StringComparison.Ordinal));
     }
 
     [Fact]

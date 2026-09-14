@@ -187,10 +187,11 @@ public class StudioLayoutTests
         // Only the pages that have an @page yet are links; the rest are visible and disabled, so the
         // information architecture is legible from the first version. This list grows one packet at a
         // time - Projections joined it in P5, the four Events screens in P4, Schema and Configuration
-        // in P7.
+        // in P7, Documents in P2.
         layout.TextOfAll(".ms-nav-link:not(.ms-nav-link-disabled) .ms-nav-link-text")
             .Should().Equal(
                 "Overview",
+                "Documents",
                 "Streams",
                 "Feed",
                 "Event types",
@@ -216,6 +217,7 @@ public class StudioLayoutTests
         // an empty href resolves to it.
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
             "",
+            "documents",
             "events/streams",
             "events/feed",
             "events/types",
@@ -239,6 +241,7 @@ public class StudioLayoutTests
 
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
             "",
+            "documents",
             "events/streams",
             "events/feed",
             "events/types",
