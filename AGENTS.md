@@ -75,8 +75,13 @@ model, the phased delivery plan — lives in the approved plan at
     LINQ terminals — they throw. Serialize and deserialize through `store.Options.Serializer()`, never
     your own `JsonSerializer`, or a document round-trips through different settings than Marten wrote it
     with. Never touch `StoreOptions.Storage.AllDocumentMappings` (internal). Every metadata column is
-    optional: check `Metadata.X.Enabled` before you put `X` in a select list, because a store with
-    `DisableInformationalFields()` has no `mt_last_modified` at all.
+    optional — but `Metadata.X.Enabled` alone does not say whether a column exists (verified against
+    Marten 9.35's `DocumentTable`, 2026-09-14): `tenant_id` exists iff the type is conjoined, `mt_doc_type`
+    iff it is a hierarchy, `mt_deleted`/`mt_deleted_at` iff its `DeleteStyle` is soft (read by casting the
+    `IDocumentType` to `Marten.Schema.DocumentMapping`), and only the rest honour `Enabled`; a store with
+    `DisableInformationalFields()` has no `mt_last_modified` at all. Build the column set with
+    `DocumentTableInfo.FromDocumentType(...).WithPhysicalColumns(...)`, which settles it against
+    `information_schema`, and never `select *`.
 11. **Never call `store.BuildProjectionDaemonAsync()`.** It starts a *second* daemon alongside the host's
     own, and the two fight over the same advisory locks until one hangs. The only supported way to reach a
     running daemon is the DI-registered coordinator, and its absence is a value —
