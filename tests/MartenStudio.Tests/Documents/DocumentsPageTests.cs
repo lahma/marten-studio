@@ -202,7 +202,11 @@ public class DocumentsPageTests
         context.Data.Rail = FakeDocuments.Rail();
         context.Data.Page = FakeDocuments.Page(verdict: new SearchVerdict
         {
+            // Both levels, the way DocumentDataService.BuildVerdict sets them: the strip's colour is
+            // FilterLevel, because Level also carries the sort's verdict and DocumentTable renders that
+            // one beside the column header instead.
             Level = IndexVerdictLevel.Red,
+            FilterLevel = IndexVerdictLevel.Red,
             Chips =
             [
                 new SearchChip(SearchChipKind.Predicate, "id:1", IndexVerdictLevel.Green, "id is the primary key.", null),
@@ -241,7 +245,7 @@ public class DocumentsPageTests
         context.Data.Rail = FakeDocuments.Rail();
         context.Data.Page = FakeDocuments.Page(
             state: DocumentListState.BlockedByVerdict,
-            verdict: new SearchVerdict { Level = IndexVerdictLevel.Red });
+            verdict: new SearchVerdict { Level = IndexVerdictLevel.Red, FilterLevel = IndexVerdictLevel.Red });
 
         var page = Render(context, "customer");
 

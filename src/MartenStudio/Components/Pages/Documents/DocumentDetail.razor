@@ -11,6 +11,7 @@
 @inject DocumentBrowserState Browser
 @inject StudioState State
 @inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
 @inject ToastService Toasts
 @inject NavigationManager Navigation
 @inject IOptions<MartenStudioOptions> Options
@@ -84,6 +85,8 @@
                                       Editing="editing"
                                       Busy="writing"
                                       EditRefusal="@editRefusal"
+                                      MayEdit="mayEdit"
+                                      MayDelete="mayDelete"
                                       OnEdit="StartEditAsync"
                                       OnDelete="OpenDeleteDialog"
                                       OnUndelete="UndeleteAsync" />
@@ -158,6 +161,13 @@
     private string? writeError;
     private string? editRefusal;
     private WritePreview? editProbe;
+
+    // What MartenStudioOptions.WriteAuthorizationPolicy said about *this* visitor and the scope on
+    // screen, evaluated once per load beside the document read. They start true because a host that
+    // configured no write policy is the overwhelmingly common case and StudioAuthorization answers true
+    // for it without asking anything.
+    private bool mayEdit = true;
+    private bool mayDelete = true;
 
     /// <summary>The collection alias from the route.</summary>
     [Parameter]
@@ -250,9 +260,18 @@
 
             (previousId, nextId) = Browser.Neighbours(Alias, Id);
 
+            // Per visitor rather than per process, so it is asked here rather than read off the guard.
+            // Nothing is memoised: the answer is about this circuit's user, and a cache that outlived one
+            // would be how one person's answer gets shown to another.
+            mayEdit = await Authorization.IsAuthorizedAsync(scope, StudioCapability.EditDocuments, token);
+            mayDelete = await Authorization.IsAuthorizedAsync(scope, StudioCapability.DeleteDocuments, token);
+
             if (result.Found)
             {
-                related = await Data.GetRelatedAsync(scope, Alias, Id, token);
+                // The overload that takes the document we have just read, not the one that takes an id:
+                // the id overload reads the row again to find out what it points at, which is a second
+                // round trip for a document already in hand.
+                related = await Data.GetRelatedAsync(scope, Alias, result.Detail!, token);
                 streamExists = await Data.StreamExistsAsync(scope, Id, token);
             }
         }

@@ -76,6 +76,35 @@ internal sealed class StudioAuthorization
     }
 
     /// <summary>
+    /// Whether the visitor may exercise <paramref name="capability" /> on <paramref name="scope" />.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The overload a screen calls. It asks exactly the question
+    /// <see cref="StudioScopeResolver.ResolveAsync" /> asks on the visitor's behalf a moment later —
+    /// same policy, same resource, same capability name, spelled by
+    /// <c>StudioCapability.ToString()</c> the way the write service spells it — so a control this
+    /// answers <see langword="false" /> for is a control whose service call would have thrown.
+    /// </para>
+    /// <para>
+    /// It is not the enforcement and must never be mistaken for it (AGENTS.md hard rule 5): a circuit is
+    /// a long-lived object a client can drive, so the refusal lives in the service. This is the part a
+    /// person reads, and it exists because capabilities are process-wide while a policy is per visitor —
+    /// without it, everyone the <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> refuses sees
+    /// live buttons and finds out only after pressing one.
+    /// </para>
+    /// <para>
+    /// Nothing is memoised here. The answer is about <em>this</em> circuit's visitor and this scope, and a
+    /// cache on a service that outlives either is how one person's answer is shown to another.
+    /// </para>
+    /// </remarks>
+    public ValueTask<bool> IsAuthorizedAsync(
+        StudioScope scope,
+        StudioCapability capability,
+        CancellationToken cancellationToken = default) =>
+        IsAuthorizedAsync(scope, capability.ToString(), cancellationToken);
+
+    /// <summary>
     /// The same question for a caller that already holds the principal.
     /// </summary>
     public async ValueTask<bool> IsAuthorizedAsync(

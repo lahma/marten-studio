@@ -403,6 +403,61 @@ body{
     max-width: 320px;
 }
 
+/*
+   The header on a phone.
+
+   At 390 px the five uppercase labels - STORE, DATABASE, TENANT, TIME ZONE, THEME - are wider than the
+   controls they name, so each one broke onto a line of its own and the header became a ragged block
+   four rows deep. Below 900 px they become visually hidden and the controls sit on one row.
+
+   Hidden labels rather than an overflow menu, deliberately. The scope *is* the context of every screen
+   in the studio - which store, which database, which tenant this page is about - and a context you have
+   to open a menu to read is a context people stop checking, which is exactly how somebody deletes a
+   document in the wrong tenant. A menu would also be a new popover, new keyboard handling and a new
+   component; this is a media query over markup that already exists.
+
+   Nothing is lost to a screen reader: every control carries an `aria-label` of its own, so its
+   accessible name is the same whether the label is painted or not, and the `<label for>` stays in the
+   accessibility tree either way.
+*/
+@media (max-width: 900px) {
+    .ms-header {
+        flex-wrap: wrap;
+        row-gap: var(--ms-space-sm);
+        padding-inline: var(--ms-space-md);
+    }
+
+    .ms-header-left,
+    .ms-header-right {
+        flex: 1 1 auto;
+        min-width: 0;
+        gap: var(--ms-space-sm);
+        flex-wrap: wrap;
+    }
+
+    .ms-header-control {
+        min-width: 0;
+    }
+
+    /* `.ms-sr-only`'s own body, applied by viewport width rather than by class. */
+    .ms-header-control-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border-width: 0;
+    }
+
+    .ms-header-select {
+        min-width: 0;
+        max-width: 100%;
+    }
+}
+
 /* ==========================================================================
    6. MAIN CONTENT
    ========================================================================== */
@@ -430,6 +485,25 @@ body{
     font-size: var(--ms-font-size-2xl);
     font-weight: var(--ms-font-weight-bold);
     letter-spacing: -0.01em;
+}
+
+/*
+   `<FocusOnNavigate Selector="h1" />` moves focus to the page heading after every navigation, which is
+   the right thing for a screen reader and left a hard black box round the title for everybody else:
+   the heading takes `tabindex="-1"` and picks up the user agent's own focus ring. Two rules, because
+   whether a programmatic focus counts as `:focus-visible` is the browser's decision and depends on
+   whether the visitor arrived by keyboard - so the plain state is quiet and the keyboard state gets the
+   same ring every other focusable thing here has (2px of --ms-color-primary; the stylesheet has no
+   focus-ring token of its own and this change does not invent one).
+*/
+.ms-studio h1:focus {
+    outline: none;
+}
+
+.ms-studio h1:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 4px;
+    border-radius: var(--ms-radius-sm);
 }
 
 .ms-page > h2 {
@@ -947,6 +1021,34 @@ body{
 .ms-table-cell-mono {
     font-family: var(--ms-font-mono);
     font-size: var(--ms-font-size-xs);
+}
+
+/*
+   Identifier cells.
+
+   A GUID is 36 characters with no natural break point, so a cell that lets one wrap broke it into four
+   lines and made every row of the list about 70 px tall - a page of documents that showed six of them.
+   An id is one line: monospace, never wrapped, clipped with an ellipsis when it does not fit.
+
+   Nothing is lost by the clip. The whole id is the element's `title`, and where a table puts a
+   <CopyBadge> beside one that badge still carries and copies all of it. `ms-id-cell` goes on the
+   <td>/<th> - it is what keeps the `deleted` / tenant / subclass badges that follow an id on the same
+   line as it - and `ms-id-text` on the element holding the id itself; a bare <a> child of an id cell
+   gets it without being asked, so a table only has to name the cell.
+*/
+.ms-id-cell {
+    white-space: nowrap;
+}
+
+.ms-id-text,
+.ms-id-cell > a {
+    display: inline-block;
+    max-width: 28ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+    white-space: nowrap;
+    font-family: var(--ms-font-mono);
 }
 
 .ms-table-cell-actions,
@@ -1943,6 +2045,15 @@ body{
     color: var(--ms-color-warning);
     font-size: var(--ms-font-size-xs);
     align-self: center;
+}
+
+/* The phone header: the labels are hidden by the rule in section 5, so the pickers are all one height
+   and there is no baseline left to align to. */
+@media (max-width: 900px) {
+    .ms-scope-selector {
+        gap: var(--ms-space-sm);
+        align-items: center;
+    }
 }
 
 /* ==========================================================================
@@ -3363,25 +3474,12 @@ a.ms-json-url {
 
 /* --- the rebuild dialog ------------------------------------------------------------------------- */
 
-.ms-rebuild-dialog {
-    max-width: 44rem;
-}
-
-.ms-rebuild-summary {
-    max-width: 60ch;
-}
-
 .ms-rebuild-scope {
     margin: 0.75rem 0;
 }
 
 .ms-rebuild-inline-warning {
     margin: 0.75rem 0;
-}
-
-.ms-rebuild-input {
-    width: 100%;
-    margin: 0.25rem 0 0.75rem;
 }
 
 .ms-no-daemon-banner {
@@ -4951,6 +5049,32 @@ a.ms-event-chip:focus-visible {
     font-size: 9px;
 }
 
+/*
+   The sort's index verdict, beside the column it is about.
+
+   Marten declares no index on `mt_last_modified`, so the default sort of very nearly every collection is
+   red on its own - and rendering that through the search strip put a red FULL SCAN banner above every
+   collection in the store, on a page nobody had typed a filter into. A banner that is always there is a
+   banner nobody reads, and it made the strip useless for the thing it exists for: telling a filter that
+   an index can serve from one that cannot. So the sort's verdict is demoted to a mark on the sorted
+   column header, where the fact belongs; the strip and its colours are about the filter.
+*/
+.ms-doc-sort-hint {
+    margin-left: 4px;
+    font-size: 9px;
+    font-weight: var(--ms-font-weight-bold);
+    cursor: help;
+    vertical-align: super;
+}
+
+.ms-doc-sort-hint-amber {
+    color: var(--ms-color-warning);
+}
+
+.ms-doc-sort-hint-red {
+    color: var(--ms-color-danger);
+}
+
 .ms-doc-row:hover {
     background: var(--ms-color-surface-hover);
 }
@@ -5779,6 +5903,23 @@ a.ms-event-chip:focus-visible {
     margin-left: var(--ms-space-sm);
     padding-left: var(--ms-space-sm);
     border-left: 1px solid var(--ms-color-border);
+}
+
+/*
+   Why a write control is disabled for *this* visitor.
+
+   Capabilities are process-wide; a WriteAuthorizationPolicy is per person. Without this, everybody the
+   policy refuses saw live Edit and Delete buttons and found out only from the service's refusal. The
+   control stays rendered and disabled rather than hidden - the option has to stay discoverable, because
+   "this studio can edit documents, and your account may not" is a different fact from "this studio
+   cannot edit documents", and a person who cannot see the first one asks the wrong question.
+
+   Said out loud as well as in the button's `title`: a tooltip does not exist on a touch screen.
+*/
+.ms-write-refusal {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    white-space: normal;
 }
 
 /* The delete and undelete buttons sit next to Copy and Download, and a destructive action that looks

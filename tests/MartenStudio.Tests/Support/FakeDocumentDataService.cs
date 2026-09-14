@@ -46,6 +46,20 @@ internal sealed class FakeDocumentDataService : IDocumentDataService
     /// <summary>How many times the rail was asked for.</summary>
     public int RailLoads { get; private set; }
 
+    /// <summary>
+    /// How many times the detail page asked for related documents by id, which is the overload that has
+    /// to read the row again to find out what it points at.
+    /// </summary>
+    /// <remarks>
+    /// The detail page has the document in hand by the time it asks, so this should stay at zero: a page
+    /// that reads a document and then reads it again for its foreign keys costs two round trips for one
+    /// screen, and the second one is the same row.
+    /// </remarks>
+    public int RelatedByIdCalls { get; private set; }
+
+    /// <summary>How many times it asked with the document it had already read.</summary>
+    public int RelatedByDetailCalls { get; private set; }
+
     /// <summary>What every method throws, when a test is about the failure frame.</summary>
     public Exception? Failure { get; set; }
 
@@ -79,13 +93,21 @@ internal sealed class FakeDocumentDataService : IDocumentDataService
         StudioScope scope,
         string alias,
         string id,
-        CancellationToken cancellationToken = default) => Task.FromResult(Related);
+        CancellationToken cancellationToken = default)
+    {
+        RelatedByIdCalls++;
+        return Task.FromResult(Related);
+    }
 
     public Task<RelatedDocuments> GetRelatedAsync(
         StudioScope scope,
         string alias,
         DocumentDetail detail,
-        CancellationToken cancellationToken = default) => Task.FromResult(Related);
+        CancellationToken cancellationToken = default)
+    {
+        RelatedByDetailCalls++;
+        return Task.FromResult(Related);
+    }
 
     public Task<bool> StreamExistsAsync(StudioScope scope, string id, CancellationToken cancellationToken = default) =>
         Task.FromResult(StreamExists);

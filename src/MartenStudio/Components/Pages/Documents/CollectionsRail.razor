@@ -113,7 +113,7 @@
 
                 @if (CountText(collection) is { Length: > 0 } count)
                 {
-                    <span class="ms-rail-badge-count" title="@(collection.Count.IsEstimate ? "Estimated from pg_class.reltuples" : "Exact count")">@count</span>
+                    <span class="ms-rail-badge-count" title="@CountTitle(collection)">@count</span>
                 }
             </a>
 
@@ -139,7 +139,10 @@
                     <span class="ms-rail-flag ms-rail-flag-discovered" title="No StoreOptions mapping claims this table - read-only">?</span>
                 }
 
-                @if (collection.Count.IsEstimate && OnExactCount.HasDelegate)
+                @* Offered for an unknown count as well as for an estimate: a "?" a person cannot resolve is
+                   a dead end, and an unanalysed table is precisely the one where the exact count is the
+                   only number available. *@
+                @if ((collection.Count.IsEstimate || collection.Count.IsUnknown) && OnExactCount.HasDelegate)
                 {
                     <button type="button"
                             class="ms-rail-action"
@@ -218,8 +221,24 @@
             ? "ms-rail-link ms-rail-link-active"
             : "ms-rail-link";
 
+    /// <summary>
+    /// The number beside a collection, or the honest absence of one.
+    /// </summary>
+    /// <remarks>
+    /// <c>DocumentCount.IsUnknown</c> is checked <em>before</em> <c>IsUnavailable</c>, which it is a kind
+    /// of on purpose. "Postgres has never analysed this table" is a different fact from
+    /// "the studio could not read this table", and it is one a person can act on — <c>analyze</c> — so it
+    /// gets a mark of its own rather than the blank that a refused read gets. Reporting it as <c>~0</c> is
+    /// the studio saying "no documents" about a collection it has not looked at, which is the one answer
+    /// that is worse than saying nothing.
+    /// </remarks>
     private static string CountText(CollectionInfo collection)
     {
+        if (collection.Count.IsUnknown)
+        {
+            return "?";
+        }
+
         if (collection.Count.IsUnavailable)
         {
             return string.Empty;
@@ -230,6 +249,17 @@
         // The tilde is load-bearing: D8 says counts are reltuples estimates, and a number that looks
         // exact when it is not is how a dashboard loses somebody's trust the first time they check it.
         return collection.Count.IsEstimate ? "~" + value : value;
+    }
+
+    /// <summary>What the badge says on hover, which is the only place the estimate's provenance fits.</summary>
+    private static string CountTitle(CollectionInfo collection)
+    {
+        if (collection.Count.IsUnknown)
+        {
+            return "Postgres has never analysed this table";
+        }
+
+        return collection.Count.IsEstimate ? "Estimated from pg_class.reltuples" : "Exact count";
     }
 
     private async Task TogglePinAsync(string alias) => await OnTogglePin.InvokeAsync(alias);

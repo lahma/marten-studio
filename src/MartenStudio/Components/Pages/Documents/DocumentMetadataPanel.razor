@@ -26,6 +26,18 @@
         </div>
     }
 
+    @* A finding about the row's type that is not a mismatch: most often an mt_doc_type naming a subclass
+       this store no longer registers, which Marten cannot deserialize at all. It is a different fact from
+       the mismatch above and can occur without one, so it is its own alert rather than a line inside that
+       one. *@
+    @if (Detail.DotNetTypeWarning is { Length: > 0 } typeWarning)
+    {
+        <div class="ms-alert ms-alert-warning ms-doc-type-warning" role="alert">
+            <strong>This row's type is not one this store registers.</strong>
+            @typeWarning
+        </div>
+    }
+
     @if (!Detail.IsRegistered)
     {
         <div class="ms-alert ms-alert-info" role="status">

@@ -10,6 +10,7 @@
             <label class="ms-header-control-label" for="ms-store-select">Store</label>
             <select id="ms-store-select"
                     class="ms-select ms-header-select"
+                    aria-label="Store"
                     value="@State.ActiveScope?.StoreKey"
                     @onchange="OnStoreChangedAsync">
                 @foreach (StoreListing store in State.AvailableStores)
@@ -37,6 +38,7 @@
             <label class="ms-header-control-label" for="ms-database-select">Database</label>
             <select id="ms-database-select"
                     class="ms-select ms-header-select"
+                    aria-label="Database"
                     value="@State.ActiveScope?.DatabaseId"
                     @onchange="OnDatabaseChangedAsync">
                 @foreach (DatabaseListing database in State.AvailableDatabases)
@@ -69,6 +71,7 @@
                    would be worse than none, so the box takes the id instead. *@
                 <input id="ms-tenant-select"
                        class="ms-input ms-header-select"
+                       aria-label="Tenant"
                        type="text"
                        placeholder="All tenants"
                        value="@State.ActiveScope?.TenantId"
@@ -79,6 +82,7 @@
             {
                 <select id="ms-tenant-select"
                         class="ms-select ms-header-select"
+                        aria-label="Tenant"
                         value="@State.ActiveScope?.TenantId"
                         @onchange="OnTenantChangedAsync">
                     <option value="" selected="@(State.ActiveScope?.TenantId is null)">All tenants</option>

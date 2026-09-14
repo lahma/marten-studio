@@ -12,6 +12,15 @@
     studio only discovered - a table no mapping claims - nothing is rendered either, because there is no
     CLR type to write it as and no amount of configuration changes that.
 
+    There is a fourth level, and it is per person rather than per process: a capability is a property of
+    the application, while `MartenStudioOptions.WriteAuthorizationPolicy` is asked about the visitor. A
+    studio with EditDocuments on, mounted for a team where only two people may write, showed everybody a
+    live Edit button and told the other forty only after they had pressed it. So the page evaluates the
+    write policy for this scope and hands the answer down as `MayEdit` / `MayDelete`, and a refusal
+    renders the control disabled - disabled rather than hidden, because "this studio can edit documents
+    and your account may not" is a different fact from "this studio cannot edit documents", and somebody
+    who cannot see the first one goes and asks the wrong question.
+
     None of this is the enforcement. `IDocumentWriteService` refuses on its own, in the service layer,
     for every one of these reasons and several this component cannot see (AGENTS.md hard rule 5). What is
     here is the part a person reads.
@@ -44,6 +53,13 @@
                     disabled="@(!DeleteAllowed || Busy)"
                     title="@DeleteTitle"
                     @onclick="OnDelete">@(SoftDeleteType ? "Soft-delete" : "Delete")</button>
+        }
+
+        @* Said out loud as well as in the buttons' titles: a tooltip does not exist on a touch screen,
+           and this is the one refusal a person cannot work out from the screen on their own. *@
+        @if (PolicyRefusal is { Length: > 0 } refusal)
+        {
+            <span class="ms-write-refusal" role="note">@refusal</span>
         }
     </div>
 }
@@ -80,6 +96,29 @@
     [Parameter]
     public string? EditRefusal { get; set; }
 
+    /// <summary>
+    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor edit
+    /// documents in the scope on screen.
+    /// </summary>
+    /// <remarks>
+    /// Evaluated once per load by the page, which holds the scope, and handed down: a component that
+    /// asked for itself would put an <c>await</c> in a render path and would ask again for every
+    /// document. The default is <see langword="true" /> because the overwhelmingly common case is a host
+    /// that configured no write policy at all, and a studio that greyed out Edit for everyone because a
+    /// caller forgot a parameter would be worse than useless. Fail-open is safe precisely because this is
+    /// not the enforcement - <c>IDocumentWriteService</c> asks the same policy again and throws
+    /// (AGENTS.md hard rule 5).
+    /// </remarks>
+    [Parameter]
+    public bool MayEdit { get; set; } = true;
+
+    /// <summary>
+    /// The same question for deleting and undeleting. Separate from <see cref="MayEdit" /> because they
+    /// are two capabilities and a policy is free to allow one and refuse the other.
+    /// </summary>
+    [Parameter]
+    public bool MayDelete { get; set; } = true;
+
     /// <summary>Opens the editor.</summary>
     [Parameter]
     public EventCallback OnEdit { get; set; }
@@ -92,23 +131,61 @@
     [Parameter]
     public EventCallback OnUndelete { get; set; }
 
+    /// <summary>What a visitor the write policy refuses is told, per capability.</summary>
+    internal const string EditRefusedByPolicy = "Your account may not edit documents here.";
+
+    /// <summary>The same, for delete and undelete.</summary>
+    internal const string DeleteRefusedByPolicy = "Your account may not delete documents here.";
+
     private bool EditCapability => Capabilities.IsEnabled(StudioCapability.EditDocuments);
 
-    private bool DeleteAllowed => Capabilities.IsEnabled(StudioCapability.DeleteDocuments);
+    private bool DeleteCapability => Capabilities.IsEnabled(StudioCapability.DeleteDocuments);
 
-    private bool EditAllowed => EditCapability && EditRefusal is null && !Busy;
+    private bool DeleteAllowed => DeleteCapability && MayDelete;
 
-    private string EditTitle => EditCapability
-        ? EditRefusal ?? "Edit this document's JSON"
-        : Requires(StudioCapability.EditDocuments);
+    private bool EditAllowed => EditCapability && MayEdit && EditRefusal is null && !Busy;
 
-    private string DeleteTitle => DeleteAllowed
-        ? IsDeleted
-            ? "Clear the deleted flag on this row"
-            : SoftDeleteType
-                ? "Mark this document deleted; it can be undeleted"
-                : "Remove this row from the table"
-        : Requires(StudioCapability.DeleteDocuments);
+    /// <summary>
+    /// The capability's name first, the visitor's refusal second: a capability that is off makes the
+    /// policy moot, because the guard refuses before the scope is ever resolved.
+    /// </summary>
+    private string EditTitle => !EditCapability
+        ? Requires(StudioCapability.EditDocuments)
+        : !MayEdit
+            ? EditRefusedByPolicy
+            : EditRefusal ?? "Edit this document's JSON";
+
+    private string DeleteTitle => !DeleteCapability
+        ? Requires(StudioCapability.DeleteDocuments)
+        : !MayDelete
+            ? DeleteRefusedByPolicy
+            : IsDeleted
+                ? "Clear the deleted flag on this row"
+                : SoftDeleteType
+                    ? "Mark this document deleted; it can be undeleted"
+                    : "Remove this row from the table";
+
+    /// <summary>
+    /// The one sentence under the buttons, when the policy - and not a capability - is what refused.
+    /// Nothing is said where a capability is already off: that case names the option out loud in the
+    /// button's own title and is about the application rather than about the person.
+    /// </summary>
+    private string? PolicyRefusal
+    {
+        get
+        {
+            bool editRefused = EditCapability && !MayEdit && !Editing;
+            bool deleteRefused = DeleteCapability && !MayDelete;
+
+            return (editRefused, deleteRefused) switch
+            {
+                (true, true) => "Your account may not edit or delete documents here.",
+                (true, false) => EditRefusedByPolicy,
+                (false, true) => DeleteRefusedByPolicy,
+                _ => null
+            };
+        }
+    }
 
     private static string Requires(StudioCapability capability) =>
         "Requires " + StudioCapabilityGuard.OptionName(capability);

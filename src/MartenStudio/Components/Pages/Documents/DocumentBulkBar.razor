@@ -25,11 +25,20 @@
             </span>
         }
 
+        @* The write policy is asked about the visitor, while the DeleteDocuments capability is asked about
+           the process. The checkboxes and this bar are drawn either way - a selection is still worth
+           copying ids out of - and only the button that writes is refused, with the reason said out loud
+           because a title does not exist on a touch screen. The service refuses regardless. *@
+        @if (!MayDelete)
+        {
+            <span class="ms-write-refusal" role="note">@DocumentWriteActions.DeleteRefusedByPolicy</span>
+        }
+
         <div class="ms-doc-bulk-actions">
             <button type="button"
                     class="ms-btn ms-btn-sm ms-btn-danger ms-doc-bulk-delete"
-                    disabled="@(OverCap || Busy)"
-                    title="@(OverCap ? $"At most {Cap} documents at once" : "Delete every selected document")"
+                    disabled="@(OverCap || Busy || !MayDelete)"
+                    title="@DeleteTitle"
                     @onclick="OnDelete">
                 @(Busy ? "Deleting..." : "Delete")
             </button>
@@ -47,6 +56,18 @@
     /// <summary>Whether a bulk delete is in flight.</summary>
     [Parameter]
     public bool Busy { get; set; }
+
+    /// <summary>
+    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets this visitor delete
+    /// documents in the scope on screen. Evaluated once per load by the page, which holds the scope.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to <see langword="true" />: almost every host configures no write policy, and this is a
+    /// label rather than the enforcement - <c>IDocumentWriteService</c> asks the same policy again and
+    /// throws (AGENTS.md hard rule 5).
+    /// </remarks>
+    [Parameter]
+    public bool MayDelete { get; set; } = true;
 
     /// <summary>Opens the confirmation.</summary>
     [Parameter]
@@ -67,4 +88,10 @@
     private static int Cap => DocumentWriteService.MaxBulkDeleteIds;
 
     private bool OverCap => Count > Cap;
+
+    private string DeleteTitle => !MayDelete
+        ? DocumentWriteActions.DeleteRefusedByPolicy
+        : OverCap
+            ? $"At most {Cap} documents at once"
+            : "Delete every selected document";
 }

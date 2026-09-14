@@ -42,6 +42,19 @@
                                 <span class="ms-doc-sort-arrow" aria-hidden="true">@(SortDirectionValue == SortDirection.Ascending ? "▲" : "▼")</span>
                             }
                         </button>
+
+                        @* The sort's own index verdict, beside the column it is about rather than in the
+                           search strip. Marten declares no index on `mt_last_modified`, so the default
+                           sort makes the strip red on every collection in the store - a banner that is
+                           always there is a banner nobody reads, and it drowned out the filter verdicts
+                           the strip exists for. Here it is a mark on the header, which is where the fact
+                           belongs and where it is still visible. *@
+                        @if (IsSorted(header) && SortHint is { } hint)
+                        {
+                            <span class="ms-doc-sort-hint ms-doc-sort-hint-@hint.Level.ToString().ToLowerInvariant()"
+                                  title="@hint.Reason">@(hint.Level == IndexVerdictLevel.Red ? "!" : "?")</span>
+                            <span class="ms-sr-only">@hint.Reason</span>
+                        }
                     </th>
                 }
                 <th class="ms-doc-col-size" scope="col">size</th>
@@ -84,10 +97,13 @@
                         DocumentColumnHeader header = Page.Columns[index];
                         string? value = index < row.Cells.Count ? row.Cells[index] : null;
 
-                        <td class="ms-doc-cell ms-doc-cell-@header.Kind.ToString().ToLowerInvariant()" @key="header.Key">
+                        <td class="ms-doc-cell ms-doc-cell-@header.Kind.ToString().ToLowerInvariant() @(header.Kind == DocumentColumnKind.Id ? "ms-id-cell" : null)" @key="header.Key">
                             @if (header.Kind == DocumentColumnKind.Id)
                             {
-                                <a class="ms-doc-id" href="@HrefFor(row.Id)" title="@row.Id">@row.Id</a>
+                                @* `ms-id-text` clips a 36-character GUID to one line instead of letting it
+                                   wrap to four; the whole of it stays in the title. `ms-id-cell` on the
+                                   cell is what keeps the badges after it on the same line. *@
+                                <a class="ms-doc-id ms-id-text" href="@HrefFor(row.Id)" title="@row.Id">@row.Id</a>
 
                                 @if (row.IsDeleted)
                                 {
@@ -240,6 +256,31 @@
     private Task SelectAsync(string id) => OnToggleSelect.InvokeAsync(id);
 
     private Task ToggleAllAsync() => OnToggleSelectPage.InvokeAsync(!PageIsSelected);
+
+    /// <summary>
+    /// The verdict on the sort key, when there is one worth saying anything about.
+    /// </summary>
+    /// <remarks>
+    /// Read off the page's own verdict rather than taken as a parameter: the sort chip is already in
+    /// <see cref="DocumentPage.Verdict" />, put there by the data service, and a second parameter
+    /// carrying the same fact is a second thing that can disagree with it. A green sort renders nothing -
+    /// "this is indexed" is not news beside a column header.
+    /// </remarks>
+    private SearchChip? SortHint
+    {
+        get
+        {
+            foreach (SearchChip chip in Page.Verdict.Chips)
+            {
+                if (chip.Kind == SearchChipKind.Sort && chip.Level != IndexVerdictLevel.Green)
+                {
+                    return chip;
+                }
+            }
+
+            return null;
+        }
+    }
 
     private bool IsSorted(DocumentColumnHeader header) =>
         string.Equals(header.Key, SortKey, StringComparison.OrdinalIgnoreCase);

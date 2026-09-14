@@ -10,6 +10,7 @@
 @inject DocumentBrowserState Browser
 @inject StudioState State
 @inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
 @inject ToastService Toasts
 @inject NavigationManager Navigation
 @inject IOptions<MartenStudioOptions> Options
@@ -79,6 +80,11 @@
     private bool bulkDialogOpen;
     private bool bulkDeleting;
     private string? selectionKey;
+
+    // What MartenStudioOptions.WriteAuthorizationPolicy said about *this* visitor and the scope on
+    // screen, evaluated once per load. True to start with because a host that configured no write policy
+    // is the common case and StudioAuthorization answers true for it without asking anything.
+    private bool mayDelete = true;
 
     /// <summary>The collection alias from the route, or <see langword="null"/> for the index.</summary>
     [Parameter]
@@ -222,6 +228,10 @@
 
         try
         {
+            // Per visitor, and therefore not something the process-wide capability guard can answer. Once
+            // per load, and never memoised beyond it: the answer belongs to this circuit's user.
+            mayDelete = await Authorization.IsAuthorizedAsync(scope, StudioCapability.DeleteDocuments, token);
+
             rail = await Data.GetCollectionsAsync(scope, token);
             collection = rail.Find(Alias);
 
@@ -316,7 +326,15 @@
                 {
                     <span class="ms-doc-subtitle">a subclass of <a href="@CollectionHref(root)">@root</a>, in the same table</span>
                 }
-                @if (!list.Estimate.IsUnavailable)
+                @* IsUnknown before IsUnavailable, which it is a kind of. "Postgres has never analysed this
+                   table" is something a person can act on; a blank where a size should be is not. *@
+                @if (list.Estimate.IsUnknown)
+                {
+                    <span class="ms-doc-subtitle" title="Postgres has never analysed this table, so there is no estimate to report. Use the = button beside the collection for an exact count.">
+                        unknown size
+                    </span>
+                }
+                else if (!list.Estimate.IsUnavailable)
                 {
                     <span class="ms-doc-subtitle" title="@(list.Estimate.IsEstimate ? "Estimated from pg_class.reltuples (D8)" : "Exact count")">
                         @(list.Estimate.IsEstimate ? "~" : string.Empty)@list.Estimate.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) documents
@@ -400,6 +418,7 @@
                     {
                         <DocumentBulkBar Count="selected.Count"
                                          Busy="bulkDeleting"
+                                         MayDelete="mayDelete"
                                          OnDelete="OpenBulkDialogAsync"
                                          OnCopyIds="CopySelectedIdsAsync"
                                          OnClear="ClearSelectionAsync" />
@@ -459,8 +478,10 @@
                             {
                                 <tr @key="document.Alias + '/' + document.Id">
                                     <td><CollectionChip Alias="@document.Alias" Hue="@document.Hue" Small="true" /></td>
-                                    <td>
-                                        <a class="ms-doc-id" href="@DocumentLinks.ToDocument(Options.Value, State.ActiveScope, document.Alias, document.Id)">@document.Id</a>
+                                    <td class="ms-id-cell">
+                                        <a class="ms-doc-id ms-id-text"
+                                           href="@DocumentLinks.ToDocument(Options.Value, State.ActiveScope, document.Alias, document.Id)"
+                                           title="@document.Id">@document.Id</a>
                                     </td>
                                     <td title="@State.FormatInSelectedTimeZone(document.LastModified)">
                                         <TimeAgo Timestamp="document.LastModified" />
