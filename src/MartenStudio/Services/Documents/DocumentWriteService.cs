@@ -41,23 +41,48 @@ namespace MartenStudio.Services.Documents;
 /// <b>Reads are the studio's SQL, writes are Marten's</b> (D6). The current JSON and the version come
 /// from <see cref="DocumentQueryBuilder" /> on a read connection, because the studio only knows a
 /// document type as a runtime <see cref="Type" /> and <c>session.Query&lt;T&gt;()</c> is not available
-/// to it. The write itself is <c>StoreObjects</c>/<c>DeleteObjects</c> on a real session, so upsert
-/// semantics, metadata columns, soft-delete style and tenancy stay exactly as Marten defines them.
-/// <c>mt_upsert_*</c> is never called and no <c>insert</c> is ever written here.
+/// to it. The write itself is <c>StoreObjects</c>, <c>UpdateExpectedVersion&lt;T&gt;</c>,
+/// <c>UpdateRevision&lt;T&gt;</c>, <c>Delete&lt;T&gt;(id)</c> or <c>UndoDeleteWhere&lt;T&gt;</c> on a
+/// real session, so upsert semantics, metadata columns, soft-delete style and tenancy stay exactly as
+/// Marten defines them. <c>mt_upsert_*</c> is never called and no <c>insert</c>, <c>update</c> or
+/// <c>delete</c> is ever written here.
+/// </para>
+/// <para>
+/// <b>Only the save needs the document.</b> A delete is <c>Delete&lt;T&gt;(id)</c> and an undelete is
+/// <c>UndoDeleteWhere&lt;T&gt;(x =&gt; x.Id == id)</c>, so neither deserializes anything: a row whose
+/// JSON no CLR type can read is still a row somebody can remove, and bringing a soft-deleted row back
+/// cannot lose a property on the way — it is an <c>update … set mt_deleted = false, mt_deleted_at =
+/// null</c> that never touches <c>data</c> (verified against <c>Marten.Linq.SqlGeneration.UnSoftDelete</c>,
+/// Marten 9.35).
+/// </para>
+/// <para>
+/// <b>A subclass stays a subclass.</b> <c>AllKnownDocumentTypes()</c> hands back root mappings only, so
+/// the alias <c>vehicle</c> resolves to <c>Vehicle</c> even for a row that holds a <c>Car</c>. Every row
+/// this service reads therefore carries its <c>mt_doc_type</c> with it and the concrete type comes from
+/// <c>IDocumentType.TypeFor(alias)</c>; that type is what the JSON is deserialized as and what the typed
+/// write is made generic over, so the upsert stamps the discriminator the row already had. Without it a
+/// save through this service would quietly turn every <c>Car</c> into a <c>Vehicle</c>.
 /// </para>
 /// <para>
 /// <b>The concurrency check is inside the write transaction.</b> The version read for the preview is
 /// minutes old by the time somebody clicks save, so it is read again — with <c>for update</c>, on the
 /// session's own connection, inside the session's own transaction — and compared there. Read committed
 /// alone would let another session commit between the check and the upsert; the row lock is what closes
-/// that window. For a type that also uses Marten's own optimistic concurrency the expected version is
-/// handed to Marten as well, so the database's <c>where mt_version = ?</c> guard runs too and the two
-/// checks have to agree.
+/// that window. A <c>lock_timeout</c> is set on the same transaction first, so a row somebody else is
+/// holding comes back as a refusal rather than as a page that never answers. For a type that also uses
+/// Marten's own optimistic concurrency the expected version is handed to Marten as well, so the
+/// database's <c>where mt_version = ?</c> guard runs too and the two checks have to agree.
 /// </para>
 /// <para>
 /// <b>Nothing is saved silently lossy</b> (D7). Every save runs the round trip first and refuses when it
 /// would drop properties unless the caller says it has seen them, and a save that drops properties
 /// anyway is logged as event 9211 with the paths.
+/// </para>
+/// <para>
+/// <b>Nothing user-supplied reaches a log line unsanitised.</b> The alias and the id come from a URL and
+/// the dropped paths are property names out of somebody's document; every audit and log message is put
+/// through <see cref="WriteAuditText" /> first, and a serializer's own exception message never leaves
+/// the screen (see <see cref="WritePreview.AuditReason" />).
 /// </para>
 /// </remarks>
 internal sealed class DocumentWriteService : IDocumentWriteService
@@ -72,6 +97,29 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     /// one that did none.
     /// </remarks>
     public const int MaxBulkDeleteIds = 500;
+
+    /// <summary>
+    /// How long a save waits for the row it is about to overwrite before it gives up.
+    /// </summary>
+    /// <remarks>
+    /// Five seconds is long enough that the ordinary case — another circuit's save, which takes
+    /// milliseconds — never notices, and short enough that a row held by somebody's forgotten
+    /// <c>begin;</c> in a psql window produces an answer while the person is still looking at the page.
+    /// Clamped down to <see cref="MartenStudioOptions.QueryTimeout" /> when that is shorter, because a
+    /// host that said "no statement of mine takes more than two seconds" meant this one too.
+    /// </remarks>
+    internal static readonly TimeSpan DefaultRowLockTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>Postgres <c>lock_not_available</c>: the <c>lock_timeout</c> above expired.</summary>
+    private const string LockNotAvailableSqlState = "55P03";
+
+    /// <summary>Postgres <c>query_canceled</c>, which is what a <c>statement_timeout</c> looks like.</summary>
+    private const string QueryCanceledSqlState = "57014";
+
+    /// <summary>What a caller is told when somebody else is holding the row.</summary>
+    private const string RowIsLockedMessage =
+        "This document is being edited by another session, so the studio stopped waiting for it rather " +
+        "than holding the page open. Nothing was saved. Try again in a moment.";
 
     private const string PreviewAction = "PreviewDocumentEdit";
     private const string SaveAction = "EditDocument";
@@ -151,21 +199,13 @@ internal sealed class DocumentWriteService : IDocumentWriteService
                     { Error: not null } => WritePreview.Refused(
                         alias, id, load.Error, editedJson: editedJson, documentTypeName: writeTarget.TypeName),
                     { Row: null } => WritePreview.NotFound(alias, id, writeTarget.TypeName),
-                    _ => BuildPreview(
-                        alias,
-                        id,
-                        writeTarget.ClrType,
-                        resolved.Store.Options.Serializer(),
-                        load.Row!.Json,
-                        editedJson,
-                        load.Row.Token,
-                        HasConcurrencyColumn(writeTarget.Table)).Preview,
+                    _ => PreviewRow(writeTarget, alias, id, editedJson, load.Row!, resolved),
                 };
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            audit.Record(PreviewAction, target, succeeded: false, ex.Message, StudioCapability.EditDocuments, scope);
+            audit.Record(PreviewAction, target, succeeded: false, AuditLine(ex), StudioCapability.EditDocuments, scope);
             throw;
         }
 
@@ -207,7 +247,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            audit.Record(SaveAction, target, succeeded: false, ex.Message, StudioCapability.EditDocuments, scope);
+            audit.Record(SaveAction, target, succeeded: false, AuditLine(ex), StudioCapability.EditDocuments, scope);
             throw;
         }
 
@@ -215,7 +255,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             SaveAction,
             target,
             result.IsSaved,
-            result.IsSaved ? result.Preview?.Summary() ?? "Saved." : result.Reason,
+            result.IsSaved ? result.Preview?.Summary() ?? "Saved." : result.AuditMessage(),
             StudioCapability.EditDocuments,
             scope);
 
@@ -225,8 +265,8 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         {
             logger.DocumentWriteRoundTripDropped(
                 UserName(),
-                preview.DocumentTypeName ?? alias,
-                id,
+                WriteAuditText.Sanitize(preview.DocumentTypeName ?? alias, WriteAuditText.MaxTokenLength),
+                WriteAuditText.Sanitize(id, WriteAuditText.MaxTokenLength),
                 preview.DroppedPaths.Length,
                 preview.DroppedPathsSummary());
         }
@@ -256,7 +296,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            audit.Record(DeleteAction, target, succeeded: false, ex.Message, StudioCapability.DeleteDocuments, scope);
+            audit.Record(DeleteAction, target, succeeded: false, AuditLine(ex), StudioCapability.DeleteDocuments, scope);
             throw;
         }
 
@@ -265,10 +305,19 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     }
 
     /// <inheritdoc />
+    public Task<DeleteResult> UndeleteAsync(
+        StudioScope scope,
+        string alias,
+        string id,
+        CancellationToken cancellationToken = default) =>
+        UndeleteAsync(scope, alias, id, acknowledgeDrops: false, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<DeleteResult> UndeleteAsync(
         StudioScope scope,
         string alias,
         string id,
+        bool acknowledgeDrops,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
@@ -282,11 +331,11 @@ internal sealed class DocumentWriteService : IDocumentWriteService
 
         try
         {
-            result = await UndeleteCoreAsync(resolved, alias, id, cancellationToken).ConfigureAwait(false);
+            result = await UndeleteCoreAsync(resolved, alias, id, acknowledgeDrops, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            audit.Record(UndeleteAction, target, succeeded: false, ex.Message, StudioCapability.DeleteDocuments, scope);
+            audit.Record(UndeleteAction, target, succeeded: false, AuditLine(ex), StudioCapability.DeleteDocuments, scope);
             throw;
         }
 
@@ -305,7 +354,10 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         ArgumentException.ThrowIfNullOrWhiteSpace(alias);
         ArgumentNullException.ThrowIfNull(ids);
 
-        var target = string.Create(CultureInfo.InvariantCulture, $"{alias} ({ids.Count} ids)");
+        var target = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{WriteAuditText.Sanitize(alias, WriteAuditText.MaxTokenLength)} ({ids.Count} ids)");
+
         var resolved = await AuthorizeAsync(scope, StudioCapability.DeleteDocuments, BulkDeleteAction, target, cancellationToken)
             .ConfigureAwait(false);
 
@@ -317,7 +369,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            audit.Record(BulkDeleteAction, target, succeeded: false, ex.Message, StudioCapability.DeleteDocuments, scope);
+            audit.Record(BulkDeleteAction, target, succeeded: false, AuditLine(ex), StudioCapability.DeleteDocuments, scope);
             throw;
         }
 
@@ -342,7 +394,10 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     /// </remarks>
     /// <param name="alias">The collection alias.</param>
     /// <param name="id">The document id.</param>
-    /// <param name="documentType">The CLR type Marten would store this document as.</param>
+    /// <param name="documentType">
+    /// The CLR type Marten would store this document as. For a hierarchy this is the <em>concrete</em>
+    /// type the row's <c>mt_doc_type</c> names, not the root the alias resolves to.
+    /// </param>
     /// <param name="serializer">
     /// The store's own serializer. Never a <c>JsonSerializer</c> of the studio's own making
     /// (AGENTS.md hard rule 10): a document round-tripped through different settings than Marten wrote
@@ -375,11 +430,12 @@ internal sealed class DocumentWriteService : IDocumentWriteService
                     editedJson: editedJson,
                     storedJson: storedJson,
                     documentTypeName: documentType.Name,
-                    currentToken: currentToken),
+                    currentToken: currentToken,
+                    auditReason: "The edit is not valid JSON."),
                 null);
         }
 
-        if (!TryDeserialize(serializer, documentType, editedJson, out var document, out var typeError))
+        if (!TryDeserialize(serializer, documentType, editedJson, out var document, out var typeError, out var typeAudit))
         {
             return new PreviewResult(
                 WritePreview.Refused(
@@ -390,7 +446,8 @@ internal sealed class DocumentWriteService : IDocumentWriteService
                     editedJson: editedJson,
                     storedJson: storedJson,
                     documentTypeName: documentType.Name,
-                    currentToken: currentToken),
+                    currentToken: currentToken,
+                    auditReason: typeAudit),
                 null);
         }
 
@@ -411,7 +468,8 @@ internal sealed class DocumentWriteService : IDocumentWriteService
                     editedJson: editedJson,
                     storedJson: storedJson,
                     documentTypeName: documentType.Name,
-                    currentToken: currentToken),
+                    currentToken: currentToken,
+                    auditReason: $"'{documentType.Name}' could not be serialized back ({ex.GetType().Name})."),
                 null);
         }
 
@@ -420,10 +478,14 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         var roundTripDiff = RoundTripDiffer.Diff(editedJson, roundTrippedJson);
         var editDiff = RoundTripDiffer.Diff(storedJson, editedJson);
 
-        var caveat = hasConcurrencyColumn
-            ? null
-            : "This collection has no version column, so the save cannot be checked against a " +
-              "concurrent change. Saving will overwrite whatever is there.";
+        var caveat = !hasConcurrencyColumn
+            ? "This collection has no version column, so the save cannot be checked against a " +
+              "concurrent change. Saving will overwrite whatever is there."
+            : currentToken.IsKnown
+                ? null
+                : "This row's version column is empty, so the save cannot be checked against a " +
+                  "concurrent change and will be refused. A row written outside Marten, or migrated by " +
+                  "hand, does this.";
 
         return new PreviewResult(
             WritePreview.Ready(
@@ -445,6 +507,41 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     /// <param name="Document">The deserialized document, or <see langword="null" /> when the preview is not ready.</param>
     internal readonly record struct PreviewResult(WritePreview Preview, object? Document);
 
+    /// <summary>Builds the preview for a row that is there, once its concrete type is settled.</summary>
+    private static WritePreview PreviewRow(
+        WriteTarget writeTarget,
+        string alias,
+        string id,
+        string editedJson,
+        DocumentRow row,
+        ResolvedScope resolved)
+    {
+        var runtime = ResolveRuntimeType(writeTarget, row.DocType);
+
+        if (runtime.Type is null)
+        {
+            return WritePreview.Refused(
+                alias,
+                id,
+                runtime.Refusal!,
+                typeIsConstructible: false,
+                editedJson: editedJson,
+                storedJson: row.Json,
+                documentTypeName: writeTarget.TypeName,
+                currentToken: row.Token);
+        }
+
+        return BuildPreview(
+            alias,
+            id,
+            runtime.Type,
+            resolved.Store.Options.Serializer(),
+            row.Json,
+            editedJson,
+            row.Token,
+            HasConcurrencyColumn(writeTarget.Table)).Preview;
+    }
+
     private async Task<WriteResult> SaveCoreAsync(
         ResolvedScope resolved,
         string alias,
@@ -462,6 +559,8 @@ internal sealed class DocumentWriteService : IDocumentWriteService
 
         WriteTarget writeTarget;
         WritePreview preview;
+        Type documentType;
+        string? storedDocType;
         object document;
 
         // The read connection is opened, used and closed before the session opens: two connections held
@@ -482,10 +581,20 @@ internal sealed class DocumentWriteService : IDocumentWriteService
                 return WriteResult.Refused(notFound.Reason!, notFound);
             }
 
+            storedDocType = load.Row.DocType;
+
+            var runtime = ResolveRuntimeType(writeTarget, storedDocType);
+            if (runtime.Type is null)
+            {
+                return WriteResult.Refused(runtime.Refusal!);
+            }
+
+            documentType = runtime.Type;
+
             var built = BuildPreview(
                 alias,
                 id,
-                writeTarget.ClrType,
+                documentType,
                 resolved.Store.Options.Serializer(),
                 load.Row.Json,
                 editedJson,
@@ -500,14 +609,25 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             }
 
             document = built.Document;
+
+            // A version column that is there and empty is not a conflict — it is a row nothing can be
+            // checked against, and reporting it as a conflict would put the editor in a loop where
+            // reloading changes nothing and saving never works. The preview goes back with it so the
+            // screen can still show what the edit would have done.
+            if (HasConcurrencyColumn(writeTarget.Table) && !load.Row.Token.IsKnown)
+            {
+                return WriteResult.Refused(NullVersionMessage(writeTarget), preview);
+            }
         }
 
         if (preview.HasDrops && !acknowledgeDrops)
         {
+            var typeName = preview.DocumentTypeName ?? writeTarget.TypeName;
+
             return WriteResult.Refused(
                 string.Create(
                     CultureInfo.InvariantCulture,
-                    $"Saving would drop {preview.DroppedPaths.Length} propert{(preview.DroppedPaths.Length == 1 ? "y" : "ies")} that '{writeTarget.TypeName}' has no member for: {preview.DroppedPathsSummary()}. Nothing was saved."),
+                    $"Saving would drop {preview.DroppedPaths.Length} propert{(preview.DroppedPaths.Length == 1 ? "y" : "ies")} that '{typeName}' has no member for: {preview.DroppedPathsSummary()}. Nothing was saved."),
                 preview);
         }
 
@@ -526,6 +646,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         // Force the connection and the transaction open, so the check below and the write below are one
         // transaction rather than two statements that happen to follow each other.
         await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await ApplyLockTimeoutAsync(session, cancellationToken).ConfigureAwait(false);
 
         if (!DocumentQueryBuilder.TryBuildSingle(
                 writeTarget.Table,
@@ -540,10 +661,19 @@ internal sealed class DocumentWriteService : IDocumentWriteService
 
         DocumentRow? current;
 
-        await using (command)
+        try
         {
-            await using var reader = await session.ExecuteReaderAsync(command, cancellationToken).ConfigureAwait(false);
-            current = await ReadRowAsync(reader, writeTarget.Table, cancellationToken).ConfigureAwait(false);
+            await using (command)
+            {
+                await using var reader = await ExecuteInSessionTransactionAsync(session, command, cancellationToken)
+                    .ConfigureAwait(false);
+
+                current = await ReadRowAsync(reader, writeTarget.Table, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (IsRowUnavailable(ex, cancellationToken))
+        {
+            return WriteResult.Refused(RowIsLockedMessage, preview);
         }
 
         if (current is null)
@@ -553,12 +683,25 @@ internal sealed class DocumentWriteService : IDocumentWriteService
                 preview);
         }
 
+        if (!string.Equals(current.DocType, storedDocType, StringComparison.Ordinal))
+        {
+            return WriteResult.Refused(
+                "The document's own type changed while it was open, so saving the edit would have " +
+                "rewritten it as something else. Nothing was saved; reload the document.",
+                preview);
+        }
+
+        if (guarded && !current.Token.IsKnown)
+        {
+            return WriteResult.Refused(NullVersionMessage(writeTarget), preview);
+        }
+
         if (guarded && current.Token != expectedToken)
         {
             return WriteResult.Conflict(current.Token, preview);
         }
 
-        QueueStore(session, writeTarget, document, expectedToken.IsKnown ? expectedToken : current.Token);
+        QueueStore(session, writeTarget, documentType, document, expectedToken.IsKnown ? expectedToken : current.Token);
 
         try
         {
@@ -569,6 +712,10 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             // Marten's own check fired. Whatever is in the row now is what the screen has to show.
             var latest = await ReadTokenAsync(resolved, writeTarget, id, cancellationToken).ConfigureAwait(false);
             return WriteResult.Conflict(latest, preview);
+        }
+        catch (Exception ex) when (IsRowUnavailable(ex, cancellationToken))
+        {
+            return WriteResult.Refused(RowIsLockedMessage, preview);
         }
 
         var saved = await ReadTokenAsync(resolved, writeTarget, id, cancellationToken).ConfigureAwait(false);
@@ -588,41 +735,49 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         }
 
         WriteTarget writeTarget;
-        object document;
+        ExistingRow row;
 
+        // The existence read does not select `data`: a delete does not need the document, and a row whose
+        // JSON no CLR type can read has to stay deletable (that is the whole point of deleting by id).
         await using (var connection = await OpenReadConnectionAsync(resolved, cancellationToken).ConfigureAwait(false))
         {
             writeTarget = await ReconcileAsync(described.Target, connection, cancellationToken).ConfigureAwait(false);
 
-            var load = await LoadAsync(connection, writeTarget, id, resolved.TenantId, cancellationToken).ConfigureAwait(false);
-            if (load.Error is not null)
-            {
-                return DeleteResult.Refused(alias, id, load.Error);
-            }
+            var lookup = await LoadIdsAsync(connection, writeTarget, [id], resolved.TenantId, cancellationToken)
+                .ConfigureAwait(false);
 
-            if (load.Row is null)
-            {
-                return DeleteResult.NotFound(alias, id);
-            }
-
-            if (!TryDeserialize(
-                    resolved.Store.Options.Serializer(),
-                    writeTarget.ClrType,
-                    load.Row.Json,
-                    out var deserialized,
-                    out var error))
+            if (lookup.Errors[0] is { } error)
             {
                 return DeleteResult.Refused(alias, id, error);
             }
 
-            document = deserialized;
+            if (lookup.Rows[0] is not { } found)
+            {
+                return DeleteResult.NotFound(alias, id);
+            }
+
+            row = found;
         }
+
+        // A row whose discriminator the mapping cannot name is still a row: the primary key says which
+        // one it is, and refusing to delete it would leave the studio unable to clean up exactly the
+        // rows somebody most wants gone.
+        var documentType = ResolveRuntimeType(writeTarget, row.DocType).Type ?? writeTarget.ClrType;
 
         await using var session = OpenSession(resolved);
 
-        // DeleteObjects, never a delete statement of our own: it is what knows that this type is
-        // soft-deleted and that that type is not, and it is what keeps tenancy right.
-        session.DeleteObjects([document]);
+        if (TypedIds.TryConvert(writeTarget.IdMemberType, row.IdValue, out var typedId))
+        {
+            // Delete<T>(id) rather than DeleteObjects: it is what knows that this type is soft-deleted
+            // and that that type is not, it keeps tenancy right, and it never has to see the document.
+            TypedSessionWrites.DeleteById(session, documentType, typedId);
+        }
+        else if (await TryQueueDeleteByDocumentAsync(session, resolved, writeTarget, documentType, id, cancellationToken)
+                     .ConfigureAwait(false) is { } refusal)
+        {
+            return DeleteResult.Refused(alias, id, refusal);
+        }
+
         await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         return writeTarget.IsSoftDeleted
@@ -634,6 +789,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         ResolvedScope resolved,
         string alias,
         string id,
+        bool acknowledgeDrops,
         CancellationToken cancellationToken)
     {
         var described = TryFindTarget(resolved, alias);
@@ -652,15 +808,102 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         }
 
         WriteTarget writeTarget;
-        object document;
-        DocumentConcurrencyToken token;
+        ExistingRow row;
 
         await using (var connection = await OpenReadConnectionAsync(resolved, cancellationToken).ConfigureAwait(false))
         {
             writeTarget = await ReconcileAsync(described.Target, connection, cancellationToken).ConfigureAwait(false);
 
-            // The single read carries no soft-delete predicate, so the deleted row is right there.
+            // The existence read carries no soft-delete predicate, so the deleted row is right there.
+            var lookup = await LoadIdsAsync(connection, writeTarget, [id], resolved.TenantId, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (lookup.Errors[0] is { } error)
+            {
+                return DeleteResult.Refused(alias, id, error);
+            }
+
+            if (lookup.Rows[0] is not { } found)
+            {
+                return DeleteResult.NotFound(alias, id);
+            }
+
+            row = found;
+        }
+
+        if (!row.IsDeleted)
+        {
+            return DeleteResult.Undeleted(alias, id, "The document was not deleted; nothing was changed.");
+        }
+
+        var queued = false;
+
+        await using (var session = OpenSession(resolved))
+        {
+            if (TypedIds.TryConvert(writeTarget.IdMemberType, row.IdValue, out var typedId) &&
+                TypedSessionWrites.TryQueueUndoDelete(session, writeTarget.ClrType, writeTarget.IdMember, typedId))
+            {
+                await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                queued = true;
+            }
+        }
+
+        if (!queued)
+        {
+            var fallback = await UndeleteByRewritingAsync(resolved, writeTarget, alias, id, acknowledgeDrops, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (fallback is not null)
+            {
+                return fallback;
+            }
+        }
+
+        await using (var connection = await OpenReadConnectionAsync(resolved, cancellationToken).ConfigureAwait(false))
+        {
+            var after = await LoadIdsAsync(connection, writeTarget, [id], resolved.TenantId, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (after.Rows[0] is not { IsDeleted: false })
+            {
+                return DeleteResult.Refused(
+                    alias,
+                    id,
+                    "The document is still marked deleted after the write. Nothing else was changed.");
+            }
+        }
+
+        return DeleteResult.Undeleted(alias, id);
+    }
+
+    /// <summary>
+    /// The undelete of last resort: deserialize the document and store it back, because Marten's upsert
+    /// clears <c>mt_deleted</c> on every write.
+    /// </summary>
+    /// <remarks>
+    /// Only reached for a document type whose id the studio cannot turn into
+    /// <c>x =&gt; x.Id == id</c> — an F# discriminated-union id, or a value object with no constructor
+    /// Marten's own rules would accept. It is a <em>full rewrite of the document body</em>, so it runs
+    /// the round-trip differ first and refuses unless the caller has acknowledged what that would change.
+    /// Returns the refusal, or <see langword="null" /> when the write was queued and committed.
+    /// </remarks>
+    private async Task<DeleteResult?> UndeleteByRewritingAsync(
+        ResolvedScope resolved,
+        WriteTarget writeTarget,
+        string alias,
+        string id,
+        bool acknowledgeDrops,
+        CancellationToken cancellationToken)
+    {
+        object document;
+        DocumentConcurrencyToken token;
+        Type documentType;
+        JsonDiffResult diff;
+
+        await using (var connection = await OpenReadConnectionAsync(resolved, cancellationToken).ConfigureAwait(false))
+        {
             var load = await LoadAsync(connection, writeTarget, id, resolved.TenantId, cancellationToken).ConfigureAwait(false);
+
             if (load.Error is not null)
             {
                 return DeleteResult.Refused(alias, id, load.Error);
@@ -671,47 +914,57 @@ internal sealed class DocumentWriteService : IDocumentWriteService
                 return DeleteResult.NotFound(alias, id);
             }
 
-            if (!load.Row.IsDeleted)
+            var runtime = ResolveRuntimeType(writeTarget, load.Row.DocType);
+            if (runtime.Type is null)
             {
-                return DeleteResult.Undeleted(alias, id, "The document was not deleted; nothing was changed.");
+                return DeleteResult.Refused(alias, id, runtime.Refusal!);
             }
 
-            if (!TryDeserialize(
-                    resolved.Store.Options.Serializer(),
-                    writeTarget.ClrType,
-                    load.Row.Json,
-                    out var deserialized,
-                    out var error))
+            documentType = runtime.Type;
+            var serializer = resolved.Store.Options.Serializer();
+
+            if (!TryDeserialize(serializer, documentType, load.Row.Json, out var deserialized, out var error, out var auditError))
             {
-                return DeleteResult.Refused(alias, id, error);
+                return DeleteResult.Refused(alias, id, error, auditError);
             }
 
             document = deserialized;
             token = load.Row.Token;
-        }
 
-        await using (var session = OpenSession(resolved))
-        {
-            // Marten's upsert writes mt_deleted = false on every store, so storing the document back is
-            // the undelete (verified against Weasel.Storage.DocumentSoftDeletedBinder, Marten 9.35).
-            QueueStore(session, writeTarget, document, token);
-            await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        await using (var connection = await OpenReadConnectionAsync(resolved, cancellationToken).ConfigureAwait(false))
-        {
-            var after = await LoadAsync(connection, writeTarget, id, resolved.TenantId, cancellationToken).ConfigureAwait(false);
-
-            if (after.Row is null || after.Row.IsDeleted)
+            try
+            {
+                diff = RoundTripDiffer.Diff(load.Row.Json, serializer.ToJson(document));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 return DeleteResult.Refused(
                     alias,
                     id,
-                    "The document is still marked deleted after the write. Nothing else was changed.");
+                    $"'{documentType.Name}' could not be serialized back, so the document cannot be brought " +
+                    $"back without losing it: {ex.Message}",
+                    $"'{documentType.Name}' could not be serialized back ({ex.GetType().Name}).");
             }
         }
 
-        return DeleteResult.Undeleted(alias, id);
+        var changes = diff.Dropped.Length + diff.Changed.Length;
+
+        if (!acknowledgeDrops && (changes > 0 || diff.IsFaulted))
+        {
+            return DeleteResult.Refused(
+                alias,
+                id,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"The studio cannot bring a '{writeTarget.TypeName}' back without rewriting its JSON, and " +
+                    $"the rewrite would change {changes} value{(changes == 1 ? string.Empty : "s")}. Nothing was changed."));
+        }
+
+        await using var session = OpenSession(resolved);
+
+        QueueStore(session, writeTarget, documentType, document, token);
+        await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+        return null;
     }
 
     private async Task<BulkDeleteResult> BulkDeleteCoreAsync(
@@ -739,51 +992,64 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         }
 
         WriteTarget writeTarget;
-        var outcomes = new DeleteResult[ids.Count];
-        List<object> documents = [];
-        List<int> queued = [];
+        IdLookup lookup;
 
+        // One read for the whole selection — `id = any(@ids)` — rather than one round trip per id, and
+        // without the `data` column, because a bulk delete never needs the documents.
         await using (var connection = await OpenReadConnectionAsync(resolved, cancellationToken).ConfigureAwait(false))
         {
             writeTarget = await ReconcileAsync(described.Target, connection, cancellationToken).ConfigureAwait(false);
-            var serializer = resolved.Store.Options.Serializer();
-
-            for (var i = 0; i < ids.Count; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var id = ids[i];
-                var load = await LoadAsync(connection, writeTarget, id, resolved.TenantId, cancellationToken).ConfigureAwait(false);
-
-                if (load.Error is not null)
-                {
-                    outcomes[i] = DeleteResult.Refused(alias, id, load.Error);
-                    continue;
-                }
-
-                if (load.Row is null)
-                {
-                    outcomes[i] = DeleteResult.NotFound(alias, id);
-                    continue;
-                }
-
-                if (!TryDeserialize(serializer, writeTarget.ClrType, load.Row.Json, out var document, out var error))
-                {
-                    outcomes[i] = DeleteResult.Refused(alias, id, error);
-                    continue;
-                }
-
-                documents.Add(document);
-                queued.Add(i);
-            }
+            lookup = await LoadIdsAsync(connection, writeTarget, ids, resolved.TenantId, cancellationToken)
+                .ConfigureAwait(false);
         }
 
-        if (documents.Count > 0)
+        var outcomes = new DeleteResult[ids.Count];
+        List<int> queued = [];
+
+        // One session, one SaveChangesAsync: the whole selection is one transaction, so a failure
+        // halfway leaves the database as it was rather than half-deleted.
+        await using var session = OpenSession(resolved);
+
+        HashSet<string> alreadyQueued = new(StringComparer.Ordinal);
+
+        for (var i = 0; i < ids.Count; i++)
         {
-            // One session, one SaveChangesAsync: the whole selection is one transaction, so a failure
-            // halfway leaves the database as it was rather than half-deleted.
-            await using var session = OpenSession(resolved);
-            session.DeleteObjects(documents);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (lookup.Errors[i] is { } error)
+            {
+                outcomes[i] = DeleteResult.Refused(alias, ids[i], error);
+                continue;
+            }
+
+            if (lookup.Rows[i] is not { } row)
+            {
+                outcomes[i] = DeleteResult.NotFound(alias, ids[i]);
+                continue;
+            }
+
+            if (!TypedIds.TryConvert(writeTarget.IdMemberType, row.IdValue, out var typedId))
+            {
+                outcomes[i] = DeleteResult.Refused(
+                    alias,
+                    ids[i],
+                    $"The studio cannot build an id of type '{writeTarget.IdMemberType.Name}' for this row, so " +
+                    "it cannot be deleted from a selection. Open it and delete it on its own page.");
+                continue;
+            }
+
+            // The same id twice in one selection is one delete and two answers.
+            if (alreadyQueued.Add(IdKey(row.IdValue)))
+            {
+                var documentType = ResolveRuntimeType(writeTarget, row.DocType).Type ?? writeTarget.ClrType;
+                TypedSessionWrites.DeleteById(session, documentType, typedId);
+            }
+
+            queued.Add(i);
+        }
+
+        if (queued.Count > 0)
+        {
             await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -829,7 +1095,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            audit.Record(action, target, succeeded: false, ex.Message, capability, scope);
+            audit.Record(action, target, succeeded: false, AuditLine(ex), capability, scope);
             throw;
         }
     }
@@ -844,9 +1110,48 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         return value.WriteAuthorizationPolicy ?? value.StoreAuthorizationPolicy ?? "(none)";
     }
 
-    private static string Target(string alias, string id) => alias + "/" + id;
+    /// <summary>
+    /// What an unexpected failure says in the audit: the exception's type and message, sanitised and
+    /// capped. The stack trace belongs to whoever catches it further up.
+    /// </summary>
+    private static string AuditLine(Exception exception) =>
+        WriteAuditText.Sanitize(exception.GetType().Name + ": " + exception.Message);
+
+    /// <summary>
+    /// The audit's name for what was acted on. Both halves come from a URL, so both are sanitised — a
+    /// document id containing a newline would otherwise write a second line into the log.
+    /// </summary>
+    private static string Target(string alias, string id) =>
+        WriteAuditText.Sanitize(alias, WriteAuditText.MaxTokenLength) + "/" +
+        WriteAuditText.Sanitize(id, WriteAuditText.MaxTokenLength);
 
     private int CommandTimeoutSeconds => (int) Math.Ceiling(options.Value.QueryTimeout.TotalSeconds);
+
+    /// <summary>
+    /// How long the <c>for update</c> read waits before it gives up on the row.
+    /// </summary>
+    /// <remarks>
+    /// Half the query timeout, capped at <see cref="DefaultRowLockTimeout" />. Half rather than all of it
+    /// because the two timeouts must not be able to fire at the same moment: <c>lock_timeout</c> expiring
+    /// is <c>55P03</c> from the server and turns into a sentence about somebody else editing the
+    /// document, while Npgsql giving up on the command is a socket-level failure with nothing in it a
+    /// person could act on. The one that has an explanation has to win.
+    /// </remarks>
+    private TimeSpan RowLockTimeout
+    {
+        get
+        {
+            var queryTimeout = options.Value.QueryTimeout;
+
+            if (queryTimeout <= TimeSpan.Zero)
+            {
+                return DefaultRowLockTimeout;
+            }
+
+            var half = TimeSpan.FromTicks(queryTimeout.Ticks / 2);
+            return half < DefaultRowLockTimeout ? half : DefaultRowLockTimeout;
+        }
+    }
 
     private static async Task<NpgsqlConnection> OpenReadConnectionAsync(
         ResolvedScope resolved,
@@ -897,6 +1202,55 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     }
 
     /// <summary>
+    /// Caps how long this transaction will wait for a row lock.
+    /// </summary>
+    /// <remarks>
+    /// Run on the session's own connection, after <c>BeginTransactionAsync</c>, so the <c>true</c> third
+    /// argument to <c>set_config</c> scopes it to the transaction that is about to take the lock and
+    /// nothing else on that connection afterwards.
+    /// </remarks>
+    private async Task ApplyLockTimeoutAsync(IDocumentSession session, CancellationToken cancellationToken)
+    {
+        await using var command = DocumentQueryBuilder.BuildLockTimeout(RowLockTimeout);
+        await using var reader = await ExecuteInSessionTransactionAsync(session, command, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs one of the studio's own statements inside the session's transaction, on the session's
+    /// connection, and deliberately <em>not</em> through <c>session.ExecuteReaderAsync</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Marten runs everything that goes through the session's own execute methods under
+    /// <c>StoreOptions.ResiliencePipeline</c>, whose default retries any <c>NpgsqlException</c> or
+    /// <c>MartenCommandException</c> three times (verified against
+    /// <c>Marten.Util.ResilientPipelineBuilderExtensions.AddMartenDefaults</c>, 9.35). That is the right
+    /// policy for an ordinary read and precisely the wrong one for a statement that takes a lock: a
+    /// <c>lock_timeout</c> expiry is <c>55P03</c>, which aborts the transaction, so the retry comes back
+    /// as <c>25P02</c> — "current transaction is aborted" — and the error that says <em>why</em> is gone.
+    /// The screen would get an unhandled exception where it should have got "somebody else is editing
+    /// this".
+    /// </para>
+    /// <para>
+    /// <c>IQuerySession.Connection</c> is the session's own open connection, so the statement is still in
+    /// the session's transaction — the part that makes the lock mean anything. Npgsql executes a command
+    /// in whatever transaction its connection is currently in; the <c>Transaction</c> property is not
+    /// consulted.
+    /// </para>
+    /// </remarks>
+    private async Task<DbDataReader> ExecuteInSessionTransactionAsync(
+        IDocumentSession session,
+        NpgsqlCommand command,
+        CancellationToken cancellationToken)
+    {
+        command.Connection = session.Connection;
+        command.CommandTimeout = CommandTimeoutSeconds;
+
+        return await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// What the studio knows about the collection it is about to write to: Marten's mapping, and the
     /// table as it actually exists.
     /// </summary>
@@ -905,6 +1259,21 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         public Type ClrType => DocumentType.DocumentType;
 
         public string TypeName => DocumentType.DocumentType.Name;
+
+        /// <summary>The member Marten treats as this type's identity, which an id expression is built on.</summary>
+        public MemberInfo IdMember => DocumentType.IdMember;
+
+        /// <summary>
+        /// The CLR type of that member — <see cref="IDocumentType.IdType" />, which Marten defines as the
+        /// id member's type, so a strong-typed id reports the wrapper and not the value inside it.
+        /// </summary>
+        public Type IdMemberType => DocumentType.IdType;
+
+        /// <summary>
+        /// Whether this alias covers more than one CLR type, in which case every row carries an
+        /// <c>mt_doc_type</c> saying which one it is.
+        /// </summary>
+        public bool IsHierarchy => DocumentType.IsHierarchy();
 
         /// <summary>
         /// Whether a delete hides the row or removes it. Read from the concrete mapping's
@@ -981,6 +1350,8 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     /// <remarks>
     /// <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> is honoured here as well as on the read
     /// side: a type a host hid from the studio must not be writable through a hand-typed alias either.
+    /// A hidden type answers exactly as an unmapped one does — the refusal is the same sentence — so the
+    /// gate does not tell a visitor which types exist and are merely hidden.
     /// </remarks>
     private IDocumentType? FindDocumentType(IDocumentStore store, string alias)
     {
@@ -999,8 +1370,84 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         return null;
     }
 
+    /// <summary>The concrete CLR type one row is, or why the studio cannot say.</summary>
+    /// <param name="Type">The type to deserialize as and to write as.</param>
+    /// <param name="Refusal">Why it could not be settled, when it could not.</param>
+    private readonly record struct RuntimeType(Type? Type, string? Refusal);
+
+    /// <summary>
+    /// Resolves what a row actually is, which for a hierarchy is not what its alias says.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>IReadOnlyStoreOptions.AllKnownDocumentTypes()</c> returns <c>Storage.AllDocumentMappings</c>,
+    /// which holds root mappings only — a <c>SubClassMapping</c> is not an <c>IDocumentType</c> at all.
+    /// So the alias <c>vehicle</c> resolves to <c>Vehicle</c>, and a <c>Car</c> row deserialized as
+    /// <c>Vehicle</c> and stored back would be stamped <c>mt_doc_type = 'BASE'</c> and
+    /// <c>mt_dotnet_type = Vehicle</c>: the row would silently stop being a <c>Car</c>, and for a marker
+    /// subclass with no members of its own the round-trip differ would report nothing dropped, because
+    /// nothing in the JSON was.
+    /// </para>
+    /// <para>
+    /// <c>IDocumentType.TypeFor(alias)</c> is the mapping's own reverse lookup and is what fixes it. It
+    /// answers <c>"BASE"</c> — the value Marten's <c>DocTypeArgument</c> writes for an instance of the
+    /// root type itself — with the root, and <b>throws</b> <see cref="ArgumentOutOfRangeException" /> for
+    /// an alias it does not know, which is why the call is guarded: a row stamped by an older version of
+    /// the application with a subclass that has since been removed must be a refusal a person can read,
+    /// not an unhandled exception.
+    /// </para>
+    /// </remarks>
+    private static RuntimeType ResolveRuntimeType(WriteTarget target, string? docTypeAlias)
+    {
+        if (!target.IsHierarchy)
+        {
+            return new RuntimeType(target.ClrType, null);
+        }
+
+        if (string.IsNullOrWhiteSpace(docTypeAlias))
+        {
+            if (target.ClrType.IsAbstract || target.ClrType.IsInterface)
+            {
+                return new RuntimeType(
+                    null,
+                    $"This row carries no document-type discriminator and '{target.TypeName}' cannot be " +
+                    "instantiated, so the studio has no type to read it as. Nothing was changed.");
+            }
+
+            return new RuntimeType(target.ClrType, null);
+        }
+
+        try
+        {
+            var resolved = target.DocumentType.TypeFor(docTypeAlias);
+
+            return resolved is null
+                ? new RuntimeType(null, UnknownSubclass(target, docTypeAlias))
+                : new RuntimeType(resolved, null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new RuntimeType(null, UnknownSubclass(target, docTypeAlias));
+        }
+    }
+
+    private static string UnknownSubclass(WriteTarget target, string docTypeAlias) =>
+        $"This row says it is a '{docTypeAlias}', which is not a subclass '{target.TypeName}' is mapped " +
+        "with in this process. Writing it would change what it is, so nothing was changed. Register the " +
+        "subclass, or use a store that has it.";
+
+    /// <summary>What a save is told about a row whose version column is there and empty.</summary>
+    private static string NullVersionMessage(WriteTarget target) =>
+        $"This row's version column is empty, so there is nothing to check the save against and the " +
+        $"studio will not overwrite it blindly. A '{target.TypeName}' row written outside Marten, or " +
+        "migrated by hand, does this; give the column a value and try again.";
+
     /// <summary>One document row, as much of it as a write cares about.</summary>
-    private sealed record DocumentRow(string Json, DocumentConcurrencyToken Token, bool IsDeleted);
+    /// <param name="Json">The stored document.</param>
+    /// <param name="Token">The version or revision the row carries.</param>
+    /// <param name="IsDeleted">Whether it is soft-deleted.</param>
+    /// <param name="DocType">The <c>mt_doc_type</c> discriminator, for a hierarchy.</param>
+    private sealed record DocumentRow(string Json, DocumentConcurrencyToken Token, bool IsDeleted, string? DocType);
 
     private readonly record struct DocumentLoad(DocumentRow? Row, string? Error);
 
@@ -1025,6 +1472,104 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             return new DocumentLoad(await ReadRowAsync(reader, target.Table, cancellationToken).ConfigureAwait(false), null);
         }
     }
+
+    /// <summary>One row as the delete path knows it: its key, its discriminator and whether it is hidden.</summary>
+    /// <param name="IdValue">The id exactly as the column holds it.</param>
+    /// <param name="DocType">The <c>mt_doc_type</c> discriminator, for a hierarchy.</param>
+    /// <param name="IsDeleted">Whether it is soft-deleted.</param>
+    private sealed record ExistingRow(object IdValue, string? DocType, bool IsDeleted);
+
+    /// <summary>
+    /// The answer to "which of these ids are there", per requested id.
+    /// </summary>
+    /// <param name="Errors">Why an id could not be used at all, per requested id.</param>
+    /// <param name="Rows">The row for each requested id, or <see langword="null" /> when there is none.</param>
+    private readonly record struct IdLookup(IReadOnlyList<string?> Errors, ExistingRow?[] Rows);
+
+    /// <summary>
+    /// Reads which of <paramref name="ids" /> exist, in one statement and without the <c>data</c> column.
+    /// </summary>
+    /// <remarks>
+    /// The single-document delete uses this too, with one id. Rows come back in whatever order Postgres
+    /// produces them, so each is matched to the requested ids by a canonical key — and a selection that
+    /// names the same document twice gets two answers and one delete.
+    /// </remarks>
+    private async Task<IdLookup> LoadIdsAsync(
+        NpgsqlConnection connection,
+        WriteTarget target,
+        IReadOnlyList<string> ids,
+        string? tenantId,
+        CancellationToken cancellationToken)
+    {
+        var rows = new ExistingRow?[ids.Count];
+
+        if (!DocumentQueryBuilder.TryBuildMany(target.Table, ids, tenantId, out var command, out var errors))
+        {
+            return new IdLookup(errors, rows);
+        }
+
+        Dictionary<string, List<int>> wanted = new(StringComparer.Ordinal);
+
+        for (var i = 0; i < ids.Count; i++)
+        {
+            if (errors[i] is not null)
+            {
+                continue;
+            }
+
+            var parsed = DocumentQueryBuilder.ParseId(target.Table.IdColumnType, ids[i]);
+            var key = IdKey(parsed.Value!);
+
+            if (!wanted.TryGetValue(key, out var indexes))
+            {
+                wanted[key] = indexes = [];
+            }
+
+            indexes.Add(i);
+        }
+
+        var docTypeColumn = target.Table.MetadataColumnName(DocumentMetadataColumn.DocumentType);
+        var deletedColumn = target.Table.MetadataColumnName(DocumentMetadataColumn.IsSoftDeleted);
+
+        await using (command)
+        {
+            command.Connection = connection;
+            command.CommandTimeout = CommandTimeoutSeconds;
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var idValue = reader.GetValue(0);
+                var docType = await ReadOptionalStringAsync(reader, docTypeColumn, cancellationToken).ConfigureAwait(false);
+                var deleted = await ReadOptionalBooleanAsync(reader, deletedColumn, cancellationToken).ConfigureAwait(false);
+
+                if (!wanted.TryGetValue(IdKey(idValue), out var indexes))
+                {
+                    continue;
+                }
+
+                foreach (var index in indexes)
+                {
+                    rows[index] = new ExistingRow(idValue, docType, deleted);
+                }
+            }
+        }
+
+        return new IdLookup(errors, rows);
+    }
+
+    /// <summary>
+    /// One id as a string that two equal ids always agree on, so a row read back can be matched to the id
+    /// that asked for it whatever CLR type the column produced.
+    /// </summary>
+    private static string IdKey(object value) => value switch
+    {
+        Guid guid => guid.ToString("D", CultureInfo.InvariantCulture),
+        string text => text,
+        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? string.Empty,
+    };
 
     /// <summary>Reads the version the row carries now, on a connection of its own.</summary>
     private async Task<DocumentConcurrencyToken> ReadTokenAsync(
@@ -1064,17 +1609,45 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             }
         }
 
-        var deleted = false;
-        var deletedColumn = table.MetadataColumnName(DocumentMetadataColumn.IsSoftDeleted);
+        var deleted = await ReadOptionalBooleanAsync(
+            reader, table.MetadataColumnName(DocumentMetadataColumn.IsSoftDeleted), cancellationToken).ConfigureAwait(false);
 
-        if (deletedColumn is not null)
+        var docType = await ReadOptionalStringAsync(
+            reader, table.MetadataColumnName(DocumentMetadataColumn.DocumentType), cancellationToken).ConfigureAwait(false);
+
+        return new DocumentRow(json, token, deleted, docType);
+    }
+
+    private static async Task<string?> ReadOptionalStringAsync(
+        DbDataReader reader,
+        string? columnName,
+        CancellationToken cancellationToken)
+    {
+        if (columnName is null)
         {
-            var ordinal = reader.GetOrdinal(deletedColumn);
-            deleted = !await reader.IsDBNullAsync(ordinal, cancellationToken).ConfigureAwait(false)
-                && reader.GetBoolean(ordinal);
+            return null;
         }
 
-        return new DocumentRow(json, token, deleted);
+        var ordinal = reader.GetOrdinal(columnName);
+
+        return await reader.IsDBNullAsync(ordinal, cancellationToken).ConfigureAwait(false)
+            ? null
+            : reader.GetString(ordinal);
+    }
+
+    private static async Task<bool> ReadOptionalBooleanAsync(
+        DbDataReader reader,
+        string? columnName,
+        CancellationToken cancellationToken)
+    {
+        if (columnName is null)
+        {
+            return false;
+        }
+
+        var ordinal = reader.GetOrdinal(columnName);
+
+        return !await reader.IsDBNullAsync(ordinal, cancellationToken).ConfigureAwait(false) && reader.GetBoolean(ordinal);
     }
 
     /// <summary>Whether this table has a version column for a save to be checked against.</summary>
@@ -1096,20 +1669,22 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     /// </para>
     /// <para>
     /// Both APIs are generic in the document type and the studio only has a runtime <see cref="Type" />,
-    /// so the call goes through a per-type compiled delegate (<see cref="TypedSessionWrites" />). That
-    /// is the one place in this codebase where reflection stands in for a generic call, and it is here
-    /// because Marten offers no non-generic overload of either.
+    /// so the call goes through a per-type compiled delegate (<see cref="TypedSessionWrites" />). The
+    /// type they are made generic over is <paramref name="documentType" /> — the row's concrete type, not
+    /// the alias's root — because that is what decides which storage Marten uses and therefore what
+    /// <c>mt_doc_type</c> and <c>mt_dotnet_type</c> end up saying.
     /// </para>
     /// </remarks>
     private static void QueueStore(
         IDocumentSession session,
         WriteTarget target,
+        Type documentType,
         object document,
         DocumentConcurrencyToken token)
     {
         if (target.UsesOptimisticConcurrency && token.Version is { } version)
         {
-            TypedSessionWrites.UpdateExpectedVersion(session, target.ClrType, document, version);
+            TypedSessionWrites.UpdateExpectedVersion(session, documentType, document, version);
             return;
         }
 
@@ -1117,11 +1692,55 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         {
             // UpdateRevision takes the *new* revision and refuses if the database is already at or past
             // it, so the next one up is both the check and the increment.
-            TypedSessionWrites.UpdateRevision(session, target.ClrType, document, revision + 1);
+            TypedSessionWrites.UpdateRevision(session, documentType, document, revision + 1);
             return;
         }
 
+        // StoreObjects groups by the instance's own GetType(), which is the concrete subclass because
+        // that is what the JSON was deserialized as.
         session.StoreObjects([document]);
+    }
+
+    /// <summary>
+    /// The delete of last resort: read the document, deserialize it, and hand the instance to
+    /// <c>DeleteObjects</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>DeleteObjects</c> survives for exactly one case — a document type whose id member the studio
+    /// cannot build a value for, which in Marten 9.35 means an F# discriminated-union id or a value
+    /// object that does not match <c>ValueTypeIdGeneration</c>'s shape. Everything else deletes by id and
+    /// never reads the document at all. Returns the refusal, or <see langword="null" /> when the delete
+    /// was queued.
+    /// </remarks>
+    private async Task<string?> TryQueueDeleteByDocumentAsync(
+        IDocumentSession session,
+        ResolvedScope resolved,
+        WriteTarget writeTarget,
+        Type documentType,
+        string id,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenReadConnectionAsync(resolved, cancellationToken).ConfigureAwait(false);
+        var load = await LoadAsync(connection, writeTarget, id, resolved.TenantId, cancellationToken).ConfigureAwait(false);
+
+        if (load.Error is not null)
+        {
+            return load.Error;
+        }
+
+        if (load.Row is null)
+        {
+            return "The document was deleted while this was being read; nothing was changed.";
+        }
+
+        if (!TryDeserialize(
+                resolved.Store.Options.Serializer(), documentType, load.Row.Json, out var document, out var error, out _))
+        {
+            return error;
+        }
+
+        session.DeleteObjects([document]);
+        return null;
     }
 
     private static bool IsConcurrencyFailure(Exception exception) => exception switch
@@ -1129,6 +1748,33 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         ConcurrencyException => true,
         AggregateException aggregate => aggregate.InnerExceptions.Any(static x => x is ConcurrencyException),
         _ => false,
+    };
+
+    /// <summary>
+    /// Whether a failure is "somebody else is holding this row": the <c>lock_timeout</c> expiring
+    /// (<c>55P03</c>) or the statement being cut short (<c>57014</c>).
+    /// </summary>
+    /// <remarks>
+    /// <c>57014</c> is also what a genuinely cancelled statement looks like, so a request the caller
+    /// cancelled is deliberately not folded into this: that one has to keep propagating as a
+    /// cancellation. Marten wraps its command failures, so the whole inner chain is walked.
+    /// </remarks>
+    private static bool IsRowUnavailable(Exception exception, CancellationToken cancellationToken)
+    {
+        if (exception is OperationCanceledException || cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        return HasLockSqlState(exception);
+    }
+
+    private static bool HasLockSqlState(Exception? exception) => exception switch
+    {
+        null => false,
+        PostgresException postgres => postgres.SqlState is LockNotAvailableSqlState or QueryCanceledSqlState,
+        AggregateException aggregate => aggregate.InnerExceptions.Any(HasLockSqlState),
+        _ => HasLockSqlState(exception.InnerException),
     };
 
     private static bool TryParseEdited(string editedJson, out string reason)
@@ -1151,18 +1797,28 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     /// message instead of an exception.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// An abstract type, a type with no usable constructor, a converter that throws — all of them are
     /// ordinary answers about a document somebody is trying to edit, and all of them have to reach the
     /// screen as text. <c>FromJson(Type, Stream)</c> is the only non-generic entry point Marten's
     /// serializer has (there is no string overload), so the edit goes in as UTF-8 over a
     /// <see cref="MemoryStream" />.
+    /// </para>
+    /// <para>
+    /// Two messages come back, and the difference matters. <paramref name="reason" /> carries the
+    /// exception's own words and goes on screen, where a person needs them and where Blazor escapes
+    /// them. <paramref name="auditReason" /> names the exception type and the JSON path instead and is
+    /// what the audit ring and the application log get: a converter's message can be arbitrarily long
+    /// and can quote a fragment of somebody's document into a log file.
+    /// </para>
     /// </remarks>
     private static bool TryDeserialize(
         ISerializer serializer,
         Type documentType,
         string json,
         out object document,
-        out string reason)
+        out string reason,
+        out string auditReason)
     {
         try
         {
@@ -1173,17 +1829,20 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             {
                 document = null!;
                 reason = $"The edit deserialized to nothing at all as '{documentType.Name}'.";
+                auditReason = reason;
                 return false;
             }
 
             document = result;
             reason = string.Empty;
+            auditReason = string.Empty;
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             document = null!;
             reason = $"'{documentType.Name}' could not be built from this JSON{Where(ex)}: {ex.Message}";
+            auditReason = $"'{documentType.Name}' could not be built from this JSON{Where(ex)} ({ex.GetType().Name}).";
             return false;
         }
     }
@@ -1241,7 +1900,150 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     }
 
     /// <summary>
-    /// Marten's two generic concurrency-aware write calls, reachable from a runtime <see cref="Type" />.
+    /// Turns a value out of an <c>id</c> column into the CLR type the document's id member actually has.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The studio reads ids as the <em>column</em> says they are — <see cref="Guid" />, <see cref="int" />,
+    /// <see cref="long" />, <see cref="string" /> — because that is what a parameter has to bind as. Every
+    /// generic write call needs the other thing: the type the document's own id member is declared as,
+    /// which for a strong-typed id is a wrapper around one of those four.
+    /// </para>
+    /// <para>
+    /// The shape it looks for is exactly the one <c>Marten.Schema.Identity.ValueTypeIdGeneration</c>
+    /// accepts (verified against Marten 9.35): a public struct with exactly one property of a valid id
+    /// type, and either a one-argument constructor taking that type or a public static factory returning
+    /// the struct from it. A type that does not match — an F# discriminated union is the real example —
+    /// comes back as <see langword="false" />, and the caller falls back to a path that does not need an
+    /// id value.
+    /// </para>
+    /// </remarks>
+    private static class TypedIds
+    {
+        /// <summary>The four things a Marten id column can hold, which is what a wrapper must wrap.</summary>
+        private static readonly Type[] InnerIdTypes = [typeof(Guid), typeof(string), typeof(int), typeof(long)];
+
+        private static readonly ConcurrentDictionary<Type, Wrapper?> Wrappers = new();
+
+        /// <summary>A value-object id: the type inside it, and how to build one.</summary>
+        private sealed record Wrapper(Type InnerType, Func<object, object> Build);
+
+        public static bool TryConvert(Type? idMemberType, object columnValue, out object typed)
+        {
+            ArgumentNullException.ThrowIfNull(columnValue);
+
+            if (idMemberType is null)
+            {
+                typed = null!;
+                return false;
+            }
+
+            if (TryCoerce(idMemberType, columnValue, out typed))
+            {
+                return true;
+            }
+
+            var wrapper = Wrappers.GetOrAdd(Nullable.GetUnderlyingType(idMemberType) ?? idMemberType, FindWrapper);
+
+            if (wrapper is null || !TryCoerce(wrapper.InnerType, columnValue, out var inner))
+            {
+                typed = null!;
+                return false;
+            }
+
+            try
+            {
+                typed = wrapper.Build(inner);
+                return true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                typed = null!;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// The column value as <paramref name="wanted" />, when the two are the same thing in different
+        /// widths. An <c>int4</c> column under a <c>long</c> id member is the case this exists for.
+        /// </summary>
+        private static bool TryCoerce(Type wanted, object columnValue, out object result)
+        {
+            var target = Nullable.GetUnderlyingType(wanted) ?? wanted;
+
+            if (target.IsInstanceOfType(columnValue))
+            {
+                result = columnValue;
+                return true;
+            }
+
+            if (columnValue is IConvertible && (target == typeof(int) || target == typeof(long) || target == typeof(string)))
+            {
+                try
+                {
+                    result = Convert.ChangeType(columnValue, target, CultureInfo.InvariantCulture);
+                    return true;
+                }
+                catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException)
+                {
+                    result = null!;
+                    return false;
+                }
+            }
+
+            result = null!;
+            return false;
+        }
+
+        private static Wrapper? FindWrapper(Type idType)
+        {
+            // Marten only recognises a struct here; a class id is an F# union and has its own generator.
+            if (!idType.IsValueType || idType.IsPrimitive || idType.IsEnum)
+            {
+                return null;
+            }
+
+            var candidates = idType
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(static x => Array.IndexOf(InnerIdTypes, x.PropertyType) >= 0)
+                .ToArray();
+
+            if (candidates.Length != 1)
+            {
+                return null;
+            }
+
+            var inner = candidates[0].PropertyType;
+
+            var constructor = idType.GetConstructors()
+                .FirstOrDefault(x => x.GetParameters() is [{ } parameter] && parameter.ParameterType == inner);
+
+            if (constructor is not null)
+            {
+                return new Wrapper(inner, Compile(inner, value => Expression.New(constructor, value)));
+            }
+
+            var factory = idType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(x => x.ReturnType == idType &&
+                    x.GetParameters() is [{ } parameter] &&
+                    parameter.ParameterType == inner);
+
+            return factory is null
+                ? null
+                : new Wrapper(inner, Compile(inner, value => Expression.Call(factory, value)));
+        }
+
+        private static Func<object, object> Compile(Type innerType, Func<Expression, Expression> build)
+        {
+            var parameter = Expression.Parameter(typeof(object), "value");
+            var body = build(Expression.Convert(parameter, innerType));
+
+            return Expression.Lambda<Func<object, object>>(Expression.Convert(body, typeof(object)), parameter).Compile();
+        }
+    }
+
+    /// <summary>
+    /// Marten's generic write calls, reachable from a runtime <see cref="Type" />.
     /// </summary>
     /// <remarks>
     /// One compiled delegate per document type, built once and cached. A compiled expression rather than
@@ -1253,12 +2055,81 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     {
         private static readonly ConcurrentDictionary<Type, Action<IDocumentSession, object, Guid>> ExpectedVersionCalls = new();
         private static readonly ConcurrentDictionary<Type, Action<IDocumentSession, object, long>> RevisionCalls = new();
+        private static readonly ConcurrentDictionary<Type, Action<IDocumentSession, object>> DeleteCalls = new();
+        private static readonly ConcurrentDictionary<Type, Action<IDocumentSession, LambdaExpression>> UndoDeleteCalls = new();
 
         public static void UpdateExpectedVersion(IDocumentSession session, Type documentType, object document, Guid version) =>
             ExpectedVersionCalls.GetOrAdd(documentType, BuildExpectedVersionCall)(session, document, version);
 
         public static void UpdateRevision(IDocumentSession session, Type documentType, object document, long revision) =>
             RevisionCalls.GetOrAdd(documentType, BuildRevisionCall)(session, document, revision);
+
+        /// <summary>
+        /// <c>Delete&lt;T&gt;(object id)</c>: Marten's own untyped-id entry point, which resolves the
+        /// storage from the runtime type of the id it is handed — so a strong-typed id works by being
+        /// passed as itself, and the document never has to be read.
+        /// </summary>
+        public static void DeleteById(IDocumentSession session, Type documentType, object id) =>
+            DeleteCalls.GetOrAdd(documentType, BuildDeleteCall)(session, id);
+
+        /// <summary>
+        /// Queues <c>UndoDeleteWhere&lt;T&gt;(x =&gt; x.Id == id)</c>, which is an
+        /// <c>update … set mt_deleted = false, mt_deleted_at = null where …</c> and never touches
+        /// <c>data</c>.
+        /// </summary>
+        /// <remarks>
+        /// Returns <see langword="false" /> rather than throwing when the predicate cannot be built or
+        /// Marten's LINQ parser will not take it — a type whose id member has no <c>==</c> at all, for
+        /// instance. The caller then falls back to the round-trip undelete, which is lossy and says so.
+        /// Marten parses the expression inside <c>UndoDeleteWhere</c> itself, so a parser refusal shows
+        /// up here and not at <c>SaveChangesAsync</c>.
+        /// </remarks>
+        public static bool TryQueueUndoDelete(
+            IDocumentSession session,
+            Type documentType,
+            MemberInfo? idMember,
+            object id)
+        {
+            if (idMember is null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var parameter = Expression.Parameter(documentType, "x");
+                var member = Expression.MakeMemberAccess(parameter, idMember);
+
+                // The id travels as a field on a constant holder rather than as a ConstantExpression of
+                // its own: that is exactly the shape the C# compiler gives `x => x.Id == local`, and it is
+                // the shape Marten's where-clause parser is written against.
+                var holderType = typeof(IdHolder<>).MakeGenericType(member.Type);
+                var holder = Activator.CreateInstance(holderType, id);
+                var value = Expression.Field(
+                    Expression.Constant(holder, holderType),
+                    holderType.GetField(nameof(IdHolder<object>.Value))!);
+
+                var predicate = Expression.Lambda(
+                    typeof(Func<,>).MakeGenericType(documentType, typeof(bool)),
+                    Expression.Equal(member, value),
+                    parameter);
+
+                UndoDeleteCalls.GetOrAdd(documentType, BuildUndoDeleteCall)(session, predicate);
+                return true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>The closure a built id predicate captures its value in.</summary>
+        /// <typeparam name="T">The id member's own type.</typeparam>
+        private sealed class IdHolder<T>(T value)
+        {
+            /// <summary>The id, as the member's type.</summary>
+            public readonly T Value = value;
+        }
 
         private static Action<IDocumentSession, object, Guid> BuildExpectedVersionCall(Type documentType) =>
             Build<Guid>(nameof(IDocumentOperations.UpdateExpectedVersion), documentType);
@@ -1279,6 +2150,43 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             var call = Expression.Call(session, method, Expression.Convert(document, documentType), value);
 
             return Expression.Lambda<Action<IDocumentSession, object, TValue>>(call, session, document, value).Compile();
+        }
+
+        private static Action<IDocumentSession, object> BuildDeleteCall(Type documentType)
+        {
+            // Delete<T>(object id), not Delete<T>(T entity): the one whose single parameter really is
+            // System.Object rather than the method's own type parameter.
+            var method = typeof(IDocumentOperations)
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .Single(x => x.Name == nameof(IDocumentOperations.Delete) &&
+                    x.IsGenericMethodDefinition &&
+                    x.GetParameters() is [{ } parameter] &&
+                    parameter.ParameterType == typeof(object))
+                .MakeGenericMethod(documentType);
+
+            var session = Expression.Parameter(typeof(IDocumentSession), "session");
+            var id = Expression.Parameter(typeof(object), "id");
+
+            return Expression.Lambda<Action<IDocumentSession, object>>(
+                Expression.Call(session, method, id), session, id).Compile();
+        }
+
+        private static Action<IDocumentSession, LambdaExpression> BuildUndoDeleteCall(Type documentType)
+        {
+            var method = typeof(IDocumentOperations)
+                .GetMethod(nameof(IDocumentOperations.UndoDeleteWhere), BindingFlags.Public | BindingFlags.Instance)!
+                .MakeGenericMethod(documentType);
+
+            var session = Expression.Parameter(typeof(IDocumentSession), "session");
+            var predicate = Expression.Parameter(typeof(LambdaExpression), "predicate");
+
+            var expressionType = typeof(Expression<>).MakeGenericType(
+                typeof(Func<,>).MakeGenericType(documentType, typeof(bool)));
+
+            return Expression.Lambda<Action<IDocumentSession, LambdaExpression>>(
+                Expression.Call(session, method, Expression.Convert(predicate, expressionType)),
+                session,
+                predicate).Compile();
         }
     }
 }

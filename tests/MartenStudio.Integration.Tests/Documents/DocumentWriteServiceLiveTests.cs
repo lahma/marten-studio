@@ -1,9 +1,15 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
 
+using Marten;
+
+using MartenStudio.Internal.Sql;
+using MartenStudio.SampleDomain.Documents;
 using MartenStudio.Services;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Json;
+
+using Npgsql;
 
 namespace MartenStudio.Integration.Tests.Documents;
 
@@ -599,6 +605,325 @@ public class DocumentWriteServiceLiveTests(PostgresFixture postgres) : DocumentW
         save.Status.Should().Be(WriteStatus.Refused);
         (await VersionAsync(CustomerTable, id)).Should().Be(versionBefore);
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // The row lock, and the two ways a version column can stop a save from being decidable.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The proof that the <c>for update</c> is load-bearing, without touching production code.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Two_saves_racing_on_one_document_produce_one_save_and_one_conflict</c> above shows what the
+    /// write service does; it cannot show that the lock is <em>why</em>, because a passing test proves
+    /// nothing about the counterfactual. This one runs the same algorithm — read the version, compare it
+    /// with what the editor was opened on, write — with <see cref="DocumentRowLock.None" /> instead, out
+    /// of the studio's own builder, and shows the lost update that read committed allows: both readers
+    /// see the same version, both conclude they are safe, and one of the two edits disappears with
+    /// nobody told.
+    /// </para>
+    /// <para>
+    /// Deterministic rather than racy: both reads happen before either write, which is precisely the
+    /// interleaving the lock makes impossible.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task Without_the_row_lock_two_saves_lose_one_of_the_edits()
+    {
+        var id = await CustomerIdAsync("customer01@example.com");
+        var table = CustomerTableInfo();
+        var before = (await VersionAsync(CustomerTable, id))!.Value;
+
+        await using var first = Store.LightweightSession();
+        await using var second = Store.LightweightSession();
+
+        await first.BeginTransactionAsync(Token);
+        await second.BeginTransactionAsync(Token);
+
+        // Step one of the save, twice, with no lock: this is the only line that differs from what the
+        // write service does.
+        var firstSeen = await ReadVersionAsync(first, table, id);
+        var secondSeen = await ReadVersionAsync(second, table, id);
+
+        firstSeen.Should().Be(before);
+        secondSeen.Should().Be(before, "neither reader locked anything, so both still see the version the other is about to replace");
+
+        // Step two: both compare what they read with what their editor was opened on. Both pass.
+        firstSeen.Should().Be(before);
+        secondSeen.Should().Be(before);
+
+        var mine = await first.LoadAsync<Customer>(id, Token);
+        mine!.Name = "First";
+        first.Store(mine);
+        await first.SaveChangesAsync(Token);
+
+        var theirs = await second.LoadAsync<Customer>(id, Token);
+        theirs!.Name = "Second";
+        second.Store(theirs);
+        await second.SaveChangesAsync(Token);
+
+        var after = JsonNode.Parse((await StoredJsonAsync(CustomerTable, id))!)!;
+
+        after["Name"]!.GetValue<string>().Should().Be(
+            "Second",
+            "without the row lock the second writer's guard passed against a version the first writer had " +
+            "already replaced - a lost update, which is exactly what `for update` prevents");
+
+        (await VersionAsync(CustomerTable, id)).Should().NotBe(before);
+    }
+
+    /// <summary>
+    /// A row somebody else is holding produces an answer, not a page that never finishes loading.
+    /// </summary>
+    /// <remarks>
+    /// The competing transaction is a plain connection holding <c>for update</c> on the row, which is
+    /// what a forgotten <c>begin;</c> in a psql window looks like from the studio's side. Without
+    /// <c>SET LOCAL lock_timeout</c> the save would wait for as long as that transaction lives.
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_row_another_session_is_holding_is_refused_rather_than_waited_on()
+    {
+        // Halved and capped, so the lock gives up after a second and the command timeout never races it.
+        StudioOptions.QueryTimeout = TimeSpan.FromSeconds(2);
+
+        try
+        {
+            var service = CreateService();
+            var id = await CustomerIdAsync("customer02@example.com");
+            var stored = await StoredJsonAsync(CustomerTable, id);
+            var versionBefore = (await VersionAsync(CustomerTable, id))!.Value;
+
+            await using var competitor = await Postgres.OpenAsync(Token);
+            await using var transaction = await competitor.BeginTransactionAsync(Token);
+
+            await using (var hold = new NpgsqlCommand(
+                             $"select id from \"{Schema}\".{CustomerTable} where id = '{id}' for update",
+                             competitor,
+                             transaction))
+            {
+                await hold.ExecuteScalarAsync(Token);
+            }
+
+            var result = await service.SaveAsync(
+                ScopeFor(),
+                CustomerAlias,
+                id.ToString(),
+                WithProperty(stored!, "Name", "Blocked"),
+                DocumentConcurrencyToken.ForVersion(versionBefore),
+                acknowledgeDrops: false,
+                Token);
+
+            result.Status.Should().Be(WriteStatus.Refused);
+            result.Reason.Should().Contain("another session");
+
+            await transaction.RollbackAsync(Token);
+
+            (await VersionAsync(CustomerTable, id)).Should().Be(versionBefore, "nothing was written");
+            JsonNode.Parse((await StoredJsonAsync(CustomerTable, id))!)!["Name"]!.GetValue<string>()
+                .Should().NotBe("Blocked");
+        }
+        finally
+        {
+            StudioOptions.QueryTimeout = TimeSpan.FromSeconds(30);
+        }
+    }
+
+    /// <summary>
+    /// A version column that is there and empty is a refusal with its own reason — never a conflict,
+    /// which would be a loop: reload, get the same nothing, save, be told it conflicts again.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_row_whose_version_column_is_null_is_refused_with_its_own_reason()
+    {
+        var service = CreateService();
+        var id = await NewCustomerAsync("nullversion@example.com");
+
+        // Marten's own schema has mt_version NOT NULL, which is exactly why this state only ever arrives
+        // from somebody's hand-written migration - and why the studio has to have an answer for it.
+        await ExecuteAsync($"alter table \"{Schema}\".{CustomerTable} alter column mt_version drop not null");
+        await ExecuteAsync($"update \"{Schema}\".{CustomerTable} set mt_version = null where id = '{id}'");
+
+        var stored = await StoredJsonAsync(CustomerTable, id);
+        var edited = WithProperty(stored!, "Name", "Unversionable");
+
+        var preview = await service.PreviewAsync(ScopeFor(), CustomerAlias, id.ToString(), edited, Token);
+
+        preview.Status.Should().Be(WritePreviewStatus.Ready, "the document can still be read and shown");
+        preview.CurrentToken.IsKnown.Should().BeFalse();
+        preview.Reason.Should().Contain("empty", "the dialog has to say the save will be refused before the click");
+
+        var result = await service.SaveAsync(
+            ScopeFor(),
+            CustomerAlias,
+            id.ToString(),
+            edited,
+            DocumentConcurrencyToken.ForVersion(Guid.NewGuid()),
+            acknowledgeDrops: true,
+            Token);
+
+        result.Status.Should().Be(WriteStatus.Refused);
+        result.Status.Should().NotBe(WriteStatus.Conflict);
+        result.Reason.Should().Contain("version column is empty");
+
+        (await StoredJsonAsync(CustomerTable, id)).Should().Be(stored, "nothing was written");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Delete by id: no deserialization, and one read for a whole selection.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A row whose JSON no CLR type can read is still a row somebody has to be able to get rid of —
+    /// which is only true if the delete never materialises the document.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_row_that_cannot_be_deserialized_can_still_be_deleted()
+    {
+        var service = CreateService();
+        var id = Guid.NewGuid();
+
+        await InsertUnreadableCustomerAsync(id, "unreadable@example.com");
+
+        // It really is unreadable: the preview, which does need the document, says so.
+        var preview = await service.PreviewAsync(
+            ScopeFor(), CustomerAlias, id.ToString(), (await StoredJsonAsync(CustomerTable, id))!, Token);
+
+        preview.Status.Should().Be(WritePreviewStatus.Refused);
+        preview.TypeIsConstructible.Should().BeFalse();
+
+        var result = await service.DeleteAsync(ScopeFor(), CustomerAlias, id.ToString(), Token);
+
+        result.Outcome.Should().Be(DeleteOutcome.HardDeleted);
+        (await RowExistsAsync(CustomerTable, id)).Should().BeFalse();
+    }
+
+    /// <summary>A selection may name the same document twice; it gets two answers and one delete.</summary>
+    [PostgresFact]
+    public async Task A_bulk_delete_answers_every_id_even_when_one_is_repeated()
+    {
+        var service = CreateService();
+        var id = await NewCustomerAsync("bulk-one@example.com");
+        var other = await NewCustomerAsync("bulk-two@example.com");
+
+        var result = await service.BulkDeleteAsync(
+            ScopeFor(), CustomerAlias, [id.ToString(), other.ToString(), id.ToString()], Token);
+
+        result.Accepted.Should().BeTrue();
+        result.Results.Should().HaveCount(3);
+        result.Results.Should().OnlyContain(x => x.Outcome == DeleteOutcome.HardDeleted);
+
+        (await RowExistsAsync(CustomerTable, id)).Should().BeFalse();
+        (await RowExistsAsync(CustomerTable, other)).Should().BeFalse();
+    }
+
+    /// <summary>An id that cannot be what the column is refuses only itself; the rest of the batch runs.</summary>
+    [PostgresFact]
+    public async Task A_bulk_delete_refuses_the_unusable_id_and_deletes_the_rest()
+    {
+        var service = CreateService();
+        var id = await NewCustomerAsync("bulk-three@example.com");
+
+        var result = await service.BulkDeleteAsync(
+            ScopeFor(), CustomerAlias, ["not-a-guid", id.ToString()], Token);
+
+        result.Accepted.Should().BeTrue();
+        result.Results[0].Outcome.Should().Be(DeleteOutcome.Refused);
+        result.Results[0].Reason.Should().Contain("uuid");
+        result.Results[1].Outcome.Should().Be(DeleteOutcome.HardDeleted);
+
+        (await RowExistsAsync(CustomerTable, id)).Should().BeFalse();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Undelete without a body rewrite.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// B2: bringing an order back changes <c>mt_deleted</c> and <c>mt_deleted_at</c> and nothing else —
+    /// the JSON is the same bytes afterwards, unknown properties included.
+    /// </summary>
+    /// <remarks>
+    /// The order's id is a strong-typed <c>OrderId</c>, which is the identity shape the
+    /// <c>x =&gt; x.Id == id</c> expression has to be built for; an undelete that fell back to
+    /// deserializing and storing would drop <c>legacyFlag</c> on the way and the assertion below is what
+    /// would catch it.
+    /// </remarks>
+    [PostgresFact]
+    public async Task Undeleting_an_order_keeps_its_unknown_properties_byte_for_byte()
+    {
+        var service = CreateService();
+        var id = await OrderIdAsync("ORD-2026-0009");
+
+        await ExecuteAsync(
+            $"update \"{Schema}\".{OrderTable} set data = jsonb_set(data, '{{legacyFlag}}', 'true') where id = '{id}'");
+
+        var deleted = await service.DeleteAsync(ScopeFor(), OrderAlias, id.ToString(), Token);
+        deleted.Outcome.Should().Be(DeleteOutcome.SoftDeleted);
+
+        var before = await StoredJsonAsync(OrderTable, id);
+        var versionBefore = await VersionAsync(OrderTable, id);
+        before.Should().Contain("legacyFlag");
+
+        var undeleted = await service.UndeleteAsync(ScopeFor(), OrderAlias, id.ToString(), Token);
+
+        undeleted.Outcome.Should().Be(DeleteOutcome.Undeleted);
+        (await IsDeletedAsync(OrderTable, id)).Should().BeFalse();
+        (await ScalarAsync($"select mt_deleted_at from \"{Schema}\".{OrderTable} where id = '{id}'"))
+            .Should().BeNull();
+
+        (await StoredJsonAsync(OrderTable, id)).Should().Be(
+            before, "the undelete is an update of two columns and must not touch `data`");
+        (await VersionAsync(OrderTable, id)).Should().Be(
+            versionBefore, "nor mt_version: nobody changed the document");
+    }
+
+    /// <summary>
+    /// A customer of this test's own, so a delete cannot trip over the demo orders' foreign key and two
+    /// tests can never disagree about whose row they were using.
+    /// </summary>
+    private async Task<Guid> NewCustomerAsync(string email)
+    {
+        var customer = new Customer { Id = Guid.NewGuid(), Name = "Ad hoc", Email = email };
+
+        await using var session = Store.LightweightSession();
+        session.Store(customer);
+        await session.SaveChangesAsync(Token);
+
+        return customer.Id;
+    }
+
+    private DocumentTableInfo CustomerTableInfo() =>
+        DocumentTableInfo.FromDocumentType(Store.Options.FindOrResolveDocumentType(typeof(Customer)));
+
+    /// <summary>
+    /// The write service's version read, run through the studio's own builder with the lock left off.
+    /// </summary>
+    private static async Task<Guid> ReadVersionAsync(IDocumentSession session, DocumentTableInfo table, Guid id)
+    {
+        DocumentQueryBuilder.TryBuildSingle(table, id.ToString(), null, DocumentRowLock.None, out var command, out _)
+            .Should().BeTrue();
+
+        await using (command)
+        {
+            await using var reader = await session.ExecuteReaderAsync(command!, Token);
+            (await reader.ReadAsync(Token)).Should().BeTrue();
+
+            return reader.GetGuid(reader.GetOrdinal("mt_version"));
+        }
+    }
+
+    /// <summary>Puts a row into the customer table whose JSON no <c>Customer</c> can be built from.</summary>
+    private Task InsertUnreadableCustomerAsync(Guid id, string email) =>
+        ExecuteAsync(
+            $$"""
+              insert into "{{Schema}}".{{CustomerTable}} (id, data, email, mt_dotnet_type)
+              values (
+                  '{{id}}'::uuid,
+                  '{"Id":"{{id}}","Name":"Broken","Email":"{{email}}","Tags":"not-an-array"}'::jsonb,
+                  '{{email}}',
+                  'MartenStudio.SampleDomain.Documents.Customer')
+              """);
 
     private static string WithProperty(string json, string name, JsonNode? value)
     {

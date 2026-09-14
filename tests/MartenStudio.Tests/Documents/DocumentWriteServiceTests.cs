@@ -1,3 +1,6 @@
+using System.Linq.Expressions;
+using System.Text.Json;
+
 using Marten;
 using Marten.Services;
 
@@ -11,6 +14,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+
+using Npgsql;
+
+using NpgsqlTypes;
 
 namespace MartenStudio.Tests.Documents;
 
@@ -447,6 +454,240 @@ public class DocumentWriteServiceTests
         DocumentConcurrencyToken.FromColumnValue("something").Should().Be(DocumentConcurrencyToken.None);
         DocumentConcurrencyToken.FromColumnValue(7).Should().Be(DocumentConcurrencyToken.ForRevision(7));
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // What reaches a log line. Every string in a write message came from a URL or from a document.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A property name with a newline in it would end the log line and start one that looks like a
+    /// second event — the cheapest way there is to make an audit trail lie.
+    /// </summary>
+    [Fact]
+    public void A_dropped_property_whose_name_contains_a_newline_cannot_break_the_log_line()
+    {
+        var edited =
+            """
+            {"Id":"11111111-1111-1111-1111-111111111111","Name":"Ada","Address":{"City":"Helsinki"},"a\nb":1}
+            """;
+
+        var result = Preview(edited);
+
+        result.Preview.HasDrops.Should().BeTrue();
+        result.Preview.DroppedPaths.Should().ContainSingle()
+            .Which.Should().Contain("\n", "the path itself keeps the name the document really has");
+
+        var summary = result.Preview.DroppedPathsSummary();
+
+        summary.Should().NotContain("\n").And.NotContain("\r");
+        summary.Should().Contain("a b", "the newline is folded to a space rather than dropped silently");
+
+        result.Preview.Summary().Should().NotContain("\n").And.NotContain("\r");
+    }
+
+    /// <summary>
+    /// A serializer's own message can be any length and can quote a fragment of somebody's document, so
+    /// it stays on the screen. The audit gets the exception type and the JSON path instead.
+    /// </summary>
+    [Fact]
+    public void A_deserializer_failure_keeps_its_message_on_screen_and_out_of_the_audit()
+    {
+        var result = Preview("[]");
+
+        result.Preview.Status.Should().Be(WritePreviewStatus.Refused);
+        result.Preview.TypeIsConstructible.Should().BeFalse();
+
+        var reason = result.Preview.Reason.Should().NotBeNull().And.Subject!;
+        var audit = result.Preview.AuditReason.Should().NotBeNull().And.Subject!;
+
+        audit.Should().Contain(nameof(WriteTestCustomer), "the audit still says which type could not be built")
+            .And.Contain(nameof(JsonException), "and what went wrong, by type");
+
+        // Everything after the last colon is the serializer's own words about the document. They are what
+        // a person fixing the edit needs, and they are exactly what must not reach a log file.
+        var serializerWords = reason[(reason.LastIndexOf(": ", StringComparison.Ordinal) + 2)..];
+
+        serializerWords.Should().NotBeEmpty();
+        audit.Should().NotContain(serializerWords);
+        result.Preview.Summary().Should().Be(audit);
+
+        WriteResult.Refused(reason, result.Preview).AuditMessage().Should()
+            .NotContain(serializerWords, "the refusal the save returns carries the same split");
+    }
+
+    [Theory]
+    [InlineData("a\nb", "a b")]
+    [InlineData("a\r\nb", "a b")]
+    [InlineData("a\tb", "a b")]
+    [InlineData("plain", "plain")]
+    [InlineData("", "")]
+    [InlineData("  ", "")]
+    public void Sanitize_folds_every_control_character_into_one_space(string value, string expected) =>
+        WriteAuditText.Sanitize(value).Should().Be(expected);
+
+    [Fact]
+    public void Sanitize_folds_the_invisible_characters_a_log_reader_cannot_see()
+    {
+        // U+2028 LINE SEPARATOR, U+200E LEFT-TO-RIGHT MARK, U+202E RIGHT-TO-LEFT OVERRIDE: one ends the
+        // line for several log shippers and the other two change how the rest of it reads.
+        WriteAuditText.Sanitize("a" + (char) 0x2028 + "b").Should().Be("a b");
+        WriteAuditText.Sanitize("a" + (char) 0x200E + "b").Should().Be("a b");
+        WriteAuditText.Sanitize("a" + (char) 0x202E + "b").Should().Be("a b");
+    }
+
+    [Fact]
+    public void Sanitize_caps_the_line_and_says_that_it_did()
+    {
+        var sanitized = WriteAuditText.Sanitize(new string('x', 5_000));
+
+        sanitized.Should().HaveLength(WriteAuditText.MaxLength + 1);
+        sanitized.Should().EndWith("…");
+    }
+
+    /// <summary>A cut must never land between the halves of a surrogate pair.</summary>
+    [Fact]
+    public void Sanitize_never_cuts_a_character_in_half()
+    {
+        var sanitized = WriteAuditText.Sanitize(string.Concat(Enumerable.Repeat("🙂", 40)), 11);
+
+        sanitized.Should().NotBeEmpty();
+        char.IsHighSurrogate(sanitized[^2]).Should().BeFalse("the last kept character is a whole one");
+        sanitized.EnumerateRunes().Should().NotContain(static rune => rune.Value == 0xFFFD);
+    }
+
+    /// <summary>
+    /// The audit's target is built from the alias and the id, both of which arrive from a URL.
+    /// </summary>
+    [Fact]
+    public async Task An_id_with_a_newline_in_it_cannot_write_a_second_audit_line()
+    {
+        using var harness = CreateHarness();
+
+        await harness.Service.PreviewAsync(Scope, "no-such-collection", "42\nDELETED everything", "{}", Token);
+
+        var entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
+
+        entry.Target.Should().Be("no-such-collection/42 DELETED everything");
+        entry.Message.Should().NotContain("\n");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The Marten calls the write path makes, pinned here because they are this file's subject.
+    // MartenApiSurfaceTest owns the rest of the contract.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The four generic writes the studio reaches through a compiled expression, and the one overload
+    /// resolution that is genuinely ambiguous to a reflection lookup.
+    /// </summary>
+    /// <remarks>
+    /// <c>Delete&lt;T&gt;(object id)</c> and <c>Delete&lt;T&gt;(T entity)</c> are both one-argument
+    /// generic methods called <c>Delete</c>; only the first has a parameter whose type really is
+    /// <see cref="object" />, and picking the wrong one would delete nothing and throw an invalid cast at
+    /// the first id. <c>UndoDeleteWhere&lt;T&gt;</c> is what makes an undelete a two-column update
+    /// instead of a full rewrite of the document.
+    /// </remarks>
+    [Fact]
+    public void IDocumentOperations_has_the_generic_writes_the_studio_compiles_against()
+    {
+        var operations = typeof(IDocumentOperations);
+
+        var deletes = operations.GetMethods()
+            .Where(static x => x.Name == nameof(IDocumentOperations.Delete) && x.IsGenericMethodDefinition)
+            .ToArray();
+
+        deletes.Should().Contain(static x => x.GetParameters().Length == 1 &&
+            x.GetParameters()[0].ParameterType == typeof(object));
+        deletes.Count(static x => x.GetParameters().Length == 1 &&
+            x.GetParameters()[0].ParameterType == typeof(object)).Should().Be(1);
+
+        var undoDelete = operations.GetMethod(nameof(IDocumentOperations.UndoDeleteWhere));
+        undoDelete.Should().NotBeNull();
+        undoDelete!.IsGenericMethodDefinition.Should().BeTrue();
+        undoDelete.GetParameters().Should().ContainSingle().Which.ParameterType.GetGenericTypeDefinition()
+            .Should().Be(typeof(Expression<>));
+
+        operations.GetMethod(nameof(IDocumentOperations.UpdateExpectedVersion)).Should().NotBeNull();
+        operations.GetMethod(nameof(IDocumentOperations.UpdateRevision)).Should().NotBeNull();
+        typeof(IQuerySession).GetProperty(nameof(IQuerySession.Connection))!.PropertyType
+            .Should().Be<NpgsqlConnection>();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The two statements the bulk delete and the row lock rest on.
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_many_read_is_one_statement_with_one_typed_array_parameter()
+    {
+        var table = CustomerTable();
+        var ids = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
+
+        DocumentQueryBuilder.TryBuildMany(table, ids, null, out var command, out var errors).Should().BeTrue();
+
+        using (command)
+        {
+            errors.Should().OnlyContain(static x => x == null);
+
+            command!.CommandText.Should().Contain("= any(@ids)");
+            command.CommandText.Should().NotContain("\"data\"", "a bulk delete does not need the documents");
+
+            var parameter = command.Parameters.Should().ContainSingle().Which;
+            parameter.ParameterName.Should().Be("ids");
+            parameter.NpgsqlDbType.Should().Be(NpgsqlDbType.Array | NpgsqlDbType.Uuid);
+            parameter.Value.Should().BeOfType<Guid[]>().Which.Should().HaveCount(2);
+        }
+    }
+
+    [Fact]
+    public void The_many_read_reports_the_ids_it_could_not_use_and_still_reads_the_rest()
+    {
+        var table = CustomerTable();
+        var good = Guid.NewGuid().ToString();
+
+        DocumentQueryBuilder.TryBuildMany(table, ["not-a-guid", good], null, out var command, out var errors)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            errors[0].Should().Contain("uuid");
+            errors[1].Should().BeNull();
+            command!.Parameters["ids"].Value.Should().BeOfType<Guid[]>().Which.Should().ContainSingle();
+        }
+    }
+
+    [Fact]
+    public void The_many_read_is_not_built_at_all_when_no_id_is_usable()
+    {
+        DocumentQueryBuilder.TryBuildMany(CustomerTable(), ["nope", "also-nope"], null, out var command, out var errors)
+            .Should().BeFalse();
+
+        command.Should().BeNull();
+        errors.Should().HaveCount(2).And.OnlyContain(static x => x != null);
+    }
+
+    /// <summary>
+    /// The lock timeout is a parameter and not a literal, which is the whole rule this file's SQL lives
+    /// by (AGENTS.md hard rule 4) — <c>SET LOCAL</c> cannot take one, which is why it is
+    /// <c>set_config(…, true)</c> instead.
+    /// </summary>
+    [Fact]
+    public void The_lock_timeout_is_transaction_local_and_parameterised()
+    {
+        using var command = DocumentQueryBuilder.BuildLockTimeout(TimeSpan.FromSeconds(2.5));
+
+        command.CommandText.Should().Be("select set_config('lock_timeout', @lockTimeout, true)");
+        command.Parameters.Should().ContainSingle().Which.Value.Should().Be("2500");
+    }
+
+    private static DocumentTableInfo CustomerTable() => new()
+    {
+        Schema = "public",
+        Table = "mt_doc_customer",
+        Alias = "customer",
+        IdColumnType = DocumentIdColumnType.Uuid,
+    };
+
 }
 
 /// <summary>A document with one nested value object, which is all the round-trip tests need.</summary>

@@ -138,6 +138,29 @@ public abstract class DocumentWriteFixture(PostgresFixture postgres) : IAsyncLif
             Users);
     }
 
+    /// <summary>
+    /// Extra configuration this test class needs on top of the demo domain: its own document types, its
+    /// own serializer settings.
+    /// </summary>
+    /// <remarks>
+    /// The shapes the write path has to get right — a subclass hierarchy, a numeric-revision type, a
+    /// string id with a slash in it, a store whose serializer is not Marten's default — do not exist in
+    /// <c>samples/MartenStudio.SampleDomain</c> and must not be added there: the demo domain is what a
+    /// reader looks at to understand the product, and it is owned by another packet. They live in this
+    /// test project instead, registered here on the same store and in the same schema, which costs
+    /// nothing because a table nobody writes to is a table Marten never creates.
+    /// </remarks>
+    /// <param name="opts">The store being configured.</param>
+    protected virtual void ConfigureExtras(StoreOptions opts)
+    {
+    }
+
+    /// <summary>
+    /// Whether the demo data is seeded. A class that only exercises its own document types turns it off
+    /// and starts a second or two faster.
+    /// </summary>
+    protected virtual bool SeedSampleData => true;
+
     /// <summary>Creates the schema, builds the store and seeds the demo data.</summary>
     public async ValueTask InitializeAsync()
     {
@@ -159,7 +182,10 @@ public abstract class DocumentWriteFixture(PostgresFixture postgres) : IAsyncLif
         provider = services.BuildServiceProvider();
         store = provider.GetRequiredService<IDocumentStore>();
 
-        await new SampleDataSeeder().Populate(store, TestContext.Current.CancellationToken);
+        if (SeedSampleData)
+        {
+            await new SampleDataSeeder().Populate(store, TestContext.Current.CancellationToken);
+        }
     }
 
     /// <summary>Disposes the store. The schema is dropped by the next run that uses this name.</summary>
@@ -186,6 +212,29 @@ public abstract class DocumentWriteFixture(PostgresFixture postgres) : IAsyncLif
         // them is the isolation: one schema per class, dropped and recreated by InitializeAsync.
         opts.DatabaseSchemaName = Schema;
         opts.Events.DatabaseSchemaName = EventSchema;
+
+        ConfigureExtras(opts);
+    }
+
+    /// <summary>Stores one document of a test-local type through Marten itself.</summary>
+    /// <remarks>
+    /// Deliberately not through the studio: these are the <em>arrangements</em>, and an arrangement made
+    /// with the code under test proves nothing.
+    /// </remarks>
+    protected async Task StoreAsync<T>(params T[] documents) where T : notnull
+    {
+        await using var session = Store.LightweightSession();
+        session.Store(documents);
+        await session.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>Runs a statement against this class's schema.</summary>
+    protected async Task ExecuteAsync(string sql)
+    {
+        await using var connection = await Postgres.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = 30 };
+
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
     // -----------------------------------------------------------------------------------------------

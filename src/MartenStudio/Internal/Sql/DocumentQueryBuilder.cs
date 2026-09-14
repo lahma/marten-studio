@@ -226,6 +226,152 @@ internal static class DocumentQueryBuilder
     }
 
     /// <summary>
+    /// Builds the many-document read: one <c>id = any(@ids)</c> statement instead of one statement per id.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>No <c>data</c> column.</b> The only caller is the bulk delete, which needs to know which of the
+    /// requested ids are actually there and — for a hierarchy — what each row's <c>mt_doc_type</c> says;
+    /// it does not need the documents. Selecting five hundred JSON bodies to throw them all away is the
+    /// difference between a bulk delete that is one cheap index scan and one that moves megabytes.
+    /// </para>
+    /// <para>
+    /// <b>The array parameter is typed from <see cref="DocumentTableInfo.IdColumnType"/></b>, so the
+    /// comparison is <c>uuid = any(uuid[])</c> and can use the primary key. The one exception is a column
+    /// the studio could not identify — a domain, a <c>citext</c>, an enum — where there is no array type
+    /// to send: those compare <c>id::text = any(text[])</c>, which is correct but cannot use the index.
+    /// </para>
+    /// <para>
+    /// Ids that do not parse against the column type are not an error for the whole batch:
+    /// <paramref name="idErrors"/> carries one entry per requested id, and the caller reports that id as
+    /// refused while the rest of the batch goes ahead. The method returns <see langword="false"/> only
+    /// when <em>no</em> id parsed, because then there is nothing to read.
+    /// </para>
+    /// </remarks>
+    /// <param name="table">The table to read.</param>
+    /// <param name="rawIds">The ids as they arrived, in the order the caller wants them answered.</param>
+    /// <param name="tenantId">The tenant in scope, when the collection is conjoined.</param>
+    /// <param name="command">The read, when at least one id parsed.</param>
+    /// <param name="idErrors">
+    /// One entry per requested id: <see langword="null"/> when it parsed, the reason when it did not.
+    /// Always the same length as <paramref name="rawIds"/>, whatever the method returns.
+    /// </param>
+    public static bool TryBuildMany(
+        DocumentTableInfo table,
+        IReadOnlyList<string> rawIds,
+        string? tenantId,
+        [NotNullWhen(true)] out NpgsqlCommand? command,
+        out IReadOnlyList<string?> idErrors)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(rawIds);
+
+        var errors = new string?[rawIds.Count];
+        List<object> parsed = [];
+
+        for (var i = 0; i < rawIds.Count; i++)
+        {
+            var result = ParseId(table.IdColumnType, rawIds[i]);
+
+            if (result.Success)
+            {
+                parsed.Add(result.Value!);
+            }
+            else
+            {
+                errors[i] = result.Error ?? "That id cannot be used against this collection.";
+            }
+        }
+
+        idErrors = errors;
+
+        if (parsed.Count == 0)
+        {
+            command = null;
+            return false;
+        }
+
+        var built = new NpgsqlCommand();
+
+        try
+        {
+            var builder = new ParameterBuilder(built);
+            var sql = new StringBuilder();
+
+            sql.Append("select ").Append(IdRef);
+
+            foreach (var metadata in table.MetadataColumns)
+            {
+                sql.Append(",\n       ").Append(Column(metadata.ColumnName));
+            }
+
+            sql.Append('\n');
+            sql.Append("from ").Append(table.QualifiedName).Append(AsAlias).Append('\n');
+            sql.Append("where ").Append(IdRef);
+
+            if (table.IdColumnType == DocumentIdColumnType.Unknown)
+            {
+                sql.Append("::text");
+            }
+
+            sql.Append(" = any(")
+                .Append(builder.Add(IdArrayDbType(table.IdColumnType), IdArray(table.IdColumnType, parsed), "ids"))
+                .Append(")\n");
+
+            AppendTenantFilter(sql, table, tenantId, builder);
+
+            built.CommandText = sql.ToString();
+            command = built;
+            return true;
+        }
+        catch
+        {
+            built.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Builds the statement that caps how long the next statement in this transaction will wait for a row
+    /// lock.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>set_config(…, true)</c> rather than <c>SET LOCAL</c> because the third argument is what makes it
+    /// local to the transaction <em>and</em> because a <c>SET</c> takes a literal, not a parameter — and
+    /// the one rule this file has is that values are parameters (AGENTS.md hard rule 4).
+    /// </para>
+    /// <para>
+    /// Without it a save that meets a row somebody else is holding waits for as long as the other
+    /// transaction lives, which from a browser looks exactly like the studio having hung. With it, the
+    /// wait ends in <c>55P03</c> and the write service can say "somebody else is editing this" — an
+    /// answer instead of a spinner.
+    /// </para>
+    /// </remarks>
+    /// <param name="timeout">How long to wait. Rounded up to whole milliseconds, and at least one.</param>
+    public static NpgsqlCommand BuildLockTimeout(TimeSpan timeout)
+    {
+        var milliseconds = (int) Math.Clamp(Math.Ceiling(timeout.TotalMilliseconds), 1d, int.MaxValue);
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var builder = new ParameterBuilder(command);
+
+            command.CommandText = "select set_config('lock_timeout', " +
+                builder.Add(NpgsqlDbType.Text, milliseconds.ToString(CultureInfo.InvariantCulture), "lockTimeout") +
+                ", true)";
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Parses an id against the type of the column it will be compared with — the column type, not the CLR
     /// <c>IdType</c>, so strong-typed ids, <c>UseIdentityKey</c> and F# unions all work without unwrapping.
     /// </summary>
@@ -647,6 +793,24 @@ internal static class DocumentQueryBuilder
 
         throw new ArgumentException($"'{table.Alias}' has no duplicated column named '{columnName}'.", nameof(columnName));
     }
+
+    /// <summary>The Npgsql type of the <c>any(…)</c> array parameter for a given id column.</summary>
+    private static NpgsqlDbType IdArrayDbType(DocumentIdColumnType columnType) =>
+        NpgsqlDbType.Array | (columnType == DocumentIdColumnType.Unknown
+            ? NpgsqlDbType.Text
+            : DocumentIdColumnTypes.DbType(columnType));
+
+    /// <summary>
+    /// The parsed ids as the CLR array the parameter needs. <see cref="ParseId"/> has already produced the
+    /// right element type for every column type, so this only has to stop them being boxed.
+    /// </summary>
+    private static object IdArray(DocumentIdColumnType columnType, List<object> ids) => columnType switch
+    {
+        DocumentIdColumnType.Uuid => ids.Cast<Guid>().ToArray(),
+        DocumentIdColumnType.Int4 => ids.Cast<int>().ToArray(),
+        DocumentIdColumnType.Int8 => ids.Cast<long>().ToArray(),
+        _ => ids.Cast<string>().ToArray(),
+    };
 
     private static string Column(string name) => Alias + "." + SqlIdentifier.Quote(name);
 

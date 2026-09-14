@@ -51,6 +51,19 @@ internal sealed record WriteResult(
     /// <summary>Whether the document was written.</summary>
     public bool IsSaved => Status == WriteStatus.Saved;
 
+    /// <summary>
+    /// What the audit records instead of <see cref="Reason" />, when the two have to differ.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="WritePreview.AuditReason" />, for the same reason: a serializer's exception message
+    /// belongs on the screen and not in a log line.
+    /// </remarks>
+    public string? AuditReason { get; init; }
+
+    /// <summary>The outcome as one sanitised line, which is what the audit entry carries.</summary>
+    public string AuditMessage() =>
+        WriteAuditText.Sanitize(AuditReason ?? Reason ?? Status.ToString());
+
     /// <summary>The document was written; <paramref name="currentToken" /> is what the row carries now.</summary>
     public static WriteResult Saved(DocumentConcurrencyToken currentToken, WritePreview preview) =>
         new(WriteStatus.Saved, currentToken, null, preview);
@@ -65,8 +78,14 @@ internal sealed record WriteResult(
             preview);
 
     /// <summary>The save was refused before any write.</summary>
-    public static WriteResult Refused(string reason, WritePreview? preview = null) =>
-        new(WriteStatus.Refused, preview?.CurrentToken ?? DocumentConcurrencyToken.None, reason, preview);
+    /// <param name="reason">Why, phrased for whoever is looking at the editor.</param>
+    /// <param name="preview">The preview the refusal was decided from, when there was one.</param>
+    /// <param name="auditReason">What the audit records instead, when it has to differ.</param>
+    public static WriteResult Refused(string reason, WritePreview? preview = null, string? auditReason = null) =>
+        new(WriteStatus.Refused, preview?.CurrentToken ?? DocumentConcurrencyToken.None, reason, preview)
+        {
+            AuditReason = auditReason ?? preview?.AuditReason,
+        };
 }
 
 /// <summary>What a delete, or an undelete, did to one document.</summary>
@@ -93,7 +112,8 @@ internal enum DeleteOutcome
 
 /// <summary>
 /// What <see cref="IDocumentWriteService.DeleteAsync" /> or
-/// <see cref="IDocumentWriteService.UndeleteAsync" /> did to one document.
+/// <see cref="IDocumentWriteService.UndeleteAsync(StudioScope, string, string, CancellationToken)" /> did
+/// to one document.
 /// </summary>
 /// <remarks>
 /// Hard and soft are reported apart rather than folded into "deleted" because they are different
@@ -108,6 +128,9 @@ internal sealed record DeleteResult(DeleteOutcome Outcome, string Alias, string 
 {
     /// <summary>Whether the database actually changed.</summary>
     public bool Changed => Outcome is DeleteOutcome.HardDeleted or DeleteOutcome.SoftDeleted or DeleteOutcome.Undeleted;
+
+    /// <summary>What the audit records instead of <see cref="Reason" />, when the two have to differ.</summary>
+    public string? AuditReason { get; init; }
 
     /// <summary>The row is gone.</summary>
     public static DeleteResult HardDeleted(string alias, string id) => new(DeleteOutcome.HardDeleted, alias, id);
@@ -124,13 +147,23 @@ internal sealed record DeleteResult(DeleteOutcome Outcome, string Alias, string 
         new(DeleteOutcome.NotFound, alias, id, $"No document with id '{id}' is in '{alias}'.");
 
     /// <summary>Nothing was written, and this is why.</summary>
-    public static DeleteResult Refused(string alias, string id, string reason) =>
-        new(DeleteOutcome.Refused, alias, id, reason);
+    /// <param name="alias">The collection.</param>
+    /// <param name="id">The document id, as it was given.</param>
+    /// <param name="reason">Why, phrased for whoever asked.</param>
+    /// <param name="auditReason">What the audit records instead, when it has to differ.</param>
+    public static DeleteResult Refused(string alias, string id, string reason, string? auditReason = null) =>
+        new(DeleteOutcome.Refused, alias, id, reason) { AuditReason = auditReason };
 
-    /// <summary>How the outcome reads in an audit entry.</summary>
-    public string Describe() => Reason is null
-        ? Outcome.ToString()
-        : Outcome + ": " + Reason;
+    /// <summary>
+    /// How the outcome reads in an audit entry.
+    /// </summary>
+    /// <remarks>
+    /// Sanitised: the alias and the id are both interpolated into <see cref="Reason" /> and both arrive
+    /// from a URL (see <see cref="WriteAuditText" />).
+    /// </remarks>
+    public string Describe() => (AuditReason ?? Reason) is { } text
+        ? Outcome + ": " + WriteAuditText.Sanitize(text)
+        : Outcome.ToString();
 }
 
 /// <summary>
@@ -179,7 +212,7 @@ internal sealed record BulkDeleteResult(bool Accepted, string? Reason, Immutable
     {
         if (!Accepted)
         {
-            return Reason ?? "Refused.";
+            return WriteAuditText.Sanitize(Reason ?? "Refused.");
         }
 
         return string.Create(
