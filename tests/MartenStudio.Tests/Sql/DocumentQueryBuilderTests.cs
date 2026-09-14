@@ -1,0 +1,476 @@
+using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Query;
+
+using Npgsql;
+
+using NpgsqlTypes;
+
+namespace MartenStudio.Tests.Sql;
+
+/// <summary>
+/// The document list and single-document reads, asserted as SQL text plus parameters.
+/// </summary>
+/// <remarks>
+/// These tests are the reason the builders take a <see cref="DocumentTableInfo"/> rather than a live
+/// store: the whole of AGENTS.md hard rule 4 — quoted identifiers, parameterised values, never
+/// <c>select *</c> — is checkable without a database, in milliseconds, on every keystroke.
+/// </remarks>
+public class DocumentQueryBuilderTests
+{
+    [Fact]
+    public void The_list_selects_id_capped_json_size_metadata_and_duplicated_columns()
+    {
+        using var command = DocumentQueryBuilder.BuildList(SqlTestTables.FullyFeatured(), new DocumentListQuery());
+
+        command.CommandText.Should().Contain("select d.\"id\",");
+        command.CommandText.Should().Contain(
+            "case when octet_length(d.\"data\"::text) <= @maxInline then d.\"data\"::text end as data");
+        command.CommandText.Should().Contain("octet_length(d.\"data\"::text) as data_bytes");
+        command.CommandText.Should().Contain("d.\"mt_last_modified\"");
+        command.CommandText.Should().Contain("d.\"email\"");
+        command.CommandText.Should().Contain("d.\"address_city\"");
+        command.CommandText.Should().Contain("from \"studio_sql\".\"mt_doc_sqltestcustomer\" as d");
+        command.CommandText.Should().NotContain("select *");
+
+        Parameter(command, "maxInline").Value.Should().Be(DocumentListQuery.DefaultMaxInlineDocumentBytes);
+    }
+
+    [Fact]
+    public void The_list_against_a_table_with_no_metadata_selects_only_id_and_the_json()
+    {
+        using var command = DocumentQueryBuilder.BuildList(SqlTestTables.MetadataLess(), new DocumentListQuery());
+
+        command.CommandText.Should().Be(
+            """
+            select d."id",
+                   case when octet_length(d."data"::text) <= @maxInline then d."data"::text end as data,
+                   octet_length(d."data"::text) as data_bytes
+            from "studio_sql"."mt_doc_sqltestnote" as d
+            where 1 = 1
+            order by d."id"
+            limit @limit offset @offset
+            """.ReplaceLineEndings("\n"),
+            "a store with DisableInformationalFields() has no mt_last_modified to select");
+    }
+
+    [Fact]
+    public void Soft_deleted_documents_are_excluded_by_default_and_the_tri_state_says_otherwise()
+    {
+        var table = SqlTestTables.FullyFeatured();
+
+        using var excluded = DocumentQueryBuilder.BuildList(table, new DocumentListQuery());
+        using var included = DocumentQueryBuilder.BuildList(
+            table, new DocumentListQuery { IncludeDeleted = DeletedFilter.Include });
+        using var only = DocumentQueryBuilder.BuildList(
+            table, new DocumentListQuery { IncludeDeleted = DeletedFilter.Only });
+
+        excluded.CommandText.Should().Contain("and d.\"mt_deleted\" = false");
+        included.CommandText.Should().NotContain("and d.\"mt_deleted\" =");
+        only.CommandText.Should().Contain("and d.\"mt_deleted\" = true");
+    }
+
+    /// <summary>
+    /// The tri-state and <c>is:deleted</c> are two ways of saying the same thing, and a query that emitted
+    /// both would read <c>mt_deleted = false and mt_deleted = true</c> — a page that is always empty and
+    /// never says why. The typed term is the more specific of the two, so it wins.
+    /// </summary>
+    [Fact]
+    public void An_explicit_deleted_term_replaces_the_tri_state_rather_than_contradicting_it()
+    {
+        using var command = DocumentQueryBuilder.BuildList(SqlTestTables.FullyFeatured(), new DocumentListQuery
+        {
+            Predicates = SearchGrammar.Parse("is:deleted").Predicates,
+            IncludeDeleted = DeletedFilter.Exclude,
+        });
+
+        command.CommandText.Should().NotContain("and d.\"mt_deleted\" = false");
+        command.CommandText.Should().Contain("and d.\"mt_deleted\" = @p0");
+        Parameter(command, "p0").Value.Should().Be(true);
+    }
+
+    [Fact]
+    public void A_collection_without_soft_delete_has_no_deleted_filter_at_all()
+    {
+        using var command = DocumentQueryBuilder.BuildList(SqlTestTables.MetadataLess(), new DocumentListQuery());
+
+        command.CommandText.Should().NotContain("mt_deleted");
+    }
+
+    [Fact]
+    public void Asking_for_only_deleted_documents_of_a_collection_that_has_none_is_refused()
+    {
+        var act = () => DocumentQueryBuilder.BuildList(
+            SqlTestTables.MetadataLess(), new DocumentListQuery { IncludeDeleted = DeletedFilter.Only });
+
+        act.Should().Throw<ArgumentException>().WithMessage("*not soft-deleted*");
+    }
+
+    [Fact]
+    public void The_tenant_filter_appears_only_on_a_conjoined_collection()
+    {
+        using var conjoined = DocumentQueryBuilder.BuildList(
+            SqlTestTables.FullyFeatured(), new DocumentListQuery { TenantId = "acme" });
+
+        conjoined.CommandText.Should().Contain("and d.\"tenant_id\" = @tenant");
+        Parameter(conjoined, "tenant").Value.Should().Be("acme");
+
+        // A single-tenant collection is genuinely shared; filtering it by the scope's tenant would hide it.
+        using var single = DocumentQueryBuilder.BuildList(
+            SqlTestTables.MetadataLess(), new DocumentListQuery { TenantId = "acme" });
+
+        single.CommandText.Should().NotContain("tenant_id");
+    }
+
+    [Fact]
+    public void A_json_path_travels_as_a_text_array_parameter_and_never_as_SQL()
+    {
+        var nasty = new[] { "'); drop table mt_doc_customer; --" };
+
+        using var command = DocumentQueryBuilder.BuildList(SqlTestTables.FullyFeatured(), new DocumentListQuery
+        {
+            Columns = [new DocumentColumn.JsonPath(nasty)],
+        });
+
+        command.CommandText.Should().Contain("(d.\"data\" #>> @p0) as json_0");
+        command.CommandText.Should().NotContain("drop table");
+
+        var parameter = Parameter(command, "p0");
+
+        parameter.NpgsqlDbType.Should().Be(NpgsqlDbType.Array | NpgsqlDbType.Text);
+        parameter.Value.Should().BeEquivalentTo(nasty);
+    }
+
+    [Fact]
+    public void A_filter_on_a_duplicated_field_uses_the_column_and_its_own_type()
+    {
+        var predicates = SearchGrammar.Parse("email = bob@example.com orders.count >= 3").Predicates;
+
+        using var command = DocumentQueryBuilder.BuildList(
+            SqlTestTables.FullyFeatured(), new DocumentListQuery { Predicates = predicates });
+
+        command.CommandText.Should().Contain("and d.\"email\" = @p0");
+        Parameter(command, "p0").NpgsqlDbType.Should().Be(NpgsqlDbType.Text);
+    }
+
+    [Fact]
+    public void A_numeric_filter_on_a_duplicated_int_column_binds_an_integer()
+    {
+        var predicates = SearchGrammar.Parse("ordercount >= 3").Predicates;
+
+        using var command = DocumentQueryBuilder.BuildList(
+            SqlTestTables.FullyFeatured(), new DocumentListQuery { Predicates = predicates });
+
+        command.CommandText.Should().Contain("and d.\"order_count\" >= @p0");
+        Parameter(command, "p0").Value.Should().Be(3);
+    }
+
+    [Fact]
+    public void A_literal_the_duplicated_column_cannot_hold_falls_back_to_the_json_path()
+    {
+        // An int4 column and the word "many" do not meet. Comparing through the JSON is wrong-ish but it
+        // returns an empty page; binding "many" to an int4 parameter would be an exception on a page render.
+        var predicates = SearchGrammar.Parse("ordercount > many").Predicates;
+
+        using var command = DocumentQueryBuilder.BuildList(
+            SqlTestTables.FullyFeatured(), new DocumentListQuery { Predicates = predicates });
+
+        command.CommandText.Should().Contain("(d.\"data\" #>> @p0) > @p1");
+        command.CommandText.Should().NotContain("and d.\"order_count\"");
+    }
+
+    [Fact]
+    public void A_filter_that_is_only_in_the_json_is_cast_for_its_literal()
+    {
+        var predicates = SearchGrammar.Parse(
+            "total > 99.5 opened >= 2026-01-01 flagged = true note = hello missing = null").Predicates;
+
+        using var command = DocumentQueryBuilder.BuildList(
+            SqlTestTables.MetadataLess(), new DocumentListQuery { Predicates = predicates });
+
+        command.CommandText.Should().Contain("(d.\"data\" #>> @p0)::numeric > @p1");
+        command.CommandText.Should().Contain("(d.\"data\" #>> @p2)::timestamptz >= @p3");
+        command.CommandText.Should().Contain("(d.\"data\" #>> @p4)::boolean = @p5");
+        command.CommandText.Should().Contain("(d.\"data\" #>> @p6) = @p7");
+        command.CommandText.Should().Contain("(d.\"data\" #>> @p8) is null");
+
+        Parameter(command, "p1").NpgsqlDbType.Should().Be(NpgsqlDbType.Numeric);
+        Parameter(command, "p3").NpgsqlDbType.Should().Be(NpgsqlDbType.TimestampTz);
+        Parameter(command, "p5").NpgsqlDbType.Should().Be(NpgsqlDbType.Boolean);
+    }
+
+    [Fact]
+    public void Containment_free_text_and_contains_match_each_have_their_own_shape()
+    {
+        var predicates = SearchGrammar.Parse("""@> {"status":"open"} address.city ~ helsin urgent""").Predicates;
+
+        using var command = DocumentQueryBuilder.BuildList(
+            SqlTestTables.FullyFeatured(), new DocumentListQuery { Predicates = predicates });
+
+        command.CommandText.Should().Contain("d.\"data\" @> @p0::jsonb");
+        command.CommandText.Should().Contain("d.\"address_city\" ilike @p1");
+        command.CommandText.Should().Contain("d.\"data\"::text ilike @p2");
+
+        Parameter(command, "p0").Value.Should().Be("""{"status":"open"}""");
+        Parameter(command, "p1").Value.Should().Be("%helsin%");
+        Parameter(command, "p2").Value.Should().Be("%urgent%");
+    }
+
+    [Theory]
+    [InlineData("50%", "%50\\%%")]
+    [InlineData("a_b", "%a\\_b%")]
+    [InlineData("back\\slash", "%back\\\\slash%")]
+    public void A_contains_match_escapes_the_LIKE_metacharacters(string text, string expected) =>
+        DocumentQueryBuilder.LikePattern(text).Should().Be(expected);
+
+    [Fact]
+    public void An_id_filter_is_typed_from_the_id_column()
+    {
+        var id = Guid.NewGuid();
+
+        using var command = DocumentQueryBuilder.BuildList(SqlTestTables.FullyFeatured(), new DocumentListQuery
+        {
+            Predicates = SearchGrammar.Parse("id:" + id.ToString("D")).Predicates,
+        });
+
+        command.CommandText.Should().Contain("and d.\"id\" = @p0");
+
+        var parameter = Parameter(command, "p0");
+
+        parameter.NpgsqlDbType.Should().Be(NpgsqlDbType.Uuid);
+        parameter.Value.Should().Be(id);
+    }
+
+    [Fact]
+    public void An_id_filter_that_cannot_be_parsed_is_refused_rather_than_sent()
+    {
+        var act = () => DocumentQueryBuilder.BuildList(SqlTestTables.FullyFeatured(), new DocumentListQuery
+        {
+            Predicates = SearchGrammar.Parse("id:not-a-guid").Predicates,
+        });
+
+        act.Should().Throw<ArgumentException>().WithMessage("*not a GUID*");
+    }
+
+    [Fact]
+    public void Sorting_always_ends_in_the_id_tiebreaker()
+    {
+        var table = SqlTestTables.FullyFeatured();
+
+        using var byMetadata = DocumentQueryBuilder.BuildList(table, new DocumentListQuery
+        {
+            Sort = new DocumentColumn.Metadata(DocumentMetadataColumn.LastModified),
+            Direction = SortDirection.Descending,
+        });
+
+        byMetadata.CommandText.Should().Contain("order by d.\"mt_last_modified\" desc nulls last, d.\"id\"");
+
+        using var byDuplicated = DocumentQueryBuilder.BuildList(
+            table, new DocumentListQuery { Sort = new DocumentColumn.Duplicated("email") });
+
+        byDuplicated.CommandText.Should().Contain("order by d.\"email\" nulls last, d.\"id\"");
+
+        using var byJson = DocumentQueryBuilder.BuildList(
+            table, new DocumentListQuery { Sort = new DocumentColumn.JsonPath(["Address", "City"]) });
+
+        byJson.CommandText.Should().Contain("order by (d.\"data\" #>> @p0) nulls last, d.\"id\"");
+
+        using var byId = DocumentQueryBuilder.BuildList(table, new DocumentListQuery());
+
+        byId.CommandText.Should().Contain("order by d.\"id\"\n", "id is already the total order");
+    }
+
+    [Fact]
+    public void A_sort_key_the_table_has_no_column_for_is_refused()
+    {
+        var bare = SqlTestTables.MetadataLess();
+
+        var byDisabledMetadata = () => DocumentQueryBuilder.BuildList(
+            bare, new DocumentListQuery { Sort = new DocumentColumn.Metadata(DocumentMetadataColumn.LastModified) });
+
+        byDisabledMetadata.Should().Throw<ArgumentException>().WithMessage("*disabled*");
+
+        var byUnknownColumn = () => DocumentQueryBuilder.BuildList(
+            bare, new DocumentListQuery { Sort = new DocumentColumn.Duplicated("whatever") });
+
+        byUnknownColumn.Should().Throw<ArgumentException>().WithMessage("*no duplicated column*");
+    }
+
+    [Fact]
+    public void An_ascending_keyset_page_starts_after_the_cursor_and_keeps_the_nulls_at_the_end()
+    {
+        var lastId = Guid.NewGuid();
+
+        using var command = DocumentQueryBuilder.BuildList(SqlTestTables.FullyFeatured(), new DocumentListQuery
+        {
+            Sort = new DocumentColumn.Metadata(DocumentMetadataColumn.LastModified),
+            Cursor = new DocumentKeysetCursor("2026-01-01T10:00:00Z", lastId.ToString("D")),
+        });
+
+        command.CommandText.Should().Contain(
+            "and (d.\"mt_last_modified\" > @k or d.\"mt_last_modified\" is null or " +
+            "(d.\"mt_last_modified\" = @k and d.\"id\" > @i))");
+        command.CommandText.Should().NotContain("offset", "a keyset page has no offset");
+
+        Parameter(command, "k").NpgsqlDbType.Should().Be(NpgsqlDbType.TimestampTz);
+        Parameter(command, "i").Value.Should().Be(lastId);
+    }
+
+    [Fact]
+    public void A_descending_keyset_page_walks_the_other_way()
+    {
+        using var command = DocumentQueryBuilder.BuildList(SqlTestTables.FullyFeatured(), new DocumentListQuery
+        {
+            Sort = new DocumentColumn.Metadata(DocumentMetadataColumn.LastModified),
+            Direction = SortDirection.Descending,
+            Cursor = new DocumentKeysetCursor("2026-01-01T10:00:00Z", Guid.NewGuid().ToString("D")),
+        });
+
+        command.CommandText.Should().Contain("and (d.\"mt_last_modified\" < @k or");
+    }
+
+    [Fact]
+    public void A_keyset_page_whose_cursor_sort_value_was_null_walks_the_nulls_at_the_end()
+    {
+        using var command = DocumentQueryBuilder.BuildList(SqlTestTables.FullyFeatured(), new DocumentListQuery
+        {
+            Sort = new DocumentColumn.Metadata(DocumentMetadataColumn.LastModified),
+            Cursor = new DocumentKeysetCursor(null, Guid.NewGuid().ToString("D")),
+        });
+
+        command.CommandText.Should().Contain("and (d.\"mt_last_modified\" is null and d.\"id\" > @i)");
+        command.Parameters.Contains("k").Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_keyset_page_on_id_alone_needs_only_the_id()
+    {
+        using var command = DocumentQueryBuilder.BuildList(SqlTestTables.FullyFeatured(), new DocumentListQuery
+        {
+            Cursor = new DocumentKeysetCursor(null, Guid.NewGuid().ToString("D")),
+        });
+
+        command.CommandText.Should().Contain("and d.\"id\" > @i");
+    }
+
+    [Fact]
+    public void An_offset_page_is_capped_at_ten_thousand()
+    {
+        using var allowed = DocumentQueryBuilder.BuildList(
+            SqlTestTables.FullyFeatured(), new DocumentListQuery { Offset = DocumentQueryBuilder.MaxOffset });
+
+        Parameter(allowed, "offset").Value.Should().Be(10_000);
+
+        var tooFar = () => DocumentQueryBuilder.BuildList(
+            SqlTestTables.FullyFeatured(), new DocumentListQuery { Offset = DocumentQueryBuilder.MaxOffset + 1 });
+
+        tooFar.Should().Throw<ArgumentException>().WithMessage("*keyset cursor*");
+
+        var negative = () => DocumentQueryBuilder.BuildList(
+            SqlTestTables.FullyFeatured(), new DocumentListQuery { Offset = -1 });
+
+        negative.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void The_page_size_is_clamped_on_the_server()
+    {
+        using var huge = DocumentQueryBuilder.BuildList(
+            SqlTestTables.FullyFeatured(), new DocumentListQuery { PageSize = 100_000 });
+
+        Parameter(huge, "limit").Value.Should().Be(DocumentListQuery.MaxPageSize);
+
+        using var zero = DocumentQueryBuilder.BuildList(
+            SqlTestTables.FullyFeatured(), new DocumentListQuery { PageSize = 0 });
+
+        Parameter(zero, "limit").Value.Should().Be(1);
+    }
+
+    [Fact]
+    public void The_single_document_read_selects_the_whole_json_and_every_metadata_column()
+    {
+        var id = Guid.NewGuid();
+
+        DocumentQueryBuilder.TryBuildSingle(SqlTestTables.FullyFeatured(), id.ToString("D"), "acme", out var command, out var error)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            error.Should().BeNull();
+            command!.CommandText.Should().Contain("select d.\"data\"::text as data");
+            command.CommandText.Should().Contain("octet_length(d.\"data\"::text) as data_bytes");
+            command.CommandText.Should().Contain("d.\"mt_version\"");
+            command.CommandText.Should().Contain("d.\"email\"", "the detail page compares the duplicated columns with the JSON");
+            command.CommandText.Should().Contain("where d.\"id\" = @id");
+            command.CommandText.Should().Contain("and d.\"tenant_id\" = @tenant");
+            Parameter(command, "id").Value.Should().Be(id);
+        }
+    }
+
+    [Fact]
+    public void The_single_document_read_of_a_bare_table_is_two_columns()
+    {
+        DocumentQueryBuilder.TryBuildSingle(SqlTestTables.MetadataLess(), Guid.NewGuid().ToString("D"), null, out var command, out _)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            command!.CommandText.Trim().Should().Be(
+                """
+                select d."data"::text as data,
+                       octet_length(d."data"::text) as data_bytes
+                from "studio_sql"."mt_doc_sqltestnote" as d
+                where d."id" = @id
+                """.ReplaceLineEndings("\n"));
+        }
+    }
+
+    [Theory]
+    [InlineData("not-a-guid", "*not a GUID*")]
+    [InlineData("", "*id is required*")]
+    [InlineData("   ", "*id is required*")]
+    public void A_malformed_id_comes_back_as_a_message_and_never_as_an_exception(string rawId, string expected)
+    {
+        var built = DocumentQueryBuilder.TryBuildSingle(SqlTestTables.FullyFeatured(), rawId, null, out var command, out var error);
+
+        built.Should().BeFalse();
+        command.Should().BeNull();
+        error.Should().Match(expected);
+    }
+
+    [Fact]
+    public void An_id_is_parsed_against_the_column_type_and_not_the_CLR_type()
+    {
+        DocumentQueryBuilder.ParseId(DocumentIdColumnType.Uuid, "  " + Guid.Empty.ToString("D") + "  ")
+            .Value.Should().Be(Guid.Empty);
+        DocumentQueryBuilder.ParseId(DocumentIdColumnType.Int4, "42").Value.Should().Be(42);
+        DocumentQueryBuilder.ParseId(DocumentIdColumnType.Int8, "9000000000").Value.Should().Be(9_000_000_000L);
+        DocumentQueryBuilder.ParseId(DocumentIdColumnType.Text, "anything").Value.Should().Be("anything");
+        DocumentQueryBuilder.ParseId(DocumentIdColumnType.Varchar, "anything").Value.Should().Be("anything");
+
+        // A strong-typed id the studio could not identify: send the text and let Postgres decide.
+        DocumentQueryBuilder.ParseId(DocumentIdColumnType.Unknown, "ORD-17").Value.Should().Be("ORD-17");
+
+        DocumentQueryBuilder.ParseId(DocumentIdColumnType.Int4, "9000000000").Success.Should().BeFalse();
+        DocumentQueryBuilder.ParseId(DocumentIdColumnType.Int4, "x").Error.Should().Contain("int4");
+        DocumentQueryBuilder.ParseId(DocumentIdColumnType.Int8, "x").Error.Should().Contain("int8");
+    }
+
+    [Fact]
+    public void A_string_keyed_collection_binds_its_id_as_text()
+    {
+        DocumentQueryBuilder.TryBuildSingle(SqlTestTables.StringKeyed(), "ORD-17", null, out var command, out _)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            Parameter(command!, "id").NpgsqlDbType.Should().Be(NpgsqlDbType.Varchar);
+            Parameter(command!, "id").Value.Should().Be("ORD-17");
+        }
+    }
+
+    [Fact]
+    public void An_unidentified_id_column_is_sent_as_an_untyped_literal() =>
+        DocumentIdColumnTypes.DbType(DocumentIdColumnType.Unknown).Should().Be(NpgsqlDbType.Unknown);
+
+    private static NpgsqlParameter Parameter(NpgsqlCommand command, string name) => command.Parameters[name];
+}

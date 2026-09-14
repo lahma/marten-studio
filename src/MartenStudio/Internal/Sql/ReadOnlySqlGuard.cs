@@ -1,0 +1,438 @@
+namespace MartenStudio.Internal.Sql;
+
+/// <summary>Why the guard refused a statement.</summary>
+internal enum SqlRejectionReason
+{
+    /// <summary>It did not refuse.</summary>
+    None,
+
+    /// <summary>There was nothing to run but whitespace and comments.</summary>
+    Empty,
+
+    /// <summary>The statement does not start with one of the shapes the console runs.</summary>
+    DisallowedStatement,
+
+    /// <summary>There is more than one statement.</summary>
+    MultipleStatements,
+
+    /// <summary>A quoted string is never closed.</summary>
+    UnterminatedString,
+
+    /// <summary>A block comment is never closed.</summary>
+    UnterminatedComment,
+
+    /// <summary>A dollar-quoted body is never closed.</summary>
+    UnterminatedDollarQuote,
+}
+
+/// <summary>The guard's answer: allowed, or refused with a reason and a place to point at.</summary>
+/// <param name="Allowed">Whether the statement may be sent.</param>
+/// <param name="Reason">Why not.</param>
+/// <param name="Message">What to tell the user.</param>
+/// <param name="Token">The offending token, when there is one.</param>
+/// <param name="Position">Where in the text the problem is, zero-based.</param>
+internal readonly record struct SqlGuardResult(
+    bool Allowed,
+    SqlRejectionReason Reason,
+    string Message,
+    string? Token,
+    int Position)
+{
+    /// <summary>The statement may be sent.</summary>
+    public static SqlGuardResult Allow(string token, int position) =>
+        new(true, SqlRejectionReason.None, string.Empty, token, position);
+
+    /// <summary>The statement is refused.</summary>
+    public static SqlGuardResult Reject(SqlRejectionReason reason, string message, string? token, int position) =>
+        new(false, reason, message, token, position);
+}
+
+/// <summary>
+/// An <em>advisory</em> check on the shape of a statement before the SQL console sends it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>This is not the security boundary, and must never be treated as one</b> (D13). What makes the
+/// console safe is the transaction: <c>SET TRANSACTION READ ONLY</c> plus <c>statement_timeout</c> and an
+/// optional <c>SET LOCAL ROLE</c>, which is the database's own refusal and not a parser's. This guard
+/// exists so that <c>delete from mt_doc_customer</c> produces "the SQL console only runs select, with,
+/// explain, table and values statements" instead of Postgres' <c>25006: cannot execute DELETE in a
+/// read-only transaction</c> — a better message for the overwhelmingly common case of somebody pasting the
+/// wrong thing. Every statement the parser lets through and the database refuses is working as designed;
+/// <c>WITH x AS (DELETE … RETURNING *) SELECT * FROM x</c> is exactly that statement, and the integration
+/// tests assert it comes back as 25006 with the table unchanged.
+/// </para>
+/// <para>
+/// Two rules. The first significant token - after leading whitespace, <c>--</c> line comments and nestable
+/// <c>/* */</c> block comments - must be one of <c>select</c>, <c>with</c>, <c>explain</c>, <c>table</c>,
+/// <c>values</c>. And there must be exactly one statement: a <c>;</c> anywhere except inside a string, a
+/// dollar-quoted body or a comment ends the statement, and anything but whitespace and comments after it is
+/// a second statement. That second rule is what keeps <c>select 1; drop table x</c> from arriving as one
+/// batch, which is the shape of every SQL-injection demonstration ever written.
+/// </para>
+/// <para>
+/// <c>explain</c> gets one extra check: <c>EXPLAIN ANALYZE</c> <em>runs</em> the statement it is given, so
+/// the guard looks past the explain options and holds whatever follows to the same allow-list.
+/// </para>
+/// </remarks>
+internal static class ReadOnlySqlGuard
+{
+    /// <summary>The statement shapes the console runs.</summary>
+    internal static readonly string[] AllowedStatements = ["select", "with", "explain", "table", "values"];
+
+    /// <summary>Keywords that may sit between <c>explain</c> and the statement it explains.</summary>
+    private static readonly HashSet<string> ExplainOptions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "analyze", "analyse", "verbose", "costs", "settings", "generic_plan", "buffers", "serialize", "wal",
+        "timing", "summary", "memory", "format", "text", "xml", "json", "yaml", "on", "off", "true", "false",
+    };
+
+    /// <summary>Checks a statement's shape.</summary>
+    public static SqlGuardResult Check(string? sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            return SqlGuardResult.Reject(SqlRejectionReason.Empty, "There is no statement to run.", null, 0);
+        }
+
+        var scanner = new Scanner(sql);
+
+        if (!scanner.TryReadToken(out var first, out var firstPosition, out var scanError))
+        {
+            return scanError ?? SqlGuardResult.Reject(
+                SqlRejectionReason.Empty, "There is no statement to run, only comments.", null, 0);
+        }
+
+        if (!IsAllowed(first!))
+        {
+            return SqlGuardResult.Reject(
+                SqlRejectionReason.DisallowedStatement,
+                $"The SQL console only runs {string.Join(", ", AllowedStatements)} statements; this one starts with " +
+                $"'{first}'. Everything it runs is inside a read-only transaction, so a write would be refused by " +
+                "Postgres anyway.",
+                first,
+                firstPosition);
+        }
+
+        if (string.Equals(first, "explain", StringComparison.OrdinalIgnoreCase))
+        {
+            var explained = CheckExplainTarget(ref scanner);
+
+            if (!explained.Allowed)
+            {
+                return explained;
+            }
+        }
+
+        return ScanForSecondStatement(ref scanner, first!, firstPosition);
+    }
+
+    private static SqlGuardResult CheckExplainTarget(ref Scanner scanner)
+    {
+        // EXPLAIN ANALYZE executes what it is given, so whatever the options end at has to be allow-listed
+        // too. Unrecognised words are left alone: they will be the statement, or Postgres' own syntax error.
+        while (true)
+        {
+            var before = scanner;
+
+            if (!scanner.TryReadToken(out var token, out var position, out var error))
+            {
+                return error ?? SqlGuardResult.Reject(
+                    SqlRejectionReason.DisallowedStatement,
+                    "EXPLAIN needs a statement after it.",
+                    "explain",
+                    position);
+            }
+
+            if (token is "(" or ")" or "," || ExplainOptions.Contains(token!))
+            {
+                continue;
+            }
+
+            if (IsAllowed(token!))
+            {
+                scanner = before;
+                return SqlGuardResult.Allow(token!, position);
+            }
+
+            return SqlGuardResult.Reject(
+                SqlRejectionReason.DisallowedStatement,
+                $"EXPLAIN runs the statement it is given when ANALYZE is on, and '{token}' is not one of " +
+                $"{string.Join(", ", AllowedStatements)}.",
+                token,
+                position);
+        }
+    }
+
+    private static SqlGuardResult ScanForSecondStatement(ref Scanner scanner, string first, int firstPosition)
+    {
+        while (true)
+        {
+            if (!scanner.TryReadToken(out var token, out var position, out var error))
+            {
+                return error ?? SqlGuardResult.Allow(first, firstPosition);
+            }
+
+            if (token != ";")
+            {
+                continue;
+            }
+
+            // A trailing semicolon is fine, and so is a run of them; anything else after one is a second
+            // statement.
+            string? next;
+            int nextPosition;
+            SqlGuardResult? trailingError;
+
+            do
+            {
+                if (!scanner.TryReadToken(out next, out nextPosition, out trailingError))
+                {
+                    return trailingError ?? SqlGuardResult.Allow(first, firstPosition);
+                }
+            }
+            while (next == ";");
+
+            return SqlGuardResult.Reject(
+                SqlRejectionReason.MultipleStatements,
+                "The SQL console runs one statement at a time, and this text holds more than one. Run " +
+                $"'{next}' separately.",
+                next,
+                nextPosition);
+        }
+    }
+
+    private static bool IsAllowed(string token)
+    {
+        foreach (var allowed in AllowedStatements)
+        {
+            if (string.Equals(token, allowed, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// A minimal Postgres lexer: enough to know where a token is and what is inside a string, a comment or
+    /// a dollar-quoted body, and nothing more.
+    /// </summary>
+    private struct Scanner(string text)
+    {
+        private int position;
+
+        /// <summary>
+        /// Reads the next significant token. Punctuation comes back one character at a time; a word comes
+        /// back whole; strings and comments are skipped over rather than returned.
+        /// </summary>
+        public bool TryReadToken(out string? token, out int tokenPosition, out SqlGuardResult? error)
+        {
+            error = null;
+
+            while (position < text.Length)
+            {
+                var c = text[position];
+
+                if (char.IsWhiteSpace(c))
+                {
+                    position++;
+                    continue;
+                }
+
+                if (c == '-' && Peek(1) == '-')
+                {
+                    SkipLineComment();
+                    continue;
+                }
+
+                if (c == '/' && Peek(1) == '*')
+                {
+                    if (!SkipBlockComment(out error))
+                    {
+                        token = null;
+                        tokenPosition = position;
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if (c is '\'' or '"')
+                {
+                    if (!SkipQuoted(c, out error))
+                    {
+                        token = null;
+                        tokenPosition = position;
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if (c == '$' && TryReadDollarTag(out var tag))
+                {
+                    if (!SkipDollarQuoted(tag!, out error))
+                    {
+                        token = null;
+                        tokenPosition = position;
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                tokenPosition = position;
+
+                if (char.IsLetter(c) || c == '_')
+                {
+                    var start = position;
+
+                    while (position < text.Length && (char.IsLetterOrDigit(text[position]) || text[position] == '_'))
+                    {
+                        position++;
+                    }
+
+                    token = text[start..position];
+                    return true;
+                }
+
+                position++;
+                token = c.ToString();
+                return true;
+            }
+
+            token = null;
+            tokenPosition = position;
+            return false;
+        }
+
+        private char Peek(int offset) => position + offset < text.Length ? text[position + offset] : '\0';
+
+        private void SkipLineComment()
+        {
+            while (position < text.Length && text[position] != '\n')
+            {
+                position++;
+            }
+        }
+
+        private bool SkipBlockComment(out SqlGuardResult? error)
+        {
+            // Postgres block comments nest, unlike C's.
+            var start = position;
+            var depth = 0;
+
+            while (position < text.Length)
+            {
+                if (text[position] == '/' && Peek(1) == '*')
+                {
+                    depth++;
+                    position += 2;
+                    continue;
+                }
+
+                if (text[position] == '*' && Peek(1) == '/')
+                {
+                    depth--;
+                    position += 2;
+
+                    if (depth == 0)
+                    {
+                        error = null;
+                        return true;
+                    }
+
+                    continue;
+                }
+
+                position++;
+            }
+
+            error = SqlGuardResult.Reject(
+                SqlRejectionReason.UnterminatedComment, "A /* comment is never closed.", "/*", start);
+            return false;
+        }
+
+        private bool SkipQuoted(char quote, out SqlGuardResult? error)
+        {
+            var start = position;
+
+            position++;
+
+            while (position < text.Length)
+            {
+                if (text[position] == '\\' && quote == '\'' && position + 1 < text.Length)
+                {
+                    // Only meaningful in an E'' string, but skipping the escaped character is harmless in a
+                    // standard-conforming one: the next character cannot be the closing quote either way.
+                    position += 2;
+                    continue;
+                }
+
+                if (text[position] == quote)
+                {
+                    if (Peek(1) == quote)
+                    {
+                        position += 2;
+                        continue;
+                    }
+
+                    position++;
+                    error = null;
+                    return true;
+                }
+
+                position++;
+            }
+
+            error = SqlGuardResult.Reject(
+                SqlRejectionReason.UnterminatedString,
+                $"A {quote} quoted string is never closed.",
+                quote.ToString(),
+                start);
+            return false;
+        }
+
+        private bool TryReadDollarTag(out string? tag)
+        {
+            // $tag$ or $$; a bare $1 parameter placeholder is not a dollar quote.
+            var probe = position + 1;
+
+            while (probe < text.Length && (char.IsLetterOrDigit(text[probe]) || text[probe] == '_'))
+            {
+                probe++;
+            }
+
+            if (probe < text.Length && text[probe] == '$')
+            {
+                tag = text[position..(probe + 1)];
+                return true;
+            }
+
+            tag = null;
+            return false;
+        }
+
+        private bool SkipDollarQuoted(string tag, out SqlGuardResult? error)
+        {
+            var start = position;
+            var closing = text.IndexOf(tag, position + tag.Length, StringComparison.Ordinal);
+
+            if (closing < 0)
+            {
+                error = SqlGuardResult.Reject(
+                    SqlRejectionReason.UnterminatedDollarQuote,
+                    $"A {tag} quoted body is never closed.",
+                    tag,
+                    start);
+                return false;
+            }
+
+            position = closing + tag.Length;
+            error = null;
+            return true;
+        }
+    }
+}
