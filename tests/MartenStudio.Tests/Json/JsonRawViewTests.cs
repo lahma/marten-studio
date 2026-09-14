@@ -81,6 +81,28 @@ public class JsonRawViewTests
     }
 
     [Fact]
+    public void A_raised_line_limit_re_renders_the_document_rather_than_keeping_the_old_clamp()
+    {
+        using var context = new JsonTestContext();
+        const string Json = """{"a":1,"b":2,"c":3}""";
+
+        var view = context.Render<JsonRawView>(p => p
+            .Add(c => c.Json, Json)
+            .Add(c => c.MaxLines, 2));
+
+        view.FindAll(".ms-code-line").Should().HaveCount(2);
+
+        // Same document, a different limit. Keying the rendered document on the text alone left the old
+        // clamp on screen under a notice that said it was showing fewer lines than it had been asked for.
+        view.Render(p => p
+            .Add(c => c.Json, Json)
+            .Add(c => c.MaxLines, 10));
+
+        view.FindAll(".ms-code-line").Should().HaveCount(5);
+        view.FindAll(".ms-json-notice").Should().BeEmpty();
+    }
+
+    [Fact]
     public void Content_that_will_not_parse_is_still_shown()
     {
         using var context = new JsonTestContext();

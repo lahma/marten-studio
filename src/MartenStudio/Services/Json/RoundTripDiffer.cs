@@ -14,10 +14,16 @@ internal readonly record struct JsonDiffEntry(string Path, string? Before, strin
 /// <param name="Dropped">Present before, gone after. This is the bucket that loses data.</param>
 /// <param name="Changed">Present in both, with a different value.</param>
 /// <param name="Added">Absent before, present after.</param>
+/// <param name="Fault">
+/// Why the comparison could not be made, when it could not. A faulted result is never an empty one: "we
+/// could not tell" and "nothing is lost" are different answers, and only one of them is safe to put in
+/// front of somebody about to press Save.
+/// </param>
 internal sealed record JsonDiffResult(
     ImmutableArray<JsonDiffEntry> Dropped,
     ImmutableArray<JsonDiffEntry> Changed,
-    ImmutableArray<JsonDiffEntry> Added)
+    ImmutableArray<JsonDiffEntry> Added,
+    string? Fault = null)
 {
     /// <summary>No differences at all.</summary>
     public static JsonDiffResult Empty { get; } = new(
@@ -25,8 +31,19 @@ internal sealed record JsonDiffResult(
         ImmutableArray<JsonDiffEntry>.Empty,
         ImmutableArray<JsonDiffEntry>.Empty);
 
+    /// <summary>A comparison that could not be made, and the reason it could not.</summary>
+    public static JsonDiffResult Faulted(string reason) => new(
+        ImmutableArray<JsonDiffEntry>.Empty,
+        ImmutableArray<JsonDiffEntry>.Empty,
+        ImmutableArray<JsonDiffEntry>.Empty,
+        reason);
+
+    /// <summary>Whether the two documents could not be compared at all.</summary>
+    public bool IsFaulted => Fault is { Length: > 0 };
+
     /// <summary>Whether the two documents say the same thing.</summary>
-    public bool IsEmpty => Dropped.IsDefaultOrEmpty && Changed.IsDefaultOrEmpty && Added.IsDefaultOrEmpty;
+    public bool IsEmpty =>
+        !IsFaulted && Dropped.IsDefaultOrEmpty && Changed.IsDefaultOrEmpty && Added.IsDefaultOrEmpty;
 
     /// <summary>How many differences there are in total.</summary>
     public int Count => Dropped.Length + Changed.Length + Added.Length;
@@ -34,6 +51,11 @@ internal sealed record JsonDiffResult(
     /// <summary>A one-line summary, of the kind a confirm dialog leads with.</summary>
     public string Summary()
     {
+        if (IsFaulted)
+        {
+            return "These documents could not be compared: " + Fault;
+        }
+
         if (IsEmpty)
         {
             return "Nothing will change.";
@@ -79,15 +101,24 @@ internal sealed record JsonDiffResult(
 /// </remarks>
 internal static class RoundTripDiffer
 {
-    /// <summary>Diffs two documents. Invalid JSON on either side yields no differences rather than throwing.</summary>
+    /// <summary>Diffs two documents. Invalid JSON on either side faults the result rather than throwing.</summary>
     /// <param name="before">The document as it is now - what was edited, or what is stored.</param>
     /// <param name="after">The document as it would be - what came back from the round trip, or the edit.</param>
+    /// <remarks>
+    /// A side that cannot be canonicalized comes back as <see cref="JsonDiffResult.Faulted"/>, never as
+    /// <see cref="JsonDiffResult.Empty"/>. An empty result is the sentence "nothing is lost", and saying
+    /// that because the comparison failed is the one answer this dialog must never give.
+    /// </remarks>
     public static JsonDiffResult Diff(string? before, string? after)
     {
-        if (!JsonCanonicalizer.TryCanonicalize(before, out var left, out _) ||
-            !JsonCanonicalizer.TryCanonicalize(after, out var right, out _))
+        if (!JsonCanonicalizer.TryCanonicalize(before, out var left, out var leftError))
         {
-            return JsonDiffResult.Empty;
+            return JsonDiffResult.Faulted("the first document could not be read (" + leftError + ")");
+        }
+
+        if (!JsonCanonicalizer.TryCanonicalize(after, out var right, out var rightError))
+        {
+            return JsonDiffResult.Faulted("the second document could not be read (" + rightError + ")");
         }
 
         return Diff(left, right);

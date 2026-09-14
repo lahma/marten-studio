@@ -27,7 +27,14 @@
         }
     </p>
 
-    @if (Loss)
+    @if (_roundTrip.IsFaulted)
+    {
+        <p class="ms-round-trip-note">
+            These documents could not be compared: @_roundTrip.Fault. Nothing here can tell you what
+            saving would cost, so treat it as a loss until it can.
+        </p>
+    }
+    else if (Loss)
     {
         <p class="ms-round-trip-note">
             These members are in the stored document but not on the CLR type, so saving removes them.
@@ -110,12 +117,18 @@
     /// <summary>The round-trip difference, for a parent component or a test.</summary>
     internal JsonDiffResult Result => _roundTrip;
 
-    /// <summary>Whether saving would lose anything.</summary>
-    public bool Loss => !_roundTrip.Dropped.IsDefaultOrEmpty || !_roundTrip.Changed.IsDefaultOrEmpty;
+    /// <summary>
+    /// Whether saving would lose anything. A comparison that faulted counts as a loss: the dialog cannot
+    /// say what a save would cost, and the honest reading of that is "assume the worst", not "carry on".
+    /// </summary>
+    public bool Loss =>
+        _roundTrip.IsFaulted || !_roundTrip.Dropped.IsDefaultOrEmpty || !_roundTrip.Changed.IsDefaultOrEmpty;
 
-    private string SummaryClass => Loss
-        ? "ms-alert ms-alert-warning ms-round-trip-summary"
-        : "ms-alert ms-alert-info ms-round-trip-summary";
+    private string SummaryClass => _roundTrip.IsFaulted
+        ? "ms-alert ms-alert-error ms-round-trip-summary"
+        : Loss
+            ? "ms-alert ms-alert-warning ms-round-trip-summary"
+            : "ms-alert ms-alert-info ms-round-trip-summary";
 
     private string ConfirmClass => Loss ? "ms-btn ms-btn-danger" : "ms-btn ms-btn-primary";
 

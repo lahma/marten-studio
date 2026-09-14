@@ -130,6 +130,55 @@ public class CSharpRecordGeneratorTests
     }
 
     [Fact]
+    public void Two_member_names_that_land_on_one_identifier_are_told_apart()
+    {
+        // JSON member names are case-sensitive and may contain anything; C# record parameters are
+        // neither. Emitting the same name twice produces a record that does not compile, which is a
+        // worse answer than a name the user has to rename.
+        var generated = CSharpRecordGenerator.Generate("""{"first-name":"a","first_name":"b"}""", "Person");
+
+        generated.Should().Be(
+            """
+            public sealed record Person(
+                string FirstName,
+                string FirstName2);
+
+            """);
+    }
+
+    [Fact]
+    public void Two_member_names_that_differ_only_in_case_are_told_apart_too()
+    {
+        var generated = CSharpRecordGenerator.Generate("""{"a":1,"A":2}""", "Sample");
+
+        generated.Should().Be(
+            """
+            public sealed record Sample(
+                int A,
+                int A2);
+
+            """);
+    }
+
+    [Fact]
+    public void A_member_named_after_a_keyword_needs_no_escape_because_pascal_case_is_not_one()
+    {
+        // Every C# keyword is lower case and every generated identifier starts upper case, so `class`
+        // becomes `Class` and there is no case left for an @-prefix to handle.
+        var generated = CSharpRecordGenerator.Generate("""{"class":"a","int":1,"new":true}""", "Lesson");
+
+        generated.Should().Be(
+            """
+            public sealed record Lesson(
+                string Class,
+                int Int,
+                bool New);
+
+            """);
+        generated.Should().NotContain("@");
+    }
+
+    [Fact]
     public void An_empty_array_says_nothing_about_its_elements()
     {
         CSharpRecordGenerator.Generate("""{"tags":[]}""", "Sample")

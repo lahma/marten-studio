@@ -2168,7 +2168,7 @@ body{
     --ms-json-number: #1d4ed8;
     --ms-json-boolean: #7c3aed;
     --ms-json-null: #64748b;
-    --ms-json-punct: #94a3b8;
+    --ms-json-punct: #64748b;
     --ms-json-brace: #475569;
     --ms-json-date: #0369a1;
     --ms-json-guid: #6d28d9;
@@ -2180,7 +2180,7 @@ body{
     --ms-json-row-focus: #dbeafe;
     --ms-json-guide: #e2e8f0;
     --ms-json-gutter-bg: #f8fafc;
-    --ms-json-gutter-text: #94a3b8;
+    --ms-json-gutter-text: #64748b;
     --ms-json-hit-bg: #fde68a;
     --ms-json-hit-text: #422006;
     --ms-json-badge-bg: #e0e7ff;
@@ -2207,7 +2207,7 @@ body{
         --ms-json-number: #93c5fd;
         --ms-json-boolean: #c4b5fd;
         --ms-json-null: #94a3b8;
-        --ms-json-punct: #64748b;
+        --ms-json-punct: #94a3b8;
         --ms-json-brace: #cbd5e1;
         --ms-json-date: #7dd3fc;
         --ms-json-guid: #d8b4fe;
@@ -2218,7 +2218,7 @@ body{
         --ms-json-row-focus: #1e3a5f;
         --ms-json-guide: #334155;
         --ms-json-gutter-bg: #0f172a;
-        --ms-json-gutter-text: #64748b;
+        --ms-json-gutter-text: #94a3b8;
         --ms-json-hit-bg: #78350f;
         --ms-json-hit-text: #fef3c7;
         --ms-json-badge-bg: #312e81;
@@ -2242,7 +2242,7 @@ body{
     --ms-json-number: #1d4ed8;
     --ms-json-boolean: #7c3aed;
     --ms-json-null: #64748b;
-    --ms-json-punct: #94a3b8;
+    --ms-json-punct: #64748b;
     --ms-json-brace: #475569;
     --ms-json-date: #0369a1;
     --ms-json-guid: #6d28d9;
@@ -2253,7 +2253,7 @@ body{
     --ms-json-row-focus: #dbeafe;
     --ms-json-guide: #e2e8f0;
     --ms-json-gutter-bg: #f8fafc;
-    --ms-json-gutter-text: #94a3b8;
+    --ms-json-gutter-text: #64748b;
     --ms-json-hit-bg: #fde68a;
     --ms-json-hit-text: #422006;
     --ms-json-badge-bg: #e0e7ff;
@@ -2276,7 +2276,7 @@ body{
     --ms-json-number: #93c5fd;
     --ms-json-boolean: #c4b5fd;
     --ms-json-null: #94a3b8;
-    --ms-json-punct: #64748b;
+    --ms-json-punct: #94a3b8;
     --ms-json-brace: #cbd5e1;
     --ms-json-date: #7dd3fc;
     --ms-json-guid: #d8b4fe;
@@ -2287,7 +2287,7 @@ body{
     --ms-json-row-focus: #1e3a5f;
     --ms-json-guide: #334155;
     --ms-json-gutter-bg: #0f172a;
-    --ms-json-gutter-text: #64748b;
+    --ms-json-gutter-text: #94a3b8;
     --ms-json-hit-bg: #78350f;
     --ms-json-hit-text: #fef3c7;
     --ms-json-badge-bg: #312e81;

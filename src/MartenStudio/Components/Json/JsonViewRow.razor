@@ -264,7 +264,8 @@
 
     private bool IsLong => Kind == JsonValueKind.String && Display.Length > MaxInlineLength;
 
-    private string VisibleText => IsLong && !ShowFullString ? Display[..MaxInlineLength] : Display;
+    private string VisibleText =>
+        IsLong && !ShowFullString ? JsonModelBuilder.Cut(Display, MaxInlineLength) : Display;
 
     private string OverflowSize =>
         JsonModelBuilder.FormatBytes(Encoding.UTF8.GetByteCount(Display) - Encoding.UTF8.GetByteCount(VisibleText));

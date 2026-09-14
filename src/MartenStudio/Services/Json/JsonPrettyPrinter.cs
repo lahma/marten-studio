@@ -119,7 +119,7 @@ internal static class JsonPrettyPrinter
         var totalBytes = Encoding.UTF8.GetByteCount(json);
         if (totalBytes > maxBytes)
         {
-            var head = json.Length > headLength ? json[..headLength] : json;
+            var head = JsonModelBuilder.Cut(json, headLength);
             var notice = head.Length < json.Length
                 ? "Showing the first " + JsonModelBuilder.FormatBytes(Encoding.UTF8.GetByteCount(head)) +
                   " of a " + JsonModelBuilder.FormatBytes(totalBytes) + " document."

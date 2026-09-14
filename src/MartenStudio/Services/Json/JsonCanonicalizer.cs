@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -23,6 +24,17 @@ namespace MartenStudio.Services.Json;
 /// </remarks>
 internal static class JsonCanonicalizer
 {
+    /// <summary>The longest run of characters a plain (non-exponential) canonical number may use.</summary>
+    /// <remarks>
+    /// Only ever reached by padding zeros, so the cap decides between <c>0.0000000000000000000000000001</c>
+    /// and <c>1E-400</c> - never between keeping a digit and losing one. It is a function of the stripped
+    /// digits and the exponent alone, which is what keeps the canonical form unique.
+    /// </remarks>
+    private const int MaxPlainLength = 40;
+
+    /// <summary>An exponent beyond this is not worth canonicalizing; the token is handed back as it is.</summary>
+    private const long MaxExponent = 1_000_000_000L;
+
     private static readonly JsonDocumentOptions ParseOptions = new() { MaxDepth = 64 };
 
     private static readonly JsonSerializerOptions WriteOptions = new()
@@ -115,31 +127,189 @@ internal static class JsonCanonicalizer
     /// <summary>
     /// The canonical text of a number: <c>1.0</c>, <c>1</c> and <c>1e0</c> all come back as <c>1</c>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Nothing here goes anywhere near <see cref="double"/>, and no CLR numeric type is asked to hold the
+    /// value. Postgres stores a jsonb number as <c>numeric</c>, which has neither <see cref="decimal"/>'s
+    /// 28-digit ceiling nor <see cref="double"/>'s range, so a stored document may perfectly legally hold
+    /// <c>1e400</c>, a 33-digit integer or <c>1e-30</c>. Rounding any of those to fit a CLR type is how a
+    /// round-trip differ ends up saying "nothing is lost" about a document that lost something - and this
+    /// method is the one place that decision is made.
+    /// </para>
+    /// <para>
+    /// So the token is canonicalized as text: a sign, the significant digits, and a power of ten. Two
+    /// spellings of the same number produce the same text, every digit survives, and the result is still
+    /// a legal JSON number so it can be parsed straight back into a node.
+    /// </para>
+    /// </remarks>
     internal static string NormalizeNumber(string raw)
     {
-        if (decimal.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+        if (!TryReadNumber(raw, out var negative, out var digits, out var exponent))
         {
-            if (value == 0m)
-            {
-                // decimal keeps both a scale and a sign on zero, so -0.0 and 0.000 are the same value
-                // spelled three ways. There is one canonical zero.
-                return "0";
-            }
-
-            var text = value.ToString(CultureInfo.InvariantCulture);
-            if (text.Contains('.', StringComparison.Ordinal))
-            {
-                text = text.TrimEnd('0').TrimEnd('.');
-            }
-
-            return text.Length == 0 || text == "-" ? "0" : text;
+            // Not a number this method can take apart. Handing the token back unchanged can only ever
+            // make two documents look different, never the same, which is the safe direction for a
+            // report about what a save would lose.
+            return raw;
         }
 
-        if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var wide))
+        return digits.Length == 0 ? "0" : Compose(negative, digits, exponent);
+    }
+
+    /// <summary>
+    /// Takes a JSON number token apart into a sign, its significant digits and a power of ten, with
+    /// leading and trailing zeros removed so that every spelling of one value arrives here the same.
+    /// </summary>
+    private static bool TryReadNumber(string raw, out bool negative, out string digits, out long exponent)
+    {
+        negative = false;
+        digits = string.Empty;
+        exponent = 0;
+
+        var text = raw.AsSpan().Trim();
+        if (text.Length == 0)
         {
-            return wide.ToString("R", CultureInfo.InvariantCulture);
+            return false;
         }
 
-        return raw;
+        var index = 0;
+        if (text[0] is '+' or '-')
+        {
+            // JSON has no leading '+', but this method is also called directly with hand-written text.
+            negative = text[0] == '-';
+            index = 1;
+        }
+
+        var significand = new StringBuilder(text.Length);
+        var integerDigits = 0;
+        while (index < text.Length && char.IsAsciiDigit(text[index]))
+        {
+            significand.Append(text[index]);
+            integerDigits++;
+            index++;
+        }
+
+        var fractionDigits = 0;
+        if (index < text.Length && text[index] == '.')
+        {
+            index++;
+            while (index < text.Length && char.IsAsciiDigit(text[index]))
+            {
+                significand.Append(text[index]);
+                fractionDigits++;
+                index++;
+            }
+        }
+
+        if (integerDigits + fractionDigits == 0)
+        {
+            return false;
+        }
+
+        long written = 0;
+        if (index < text.Length && text[index] is 'e' or 'E')
+        {
+            index++;
+            var exponentNegative = false;
+            if (index < text.Length && text[index] is '+' or '-')
+            {
+                exponentNegative = text[index] == '-';
+                index++;
+            }
+
+            var exponentDigits = 0;
+            while (index < text.Length && char.IsAsciiDigit(text[index]))
+            {
+                if (written <= MaxExponent)
+                {
+                    written = (written * 10) + (text[index] - '0');
+                }
+
+                exponentDigits++;
+                index++;
+            }
+
+            if (exponentDigits == 0 || written > MaxExponent)
+            {
+                return false;
+            }
+
+            if (exponentNegative)
+            {
+                written = -written;
+            }
+        }
+
+        if (index != text.Length)
+        {
+            return false;
+        }
+
+        exponent = written - fractionDigits;
+
+        var all = significand.ToString();
+        var start = 0;
+        while (start < all.Length && all[start] == '0')
+        {
+            start++;
+        }
+
+        var end = all.Length;
+        while (end > start && all[end - 1] == '0')
+        {
+            end--;
+            exponent++;
+        }
+
+        if (start >= end)
+        {
+            // Every digit was a zero. decimal keeps both a scale and a sign on zero, so -0.0, 0.000 and
+            // 0e9 are one value spelled four ways; there is exactly one canonical zero and it is unsigned.
+            negative = false;
+            digits = string.Empty;
+            exponent = 0;
+            return true;
+        }
+
+        digits = all[start..end];
+        return true;
+    }
+
+    /// <summary>Writes the digits and the power of ten back out as the one canonical JSON number.</summary>
+    private static string Compose(bool negative, string digits, long exponent)
+    {
+        var sign = negative ? "-" : string.Empty;
+
+        if (exponent == 0)
+        {
+            return sign + digits;
+        }
+
+        if (exponent > 0)
+        {
+            if (digits.Length + exponent <= MaxPlainLength)
+            {
+                return sign + digits + new string('0', (int)exponent);
+            }
+        }
+        else
+        {
+            var scale = (int)Math.Min(-exponent, int.MaxValue);
+            if (scale < digits.Length)
+            {
+                return sign + digits[..(digits.Length - scale)] + "." + digits[(digits.Length - scale)..];
+            }
+
+            if (scale + 2 <= MaxPlainLength)
+            {
+                return sign + "0." + new string('0', scale - digits.Length) + digits;
+            }
+        }
+
+        // A number whose plain form would be mostly padding zeros. The exponent chosen is the one that
+        // leaves a single digit in front of the point, so this form is unique too.
+        var adjusted = exponent + digits.Length - 1;
+        var mantissa = digits.Length == 1 ? digits : digits[..1] + "." + digits[1..];
+        return sign + mantissa + "E" + (adjusted < 0 ? "-" : "+") +
+            Math.Abs(adjusted).ToString(CultureInfo.InvariantCulture);
     }
 }

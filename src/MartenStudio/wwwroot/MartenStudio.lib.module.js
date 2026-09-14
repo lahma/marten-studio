@@ -164,9 +164,43 @@ export function afterWebStarted() {
          * `popovertarget` and never reaches this.
          */
         openMenu: function (element) {
+            let shown = false;
             try {
                 if (element && typeof element.showPopover === "function") {
                     element.showPopover();
+                    shown = true;
+                }
+            }
+            catch {
+                // Already open, or no popover support. Either way the focus move below is still right.
+            }
+
+            try {
+                // A role="menu" is one tab stop with its own roving tabindex, so opening it has to put
+                // DOM focus on the first item; without that the keyboard lands nowhere and the arrow
+                // keys have nothing to move.
+                const first = element && element.querySelector
+                    ? element.querySelector("[role=\"menuitem\"]")
+                    : null;
+                if (first && typeof first.focus === "function") {
+                    first.focus();
+                }
+            }
+            catch {
+            }
+
+            return shown;
+        },
+
+        /*
+         * Moves DOM focus onto one element by id, for the roving tabindex in the copy menu. Focus is a
+         * courtesy here: a missing element is an answer, never an exception.
+         */
+        focusElement: function (elementId) {
+            try {
+                const element = document.getElementById(elementId);
+                if (element && typeof element.focus === "function") {
+                    element.focus();
                     return true;
                 }
             }
@@ -174,6 +208,63 @@ export function afterWebStarted() {
             }
 
             return false;
+        },
+
+        /*
+         * Stops the page scrolling under the JSON tree's own keys.
+         *
+         * Razor decides `@onkeydown:preventDefault` when the component renders, so it can only be
+         * "always" or "never" - and "always" would swallow Tab and take the tree out of the page's focus
+         * order. The real condition is per key and per target, which is a runtime question, so it is
+         * answered here: the arrows, Home, End and Space are prevented only when the tree row itself is
+         * the thing with focus. A button or an input inside a row keeps every key it needs.
+         *
+         * Idempotent: calling it twice on the same element attaches nothing twice.
+         */
+        captureTreeKeys: function (element) {
+            if (!element || element.dataset.msTreeKeys === "true") {
+                return false;
+            }
+
+            const captured = ["ArrowUp", "ArrowDown", "Home", "End", " ", "Spacebar"];
+
+            const onKeyDown = function (event) {
+                if (event.ctrlKey || event.altKey || event.metaKey) {
+                    return;
+                }
+
+                if (captured.indexOf(event.key) < 0) {
+                    return;
+                }
+
+                const target = event.target;
+                if (!target || !target.getAttribute) {
+                    return;
+                }
+
+                const role = target.getAttribute("role");
+                if (role !== "treeitem" && role !== "tree") {
+                    return;
+                }
+
+                event.preventDefault();
+            };
+
+            element.addEventListener("keydown", onKeyDown);
+            element.dataset.msTreeKeys = "true";
+            element.msTreeKeyHandler = onKeyDown;
+            return true;
+        },
+
+        releaseTreeKeys: function (element) {
+            if (!element || !element.msTreeKeyHandler) {
+                return false;
+            }
+
+            element.removeEventListener("keydown", element.msTreeKeyHandler);
+            delete element.msTreeKeyHandler;
+            delete element.dataset.msTreeKeys;
+            return true;
         },
 
         closeMenu: function (element) {
@@ -203,15 +294,48 @@ export function afterWebStarted() {
         },
 
         /*
-         * Soft tabs and a gutter that scrolls with the text. Idempotent: calling it twice on the same
-         * textarea attaches nothing twice.
+         * Soft tabs, a gutter that scrolls with the text, and the editor's two shortcuts.
+         *
+         * The shortcuts live here rather than on a Blazor `@onkeydown` because that handler would send
+         * every keystroke over the circuit and re-render the whole editor - gutter included - on the way
+         * back. Here nothing crosses the wire until Ctrl+Enter or Esc actually happens, and when it does
+         * it carries `textarea.value`, so the save can never be one round trip behind what is on screen.
+         *
+         * Idempotent: calling it twice on the same textarea attaches nothing twice.
          */
-        enhanceTextarea: function (textarea, gutter) {
+        enhanceTextarea: function (textarea, gutter, dotNetRef) {
             if (!textarea || textarea.dataset.msEnhanced === "true") {
                 return false;
             }
 
             const onKeyDown = function (event) {
+                if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.altKey) {
+                    event.preventDefault();
+                    if (dotNetRef) {
+                        try {
+                            dotNetRef.invokeMethodAsync("OnEditorSaveAsync", textarea.value);
+                        }
+                        catch {
+                            // The circuit has gone; the page is already being torn down.
+                        }
+                    }
+
+                    return;
+                }
+
+                if (event.key === "Escape" || event.key === "Esc") {
+                    event.preventDefault();
+                    if (dotNetRef) {
+                        try {
+                            dotNetRef.invokeMethodAsync("OnEditorCancelAsync", textarea.value);
+                        }
+                        catch {
+                        }
+                    }
+
+                    return;
+                }
+
                 if (event.key !== "Tab" || event.ctrlKey || event.altKey || event.metaKey) {
                     return;
                 }

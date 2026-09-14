@@ -103,6 +103,23 @@ public class JsonPrettyPrinterTests
     }
 
     [Fact]
+    public void The_head_is_cut_between_characters_and_never_through_one()
+    {
+        // A string is UTF-16, so every emoji here is two chars. Cutting between them leaves a lone
+        // surrogate: not a character, unrepresentable in UTF-8, and rendered as a replacement glyph at
+        // the exact place a reader is trying to work out what the document says.
+        var big = "{\"blob\":\"" + string.Concat(Enumerable.Repeat("\U0001F600", 60)) + "\"}";
+
+        var document = JsonPrettyPrinter.Render(big, maxBytes: 16, maxLines: 100, headLength: 20);
+
+        document.Text.Should().HaveLength(19, "the twentieth char was half of a character");
+
+        // A lone surrogate cannot be encoded, so it comes back from UTF-8 as U+FFFD. Surviving the round
+        // trip unchanged is the same thing as being well-formed.
+        Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(document.Text)).Should().Be(document.Text);
+    }
+
+    [Fact]
     public void A_document_over_the_limit_but_shorter_than_the_head_says_so_rather_than_claiming_a_truncation()
     {
         var document = JsonPrettyPrinter.Render("""{"a":1}""", maxBytes: 4);

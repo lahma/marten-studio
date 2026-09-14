@@ -25,18 +25,6 @@ internal static class CSharpRecordGenerator
 {
     private static readonly JsonDocumentOptions ParseOptions = new() { MaxDepth = 64 };
 
-    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
-    {
-        "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked", "class",
-        "const", "continue", "decimal", "default", "delegate", "do", "double", "else", "enum", "event",
-        "explicit", "extern", "false", "finally", "fixed", "float", "for", "foreach", "goto", "if",
-        "implicit", "in", "int", "interface", "internal", "is", "lock", "long", "namespace", "new",
-        "null", "object", "operator", "out", "override", "params", "private", "protected", "public",
-        "readonly", "ref", "return", "sbyte", "sealed", "short", "sizeof", "stackalloc", "static",
-        "string", "struct", "switch", "this", "throw", "true", "try", "typeof", "uint", "ulong",
-        "unchecked", "unsafe", "ushort", "using", "virtual", "void", "volatile", "while",
-    };
-
     /// <summary>Generates the record skeleton for <paramref name="json"/>.</summary>
     /// <param name="json">A sample document, or an array of sample documents.</param>
     /// <param name="typeName">The name for the root record.</param>
@@ -193,6 +181,13 @@ internal static class CSharpRecordGenerator
     }
 
     /// <summary>Makes <paramref name="candidate"/> into a C# identifier, PascalCased.</summary>
+    /// <remarks>
+    /// There is deliberately no <c>@</c>-escaping branch here. Every C# keyword is lower case and every
+    /// result of this method starts with an upper-case letter or an underscore, so a member named
+    /// <c>class</c> comes out as <c>Class</c> and no keyword can ever be produced. The branch that used to
+    /// check a keyword table was unreachable, and an unreachable guard is worse than none: it reads as if
+    /// the case were handled.
+    /// </remarks>
     internal static string Identifier(string? candidate, string fallback)
     {
         if (string.IsNullOrWhiteSpace(candidate))
@@ -226,8 +221,7 @@ internal static class CSharpRecordGenerator
             builder.Insert(0, '_');
         }
 
-        var result = builder.ToString();
-        return Keywords.Contains(result) ? "@" + result : result;
+        return builder.ToString();
 
         void AppendToken()
         {
@@ -354,11 +348,18 @@ internal static class CSharpRecordGenerator
             }
 
             _output.Append('\n');
+
+            // Two JSON member names can land on one C# identifier - `first-name` and `first_name` both
+            // give FirstName, and `a` and `A` both give A - and a record with two parameters of the same
+            // name does not compile. The names are claimed one at a time, per record, the same way nested
+            // record names are claimed across the file.
+            var claimed = new HashSet<string>(StringComparer.Ordinal) { name };
+
             for (var i = 0; i < shape.MemberOrder.Count; i++)
             {
                 var key = shape.MemberOrder[i];
                 var member = shape.Members[key];
-                var propertyName = PropertyName(key, name);
+                var propertyName = PropertyName(key, name, claimed);
                 var optional = member.SeenIn < shape.ObjectSamples;
                 var type = TypeOf(member.Shape, key, optional);
 
@@ -367,10 +368,24 @@ internal static class CSharpRecordGenerator
             }
         }
 
-        private static string PropertyName(string key, string recordName)
+        private static string PropertyName(string key, string recordName, HashSet<string> claimed)
         {
             var name = Identifier(key, "Value");
-            return string.Equals(name, recordName, StringComparison.Ordinal) ? name + "Value" : name;
+            if (string.Equals(name, recordName, StringComparison.Ordinal))
+            {
+                // A record parameter may not be spelled the same as its record (CS0542).
+                name += "Value";
+            }
+
+            var candidate = name;
+            var suffix = 2;
+            while (!claimed.Add(candidate))
+            {
+                candidate = name + suffix.ToString(CultureInfo.InvariantCulture);
+                suffix++;
+            }
+
+            return candidate;
         }
 
         private string TypeOf(Shape shape, string key, bool optional)

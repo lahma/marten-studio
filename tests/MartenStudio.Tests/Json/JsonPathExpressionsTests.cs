@@ -87,6 +87,20 @@ public class JsonPathExpressionsTests
             .Should().Be("data #>> '{\"first name\",\"a,b\"}'");
     }
 
+    [Theory]
+    [InlineData("null")]
+    [InlineData("NULL")]
+    [InlineData("Null")]
+    public void A_member_actually_named_null_is_quoted_so_postgres_reads_it_as_a_key(string key)
+    {
+        // Postgres parses an unquoted NULL element of an array literal as the NULL element, whatever its
+        // case. Unquoted, `data #>> '{null}'` asks for a NULL path step and returns NULL for every row
+        // instead of reading the member - an expression that is not wrong, just silently about nothing.
+        JsonPathSegment[] segments = [JsonPathSegment.ForKey(key)];
+
+        JsonPathExpressions.ToPostgresTextPath(segments).Should().Be("data #>> '{\"" + key + "\"}'");
+    }
+
     [Fact]
     public void A_containment_filter_nests_objects_and_wraps_arrays()
     {

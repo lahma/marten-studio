@@ -122,7 +122,7 @@ public class JsonDiffTests
     }
 
     [Fact]
-    public void Invalid_json_on_either_side_renders_the_empty_state_rather_than_throwing()
+    public void Invalid_json_on_either_side_says_it_could_not_compare_them_rather_than_showing_the_empty_state()
     {
         using var context = new JsonTestContext();
 
@@ -130,7 +130,44 @@ public class JsonDiffTests
             .Add(c => c.Before, "{ nope")
             .Add(c => c.After, """{"a":1}"""));
 
-        view.Find(".ms-diff-empty").Should().NotBeNull();
+        view.FindAll(".ms-diff-empty").Should().BeEmpty("'the two documents are the same' would be a lie");
+        view.Find(".ms-diff-faulted").TextContent.Should().Contain("could not be compared");
+        view.Find(".ms-diff-faulted").GetAttribute("role").Should().Be("alert");
+    }
+
+    [Fact]
+    public void A_round_trip_that_cannot_be_compared_is_treated_as_a_loss()
+    {
+        using var context = new JsonTestContext();
+        var confirmed = 0;
+
+        var view = context.Render<RoundTripDiff>(p => p
+            .Add(c => c.Edited, "{ nope")
+            .Add(c => c.RoundTripped, """{"name":"Ada"}""")
+            .Add(c => c.OnConfirm, EventCallback.Factory.Create(this, () => confirmed++)));
+
+        view.Instance.Loss.Should().BeTrue("a comparison that failed cannot promise that nothing is lost");
+        view.Find(".ms-round-trip-summary").TextContent.Should().Contain("could not be compared");
+        view.Find(".ms-round-trip-summary").ClassList.Should().Contain("ms-alert-error");
+        view.Find(".ms-round-trip-note").TextContent.Should().Contain("treat it as a loss");
+        view.FindAll(".ms-diff-empty").Should().BeEmpty();
+
+        var confirm = view.Find(".ms-round-trip-actions button");
+        confirm.ClassList.Should().Contain("ms-btn-danger");
+    }
+
+    [Fact]
+    public void A_number_too_wide_for_double_no_longer_hides_the_property_beside_it()
+    {
+        using var context = new JsonTestContext();
+
+        var view = context.Render<RoundTripDiff>(p => p
+            .Add(c => c.Edited, """{"name":"Ada","legacy":true,"n":1e400}""")
+            .Add(c => c.RoundTripped, """{"name":"Ada","n":1e400}"""));
+
+        view.Instance.Loss.Should().BeTrue();
+        view.Find(".ms-round-trip-summary").TextContent.Should().Contain("1 property will be dropped.");
+        view.Find(".ms-diff-row.ms-diff-del .ms-diff-path").TextContent.Should().Be("$.legacy");
     }
 
     [Fact]

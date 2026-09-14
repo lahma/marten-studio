@@ -1,0 +1,94 @@
+@using MartenStudio.Components.Json
+
+@*
+    The row that stands in for the rest of a windowed container.
+
+    It is deliberately not a treeitem. It has no position in its parent's set, so aria-posinset and
+    aria-setsize would have to lie about how many children the container has; and a treeitem whose whole
+    content is two buttons is announced as a tree node that is not one. So the row itself is
+    presentational and the buttons are what is interactive - reached through the tree's own roving
+    tabindex rather than through Tab, which is what keeps a 340-element array from putting two extra tab
+    stops in the middle of the page. Enter and Space on a focused button are the browser's own doing; the
+    tree's key handler deliberately leaves them alone here.
+*@
+
+<div class="ms-json-row ms-json-row-more" role="presentation" style="--ms-json-depth: @Depth">
+    <span class="ms-json-toggle ms-json-toggle-empty" aria-hidden="true"></span>
+    <button type="button" class="ms-json-more" tabindex="@(Focused ? 0 : -1)" @ref="_element" @onclick="ShowMoreAsync">Show @NextCount more</button>
+    <button type="button" class="ms-json-more" tabindex="-1" @onclick="ShowAllAsync">Show all (@Total)</button>
+    <span class="ms-json-count">@Shown of @Total shown</span>
+</div>
+
+@code {
+    private ElementReference _element;
+    private bool _autoFocused;
+
+    /// <summary>The id of the container whose children are windowed.</summary>
+    [Parameter]
+    public int NodeId { get; set; }
+
+    /// <summary>The indent level the row sits at.</summary>
+    [Parameter]
+    public int Depth { get; set; }
+
+    /// <summary>How many children are on screen.</summary>
+    [Parameter]
+    public int Shown { get; set; }
+
+    /// <summary>How many children there are in all.</summary>
+    [Parameter]
+    public int Total { get; set; }
+
+    /// <summary>How many more children one press reveals.</summary>
+    [Parameter]
+    public int ChildWindow { get; set; } = 100;
+
+    /// <summary>Whether this row holds the tree's single <c>tabindex="0"</c>.</summary>
+    [Parameter]
+    public bool Focused { get; set; }
+
+    /// <summary>Whether this row should take DOM focus, because the keyboard just moved here.</summary>
+    [Parameter]
+    public bool AutoFocus { get; set; }
+
+    /// <summary>Raised with the node id when one more window of children is asked for.</summary>
+    [Parameter]
+    public EventCallback<int> OnShowMore { get; set; }
+
+    /// <summary>Raised with the node id when every remaining child is asked for.</summary>
+    [Parameter]
+    public EventCallback<int> OnShowAll { get; set; }
+
+    private int NextCount => Math.Max(Math.Min(ChildWindow, Total - Shown), 0);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (AutoFocus == _autoFocused)
+        {
+            return;
+        }
+
+        _autoFocused = AutoFocus;
+        if (!AutoFocus)
+        {
+            return;
+        }
+
+        try
+        {
+            await _element.FocusAsync();
+        }
+        catch (JSException)
+        {
+            // Prerendering, or the row has already been replaced. Keyboard focus is a nicety here, and
+            // losing it must never take the circuit down with it.
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private Task ShowMoreAsync() => OnShowMore.InvokeAsync(NodeId);
+
+    private Task ShowAllAsync() => OnShowAll.InvokeAsync(NodeId);
+}

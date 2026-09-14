@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using AngleSharp.Dom;
 using Bunit;
@@ -118,8 +119,10 @@ public class JsonViewTests
             .Add(c => c.Json, json)
             .Add(c => c.AutoExpandNodeBudget, 10_000));
 
-        // Root, the items array, the first hundred elements, and the "show more" row.
-        view.FindAll("[role=treeitem]").Should().HaveCount(103);
+        // Root, the items array and the first hundred elements. The "show more" row is not one of them:
+        // it has no position in the array, so a treeitem role could only lie about aria-posinset.
+        view.FindAll("[role=treeitem]").Should().HaveCount(102);
+        view.Find(".ms-json-row-more").GetAttribute("role").Should().Be("presentation");
         view.Markup.Should().Contain("Show all (340)");
         view.Markup.Should().Contain("100 of 340 shown");
 
@@ -128,6 +131,60 @@ public class JsonViewTests
 
         ButtonWithText(view, "Show all (340)").Click();
         view.FindAll("[role=treeitem]").Should().HaveCount(342);
+    }
+
+    [Fact]
+    public void The_show_more_buttons_are_out_of_the_tab_order_and_in_the_arrow_keys_instead()
+    {
+        using var context = new JsonTestContext();
+        var json = "{\"items\":[" +
+            string.Join(",", Enumerable.Range(0, 340).Select(i => i.ToString(CultureInfo.InvariantCulture))) + "]}";
+
+        var view = context.Render<JsonView>(p => p
+            .Add(c => c.Json, json)
+            .Add(c => c.AutoExpandNodeBudget, 10_000));
+
+        // A tree is one tab stop. Two buttons per windowed container in the tab order would put a tab
+        // stop in the middle of a page that is navigated with the arrow keys - so they are reachable the
+        // way every other row is, and Enter on the focused button is then the browser's own doing.
+        var buttons = view.FindAll(".ms-json-row-more button");
+        buttons.Should().HaveCount(2);
+        buttons.Should().AllSatisfy(b => b.GetAttribute("tabindex").Should().Be("-1"));
+
+        view.Find("[role=tree]").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "End" });
+
+        view.Find(".ms-json-row-more button").GetAttribute("tabindex")
+            .Should().Be("0", "the arrow keys have to be able to reach what Tab no longer can");
+        view.FindAll("[role=treeitem][tabindex='0']").Should().BeEmpty("a tree has one roving tabindex, not two");
+    }
+
+    [Fact]
+    public void Enter_with_a_show_more_row_focused_does_not_open_the_previous_nodes_menu()
+    {
+        using var context = new JsonTestContext();
+        var json = "{\"items\":[" +
+            string.Join(",", Enumerable.Range(0, 340).Select(i => i.ToString(CultureInfo.InvariantCulture))) + "]}";
+
+        var view = context.Render<JsonView>(p => p
+            .Add(c => c.Json, json)
+            .Add(c => c.AutoExpandNodeBudget, 10_000));
+
+        view.Find("[role=tree]").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "End" });
+        view.Find("[role=tree]").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Enter" });
+
+        context.JSInterop.Invocations.Identifiers.Should().NotContain("martenStudio.json.openMenu");
+    }
+
+    [Fact]
+    public void The_tree_asks_the_browser_to_stop_scrolling_under_its_own_keys()
+    {
+        using var context = new JsonTestContext();
+
+        context.Render<JsonView>(p => p.Add(c => c.Json, Sample));
+
+        // Razor decides preventDefault at render time, which can only be "always" - swallowing Tab - or
+        // "never". The condition is per key and per target, so it is answered in the lib module.
+        context.JSInterop.Invocations["martenStudio.json.captureTreeKeys"].Should().ContainSingle();
     }
 
     [Fact]
@@ -182,6 +239,23 @@ public class JsonViewTests
 
         more.Click();
         view.Find(".ms-json-value .ms-json-more").TextContent.Trim().Should().Be("show less");
+    }
+
+    [Fact]
+    public void A_truncated_string_is_cut_between_characters_and_never_through_one()
+    {
+        using var context = new JsonTestContext();
+        var json = "{\"note\":\"" + string.Concat(Enumerable.Repeat("\U0001F600", 10)) + "\"}";
+
+        var view = context.Render<JsonView>(p => p
+            .Add(c => c.Json, json)
+            .Add(c => c.LongString, 5));
+
+        // Five chars is two and a half emoji. Half of one is a lone surrogate: not a character, and
+        // rendered as a replacement glyph right where the reader is trying to read the value.
+        var shown = view.Find(".ms-json-string").TextContent;
+        shown.Should().Be("\"\U0001F600\U0001F600\"");
+        Encoding.UTF8.GetString(Encoding.UTF8.GetBytes(shown)).Should().Be(shown);
     }
 
     [Fact]
@@ -260,6 +334,53 @@ public class JsonViewTests
 
         context.JSInterop.Invocations["martenStudio.clipboard.copyText"].Should().ContainSingle()
             .Which.Arguments[0].Should().Be("\"Helsinki\"");
+    }
+
+    [Fact]
+    public void The_copy_menu_is_one_tab_stop_with_the_arrow_keys_inside_it()
+    {
+        using var context = new JsonTestContext();
+
+        var view = context.Render<JsonView>(p => p.Add(c => c.Json, Sample));
+
+        view.FindAll(".ms-json-key")[1].Click();
+
+        // role="menu" is a promise about the keyboard: one tab stop, and a roving tabindex inside it.
+        // Six tab stops with a menu role tells a screen-reader user this is a menu and then is not one.
+        var items = view.FindAll(".ms-copy-menu .ms-menu-item");
+        items.Select(i => i.GetAttribute("tabindex")).Should().Equal("0", "-1", "-1", "-1", "-1", "-1");
+
+        var menu = view.Find(".ms-copy-menu");
+        menu.KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "ArrowDown" });
+        view.FindAll(".ms-copy-menu .ms-menu-item")[1].GetAttribute("tabindex").Should().Be("0");
+
+        menu.KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "End" });
+        view.FindAll(".ms-copy-menu .ms-menu-item")[^1].GetAttribute("tabindex").Should().Be("0");
+
+        menu.KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "ArrowDown" });
+        view.FindAll(".ms-copy-menu .ms-menu-item")[0].GetAttribute("tabindex").Should().Be("0", "the menu wraps");
+
+        menu.KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Home" });
+        view.FindAll(".ms-copy-menu .ms-menu-item")[0].GetAttribute("tabindex").Should().Be("0");
+
+        // Every move takes DOM focus with it; a roving tabindex that nothing follows is decoration.
+        context.JSInterop.Invocations["martenStudio.json.focusElement"].Should().HaveCount(4);
+    }
+
+    [Fact]
+    public void Tab_is_left_alone_inside_the_copy_menu_because_leaving_is_what_tab_is_for()
+    {
+        using var context = new JsonTestContext();
+
+        var view = context.Render<JsonView>(p => p.Add(c => c.Json, Sample));
+        view.FindAll(".ms-json-key")[1].Click();
+
+        var menu = view.Find(".ms-copy-menu");
+        menu.KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Tab" });
+        menu.KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" });
+
+        view.FindAll(".ms-copy-menu .ms-menu-item")[0].GetAttribute("tabindex").Should().Be("0");
+        context.JSInterop.Invocations.Identifiers.Should().NotContain("martenStudio.json.focusElement");
     }
 
     [Fact]
@@ -453,8 +574,73 @@ public class JsonViewTests
             .Add(c => c.Json, json)
             .Add(c => c.MaxVisibleRows, 10));
 
-        view.FindAll("[role=treeitem]").Should().HaveCount(11, "ten rows plus the row that says so");
+        view.FindAll("[role=treeitem]").Should().HaveCount(10);
+        view.Find(".ms-json-row-clamp").GetAttribute("role")
+            .Should().Be("presentation", "a sentence about the tree is not a node in it");
         view.Markup.Should().Contain("Showing the first 10 rows");
+    }
+
+    [Fact]
+    public void A_changed_column_rebuilds_the_expressions_the_copy_menu_offers()
+    {
+        using var context = new JsonTestContext();
+
+        var view = context.Render<JsonView>(p => p
+            .Add(c => c.Json, """{"city":"Helsinki"}""")
+            .Add(c => c.Column, "data"));
+
+        view.FindAll(".ms-json-key")[1].Click();
+        view.Find(".ms-copy-menu").TextContent.Should().Contain("data ->> 'city'");
+
+        // Same document, different column. Keying the model on the document alone left the viewer
+        // offering expressions against a column the page had already stopped using.
+        view.Render(p => p
+            .Add(c => c.Json, """{"city":"Helsinki"}""")
+            .Add(c => c.Column, "body"));
+
+        view.FindAll(".ms-json-key")[1].Click();
+        view.Find(".ms-copy-menu").TextContent.Should().Contain("body ->> 'city'");
+        view.Find(".ms-copy-menu").TextContent.Should().NotContain("data ->>");
+    }
+
+    [Fact]
+    public void A_raised_node_limit_builds_the_tree_that_was_refused()
+    {
+        using var context = new JsonTestContext();
+        var json = "{\"blob\":\"" + new string('x', 4_000) + "\"}";
+
+        var view = context.Render<JsonView>(p => p
+            .Add(c => c.Json, json)
+            .Add(c => c.MaxBytesForTree, 1_000));
+
+        view.FindAll("[role=tree]").Should().BeEmpty();
+
+        view.Render(p => p
+            .Add(c => c.Json, json)
+            .Add(c => c.MaxBytesForTree, 1_000_000)
+            .Add(c => c.MaxNodesForTree, 100_000));
+
+        view.FindAll("[role=tree]").Should().ContainSingle("the limits moved, so the model has to be rebuilt");
+        view.FindAll("[role=treeitem]").Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void A_changed_string_limit_re_truncates_the_values_on_screen()
+    {
+        using var context = new JsonTestContext();
+        var json = "{\"note\":\"" + new string('x', 400) + "\"}";
+
+        var view = context.Render<JsonView>(p => p
+            .Add(c => c.Json, json)
+            .Add(c => c.LongString, 120));
+
+        view.Find(".ms-json-string").TextContent.Should().HaveLength(122, "120 characters inside two quotes");
+
+        view.Render(p => p
+            .Add(c => c.Json, json)
+            .Add(c => c.LongString, 20));
+
+        view.Find(".ms-json-string").TextContent.Should().HaveLength(22);
     }
 
     [Fact]

@@ -96,6 +96,38 @@ internal static class JsonModelBuilder
         return (bytes / (1024.0 * 1024.0)).ToString("0.#", CultureInfo.InvariantCulture) + " MB";
     }
 
+    /// <summary>
+    /// The first <paramref name="maxChars"/> characters of <paramref name="text"/>, never splitting a
+    /// surrogate pair.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="string"/> is UTF-16, so an emoji or any character outside the basic multilingual plane
+    /// is two chars. Cutting between them leaves a lone surrogate, which is not a character at all: it
+    /// renders as a replacement glyph, breaks the byte arithmetic that sizes the "… +n B" hint, and can be
+    /// rejected outright on the way back out through UTF-8. One character short is always the right
+    /// answer.
+    /// </remarks>
+    public static string Cut(string text, int maxChars)
+    {
+        if (maxChars <= 0)
+        {
+            return string.Empty;
+        }
+
+        if (text.Length <= maxChars)
+        {
+            return text;
+        }
+
+        var length = maxChars;
+        if (char.IsHighSurrogate(text[length - 1]) && char.IsLowSurrogate(text[length]))
+        {
+            length--;
+        }
+
+        return text[..length];
+    }
+
     private static JsonModel Refused(int totalBytes, int nodeCount, string reason) =>
         new(ImmutableArray<JsonViewNode>.Empty,
             ImmutableArray<int>.Empty,

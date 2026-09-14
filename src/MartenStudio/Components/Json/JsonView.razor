@@ -74,26 +74,22 @@
              role="tree"
              aria-label="@Label"
              tabindex="-1"
+             @ref="_treeElement"
              @onkeydown="OnTreeKeyDownAsync">
             @foreach (var row in _rows)
             {
                 if (row.IsMore)
                 {
-                    <div class="ms-json-row ms-json-row-more"
-                         role="treeitem"
-                         aria-level="@(row.Depth + 1)"
-                         tabindex="-1"
-                         style="--ms-json-depth: @row.Depth"
-                         @key="row.Key">
-                        <span class="ms-json-toggle ms-json-toggle-empty" aria-hidden="true"></span>
-                        <button type="button" class="ms-json-more" @onclick="() => ShowMoreAsync(row.NodeId, false)">
-                            Show @Math.Min(ChildWindow, row.Total - row.Shown) more
-                        </button>
-                        <button type="button" class="ms-json-more" @onclick="() => ShowMoreAsync(row.NodeId, true)">
-                            Show all (@row.Total)
-                        </button>
-                        <span class="ms-json-count">@row.Shown of @row.Total shown</span>
-                    </div>
+                    <JsonViewMoreRow @key="row.Key"
+                                     NodeId="row.NodeId"
+                                     Depth="row.Depth"
+                                     Shown="row.Shown"
+                                     Total="row.Total"
+                                     ChildWindow="ChildWindow"
+                                     Focused="_focusedIsMore && row.NodeId == _focusedNodeId"
+                                     AutoFocus="_autoFocusIsMore && row.NodeId == _autoFocusNodeId"
+                                     OnShowMore="ShowMoreAsync"
+                                     OnShowAll="ShowAllAsync" />
                 }
                 else
                 {
@@ -112,8 +108,8 @@
                                  Expanded="_expanded.Contains(row.NodeId)"
                                  SetSize="row.SetSize"
                                  PosInSet="row.PosInSet"
-                                 Focused="row.NodeId == _focusedNodeId"
-                                 AutoFocus="row.NodeId == _autoFocusNodeId"
+                                 Focused="!_focusedIsMore && row.NodeId == _focusedNodeId"
+                                 AutoFocus="!_autoFocusIsMore && row.NodeId == _autoFocusNodeId"
                                  SearchTerm="@_searchTerm"
                                  MatchBadge="@BadgeOf(row.NodeId)"
                                  ShowFullString="_expandedStrings.Contains(row.NodeId)"
@@ -128,7 +124,8 @@
 
             @if (_rowsClamped)
             {
-                <div class="ms-json-row ms-json-row-more" role="treeitem" aria-level="1" tabindex="-1">
+                @* Not a treeitem: it is a sentence about the tree, not a node in it. *@
+                <div class="ms-json-row ms-json-row-more ms-json-row-clamp" role="presentation">
                     <span class="ms-json-count">
                         Showing the first @MaxVisibleRows rows. Collapse a level or search to see the rest.
                     </span>
@@ -166,6 +163,9 @@
     private ImmutableArray<JsonMatch> _matches = ImmutableArray<JsonMatch>.Empty;
 
     private string? _builtFrom;
+    private string? _builtColumn;
+    private JsonModelOptions? _builtOptions;
+    private int _builtVisibleRows;
     private bool _built;
     private bool _forceTree;
     private bool _rawMode;
@@ -175,6 +175,10 @@
     private int _depth = 2;
     private int _focusedNodeId = -1;
     private int _autoFocusNodeId = -1;
+    private bool _focusedIsMore;
+    private bool _autoFocusIsMore;
+    private ElementReference _treeElement;
+    private string? _capturedTreeId;
     private int _matchIndex = -1;
     private string _searchTerm = string.Empty;
     private string _announcement = string.Empty;
@@ -297,15 +301,37 @@
 
     protected override void OnParametersSet()
     {
-        if (_built && ReferenceEquals(_builtFrom, Json))
+        // Everything the model is built from, not just the document. A parent that re-renders with the
+        // same Json and a different Column - or a raised MaxNodesForTree, or a different LongString -
+        // has asked for a different model, and short-circuiting on the document alone left the old one
+        // on screen: the copy menu went on offering Postgres expressions against the previous column,
+        // and "the tree is too large" survived being told it was not.
+        var options = BuildOptions();
+        var sameModel = _built &&
+            ReferenceEquals(_builtFrom, Json) &&
+            string.Equals(_builtColumn, Column, StringComparison.Ordinal) &&
+            options == _builtOptions;
+
+        if (sameModel && _builtVisibleRows == MaxVisibleRows)
         {
+            return;
+        }
+
+        _builtVisibleRows = MaxVisibleRows;
+
+        if (sameModel)
+        {
+            // Only the row clamp moved. The model and every expansion the user has made still stand.
+            RebuildRows();
             return;
         }
 
         _built = true;
         _builtFrom = Json;
+        _builtColumn = Column;
+        _builtOptions = options;
         _forceTree = false;
-        Rebuild();
+        Rebuild(options);
     }
 
     private JsonModelOptions BuildOptions() => new()
@@ -320,9 +346,11 @@
         LongString = LongString,
     };
 
-    private void Rebuild()
+    private void Rebuild() => Rebuild(BuildOptions());
+
+    private void Rebuild(JsonModelOptions options)
     {
-        _model = JsonModelBuilder.Build(Json, BuildOptions(), Column, _forceTree);
+        _model = JsonModelBuilder.Build(Json, options, Column, _forceTree);
         _expanded.Clear();
         _expandedStrings.Clear();
         _windows.Clear();
@@ -332,6 +360,8 @@
         _searchTerm = string.Empty;
         _focusedNodeId = _model.HasNodes ? 0 : -1;
         _autoFocusNodeId = -1;
+        _focusedIsMore = false;
+        _autoFocusIsMore = false;
         _depth = Math.Clamp(AutoExpandDepth, JsonViewToolbar.MinDepth, JsonViewToolbar.MaxDepth);
         _rawMode = StartInRawView || !_model.HasNodes;
         _downloadHref = BuildDownloadHref();
@@ -532,6 +562,7 @@
         }
 
         _focusedNodeId = nodeId;
+        _focusedIsMore = false;
         RebuildRows();
         RecomputeBadges();
         return Task.CompletedTask;
@@ -550,14 +581,31 @@
     private Task FocusRowAsync(int nodeId)
     {
         _focusedNodeId = nodeId;
+        _focusedIsMore = false;
         return Task.CompletedTask;
     }
 
-    private Task ShowMoreAsync(int nodeId, bool all)
+    private Task ShowMoreAsync(int nodeId) => WidenAsync(nodeId, all: false);
+
+    private Task ShowAllAsync(int nodeId) => WidenAsync(nodeId, all: true);
+
+    private Task WidenAsync(int nodeId, bool all)
     {
         var node = _model.Nodes[nodeId];
         var shown = ShownChildren(node);
         _windows[nodeId] = all ? node.ChildCount : Math.Min(node.ChildCount, shown + ChildWindow);
+
+        // The row the user pressed keeps the roving tabindex if it is still there; when the container is
+        // now whole, the last child it just revealed takes it, so focus never lands on nothing.
+        _focusedNodeId = nodeId;
+        _focusedIsMore = _windows[nodeId] < node.ChildCount;
+        if (!_focusedIsMore)
+        {
+            _focusedNodeId = node.ChildStart + node.ChildCount - 1;
+        }
+
+        _autoFocusNodeId = _focusedNodeId;
+        _autoFocusIsMore = _focusedIsMore;
         RebuildRows();
         return Task.CompletedTask;
     }
@@ -776,8 +824,7 @@
             child = ancestor;
         }
 
-        _focusedNodeId = nodeId;
-        _autoFocusNodeId = nodeId;
+        FocusNode(nodeId);
         RebuildRows();
         RecomputeBadges();
     }
@@ -812,11 +859,23 @@
                 CollapseOrAscend();
                 return;
             case "*":
-                ExpandSubtree(_focusedNodeId);
+                if (!_focusedIsMore)
+                {
+                    ExpandSubtree(_focusedNodeId);
+                }
+
                 return;
             case "Enter":
             case " ":
-                await OpenMenuAsync(_focusedNodeId);
+                // A "show more" row is two real buttons and holds real DOM focus, so the browser's own
+                // activation does the work; stepping in here would run it twice. And with nothing
+                // focused there is no menu to open - opening one anyway showed whichever node the menu
+                // had last been prepared for, which is the one thing worse than doing nothing.
+                if (!_focusedIsMore && _focusedNodeId >= 0)
+                {
+                    await OpenMenuAsync(_focusedNodeId);
+                }
+
                 return;
             case "/":
                 if (_searchBar is not null)
@@ -838,17 +897,48 @@
         }
     }
 
-    private void MoveFocus(int direction)
+    /// <summary>
+    /// Asks the browser to stop scrolling the page when the tree's own keys are pressed.
+    /// </summary>
+    /// <remarks>
+    /// Razor's <c>@@onkeydown:preventDefault</c> is evaluated when the component renders, not when the
+    /// key arrives, so it can only ever be "always" or "never" - and "always" would swallow Tab and take
+    /// the tree out of the page's focus order. The condition is "this key, and only when the tree row
+    /// itself is the target", which is a runtime question, so it is answered in JS. The helper is
+    /// idempotent per element and its absence costs nothing but a scrolled page.
+    /// </remarks>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var current = IndexOfFocusedRow();
-        var next = current + direction;
-        while (next >= 0 && next < _rows.Count && _rows[next].IsMore)
+        var id = _treeElement.Id;
+        if (string.IsNullOrEmpty(id) || string.Equals(id, _capturedTreeId, StringComparison.Ordinal))
         {
-            next += direction;
+            return;
         }
 
-        FocusRowAt(next);
+        _capturedTreeId = id;
+
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.json.captureTreeKeys", _treeElement);
+        }
+        catch (JSException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
+
+    /// <summary>
+    /// Moves the roving tabindex one row, including onto a "show more" row.
+    /// </summary>
+    /// <remarks>
+    /// A "show more" row used to be skipped, which left its two buttons reachable only by Tab - and they
+    /// were in the tab order, so a windowed array put two tab stops in the middle of a page whose whole
+    /// point is that it is navigated with the arrow keys. They are out of the tab order now, so the arrow
+    /// keys have to be able to reach them or nothing can.
+    /// </remarks>
+    private void MoveFocus(int direction) => FocusRowAt(IndexOfFocusedRow() + direction);
 
     private void FocusRowAt(int rowIndex)
     {
@@ -858,20 +948,17 @@
         }
 
         var row = _rows[rowIndex];
-        if (row.IsMore)
-        {
-            return;
-        }
-
         _focusedNodeId = row.NodeId;
+        _focusedIsMore = row.IsMore;
         _autoFocusNodeId = row.NodeId;
+        _autoFocusIsMore = row.IsMore;
     }
 
     private int IndexOfFocusedRow()
     {
         for (var i = 0; i < _rows.Count; i++)
         {
-            if (!_rows[i].IsMore && _rows[i].NodeId == _focusedNodeId)
+            if (_rows[i].IsMore == _focusedIsMore && _rows[i].NodeId == _focusedNodeId)
             {
                 return i;
             }
@@ -882,7 +969,7 @@
 
     private void ExpandOrDescend()
     {
-        if (_focusedNodeId < 0 || !_model.HasNodes)
+        if (_focusedNodeId < 0 || _focusedIsMore || !_model.HasNodes)
         {
             return;
         }
@@ -900,14 +987,21 @@
             return;
         }
 
-        _focusedNodeId = node.ChildStart;
-        _autoFocusNodeId = node.ChildStart;
+        FocusNode(node.ChildStart);
     }
 
     private void CollapseOrAscend()
     {
         if (_focusedNodeId < 0 || !_model.HasNodes)
         {
+            return;
+        }
+
+        if (_focusedIsMore)
+        {
+            // Left from a "show more" row goes to the container it belongs to, the same place left from
+            // the container's last child goes.
+            FocusNode(_focusedNodeId);
             return;
         }
 
@@ -921,9 +1015,16 @@
 
         if (node.ParentId >= 0)
         {
-            _focusedNodeId = node.ParentId;
-            _autoFocusNodeId = node.ParentId;
+            FocusNode(node.ParentId);
         }
+    }
+
+    private void FocusNode(int nodeId)
+    {
+        _focusedNodeId = nodeId;
+        _autoFocusNodeId = nodeId;
+        _focusedIsMore = false;
+        _autoFocusIsMore = false;
     }
 
     private void ExpandSubtree(int nodeId)

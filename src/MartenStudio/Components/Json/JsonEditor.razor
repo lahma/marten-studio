@@ -1,6 +1,7 @@
 @using System.Text.Json
 @using MartenStudio.Components.Json
 @using MartenStudio.Services.Json
+@implements IDisposable
 @inject IJSRuntime JsRuntime
 
 @*
@@ -8,9 +9,12 @@
     class library that fetches a megabyte of editor from a CDN, or bundles one, has changed its host's
     page - which is the single thing this project refuses to do (AGENTS.md hard rule 3, D2).
 
-    The textarea is bound on `change`, never on `input`. A Blazor Server circuit binding on `input` sends
-    one round trip per keystroke and re-renders the component each time; on a document of any size that
-    turns typing into a latency test.
+    The textarea is bound on `change`, never on `input`, and it has no `@@onkeydown` either. A Blazor
+    Server circuit that handles a keystroke sends a round trip per key and re-renders the whole component
+    on the way back - including the gutter, which is one div per line. That is one keystroke costing three
+    thousand diffed elements on a three-thousand-line document, and it is why the two shortcuts the editor
+    does answer to, Ctrl+Enter and Esc, are recognised in the browser and only cross the wire once they
+    have happened - carrying the textarea's live text with them.
 *@
 
 <div class="ms-editor">
@@ -28,9 +32,13 @@
 
     <div class="ms-editor-body">
         <div class="ms-editor-gutter" @ref="_gutter" aria-hidden="true">
-            @for (var line = 1; line <= LineCount; line++)
+            @for (var line = 1; line <= GutterLines; line++)
             {
                 <div class="ms-editor-gutter-line" @key="line">@line</div>
+            }
+            @if (LineCount > GutterLines)
+            {
+                <div class="ms-editor-gutter-line ms-editor-gutter-more" @key="'…'">…</div>
             }
         </div>
         <textarea @ref="_textArea"
@@ -43,8 +51,7 @@
                   aria-label="@Label"
                   aria-describedby="@_statusId"
                   value="@_text"
-                  @onchange="OnChangedAsync"
-                  @onkeydown="OnKeyDownAsync"></textarea>
+                  @onchange="OnChangedAsync"></textarea>
     </div>
 
     <div id="@_statusId" class="ms-editor-status" role="status" aria-live="polite">
@@ -84,6 +91,7 @@
 
     private readonly string _statusId = "ms-editor-status-" + Guid.NewGuid().ToString("N")[..8];
 
+    private DotNetObjectReference<JsonEditor>? _self;
     private ElementReference _textArea;
     private ElementReference _gutter;
     private string _text = string.Empty;
@@ -115,6 +123,15 @@
     /// <summary>Whether Save refuses while the text is not valid JSON.</summary>
     [Parameter]
     public bool ValidateBeforeSave { get; set; } = true;
+
+    /// <summary>The most line numbers to put in the gutter.</summary>
+    /// <remarks>
+    /// The gutter is one element per line and it is re-rendered whenever the component is, so an
+    /// unbounded one turns a large document into thousands of diffed elements for every status message.
+    /// Past the clamp the gutter ends in an ellipsis; the text itself is never clamped.
+    /// </remarks>
+    [Parameter]
+    public int MaxLines { get; set; } = 2_000;
 
     /// <summary>Raised with the edited text.</summary>
     [Parameter]
@@ -151,6 +168,8 @@
         }
     }
 
+    private int GutterLines => Math.Min(LineCount, Math.Max(MaxLines, 1));
+
     protected override void OnParametersSet()
     {
         if (_loaded && ReferenceEquals(_loadedFrom, Json))
@@ -178,10 +197,13 @@
 
         try
         {
-            // Soft tabs and a gutter that scrolls with the text. Both are pure convenience: if the
-            // helper is not in the lib module yet, Tab still moves focus and the gutter still lines up
-            // for every document that fits without scrolling.
-            await JsRuntime.InvokeVoidAsync("martenStudio.json.enhanceTextarea", _textArea, _gutter);
+            // Soft tabs, a gutter that scrolls with the text, and the two keyboard shortcuts. The first
+            // two are pure convenience; the shortcuts are why the reference goes across. Recognising
+            // Ctrl+Enter and Esc in the browser is what keeps every *other* keystroke off the wire, and
+            // the call back carries the textarea's live value, so the keyboard save can never save the
+            // text as it was one round trip ago.
+            _self ??= DotNetObjectReference.Create(this);
+            await JsRuntime.InvokeVoidAsync("martenStudio.json.enhanceTextarea", _textArea, _gutter, _self);
         }
         catch (JSException)
         {
@@ -189,6 +211,52 @@
         catch (InvalidOperationException)
         {
         }
+    }
+
+    /// <summary>Saves the text the browser has, sent by the Ctrl+Enter handler in the lib module.</summary>
+    /// <param name="text">The textarea's live value at the moment the shortcut was pressed.</param>
+    [JSInvokable]
+    public async Task OnEditorSaveAsync(string? text)
+    {
+        _text = text ?? string.Empty;
+
+        if (ValidateBeforeSave && !Validate())
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        await OnSave.InvokeAsync(_text);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Cancels the edit, sent by the Esc handler in the lib module.</summary>
+    /// <param name="text">
+    /// The textarea's live value, for the same reason the save path carries it: Esc pressed on text the
+    /// <c>change</c> event has not reported yet would otherwise look like a clean editor and discard what
+    /// was typed without asking.
+    /// </param>
+    [JSInvokable]
+    public async Task OnEditorCancelAsync(string? text = null)
+    {
+        if (text is not null)
+        {
+            _text = text;
+        }
+
+        await CancelAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Releases the reference the lib module holds. Without this the component stays reachable from the
+    /// JS side for the life of the circuit, which on a page that opens an editor per document is a leak
+    /// with a shape - one live component per document ever edited.
+    /// </summary>
+    public void Dispose()
+    {
+        _self?.Dispose();
+        _self = null;
     }
 
     private async Task OnChangedAsync(ChangeEventArgs args)
@@ -206,26 +274,17 @@
         }
     }
 
-    private async Task OnKeyDownAsync(KeyboardEventArgs args)
-    {
-        if (args.Key == "Enter" && (args.CtrlKey || args.MetaKey))
-        {
-            await SaveAsync();
-            return;
-        }
-
-        if (args.Key == "Escape")
-        {
-            await CancelAsync();
-        }
-    }
-
     /// <summary>
-    /// Pulls the textarea's live value across before acting on it. The binding is on <c>change</c>, which
-    /// has not fired yet when Ctrl+Enter arrives; clicking a button blurs the textarea and does fire it,
-    /// so only the keyboard path needs this.
+    /// Pulls the textarea's live value across before acting on it, and says whether it got one.
     /// </summary>
-    private async Task CommitAsync()
+    /// <remarks>
+    /// The binding is on <c>change</c>. Pressing a toolbar button blurs the textarea and so does fire it -
+    /// but only if the browser thinks the value changed, and the order in which the two events reach the
+    /// circuit is the browser's business, not ours. Reading the value back is the only way to be sure
+    /// what is about to be saved is what is on screen, which is why <see cref="SaveAsync"/> refuses when
+    /// this returns <see langword="false"/> rather than saving whatever it happens to be holding.
+    /// </remarks>
+    private async Task<bool> CommitAsync()
     {
         try
         {
@@ -233,6 +292,7 @@
             if (live is not null)
             {
                 _text = live;
+                return true;
             }
         }
         catch (JSException)
@@ -241,6 +301,8 @@
         catch (InvalidOperationException)
         {
         }
+
+        return false;
     }
 
     private async Task FormatAsync()
@@ -311,7 +373,17 @@
 
     private async Task SaveAsync()
     {
-        await CommitAsync();
+        if (!await CommitAsync())
+        {
+            // Saving text that might be a round trip out of date is how an edit silently reverts a
+            // character somebody typed. Refusing and saying so is the only honest answer.
+            _status = string.Empty;
+            _caretSource = null;
+            _caretLine = null;
+            _error = "The editor's current text could not be read from the browser, so nothing was saved. " +
+                "Click in the document and press Save again.";
+            return;
+        }
 
         if (ValidateBeforeSave && !Validate())
         {

@@ -338,9 +338,17 @@ internal static class JsonPathExpressions
     }
 
     /// <summary>Quotes one element of a Postgres text array literal when it would otherwise be ambiguous.</summary>
+    /// <remarks>
+    /// The <c>NULL</c> case is not cosmetic. Postgres reads an unquoted <c>NULL</c> element of an array
+    /// literal as the NULL element, case-insensitively, so a member actually named <c>null</c> would come
+    /// out as <c>data #&gt;&gt; '{null}'</c> - an expression that asks for a NULL path step and returns
+    /// NULL for every row rather than reading the member.
+    /// </remarks>
     private static string QuoteArrayElement(string value)
     {
-        var needsQuotes = value.Length == 0;
+        var needsQuotes = value.Length == 0 ||
+            string.Equals(value, "NULL", StringComparison.OrdinalIgnoreCase);
+
         foreach (var c in value)
         {
             if (c is '{' or '}' or ',' or '"' or '\\' or ' ' || char.IsWhiteSpace(c))

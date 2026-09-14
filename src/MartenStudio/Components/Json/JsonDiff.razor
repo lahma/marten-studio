@@ -9,7 +9,13 @@
 *@
 
 <div class="ms-diff">
-    @if (_result.IsEmpty)
+    @if (_result.IsFaulted)
+    {
+        <p class="ms-alert ms-alert-error ms-diff-faulted" role="alert">
+            These documents could not be compared: @_result.Fault
+        </p>
+    }
+    else if (_result.IsEmpty)
     {
         <p class="ms-diff-empty">@EmptyText</p>
     }

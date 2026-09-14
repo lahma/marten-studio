@@ -38,6 +38,8 @@
     private JsonRawDocument _document = JsonRawDocument.Empty;
     private string? _rendered;
     private bool _hasRendered;
+    private int _renderedMaxBytes;
+    private int _renderedMaxLines;
 
     /// <summary>The document text.</summary>
     [Parameter]
@@ -81,14 +83,22 @@
     protected override void OnParametersSet()
     {
         // Re-render on a parameter change is cheap; re-pretty-printing a megabyte because the wrap
-        // toggle moved is not. The rendered document is keyed on the text alone.
-        if (_hasRendered && ReferenceEquals(_rendered, Json))
+        // toggle moved is not. So the rendered document is keyed on everything that actually goes into
+        // it - the text and the two limits - and on nothing else. Keying it on the text alone was a bug:
+        // a raised MaxLines left the old clamp on screen, with a notice saying it was showing fewer
+        // lines than it had been asked for.
+        if (_hasRendered &&
+            ReferenceEquals(_rendered, Json) &&
+            _renderedMaxBytes == MaxBytes &&
+            _renderedMaxLines == MaxLines)
         {
             return;
         }
 
         _hasRendered = true;
         _rendered = Json;
+        _renderedMaxBytes = MaxBytes;
+        _renderedMaxLines = MaxLines;
         _document = JsonPrettyPrinter.Render(Json, MaxBytes, MaxLines);
     }
 

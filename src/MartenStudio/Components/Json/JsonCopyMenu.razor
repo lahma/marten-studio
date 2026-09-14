@@ -6,11 +6,16 @@
     The per-node menu, on the platform's own popover: one element, reused by every row, opened
     declaratively by each row's key button through `popovertarget`. That is what makes it free of a
     positioning library (hard rule 3) and free of a "click outside to close" handler - the browser's own
-    light dismiss does it.
+    light dismiss does it, and Escape with it.
 
     There is exactly one of these per viewer rather than one per row. Twenty thousand hidden menus would
     be twenty thousand components with their own parameters to diff on every render, for a thing the user
     opens once.
+
+    role="menu" is a promise about the keyboard, not a label: a menu is one tab stop, and inside it the
+    arrow keys, Home and End move a roving tabindex between the items. That is implemented here, because
+    the alternative - keeping the role and leaving six tab stops behind - tells a screen-reader user this
+    is a menu and then behaves like a list of buttons.
 *@
 
 <div id="@ElementId"
@@ -18,48 +23,38 @@
      class="ms-menu ms-copy-menu"
      role="menu"
      aria-label="Copy from this node"
-     @ref="_element">
+     @ref="_element"
+     @onkeydown="OnKeyDownAsync">
     <div class="ms-copy-menu-header">
         <span class="ms-copy-menu-path">@(string.IsNullOrEmpty(Path) ? "$" : Path)</span>
     </div>
 
-    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyValueAsync">
-        <span class="ms-menu-item-label">Copy value</span>
-        <span class="ms-menu-item-detail">@Preview(ValueJson)</span>
-    </button>
-
-    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyJsonPathAsync">
-        <span class="ms-menu-item-label">Copy JSONPath</span>
-        <span class="ms-menu-item-detail">@JsonPath</span>
-    </button>
-
-    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyPgExpressionAsync">
-        <span class="ms-menu-item-label">Copy Postgres expression</span>
-        <span class="ms-menu-item-detail">@PgExpression</span>
-    </button>
-
-    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyPgTextPathAsync">
-        <span class="ms-menu-item-label">Copy Postgres <code>#&gt;&gt;</code> path</span>
-        <span class="ms-menu-item-detail">@PgTextPath</span>
-    </button>
-
-    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyLinqPathAsync">
-        <span class="ms-menu-item-label">Copy Marten LINQ path</span>
-        <span class="ms-menu-item-detail">@LinqPath</span>
-        @if (LinqNote is { Length: > 0 })
-        {
-            <span class="ms-menu-item-warning">@LinqNote</span>
-        }
-    </button>
-
-    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyContainmentFilterAsync">
-        <span class="ms-menu-item-label">Copy containment filter</span>
-        <span class="ms-menu-item-detail">@Preview(ContainmentFilter)</span>
-    </button>
+    @for (var i = 0; i < _items.Count; i++)
+    {
+        var index = i;
+        var item = _items[index];
+        <button type="button"
+                id="@ItemId(index)"
+                class="ms-menu-item"
+                role="menuitem"
+                tabindex="@(index == _activeIndex ? 0 : -1)"
+                @key="index"
+                @onclick="() => CopyAsync(item.Text, item.What)">
+            <span class="ms-menu-item-label">@item.Label</span>
+            <span class="ms-menu-item-detail">@item.Detail</span>
+            @if (item.Warning is { Length: > 0 })
+            {
+                <span class="ms-menu-item-warning">@item.Warning</span>
+            }
+        </button>
+    }
 </div>
 
 @code {
     private ElementReference _element;
+    private IReadOnlyList<MenuItem> _items = [];
+    private string? _preparedFor;
+    private int _activeIndex;
 
     /// <summary>The DOM id every row's key button points its <c>popovertarget</c> at.</summary>
     [Parameter]
@@ -107,6 +102,8 @@
     /// </summary>
     public async Task ShowAsync()
     {
+        _activeIndex = 0;
+
         try
         {
             await JsRuntime.InvokeVoidAsync("martenStudio.json.openMenu", _element);
@@ -121,20 +118,83 @@
         }
     }
 
-    private Task CopyValueAsync() => CopyAsync(ValueJson, "value");
+    protected override void OnParametersSet()
+    {
+        // A menu that has just been told about a different node is a menu that is about to be opened
+        // again, so the roving tabindex starts at the top. Any other re-render leaves it where the user
+        // put it - resetting on every parameter set would undo each arrow key the moment the viewer
+        // around it re-rendered.
+        if (!string.Equals(_preparedFor, JsonPath, StringComparison.Ordinal))
+        {
+            _preparedFor = JsonPath;
+            _activeIndex = 0;
+        }
 
-    private Task CopyJsonPathAsync() => CopyAsync(JsonPath, "JSONPath");
+        _items =
+        [
+            new MenuItem("Copy value", Preview(ValueJson), null, ValueJson, "value"),
+            new MenuItem("Copy JSONPath", JsonPath, null, JsonPath, "JSONPath"),
+            new MenuItem("Copy Postgres expression", PgExpression, null, PgExpression, "Postgres expression"),
+            new MenuItem("Copy Postgres #>> path", PgTextPath, null, PgTextPath, "Postgres path expression"),
+            new MenuItem("Copy Marten LINQ path", LinqPath, LinqNote, LinqPath, "Marten LINQ path"),
+            new MenuItem(
+                "Copy containment filter",
+                Preview(ContainmentFilter),
+                null,
+                ContainmentFilter,
+                "containment filter"),
+        ];
+    }
 
-    private Task CopyPgExpressionAsync() => CopyAsync(PgExpression, "Postgres expression");
+    private string ItemId(int index) =>
+        ElementId + "-item-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    private Task CopyPgTextPathAsync() => CopyAsync(PgTextPath, "Postgres path expression");
+    /// <summary>
+    /// The menu keyboard pattern: one tab stop, arrows and Home/End inside it. Tab is left alone, because
+    /// leaving is what Tab is for; Escape is left alone too, because the popover's own light dismiss
+    /// already closes on it.
+    /// </summary>
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (_items.Count == 0 || args.CtrlKey || args.AltKey || args.MetaKey)
+        {
+            return;
+        }
 
-    private Task CopyLinqPathAsync() => CopyAsync(LinqPath, "Marten LINQ path");
+        var next = args.Key switch
+        {
+            "ArrowDown" => (_activeIndex + 1) % _items.Count,
+            "ArrowUp" => (_activeIndex - 1 + _items.Count) % _items.Count,
+            "Home" => 0,
+            "End" => _items.Count - 1,
+            _ => -1,
+        };
 
-    private Task CopyContainmentFilterAsync() => CopyAsync(ContainmentFilter, "containment filter");
+        if (next < 0)
+        {
+            return;
+        }
+
+        _activeIndex = next;
+        await FocusItemAsync(next);
+    }
+
+    private async Task FocusItemAsync(int index)
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.json.focusElement", ItemId(index));
+        }
+        catch (JSException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
 
     private static string Preview(string value) =>
-        value.Length <= 48 ? value : value[..48] + "…";
+        value.Length <= 48 ? value : JsonModelBuilder.Cut(value, 48) + "…";
 
     private async Task CopyAsync(string text, string what)
     {
@@ -157,4 +217,12 @@
             ? "Copied the " + what + "."
             : "Could not copy the " + what + ".");
     }
+
+    /// <summary>One offer in the menu: what it says, what it shows, and what it puts on the clipboard.</summary>
+    private readonly record struct MenuItem(
+        string Label,
+        string Detail,
+        string? Warning,
+        string Text,
+        string What);
 }
