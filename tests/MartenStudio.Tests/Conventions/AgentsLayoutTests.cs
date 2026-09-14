@@ -25,7 +25,7 @@ namespace MartenStudio.Tests.Conventions;
 public class AgentsLayoutTests
 {
     /// <summary>Roots whose directory structure the layout tree has to describe completely.</summary>
-    private static readonly string[] DescribedRoots = ["src", "samples", "tests", "build", ".claude"];
+    private static readonly string[] DescribedRoots = ["src", "samples", "tests", "build", ".claude", "docs"];
 
     /// <summary>Directory names that are build output, never source, and never listed.</summary>
     private static readonly string[] ExcludedSegments = ["bin", "obj", "artifacts"];

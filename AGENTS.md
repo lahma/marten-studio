@@ -486,6 +486,8 @@ samples/MartenStudio.SampleDomain/Generation/  The demo data generator: size pre
                                          truncation, the word lists and the run marker
 samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpoints, progress, daemon lag
 tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in
+docs/                                    Long-form documentation linked from README.md; never packed
+docs/screenshots/                        The eight README screenshots, from the P2 UI verification run
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),
