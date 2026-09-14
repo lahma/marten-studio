@@ -480,11 +480,15 @@ layer of the authorization contract does.
 
 ### Demo data generator
 
-*Verify this section against packet P8a when it lands.* In development the sample's landing page carries
-a data-generation panel — presets **Small**, **Medium**, **Large** and **Custom** — that runs as a
-background job with progress, cancellation and a truncate, so you can see the studio against something
-bigger than a seeded handful. It is off unless the host is started with `--allow-data-generation`, and
-the responsiveness tests that drive a large store run under `MARTENSTUDIO_LARGE=1`.
+In the `Development` environment (or with `--allow-data-generation` elsewhere) the sample's landing page
+carries a **Demo data** panel for the `admin` user — presets **Small**, **Medium** (about 100 k documents
+and 100 k events), **Large** (about 1.2 M documents, 1.25 M events across 250 k streams) and **Custom** —
+that runs as a cancellable background job with a progress bar, rows per second, an ETA and the async
+daemon's lag, plus a truncate that removes exactly what was generated. Documents go in through a binary
+`COPY`; order streams go through Marten sessions so the inline projection runs and the async ones have
+something to catch up on, with one poisoned stream per 10 000 so the dead-letter screen has real content.
+The studio's own services are measured against the Medium set in every integration run; the Large set
+runs under `MARTENSTUDIO_LARGE=1`. See [`samples/MartenStudio.Sample/README.md`](samples/MartenStudio.Sample/README.md).
 
 ## Security model and limits
 
@@ -512,12 +516,13 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   is spelled. Configure one if you enable the console. Without it, the console reads everything the
   store's own Postgres role can read — every table in the database, Marten's or not.
 - **Grant `RunSql` only to people you would give `psql` to.** That is the whole of it.
-- **Mode A is guarded differently, because it needs no capability.** A `where` clause may not carry a
-  second statement or be a statement of its own — Marten's string query runs on an ordinary session, not
-  inside the console's read-only transaction, so `1 = 1; drop table x` would really write — and without
-  `RunSql` it may not reach another relation, call a function that reads, writes or waits outside the
-  row, or cast to `regclass`/`regproc`. The scanner errs towards refusing, and every refusal names the
-  capability that would lift it.
+- **Mode A is guarded differently, because it needs no capability.** The studio composes the statement
+  itself — `select … from <table> as d where 1 = 1 and <tenant> and <not deleted> and ( <your clause> )`
+  — so the tenant in the header and the soft-delete rule apply exactly as they do in the Documents
+  browser, and the SQL the page shows is the SQL that ran. The clause may not carry a second statement or
+  be a statement of its own, and without `RunSql` it may not reach another relation, call a function that
+  reads, writes or waits outside the row, or cast to `regclass`/`regproc`. The scanner errs towards
+  refusing, and every refusal names the capability that would lift it.
 - **Audit.** Every mutating operation and every refusal is written to a 500-entry in-memory ring (the
   Activity page) *and* to your `ILogger` under event ids **9200–9211**, which is the copy that survives a
   deployment. 9200 `ActionPerformed`, 9201 `ActionFailed`, 9202 `CapabilityDenied`, 9203
@@ -530,12 +535,11 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
 
 ## Current limitations
 
-- **Mode A applies no tenant or soft-delete predicate.** A Marten `where` clause goes through Marten's
-  `UserSuppliedQueryHandler`, which adds neither, so on a conjoined multi-tenant collection it reads
-  every tenant's rows and on a soft-deleted one it reads deleted rows as well — regardless of the tenant
-  in the scope selector. The Documents browser is not affected: it builds its own SQL and applies both.
-  Until this is fixed, treat Query as a store-wide read and gate it with `StoreAuthorizationPolicy`
-  accordingly.
+- **Mode A runs on a plain read connection, not inside the console's read-only transaction.** The
+  composed statement is the studio's own `select`, the clause guard refuses a second statement, and
+  without `RunSql` every function that could write is refused — but a visitor who holds `RunSql` may name
+  such a function inside the clause, and there is no `SET TRANSACTION READ ONLY` behind Mode A to catch
+  it the way there is behind the console. Grant `RunSql` accordingly.
 - **Mode A takes no parameters.** The clause is handed to Marten as SQL text; there is no `?`/`@p`
   binding, so a literal you paste in is SQL too. What keeps that from being an ungated console is the
   clause guard — no second statement, and without `RunSql` no nested read — not a parameter you could

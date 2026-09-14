@@ -233,9 +233,21 @@ database, Marten's or not, including tables belonging to other applications shar
 ## Mode A: the Marten `where` clause
 
 The Query page's other mode needs *no* capability, because it is a read against one document type — the
-same thing the documents list does with a search box. That is precisely why it is held to a stricter
-shape than the console: a clause runs through a Marten session on an ordinary transaction, **not** inside
-the console's read-only one, so a clause carrying a second statement would really write.
+same thing the documents list does with a search box. The studio composes the statement itself:
+
+```sql
+select d."id", d."data"::text /*, d."tenant_id", d."mt_deleted" when the table has them */
+from <schema>."mt_doc_<alias>" as d
+where 1 = 1 and d."tenant_id" = @tenant and d."mt_deleted" = false and ( <your clause> )
+order by … limit @limit
+```
+
+The tenant predicate and the soft-delete predicate are the Documents browser's, decided from the
+document type's configuration reconciled against the physical columns, and the SQL the page shows is the
+SQL that ran. Marten's own string query (`Query<T>("where …")`) is never used for this: it applies
+neither predicate. That is also precisely why the clause is held to a stricter shape than the console: it
+runs as an ordinary command on a read connection, **not** inside the console's read-only transaction, so
+a clause carrying a second statement would really write.
 
 Three rules, all structural rather than semantic:
 
@@ -263,16 +275,14 @@ refusal names `MartenStudioOptions.Capabilities.RunSql` as the thing that would 
 
 ### What Mode A does **not** do
 
-Marten's `UserSuppliedQueryHandler` applies the document's select clause and nothing else: **no tenant
-predicate and no soft-delete predicate.** A `where` clause against a conjoined multi-tenant collection
-therefore reads every tenant's rows, and against a soft-deleted collection it reads deleted rows,
-regardless of the tenant selected in the header. The session is still pinned to the right *database*
-(`SessionOptions.ForDatabase(tenantId, database)`), and the Documents browser — which builds its own SQL
-— applies both predicates; Mode A does not.
+It does not run inside a read-only transaction. The statement is the studio's own `select`, the guard
+refuses a second statement, and without `RunSql` every function that could write is refused — but a
+visitor who holds `RunSql` (and passes the write policy) may name such a function inside the clause,
+`setval(…)` say, and nothing behind Mode A would roll it back the way the console's transaction would.
+The console is the safer place for that visitor's ad-hoc reads; grant `RunSql` accordingly.
 
-Treat the Query page as a **store-wide read** and authorize it accordingly with
-`StoreAuthorizationPolicy`, or leave `RunSql` and the Query page out of reach of anyone who must not see
-another tenant's rows.
+Every successful run is audited under 9204 `SqlExecuted` with the statement that ran, so a clause that
+should not have been typed is at least on the record.
 
 ## What the studio never does
 
