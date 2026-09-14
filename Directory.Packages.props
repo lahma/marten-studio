@@ -13,6 +13,21 @@
          package from pinning an ASP.NET Core patch on its host. Floor, not exact pin: a consumer
          on a newer Marten 9.x must not be forced down. Npgsql arrives transitively via Weasel.Postgresql. -->
     <PackageVersion Include="Marten" Version="9.35.0" />
+    <!--
+      blazor.web.js. As of .NET 10 it is not in the shared framework and not embedded in any ASP.NET
+      Core assembly: it lives in this pack, which the SDK resolves only for a project whose
+      `RequiresAspNetWebAssets` is true - and the Web SDK defaults that to true only for a project with
+      `.razor` Content items of its own. A host that adds Marten Studio and writes no Blazor components
+      has none, so GET /_framework/blazor.web.js answered 404 and the studio prerendered and never became
+      interactive. The package cannot set the property on the consumer's behalf (NuGet excludes
+      package-provided .props from restore evaluation), so the reference is how the script reaches the
+      host: its buildTransitive targets define the asset IN THE CONSUMER, at the consumer's own resolved
+      version, which is also what keeps the studio from shipping a frozen copy of a Microsoft script.
+      No lib/, no ref/, no runtime assembly - three .js files and an MSBuild target - so it pins no
+      ASP.NET Core patch on the host. Floor, not exact pin, like Marten. Recorded in AGENTS.md,
+      *Package budget changes*, 2026-09-14.
+    -->
+    <PackageVersion Include="Microsoft.AspNetCore.App.Internal.Assets" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup Label="Sample and integration tests">

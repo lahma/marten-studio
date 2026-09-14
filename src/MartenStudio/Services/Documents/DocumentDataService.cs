@@ -30,6 +30,28 @@ internal static class CollectionAliases
     /// leaves out of the discovered group.
     /// </summary>
     public const string DeadLetterTable = "mt_doc_deadletterevent";
+
+    /// <summary>
+    /// Whether a document type is Marten's own bookkeeping rather than one of the host's collections.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only <c>DeadLetterEvent</c> so far, and only once the store has an event store: a store with an
+    /// async projection gets the mapping for free, so the type arrives in
+    /// <c>AllKnownDocumentTypes()</c> in the registered band rather than as a discovered orphan table -
+    /// which is why excluding the table name from discovery is not enough on its own.
+    /// </para>
+    /// <para>
+    /// <b>The documents browser leaves it out entirely, and this is not cosmetic.</b> Dead letters have
+    /// a screen of their own whose actions are gated on <c>ManageDeadLetters</c>; the same rows reached
+    /// as an ordinary collection would be editable and deletable under <c>EditDocuments</c> and
+    /// <c>DeleteDocuments</c> instead, which is a different capability answering for the same data. The
+    /// Query page takes the opposite line on purpose and keeps it in the picker - it is queryable there,
+    /// read-only, and sorted last (<c>QueryService.CompareAliases</c>).
+    /// </para>
+    /// </remarks>
+    public static bool IsMartenInfrastructure(Type documentType) =>
+        documentType == typeof(JasperFx.Events.Daemon.DeadLetterEvent);
 }
 
 /// <summary>
@@ -964,6 +986,13 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         foreach (IDocumentType documentType in store.Options.AllKnownDocumentTypes())
         {
+            // Marten's own bookkeeping is not one of this application's collections, and the browser's
+            // capabilities are not the ones that answer for it - see CollectionAliases.
+            if (CollectionAliases.IsMartenInfrastructure(documentType.DocumentType))
+            {
+                continue;
+            }
+
             if (visible is null || visible(documentType.DocumentType))
             {
                 yield return documentType;

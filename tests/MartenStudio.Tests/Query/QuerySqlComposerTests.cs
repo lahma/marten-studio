@@ -286,4 +286,35 @@ public class QuerySqlComposerTests
         composed.Statement.Should().Contain("\"s\".\"t\"");
         composed.Statement.Should().Contain("where a = 'x'");
     }
+
+    /// <summary>
+    /// The two denylists are one list. The console's set is the base and the composer adds only what a
+    /// <c>where</c> clause needs on top of it, so a function added to <c>ReadOnlySqlGuard</c> reaches the
+    /// ungated Mode A for free and the two can never answer the same question differently.
+    /// </summary>
+    [Fact]
+    public void Every_function_the_console_refuses_is_refused_in_a_where_clause_too()
+    {
+        QuerySqlComposer.DisallowedFunctions.Should().Contain(ReadOnlySqlGuard.DisallowedFunctions.Keys);
+
+        QuerySqlComposer.DisallowedFunctions.Should().HaveCount(
+            ReadOnlySqlGuard.DisallowedFunctions.Count + QuerySqlComposer.AdditionalDisallowedFunctions.Length,
+            "the composer's own entries are the difference between the two lists, not a second copy");
+
+        QuerySqlComposer.AdditionalDisallowedFunctions.Should().NotIntersectWith(
+            ReadOnlySqlGuard.DisallowedFunctions.Keys,
+            "an entry restated on both sides is the drift this test exists to stop");
+    }
+
+    /// <summary>
+    /// The console allows <c>pg_sleep</c> because <c>statement_timeout</c> bounds it inside the read-only
+    /// transaction. A Marten string query has neither, so Mode A refuses it - which is the one deliberate
+    /// disagreement between the two lists and is therefore worth pinning.
+    /// </summary>
+    [Fact]
+    public void Pg_sleep_is_the_one_the_console_allows_and_a_clause_does_not()
+    {
+        ReadOnlySqlGuard.DisallowedFunctions.Should().NotContainKey("pg_sleep");
+        QuerySqlComposer.DisallowedFunctions.Should().Contain("pg_sleep");
+    }
 }

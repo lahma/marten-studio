@@ -135,6 +135,18 @@ public static class MartenStudioEndpointRouteBuilderExtensions
         // that forwards only the studio prefix needs.
         components.Add(endpointBuilder => ReRootUnderStudioPath(endpointBuilder, studioPath));
 
+        // The studio has no form, so it needs no antiforgery token - and requiring one would be a
+        // middleware-ordering requirement on the host, which is the one thing registering the studio must
+        // never impose. MapRazorComponents stamps IAntiforgeryMetadata that *requires* validation on every
+        // page endpoint, and the framework then refuses to serve an endpoint carrying it when
+        // UseAntiforgery() is not in the pipeline: an API-only host that mapped the studio got 500 for
+        // GET /marten with "Endpoint … contains anti-forgery metadata, but a middleware was not found".
+        // Saying it here rather than leaving it to the host keeps the mutations covered by what actually
+        // covers them - every one of them is a Blazor event over the circuit, and SignalR's own
+        // same-origin check is what stands between a cross-site page and that circuit. A host that does
+        // call UseAntiforgery() is unaffected: the middleware simply has nothing to validate here.
+        components.DisableAntiforgery();
+
         // Serve the studio's static web assets through endpoint routing as a fallback for hosts that do
         // not configure UseStaticFiles()/MapStaticAssets() (API-only projects, for instance). The root
         // copy stays for hosts that do not path-forward; the mirror under the studio path is what the

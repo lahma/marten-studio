@@ -81,22 +81,40 @@ internal static class QuerySqlComposer
     ];
 
     /// <summary>
+    /// The entries this composer refuses on top of <see cref="ReadOnlySqlGuard.DisallowedFunctions" />,
+    /// each because a <c>where</c> clause is not a console statement.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>pg_sleep</c> is here although the console allows it: the console bounds it with
+    /// <c>statement_timeout</c> inside its own read-only transaction, while a Marten string query runs on
+    /// an ordinary session that has neither, so the same call is a way to park a connection. The rest read
+    /// the catalog, run a statement of their own behind a function call
+    /// (<c>query_to_xml</c>, <c>xpath</c>) or move a sequence (<c>nextval</c>, <c>setval</c>) - none of
+    /// which is a filter on the collection that was picked.
+    /// </para>
+    /// </remarks>
+    internal static readonly string[] AdditionalDisallowedFunctions =
+    [
+        "pg_sleep", "current_setting", "query_to_xml", "query_to_xml_and_xmlschema", "table_to_xml",
+        "xpath", "xpath_exists", "nextval", "setval",
+    ];
+
+    /// <summary>
     /// Functions that read, write or wait outside the row they are given. Refused unless the visitor may
     /// run SQL.
     /// </summary>
     /// <remarks>
-    /// <b>When W2-fix's <c>ReadOnlySqlGuard.DisallowedFunctions</c> lands, union it into this list</b> - it
-    /// is the same question asked of a different text, and two lists answering it differently is exactly
-    /// the drift a reviewer cannot see. This is what could be named on a base without that set.
+    /// <b>One list, two callers.</b> <see cref="ReadOnlySqlGuard.DisallowedFunctions" /> is the same
+    /// question asked of a different text, so it is unioned in here rather than restated: two lists
+    /// answering it differently is exactly the drift a reviewer cannot see, and a function added to the
+    /// console's denylist now reaches the ungated <c>where</c>-clause mode for free. What this file owns
+    /// is only the difference, <see cref="AdditionalDisallowedFunctions" />.
     /// </remarks>
-    internal static readonly string[] DisallowedFunctions =
-    [
-        "pg_sleep", "pg_sleep_for", "pg_sleep_until", "set_config", "current_setting", "dblink",
-        "dblink_exec", "dblink_connect", "query_to_xml", "query_to_xml_and_xmlschema", "table_to_xml",
-        "xpath", "xpath_exists", "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_stat_file",
-        "lo_import", "lo_export", "pg_terminate_backend", "pg_cancel_backend", "pg_advisory_lock",
-        "pg_advisory_xact_lock", "pg_reload_conf", "pg_rotate_logfile", "nextval", "setval",
-    ];
+    internal static readonly IReadOnlySet<string> DisallowedFunctions =
+        new HashSet<string>(
+            ReadOnlySqlGuard.DisallowedFunctions.Keys.Concat(AdditionalDisallowedFunctions),
+            StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Casts that turn text into a database object, and so into a probe of the catalog.</summary>
     internal static readonly string[] DisallowedCastTargets = ["regclass", "regproc"];
@@ -267,7 +285,7 @@ internal static class QuerySqlComposer
                         start);
                 }
 
-                if (Contains(DisallowedFunctions, word))
+                if (DisallowedFunctions.Contains(word))
                 {
                     return SqlGuardResult.Reject(
                         SqlRejectionReason.DisallowedStatement,

@@ -21,7 +21,18 @@
     <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
 </head>
 <body>
-    <AntiforgeryToken />
+    @*
+        No <AntiforgeryToken />, and the studio's endpoints say DisableAntiforgery().
+
+        The studio has no <form> and no <EditForm>: every mutation is a Blazor event over the circuit,
+        which SignalR's own origin check already covers. The token was therefore protecting nothing - and
+        it cost the host a hard requirement, because rendering it needs the antiforgery middleware in the
+        pipeline and MapRazorComponents stamps IAntiforgeryMetadata on the page endpoints, so a host that
+        never called app.UseAntiforgery() answered 500 for GET /marten. "Registering the studio must never
+        change host behaviour" includes not dictating the host's middleware order, so the requirement is
+        dropped rather than documented. If a future screen ever grows a real form, it brings the token
+        back with it - scoped to that endpoint, not to the whole studio.
+    *@
     <Routes @rendermode="RenderMode.InteractiveServer" />
     @*
         Relative, so it resolves against the studio-rooted <base href> above: every mount serves its own

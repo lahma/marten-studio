@@ -3134,13 +3134,9 @@ a.ms-json-url {
 /*
  * Marten Studio - the projections screen.
  *
- * Loaded by Components/Pages/Projections/Projections.razor through <HeadContent>, not by
- * marten-studio.css: a host that never opens this page never parses these rules, and the projections
- * packet owns one file rather than a slice of the shared stylesheet.
- *
- * Every rule is prefixed ms- and every colour comes from the tokens in marten-studio.css (AGENTS.md
- * hard rule 3). The three added here are lag thresholds, which have no equivalent token because they
- * are a scale rather than a status: keeping up, behind, badly behind.
+ * Every rule is prefixed ms- and every colour comes from the tokens above (AGENTS.md hard rule 3). The
+ * three added here are lag thresholds, which have no equivalent token because they are a scale rather
+ * than a status: keeping up, behind, badly behind.
  */
 
 .ms-projections {
@@ -4368,4 +4364,1345 @@ a.ms-event-chip:focus-visible {
 
 .ms-anonymous-banner strong {
     font-weight: 700;
+}
+
+/* ==========================================================================
+   DOCUMENTS (folded in from the P2 packet)
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Collection colour                                                                                */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-studio {
+    /* How a collection hue becomes a colour. The ring itself is chosen in C# to avoid the status
+       hues, so nothing here has to worry about a collection that looks like a failure. */
+    --ms-collection-lightness: 55%;
+    --ms-collection-chroma: 0.16;
+    --ms-collection-dot-size: 9px;
+}
+
+.ms-collection-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-collection-dot {
+    flex: 0 0 auto;
+    width: var(--ms-collection-dot-size);
+    height: var(--ms-collection-dot-size);
+    border-radius: var(--ms-radius-full);
+    background: hsl(var(--ms-collection-hue, 210) 60% 50%);
+}
+
+@supports (color: oklch(50% 0.1 200)) {
+    .ms-collection-dot {
+        background: oklch(var(--ms-collection-lightness) var(--ms-collection-chroma) var(--ms-collection-hue, 210));
+    }
+}
+
+.ms-collection-alias {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-collection-chip-sm {
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-collection-chip-sm .ms-collection-dot {
+    width: 7px;
+    height: 7px;
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Page layout                                                                                      */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-doc-layout {
+    display: grid;
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    gap: var(--ms-space-lg);
+    align-items: start;
+}
+
+.ms-doc-main {
+    min-width: 0;
+}
+
+/* Below the rail breakpoint the rail stacks above the list rather than squeezing it (plan 3.5). */
+@media (max-width: 900px) {
+    .ms-doc-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The rail                                                                                         */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-rail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    position: sticky;
+    top: var(--ms-space-sm);
+    max-height: calc(100vh - var(--ms-header-height) - var(--ms-space-lg));
+    overflow-y: auto;
+}
+
+.ms-rail-group {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-rail-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-bottom: 1px solid var(--ms-color-border);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-rail-count {
+    font-variant-numeric: tabular-nums;
+    color: var(--ms-color-text-muted);
+}
+
+.ms-rail-empty {
+    margin: 0;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-rail-list {
+    margin: 0;
+    padding: var(--ms-space-xs) 0;
+    list-style: none;
+}
+
+.ms-rail-sublist {
+    padding: 0 0 0 var(--ms-space-md);
+    border-left: 1px dashed var(--ms-color-border-strong);
+    margin-left: var(--ms-space-md);
+}
+
+.ms-rail-entry {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding-right: var(--ms-space-xs);
+}
+
+.ms-rail-link {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: var(--ms-space-xs) var(--ms-space-md);
+    color: var(--ms-color-text);
+    text-decoration: none;
+    border-radius: var(--ms-radius-sm);
+}
+
+.ms-rail-link:hover {
+    background: var(--ms-color-surface-hover);
+}
+
+.ms-rail-link-active {
+    background: var(--ms-color-primary-light);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-rail-type {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-rail-badge-count {
+    margin-left: auto;
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-rail-flags {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+/* The flags are letters, not colours alone: a colour-only cue is not a cue for everyone. */
+.ms-rail-flag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: var(--ms-radius-sm);
+    font-size: 10px;
+    font-weight: var(--ms-font-weight-bold);
+    background: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    cursor: help;
+}
+
+.ms-rail-flag-delete { color: var(--ms-color-danger); }
+.ms-rail-flag-tenant { color: var(--ms-color-info); }
+.ms-rail-flag-concurrency { color: var(--ms-color-warning); }
+.ms-rail-flag-hierarchy { color: var(--ms-color-executing); }
+.ms-rail-flag-discovered { color: var(--ms-color-text-muted); }
+
+.ms-rail-action {
+    border: 0;
+    background: transparent;
+    color: var(--ms-color-text-muted);
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: var(--ms-font-size-sm);
+    line-height: 1;
+}
+
+.ms-rail-action:hover {
+    color: var(--ms-color-text);
+}
+
+.ms-rail-action-on {
+    color: var(--ms-color-warning);
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Toolbar                                                                                          */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-doc-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-doc-search {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    flex: 1 1 360px;
+    min-width: 0;
+}
+
+.ms-doc-search-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-doc-search-help summary {
+    cursor: pointer;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-doc-search-help-list {
+    margin: var(--ms-space-xs) 0 0;
+    padding-left: var(--ms-space-md);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-doc-toolbar-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-segmented {
+    display: inline-flex;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    overflow: hidden;
+}
+
+.ms-segmented-option {
+    border: 0;
+    border-right: 1px solid var(--ms-color-border);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text-secondary);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    font-size: var(--ms-font-size-xs);
+    cursor: pointer;
+}
+
+.ms-segmented-option:last-child {
+    border-right: 0;
+}
+
+.ms-segmented-option-on {
+    background: var(--ms-color-primary);
+    color: var(--ms-color-text-inverse);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Column chooser                                                                                   */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-column-chooser {
+    position: relative;
+}
+
+.ms-column-chooser-summary {
+    cursor: pointer;
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    font-size: var(--ms-font-size-xs);
+    background: var(--ms-color-surface);
+}
+
+.ms-column-chooser-body {
+    position: absolute;
+    z-index: 20;
+    right: 0;
+    margin-top: var(--ms-space-xs);
+    min-width: 240px;
+    max-height: 340px;
+    overflow-y: auto;
+    padding: var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    box-shadow: var(--ms-shadow-md);
+}
+
+.ms-column-chooser-group {
+    border: 0;
+    margin: 0 0 var(--ms-space-sm);
+    padding: 0;
+}
+
+.ms-column-chooser-group legend {
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text-secondary);
+    padding: 0 0 var(--ms-space-xs);
+}
+
+.ms-column-chooser-option {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 2px 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-column-chooser-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-column-chooser-kind {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-column-chooser-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The search strip and the index verdict                                                           */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-search-strip {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    padding: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-left-width: 3px;
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-search-strip.ms-verdict-green { border-left-color: var(--ms-color-success); }
+.ms-search-strip.ms-verdict-amber { border-left-color: var(--ms-color-warning); }
+.ms-search-strip.ms-verdict-red { border-left-color: var(--ms-color-danger); }
+
+.ms-search-strip-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-verdict-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px var(--ms-space-sm);
+    border-radius: var(--ms-radius-full);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.ms-verdict-badge-green { background: var(--ms-color-success-bg); color: var(--ms-color-success); }
+.ms-verdict-badge-amber { background: var(--ms-color-warning-bg); color: var(--ms-color-warning); }
+.ms-verdict-badge-red { background: var(--ms-color-danger-bg); color: var(--ms-color-danger); }
+
+.ms-search-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-full);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-search-chip.ms-verdict-amber { border-color: var(--ms-color-warning); }
+.ms-search-chip.ms-verdict-red { border-color: var(--ms-color-danger); }
+.ms-search-chip-error { background: var(--ms-color-danger-bg); color: var(--ms-color-danger); }
+.ms-search-chip-empty { font-family: var(--ms-font-family); color: var(--ms-color-text-muted); border-style: dashed; }
+
+.ms-verdict-reasons {
+    margin: 0;
+    padding-left: var(--ms-space-md);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-verdict-reason-text {
+    margin-right: var(--ms-space-xs);
+}
+
+.ms-code-inline {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    background: var(--ms-color-surface-alt);
+    border-radius: var(--ms-radius-sm);
+    padding: 0 var(--ms-space-xs);
+}
+
+.ms-verdict-blocked {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-danger-bg);
+    color: var(--ms-color-text);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-sql-disclosure summary {
+    cursor: pointer;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-code-sql {
+    max-height: 260px;
+    overflow: auto;
+}
+
+.ms-sql-parameters {
+    margin: var(--ms-space-xs) 0 0;
+    font-size: var(--ms-font-size-xs);
+    font-family: var(--ms-font-mono);
+    color: var(--ms-color-text-muted);
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The table                                                                                        */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-doc-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-doc-table th,
+.ms-doc-table td {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    text-align: left;
+    border-bottom: 1px solid var(--ms-color-border);
+    vertical-align: top;
+}
+
+.ms-doc-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--ms-color-surface-alt);
+    font-size: var(--ms-font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--ms-color-text-secondary);
+    white-space: nowrap;
+}
+
+.ms-doc-sort {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-transform: inherit;
+    letter-spacing: inherit;
+    cursor: pointer;
+    padding: 0;
+}
+
+.ms-doc-sort-on {
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-doc-sort-arrow {
+    margin-left: 2px;
+    font-size: 9px;
+}
+
+.ms-doc-row:hover {
+    background: var(--ms-color-surface-hover);
+}
+
+.ms-doc-row-deleted .ms-doc-id {
+    text-decoration: line-through;
+}
+
+.ms-doc-col-expand,
+.ms-doc-cell-expand {
+    width: 24px;
+    padding-right: 0;
+}
+
+.ms-doc-expander {
+    border: 0;
+    background: transparent;
+    color: var(--ms-color-text-muted);
+    cursor: pointer;
+    font-size: var(--ms-font-size-sm);
+    line-height: 1;
+    padding: 0;
+}
+
+.ms-doc-id {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-primary);
+}
+
+.ms-doc-cell-json,
+.ms-doc-cell-duplicated {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-doc-col-size,
+.ms-doc-cell-size {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-badge-deleted { background: var(--ms-color-danger-bg); color: var(--ms-color-danger); }
+.ms-badge-tenant { background: var(--ms-color-info-bg); color: var(--ms-color-info); }
+.ms-badge-subclass { background: var(--ms-color-surface-alt); color: var(--ms-color-text-secondary); }
+.ms-badge-warning { background: var(--ms-color-warning-bg); color: var(--ms-color-warning); }
+
+.ms-doc-preview-row > .ms-doc-preview-cell {
+    background: var(--ms-color-surface-alt);
+    padding: var(--ms-space-sm);
+}
+
+.ms-doc-preview-empty {
+    margin: 0;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-json-preview {
+    max-height: 240px;
+    overflow: auto;
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Paging                                                                                           */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-pager {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-pager-position {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-pager-note {
+    flex: 1 1 100%;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-warning);
+}
+
+.ms-pager-jump {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    margin-left: auto;
+}
+
+.ms-pager-jump-input {
+    width: 200px;
+    font-size: var(--ms-font-size-xs);
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Document detail                                                                                  */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-breadcrumb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-doc-detail-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-doc-detail-id {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-doc-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-doc-detail-nav {
+    display: inline-flex;
+    gap: 2px;
+}
+
+.ms-btn-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.ms-doc-detail-split {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: var(--ms-space-lg);
+    align-items: start;
+}
+
+/* Below the split breakpoint the panes stack rather than shrink (plan 3.5). */
+@media (max-width: 1024px) {
+    .ms-doc-detail-split {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+.ms-doc-meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    min-width: 0;
+}
+
+.ms-doc-meta-title {
+    margin: 0 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.ms-doc-meta-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-doc-meta-table th,
+.ms-doc-meta-table td {
+    padding: 2px var(--ms-space-xs);
+    text-align: left;
+    border-bottom: 1px solid var(--ms-color-border);
+    word-break: break-all;
+}
+
+.ms-doc-meta-row-identity th { color: var(--ms-color-primary); }
+.ms-doc-meta-row-data td { color: var(--ms-color-text-muted); }
+
+/* The agreement dot carries a title and an aria-label, so the colour is a second cue and never the
+   only one. */
+.ms-agree-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--ms-radius-full);
+}
+
+.ms-agree-agrees { background: var(--ms-color-success); }
+.ms-agree-differs { background: var(--ms-color-danger); }
+.ms-agree-unknown { background: var(--ms-color-text-muted); }
+
+.ms-related-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-related-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 2px 0;
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-related-column {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-related-missing {
+    color: var(--ms-color-danger);
+}
+
+.ms-doc-probe {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-doc-probe-list {
+    margin: var(--ms-space-sm) 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-doc-subtitle {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+/* ==========================================================================
+   QUERY (folded in from the P6 packet)
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Page frame and mode switch
+   -------------------------------------------------------------------------- */
+
+.ms-query-modes {
+    display: flex;
+    gap: var(--ms-space-xs);
+    border-bottom: 1px solid var(--ms-color-border);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-query-mode {
+    appearance: none;
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: var(--ms-radius-md) var(--ms-radius-md) 0 0;
+    color: var(--ms-color-text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-weight: var(--ms-font-weight-medium);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    margin-bottom: -1px;
+}
+
+.ms-query-mode:hover {
+    background: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-query-mode-active,
+.ms-query-mode-active:hover {
+    background: var(--ms-color-surface);
+    border-color: var(--ms-color-border);
+    color: var(--ms-color-text);
+}
+
+.ms-query-layout {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--ms-space-lg);
+}
+
+.ms-query-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.ms-query-side {
+    flex: 0 0 240px;
+    max-width: 240px;
+}
+
+@media (max-width: 1024px) {
+    .ms-query-layout {
+        flex-direction: column;
+    }
+
+    .ms-query-side {
+        flex: 1 1 auto;
+        max-width: none;
+        width: 100%;
+    }
+}
+
+.ms-query-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-query-type {
+    min-width: 220px;
+}
+
+.ms-query-note {
+    font-size: var(--ms-font-size-xs);
+    margin: var(--ms-space-xs) 0 var(--ms-space-md);
+}
+
+.ms-query-sql-warning {
+    font-size: var(--ms-font-size-sm);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-query-empty {
+    margin-top: var(--ms-space-md);
+}
+
+/* --------------------------------------------------------------------------
+   Editor
+   -------------------------------------------------------------------------- */
+
+.ms-query-editor {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-query-editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-query-editor-hint {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    margin-left: auto;
+}
+
+.ms-query-kbd {
+    background: var(--ms-color-surface-alt);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-sm);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    padding: 0 var(--ms-space-xs);
+}
+
+.ms-query-editor-input {
+    display: block;
+    width: 100%;
+    border: none;
+    border-radius: 0;
+    resize: vertical;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    line-height: var(--ms-line-height);
+    padding: var(--ms-space-sm);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text);
+}
+
+.ms-query-editor-input:focus {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+.ms-query-editor-status {
+    padding: var(--ms-space-sm);
+    min-height: var(--ms-space-lg);
+}
+
+.ms-query-editor-ok {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-query-running {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-query-error-message {
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-query-caret {
+    margin: var(--ms-space-xs) 0 0;
+    overflow-x: auto;
+    white-space: pre;
+}
+
+/* --------------------------------------------------------------------------
+   Stats, tabs
+   -------------------------------------------------------------------------- */
+
+.ms-query-stats {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    margin-top: var(--ms-space-md);
+}
+
+.ms-query-stats-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-md);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-query-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+}
+
+.ms-query-stat-label {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ms-query-stat-value {
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-query-tabs {
+    display: flex;
+    gap: var(--ms-space-xs);
+    padding: var(--ms-space-xs) var(--ms-space-sm) 0;
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-query-tab {
+    appearance: none;
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: var(--ms-radius-sm) var(--ms-radius-sm) 0 0;
+    color: var(--ms-color-text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--ms-font-size-xs);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    margin-bottom: -1px;
+}
+
+.ms-query-tab-active,
+.ms-query-tab:hover {
+    background: var(--ms-color-surface-alt);
+    border-color: var(--ms-color-border);
+    color: var(--ms-color-text);
+}
+
+.ms-query-tab-count {
+    margin-left: var(--ms-space-xs);
+}
+
+.ms-query-tab-panel {
+    padding: var(--ms-space-sm) var(--ms-space-md) var(--ms-space-md);
+    max-height: 24rem;
+    overflow: auto;
+}
+
+.ms-query-sql {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ms-query-sql-note,
+.ms-query-no-plan,
+.ms-query-no-messages {
+    font-size: var(--ms-font-size-xs);
+    margin: var(--ms-space-sm) 0 0;
+}
+
+.ms-query-messages {
+    margin: 0;
+    padding-left: var(--ms-space-lg);
+}
+
+.ms-query-message {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* --------------------------------------------------------------------------
+   Results
+   -------------------------------------------------------------------------- */
+
+.ms-query-grid-scroll {
+    overflow-x: auto;
+    margin-top: var(--ms-space-md);
+}
+
+.ms-query-grid th {
+    white-space: nowrap;
+    text-align: left;
+    vertical-align: bottom;
+}
+
+.ms-query-grid-name {
+    display: block;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-query-grid-type {
+    display: block;
+    color: var(--ms-color-text-muted);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+}
+
+.ms-query-grid-ordinal {
+    color: var(--ms-color-text-muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    width: 1%;
+}
+
+.ms-query-grid-footer {
+    font-size: var(--ms-font-size-xs);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-query-truncated {
+    margin-left: var(--ms-space-xs);
+}
+
+.ms-query-cell {
+    max-width: 32rem;
+}
+
+.ms-query-cell-text {
+    display: inline-block;
+    max-width: 32rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+}
+
+.ms-query-cell-number .ms-query-cell-text,
+.ms-query-cell-timestamp .ms-query-cell-text,
+.ms-query-cell-uuid .ms-query-cell-text,
+.ms-query-cell-binary .ms-query-cell-text {
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-query-cell-number {
+    text-align: right;
+}
+
+/* NULL is drawn as its own thing: on a results grid the difference between "no value" and "the empty
+   string" is frequently the answer to the question being asked. */
+.ms-query-null {
+    color: var(--ms-color-text-muted);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-style: italic;
+}
+
+.ms-query-json-chip {
+    appearance: none;
+    cursor: pointer;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-query-json-panel {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    margin-top: var(--ms-space-md);
+}
+
+.ms-query-json-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-query-json-panel-title {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-query-marten-rows {
+    margin-top: var(--ms-space-md);
+    table-layout: fixed;
+    width: 100%;
+}
+
+.ms-query-row-id {
+    width: 18rem;
+    vertical-align: top;
+    word-break: break-all;
+}
+
+.ms-query-row-document {
+    vertical-align: top;
+}
+
+.ms-query-export {
+    margin-top: var(--ms-space-md);
+}
+
+/* --------------------------------------------------------------------------
+   Examples
+   -------------------------------------------------------------------------- */
+
+.ms-query-examples {
+    border: 1px dashed var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-md);
+    padding: var(--ms-space-md);
+    margin-top: var(--ms-space-md);
+}
+
+.ms-query-examples-title {
+    font-size: var(--ms-font-size-lg);
+    margin: 0 0 var(--ms-space-xs);
+}
+
+.ms-query-examples-intro,
+.ms-query-examples-empty {
+    font-size: var(--ms-font-size-xs);
+    margin: 0 0 var(--ms-space-sm);
+}
+
+.ms-query-example-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ms-query-example-button {
+    appearance: none;
+    background: var(--ms-color-surface);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    font: inherit;
+    padding: var(--ms-space-sm);
+    text-align: left;
+    width: 100%;
+}
+
+.ms-query-example-button:hover {
+    background: var(--ms-color-surface-hover);
+    border-color: var(--ms-color-border-strong);
+}
+
+.ms-query-example-title {
+    color: var(--ms-color-text-secondary);
+    flex: 0 0 14rem;
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-query-example-snippet {
+    flex: 1 1 18rem;
+    overflow-x: auto;
+    white-space: pre;
+}
+
+/* --------------------------------------------------------------------------
+   Saved and recent queries
+   -------------------------------------------------------------------------- */
+
+.ms-query-drawer {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    padding: var(--ms-space-sm);
+}
+
+.ms-query-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-query-drawer-title {
+    font-size: var(--ms-font-size-base);
+    margin: 0;
+}
+
+.ms-query-drawer-actions {
+    display: flex;
+    gap: var(--ms-space-xs);
+}
+
+.ms-query-drawer-section {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    letter-spacing: 0.04em;
+    margin: var(--ms-space-md) 0 var(--ms-space-xs);
+    text-transform: uppercase;
+}
+
+.ms-query-drawer-empty {
+    font-size: var(--ms-font-size-xs);
+    margin: 0;
+}
+
+.ms-query-drawer-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ms-query-drawer-item {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-query-drawer-pick {
+    appearance: none;
+    background: transparent;
+    border: none;
+    border-radius: var(--ms-radius-sm);
+    color: var(--ms-color-text);
+    cursor: pointer;
+    flex: 1 1 auto;
+    font: inherit;
+    font-size: var(--ms-font-size-xs);
+    overflow: hidden;
+    padding: var(--ms-space-xs);
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-query-drawer-pick:hover {
+    background: var(--ms-color-surface-hover);
+}
+
+.ms-query-drawer-save,
+.ms-query-drawer-import {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-query-drawer-message {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-query-import-input {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    width: 100%;
 }

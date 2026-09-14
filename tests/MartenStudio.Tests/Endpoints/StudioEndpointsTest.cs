@@ -3,6 +3,7 @@ using System.Net;
 using MartenStudio.Internal;
 using MartenStudio.Tests.Support;
 
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -355,6 +356,72 @@ public class StudioEndpointsTest
         {
             await app.StopAsync(Token);
         }
+    }
+
+    /// <summary>
+    /// The studio must not require <c>app.UseAntiforgery()</c> on the host.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the bare host an API-only project has: <c>AddMartenStudio()</c>, <c>MapMartenStudio()</c>
+    /// and nothing else in the pipeline. <c>MapRazorComponents</c> stamps <c>IAntiforgeryMetadata</c> that
+    /// requires validation on every page endpoint, and the framework then refuses to serve one when the
+    /// antiforgery middleware is not in the pipeline - so before <c>DisableAntiforgery()</c> this request
+    /// was a 500 with "Endpoint … contains anti-forgery metadata, but a middleware was not found".
+    /// </para>
+    /// <para>
+    /// Asserted as a real request rather than as metadata, because the failure was the framework's own
+    /// check at request time and a metadata assertion would have passed throughout.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_host_that_never_calls_UseAntiforgery_still_serves_the_studio()
+    {
+        await using var app = CreateApp();
+        app.MapMartenStudio().AllowAnonymous();
+        await app.StartAsync(Token);
+        try
+        {
+            using var client = app.GetTestClient();
+
+            using var response = await client.GetAsync(new Uri("/marten", UriKind.Relative), Token);
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var body = await response.Content.ReadAsStringAsync(Token);
+            body.Should().Contain("<base href=\"/marten/\"");
+
+            // The studio has no form, so there is no token in the document either - the shell used to
+            // render one, which is what made the middleware load-bearing.
+            body.Should().NotContain("__RequestVerificationToken");
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>
+    /// The metadata half of the same decision: every endpoint the studio maps says validation is not
+    /// required, so a host that <em>does</em> use the middleware simply has nothing to validate here.
+    /// </summary>
+    [Fact]
+    public async Task Every_studio_endpoint_says_antiforgery_validation_is_not_required()
+    {
+        await using var app = CreateApp();
+        app.MapMartenStudio().AllowAnonymous();
+
+        var studioEndpoints = GetRouteEndpoints(app)
+            .Where(x => x.Metadata.GetMetadata<MartenStudioEndpointMarker>() is not null)
+            .ToList();
+
+        studioEndpoints.Should().NotBeEmpty();
+        studioEndpoints.Should().AllSatisfy(endpoint =>
+        {
+            IAntiforgeryMetadata? metadata = endpoint.Metadata.GetMetadata<IAntiforgeryMetadata>();
+
+            metadata.Should().NotBeNull(endpoint.RoutePattern.RawText);
+            metadata!.RequiresValidation.Should().BeFalse(endpoint.RoutePattern.RawText);
+        });
     }
 
     [Fact]

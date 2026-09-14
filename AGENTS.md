@@ -94,7 +94,7 @@ model, the phased delivery plan — lives in the approved plan at
     this class from this table, run this command and paste the output. If a step needs a decision the
     packet does not make, the correct behaviour is to stop and report the question, never to guess.
 
-## Design decisions (D1–D21)
+## Design decisions (D1–D23)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the
 rationale is not.
@@ -110,12 +110,14 @@ left to the default, because Blazor sets component `[Parameter]` properties by n
 deserializes into types discovered from `IDocumentType.DocumentType` at run time — a trimmer told it may
 cut has no way to see either.
 
-**D3 — One `PackageReference` (`Marten`, floor `9.35.0`, no upper bound) plus
+**D3 — Two `PackageReference`s (`Marten`, floor `9.35.0`, and
+`Microsoft.AspNetCore.App.Internal.Assets`, floor `10.0.12`, neither with an upper bound) plus
 `FrameworkReference Microsoft.AspNetCore.App`.** Everything else the RCL needs — Blazor, SignalR,
 authorization, endpoint routing — is in the shared framework, so the package pins no ASP.NET Core patch
-onto its host. No `Marten.AspNetCore`: its value is ETag'd HTTP JSON writers generic over `T`, and the
-studio only ever has a runtime `Type`. No direct `Npgsql` either; it arrives through
-`Weasel.Postgresql`, and adding it would let the two drift.
+onto its host; the assets pack is three `.js` files and an MSBuild target, with no `lib/`, no `ref/` and
+no runtime assembly, so it does not either (D22). No `Marten.AspNetCore`: its value is ETag'd HTTP JSON
+writers generic over `T`, and the studio only ever has a runtime `Type`. No direct `Npgsql` either; it
+arrives through `Weasel.Postgresql`, and adding it would let the two drift.
 
 **D4 — Capabilities are a class of booleans, all defaulting to `false`.** A freshly mapped studio is a
 read-only browser; `o.Capabilities = MartenStudioCapabilities.All()` is the one-line, greppable opt-in, and
@@ -219,6 +221,40 @@ scripted runs and artefact collection. Anything involving design choices, securi
 Marten API verification, Blazor circuit subtleties or test-case design goes to Opus at `xhigh`. Every
 Sonnet result is still reviewed by the orchestrator, and by `studio-reviewer` when it touches `src/`.
 
+**D22 — `blazor.web.js` reaches the host through a `PackageReference`, not through a copy in this
+package.** As of .NET 10 that file is neither in the shared framework nor embedded in any ASP.NET Core
+assembly: it is a static web asset in `Microsoft.AspNetCore.App.Internal.Assets`, which the SDK resolves
+only for a project whose `RequiresAspNetWebAssets` is true — and the Web SDK defaults that to true only
+for a project that has `.razor` Content items *of its own*. A host that adds Marten Studio and writes no
+Blazor components has none, so `GET /_framework/blazor.web.js` answered 404, the studio prerendered,
+never became interactive, and nothing in the build said a word. **The package cannot set the property on
+the consumer's behalf** — that is a restore-time decision, and NuGet deliberately excludes
+package-provided `.props`/`.targets` from restore evaluation (`ExcludeRestorePackageImports`), measured
+rather than assumed. A plain `PackageReference` is what does reach the consumer: the pack's
+`buildTransitive` targets run in any Web SDK executable that references the studio, directly or
+transitively, and define `_framework/blazor.web.js` as **that project's own** static web asset. So the
+host serves the script from its own `MapStaticAssets()`, the studio's mapped
+`{Path}/_framework/blazor.web.js` endpoint forwards to it, and nothing here ships a frozen copy of a
+Microsoft script that would go stale one patch after the package was built. The three-tier resolution in
+`MapStudioFrameworkScript` stays — host web root, host endpoint, then a packaged copy that is now
+normally absent — because the host's copy must always win where there is one. *The alternative that was
+tried and dropped:* vendoring the file, by setting `RequiresAspNetWebAssets` for the RCL itself and
+republishing the resolved file as `_content/MartenStudio/_framework/blazor.web.js`. It worked, and it
+coupled the shipped script to whatever ASP.NET Core patch built the package.
+
+**D23 — The studio has no forms, so it disables antiforgery on its own endpoints.** Every mutation is a
+Blazor event over the circuit; there is no `<form>` and no `<EditForm>` anywhere in `Components/`, and
+SignalR's own same-origin check is what stands between a cross-site page and that circuit. The
+`<AntiforgeryToken />` in the shell was therefore protecting nothing — and it cost the host a hard
+requirement, because `MapRazorComponents` stamps `IAntiforgeryMetadata` that *requires* validation and
+the framework refuses to serve such an endpoint when the middleware is absent: a host that never called
+`app.UseAntiforgery()` got a 500 for `GET /marten`. "Registering the studio must never change host
+behaviour" includes not dictating the host's middleware order, so the token is gone from the shell and
+the studio's component endpoints say `.DisableAntiforgery()`. A host that *does* use the middleware is
+unaffected — it simply has nothing to validate here. If a screen ever grows a real form, it brings the
+token back with it, scoped to that endpoint rather than to the whole studio.
+`StudioEndpointsTest.A_host_that_never_calls_UseAntiforgery_still_serves_the_studio` is the regression.
+
 ## Package budget
 
 Complete, as of the bootstrap commit. Versions are centrally pinned in `Directory.Packages.props`, with
@@ -226,7 +262,8 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 
 | Where | Package | Version | Why it is here |
 |---|---|---|---|
-| `src/MartenStudio` | `Marten` | `9.35.0` | The only `PackageReference` the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. Npgsql 9.0.4 arrives transitively through Weasel.Postgresql 9.32.0. |
+| `src/MartenStudio` | `Marten` | `9.35.0` | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. Npgsql 9.0.4 arrives transitively through Weasel.Postgresql 9.32.0. |
+| `src/MartenStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. |
 | `samples/`, `tests/…Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres, and the container the integration suite runs against. |
 | both test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
 | both test projects | `xunit.v3` | `3.2.2` | Held — see below. |
@@ -257,6 +294,29 @@ Three things were verified rather than assumed:
 - The `11.0.0-rc` releases of the `Microsoft.AspNetCore.*` test packages are deliberately not taken.
 - `Marten` is a floor rather than an exact pin. The repository's own contract with Marten's API is pinned
   instead, by `tests/MartenStudio.Tests/Marten/MartenApiSurfaceTest.cs` — see *Testing*.
+
+**2026-09-14 — `Microsoft.AspNetCore.App.Internal.Assets` 10.0.12 added to `src/MartenStudio`, and a
+vendored copy of `blazor.web.js` removed.** It is the only place that file exists on .NET 10, and nothing
+already in the budget can produce it: the shared framework does not carry it and no ASP.NET Core assembly
+embeds it (checked — `Microsoft.AspNetCore.Components.Server`/`Web`/`Endpoints` have no manifest
+resources). It replaces the build-time vendoring P1.2-fix shipped, which resolved the same pack *for the
+RCL* and republished the file as `_content/MartenStudio/_framework/blazor.web.js` — working, but frozen at
+whatever ASP.NET Core patch built the package. The reference puts the script in the **consumer's** static
+web assets instead, through the pack's `buildTransitive` targets. See D22.
+
+Measured before it was taken, with a nupkg in a local feed and a scratch **API-only** host that has no
+`.razor` file, does not set `RequiresAspNetWebAssets`, calls `MapStaticAssets()` and never calls
+`UseAntiforgery()` (2026-09-14): `_framework/blazor.web.js` appears in the host's own
+`*.staticwebassets.endpoints.json`, `GET /_framework/blazor.web.js` and
+`GET /marten/_framework/blazor.web.js` both answer 200 with the real 200 645-byte script,
+`GET /marten` is 200, the JS-initializer URL the page advertises is 200 under the studio path, and
+`POST /marten/_blazor/negotiate?negotiateVersion=1` answers 200 with a connection token. A second scratch
+host with **central package management, transitive pinning and a `.razor` file of its own** also builds
+clean — worth checking, because the SDK adds an *implicit* `PackageReference` to this pack for such a
+project and a `PackageVersion` row beside an implicit reference is `NU1009`. That is exactly why
+`samples/MartenStudio.Sample` no longer sets `RequiresAspNetWebAssets`: with the row in
+`Directory.Packages.props`, saying it there was NU1009 — and the sample is a better demonstration
+without it, because it is now the shape a real host has.
 
 **2026-09-14 — `GitHubActionsTestLogger` held at 2.4.1, not 3.0.5.** 3.x is a Microsoft.Testing.Platform
 logger: it is compiled against `Microsoft.Testing.Platform` 2.0.0, while `xunit.v3` 3.2.2 resolves 1.9.1,
@@ -369,6 +429,10 @@ src/MartenStudio/Components/Pages/Configuration/  The configuration dump screen
 tests/MartenStudio.Tests/Schema/          Index advice, the tokenizer, the schema page - no database
 tests/MartenStudio.Tests/Configuration/   The describer and the configuration page - no database
 tests/MartenStudio.Integration.Tests/Schema/  Live Postgres: drift, migration preview, catalog reads
+src/MartenStudio/Components/Pages/Documents/  The documents browser: collections rail, list, detail
+src/MartenStudio/Components/Pages/Query/  The query screen: mode switch, editor, result grid, saved queries
+tests/MartenStudio.Tests/Query/            Composer, guard, export, saved queries, the page - no database
+tests/MartenStudio.Integration.Tests/Query/  Live Postgres: Marten where-clause mode and the SQL console
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),
@@ -447,7 +511,10 @@ There are seven kinds of test, in two projects:
    member that moved rather than producing forty CS1061s. `Marten` is a floor, not a pin — this test is
    what makes that safe. Its doc comments also record the corrections found while verifying the design
    against the real assemblies (2026-09-14), which is why they are worth reading before calling a Marten
-   API you have not used here yet.
+   API you have not used here yet. **Marten sources: sibling checkout `D:\Work\marten`** (fetch
+   `upstream` tags, check out the tag matching `Directory.Packages.props`) — with JasperFx at
+   `D:\Work\jasperfx` and Wolverine, a current consumer, at `D:\Work\wolverine`; read them before
+   decompiling. All three are read-only: never modify them.
 7. **Integration and browser** (`tests/MartenStudio.Integration.Tests/`) — one `postgres:17-alpine` via an
    assembly fixture (reuse enabled locally unless `MARTENSTUDIO_PG_REUSE=false`; `PostgresFixtureTests`
    pins the variable's name), one Marten schema per collection, everything driven *through*

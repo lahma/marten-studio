@@ -4,15 +4,16 @@
     <UserSecretsId>marten-studio-sample</UserSecretsId>
 
     <!--
-      Not required any more, and kept on purpose. As of .NET 10 `_framework/blazor.web.js` is no longer
-      embedded in the ASP.NET Core assemblies: it is a static web asset out of a pack the SDK resolves
-      only for a project that says it needs one, and a host whose only Blazor components come from a
-      referenced RCL says nothing. The package now ships its own copy for exactly that host, but the
-      copy is only a fallback - the studio's script endpoint prefers whatever the host serves, because
-      the host's copy is the one that matches the host's runtime. This is the sample showing the shape a
-      real host should use, and it pairs with `app.MapStaticAssets()` in Program.cs.
+      Deliberately NO `RequiresAspNetWebAssets` here. As of .NET 10 `_framework/blazor.web.js` is no
+      longer embedded in the ASP.NET Core assemblies: it is a static web asset out of a pack the SDK
+      resolves only for a project that says it needs one, and a host whose only Blazor components come
+      from a referenced RCL says nothing - which is exactly this host. The studio's own
+      `PackageReference` to Microsoft.AspNetCore.App.Internal.Assets is what brings the script here,
+      transitively, and it pairs with `app.MapStaticAssets()` in Program.cs. This sample is therefore the
+      shape a real host has, and the fact that `/marten` is interactive without the property is the
+      thing worth demonstrating. (Setting it here would also be NU1009 under central package management:
+      the SDK's implicit reference and our PackageVersion row cannot both exist.)
     -->
-    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
 
   <ItemGroup>

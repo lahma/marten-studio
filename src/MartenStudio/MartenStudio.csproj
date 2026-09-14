@@ -23,133 +23,45 @@
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
 
-  <!--
-    The package tells its consumer that it needs the ASP.NET Core web-assets pack, because the consumer
-    has no way of knowing: see the long comment in MartenStudio.build.props. The Static Web Assets SDK
-    generates build/$(PackageId).props itself and offers exactly one way to put something else in it -
-    turn that generation off and pack your own file that imports what the generated one imported. Only
-    the build/ entry point is replaced; the SDK still generates buildMultiTargeting/ and
-    buildTransitive/, and both chain into ours.
-  -->
-  <PropertyGroup>
-    <StaticWebAssetsDisableProjectBuildPropsFileGeneration>true</StaticWebAssetsDisableProjectBuildPropsFileGeneration>
-  </PropertyGroup>
-
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="/" />
-    <None Update="MartenStudio.build.props" Pack="true" PackagePath="build/MartenStudio.props" />
   </ItemGroup>
-
-  <!--
-    The studio ships its own copy of blazor.web.js.
-
-    As of .NET 10 that file is not in the shared framework and not embedded in any ASP.NET Core assembly
-    (checked: Microsoft.AspNetCore.Components.Server/Web/Endpoints carry no manifest resources). It comes
-    from the Microsoft.AspNetCore.App.Internal.Assets pack, which the SDK resolves only for a project
-    whose `RequiresAspNetWebAssets` is true - and the Web SDK defaults that to true only for a project
-    that has `.razor` Content items of its own. A host that adds Marten Studio and writes no Blazor
-    components has none, so `GET /_framework/blazor.web.js` is a 404, the studio prerenders, never becomes
-    interactive, and nothing says a word.
-
-    The package cannot set the property on the consumer's behalf. It is a restore-time decision - the
-    implicit reference to the assets pack is added while the restore graph is built - and NuGet
-    deliberately excludes package-provided .props/.targets from restore evaluation
-    (ExcludeRestorePackageImports). Measured, not assumed: with the property set from a consumer's own
-    Directory.Build.props the pack appears in project.assets.json and blazor.web.js appears in the
-    consumer's static web asset manifest; set from this package's build/MartenStudio.props it does not,
-    even after a forced restore. The props file still ships, because the property is also read at
-    build time and costs nothing to state early, but it is not what makes this work.
-
-    So this project sets `RequiresAspNetWebAssets` for ITSELF (restore does evaluate a project's own
-    csproj) and republishes the one file out of the resolved pack as a static web asset of its own, at
-    `_content/MartenStudio/_framework/blazor.web.js`. The mapped `{Path}/_framework/blazor.web.js`
-    endpoint prefers whatever the host serves and falls back to this copy, so a host that did configure
-    web assets is unaffected and a host that did not gets a working studio instead of a silent one.
-
-    THE RISK, said out loud: this couples the shipped script to the ASP.NET Core patch version bundled
-    with the SDK that built the package. The negotiated Blazor protocol is stable across patches and the
-    host's own copy always wins when there is one, so the exposure is a host with no web assets of its own
-    running a much newer runtime than the package was built against. The clean fix is a PackageReference
-    to Microsoft.AspNetCore.App.Internal.Assets, whose buildTransitive targets would define the asset in
-    the CONSUMER at the consumer's own version - that is a package-budget decision (AGENTS.md hard rule 1)
-    and is recorded as a follow-up rather than taken here.
-  -->
-  <PropertyGroup>
-    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
-  </PropertyGroup>
-
-  <!--
-    Declared the way the assets pack declares it for an application (see
-    Microsoft.AspNetCore.App.Internal.Assets.targets): hook ResolveStaticWebAssetsInputs and call the
-    SDK's own DefineStaticWebAssets / DefineStaticWebAssetEndpoints. A Content item with a Link into
-    wwwroot does not work - the Razor SDK discovers project assets by their path on disk, and this file
-    is in the NuGet cache. AssetMode="All" so the asset reaches referencing projects and the package
-    alike; no fingerprint, because the studio's own endpoint resolves it by its logical path.
-  -->
-  <PropertyGroup>
-    <ResolveStaticWebAssetsInputsDependsOn>
-      $(ResolveStaticWebAssetsInputsDependsOn);
-      MartenStudioAddBlazorWebScript;
-    </ResolveStaticWebAssetsInputsDependsOn>
-  </PropertyGroup>
-
-  <Target Name="MartenStudioAddBlazorWebScript">
-    <PropertyGroup>
-      <!--
-        Copied into obj/ before it is declared, rather than declared where the pack put it. A consuming
-        application that resolves the same pack (any host with .razor files of its own) would otherwise
-        see the identical file path arrive twice - once as its own framework asset, once as ours - and
-        DiscoverPrecompressedAssets fails the build on the duplicate key. Same bytes, distinct identity.
-        Computed in the target rather than in a PropertyGroup above, because IntermediateOutputPath is
-        not set until the common targets have been imported.
-      -->
-      <MartenStudioFrameworkAssetRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'martenstudio-framework'))</MartenStudioFrameworkAssetRoot>
-    </PropertyGroup>
-
-    <Error Condition="!Exists('$(BlazorFrameworkStaticWebAssetRoot)\blazor.web.js')"
-           Text="Marten Studio ships its own copy of blazor.web.js and could not find one at '$(BlazorFrameworkStaticWebAssetRoot)\blazor.web.js'. That path comes from the Microsoft.AspNetCore.App.Internal.Assets pack, which this project resolves by setting RequiresAspNetWebAssets; a restore that did not bring it in would leave hosts with no Blazor script and a studio that silently never becomes interactive, so the build stops here instead." />
-
-    <Copy SourceFiles="$(BlazorFrameworkStaticWebAssetRoot)\blazor.web.js"
-          DestinationFolder="$(MartenStudioFrameworkAssetRoot)"
-          SkipUnchangedFiles="true">
-      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
-    </Copy>
-
-    <ItemGroup>
-      <MartenStudioBlazorScriptCandidate Include="$(MartenStudioFrameworkAssetRoot)blazor.web.js">
-        <RelativePath>_framework/blazor.web.js</RelativePath>
-      </MartenStudioBlazorScriptCandidate>
-    </ItemGroup>
-
-    <DefineStaticWebAssets CandidateAssets="@(MartenStudioBlazorScriptCandidate)"
-                           ContentRoot="$(MartenStudioFrameworkAssetRoot)"
-                           SourceId="$(PackageId)"
-                           SourceType="Discovered"
-                           AssetKind="All"
-                           AssetMode="All"
-                           AssetRole="Primary"
-                           FingerprintCandidates="false"
-                           BasePath="$(StaticWebAssetBasePath)">
-      <Output TaskParameter="Assets" ItemName="MartenStudioBlazorScriptAsset" />
-    </DefineStaticWebAssets>
-
-    <DefineStaticWebAssetEndpoints CandidateAssets="@(MartenStudioBlazorScriptAsset)"
-                                   ExistingEndpoints=""
-                                   ContentTypeMappings="@(StaticWebAssetContentTypeMapping)">
-      <Output TaskParameter="Endpoints" ItemName="MartenStudioBlazorScriptEndpoint" />
-    </DefineStaticWebAssetEndpoints>
-
-    <ItemGroup>
-      <StaticWebAsset Include="@(MartenStudioBlazorScriptAsset)" />
-      <StaticWebAssetEndpoint Include="@(MartenStudioBlazorScriptEndpoint)" />
-    </ItemGroup>
-  </Target>
 
   <ItemGroup>
     <!-- Blazor Server, SignalR, authorization and the endpoint routing the studio mounts into all
          come from the shared framework, so the package pins no ASP.NET Core patch on its host. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Marten" />
+    <!--
+      blazor.web.js, for the host.
+
+      As of .NET 10 that file is not in the shared framework and not embedded in any ASP.NET Core
+      assembly (checked: Microsoft.AspNetCore.Components.Server/Web/Endpoints carry no manifest
+      resources). It comes from this pack, which the SDK resolves only for a project whose
+      `RequiresAspNetWebAssets` is true - and the Web SDK defaults that to true only for a project that
+      has `.razor` Content items of its own (`ResolveRequiredWebAssets` in
+      Microsoft.NET.Sdk.Web.ProjectSystem.targets). A host that adds Marten Studio and writes no Blazor
+      components has none, so `GET /_framework/blazor.web.js` was a 404, the studio prerendered, never
+      became interactive, and nothing said a word.
+
+      The package cannot set the property on the consumer's behalf: it is a restore-time decision and
+      NuGet deliberately excludes package-provided .props/.targets from restore evaluation
+      (ExcludeRestorePackageImports) - measured, not assumed. A plain PackageReference is what does
+      reach the consumer: this pack's buildTransitive targets run in any Web SDK executable that
+      references the studio, directly or transitively, and define `_framework/blazor.web.js` as that
+      project's OWN static web asset. So the script is served by the host's own
+      MapStaticAssets()/UseStaticFiles(), the studio's mapped {Path}/_framework/blazor.web.js endpoint
+      forwards to it, and nothing here ships a copy of a Microsoft script that would go stale one patch
+      after the package was built. A floor rather than an exact pin, like Marten: a host whose own SDK
+      already resolves this pack (any project with .razor files of its own) keeps its version, because
+      NuGet takes the higher of the two.
+
+      No lib/, no ref/, no runtime assembly - three .js files and one MSBuild target - so this is not
+      an ASP.NET Core patch pinned onto the host (D3). Verified 2026-09-14 with an API-only host that
+      has no .razor file, does not set RequiresAspNetWebAssets and references only the MartenStudio
+      nupkg: /_framework/blazor.web.js 200, /marten/_framework/blazor.web.js 200, negotiate 200.
+    -->
+    <PackageReference Include="Microsoft.AspNetCore.App.Internal.Assets" />
   </ItemGroup>
 
   <ItemGroup>

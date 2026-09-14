@@ -86,7 +86,7 @@ public class QueryPageTests
         service.MartenRequests[0].PageSize.Should().Be(context.Options.DefaultPageSize);
 
         page.Find(".ms-query-sql").TextContent.Should().Contain("mt_doc_person").And.Contain("limit 50");
-        page.Find(".ms-query-row-id a").GetAttribute("href").Should().Be("marten/documents/person/doc?id=42");
+        page.Find(".ms-query-row-id a").GetAttribute("href").Should().Be("documents/person/doc?id=42");
         page.FindAll(".ms-json-tree").Should().NotBeEmpty("each row renders the document in the JSON viewer");
     }
 
