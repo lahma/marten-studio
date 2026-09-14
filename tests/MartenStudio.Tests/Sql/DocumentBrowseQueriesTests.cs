@@ -54,6 +54,70 @@ public class DocumentBrowseQueriesTests
         }
     }
 
+    /// <summary>
+    /// On a conjoined collection with no tenant in scope, the sizes read breaks the tie the same way the
+    /// document read does.
+    /// </summary>
+    /// <remarks>
+    /// The same id exists once per tenant, so <c>where id = @id</c> alone matches several rows and the
+    /// reader takes whichever came back first. <c>DocumentQueryBuilder.TryBuildSingle</c> settles that by
+    /// ordering on <c>tenant_id</c> and taking one row; this read did not, and the metadata pane draws its
+    /// two byte counts underneath the JSON that read returned — so one tenant's sizes could appear under
+    /// another tenant's document, with nothing on screen to suggest it.
+    /// </remarks>
+    [Fact]
+    public void A_conjoined_sizes_read_with_no_tenant_in_scope_takes_the_same_row_the_document_read_did()
+    {
+        DocumentTableInfo table = SqlTestTables.FullyFeatured();
+        var id = Guid.NewGuid().ToString("D");
+
+        DocumentBrowseQueries.TryBuildSizes(table, id, null, 9, out NpgsqlCommand? sizes, out _)
+            .Should().BeTrue();
+
+        DocumentQueryBuilder.TryBuildSingle(table, id, null, out NpgsqlCommand? single, out _)
+            .Should().BeTrue();
+
+        using (sizes)
+        using (single)
+        {
+            sizes!.CommandText.Should().Contain("order by \"tenant_id\"").And.Contain("limit 1");
+            single!.CommandText.Should().Contain("\"tenant_id\"").And.Contain("limit 1");
+        }
+    }
+
+    /// <summary>With a tenant in scope there is no ambiguity, so there is no tie to break.</summary>
+    [Fact]
+    public void A_tenant_scoped_sizes_read_filters_rather_than_ordering()
+    {
+        DocumentBrowseQueries.TryBuildSizes(
+                SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), "acme", 9,
+                out NpgsqlCommand? command, out _)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            command!.CommandText.Should().Contain("\"tenant_id\" = @tenant");
+            command.CommandText.Should().NotContain("order by");
+            command.CommandText.Should().NotContain("limit 1");
+        }
+    }
+
+    /// <summary>A single-tenanted collection has no tenant column to order by, and gets neither.</summary>
+    [Fact]
+    public void A_single_tenanted_sizes_read_has_neither_a_filter_nor_a_tie_break()
+    {
+        DocumentBrowseQueries.TryBuildSizes(
+                SqlTestTables.MetadataLess(), Guid.NewGuid().ToString("D"), "acme", 9,
+                out NpgsqlCommand? command, out _)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            command!.CommandText.Should().NotContain("tenant");
+            command.CommandText.Should().NotContain("order by");
+        }
+    }
+
     [Fact]
     public void A_malformed_id_never_becomes_a_sizes_query()
     {

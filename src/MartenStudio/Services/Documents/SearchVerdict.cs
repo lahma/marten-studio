@@ -52,11 +52,11 @@ internal sealed record SearchVerdict
     /// The worst of the <em>filter</em> chips: the sort key's verdict is excluded.
     /// </summary>
     /// <remarks>
-    /// This, not <see cref="Level" />, is what withholds a read. Marten creates no index on
-    /// <c>mt_last_modified</c>, so the default sort of nearly every collection is red on its own — and a
-    /// studio that refused to open a collection until somebody pressed "Run anyway" would be a studio
-    /// nobody opens. The sort's verdict is still shown, because "this sorts the whole collection" is worth
-    /// knowing; it just is not a reason to refuse.
+    /// This, not <see cref="Level" />, is what withholds a read. A collection opens sorted by its primary
+    /// key, which is green — but one click on the <c>mt_last_modified</c> header makes the sort red, and a
+    /// studio that then refused to show the collection until somebody pressed "Run anyway" would be a
+    /// studio nobody uses. The sort's verdict is still shown, because "this sorts the whole collection" is
+    /// worth knowing; it just is not a reason to refuse.
     /// </remarks>
     public IndexVerdictLevel FilterLevel { get; init; } = IndexVerdictLevel.Green;
 

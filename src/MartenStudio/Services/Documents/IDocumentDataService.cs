@@ -47,8 +47,18 @@ internal sealed record DocumentListRequest
     /// </summary>
     public bool RunAnyway { get; init; }
 
-    /// <summary>Whether an exact <c>count(*)</c> was asked for, rather than the <c>reltuples</c> estimate (D8).</summary>
-    public bool ExactCount { get; init; }
+    // There is deliberately no ExactCount flag here.
+    //
+    // There was one, no page ever set it, and if a page had set it the header would have shown a count of
+    // the whole collection over a grid showing the rows a search had narrowed - the studio answering a
+    // different question from the one on screen, which is the bug P2-fix fixed for tenancy and would have
+    // reintroduced for filters. Counting *with* the predicates is not the fix either: the predicates a
+    // person types are exactly the ones the index verdict withholds a read for, so an honest filtered
+    // count is the sequential scan the verdict just refused to run.
+    //
+    // The header therefore always reports the size of the collection in scope - tenant and soft-delete
+    // tri-state, never the search - and the exact number is asked for on the rail, per collection, through
+    // CountExactAsync. One number, one meaning.
 }
 
 /// <summary>
@@ -121,7 +131,27 @@ internal interface IDocumentDataService
         CancellationToken cancellationToken = default);
 
     /// <summary>The <c>_recent</c> pseudo-collection: the most recently modified documents of any type.</summary>
+    /// <remarks>
+    /// The rows of <see cref="ListRecentAsync"/> and nothing else. Prefer that one on a page: this
+    /// overload cannot tell "nothing has changed lately" from "the scan ran out of time", and on a large
+    /// store the second is the one that happens.
+    /// </remarks>
     Task<IReadOnlyList<RecentDocument>> GetRecentAsync(
+        StudioScope scope,
+        int limit,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The same read, with the reason there are no rows when there are none.
+    /// </summary>
+    /// <remarks>
+    /// Every branch of the union is <c>order by mt_last_modified desc limit n</c> and Marten declares no
+    /// index on that column, so the region's cost grows with the store. It runs under a
+    /// <c>statement_timeout</c> and reports <c>57014</c> as <see cref="RecentDocuments.TooLargeToScan"/> —
+    /// a value the page renders, because an empty region that means "this timed out" is the studio being
+    /// quietly wrong about the one thing the region exists to say.
+    /// </remarks>
+    Task<RecentDocuments> ListRecentAsync(
         StudioScope scope,
         int limit,
         CancellationToken cancellationToken = default);

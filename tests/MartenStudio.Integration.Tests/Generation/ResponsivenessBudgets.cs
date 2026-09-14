@@ -102,20 +102,19 @@ internal static class ResponsivenessBudgets
     /// Each entry is a debt, not an exemption: the fix is a change in <c>src/MartenStudio</c>, and when
     /// it lands the entry comes out and the budget starts holding.
     /// </para>
+    /// <para>
+    /// <b>It is empty, and empty is the goal state.</b> The one entry it ever carried was
+    /// <c>customer first page</c>: the document list's default sort was <c>mt_last_modified desc</c>, a
+    /// column Marten declares no index on, so opening any collection was a sequential scan plus a top-N
+    /// sort — 90 ms at 60 000 rows and 785 ms at 600 000, with an offset page at the 10 000 cap costing
+    /// about a second. P2-perf made the primary key the default order, which is an index scan at any size,
+    /// and took the entry out. Every budget in this file now holds on its own; a measurement that goes over
+    /// fails the run. Adding an entry back is a decision to let a screen be slow, and the reason belongs
+    /// beside it in the same words a reviewer would need.
+    /// </para>
     /// </remarks>
     public static readonly IReadOnlyDictionary<string, string> KnownHotSpots =
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["customer first page"] =
-                "The document list's default sort is mt_last_modified descending, and Marten creates no "
-                + "index on that column - so opening any collection is a sequential scan plus a top-N "
-                + "sort, whose cost is proportional to the collection. Measured 2026-09-14 against this "
-                + "generator: 90 ms at 60 000 rows, 785 ms at 600 000. Offset paging inherits it, which "
-                + "is why an offset page at the 10 000 cap costs about a second at 600 000 rows. The fix "
-                + "is in src/MartenStudio - default the sort to the primary key, or have the index "
-                + "advisor offer the mt_last_modified index the same way it offers the others - and is "
-                + "outside the packet that added this suite.",
-        };
+        new Dictionary<string, string>(StringComparer.Ordinal);
 }
 
 /// <summary>

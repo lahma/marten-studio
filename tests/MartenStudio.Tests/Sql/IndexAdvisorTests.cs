@@ -167,6 +167,21 @@ public class IndexAdvisorTests
         verdict.Suggestion.Should().Be("options.Schema.For<SqlTestCustomer>().SoftDeletedWithIndex();");
     }
 
+    /// <summary>
+    /// Sorting by <c>mt_last_modified</c> is red, and says both what fixes it and why the fix is a
+    /// declaration rather than a <c>create index</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Index(x =&gt; …)</c> takes a member expression on the document and so cannot name a metadata
+    /// column; <c>IndexLastModified()</c> is the one Marten ships for this column, and it is better advice
+    /// than the equivalent DDL rather than merely more convenient. An index the configuration does not ask
+    /// for is dropped by the next apply — <c>AutoCreate.CreateOrUpdate</c> is not additive, and Weasel's
+    /// <c>TableDelta.WriteUpdate</c> writes <c>drop index</c> for every physical index that is not in the
+    /// expected table's list. So a person who follows a raw-DDL suggestion loses the index the first time
+    /// anybody applies a migration, and never finds out why the page got slow again.
+    /// </para>
+    /// </remarks>
     [Fact]
     public void Sorting_by_last_modified_without_an_index_suggests_IndexLastModified()
     {
@@ -177,6 +192,78 @@ public class IndexAdvisorTests
 
         verdict.Level.ToString().Should().Be("Red");
         verdict.Suggestion.Should().Be("options.Schema.For<SqlTestCustomer>().IndexLastModified();");
+        verdict.Reason.Should().Contain("CreateOrUpdate is not additive")
+            .And.Contain("dropped by the next apply");
+    }
+
+    /// <summary>An index that leads with the column turns the same sort green and drops the advice.</summary>
+    [Fact]
+    public void Sorting_by_last_modified_with_an_index_on_it_is_green()
+    {
+        const string LastModifiedIndex =
+            "CREATE INDEX mt_doc_sqltestcustomer_idx_mt_last_modified ON studio_sql.mt_doc_sqltestcustomer " +
+            "USING btree (mt_last_modified)";
+
+        var verdict = IndexAdvisor.EvaluateSort(
+            SqlTestTables.FullyFeatured(),
+            [new PostgresIndex("lm", LastModifiedIndex)],
+            new DocumentColumn.Metadata(DocumentMetadataColumn.LastModified));
+
+        verdict.Level.ToString().Should().Be("Green");
+        verdict.Suggestion.Should().BeNull();
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The subclass verdict (P2-perf deliverable 5)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A subclass filter on a migrated hierarchy is green, because Marten does index <c>mt_doc_type</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>Marten.Storage.DocumentTable</c>'s constructor runs
+    /// <c>if (mapping.IsHierarchy()) { Indexes.Add(new DocumentIndex(_mapping, SchemaConstants.DocumentTypeColumn)); … }</c>
+    /// — checked against the 9.35.0 tag on 2026-09-14, and asserted against a real migrated schema by
+    /// <c>DocumentSubclassIndexLiveTests</c>. The advisor's own remark used to say the opposite, which
+    /// would have had somebody go and create an index Marten had already made.
+    /// </remarks>
+    [Fact]
+    public void A_subclass_filter_is_green_on_a_hierarchy_Marten_has_migrated()
+    {
+        const string DocTypeIndex =
+            "CREATE INDEX mt_doc_sqltestcustomer_idx_mt_doc_type ON studio_sql.mt_doc_sqltestcustomer " +
+            "USING btree (mt_doc_type)";
+
+        var verdict = IndexAdvisor.Evaluate(
+            SqlTestTables.Hierarchy(),
+            [new PostgresIndex("pk", PrimaryKey), new PostgresIndex("doctype", DocTypeIndex)],
+            new DocumentPredicate.SubclassIs("sqltestvipcustomer"));
+
+        verdict.Level.ToString().Should().Be("Green");
+        verdict.Reason.Should().Contain("mt_doc_type");
+    }
+
+    /// <summary>
+    /// The same filter is amber when the index is missing, and says that means unapplied drift.
+    /// </summary>
+    /// <remarks>
+    /// Amber rather than red because the column is on every row of a table the page was going to read
+    /// anyway — but the wording matters: this is not "Marten does not index this", which was the old text
+    /// and was simply untrue. It is "Marten declares this index and your database does not have it", which
+    /// is a fact somebody can act on from the Schema screen.
+    /// </remarks>
+    [Fact]
+    public void A_subclass_filter_on_an_unmigrated_hierarchy_is_amber_and_says_the_index_is_missing()
+    {
+        var verdict = IndexAdvisor.Evaluate(
+            SqlTestTables.Hierarchy(),
+            [new PostgresIndex("pk", PrimaryKey)],
+            new DocumentPredicate.SubclassIs("sqltestvipcustomer"));
+
+        verdict.Level.ToString().Should().Be("Amber");
+        verdict.Reason.Should().Contain("declares an index")
+            .And.Contain("migration has not been applied");
+        verdict.Reason.Should().NotContain("creates no index", "Marten does create one - that was the bug");
     }
 
     [Fact]

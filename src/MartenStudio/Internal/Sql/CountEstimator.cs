@@ -25,6 +25,12 @@ namespace MartenStudio.Internal.Sql;
 /// reports "unknown" — a table that is certainly there and whose size nobody has measured — and the caller
 /// decides whether an exact <c>count(*)</c> is worth paying for.
 /// </para>
+/// <para>
+/// <see cref="IsExactRefused"/> is the fourth answer, and it is the one
+/// <see cref="MartenStudioOptions.ExactCountThreshold"/> produces: the collection is too big for the
+/// studio to pay for <c>count(*)</c>, so the estimate stands and says so. It is a <em>value</em> and not
+/// an error — the number beside it is still true, it is simply the cheap one.
+/// </para>
 /// </remarks>
 /// <param name="Value">The number of rows, or zero when <paramref name="IsUnavailable"/>.</param>
 /// <param name="IsEstimate">Whether this came from <c>pg_class.reltuples</c> rather than <c>count(*)</c>.</param>
@@ -40,18 +46,70 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
     /// <remarks>
     /// A kind of <see cref="IsUnavailable"/> on purpose: every caller that already draws "no number" draws
     /// this correctly without being changed, and the ones that can do something about it —
-    /// <c>CountAsync</c>, and the list header — branch on <see cref="IsUnknown"/>.
+    /// the collections rail, and the list header — branch on <see cref="IsUnknown"/>.
     /// </remarks>
     public static DocumentCount Unknown { get; } = new(0, false, true) { IsUnknown = true };
 
     /// <summary>Whether the table has simply never been analysed, rather than having refused the read.</summary>
     public bool IsUnknown { get; init; }
 
+    /// <summary>
+    /// Whether an exact <c>count(*)</c> was wanted here and was declined because the collection is bigger
+    /// than <see cref="MartenStudioOptions.ExactCountThreshold"/>.
+    /// </summary>
+    /// <remarks>
+    /// Not a failure and not a refusal to answer: the estimate beside it is the answer, and this says why
+    /// it is the only one on offer. It is what makes the option's documented behaviour visible instead of
+    /// the studio quietly showing a <c>~</c> the user pressed a button to get rid of.
+    /// </remarks>
+    public bool IsExactRefused { get; init; }
+
+    /// <summary>The threshold that declined it, when <see cref="IsExactRefused"/>.</summary>
+    public long ExactRefusedAbove { get; init; }
+
+    /// <summary>
+    /// A sentence to use in place of the threshold one, for a count declined on some other ground.
+    /// </summary>
+    /// <remarks>
+    /// The rail declines a count for a second reason — a never-analysed table whose heap already occupies
+    /// more pages than the rail will speculatively read — and "refused above 100,000 rows" would be a
+    /// false account of that, because such a table may hold five hundred very large documents.
+    /// </remarks>
+    public string? ExactRefusedNote { get; init; }
+
+    /// <summary>
+    /// The sentence the UI puts beside the number when there is one to say, or <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// The wording lives here rather than in a component because the rail and the list header both show
+    /// it, and two hand-written versions of the same sentence drift. It names the option so that the
+    /// person reading it knows which knob turns it.
+    /// </remarks>
+    public string? Reason => IsExactRefused
+        ? ExactRefusedNote ??
+          "Estimate only: an exact count is refused above " +
+          ExactRefusedAbove.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) +
+          " rows (MartenStudioOptions.ExactCountThreshold)."
+        : null;
+
     /// <summary>A <c>reltuples</c> estimate.</summary>
     public static DocumentCount Estimate(long value) => new(value, true, false);
 
     /// <summary>An exact <c>count(*)</c>.</summary>
     public static DocumentCount Exact(long value) => new(value, false, false);
+
+    /// <summary>
+    /// The same count, marked as one the studio would not upgrade to an exact <c>count(*)</c>.
+    /// </summary>
+    /// <remarks>
+    /// Applied to whatever the cheap answer was — an estimate, or <see cref="Unknown"/> for a table
+    /// Postgres has never analysed — so that one rule covers both and neither loses the number it had.
+    /// </remarks>
+    /// <param name="cheap">The estimate, or <see cref="Unknown"/>.</param>
+    /// <param name="threshold">The threshold that declined the upgrade.</param>
+    /// <param name="note">A sentence to use instead of the threshold one, when the ground was different.</param>
+    public static DocumentCount RefusedExact(DocumentCount cheap, long threshold, string? note = null) =>
+        cheap with { IsExactRefused = true, ExactRefusedAbove = threshold, ExactRefusedNote = note };
 }
 
 /// <summary>
@@ -68,7 +126,15 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
 /// Postgres reports <c>-1</c> for a table that has never been vacuumed or analysed — a freshly seeded
 /// collection, which is exactly what a new user is looking at — and an estimate of "about 12" is worse
 /// than the truth on a table where the truth costs nothing. Below the threshold the estimator therefore
-/// pays for <c>count(*)</c>; above it, the estimate stands until somebody asks for the exact number.
+/// pays for <c>count(*)</c>; above it the estimate stands and says so, and <em>asking</em> for the exact
+/// number does not override it — a button that starts a ten-minute sequential scan is the denial of
+/// service D8 exists to prevent, whoever pressed it.
+/// </para>
+/// <para>
+/// A table with no estimate at all is settled by <see cref="AboveThresholdSql"/> rather than by counting
+/// it: "does this hold more than N rows" is bounded by N, where "how many rows does this hold" is bounded
+/// by the table. That probe is what keeps a rail full of freshly bulk-loaded collections from being
+/// twenty-five sequential scans.
 /// </para>
 /// </remarks>
 internal sealed class CountEstimator
@@ -85,42 +151,101 @@ internal sealed class CountEstimator
         where c.oid = to_regclass(@qualified)
         """;
 
-    /// <summary>Rows at or below which the estimate is replaced by an exact count.</summary>
+    /// <summary>
+    /// The probe that answers "does this table hold more than <see cref="ExactCountThreshold"/> rows?"
+    /// without counting them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>offset @threshold limit 1</c> stops as soon as it has thrown away that many rows, so the work is
+    /// bounded by the <em>threshold</em> and not by the table: on a collection of ten million rows this
+    /// reads a hundred thousand and stops, where the <c>count(*)</c> it is standing in front of would read
+    /// all ten million. That is the whole point — the question the threshold asks is cheap to answer even
+    /// when the answer it is protecting is not.
+    /// </para>
+    /// <para>
+    /// Deliberately whole-table, with no tenant and no soft-delete predicate. The threshold is compared
+    /// against <c>reltuples</c>, which describes the whole table and nothing narrower, so the probe has to
+    /// ask the same question or the two disagree about which collection is "big". A predicated probe would
+    /// also lose the bound: finding a hundred thousand rows of one rare tenant can mean scanning the whole
+    /// table, which is the cost this exists to avoid paying.
+    /// </para>
+    /// </remarks>
+    internal static string AboveThresholdSql(string schema, string table) =>
+        "select 1 from " + SqlIdentifier.Qualify(schema, table) + " offset @threshold limit 1";
+
+    /// <summary>
+    /// Rows above which an exact count is declined. Wired from
+    /// <see cref="MartenStudioOptions.ExactCountThreshold"/> by every caller in the studio.
+    /// </summary>
     public long ExactCountThreshold { get; init; } = 10_000;
 
     /// <summary>How long either query may take. An exact count runs under this and nothing longer.</summary>
     public int CommandTimeoutSeconds { get; init; } = 30;
 
     /// <summary>
-    /// The estimate, upgraded to an exact count when the table is small enough (or has never been
-    /// analysed, which Postgres reports as a negative <c>reltuples</c>).
+    /// Whether an exact <c>count(*)</c> of this table may run, given the cheap answer already in hand.
     /// </summary>
-    public async Task<DocumentCount> CountAsync(
+    /// <remarks>
+    /// <para>
+    /// One rule, used by all three places that would otherwise each have their own: the rail's automatic
+    /// upgrade for a never-analysed table, the list header, and the "=" button. An estimate above the
+    /// threshold declines without touching the table at all; an estimate that does not exist — Postgres
+    /// reports <c>reltuples = -1</c> until the first <c>ANALYZE</c>, which is every freshly bulk-loaded
+    /// collection — is settled by <see cref="AboveThresholdSql"/> instead, because "no estimate" must not
+    /// mean "scan it and find out".
+    /// </para>
+    /// <para>
+    /// A threshold of zero therefore declines everything except an empty table, and that is the honest
+    /// reading of the option rather than an edge case to special-case.
+    /// </para>
+    /// </remarks>
+    /// <param name="connection">An open connection.</param>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="estimate">What <see cref="EstimateAsync"/> said.</param>
+    /// <param name="cancellationToken">The usual.</param>
+    public async Task<bool> MayCountExactlyAsync(
+        NpgsqlConnection connection,
+        string schema,
+        string table,
+        DocumentCount estimate,
+        CancellationToken cancellationToken = default)
+    {
+        if (estimate.IsUnknown)
+        {
+            return !await IsAboveThresholdAsync(connection, schema, table, cancellationToken).ConfigureAwait(false);
+        }
+
+        // A table that could not be reached at all is not counted either; there is nothing to count.
+        return !estimate.IsUnavailable && estimate.Value <= ExactCountThreshold;
+    }
+
+    /// <summary>Whether the table holds more than <see cref="ExactCountThreshold"/> rows.</summary>
+    /// <param name="connection">An open connection.</param>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="cancellationToken">The usual.</param>
+    public async Task<bool> IsAboveThresholdAsync(
         NpgsqlConnection connection,
         string schema,
         string table,
         CancellationToken cancellationToken = default)
     {
-        var estimate = await EstimateAsync(connection, schema, table, cancellationToken).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(connection);
 
-        // A never-analysed table is the one case where the cheap answer says nothing at all, so it is worth
-        // the round trip rather than being reported as "no number" on a collection that plainly has rows.
-        if (estimate.IsUnknown)
+        await using var command = new NpgsqlCommand(AboveThresholdSql(schema, table), connection)
         {
-            return await CountExactAsync(connection, schema, table, cancellationToken).ConfigureAwait(false);
-        }
+            CommandTimeout = CommandTimeoutSeconds,
+        };
 
-        if (estimate.IsUnavailable)
+        command.Parameters.Add(new NpgsqlParameter("threshold", NpgsqlDbType.Bigint)
         {
-            return estimate;
-        }
+            Value = Math.Max(ExactCountThreshold, 0),
+        });
 
-        if (estimate.Value > ExactCountThreshold)
-        {
-            return estimate;
-        }
-
-        return await CountExactAsync(connection, schema, table, cancellationToken).ConfigureAwait(false);
+        // A row came back, so there is a row at position threshold + 1: more than the threshold allows.
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not (null or DBNull);
     }
 
     /// <summary>The <c>reltuples</c> estimate alone.</summary>
@@ -151,67 +276,6 @@ internal sealed class CountEstimator
         // -1 is Postgres for "never analysed", not for "minus one row" and not for "empty". Reporting it as
         // an estimate of zero is the studio saying "~0 documents" about a collection it has not looked at.
         return rows < 0 ? DocumentCount.Unknown : DocumentCount.Estimate(rows);
-    }
-
-    /// <summary>An exact <c>count(*)</c> of the whole table.</summary>
-    /// <param name="connection">An open connection.</param>
-    /// <param name="schema">The table's schema.</param>
-    /// <param name="table">The table.</param>
-    /// <param name="cancellationToken">The usual.</param>
-    public Task<DocumentCount> CountExactAsync(
-        NpgsqlConnection connection,
-        string schema,
-        string table,
-        CancellationToken cancellationToken = default) =>
-        CountExactAsync(connection, schema, table, null, null, cancellationToken);
-
-    /// <summary>An exact <c>count(*)</c>, which the user asked for explicitly or the threshold allowed.</summary>
-    /// <param name="connection">An open connection.</param>
-    /// <param name="schema">The table's schema.</param>
-    /// <param name="table">The table.</param>
-    /// <param name="cancellationToken">The usual.</param>
-    /// <param name="tenantId">
-    /// Counts only this tenant's rows. There is no tenant-scoped equivalent on the estimate side —
-    /// <c>reltuples</c> describes the whole table and nothing narrower — which is why
-    /// <see cref="CountAsync"/> takes no tenant: a tenant-scoped number is always an exact one, and the
-    /// caller has to have decided it is worth paying for.
-    /// </param>
-    /// <param name="commandTimeout">
-    /// A bound on the scan, overriding <see cref="CommandTimeoutSeconds"/>. An exact count is the one query
-    /// in the studio whose cost is proportional to how big the problem already is.
-    /// </param>
-    /// <remarks>
-    /// This is an <em>overload</em> rather than two more optional parameters on the four-argument form,
-    /// because CA1068 requires the cancellation token to come last and putting the new parameters in front
-    /// of it would silently break every existing call site that passes a token positionally.
-    /// </remarks>
-    public async Task<DocumentCount> CountExactAsync(
-        NpgsqlConnection connection,
-        string schema,
-        string table,
-        string? tenantId,
-        TimeSpan? commandTimeout,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(connection);
-
-        await using var command = new NpgsqlCommand(ExactSql(schema, table, tenantId), connection)
-        {
-            CommandTimeout = commandTimeout is { } timeout
-                ? Math.Max((int)Math.Ceiling(timeout.TotalSeconds), 1)
-                : CommandTimeoutSeconds,
-        };
-
-        if (tenantId is not null)
-        {
-            command.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Varchar) { Value = tenantId });
-        }
-
-        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-
-        return result is null or DBNull
-            ? DocumentCount.Unavailable
-            : DocumentCount.Exact(Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture));
     }
 
     /// <summary>
@@ -271,15 +335,6 @@ internal sealed class CountEstimator
             ? DocumentCount.Unavailable
             : DocumentCount.Exact(Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture));
     }
-
-    /// <summary>
-    /// The exact-count query. The only things interpolated are quoted identifiers; the tenant is a
-    /// parameter, and its predicate is emitted only when there is a tenant, because this method is given a
-    /// table name rather than a <see cref="DocumentTableInfo"/> and cannot ask whether the column exists.
-    /// </summary>
-    internal static string ExactSql(string schema, string table, string? tenantId = null) =>
-        "select count(*) from " + SqlIdentifier.Qualify(schema, table) +
-        (tenantId is null ? string.Empty : " where " + SqlIdentifier.Quote("tenant_id") + " = @tenant");
 
     /// <summary>
     /// The scoped exact-count query. Identifiers are quoted and come from the table's own column set; the

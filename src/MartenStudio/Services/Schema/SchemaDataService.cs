@@ -76,6 +76,8 @@ internal sealed class SchemaDataService : ISchemaDataService
     private readonly StudioCapabilityGuard capabilities;
     private readonly StudioAuthorization authorization;
     private readonly StudioActionLog audit;
+    private readonly ColumnCatalog columnCatalog;
+    private readonly IndexCatalog indexCatalog;
     private readonly ILogger<SchemaDataService> logger;
 
     public SchemaDataService(
@@ -84,6 +86,8 @@ internal sealed class SchemaDataService : ISchemaDataService
         StudioCapabilityGuard capabilities,
         StudioAuthorization authorization,
         StudioActionLog audit,
+        ColumnCatalog columnCatalog,
+        IndexCatalog indexCatalog,
         ILogger<SchemaDataService> logger)
     {
         this.options = options;
@@ -91,6 +95,8 @@ internal sealed class SchemaDataService : ISchemaDataService
         this.capabilities = capabilities;
         this.authorization = authorization;
         this.audit = audit;
+        this.columnCatalog = columnCatalog;
+        this.indexCatalog = indexCatalog;
         this.logger = logger;
     }
 
@@ -292,6 +298,20 @@ internal sealed class SchemaDataService : ISchemaDataService
                 preview.ObjectCount,
                 exception.Message,
                 sqlState);
+        }
+        finally
+        {
+            // The studio has just changed the shape of the tables it reads, and its two catalogs are
+            // caches with a sixty-second TTL - so without this the documents browser goes on selecting the
+            // old column set, and the index verdict goes on recommending the index that was just created,
+            // for up to a minute after the apply the same person pressed. The TTL exists for migrations
+            // the studio did not make; this is the one it did.
+            //
+            // In the `finally` rather than only on success, on purpose: a failed apply runs as separate
+            // statements with no transaction (see the cancellation path above), so part of it may have
+            // landed. A half-applied migration is exactly when a stale catalog is most wrong.
+            columnCatalog.Clear();
+            indexCatalog.Clear();
         }
     }
 

@@ -173,14 +173,27 @@ internal static class IndexAdvisor
                     return byColumn with { Reason = $"Sorted by {column}, which an index leads with." };
                 }
 
-                var suggestion = metadata.Column == DocumentMetadataColumn.LastModified
-                    ? StoreOptionsLine(table, "IndexLastModified()")
-                    : null;
+                // mt_last_modified is the one metadata column a host can index from StoreOptions, and it
+                // is the one people reach for, so it gets the fix line the way a filter on a duplicated
+                // field does. `Index(x => ...)` is not available for a metadata column - it takes a member
+                // expression on the document - and the declared call is better than the hand-rolled DDL
+                // anyway: an index the configuration does not ask for is dropped by the next apply, which
+                // is what IndexAdvice.UndeclaredSuggestion says at length on the Schema screen.
+                if (metadata.Column == DocumentMetadataColumn.LastModified)
+                {
+                    return new IndexVerdict(
+                        byColumn.Level,
+                        $"Sorting by {column} reads and sorts the whole collection: Marten declares no " +
+                        "index on it unless the store asks for one. Declare it rather than creating it by " +
+                        "hand - AutoCreate.CreateOrUpdate is not additive, and an index the configuration " +
+                        "does not ask for is dropped by the next apply.",
+                        StoreOptionsLine(table, "IndexLastModified()"));
+                }
 
                 return new IndexVerdict(
                     byColumn.Level,
                     $"Sorting by {column} with no index behind it means reading and sorting the whole collection.",
-                    suggestion ?? byColumn.Suggestion);
+                    byColumn.Suggestion);
             }
 
             case DocumentColumn.Duplicated duplicated:
@@ -237,10 +250,23 @@ internal static class IndexAdvisor
     }
 
     /// <summary>
-    /// A subclass filter. Marten creates no index on <c>mt_doc_type</c>, so this is normally amber rather
-    /// than red: the column is on every row of a table the page was going to read anyway, and the scan is
-    /// the hierarchy's own cost rather than something the filter added.
+    /// A subclass filter, which on a hierarchy Marten migrated is green.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Marten does index <c>mt_doc_type</c>.</b> <c>Marten.Storage.DocumentTable</c>'s constructor runs
+    /// <c>if (mapping.IsHierarchy()) { Indexes.Add(new DocumentIndex(_mapping, SchemaConstants.DocumentTypeColumn)); … }</c>
+    /// — verified against the Marten 9.35.0 tag, 2026-09-14, and asserted live by
+    /// <c>DocumentSubclassIndexLiveTests</c>. The remark that used to be here predicted amber for every
+    /// hierarchy, which was wrong about the common case and would have had somebody chasing an index that
+    /// is already there.
+    /// </para>
+    /// <para>
+    /// The amber branch is therefore not the normal answer but the drifted one: the column exists and the
+    /// index Marten declares for it does not, which means the migration has not been applied here or the
+    /// index was dropped by hand.
+    /// </para>
+    /// </remarks>
     private static IndexVerdict EvaluateSubclass(DocumentTableInfo table, IReadOnlyList<PostgresIndex> indexes)
     {
         var column = table.MetadataColumnName(DocumentMetadataColumn.DocumentType);
@@ -259,8 +285,9 @@ internal static class IndexAdvisor
             ? verdict with { Reason = $"{column} leads an index." }
             : new IndexVerdict(
                 IndexVerdictLevel.Amber,
-                $"A subclass shares its root's table and is found by scanning {column}; Marten creates no " +
-                "index on it.",
+                $"A subclass shares its root's table and is found through {column}. Marten declares an " +
+                $"index on it for every hierarchy, and this database does not have it - so the migration " +
+                "has not been applied here, and the filter scans the table until it is.",
                 null);
     }
 

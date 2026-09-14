@@ -106,7 +106,12 @@ public class DocumentRelatedLiveTests(DocumentRelatedLiveTests.Fixture fixture)
         }
         finally
         {
+            // Both halves, in the order the database will accept them: the value first, because putting
+            // the constraint back over a dangling one fails. Restoring only the value left the schema
+            // short a foreign key for the rest of the class, so a later test in it would have been
+            // exercising a table that no longer had the constraint this one removed.
             await SetOrderColumnAsync(id, fixture.LinkedOrderId);
+            await RestoreForeignKeyAsync();
         }
     }
 
@@ -129,6 +134,27 @@ public class DocumentRelatedLiveTests(DocumentRelatedLiveTests.Fixture fixture)
         await using var command = new Npgsql.NpgsqlCommand(
             $"alter table \"{Schema}\".\"mt_doc_ordernote\" " +
             "drop constraint if exists mt_doc_ordernote_order_id_fkey",
+            connection);
+
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>
+    /// Puts back the constraint <see cref="DropForeignKeyAsync" /> removed, exactly as Marten declares it.
+    /// </summary>
+    /// <remarks>
+    /// Marten's own name and shape — <c>mt_doc_ordernote_order_id_fkey</c> on <c>order_id</c> referencing
+    /// <c>mt_doc_order (id)</c> — so the schema this class leaves behind is the one it was given and the
+    /// drift screens have nothing to report about it.
+    /// </remarks>
+    private async Task RestoreForeignKeyAsync()
+    {
+        await using Npgsql.NpgsqlConnection connection = await Postgres.OpenAsync(TestContext.Current.CancellationToken);
+
+        await using var command = new Npgsql.NpgsqlCommand(
+            $"alter table \"{Schema}\".\"mt_doc_ordernote\" " +
+            "add constraint mt_doc_ordernote_order_id_fkey " +
+            $"foreign key (order_id) references \"{Schema}\".\"mt_doc_order\" (id)",
             connection);
 
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);

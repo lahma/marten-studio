@@ -163,3 +163,52 @@ internal sealed record CollectionRail(IReadOnlyList<CollectionGroup> Groups, str
 /// <param name="LastModified">When Marten last wrote it.</param>
 /// <param name="Hue">The collection's colour, so the mixed list stays readable.</param>
 internal sealed record RecentDocument(string Alias, string Id, DateTimeOffset LastModified, int Hue);
+
+/// <summary>
+/// The <c>_recent</c> region: its rows, or the reason it has none.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The region needs three answers and a bare list can only give two. "Nothing has been written lately" and
+/// "this store keeps no <c>mt_last_modified</c> anywhere" are both empty, and so was the third — the union
+/// ran past its <c>statement_timeout</c> because a collection in it has no index on the sort column and
+/// several million rows. Reporting that as "nothing recent" is the studio being quietly wrong about the
+/// one thing the region exists to say, so it is a value instead (plan §4.8).
+/// </para>
+/// <para>
+/// <see cref="Notice"/> is what the region draws in place of rows; <see cref="TooLargeToScan"/> separates
+/// the timeout from every other reason, because it is the one a host can act on — the branch that cost the
+/// time is a collection whose <c>mt_last_modified</c> has no index behind it.
+/// </para>
+/// </remarks>
+internal sealed record RecentDocuments
+{
+    /// <summary>Nothing recent, and nothing to say about it.</summary>
+    public static RecentDocuments None { get; } = new();
+
+    /// <summary>The rows, newest first.</summary>
+    public IReadOnlyList<RecentDocument> Rows { get; init; } = [];
+
+    /// <summary>Why there are none, when that is worth saying.</summary>
+    public string? Notice { get; init; }
+
+    /// <summary>Whether the union was abandoned by <c>statement_timeout</c>.</summary>
+    public bool TooLargeToScan { get; init; }
+
+    /// <summary>What the region says when the scan ran out of time.</summary>
+    internal const string TooLargeNotice =
+        "Too large to scan: reading the most recently changed documents ran past the studio's query " +
+        "timeout. Marten declares no index on mt_last_modified, so a collection of any size is sorted in " +
+        "full to answer this - opts.Schema.For<T>().IndexLastModified() on the large ones fixes it.";
+
+    /// <summary>The rows this read produced.</summary>
+    /// <param name="rows">The rows, newest first.</param>
+    public static RecentDocuments From(IReadOnlyList<RecentDocument> rows) => new() { Rows = rows };
+
+    /// <summary>The <c>57014</c> answer: a value, not an empty list and not an exception.</summary>
+    public static RecentDocuments TooLarge() => new() { Notice = TooLargeNotice, TooLargeToScan = true };
+
+    /// <summary>Any other failure, reported rather than blanked.</summary>
+    /// <param name="notice">What went wrong, phrased for the page.</param>
+    public static RecentDocuments Failed(string notice) => new() { Notice = notice };
+}

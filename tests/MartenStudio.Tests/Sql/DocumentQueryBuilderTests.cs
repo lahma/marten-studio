@@ -279,6 +279,105 @@ public class DocumentQueryBuilderTests
         byId.CommandText.Should().Contain("order by d.\"id\"\n", "id is already the total order");
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // The default order: the primary key (P2-perf deliverable 1)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The order a collection opens in, pinned as SQL: the primary key descending, and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the shape of the query whose cost stopped depending on the size of the collection. The
+    /// default used to be <c>order by mt_last_modified desc nulls last, id</c> — a column Marten declares
+    /// no index on, so every collection opened with a sequential scan and a top-N sort: 88 ms at 100 000
+    /// documents and 784 ms at 1.2 M, against a 250 ms budget.
+    /// </para>
+    /// <para>
+    /// Three things are being pinned, and each of them is what makes the plan an index scan. There is no
+    /// second sort term, because <c>id</c> is already a total order and a tiebreaker after it would be
+    /// dead weight in the index condition. There is no <c>nulls last</c>, because a primary key has none.
+    /// And the direction is a modifier on the indexed column itself rather than an expression, which is
+    /// what lets a btree walk backwards instead of sorting.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_default_order_is_the_primary_key_and_carries_no_tiebreaker()
+    {
+        using var command = DocumentQueryBuilder.BuildList(SqlTestTables.FullyFeatured(), new DocumentListQuery
+        {
+            Sort = DocumentColumn.ById,
+            Direction = SortDirection.Descending,
+        });
+
+        command.CommandText.Should().Contain("order by d.\"id\" desc\n");
+        command.CommandText.Should().NotContain("nulls last");
+        command.CommandText.Should().NotContain("mt_last_modified\" desc");
+    }
+
+    /// <summary>
+    /// The same order pages by cursor and by offset, so the two agree about which row is first.
+    /// </summary>
+    /// <remarks>
+    /// A keyset page on the primary key is a single index condition — <c>id &lt; @i</c> — with no null
+    /// branch and no composite comparison, which is the other half of why the page cost stopped growing.
+    /// An offset page keeps the same <c>order by</c>, which is what makes "page 3 by offset" and "three
+    /// pages of cursor" the same rows in the same order.
+    /// </remarks>
+    [Fact]
+    public void The_default_order_pages_the_same_way_by_cursor_and_by_offset()
+    {
+        var table = SqlTestTables.FullyFeatured();
+        var id = Guid.NewGuid();
+
+        using var keyset = DocumentQueryBuilder.BuildList(table, new DocumentListQuery
+        {
+            Sort = DocumentColumn.ById,
+            Direction = SortDirection.Descending,
+            Cursor = new DocumentKeysetCursor(null, id.ToString()),
+        });
+
+        keyset.CommandText.Should().Contain("and d.\"id\" < @i\n");
+        keyset.CommandText.Should().Contain("order by d.\"id\" desc\n");
+        keyset.CommandText.Should().NotContain("offset");
+        Parameter(keyset, "i").Value.Should().Be(id);
+
+        using var offset = DocumentQueryBuilder.BuildList(table, new DocumentListQuery
+        {
+            Sort = DocumentColumn.ById,
+            Direction = SortDirection.Descending,
+            Offset = 500,
+        });
+
+        offset.CommandText.Should().Contain("order by d.\"id\" desc\n");
+        offset.CommandText.Should().Contain("limit @limit offset @offset");
+        Parameter(offset, "offset").Value.Should().Be(500);
+    }
+
+    /// <summary>
+    /// The statement timeout is a <c>set_config</c> with the value as a parameter, local to a transaction.
+    /// </summary>
+    /// <remarks>
+    /// <c>SET</c> takes a literal and not a parameter, so it cannot be used here: the one rule this file
+    /// has is that values are parameters. The third argument is what makes the setting local to the
+    /// transaction rather than to the pooled connection, which would leak it to whoever got the connection
+    /// next.
+    /// </remarks>
+    [Fact]
+    public void The_statement_timeout_parameterises_its_value_and_is_local_to_the_transaction()
+    {
+        using var command = DocumentQueryBuilder.BuildStatementTimeout(TimeSpan.FromSeconds(30));
+
+        command.CommandText.Should().Be("select set_config('statement_timeout', @statementTimeout, true)");
+        Parameter(command, "statementTimeout").Value.Should().Be("30000");
+
+        // 0ms is "disabled" to Postgres, so the shortest thing anybody can ask for is one millisecond -
+        // a caller who asked for less meant "immediately", not "never".
+        using var tiny = DocumentQueryBuilder.BuildStatementTimeout(TimeSpan.Zero);
+
+        Parameter(tiny, "statementTimeout").Value.Should().Be("1");
+    }
+
     [Fact]
     public void A_sort_key_the_table_has_no_column_for_is_refused()
     {

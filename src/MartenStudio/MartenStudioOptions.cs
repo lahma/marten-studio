@@ -104,9 +104,28 @@ public sealed class MartenStudioOptions
     public string? SqlConsoleRole { get; set; }
 
     /// <summary>
-    /// Above this estimated row count, document counts are reported as estimates from
-    /// <c>pg_class.reltuples</c> rather than <c>count(*)</c>.
+    /// Above this row count, the studio reports the <c>pg_class.reltuples</c> estimate and declines to run
+    /// <c>count(*)</c> — including when a user asks for the exact number.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It governs every exact count the documents browser would take: the collections rail's automatic
+    /// upgrade for a table Postgres has never analysed, the number in the list header, and the "=" button
+    /// beside a collection. Above the threshold each of those comes back as an estimate carrying "estimate
+    /// only, exact count refused above N" — a value the page renders, not an error — because an exact
+    /// <c>count(*)</c> on a large collection is a sequential scan, and a button that starts one is the
+    /// denial of service D8 exists to prevent.
+    /// </para>
+    /// <para>
+    /// A table Postgres has never analysed reports <c>reltuples = -1</c> and so has no estimate to compare.
+    /// The studio settles that case with <c>select 1 from … offset N limit 1</c>, whose cost is bounded by
+    /// this number rather than by the collection, and counts only when the probe comes back empty.
+    /// </para>
+    /// <para>
+    /// Zero means "never count, always estimate"; the default is a hundred thousand rows, at which an exact
+    /// count costs a fraction of a second. It cannot be negative.
+    /// </para>
+    /// </remarks>
     public long ExactCountThreshold { get; set; } = 100_000;
 
     /// <summary>
@@ -127,9 +146,29 @@ public sealed class MartenStudioOptions
     public TimeSpan RebuildShardTimeout { get; set; } = TimeSpan.FromHours(1);
 
     /// <summary>
-    /// Optional filter over the registered document types. Applied in the data layer, not only in
+    /// Optional filter over the store's <b>root</b> document types. Applied in the data layer, not only in
     /// navigation.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Roots only, and a subclass cannot be hidden on its own.</b> The delegate is asked about each type
+    /// in <c>StoreOptions.AllKnownDocumentTypes()</c>, which is the registered roots — a hierarchy appears
+    /// once, as its root. A subclass shares the root's table and is told apart only by <c>mt_doc_type</c>,
+    /// so "hide <c>Car</c> but show <c>Vehicle</c>" is not a thing this can do: hiding the root hides the
+    /// whole table, and showing it shows every row in it.
+    /// </para>
+    /// <para>
+    /// It is a gate rather than a display filter. A hidden type's table is also kept out of the discovered
+    /// band, out of every list and out of every detail page — otherwise the same rows came back as
+    /// "Discovered (unregistered)" with a row count and a detail page, which is the data the delegate was
+    /// set to keep off the screen.
+    /// </para>
+    /// <para>
+    /// It is called more than once per page. Answer from the type alone and answer the same way every
+    /// time; a delegate that consults mutable state can hand the rail one set of collections and the
+    /// counts another.
+    /// </para>
+    /// </remarks>
     public Func<Type, bool>? IsDocumentTypeVisible { get; set; }
 
     /// <summary>

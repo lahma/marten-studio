@@ -105,27 +105,53 @@ internal static class DocumentBrowseQueries
     }
 
     /// <summary>
-    /// Every table's <c>reltuples</c> in one round trip.
+    /// What <c>pg_class</c> knows about one table's size without reading a row of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both numbers, because either alone is a trap. <see cref="Rows"/> is <c>-1</c> until the first
+    /// <c>ANALYZE</c> — "never measured", not "empty" — and every freshly bulk-loaded or <c>pg_restore</c>d
+    /// collection is in that state. <see cref="Pages"/> is what is left to go on when it is: a table whose
+    /// heap already occupies thousands of 8 KB pages is one nobody should be counting speculatively,
+    /// whatever its row count turns out to be.
+    /// </para>
+    /// <para>
+    /// <see cref="Pages"/> is <c>0</c> on a table that has never been vacuumed or analysed either, so it
+    /// proves nothing about a small number — it is a guard against the large one, and the caller falls
+    /// through to a bounded probe when it says nothing.
+    /// </para>
+    /// </remarks>
+    /// <param name="Rows"><c>reltuples</c>, with <c>-1</c> passed through as Postgres wrote it.</param>
+    /// <param name="Pages"><c>relpages</c>: how many 8 KB pages the heap occupied when it was last measured.</param>
+    internal readonly record struct TableEstimate(long Rows, long Pages)
+    {
+        /// <summary>Whether Postgres has never measured this table, so there is no estimate at all.</summary>
+        public bool NeverAnalysed => Rows < 0;
+    }
+
+    /// <summary>
+    /// Every table's <c>reltuples</c> and <c>relpages</c> in one round trip.
     /// </summary>
     /// <remarks>
     /// One query for the whole rail, not one per collection: a store with forty document types would
     /// otherwise open the documents page with forty round trips, which is the shape of dashboard that
-    /// makes people turn dashboards off. <c>-1</c> is Postgres for "never analysed" and becomes zero.
+    /// makes people turn dashboards off. <c>-1</c> is Postgres for "never analysed" and is passed through
+    /// rather than clamped — see <see cref="TableEstimate"/>.
     /// </remarks>
     internal const string EstimateAllSql =
         """
-        select n.nspname, c.relname, c.reltuples::bigint
+        select n.nspname, c.relname, c.reltuples::bigint, c.relpages::bigint
         from pg_catalog.pg_class c
         join pg_catalog.pg_namespace n on n.oid = c.relnamespace
         where n.nspname = any(@schemas) and c.relkind = 'r'
         """;
 
     /// <summary>
-    /// Reads the raw <c>reltuples</c> of every table in the given schemas. <c>-1</c> is passed through
-    /// rather than clamped, because "never analysed" and "empty" are different things and only the caller
-    /// can decide whether an exact count is worth paying for.
+    /// Reads the raw <c>reltuples</c> and <c>relpages</c> of every table in the given schemas. <c>-1</c>
+    /// is passed through rather than clamped, because "never analysed" and "empty" are different things
+    /// and only the caller can decide whether an exact count is worth paying for.
     /// </summary>
-    public static async Task<IReadOnlyDictionary<string, long>> EstimateAllAsync(
+    public static async Task<IReadOnlyDictionary<string, TableEstimate>> EstimateAllAsync(
         NpgsqlConnection connection,
         IReadOnlyList<string> schemas,
         int commandTimeoutSeconds,
@@ -134,7 +160,7 @@ internal static class DocumentBrowseQueries
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(schemas);
 
-        Dictionary<string, long> estimates = new(StringComparer.Ordinal);
+        Dictionary<string, TableEstimate> estimates = new(StringComparer.Ordinal);
 
         if (schemas.Count == 0)
         {
@@ -155,7 +181,8 @@ internal static class DocumentBrowseQueries
 
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            estimates[Key(reader.GetString(0), reader.GetString(1))] = reader.GetInt64(2);
+            estimates[Key(reader.GetString(0), reader.GetString(1))] =
+                new TableEstimate(reader.GetInt64(2), reader.GetInt64(3));
         }
 
         return estimates;
@@ -168,10 +195,20 @@ internal static class DocumentBrowseQueries
     /// The two sizes of one document: <c>octet_length(data::text)</c> and <c>pg_column_size(data)</c>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// There is no <c>octet_length(jsonb)</c> — it raises 42883 (Appendix B addendum) — so the text length
     /// goes through the cast. <c>pg_column_size</c> is the other number entirely: the on-disk width of the
     /// value, TOAST compression included, which is usually a fraction of the text length and is what a
     /// person asking "why is this table so big" actually wants.
+    /// </para>
+    /// <para>
+    /// <b>A conjoined collection with no tenant in scope is made deterministic here too.</b> The same id
+    /// exists once per tenant, so <c>where id = @id</c> alone matches several rows and the reader takes
+    /// whichever one came back first — which on this read means the metadata pane can report one tenant's
+    /// byte sizes underneath another tenant's JSON, because <c>DocumentQueryBuilder.TryBuildSingle</c>
+    /// settles the same ambiguity by ordering on <c>tenant_id</c> and this did not. The two reads have to
+    /// break the tie the same way or they are describing different rows.
+    /// </para>
     /// </remarks>
     /// <param name="table">The collection.</param>
     /// <param name="rawId">The id as typed.</param>
@@ -215,12 +252,21 @@ internal static class DocumentBrowseQueries
                 Value = parsed.Value!,
             });
 
-            if (tenantId is not null && table.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined)
+            var conjoined = table.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined;
+
+            if (tenantId is not null && conjoined)
             {
                 var tenantColumn = table.MetadataColumnName(DocumentMetadataColumn.TenantId) ?? "tenant_id";
 
                 sql.Append("\n  and ").Append(SqlIdentifier.Quote(tenantColumn)).Append(" = @tenant");
                 built.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Varchar) { Value = tenantId });
+            }
+            else if (conjoined && table.MetadataColumnName(DocumentMetadataColumn.TenantId) is { } ordering)
+            {
+                // The same tie-break as DocumentQueryBuilder.TryBuildSingle, and it has to be the same one:
+                // these two sizes are drawn underneath the JSON that read returned, so a pane whose halves
+                // resolved the ambiguity differently would describe two different tenants' documents as one.
+                sql.Append("\norder by ").Append(SqlIdentifier.Quote(ordering)).Append("\nlimit 1");
             }
 
             built.CommandText = sql.ToString();

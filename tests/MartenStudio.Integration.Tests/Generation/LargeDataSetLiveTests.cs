@@ -119,9 +119,11 @@ public class LargeDataSetLiveTests(LargeDataSetFixture fixture) : IClassFixture<
     /// </para>
     /// <para>
     /// The estimate exists because the generator runs <c>analyze</c> when it finishes. Without that,
-    /// <c>reltuples</c> is <c>-1</c> until autovacuum gets there, and <c>DocumentDataService</c> falls
-    /// back to an exact count for up to twenty-five collections - so a freshly bulk-loaded million-row
-    /// store is the one case where opening the browser does pay for the scan.
+    /// <c>reltuples</c> is <c>-1</c> until autovacuum gets there — and before P2-perf,
+    /// <c>DocumentDataService</c> fell back to a real exact count for up to twenty-five collections, so a
+    /// freshly bulk-loaded million-row store was the one case where opening the browser did pay for the
+    /// scan. It no longer is: a never-analysed collection is settled by a probe bounded by
+    /// <c>ExactCountThreshold</c>, proved at small scale by <c>DocumentCountThresholdLiveTests</c>.
     /// </para>
     /// </remarks>
     [LargeDataFact]
@@ -137,11 +139,19 @@ public class LargeDataSetLiveTests(LargeDataSetFixture fixture) : IClassFixture<
         customer.Count.IsEstimate.Should().BeTrue("a collection this size is never counted on a navigation path");
         customer.Count.Value.Should().BeGreaterThan(Plan.Customers / 2);
 
-        // The exact count is still available on demand, which is the other half of D8.
-        DocumentCount exact = await probe.CountExactAsync("customer");
+        // ... and asking for the exact number does not override it either (P2-perf deliverable 2). This
+        // collection is six times the default ExactCountThreshold, so the studio declines and says so
+        // rather than starting a sequential scan over six hundred thousand rows because somebody clicked.
+        // The other half of D8 - that the exact count is there for the asking - is asserted by
+        // MediumDataSetLiveTests, where the collections are inside the threshold.
+        DocumentCount asked = await probe.CountExactAsync("customer");
 
-        exact.IsEstimate.Should().BeFalse();
-        exact.Value.Should().Be(Plan.Customers + 25);
+        asked.IsExactRefused.Should().BeTrue();
+        asked.IsEstimate.Should().BeTrue("the estimate is still the answer, and it says why");
+        asked.ExactRefusedAbove.Should().Be(new MartenStudioOptions().ExactCountThreshold);
+        asked.Reason.Should().Contain("ExactCountThreshold");
+        asked.Value.Should().NotBe(
+            Plan.Customers + 25, "a count(*) would have answered exactly that; none ran");
     }
 
     /// <summary>Offset paging refuses past the builder's cap rather than walking half a million rows.</summary>

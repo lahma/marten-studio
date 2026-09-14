@@ -590,6 +590,51 @@ internal static class DocumentQueryBuilder
     }
 
     /// <summary>
+    /// Builds the statement that caps how long the next statement in this transaction may run.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same <c>set_config(…, true)</c> shape as <see cref="BuildLockTimeout"/>, and for the same two
+    /// reasons: the third argument is what makes it local to the transaction, and a <c>SET</c> takes a
+    /// literal where this file's one rule is that values are parameters.
+    /// </para>
+    /// <para>
+    /// <b>Why a server-side timeout rather than <see cref="NpgsqlCommand.CommandTimeout"/>.</b> Npgsql's
+    /// timeout gives up on the client and issues a cancellation request, which surfaces as an exception
+    /// about the socket; Postgres' own <c>statement_timeout</c> ends the query with <c>57014</c> and a
+    /// message, which is the difference between a region that can say "this collection is too large to
+    /// scan" and one that can only say something went wrong. Callers set both — the client one a little
+    /// longer, so the server's is what fires.
+    /// </para>
+    /// <para>
+    /// <c>0ms</c> means <em>disabled</em> to Postgres, so a caller asking for less than a millisecond
+    /// means "immediately" and gets one millisecond rather than no timeout at all.
+    /// </para>
+    /// </remarks>
+    /// <param name="timeout">How long a statement may run. Rounded up to whole milliseconds, at least one.</param>
+    public static NpgsqlCommand BuildStatementTimeout(TimeSpan timeout)
+    {
+        var milliseconds = (int) Math.Clamp(Math.Ceiling(timeout.TotalMilliseconds), 1d, int.MaxValue);
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var builder = new ParameterBuilder(command);
+
+            command.CommandText = "select set_config('statement_timeout', " +
+                builder.Add(NpgsqlDbType.Text, milliseconds.ToString(CultureInfo.InvariantCulture), "statementTimeout") +
+                ", true)";
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Parses an id against the type of the column it will be compared with — the column type, not the CLR
     /// <c>IdType</c>, so strong-typed ids, <c>UseIdentityKey</c> and F# unions all work without unwrapping.
     /// </summary>

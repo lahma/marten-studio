@@ -40,4 +40,11 @@ internal static class SqlTestTables
     /// <summary>A string-keyed collection, for the id-typing tests.</summary>
     public static DocumentTableInfo StringKeyed() =>
         DocumentTableInfo.FromDocumentType(SqlTestStore.DocumentType<SqlTestTicket>());
+
+    /// <summary>
+    /// A hierarchy, so <c>mt_doc_type</c> exists and the subclass verdict has something to judge.
+    /// </summary>
+    public static DocumentTableInfo Hierarchy() =>
+        DocumentTableInfo.FromDocumentType(SqlTestStore.DocumentType<SqlTestCustomer>(options =>
+            options.Schema.For<SqlTestCustomer>().AddSubClass<SqlTestVipCustomer>()));
 }

@@ -140,7 +140,7 @@ public class DocumentDataServiceLiveTests(DocumentDataServiceLiveTests.Fixture f
         DocumentPage page = await documents.Service.ListAsync(
             MartenFixture.ScopeFor("acme"),
             "invoice",
-            new DocumentListRequest { PageSize = 100, ExactCount = true },
+            new DocumentListRequest { PageSize = 100 },
             TestContext.Current.CancellationToken);
 
         page.Rows.Should().HaveCount(3);

@@ -1114,6 +1114,37 @@ public class MartenApiSurfaceTest
     }
 
     /// <summary>
+    /// <c>IndexLastModified</c>, which is the fix line the index advisor offers for the one metadata
+    /// column a host can index from <c>StoreOptions</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The advisor prints <c>options.Schema.For&lt;T&gt;().IndexLastModified();</c> beside a red sort
+    /// verdict, and that string is only advice worth giving while the method exists. It is the whole
+    /// reason the suggestion is not the raw <c>create index … on … (mt_last_modified desc)</c> DDL:
+    /// <c>Index(x =&gt; …)</c> takes a member expression on the document and cannot name a metadata
+    /// column, so the choice was between a declared call and hand-written DDL — and an index Marten's
+    /// configuration does not ask for is dropped by the next <c>CreateOrUpdate</c> apply, which makes the
+    /// DDL the worse of the two answers rather than merely the longer one.
+    /// </para>
+    /// <para>
+    /// The optional <c>Action&lt;DocumentIndex&gt;</c> is part of the signature and is checked here so
+    /// that the suggestion's no-argument form stays callable: a future overload that made it required
+    /// would leave the studio printing a line that does not compile.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_host_can_index_mt_last_modified_from_StoreOptions()
+    {
+        var expression = typeof(MartenRegistry.DocumentMappingExpression<SampleDocument>);
+        var indexLastModified = RequireMethod(expression, "IndexLastModified", typeof(Action<DocumentIndex>));
+
+        indexLastModified.ReturnType.Should().Be(expression);
+        indexLastModified.GetParameters()[0].IsOptional
+            .Should().BeTrue("the advisor prints the no-argument form");
+    }
+
+    /// <summary>
     /// A table carries its own ignored-index list, which is what the event-store tables hand back.
     /// </summary>
     [Fact]

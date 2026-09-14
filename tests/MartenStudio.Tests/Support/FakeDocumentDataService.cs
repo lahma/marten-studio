@@ -22,8 +22,15 @@ internal sealed class FakeDocumentDataService : IDocumentDataService
     /// <summary>The page the list is given.</summary>
     public DocumentPage Page { get; set; } = new();
 
+    /// <summary>The recent documents, and the reason there are none when there are none.</summary>
+    public RecentDocuments RecentResult { get; set; } = RecentDocuments.None;
+
     /// <summary>The recent documents.</summary>
-    public IReadOnlyList<RecentDocument> Recent { get; set; } = [];
+    public IReadOnlyList<RecentDocument> Recent
+    {
+        get => RecentResult.Rows;
+        set => RecentResult = RecentDocuments.From(value);
+    }
 
     /// <summary>What one document read answers.</summary>
     public DocumentDetailResult Detail { get; set; } = DocumentDetailResult.Missing("nothing set up");
@@ -120,7 +127,12 @@ internal sealed class FakeDocumentDataService : IDocumentDataService
     public Task<IReadOnlyList<RecentDocument>> GetRecentAsync(
         StudioScope scope,
         int limit,
-        CancellationToken cancellationToken = default) => Task.FromResult(Recent);
+        CancellationToken cancellationToken = default) => Task.FromResult(RecentResult.Rows);
+
+    public Task<RecentDocuments> ListRecentAsync(
+        StudioScope scope,
+        int limit,
+        CancellationToken cancellationToken = default) => Task.FromResult(RecentResult);
 }
 
 /// <summary>Builders for the shapes the documents pages are handed, so a test reads as what it is about.</summary>

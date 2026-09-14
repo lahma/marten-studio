@@ -61,6 +61,17 @@ internal sealed record PostgresColumn(string Name, string DataType, string UdtNa
 /// bookkeeping and a lock on the read path to be correct; the cost of being wrong here is one extra read
 /// of a system view, so the cheap answer is the right one.
 /// </para>
+/// <para>
+/// <b><see cref="MaxEntries"/> is flat at 512 on purpose, and it is a safety valve rather than a sizing
+/// decision.</b> A key is one table of one database, so a single-store host uses a handful of entries and
+/// never approaches it; what the bound is defending against is the part of the key that comes from a URL
+/// on a host with many databases, where the set of things the cache can be asked about is not the set of
+/// things that exist. Deriving it from the mapping count would tie the valve to the wrong number — the
+/// mappings are per store, the keys are per database <em>and</em> per discovered table, and a host with
+/// six hundred tenant databases would get a bound six hundred times too small for its own legitimate
+/// traffic. When 512 is exceeded the cost is that everything is read once more, which is a slow page and
+/// not a wrong one.
+/// </para>
 /// </remarks>
 /// <typeparam name="TValue">What is cached.</typeparam>
 internal sealed class CatalogCache<TValue>

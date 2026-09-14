@@ -77,6 +77,51 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     /// <summary>How many never-analysed tables the rail will pay an exact <c>count(*)</c> for.</summary>
     private const int MaxExactCountsPerRail = 25;
 
+    /// <summary>
+    /// How long one of the rail's speculative counts may run, whatever <c>QueryTimeout</c> allows.
+    /// </summary>
+    /// <remarks>
+    /// The rail is navigation: it is read on every load of the documents page, by every circuit, and a
+    /// person looking at it is waiting to click something. The host's <c>QueryTimeout</c> is the patience
+    /// for a query somebody typed — thirty seconds by default — and twenty-five of those is not a page
+    /// load, it is an outage. A count that cannot finish in two seconds is one the badge does not need.
+    /// </remarks>
+    private const int RailSpeculativeTimeoutSeconds = 2;
+
+    /// <summary>
+    /// How many 8 KB heap pages a never-analysed table may occupy before the rail stops guessing at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Four thousand and ninety-six pages is thirty-two megabytes, which a sequential scan reads in well
+    /// under the two seconds above and which no realistic demo or test database exceeds while still having
+    /// never been analysed.
+    /// </para>
+    /// <para>
+    /// It guards what the row probe cannot see. <c>ExactCountThreshold</c> is a number of rows, and a
+    /// collection of very large documents can be several gigabytes of heap while holding far fewer rows
+    /// than the threshold — so the probe would say "small enough" and the <c>count(*)</c> behind it would
+    /// read the lot. <c>relpages</c> costs nothing to consult: it is in the same <c>pg_class</c> row the
+    /// estimate already came from.
+    /// </para>
+    /// <para>
+    /// It is a guard against a large number and never evidence of a small one: <c>relpages</c> is also
+    /// <c>0</c> on a table nobody has vacuumed, which is the same table this branch is about. Where it
+    /// says nothing, the probe decides.
+    /// </para>
+    /// </remarks>
+    private const long MaxSpeculativePages = 4_096;
+
+    /// <summary>Why a tenant-scoped visitor gets no number beside a conjoined collection.</summary>
+    internal const string CrossTenantEstimateNote =
+        "No estimate in this scope: pg_class.reltuples counts every tenant's rows, and this collection is " +
+        "conjoined-tenanted. Ask for the exact count to get this tenant's.";
+
+    /// <summary>Why a never-analysed table with a big heap gets no number either.</summary>
+    internal const string LargeHeapNote =
+        "Estimate only: Postgres has never analysed this collection, and its table is already too large " +
+        "for the studio to count it while drawing a rail. Ask for the exact count, or run ANALYZE.";
+
     /// <summary>How many JSON keys the column chooser offers from a sampled page.</summary>
     private const int MaxJsonSuggestions = 50;
 
@@ -105,6 +150,57 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
     private int CommandTimeoutSeconds => Math.Max(1, (int) options.Value.QueryTimeout.TotalSeconds);
 
+    /// <summary>
+    /// A counter that knows both of the host's bounds: how long a statement may run, and how big a
+    /// collection may be before an exact count is declined.
+    /// </summary>
+    /// <remarks>
+    /// Built here rather than at each call site because the threshold was missed at two of the three
+    /// before, which is how <see cref="MartenStudioOptions.ExactCountThreshold"/> came to be documented
+    /// behaviour the studio did not have.
+    /// </remarks>
+    private CountEstimator Counter() => Counter(CommandTimeoutSeconds);
+
+    /// <summary>The same counter, with a patience shorter than the host's.</summary>
+    /// <remarks>
+    /// Never longer: a caller asking for two seconds on a host that allows one gets one. The option is the
+    /// ceiling, and a constant in this file is not allowed to raise it.
+    /// </remarks>
+    /// <param name="commandTimeoutSeconds">The bound this caller wants, clamped to the host's.</param>
+    private CountEstimator Counter(int commandTimeoutSeconds) => new()
+    {
+        CommandTimeoutSeconds = Math.Clamp(commandTimeoutSeconds, 1, CommandTimeoutSeconds),
+        ExactCountThreshold = Math.Max(options.Value.ExactCountThreshold, 0),
+    };
+
+    /// <summary>
+    /// The exact count, when <see cref="MartenStudioOptions.ExactCountThreshold"/> allows one — and the
+    /// cheap answer, marked as the only one on offer, when it does not.
+    /// </summary>
+    /// <remarks>
+    /// The gate runs before any <c>count(*)</c> and, for a collection with an estimate, before the table
+    /// is touched at all. Callers hand in the estimate they already read rather than having it read twice.
+    /// </remarks>
+    private static async Task<DocumentCount> CountWithinThresholdAsync(
+        CountEstimator estimator,
+        NpgsqlConnection connection,
+        DocumentTableInfo table,
+        DocumentCount estimate,
+        string? tenantId,
+        DeletedFilter deleted,
+        CancellationToken cancellationToken)
+    {
+        var mayCount = await estimator
+            .MayCountExactlyAsync(connection, table.Schema, table.Table, estimate, cancellationToken)
+            .ConfigureAwait(false);
+
+        return mayCount
+            ? await estimator
+                .CountExactAsync(connection, table, tenantId, deleted, commandTimeout: null, cancellationToken)
+                .ConfigureAwait(false)
+            : DocumentCount.RefusedExact(estimate, estimator.ExactCountThreshold);
+    }
+
     /// <inheritdoc />
     public async Task<CollectionRail> GetCollectionsAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
@@ -117,7 +213,6 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-            List<DocumentTableInfo> tables = [];
             HashSet<string> schemas = SchemaNames(resolved.Store);
 
             // Every table a mapping claims, visible or not. Building this from the *visible* types was how
@@ -126,37 +221,39 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             // IsDocumentTypeVisible was set to keep off the screen (P2-fix B3).
             HashSet<string> knownTables = ClaimedTables(resolved.Store);
 
+            // Paired once, and iterated once. Two independent walks of VisibleDocumentTypes lined up by
+            // index is a rail that mislabels every count after the first disagreement - and disagreeing is
+            // allowed: IsDocumentTypeVisible is a host delegate, called twice, with nothing promising it
+            // answers the same way both times.
+            List<(IDocumentType Type, DocumentTableInfo Table)> visible = [];
+
             foreach (IDocumentType documentType in VisibleDocumentTypes(resolved.Store))
             {
                 DocumentTableInfo table = DocumentTableInfo.FromDocumentType(documentType);
 
-                tables.Add(table);
+                visible.Add((documentType, table));
                 schemas.Add(table.Schema);
             }
 
             // The schemas come from the mappings rather than from `Storage.AllSchemaNames()`: the latter
             // walks Marten's feature set, which lazily migrates the HiLo sequence on first touch, and the
             // rail is a read - it has no business applying schema changes to get a row count.
-            IReadOnlyDictionary<string, long> estimates = await DocumentBrowseQueries
+            IReadOnlyDictionary<string, DocumentBrowseQueries.TableEstimate> estimates = await DocumentBrowseQueries
                 .EstimateAllAsync(connection, [.. schemas], CommandTimeoutSeconds, cancellationToken)
                 .ConfigureAwait(false);
 
+            // One budget for the whole rail, registered and discovered alike. Discovery used to pass
+            // `static () => true`, so a schema full of never-analysed orphan tables was unbounded
+            // speculative counting after the registered side had carefully stopped at twenty-five.
             var exactCountsSpent = 0;
+            var budget = () => exactCountsSpent++ < MaxExactCountsPerRail;
 
             List<CollectionInfo> registered = [];
-            var index = 0;
 
-            foreach (IDocumentType documentType in VisibleDocumentTypes(resolved.Store))
+            foreach ((IDocumentType documentType, DocumentTableInfo table) in visible)
             {
-                DocumentTableInfo table = tables[index++];
-
                 DocumentCount count = await CountForRailAsync(
-                        connection,
-                        estimates,
-                        table,
-                        resolved.TenantId,
-                        () => exactCountsSpent++ < MaxExactCountsPerRail,
-                        cancellationToken)
+                        connection, estimates, table, resolved.TenantId, budget, cancellationToken)
                     .ConfigureAwait(false);
 
                 registered.Add(Describe(documentType, table, count));
@@ -165,7 +262,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             registered.Sort(static (left, right) => string.CompareOrdinal(left.Alias, right.Alias));
 
             List<CollectionInfo> discovered = await DiscoverAsync(
-                    resolved, connection, [.. schemas], knownTables, estimates, cancellationToken)
+                    resolved, connection, [.. schemas], knownTables, estimates, budget, cancellationToken)
                 .ConfigureAwait(false);
 
             List<CollectionGroup> groups =
@@ -211,21 +308,38 @@ internal sealed partial class DocumentDataService : IDocumentDataService
                 return DocumentCount.Unavailable;
             }
 
-            var estimator = new CountEstimator { CommandTimeoutSeconds = CommandTimeoutSeconds };
+            CountEstimator estimator = Counter();
+
+            // The cheap answer first, even though an exact one was asked for: it is what
+            // ExactCountThreshold is compared against, and on a collection above the threshold it is also
+            // the answer. A button is not a reason to start a sequential scan over ten million rows.
+            DocumentCount estimate = await estimator
+                .EstimateAsync(connection, context.Table.Schema, context.Table.Table, cancellationToken)
+                .ConfigureAwait(false);
 
             // Tenant-scoped, because the rail is: a scope narrowed to 'acme' that answered "6" beside a
             // collection showing three invoices would be answering a question nobody asked. Deleted rows
             // are counted, because the estimate this replaces is a whole-table reltuples and the two
             // numbers sit in the same badge.
-            return await estimator
-                .CountExactAsync(
+            return await CountWithinThresholdAsync(
+                    estimator,
                     connection,
                     context.Table,
+                    estimate,
                     resolved.TenantId,
                     DeletedFilter.Include,
-                    commandTimeout: null,
                     cancellationToken)
                 .ConfigureAwait(false);
+        }
+        catch (PostgresException postgres)
+        {
+            logger.LogWarning(postgres, "Marten Studio could not count '{Alias}' exactly", alias);
+
+            // 57014 is statement_timeout: the collection is certainly there and measuring it costs more
+            // than the host allows a statement to take, which is "unknown" rather than "unreachable".
+            return string.Equals(postgres.SqlState, "57014", StringComparison.Ordinal)
+                ? DocumentCount.Unknown
+                : DocumentCount.Unavailable;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -236,6 +350,13 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<RecentDocument>> GetRecentAsync(
+        StudioScope scope,
+        int limit,
+        CancellationToken cancellationToken = default) =>
+        (await ListRecentAsync(scope, limit, cancellationToken).ConfigureAwait(false)).Rows;
+
+    /// <inheritdoc />
+    public async Task<RecentDocuments> ListRecentAsync(
         StudioScope scope,
         int limit,
         CancellationToken cancellationToken = default)
@@ -275,35 +396,103 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
             if (command is null)
             {
-                return [];
+                return RecentDocuments.None;
             }
 
-            command.Connection = connection;
-            command.CommandTimeout = CommandTimeoutSeconds;
-
-            List<RecentDocument> recent = [];
-
-            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                var alias = reader.GetString(0);
-
-                recent.Add(new RecentDocument(
-                    alias,
-                    reader.GetString(1),
-                    reader.GetFieldValue<DateTimeOffset>(2),
-                    CollectionColorizer.HueFor(alias)));
-            }
-
-            return recent;
+            return await ReadRecentAsync(connection, command, cancellationToken).ConfigureAwait(false);
+        }
+        catch (PostgresException postgres) when (string.Equals(postgres.SqlState, "57014", StringComparison.Ordinal))
+        {
+            // The union ran past its statement_timeout. That is a fact about the store - some collection
+            // in it sorts millions of rows to answer this, because Marten declares no index on
+            // mt_last_modified - and saying so is more use than an empty region that looks like calm.
+            logger.LogWarning(postgres, "Marten Studio's recent-documents read of {StoreKey} timed out", scope.StoreKey);
+            return RecentDocuments.TooLarge();
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // The _recent pseudo-collection is one region of a page. A store where one table of fifty has
             // drifted must lose that region, not the documents browser.
             logger.LogWarning(exception, "Marten Studio could not read the recent documents of {StoreKey}", scope.StoreKey);
-            return [];
+            return RecentDocuments.Failed(Describe(exception));
+        }
+    }
+
+    /// <summary>
+    /// Runs the <c>_recent</c> union under a server-side <c>statement_timeout</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the transaction is here rather than the timeout being left to Npgsql.</b> Each branch of the
+    /// union is <c>order by mt_last_modified desc limit n</c>, and Marten declares no index on that column
+    /// — so on a collection of any size the branch is a sequential scan and a top-N sort, and the cost of
+    /// the whole region grows with the store. <c>CommandTimeout</c> would bound it only by breaking the
+    /// connection; <c>statement_timeout</c> ends it with <c>57014</c>, which is what lets the region say
+    /// "too large to scan" instead of going blank. The client timeout is set a little longer so the
+    /// server's is the one that fires.
+    /// </para>
+    /// <para>
+    /// Rolled back rather than committed: nothing here writes, and a rollback returns a pooled connection
+    /// with no transaction on it whatever happened.
+    /// </para>
+    /// </remarks>
+    private async Task<RecentDocuments> ReadRecentAsync(
+        NpgsqlConnection connection,
+        NpgsqlCommand command,
+        CancellationToken cancellationToken)
+    {
+        NpgsqlTransaction transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await using (NpgsqlCommand timeout = DocumentQueryBuilder.BuildStatementTimeout(options.Value.QueryTimeout))
+            {
+                timeout.Connection = connection;
+                timeout.Transaction = transaction;
+
+                await timeout.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            command.Connection = connection;
+            command.Transaction = transaction;
+            command.CommandTimeout = CommandTimeoutSeconds + 5;
+
+            List<RecentDocument> recent = [];
+
+            await using (NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            {
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    var alias = reader.GetString(0);
+
+                    recent.Add(new RecentDocument(
+                        alias,
+                        reader.GetString(1),
+                        reader.GetFieldValue<DateTimeOffset>(2),
+                        CollectionColorizer.HueFor(alias)));
+                }
+            }
+
+            return RecentDocuments.From(recent);
+        }
+        finally
+        {
+            // Always, and with its own token: a rollback skipped because the caller cancelled is a
+            // transaction left open on a pooled connection.
+            try
+            {
+                await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (NpgsqlException)
+            {
+                // The connection is already broken; disposing is all that is left to do.
+            }
+            catch (InvalidOperationException)
+            {
+                // The transaction has already completed.
+            }
+
+            await transaction.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -370,8 +559,8 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         IReadOnlyList<DocumentColumnHeader> available = AvailableColumns(table, context.IsRegistered);
         List<DocumentColumnHeader> visible = SelectColumns(table, request.ColumnKeys, available, context);
 
-        DocumentColumn sort = DocumentColumnKeys.Resolve(table, request.SortKey) ?? DefaultSort(table);
-        SortDirection direction = request.SortKey is null ? DefaultDirection(table) : request.Direction;
+        DocumentColumn sort = DocumentColumnKeys.Resolve(table, request.SortKey) ?? DefaultSort;
+        SortDirection direction = request.SortKey is null ? DefaultDirection : request.Direction;
 
         // The sort column has to be in the select list even when the chooser hides it: the keyset cursor
         // is (sort value, id), and a cursor whose sort half was never read cannot page.
@@ -423,7 +612,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         };
 
         DocumentCount estimate = await EstimateAsync(
-                connection, table, resolved.TenantId, query.IncludeDeleted, request.ExactCount, cancellationToken)
+                connection, table, resolved.TenantId, query.IncludeDeleted, cancellationToken)
             .ConfigureAwait(false);
 
         // Built before the verdict gate, and its refusals folded back into the verdict. A predicate the
@@ -552,20 +741,26 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     }
 
     /// <summary>
-    /// The number under the collection's title: the free estimate, or an exact count when one was asked
-    /// for — or when there is no estimate to be had.
+    /// The number under the collection's title: the free estimate, or an exact count when there is no
+    /// estimate to be had and the collection is small enough to pay for one.
     /// </summary>
     /// <remarks>
     /// <para>
     /// The exact count is scoped the way the list is, by tenant and by the soft-delete tri-state, so the
-    /// header and the rows agree about what is being counted.
+    /// header and the rows agree about what is being counted. It is never scoped by the <em>search</em>,
+    /// and there is no request flag asking it to be — see the note on <see cref="DocumentListRequest"/>.
     /// </para>
     /// <para>
     /// A never-analysed table has no estimate at all — <c>reltuples</c> is <c>-1</c>, which is the state
-    /// every freshly seeded collection is in — so the header pays for one <c>count(*)</c> under the
-    /// studio's own query timeout rather than printing "~0 documents" over a page of rows. If that scan
-    /// runs past the timeout the answer stays unknown, and the header says nothing rather than something
-    /// false.
+    /// every freshly seeded collection is in — so the header pays for one <c>count(*)</c> rather than
+    /// printing "~0 documents" over a page of rows. It pays for it only once the threshold probe says the
+    /// collection is small enough to be worth it, and if the scan runs past the query timeout the answer
+    /// stays unknown: the header says nothing rather than something false.
+    /// </para>
+    /// <para>
+    /// <see cref="MartenStudioOptions.ExactCountThreshold"/> governs the upgrade. Above it the header shows
+    /// the estimate with <see cref="DocumentCount.IsExactRefused"/> set, which is a value the page renders
+    /// and not a failure.
     /// </para>
     /// </remarks>
     private async Task<DocumentCount> EstimateAsync(
@@ -573,27 +768,25 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         DocumentTableInfo table,
         string? tenantId,
         DeletedFilter deleted,
-        bool exact,
         CancellationToken cancellationToken)
     {
-        var estimator = new CountEstimator { CommandTimeoutSeconds = CommandTimeoutSeconds };
+        CountEstimator estimator = Counter();
 
         try
         {
-            if (!exact)
-            {
-                DocumentCount estimate = await estimator
-                    .EstimateAsync(connection, table.Schema, table.Table, cancellationToken)
-                    .ConfigureAwait(false);
+            DocumentCount estimate = await estimator
+                .EstimateAsync(connection, table.Schema, table.Table, cancellationToken)
+                .ConfigureAwait(false);
 
-                if (!estimate.IsUnknown)
-                {
-                    return estimate;
-                }
+            // An estimate is the answer, whatever its size: that is D8, and there is no longer a request
+            // flag that can override it - see the note on DocumentListRequest.
+            if (!estimate.IsUnknown)
+            {
+                return estimate;
             }
 
-            return await estimator
-                .CountExactAsync(connection, table, tenantId, deleted, commandTimeout: null, cancellationToken)
+            return await CountWithinThresholdAsync(
+                    estimator, connection, table, estimate, tenantId, deleted, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (PostgresException exception)
@@ -897,13 +1090,40 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         _ => "null",
     };
 
-    private static DocumentColumn DefaultSort(DocumentTableInfo table) =>
-        table.HasMetadata(DocumentMetadataColumn.LastModified)
-            ? new DocumentColumn.Metadata(DocumentMetadataColumn.LastModified)
-            : DocumentColumn.ById;
+    /// <summary>
+    /// The order a collection opens in: the primary key, descending.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It used to be <c>mt_last_modified desc</c>, and that made opening a collection O(rows).</b>
+    /// Marten declares no index on <c>mt_last_modified</c> — it is an opt-in
+    /// (<c>Schema.For&lt;T&gt;().IndexLastModified()</c>) and almost nobody opts in — so the first page of
+    /// every collection was a sequential scan plus a top-N sort. Measured through these services against
+    /// the generated data set on 2026-09-14: 88 ms at 100 k documents, 784 ms at 1.2 M, against a 250 ms
+    /// budget, and an offset page at the 10 000 cap cost a full second. Nothing about that is fixable in
+    /// the query — the sort key has no index behind it, and the cap is not the protection it looks like
+    /// because the sort happens before the offset does.
+    /// </para>
+    /// <para>
+    /// <b>Why descending rather than ascending.</b> The primary key is indexed on every Marten table and a
+    /// btree walks either way, so both directions cost the same; descending is chosen because it keeps the
+    /// behaviour people had. Marten's default identity for a <c>Guid</c> is <c>CombGuidIdGeneration</c>,
+    /// whose values increase with time, and every other generator it ships — HiLo, <c>Identity</c>,
+    /// <c>Sequence</c> — is monotonic by construction. On all of them "highest id first" is "newest first",
+    /// which is what <c>mt_last_modified desc</c> was being asked for. On a collection keyed by something
+    /// arbitrary (a string key, a natural key) it is simply reverse key order, which is a stable, cheap,
+    /// total order and no more arbitrary than the alternative.
+    /// </para>
+    /// <para>
+    /// <c>mt_last_modified</c> is still available and still one click away in the column header; the sort
+    /// verdict turns red for it and offers <c>IndexLastModified()</c>, which is the honest answer — the
+    /// studio should not make that read the default on everybody's behalf.
+    /// </para>
+    /// </remarks>
+    internal static DocumentColumn DefaultSort => DocumentColumn.ById;
 
-    private static SortDirection DefaultDirection(DocumentTableInfo table) =>
-        table.HasMetadata(DocumentMetadataColumn.LastModified) ? SortDirection.Descending : SortDirection.Ascending;
+    /// <summary>Descending, for the reason <see cref="DefaultSort"/> gives.</summary>
+    internal static SortDirection DefaultDirection => SortDirection.Descending;
 
     /// <summary>Every column the chooser may offer for this table.</summary>
     internal static IReadOnlyList<DocumentColumnHeader> AvailableColumns(DocumentTableInfo table, bool registered)
@@ -1028,7 +1248,8 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         NpgsqlConnection connection,
         IReadOnlyList<string> schemas,
         HashSet<string> knownTables,
-        IReadOnlyDictionary<string, long> estimates,
+        IReadOnlyDictionary<string, DocumentBrowseQueries.TableEstimate> estimates,
+        Func<bool> budget,
         CancellationToken cancellationToken)
     {
         List<CollectionInfo> discovered = [];
@@ -1067,7 +1288,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             DocumentTableInfo table = DocumentTableInfo.FromDiscoveredTable(name.Schema, name.Name, physical.Columns);
 
             DocumentCount count = await CountForRailAsync(
-                    connection, estimates, table, resolved.TenantId, static () => true, cancellationToken)
+                    connection, estimates, table, resolved.TenantId, budget, cancellationToken)
                 .ConfigureAwait(false);
 
             discovered.Add(new CollectionInfo
@@ -1095,34 +1316,72 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     }
 
     /// <summary>
-    /// The rail's count for one table: the grouped estimate, upgraded to an exact count only for a table
-    /// Postgres has never analysed.
+    /// The rail's count for one table: the grouped estimate, or a bounded guess for a table Postgres has
+    /// never analysed — and nothing at all on a conjoined collection the visitor is scoped into.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>reltuples</c> is <c>-1</c> until the first <c>ANALYZE</c>, which is exactly the state a freshly
-    /// seeded demo database is in — and "~0" beside a collection that visibly has rows in it is worse than
-    /// the round trip. The budget stops a store with hundreds of never-analysed tables from turning the
-    /// rail into hundreds of sequential scans.
+    /// seeded demo database, a <c>pg_restore</c>d one and a store with autovacuum turned off are all in —
+    /// and "~0" beside a collection that visibly has rows in it is worse than a round trip. <b>Three
+    /// separate bounds</b> keep that round trip from becoming the denial of service D8 exists to prevent,
+    /// because each of them alone leaves a hole the other two close:
+    /// </para>
+    /// <para>
+    /// <b>1. <see cref="MaxExactCountsPerRail"/></b> bounds how many tables are paid for. It is not enough
+    /// on its own: twenty-five never-analysed collections of ten million rows each are twenty-five
+    /// sequential scans, inside the budget, on every load of the documents page — and the rail is loaded
+    /// per circuit rather than through the snapshot cache.
+    /// <b>2. <see cref="MartenStudioOptions.ExactCountThreshold"/></b> bounds what each one may cost, asked
+    /// through <c>select 1 … offset N limit 1</c>, whose work is the threshold and not the collection.
+    /// <b>3. <see cref="MaxSpeculativePages"/></b> is the guard for what the probe cannot see: a table of
+    /// very large documents can be gigabytes of heap and still hold fewer rows than the threshold, so
+    /// <c>relpages</c> — which costs nothing, being in the same <c>pg_class</c> row — declines it first.
+    /// Every statement this method issues also carries <see cref="RailSpeculativeTimeoutSeconds"/> rather
+    /// than the host's whole <c>QueryTimeout</c>, because a rail is navigation and navigation has a much
+    /// shorter patience than a query somebody typed.
+    /// </para>
+    /// <para>
+    /// <b>The conjoined case answers nothing, on purpose.</b> The badge used to be whole-table
+    /// <c>reltuples</c> when there was one and <em>this tenant's</em> exact count when there was not — so a
+    /// visitor scoped to one tenant saw "3" beside a collection, and "~1,200" beside the same collection
+    /// after autovacuum next ran. That is two different questions under one number, and the second of them
+    /// is a cardinality disclosure about tenants the visitor is not scoped to. D8 says an estimate is a
+    /// whole-table number; a visitor who is not looking at the whole table therefore gets
+    /// <see cref="DocumentCount.Unknown"/>, and the "=" button answers exactly and in scope on demand.
+    /// </para>
     /// </remarks>
     private async Task<DocumentCount> CountForRailAsync(
         NpgsqlConnection connection,
-        IReadOnlyDictionary<string, long> estimates,
+        IReadOnlyDictionary<string, DocumentBrowseQueries.TableEstimate> estimates,
         DocumentTableInfo table,
         string? tenantId,
         Func<bool> budget,
         CancellationToken cancellationToken)
     {
-        if (!estimates.TryGetValue(DocumentBrowseQueries.Key(table.Schema, table.Table), out var rows))
+        if (!estimates.TryGetValue(DocumentBrowseQueries.Key(table.Schema, table.Table), out var estimate))
         {
             return DocumentCount.Unavailable;
         }
 
-        // The estimate stands whenever there is one, tenant or no tenant: reltuples describes the whole
-        // table and nothing narrower, and D8 is that the rail costs one cheap query rather than one
-        // sequential scan per collection. Only a table Postgres has never looked at is worth paying for.
-        if (rows >= 0)
+        // Before anything is read: a tenant-scoped visitor is not owed a whole-table number, and must not
+        // be given one that changes meaning the next time autovacuum runs. See the remarks.
+        if (tenantId is not null && table.TenancyStyle == TenancyStyle.Conjoined)
         {
-            return DocumentCount.Estimate(rows);
+            return DocumentCount.RefusedExact(DocumentCount.Unknown, 0, CrossTenantEstimateNote);
+        }
+
+        // The estimate stands whenever there is one: reltuples describes the whole table and nothing
+        // narrower, and D8 is that the rail costs one cheap query rather than one sequential scan per
+        // collection. Only a table Postgres has never looked at is worth paying anything for.
+        if (!estimate.NeverAnalysed)
+        {
+            return DocumentCount.Estimate(estimate.Rows);
+        }
+
+        if (estimate.Pages > MaxSpeculativePages)
+        {
+            return DocumentCount.RefusedExact(DocumentCount.Unknown, 0, LargeHeapNote);
         }
 
         if (!budget())
@@ -1132,23 +1391,51 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             return DocumentCount.Unknown;
         }
 
-        var estimator = new CountEstimator { CommandTimeoutSeconds = CommandTimeoutSeconds };
+        CountEstimator estimator = Counter(RailSpeculativeTimeoutSeconds);
 
         try
         {
-            return await estimator
-                .CountExactAsync(connection, table, tenantId, DeletedFilter.Include, commandTimeout: null, cancellationToken)
+            // No tenant: a conjoined collection never reaches here, and on every other kind there is no
+            // tenant column to filter by.
+            return await CountWithinThresholdAsync(
+                    estimator,
+                    connection,
+                    table,
+                    DocumentCount.Unknown,
+                    tenantId: null,
+                    DeletedFilter.Include,
+                    cancellationToken)
                 .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsTimeout(exception))
+        {
+            // The rail's own short patience ran out. The table is certainly there and nobody has measured
+            // it, which is "unknown" - and a rail that failed because one collection is slow would be a
+            // rail that fails on exactly the store this budget exists for.
+            logger.LogWarning(exception, "Marten Studio's rail count of '{Alias}' timed out", table.Alias);
+            return DocumentCount.Unknown;
         }
         catch (PostgresException exception)
         {
             logger.LogWarning(exception, "Marten Studio could not count '{Alias}'", table.Alias);
-
-            return string.Equals(exception.SqlState, "57014", StringComparison.Ordinal)
-                ? DocumentCount.Unknown
-                : DocumentCount.Unavailable;
+            return DocumentCount.Unavailable;
         }
     }
+
+    /// <summary>
+    /// Whether a failed read is a timeout rather than a fault — Postgres' own, or Npgsql's.
+    /// </summary>
+    /// <remarks>
+    /// Both spellings, because which one arrives is a race. A <see cref="NpgsqlCommand.CommandTimeout"/>
+    /// that expires makes Npgsql send a cancellation request: when the backend answers it in time the
+    /// client sees <c>57014</c>, and when it does not the client sees an <see cref="NpgsqlException"/>
+    /// wrapping a <see cref="TimeoutException"/>. Catching only the first works until the day the database
+    /// is busy, which is the day this matters.
+    /// </remarks>
+    private static bool IsTimeout(Exception exception) =>
+        (exception is PostgresException postgres && string.Equals(postgres.SqlState, "57014", StringComparison.Ordinal))
+        || exception is TimeoutException
+        || (exception is NpgsqlException npgsql && npgsql.InnerException is TimeoutException);
 
     private IEnumerable<IDocumentType> VisibleDocumentTypes(IDocumentStore store)
     {
