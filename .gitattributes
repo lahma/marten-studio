@@ -1,0 +1,31 @@
+# Normalize line endings on check-in; check out with the platform default unless
+# an explicit eol is given below.
+* text=auto
+
+*.sh           text eol=lf
+*.cs           text eol=lf
+*.csproj       text eol=lf
+*.props        text eol=lf
+*.targets      text eol=lf
+*.json         text eol=lf
+*.yml          text eol=lf
+*.md           text eol=lf
+*.slnx         text eol=lf
+*.diff         text eol=lf
+*.editorconfig text eol=lf
+
+# Extensionless / other config files that `text=auto` would otherwise check out as CRLF.
+*.config       text eol=lf
+*.ps1          text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+LICENSE        text eol=lf
+
+*.razor        text eol=lf
+*.css          text eol=lf
+*.js           text eol=lf
+
+# Verify baselines are compared byte for byte. A CRLF checkout on Windows makes every snapshot
+# test fail on a machine that did nothing wrong.
+*.verified.txt  text eol=lf working-tree-encoding=UTF-8
+*.verified.json text eol=lf working-tree-encoding=UTF-8

@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <AssemblyName>MartenStudio</AssemblyName>
+    <RootNamespace>MartenStudio</RootNamespace>
+    <PackageId>MartenStudio</PackageId>
+    <IsPackable>true</IsPackable>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>marten;martendb;postgresql;event-sourcing;document-database;admin;dashboard;ui;blazor;aspnetcore</PackageTags>
+    <Description>An embeddable Blazor Server admin UI for MartenDB. Register it with AddMartenStudio() and mount it with MapMartenStudio() inside your own ASP.NET Core application; it runs against that application's own configured IDocumentStore. Browse document collections and JSON, inspect and steer event streams, projections and the async daemon, run guarded queries and manage schema. Every mutating operation is an individual capability flag and the studio refuses to start without an explicit authorization decision.</Description>
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <!--
+    Not trimmable, said out loud rather than left to the default. Blazor Server is a reflective
+    framework by construction: a component's [Parameter] properties are set by name from the render
+    tree, and the document viewer deserializes into types discovered from IDocumentType.DocumentType
+    at run time. Marking this IsTrimmable would tell a trimmer it may cut into a graph nothing
+    statically references. README.md says the same for anyone reading on nuget.org.
+  -->
+  <PropertyGroup>
+    <IsTrimmable>false</IsTrimmable>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Blazor Server, SignalR, authorization and the endpoint routing the studio mounts into all
+         come from the shared framework, so the package pins no ASP.NET Core patch on its host. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Marten" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MartenStudio.Tests" />
+    <InternalsVisibleTo Include="MartenStudio.Integration.Tests" />
+  </ItemGroup>
+
+</Project>

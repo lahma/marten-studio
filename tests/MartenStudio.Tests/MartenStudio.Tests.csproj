@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- Sdk.Razor, not Sdk: bUnit renders components declared in .razor test files. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <!-- Global usings, so no test file repeats them and IDE0005 (a warning, and warnings are errors)
+       stays meaningful. `Xunit` is deliberately absent: Verify.XunitV3's build props already
+       contribute `global using Xunit;` to this project, and a second copy would be exactly the
+       redundant using IDE0005 exists to catch. (tests/MartenStudio.Integration.Tests has no Verify
+       reference and therefore declares it itself.) AwesomeAssertions is the MIT fork of
+       FluentAssertions and still ships its `Should()` extensions in the `AwesomeAssertions`
+       namespace, not `FluentAssertions` - verified against the package's XML docs, 2026-09-14. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="GitHubActionsTestLogger" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="bunit" />
+    <PackageReference Include="Verify.XunitV3" />
+    <PackageReference Include="PublicApiGenerator" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MartenStudio/MartenStudio.csproj" />
+  </ItemGroup>
+
+</Project>

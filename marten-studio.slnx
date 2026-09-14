@@ -1,0 +1,32 @@
+<Solution>
+  <Folder Name="/solution items/">
+    <File Path="AGENTS.md" />
+    <File Path="CHANGELOG.md" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="README.md" />
+    <File Path="global.json" />
+    <File Path="nuget.config" />
+  </Folder>
+  <Folder Name="/build/">
+    <!-- Build="false": the Fallout orchestrator is already running out of build/bin when
+         Compile builds the solution, so building it again would fail to overwrite the locked
+         _build.exe. Same shape as Fallout's own fallout.slnx. -->
+    <Project Path="build/_build.csproj">
+      <Configuration Solution="Debug|Any CPU" Project="Debug|Any CPU|NoBuild" />
+      <Configuration Solution="Release|Any CPU" Project="Debug|Any CPU|NoBuild" />
+      <Build Project="false" />
+    </Project>
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/MartenStudio/MartenStudio.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/MartenStudio.SampleDomain/MartenStudio.SampleDomain.csproj" />
+    <Project Path="samples/MartenStudio.Sample/MartenStudio.Sample.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MartenStudio.Tests/MartenStudio.Tests.csproj" />
+    <Project Path="tests/MartenStudio.Integration.Tests/MartenStudio.Integration.Tests.csproj" />
+  </Folder>
+</Solution>

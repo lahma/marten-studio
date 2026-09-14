@@ -1,0 +1,75 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <!-- The complete package budget. Adding anything here requires a recorded decision in AGENTS.md. -->
+
+  <ItemGroup Label="Library (src/MartenStudio)">
+    <!-- The only PackageReference the shipped RCL makes. Everything else it needs is in the
+         Microsoft.AspNetCore.App shared framework (FrameworkReference), which is what keeps the
+         package from pinning an ASP.NET Core patch on its host. Floor, not exact pin: a consumer
+         on a newer Marten 9.x must not be forced down. Npgsql arrives transitively via Weasel.Postgresql. -->
+    <PackageVersion Include="Marten" Version="9.35.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Sample and integration tests">
+    <!-- Zero-config `dotnet run`: with no connection string configured the sample starts its own
+         throwaway Postgres. Also the container the integration tests use. Recorded in AGENTS.md;
+         the sample is never packed. -->
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.15.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Test - both projects">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
+    <!--
+      Held at 3.x deliberately: xunit.v3 4.0.0 drops VSTest-mode support, which Fallout 10.4.0's
+      ITest depends on (it passes `logger trx;LogFileName=` and parses the TeamTest/2010 TRX).
+      See AGENTS.md, *Package budget changes*, for the revisit trigger.
+    -->
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <!--
+      Fallout's ITest probes each test project for this reference and only then passes
+      `logger GitHubActions`. Without it a red CI run is a TRX file and nothing else.
+
+      HELD AT 2.4.1, the last VSTest-only release. 3.x is a Microsoft.Testing.Platform logger: it is
+      compiled against `Microsoft.Testing.Platform` 2.0.0, while `xunit.v3` 3.2.2 resolves 1.9.1, and
+      the two are not assembly-version compatible - both test projects failed to compile with
+      CS1705 ("Microsoft.Testing.Platform ... uses ... which has a higher version than referenced
+      assembly"). 2.4.1 depends only on `Microsoft.TestPlatform.ObjectModel`, which is exactly the
+      VSTest bridge Fallout 10.4.0's ITest drives (`logger trx` + `logger GitHubActions`), so it
+      is the release that matches the rest of the budget rather than the newest one. Pinning
+      `Microsoft.Testing.Platform` forward instead would fight xunit.v3's own resolution and is not
+      done. Revisit when xunit.v3 and Fallout's ITest both speak Microsoft.Testing.Platform v2.
+    -->
+    <PackageVersion Include="GitHubActionsTestLogger" Version="2.4.1" />
+    <!-- MIT fork of FluentAssertions. One assertion library, no mocking library: the data seam is
+         our own set of interfaces and hand-written fakes are smaller and more auditable than a
+         mocking framework's call-matching DSL. -->
+    <PackageVersion Include="AwesomeAssertions" Version="9.6.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Test - MartenStudio.Tests (no Docker)">
+    <PackageVersion Include="bunit" Version="2.11.3" />
+    <!--
+      PINNED AT 32.0.0 ON PURPOSE. Verify.XunitV3 33.x depends on xunit.v3.extensibility.core
+      4.0.1; 32.0.0 is the last release that depends on 3.2.2, which is where xunit.v3 is held.
+      Moving this forward silently forces xunit.v3 4.x and breaks Fallout's TRX reporting.
+    -->
+    <PackageVersion Include="Verify.XunitV3" Version="32.0.0" />
+    <PackageVersion Include="PublicApiGenerator" Version="11.5.4" />
+    <!-- `builder.WebHost.UseTestServer()` for the endpoint-metadata and startup-guard tests.
+         TestHost rather than Mvc.Testing: these tests never need WebApplicationFactory. -->
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup Label="Test - MartenStudio.Integration.Tests (needs Docker)">
+    <!-- WebApplicationFactory over the real sample host. 11.0.0 is rc; do not take it. -->
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Playwright" Version="1.62.0" />
+  </ItemGroup>
+
+</Project>

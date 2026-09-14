@@ -1,0 +1,25 @@
+# Build output
+bin/
+obj/
+artifacts/
+
+# IDE / editor
+.vs/
+.idea/
+*.user
+
+# Fallout
+# NOTE: never add a bare `build` rule here — the Fallout build project lives in build/
+# and a stock Visual Studio .gitignore would silently swallow the whole orchestrator.
+.fallout/temp/
+
+# Verify — a *.received.* file is the failure artefact, never committed
+*.received.*
+
+# Playwright
+playwright-report/
+test-results/
+/tests/**/.playwright/
+
+# Sample host local overrides
+samples/**/appsettings.Local.json

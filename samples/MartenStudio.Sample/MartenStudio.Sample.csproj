@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <UserSecretsId>marten-studio-sample</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MartenStudio/MartenStudio.csproj" />
+    <ProjectReference Include="../MartenStudio.SampleDomain/MartenStudio.SampleDomain.csproj" />
+  </ItemGroup>
+
+</Project>
