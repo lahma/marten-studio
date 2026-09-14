@@ -245,6 +245,20 @@ public class SqlLexerTests
     [InlineData(@"'a\'; drop table t --'", false)]
     [InlineData("$$a;b$$ = 1", true)]
     [InlineData("$tag$a;b$tag$ = 1", true)]
+
+    // A '$' that follows an identifier character continues the identifier; it does not open a body.
+    // Postgres' ident_cont is [A-Za-z\200-\377_0-9$], so `a$$` is one identifier and everything the
+    // scanner would have skipped between the two `$$` is live SQL. Measured against Postgres 17:
+    // `select 1 as a$$;select 2;--$$` really does run two statements, and `;reset role;` hidden the
+    // same way lifts SqlConsoleRole inside the transaction the guard just approved.
+    [InlineData("a$$;select 2;--$$", false)]
+    [InlineData("a$q$;select 2;--$q$", false)]
+    [InlineData("a$$;reset role;--$$", false)]
+
+    // ... and the other side of the same rule: a number and a quoted identifier are not unquoted
+    // identifiers, so a '$' after either of them still opens a body, exactly as it does to Postgres.
+    [InlineData("1$$a;b$$ = 1", true)]
+    [InlineData("\"a\"$$a;b$$ = 1", true)]
     [InlineData("'it''s fine; really' = 1", true)]
     [InlineData("\"a;column\" = 1", true)]
     [InlineData("-- a;b\r\n1 = 1", true)]
@@ -281,5 +295,25 @@ public class SqlLexerTests
 
         QuerySqlComposer.CheckClause("1 = 1 --\r and pg_advisory_lock(1) is not null", allowNestedReads: true)
             .Reason.Should().Be(SqlRejectionReason.DisallowedFunction);
+    }
+
+    /// <summary>
+    /// And a function a <c>$</c> glued to an identifier tried to hide, which is the same trick through the
+    /// other lexical door.
+    /// </summary>
+    /// <remarks>
+    /// Measured against Postgres 17 before the fix: <c>select 1 as a$$;select pg_advisory_lock(42);--$$</c>
+    /// was allowed by the guard and ran, taking a session-level lock on a pooled connection - the denylist
+    /// never saw the name, because the scanner believed it was inside a quoted body that Postgres does not
+    /// think is there.
+    /// </remarks>
+    [Fact]
+    public void Both_guards_see_a_function_a_dollar_glued_to_an_identifier_tried_to_hide()
+    {
+        ReadOnlySqlGuard.Check("select 1 as a$$;select pg_advisory_lock(42);--$$")
+            .Allowed.Should().BeFalse("the hidden ';' is a second statement");
+
+        QuerySqlComposer.CheckClause("d.id is not null and a$$) or (true) or (1=1 --$$", allowNestedReads: false)
+            .Allowed.Should().BeFalse("the ')' and the 'or' are the clause's, not a comment's");
     }
 }

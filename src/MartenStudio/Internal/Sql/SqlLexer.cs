@@ -183,7 +183,20 @@ internal struct SqlLexer(string text)
                 continue;
             }
 
-            if (c == '$' && TryReadDollarTag(out string? tag))
+            // A '$' only opens a dollar-quoted body where an identifier is not already running. Postgres'
+            // ident_cont is [A-Za-z\200-\377_0-9$], so `a$$` is ONE identifier and not an identifier
+            // followed by a quote opener - and Npgsql's own parser agrees, which is what made the
+            // disagreement reachable rather than academic. A scanner that opened a body here read
+            // `select 1 as a$$;select 2;--$$` as a single harmless statement while Postgres ran two
+            // (measured, Postgres 17 + Npgsql): the ';' rule, the function denylist and the clause's
+            // bracket balance were all blind to everything between the two '$$'. Worst of it: a hidden
+            // `;reset role;` lifts SqlConsoleRole inside the very transaction the guard approved, and
+            // D13 calls that role the only true narrowing there is.
+            //
+            // This can only ever make the lexer see MORE, so it weakens no existing verdict: a real
+            // dollar quote is always preceded by whitespace, '(', ',' or '='. `1$$` and `"a"$$` still
+            // open one, because a number and a quoted identifier are not unquoted identifiers.
+            if (c == '$' && !IsInsideIdentifier(text, position) && TryReadDollarTag(out string? tag))
             {
                 int start = position;
 
@@ -354,6 +367,40 @@ internal struct SqlLexer(string text)
 
         return before < 0 || !(char.IsLetterOrDigit(text[before]) || text[before] is '_' or '$');
     }
+
+    /// <summary>
+    /// Whether an unquoted identifier is already running at <paramref name="end" /> - in which case a
+    /// <c>$</c> there continues it rather than opening a dollar-quoted body.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Postgres' <c>ident_cont</c> is <c>[A-Za-z\200-\377_0-9$]</c> but its <c>ident_start</c> is only
+    /// <c>[A-Za-z\200-\377_]</c>, and the difference decides this question. So the run of continuation
+    /// characters ending here is walked back to its first character: a run that <em>began</em> with a
+    /// letter, an underscore or a high character is an identifier, and <c>a$$</c>, <c>x1$q$</c> and
+    /// <c>_a$$</c> are each one token. A run that began with a digit is a number, so <c>1$$</c> really does
+    /// open a body - and a quoted identifier is not an unquoted one, so <c>"a"$$</c> opens one too. Both of
+    /// those were measured against Postgres 17 rather than assumed.
+    /// </para>
+    /// </remarks>
+    /// <param name="text">The text being lexed.</param>
+    /// <param name="end">The index of the <c>$</c>.</param>
+    private static bool IsInsideIdentifier(string text, int end)
+    {
+        int start = end;
+
+        while (start > 0 && IsIdentifierContinuation(text[start - 1]))
+        {
+            start--;
+        }
+
+        return start < end && (char.IsLetter(text[start]) || text[start] is '_' || text[start] >= '');
+    }
+
+    /// <summary>One character of Postgres' <c>ident_cont</c>, <c>[A-Za-z\200-\377_0-9$]</c>.</summary>
+    /// <param name="c">The character.</param>
+    private static bool IsIdentifierContinuation(char c) =>
+        char.IsLetterOrDigit(c) || c is '_' or '$' || c >= '';
 
     /// <summary>
     /// Reads the <c>$tag$</c> that opens a dollar-quoted body at the current position, if one does.
