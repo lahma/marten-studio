@@ -85,9 +85,16 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
             // One grouped reltuples read for every node's count (D8), and one pg_constraint read for the
             // whole diagram. A diagram of forty document types is two round trips, not eighty.
-            IReadOnlyDictionary<string, long> estimates = await DocumentBrowseQueries
+            IReadOnlyDictionary<string, DocumentBrowseQueries.TableEstimate> tableEstimates = await DocumentBrowseQueries
                 .EstimateAllAsync(connection, schemas, CommandTimeoutSeconds, cancellationToken)
                 .ConfigureAwait(false);
+
+            // The diagram draws a row count per node and nothing else; the page count the browser's rail
+            // uses to decide whether an exact count is affordable has no meaning here.
+            IReadOnlyDictionary<string, long> estimates = tableEstimates.ToDictionary(
+                static pair => pair.Key,
+                static pair => pair.Value.Rows,
+                StringComparer.Ordinal);
 
             IReadOnlyList<PhysicalForeignKey> physical = await RelationshipQueries
                 .ReadForeignKeysAsync(connection, schemas, CommandTimeoutSeconds, cancellationToken)

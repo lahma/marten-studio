@@ -442,13 +442,17 @@ internal sealed class EventDataService : IEventDataService
                 return EventStoreCounts.NoEventStorage;
             }
 
+            // Estimates only (D8): these numbers feed the Overview's tiles and the nav badge's gate, both
+            // of which are read on every interval, and an exact count of mt_events is exactly the
+            // sequential scan a dashboard must never run on a timer. A never-analysed store reports the
+            // count as unknown, which the tiles draw as such.
             var estimator = new CountEstimator { CommandTimeoutSeconds = CommandTimeoutSeconds };
 
             DocumentCount streams = await estimator
-                .CountAsync(connection, table.Schema, EventTableInfo.StreamsTable, cancellationToken)
+                .EstimateAsync(connection, table.Schema, EventTableInfo.StreamsTable, cancellationToken)
                 .ConfigureAwait(false);
             DocumentCount events = await estimator
-                .CountAsync(connection, table.Schema, EventTableInfo.EventsTable, cancellationToken)
+                .EstimateAsync(connection, table.Schema, EventTableInfo.EventsTable, cancellationToken)
                 .ConfigureAwait(false);
 
             return new EventStoreCounts(Convert(streams), Convert(events), TablesExist: true, Error: null);
