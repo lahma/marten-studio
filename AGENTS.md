@@ -342,6 +342,9 @@ src/MartenStudio/Services/Query/         Search grammar, index advisor, the docu
 tests/MartenStudio.Tests/Json/           Unit and bUnit tests for the JSON toolkit
 tests/MartenStudio.Tests/Sql/            SQL builders, guard theory, grammar, advisor - no database
 tests/MartenStudio.Integration.Tests/Sql/ Live Postgres: read-only session, builders, catalog, estimator
+src/MartenStudio/Services/Documents/      Document read and write services and their DTOs
+tests/MartenStudio.Tests/Documents/       Document service unit tests - no database
+tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),

@@ -1,7 +1,9 @@
 using System.Text.RegularExpressions;
 
 using MartenStudio.Internal;
+using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
+using MartenStudio.Services.Documents;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -120,6 +122,8 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<StudioActionLog>();
         services.TryAddScoped<ToastService>();
         services.TryAddScoped<IStoreInfoService, StoreInfoService>();
+        services.TryAddSingleton<ColumnCatalog>();
+        services.TryAddScoped<IDocumentWriteService, DocumentWriteService>();
 
         return services;
     }
