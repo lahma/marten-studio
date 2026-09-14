@@ -1123,6 +1123,19 @@ body{
     color: var(--ms-color-text-secondary);
 }
 
+/* The type-to-confirm box: the label names the phrase, the input is where it is written out. */
+.ms-confirm-label {
+    display: block;
+    margin-bottom: var(--ms-space-xs);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-confirm-input {
+    width: 100%;
+    margin-bottom: var(--ms-space-md);
+}
+
 .ms-confirm-actions {
     display: flex;
     justify-content: flex-end;
@@ -3394,5 +3407,941 @@ a.ms-json-url {
 
     .ms-shard-progress {
         min-width: 8rem;
+    }
+}
+
+/* ==========================================================================
+   EVENTS (folded in from the P4 packet)
+   ==========================================================================
+
+   The Events area: streams, stream detail, the feed, event types and dead
+   letters. Hand-rolled, prefixed ms-, and built only from the design tokens
+   above plus the six declared below (hard rule 3). Each of the six is
+   declared three times the way the base tokens are: the light default, the
+   prefers-color-scheme dark override, and the explicit .ms-studio[data-theme]
+   choices, so an explicit light theme still wins inside a dark browser.
+   ========================================================================== */
+
+/* --- Tokens --------------------------------------------------------------------------------- */
+
+.ms-studio {
+    /* The colour ring CollectionColorizer.EventTypeHueFor lands an event type in. The hue itself is an
+       inline custom property on each chip - only the saturation, the lightnesses and the border alpha
+       are themed, which is what keeps one type the same colour in both themes without hard-coding
+       twelve pairs of hex values. */
+    --ms-event-chip-saturation: 65%;
+    --ms-event-chip-bg-lightness: 94%;
+    --ms-event-chip-text-lightness: 28%;
+    --ms-event-chip-border-alpha: 0.35;
+
+    /* The stream timeline's rail: the vertical line the version dots sit on. */
+    --ms-timeline-gutter: 28px;
+    --ms-timeline-dot-size: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .ms-studio {
+        --ms-event-chip-saturation: 55%;
+        --ms-event-chip-bg-lightness: 22%;
+        --ms-event-chip-text-lightness: 78%;
+        --ms-event-chip-border-alpha: 0.45;
+    }
+}
+
+.ms-studio[data-theme="light"] {
+    --ms-event-chip-saturation: 65%;
+    --ms-event-chip-bg-lightness: 94%;
+    --ms-event-chip-text-lightness: 28%;
+    --ms-event-chip-border-alpha: 0.35;
+}
+
+.ms-studio[data-theme="dark"] {
+    --ms-event-chip-saturation: 55%;
+    --ms-event-chip-bg-lightness: 22%;
+    --ms-event-chip-text-lightness: 78%;
+    --ms-event-chip-border-alpha: 0.45;
+}
+
+/* --- Event type chip ------------------------------------------------------------------------ */
+
+.ms-event-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    max-width: 100%;
+    padding: 2px var(--ms-space-sm);
+    border-radius: var(--ms-radius-full);
+    border: 1px solid hsl(var(--ms-event-hue, 210) var(--ms-event-chip-saturation) 50% / var(--ms-event-chip-border-alpha));
+    background-color: hsl(var(--ms-event-hue, 210) var(--ms-event-chip-saturation) var(--ms-event-chip-bg-lightness));
+    color: hsl(var(--ms-event-hue, 210) var(--ms-event-chip-saturation) var(--ms-event-chip-text-lightness));
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    line-height: 1.6;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-decoration: none;
+}
+
+a.ms-event-chip:hover,
+a.ms-event-chip:focus-visible {
+    border-color: hsl(var(--ms-event-hue, 210) var(--ms-event-chip-saturation) 50%);
+    text-decoration: none;
+}
+
+.ms-event-chip-unregistered {
+    border-style: dashed;
+}
+
+/* --- Flags and indicators ------------------------------------------------------------------- */
+
+.ms-event-flag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 1px var(--ms-space-sm);
+    border-radius: var(--ms-radius-full);
+    border: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+.ms-event-flag-archived {
+    border-color: var(--ms-color-warning);
+    background-color: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+}
+
+.ms-event-flag-skipped {
+    border-color: var(--ms-color-danger);
+    background-color: var(--ms-color-danger-bg);
+    color: var(--ms-color-danger);
+}
+
+.ms-event-binary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 1px var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    border: 1px dashed var(--ms-color-border-strong);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* One metadata chip per optional mt_events column the store actually has. */
+.ms-event-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-event-meta-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+    max-width: 100%;
+    padding: 1px var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    border: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-event-meta-key {
+    color: var(--ms-color-text-muted);
+    font-family: var(--ms-font-mono);
+}
+
+.ms-event-meta-value {
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 36ch;
+}
+
+/* --- Event card ----------------------------------------------------------------------------- */
+
+.ms-event-card {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    box-shadow: var(--ms-shadow-sm);
+}
+
+.ms-event-card-selected {
+    border-color: var(--ms-color-primary);
+    box-shadow: 0 0 0 1px var(--ms-color-primary);
+}
+
+.ms-event-card-archived {
+    opacity: 0.75;
+}
+
+.ms-event-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-event-card-version {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text);
+}
+
+.ms-event-card-seq {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-event-card-spacer {
+    flex: 1 1 auto;
+}
+
+.ms-event-card-time {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+    white-space: nowrap;
+}
+
+.ms-event-card-body {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-event-card-empty {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-muted);
+}
+
+/* --- Stream timeline ------------------------------------------------------------------------ */
+
+.ms-timeline {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    padding-left: var(--ms-timeline-gutter);
+}
+
+/* The rail. A pseudo-element rather than a border on each row, so the line is continuous through the
+   gaps between cards and does not move when a card grows. */
+.ms-timeline::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--ms-timeline-dot-size) / 2);
+    width: 1px;
+    background-color: var(--ms-color-border);
+}
+
+.ms-timeline-item {
+    position: relative;
+}
+
+.ms-timeline-item::before {
+    content: "";
+    position: absolute;
+    top: var(--ms-space-md);
+    left: calc(-1 * var(--ms-timeline-gutter) + var(--ms-timeline-dot-size) / 2);
+    width: var(--ms-timeline-dot-size);
+    height: var(--ms-timeline-dot-size);
+    margin-left: calc(-1 * var(--ms-timeline-dot-size) / 2);
+    border-radius: var(--ms-radius-full);
+    border: 2px solid var(--ms-color-surface);
+    background-color: var(--ms-color-border-strong);
+}
+
+.ms-timeline-item-selected::before {
+    background-color: var(--ms-color-primary);
+}
+
+.ms-timeline-more {
+    display: flex;
+    justify-content: center;
+    padding: var(--ms-space-sm) 0;
+}
+
+/* --- Filter bar ----------------------------------------------------------------------------- */
+
+.ms-event-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--ms-space-md);
+    padding: var(--ms-space-md);
+    margin-bottom: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+}
+
+.ms-event-filter {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-event-filter-label {
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-event-filter-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-event-filter-types {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    max-height: 96px;
+    overflow-y: auto;
+    padding: var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-bg);
+}
+
+.ms-event-filter-type {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* --- Follow mode ---------------------------------------------------------------------------- */
+
+.ms-follow-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-follow-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 2px var(--ms-space-md);
+    border-radius: var(--ms-radius-full);
+    border: 1px solid var(--ms-color-primary);
+    background-color: var(--ms-color-primary-light);
+    color: var(--ms-color-primary);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    cursor: pointer;
+}
+
+.ms-follow-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--ms-radius-full);
+    background-color: var(--ms-color-text-muted);
+}
+
+.ms-follow-live .ms-follow-dot {
+    background-color: var(--ms-color-success);
+}
+
+.ms-follow-paused .ms-follow-dot {
+    background-color: var(--ms-color-warning);
+}
+
+.ms-follow-state {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+/* --- Stream detail and time travel ---------------------------------------------------------- */
+
+.ms-stream-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-stream-panes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-lg);
+    align-items: flex-start;
+}
+
+.ms-stream-timeline-pane {
+    flex: 2 1 420px;
+    min-width: 0;
+}
+
+.ms-time-travel {
+    flex: 1 1 320px;
+    min-width: 0;
+    position: sticky;
+    top: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    padding: var(--ms-space-md);
+}
+
+.ms-time-travel-title {
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-time-travel-stepper {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-time-travel-version {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-base);
+    min-width: 6ch;
+    text-align: center;
+}
+
+.ms-time-travel-json {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-time-travel-note {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+    margin-top: var(--ms-space-sm);
+}
+
+/* --- Dead letters --------------------------------------------------------------------------- */
+
+.ms-dead-letter-detail {
+    background-color: var(--ms-color-bg);
+}
+
+.ms-dead-letter-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    padding: var(--ms-space-md);
+}
+
+.ms-dead-letter-exception {
+    margin: 0;
+    padding: var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    border: 1px solid var(--ms-color-danger);
+    background-color: var(--ms-color-danger-bg);
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    white-space: pre-wrap;
+    overflow-x: auto;
+}
+
+.ms-dead-letter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    align-items: center;
+}
+
+/* --- Small screens -------------------------------------------------------------------------- */
+
+@media (max-width: 720px) {
+    .ms-stream-panes {
+        flex-direction: column;
+    }
+
+    .ms-time-travel {
+        position: static;
+        width: 100%;
+    }
+
+    .ms-event-meta-value {
+        max-width: 20ch;
+    }
+}
+
+/* ==========================================================================
+   SCHEMA AND CONFIGURATION (folded in from the P7 packet)
+   ==========================================================================
+
+   Every rule below belongs to /marten/schema or /marten/config. Only --ms-*
+   tokens declared above are used; no colour literal appears except inside a
+   token fallback. The two type-to-confirm rules this packet shipped here live
+   with the other dialog rules in section 12 instead.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Tabs
+   -------------------------------------------------------------------------- */
+
+.ms-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    border-bottom: 1px solid var(--ms-color-border);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: var(--ms-radius-md) var(--ms-radius-md) 0 0;
+    color: var(--ms-color-text-secondary);
+    text-decoration: none;
+    font-weight: var(--ms-font-weight-medium);
+    transition: background-color var(--ms-transition-fast), color var(--ms-transition-fast);
+}
+
+.ms-tab:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-tab-active {
+    background-color: var(--ms-color-surface);
+    border-color: var(--ms-color-border);
+    color: var(--ms-color-text);
+    margin-bottom: -1px;
+    padding-bottom: calc(var(--ms-space-sm) + 1px);
+}
+
+.ms-tab-count {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Toolbars, notes and progress
+   -------------------------------------------------------------------------- */
+
+.ms-schema-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-schema-toolbar-spacer {
+    flex: 1 1 auto;
+}
+
+.ms-schema-note {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    margin: 0 0 var(--ms-space-md);
+    max-width: 70ch;
+}
+
+.ms-schema-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-schema-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-lg);
+    margin-bottom: var(--ms-space-md);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   Drift badge
+   -------------------------------------------------------------------------- */
+
+.ms-drift-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 3px 10px;
+    border-radius: var(--ms-radius-full);
+    border: 1px solid var(--ms-color-border);
+    font-weight: var(--ms-font-weight-semibold);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-drift-badge-ok {
+    background-color: var(--ms-color-success-bg);
+    color: var(--ms-color-success);
+    border-color: var(--ms-color-success);
+}
+
+.ms-drift-badge-warn {
+    background-color: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+    border-color: var(--ms-color-warning);
+}
+
+.ms-drift-badge-unknown {
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   SQL block. The tokens are produced server-side by Services/Schema/SqlTokenizer.cs;
+   nothing in the browser highlights anything (AGENTS.md hard rule 3).
+   -------------------------------------------------------------------------- */
+
+.ms-sql {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface-alt);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    overflow: hidden;
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-sql-body {
+    overflow-x: auto;
+    max-height: 32rem;
+    overflow-y: auto;
+    padding: var(--ms-space-sm) 0;
+}
+
+.ms-sql-line {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    white-space: pre;
+    line-height: 1.45;
+    padding: 0 var(--ms-space-sm);
+}
+
+.ms-sql-line:hover {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-sql-gutter {
+    flex: 0 0 auto;
+    min-width: 3.5ch;
+    text-align: right;
+    color: var(--ms-color-text-muted);
+    user-select: none;
+}
+
+.ms-sql-text {
+    white-space: pre;
+}
+
+.ms-sql-wrap .ms-sql-line,
+.ms-sql-wrap .ms-sql-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ms-sql-keyword {
+    color: var(--ms-color-primary);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-sql-string {
+    color: var(--ms-color-success);
+}
+
+.ms-sql-identifier {
+    color: var(--ms-color-executing);
+}
+
+.ms-sql-comment {
+    color: var(--ms-color-text-muted);
+    font-style: italic;
+}
+
+.ms-sql-number {
+    color: var(--ms-color-warning);
+}
+
+.ms-sql-operator {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-sql-plain {
+    color: var(--ms-color-text);
+}
+
+.ms-sql-footnote {
+    margin: 0;
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-top: 1px solid var(--ms-color-border);
+    color: var(--ms-color-text-muted);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* --------------------------------------------------------------------------
+   Tables tab
+   -------------------------------------------------------------------------- */
+
+.ms-num {
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.ms-schema-estimate {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-collection-link {
+    color: var(--ms-color-primary);
+    text-decoration: none;
+    font-family: var(--ms-font-mono);
+}
+
+.ms-collection-link:hover {
+    text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------------
+   Indexes tab
+   -------------------------------------------------------------------------- */
+
+.ms-index-flag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: var(--ms-radius-sm);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    margin-right: var(--ms-space-xs);
+}
+
+.ms-index-flag-warn {
+    background-color: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+}
+
+.ms-index-flag-info {
+    background-color: var(--ms-color-info-bg);
+    color: var(--ms-color-info);
+}
+
+.ms-index-definition {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+    word-break: break-word;
+}
+
+.ms-suggestion {
+    margin: var(--ms-space-xs) 0 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    max-width: 80ch;
+}
+
+.ms-suggestion-list {
+    list-style: none;
+    margin: var(--ms-space-xs) 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+}
+
+.ms-suggestion-line {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    background-color: var(--ms-color-surface-alt);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    padding: 2px 6px;
+    display: inline-block;
+    word-break: break-word;
+}
+
+/* --------------------------------------------------------------------------
+   Functions tab
+   -------------------------------------------------------------------------- */
+
+.ms-function {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    margin-bottom: var(--ms-space-sm);
+    overflow: hidden;
+}
+
+.ms-function-summary {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-function-summary:hover {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-function-body {
+    padding: 0 var(--ms-space-md) var(--ms-space-sm);
+}
+
+/* --------------------------------------------------------------------------
+   Configuration page
+   -------------------------------------------------------------------------- */
+
+.ms-config-card {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    background-color: var(--ms-color-surface);
+    margin-bottom: var(--ms-space-md);
+    overflow: hidden;
+}
+
+.ms-config-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-bottom: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface-alt);
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+}
+
+.ms-config-card-header:hover {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-config-card-title {
+    margin: 0;
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-config-card-subtitle {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-config-card-body {
+    padding: var(--ms-space-md);
+}
+
+.ms-config-group-title {
+    margin: var(--ms-space-md) 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ms-config-group-title:first-child {
+    margin-top: 0;
+}
+
+.ms-config-grid {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    overflow: hidden;
+}
+
+.ms-config-row {
+    display: grid;
+    grid-template-columns: 14rem 1fr auto;
+    gap: var(--ms-space-md);
+    align-items: baseline;
+    padding: var(--ms-space-xs) var(--ms-space-md);
+    border-bottom: 1px solid var(--ms-color-border);
+}
+
+.ms-config-row:last-child {
+    border-bottom: none;
+}
+
+.ms-config-name {
+    color: var(--ms-color-text-secondary);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-config-value {
+    font-family: var(--ms-font-mono);
+    color: var(--ms-color-text);
+    word-break: break-word;
+}
+
+.ms-config-member {
+    display: block;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+    word-break: break-word;
+}
+
+.ms-copy-inline {
+    border: 1px solid var(--ms-color-border);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text-secondary);
+    border-radius: var(--ms-radius-sm);
+    font-size: var(--ms-font-size-xs);
+    padding: 1px 6px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.ms-copy-inline:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+@media (max-width: 1024px) {
+    .ms-config-row {
+        grid-template-columns: 1fr;
+        gap: var(--ms-space-xs);
+    }
+
+    .ms-sql-body {
+        max-height: 24rem;
     }
 }

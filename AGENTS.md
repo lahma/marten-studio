@@ -134,9 +134,11 @@ of all three. A startup guard refuses a mapping that answered none of it, becaus
 document types as runtime `Type`s, so a generic `session.Query<T>()` is not available to it; reads are
 built from `IDocumentType` metadata against `IMartenDatabase.CreateConnection(ConnectionUsage.Read)`.
 Writes are the opposite: `StoreObjects(IEnumerable<object>)` / `DeleteObjects(IEnumerable<object>)` (both
-verified non-generic) keep upsert functions, metadata columns, soft-delete semantics and tenancy exactly
-as Marten defines them. `mt_upsert_<alias>` is never called directly — re-implementing Marten's write path
-is how a UI corrupts a store.
+verified non-generic) keep metadata columns, soft-delete semantics and tenancy exactly as Marten defines
+them. The studio never hand-writes document DML; writes go through the session — re-implementing Marten's
+write path is how a UI corrupts a store. (There is no `mt_upsert_*` function to call anyway: Marten 9.35
+installs none, and the upsert is inline SQL in the generated write path — verified against a live schema
+by P7, 2026-09-14.)
 
 **D7 — Document edit shows a round-trip diff before saving.** Marten has no untyped store API, so saving
 an edited document means deserializing into the CLR type and serializing it back: any property the type
@@ -356,6 +358,17 @@ src/MartenStudio/Components/Pages/Projections/  The projections screen and its p
 samples/MartenStudio.SampleDomain/Events/ The demo events and the three projections
 tests/MartenStudio.Tests/Projections/     Daemon accessor, snapshot cache, live updates, operation tracker, page
 tests/MartenStudio.Integration.Tests/Projections/  Live Postgres + a real Solo daemon
+src/MartenStudio/Services/Events/         Event data service, aggregate invoker, event DTOs and links
+src/MartenStudio/Components/Pages/Events/ Streams, stream detail, feed, event types, dead letters
+tests/MartenStudio.Tests/Events/          Event builder cases, links, and the five page tests - no database
+tests/MartenStudio.Integration.Tests/Events/  Live Postgres: the event reads and the dead-letter writes
+src/MartenStudio/Services/Schema/         Schema data service, index advice, the DDL tokenizer and its DTOs
+src/MartenStudio/Services/Configuration/  The read-only StoreOptions describer and its DTOs
+src/MartenStudio/Components/Pages/Schema/ The schema screen's five tabs and their parts
+src/MartenStudio/Components/Pages/Configuration/  The configuration dump screen
+tests/MartenStudio.Tests/Schema/          Index advice, the tokenizer, the schema page - no database
+tests/MartenStudio.Tests/Configuration/   The describer and the configuration page - no database
+tests/MartenStudio.Integration.Tests/Schema/  Live Postgres: drift, migration preview, catalog reads
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),
