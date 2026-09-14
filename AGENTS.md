@@ -350,6 +350,12 @@ tests/MartenStudio.Integration.Tests/Sql/ Live Postgres: read-only session, buil
 src/MartenStudio/Services/Documents/      Document read and write services and their DTOs
 tests/MartenStudio.Tests/Documents/       Document service unit tests - no database
 tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
+src/MartenStudio/Services/Projections/    Projection data service, daemon accessor, operation tracker
+src/MartenStudio/Services/Live/           Snapshot cache, tracker observer, the per-page polling helper (D10)
+src/MartenStudio/Components/Pages/Projections/  The projections screen and its parts
+samples/MartenStudio.SampleDomain/Events/ The demo events and the three projections
+tests/MartenStudio.Tests/Projections/     Daemon accessor, snapshot cache, live updates, operation tracker, page
+tests/MartenStudio.Integration.Tests/Projections/  Live Postgres + a real Solo daemon
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),
