@@ -370,6 +370,6 @@ internal sealed class ReadOnlySqlSession
     /// all. One millisecond is the smallest thing Postgres can be told, and a caller who asked for less
     /// than that meant "immediately", not "never".
     /// </remarks>
-    private static string Milliseconds(TimeSpan value) =>
+    internal static string Milliseconds(TimeSpan value) =>
         Math.Max((long)value.TotalMilliseconds, 1).ToString(CultureInfo.InvariantCulture) + "ms";
 }

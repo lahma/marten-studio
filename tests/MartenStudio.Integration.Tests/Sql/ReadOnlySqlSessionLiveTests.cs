@@ -151,11 +151,17 @@ public class ReadOnlySqlSessionLiveTests(PostgresFixture fixture) : PostgresTest
     [PostgresFact]
     public async Task The_settings_the_session_applies_are_the_ones_Postgres_reports()
     {
+        // The settings go to the server one round trip each, so the idle-in-transaction timeout must be
+        // long enough to cover the gaps between them. This test once asked for a negative value to prove
+        // the clamp to 1ms - and 1ms of idle time between two round trips is exactly what a loaded
+        // machine cannot promise, so Postgres terminated the session (25P03) about one run in three. The
+        // clamp is proven in ReadOnlySqlSessionTests without a server; here the values are ones a
+        // session can actually live with.
         var session = new ReadOnlySqlSession(new ReadOnlySqlOptions
         {
             StatementTimeout = TimeSpan.FromSeconds(7),
             LockTimeout = TimeSpan.Zero,
-            IdleInTransactionTimeout = TimeSpan.FromMilliseconds(-5),
+            IdleInTransactionTimeout = TimeSpan.FromSeconds(3),
         });
 
         await using var connection = await OpenAsync();
@@ -165,13 +171,14 @@ public class ReadOnlySqlSessionLiveTests(PostgresFixture fixture) : PostgresTest
             "select current_setting('statement_timeout') as s, current_setting('lock_timeout') as l, " +
             "current_setting('idle_in_transaction_session_timeout') as i");
 
+        result.Error.Should().BeNull("the statement is a plain read of three settings");
         result.Succeeded.Should().BeTrue();
 
         var row = result.Rows.Single();
 
         row[0].Text.Should().Be("7s");
         row[1].Text.Should().Be("1ms", "zero would have been Postgres for 'no lock timeout at all'");
-        row[2].Text.Should().Be("1ms", "and so would a negative TimeSpan");
+        row[2].Text.Should().Be("3s");
     }
 
     /// <summary>

@@ -35,6 +35,20 @@ public class ReadOnlySqlSessionTests
         ReadOnlySqlSession.IsValidRoleName(new string('a', 64)).Should().BeFalse();
 
     /// <summary>
+    /// <c>0ms</c> is "disabled" to Postgres for every one of the three timeouts, so a zero or a negative
+    /// value is sent as the smallest timeout there is rather than as no timeout at all. Proven here
+    /// rather than live: a 1ms idle-in-transaction timeout on a real connection is a race the server
+    /// wins about one run in three.
+    /// </summary>
+    [Theory]
+    [InlineData(7_000, "7000ms")]
+    [InlineData(1, "1ms")]
+    [InlineData(0, "1ms")]
+    [InlineData(-5, "1ms")]
+    public void A_timeout_is_sent_in_milliseconds_and_never_below_one(int milliseconds, string expected) =>
+        ReadOnlySqlSession.Milliseconds(TimeSpan.FromMilliseconds(milliseconds)).Should().Be(expected);
+
+    /// <summary>
     /// The role is validated <em>and</em> bound as a parameter. Either alone would do; both is what keeps
     /// the one place a role name could reach SQL text from being the one place that matters.
     /// </summary>
