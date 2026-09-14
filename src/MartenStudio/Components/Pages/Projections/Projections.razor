@@ -8,6 +8,7 @@
 @inject IProjectionDataService ProjectionData
 @inject StudioState State
 @inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject ToastService Toasts
 @inject IOptions<MartenStudioOptions> Options
@@ -161,6 +162,16 @@
                     <CapabilityDisabled Capability="@nameof(StudioCapability.CorrectProgression)"
                                         Action="Advancing the high water mark and correcting progression" />
                 }
+
+                @* One sentence per capability the policy refused this visitor, under the controls it
+                   disabled. Each is its own line because a policy is free to allow a pause and refuse a
+                   rebuild, and a reader has to be able to tell which button the sentence is about. *@
+                <WriteRefusal Refused="RefusedByPolicy(StudioCapability.ControlDaemon)"
+                              Capability="@nameof(StudioCapability.ControlDaemon)" />
+                <WriteRefusal Refused="RefusedByPolicy(StudioCapability.CorrectProgression)"
+                              Capability="@nameof(StudioCapability.CorrectProgression)" />
+                <WriteRefusal Refused="RefusedByPolicy(StudioCapability.RebuildProjections)"
+                              Capability="@nameof(StudioCapability.RebuildProjections)" />
 
                 @if (!view.Daemon.IsHostedHere)
                 {
@@ -442,6 +453,24 @@
     /// </remarks>
     private string? agentRefusal;
 
+    /// <summary>
+    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor use
+    /// each of the three mutating capabilities this page offers, in the scope on screen.
+    /// </summary>
+    /// <remarks>
+    /// Three questions and not one: a policy is free to allow a pause and refuse a rebuild, and they are
+    /// three capabilities. They default to <see langword="true" /> because the common case is a host that
+    /// configured no write policy at all; fail-open is safe because this is not the enforcement - the
+    /// service resolves the scope with the same capability and throws (AGENTS.md hard rule 5).
+    /// </remarks>
+    private bool mayControl = true;
+
+    /// <inheritdoc cref="mayControl" />
+    private bool mayRebuild = true;
+
+    /// <inheritdoc cref="mayControl" />
+    private bool mayCorrect = true;
+
     protected override async Task OnInitializedAsync()
     {
         State.ScopeChanged += OnScopeChangedAsync;
@@ -449,7 +478,39 @@
         live = LiveFactory.Create();
         live.Failed += OnRefreshFailedAsync;
 
+        // Before the load, and for the same reason it is not part of it: a read that throws must not
+        // leave the write controls showing the last visitor's answer.
+        await UpdateWritePolicyAsync(pageCancellation.Token);
         await LoadAsync(pageCancellation.Token);
+    }
+
+    /// <summary>
+    /// Asks the write policy about this visitor, once per load of the page and once per scope change.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not part of <see cref="LoadAsync" />, which is also the polling tick: three policy
+    /// evaluations per second per circuit would be a load nobody asked for, and the answer cannot change
+    /// between ticks - it is about a principal and a scope, and the scope moving is its own event.
+    /// Nothing is memoised across circuits either; a cache that outlived one would be how one person's
+    /// answer gets shown to another.
+    /// </remarks>
+    private async Task UpdateWritePolicyAsync(CancellationToken cancellationToken)
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
+
+        try
+        {
+            mayControl = await Authorization.IsAuthorizedAsync(scope, StudioCapability.ControlDaemon, cancellationToken);
+            mayRebuild = await Authorization.IsAuthorizedAsync(scope, StudioCapability.RebuildProjections, cancellationToken);
+            mayCorrect = await Authorization.IsAuthorizedAsync(scope, StudioCapability.CorrectProgression, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -529,6 +590,10 @@
 
         ReleaseLease();
         await SubscribeToLiveStateAsync();
+
+        // The policy is resource-based: it answers about a store, a database and a tenant, so a scope
+        // change is exactly the event that can change its answer.
+        await UpdateWritePolicyAsync(pageCancellation.Token);
         await LoadAsync(pageCancellation.Token);
         await InvokeAsync(StateHasChanged);
     }
@@ -573,11 +638,14 @@
 
     private bool DaemonHostedHere => view?.Daemon.IsHostedHere == true;
 
-    private bool ControlEnabled => Capabilities.IsEnabled(StudioCapability.ControlDaemon) && DaemonHostedHere;
+    private bool ControlEnabled =>
+        Capabilities.IsEnabled(StudioCapability.ControlDaemon) && DaemonHostedHere && mayControl;
 
-    private bool RebuildEnabled => Capabilities.IsEnabled(StudioCapability.RebuildProjections) && DaemonHostedHere;
+    private bool RebuildEnabled =>
+        Capabilities.IsEnabled(StudioCapability.RebuildProjections) && DaemonHostedHere && mayRebuild;
 
-    private bool CorrectEnabled => Capabilities.IsEnabled(StudioCapability.CorrectProgression);
+    private bool CorrectEnabled =>
+        Capabilities.IsEnabled(StudioCapability.CorrectProgression) && mayCorrect;
 
     /// <summary>
     /// Whether one agent may be started or stopped right now.
@@ -595,7 +663,8 @@
     private string? AgentControlRefusal => view?.Daemon.AgentControlRefusal;
 
     /// <summary>Whether a running operation may be asked to stop from here.</summary>
-    private bool CancelEnabled => !Capabilities.ReadOnly && Capabilities.IsEnabled(StudioCapability.RebuildProjections);
+    private bool CancelEnabled =>
+        !Capabilities.ReadOnly && Capabilities.IsEnabled(StudioCapability.RebuildProjections) && mayRebuild;
 
     /// <summary>
     /// The Cancel button on a running operation, or nothing.
@@ -651,6 +720,15 @@
             && string.Equals(x.Kind, "Rebuild", StringComparison.Ordinal)
             && string.Equals(x.Target, projectionName, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// The hover text of one control: the capability, then the visitor, then the daemon.
+    /// </summary>
+    /// <remarks>
+    /// In that order because that is the order the refusals bind in. A capability that is off makes the
+    /// policy moot - the guard refuses before a scope is ever resolved - and names something a host can
+    /// act on, so it is said first. The policy comes next, because a visitor it refuses does not need to
+    /// be told where the daemon is: that is advice about a button they cannot press either way.
+    /// </remarks>
     private string Title(StudioCapability capability, bool needsDaemon)
     {
         if (!Capabilities.IsEnabled(capability))
@@ -658,10 +736,32 @@
             return $"Set {StudioCapabilityGuard.OptionName(capability)} to true to enable this.";
         }
 
+        if (!MayUse(capability))
+        {
+            return WritePolicyRefusal.For(capability);
+        }
+
         return needsDaemon && !DaemonHostedHere
             ? "No async daemon is hosted in this process, so there is nothing here to ask."
             : string.Empty;
     }
+
+    /// <summary>Whether the write policy let this visitor have <paramref name="capability" />.</summary>
+    private bool MayUse(StudioCapability capability) => capability switch
+    {
+        StudioCapability.ControlDaemon => mayControl,
+        StudioCapability.RebuildProjections => mayRebuild,
+        StudioCapability.CorrectProgression => mayCorrect,
+        _ => true,
+    };
+
+    /// <summary>
+    /// Whether the controls behind <paramref name="capability" /> are disabled by the write policy rather
+    /// than by the capability being off - which is what decides whether the visitor is told about their
+    /// account or about the host's configuration.
+    /// </summary>
+    private bool RefusedByPolicy(StudioCapability capability) =>
+        Capabilities.IsEnabled(capability) && !MayUse(capability);
 
     // ------------------------------------------------------------------------------------------------
     // Actions

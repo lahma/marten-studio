@@ -28,8 +28,35 @@ public class StudioLayoutTests
         builder.CloseElement();
     };
 
-    private static IRenderedComponent<StudioLayout> RenderLayout(StudioComponentContext context) =>
-        context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));
+    /// <summary>
+    /// Renders the frame and waits for its first-render preference read to finish.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The wait is the whole reason this is a method. <c>StudioLayout.OnAfterRenderAsync</c> reads the
+    /// browser's remembered theme and time zone over two awaited JS calls, and bUnit's
+    /// <c>Change</c>/<c>Click</c> helpers dispatch through the renderer's dispatcher and
+    /// <em>discard the task</em> — so a test that rendered, clicked and asserted on the next line was
+    /// racing two pieces of asynchrony at once and lost about one full-suite run in four on CI.
+    /// </para>
+    /// <para>
+    /// The rule this file now follows: after any action whose handler awaits, wait — <c>WaitForState</c>,
+    /// <c>WaitForAssertion</c> or <c>WaitForElement</c> — never a bare <c>Find</c> or assertion on the
+    /// next line. The one exception is an assertion that <em>nothing</em> moved: a poll for a value that
+    /// never changes passes whether or not the action ever ran, so those tests are <c>async</c> and
+    /// <c>await</c> the <c>ChangeAsync</c>/<c>ClickAsync</c> dispatch task instead, which completes only
+    /// once the handler and its render have.
+    /// </para>
+    /// </remarks>
+    private static IRenderedComponent<StudioLayout> RenderLayout(StudioComponentContext context)
+    {
+        IRenderedComponent<StudioLayout> layout =
+            context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));
+
+        layout.WaitForState(() => layout.Instance.PreferencesLoaded);
+
+        return layout;
+    }
 
     [Fact]
     public void The_page_is_rendered_when_the_visitor_may_have_the_scope()
@@ -128,8 +155,11 @@ public class StudioLayoutTests
 
         layout.Find("#ms-theme-select").Change(theme);
 
-        layout.ThemeAttribute().Should().Be(theme);
-        context.State.SelectedTheme.Should().Be(theme);
+        layout.WaitForAssertion(() =>
+        {
+            layout.ThemeAttribute().Should().Be(theme);
+            context.State.SelectedTheme.Should().Be(theme);
+        });
     }
 
     [Fact]
@@ -138,9 +168,14 @@ public class StudioLayoutTests
         using var context = new StudioComponentContext();
         var layout = RenderLayout(context);
 
+        // "dark" first, so the fallback has something to be a fallback *from*: asserting "system" on a
+        // studio that already says "system" would pass whether or not the second change ever ran.
+        layout.Find("#ms-theme-select").Change("dark");
+        layout.WaitForAssertion(() => layout.ThemeAttribute().Should().Be("dark"));
+
         layout.Find("#ms-theme-select").Change("\" onload=\"alert(1)");
 
-        layout.ThemeAttribute().Should().Be("system");
+        layout.WaitForAssertion(() => layout.ThemeAttribute().Should().Be("system"));
     }
 
     [Fact]
@@ -164,15 +199,23 @@ public class StudioLayoutTests
         RenderLayout(context).ThemeAttribute().Should().Be("dark");
     }
 
+    /// <summary>
+    /// The zone is picked out of the list rather than named: the context pins UTC, so a test that changed
+    /// to <c>"UTC"</c> asserted that nothing had happened — and the ids themselves are Windows' on one
+    /// machine and IANA's on another.
+    /// </summary>
     [Fact]
     public void The_time_zone_picker_changes_what_timestamps_are_rendered_in()
     {
         using var context = new StudioComponentContext();
         var layout = RenderLayout(context);
 
-        layout.Find("#ms-timezone-select").Change("UTC");
+        string other = layout.SelectorOptions("ms-timezone-select")
+            .First(id => !string.Equals(id, context.State.SelectedTimeZoneId, StringComparison.Ordinal));
 
-        context.State.SelectedTimeZoneId.Should().Be("UTC");
+        layout.Find("#ms-timezone-select").Change(other);
+
+        layout.WaitForAssertion(() => context.State.SelectedTimeZoneId.Should().Be(other));
     }
 
     /// <summary>
@@ -191,6 +234,71 @@ public class StudioLayoutTests
         Action render = () => RenderLayout(context);
 
         render.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// What the browser remembered is applied when the visitor has not said otherwise. The companion to
+    /// the test below, and the reason it is here: a guard that refused every stored value would pass that
+    /// one and break the feature.
+    /// </summary>
+    [Fact]
+    public void A_stored_preference_is_applied_when_the_visitor_has_not_touched_the_pickers()
+    {
+        using var context = new StudioComponentContext();
+        context.JSInterop
+            .Setup<string?>("martenStudio.prefs.get", StudioState.ThemePreferenceKey)
+            .SetResult("dark");
+
+        var layout = RenderLayout(context);
+
+        layout.WaitForAssertion(() => layout.ThemeAttribute().Should().Be("dark"));
+        context.State.SelectedTheme.Should().Be("dark");
+    }
+
+    /// <summary>
+    /// A preference read that started before the visitor's click does not undo it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The first render asks the browser for the remembered theme and time zone — two awaited round
+    /// trips. On a slow browser the visitor can use the theme picker while those are in flight, and what
+    /// comes back was read <em>before</em> the click: it is the preference they have just moved away
+    /// from. Applying it turned their click into a picker that snapped back on its own a moment after
+    /// they used it, and the same ordering is what made <c>StudioLayoutTests</c> fail about one
+    /// full-suite run in four under parallel load.
+    /// </para>
+    /// <para>
+    /// The read is held open with a bUnit invocation handler that is completed by hand, so the ordering
+    /// is the test's to choose rather than the scheduler's — which is the only way to write this down
+    /// without writing another race.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_stored_preference_that_arrives_late_never_overwrites_the_visitors_own_choice()
+    {
+        using var context = new StudioComponentContext();
+
+        JSRuntimeInvocationHandler<string?> storedTheme =
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioState.ThemePreferenceKey);
+        JSRuntimeInvocationHandler<string?> storedZone =
+            context.JSInterop.Setup<string?>("martenStudio.prefs.get", StudioState.TimeZonePreferenceKey);
+
+        var layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, Body));
+
+        layout.Instance.PreferencesLoaded.Should().BeFalse("the browser has not answered yet");
+
+        layout.Find("#ms-theme-select").Change("dark");
+        layout.WaitForAssertion(() => context.State.SelectedTheme.Should().Be("dark"));
+
+        // Only now does the read that started before the click come back, and it carries the theme the
+        // visitor has just moved away from.
+        storedTheme.SetResult("light");
+        storedZone.SetResult(null);
+
+        layout.WaitForState(() => layout.Instance.PreferencesLoaded);
+
+        context.State.SelectedTheme.Should().Be("dark", "the visitor's choice is the newer answer");
+        layout.ThemeAttribute().Should().Be("dark");
     }
 
     // -------------------------------------------------------------------------------------------
@@ -496,7 +604,7 @@ public class StudioLayoutTests
 
         refresh.Click();
 
-        context.Catalog.InvalidateCount.Should().Be(1);
+        layout.WaitForAssertion(() => context.Catalog.InvalidateCount.Should().Be(1));
     }
 
     [Fact]
@@ -553,7 +661,7 @@ public class StudioLayoutTests
 
         layout.Find("#ms-tenant-select").Change("globex");
 
-        context.State.ActiveScope!.TenantId.Should().Be("globex");
+        layout.WaitForAssertion(() => context.State.ActiveScope!.TenantId.Should().Be("globex"));
     }
 
     /// <summary>
@@ -561,7 +669,7 @@ public class StudioLayoutTests
     /// it. Without this the client could name any store in the process.
     /// </summary>
     [Fact]
-    public void A_tenant_the_listing_did_not_carry_is_ignored()
+    public async Task A_tenant_the_listing_did_not_carry_is_ignored()
     {
         using var context = new StudioComponentContext();
         context.Catalog
@@ -569,15 +677,21 @@ public class StudioLayoutTests
             .WithTenants("default", new TenantList(["acme"], IsTruncated: false, TenantListSource.Configured));
 
         var layout = RenderLayout(context);
-        layout.Find("#ms-tenant-select").Change("acme");
 
-        layout.Find("#ms-tenant-select").Change("somebody-elses-tenant");
+        // Awaited rather than waited for. A refusal changes nothing, so there is no state a
+        // `WaitForAssertion` could poll for - it would pass whether or not the change had run at all.
+        // `ChangeAsync` returns the renderer's own dispatch task, so this is the one shape that proves
+        // the handler ran and then did nothing.
+        await layout.Find("#ms-tenant-select").ChangeAsync("acme");
+        context.State.ActiveScope!.TenantId.Should().Be("acme");
+
+        await layout.Find("#ms-tenant-select").ChangeAsync("somebody-elses-tenant");
 
         context.State.ActiveScope!.TenantId.Should().Be("acme", "the previous value stands");
     }
 
     [Fact]
-    public void A_store_the_listing_did_not_carry_is_ignored()
+    public async Task A_store_the_listing_did_not_carry_is_ignored()
     {
         using var context = new StudioComponentContext();
         context.Catalog
@@ -586,7 +700,7 @@ public class StudioLayoutTests
 
         var layout = RenderLayout(context);
 
-        layout.Find("#ms-store-select").Change("not-a-store");
+        await layout.Find("#ms-store-select").ChangeAsync("not-a-store");
 
         context.State.ActiveScope!.StoreKey.Should().Be("default");
     }
@@ -611,10 +725,13 @@ public class StudioLayoutTests
 
         layout.Find("#ms-theme-select").Change("dark");
 
-        context.State.SelectedTheme.Should().Be("dark");
-        layout.ThemeAttribute().Should().Be("dark");
-        layout.Find("#ms-theme-select option[value=dark]").HasAttribute("selected").Should().BeTrue();
-        layout.Find("#ms-theme-select option[value=light]").HasAttribute("selected").Should().BeFalse();
+        layout.WaitForAssertion(() =>
+        {
+            context.State.SelectedTheme.Should().Be("dark");
+            layout.ThemeAttribute().Should().Be("dark");
+            layout.Find("#ms-theme-select option[value=dark]").HasAttribute("selected").Should().BeTrue();
+            layout.Find("#ms-theme-select option[value=light]").HasAttribute("selected").Should().BeFalse();
+        });
     }
 
     [Fact]
@@ -623,12 +740,15 @@ public class StudioLayoutTests
         using var context = new StudioComponentContext();
         var layout = RenderLayout(context);
 
-        layout.Find("#ms-timezone-select").Change("UTC");
+        string other = layout.SelectorOptions("ms-timezone-select")
+            .First(id => !string.Equals(id, context.State.SelectedTimeZoneId, StringComparison.Ordinal));
 
-        layout.FindAll("#ms-timezone-select option")
+        layout.Find("#ms-timezone-select").Change(other);
+
+        layout.WaitForAssertion(() => layout.FindAll("#ms-timezone-select option")
             .Where(x => x.HasAttribute("selected"))
             .Select(x => x.GetAttribute("value"))
-            .Should().Equal("UTC");
+            .Should().Equal(other));
     }
 
     [Fact]
@@ -642,10 +762,10 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
         layout.Find("#ms-store-select").Change("IInvoicingStore");
 
-        layout.FindAll("#ms-store-select option")
+        layout.WaitForAssertion(() => layout.FindAll("#ms-store-select option")
             .Where(x => x.HasAttribute("selected"))
             .Select(x => x.GetAttribute("value"))
-            .Should().Equal("IInvoicingStore");
+            .Should().Equal("IInvoicingStore"));
     }
 
     /// <summary>
@@ -663,7 +783,8 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
         layout.Find("#ms-store-select").Change("IInvoicingStore");
 
-        context.CurrentUri.Should().Contain("store=IInvoicingStore").And.Contain("db=localhost.invoicing");
+        layout.WaitForAssertion(() =>
+            context.CurrentUri.Should().Contain("store=IInvoicingStore").And.Contain("db=localhost.invoicing"));
     }
 
     [Fact]

@@ -151,6 +151,69 @@ public partial class StylesheetTests
         Matches(selector).Should().HaveCount(1, $"'{selector}' should be defined in one place");
     }
 
+    /// <summary>
+    /// <c>body { margin: 0 }</c> is the only rule in the file that reaches markup the studio did not
+    /// write, and it stays that way.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is not a host leak: this stylesheet is linked from exactly one document — the studio's own
+    /// shell, whose <c>&lt;body&gt;</c> <c>MartenStudioApp</c> renders — and a host page never loads it.
+    /// Nor can it be scoped: <c>.ms-studio</c> is on a <c>&lt;div&gt;</c> <em>inside</em> that body, and
+    /// the only selector that reaches a descendant's ancestor is <c>:has()</c>, which would re-evaluate
+    /// on every DOM mutation to fix a leak that does not exist.
+    /// </para>
+    /// <para>
+    /// So it is pinned instead of removed, and pinned as an <em>allow-list of one</em> rather than as an
+    /// assertion that this rule exists: the thing worth catching is the <em>second</em> unprefixed rule —
+    /// an <c>a { }</c>, an <c>input { }</c>, a <c>* { box-sizing }</c> — which would restyle the host's
+    /// own markup wherever the file is served and is exactly the failure AGENTS.md hard rule 3 exists
+    /// for. <c>:root</c> and its dark-mode repeat are permitted with it: they declare nothing but
+    /// <c>--ms-*</c> custom properties, which change no rendering anywhere that does not name them.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_body_margin_is_the_only_rule_that_is_not_prefixed()
+    {
+        // `from` and `to` are keyframe stops inside `@keyframes ms-*`, not element selectors: they style
+        // nothing on their own, and the animations they belong to are all `ms-` prefixed.
+        string[] permitted = ["body", ":root", "from", "to"];
+
+        // "Contains" rather than "starts with": `a.ms-json-url` and `.ms-studio h1:focus` are both
+        // anchored inside the studio's own markup, and the anchor is what matters, not where in the
+        // selector it sits. A comma-separated list is already split one selector per entry, so a stray
+        // `h1` beside a scoped one is still caught.
+        List<string> unprefixed = Selectors()
+            .Where(static x => !x.Contains(".ms-", StringComparison.Ordinal))
+            .Where(x => !permitted.Contains(x, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        unprefixed.Should().BeEmpty(
+            "every rule in the studio's stylesheet is prefixed 'ms-' except the body margin and the "
+            + "':root' token blocks; anything else here restyles the host's own markup");
+
+        // And the permitted one is still the rule it is permitted for, rather than a name left behind by
+        // a rule that grew into something else.
+        Declaration("body", "margin").Should().Be("0");
+        Rule("body").Should().NotContain("padding", "the exception is the margin and nothing more");
+    }
+
+    /// <summary>
+    /// The anti-vacuity half. <see cref="Selectors" /> strips comments and splits on commas, and a
+    /// regular expression that quietly stopped matching would make the test above pass over any
+    /// stylesheet at all - including one that had grown an <c>a { }</c>.
+    /// </summary>
+    [Fact]
+    public void The_selector_scan_can_still_see_an_unprefixed_rule()
+    {
+        List<string> selectors = Selectors().ToList();
+
+        selectors.Should().Contain("body", "the one rule the test above permits has to be visible to it");
+        selectors.Should().Contain(".ms-id-cell", "and so do the prefixed ones it walks past");
+        selectors.Count.Should().BeGreaterThan(100, "the stylesheet is several thousand lines of rules");
+    }
+
     /// <summary>Every selector the stylesheet declares a rule for, trimmed, one entry per selector.</summary>
     private static IEnumerable<string> Selectors()
     {

@@ -7,6 +7,7 @@
 @inject IEventDataService Events
 @inject StudioState State
 @inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
 @inject ToastService Toasts
 @inject NavigationManager Navigation
 @inject IOptions<MartenStudioOptions> Options
@@ -111,9 +112,19 @@
                     Archiving marks the stream and all of its events archived. It is a write, it is
                     audited, and Marten has no un-archive operation.
                 </p>
-                <button type="button" class="ms-button ms-button-danger" disabled="@archiving" @onclick="OpenArchiveDialog">
+                @* Disabled rather than hidden for a visitor the write policy refuses: "this studio can
+                   archive streams and your account may not" is a different fact from "this studio cannot
+                   archive streams", and somebody who cannot see the first goes and asks the wrong
+                   question. `IEventDataService` refuses regardless (AGENTS.md hard rule 5). *@
+                <button type="button"
+                        class="ms-button ms-button-danger ms-stream-archive"
+                        disabled="@(archiving || !mayArchive)"
+                        title="@ArchiveTitle"
+                        @onclick="OpenArchiveDialog">
                     @(archiving ? "Archiving..." : "Archive this stream")
                 </button>
+
+                <WriteRefusal Refused="!mayArchive" Capability="@nameof(StudioCapability.ArchiveStreams)" />
             }
 
             @if (!string.IsNullOrWhiteSpace(archiveError))
@@ -214,6 +225,25 @@
     private string? archiveError;
     private string? signature;
     private long lastVersionLoaded;
+
+    /// <summary>
+    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor
+    /// archive a stream in the scope on screen.
+    /// </summary>
+    /// <remarks>
+    /// Asked once per load and never memoised: the answer is about this circuit's user, and a cache that
+    /// outlived one would be how one person's answer gets shown to another. It defaults to
+    /// <see langword="true" /> because the common case is a host that configured no write policy at all,
+    /// and fail-open is safe here precisely because this is not the enforcement - the service resolves
+    /// the scope with the same capability and throws (AGENTS.md hard rule 5).
+    /// </remarks>
+    private bool mayArchive = true;
+
+    private string ArchiveRefusal => WritePolicyRefusal.For(StudioCapability.ArchiveStreams);
+
+    private string ArchiveTitle => mayArchive
+        ? "Archive this stream and every one of its events"
+        : ArchiveRefusal;
 
     /// <summary>The stream id. In the query string, not the route (D9).</summary>
     [SupplyParameterFromQuery(Name = "id")]
@@ -367,6 +397,11 @@
         try
         {
             CancellationToken token = pageCancellation.Token;
+
+            // First, and before anything that can fail: a read that throws must not leave the archive
+            // button showing the last visitor's answer. Per visitor rather than per process, so it is
+            // asked here rather than read off the guard, and never memoised.
+            mayArchive = await Authorization.IsAuthorizedAsync(scope, StudioCapability.ArchiveStreams, token);
 
             shape = await Events.DescribeAsync(scope, token);
             stream = await Events.GetStreamAsync(scope, Id, token);

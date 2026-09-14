@@ -106,6 +106,106 @@ public class SampleOptionsTests
     }
 
     // ------------------------------------------------------------------------------------------------
+    // What is refused rather than guessed at
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// An <c>=</c> value that is not a literal <c>true</c> or <c>false</c> is a mistake, not somebody
+    /// else's token.
+    /// </summary>
+    /// <remarks>
+    /// Writing the <c>=</c> is a claim that this token is the whole argument, so there is nobody else it
+    /// could belong to — and what the parser did with it was yield <see langword="false" />. On
+    /// <c>--readonly</c>, the one switch whose whole job is to turn writes <em>off</em>,
+    /// <c>--readonly=yes</c> therefore started a studio that could write. A parser that fails open on
+    /// that switch is worse than one that does not support it.
+    /// </remarks>
+    [Theory]
+    [InlineData("--readonly=yes")]
+    [InlineData("--readonly=1")]
+    [InlineData("--readonly=on")]
+    [InlineData("--anonymous=no")]
+    public void An_equals_value_that_is_not_a_boolean_is_refused_rather_than_read_as_false(string argument)
+    {
+        Action parse = () => SampleOptions.Parse([argument]);
+
+        parse.Should().Throw<ArgumentException>()
+            .WithMessage("*true or false*", "the message has to say what would have worked");
+    }
+
+    /// <summary>
+    /// Both spellings .NET's own command-line provider accepts are switches here too.
+    /// </summary>
+    /// <remarks>
+    /// <c>--Anonymous</c> and <c>/anonymous</c> fell through to <c>default</c>, were passed to the host
+    /// verbatim, and the provider then swallowed the token after them exactly as it does for any bare
+    /// <c>--key</c> — which is the whole failure <see cref="SampleOptions.HostArguments" /> exists to
+    /// stop. A switch that silently means nothing because of how it was capitalised is worse than one
+    /// that is not supported at all.
+    /// </remarks>
+    [Theory]
+    [InlineData("--Anonymous")]
+    [InlineData("--ANONYMOUS")]
+    [InlineData("/anonymous")]
+    [InlineData("/Anonymous")]
+    public void A_switch_is_recognised_whatever_its_case_and_however_it_is_prefixed(string spelling)
+    {
+        string[] args = [spelling, "--urls", "http://localhost:5210"];
+
+        SampleOptions.Parse(args).Anonymous.Should().BeTrue();
+
+        SampleOptions.HostArguments(args).Should().Equal(
+            "--anonymous=true",
+            "--urls",
+            "http://localhost:5210");
+
+        IConfigurationRoot configuration = new ConfigurationBuilder()
+            .AddCommandLine(SampleOptions.HostArguments(args))
+            .Build();
+
+        configuration["urls"].Should().Be("http://localhost:5210", "the URL survives the rewrite");
+    }
+
+    /// <summary>A token that merely starts with <c>/</c> is not a switch and is passed through as it was.</summary>
+    [Fact]
+    public void A_path_shaped_token_that_is_not_one_of_our_switches_is_left_alone()
+    {
+        string[] args = ["/c/Users/somebody/app", "--urls", "http://localhost:5210"];
+
+        SampleOptions.HostArguments(args).Should().Equal(args);
+    }
+
+    /// <summary>
+    /// <c>--path</c> takes the token after it, and another switch is not a mount path.
+    /// </summary>
+    /// <remarks>
+    /// <c>--path --urls http://localhost:5210</c> mounted the studio at <c>"--urls"</c> — which
+    /// <c>MartenStudioOptions</c> would then have refused with a message about a path, several screens
+    /// later — and consumed <c>--urls</c> on the way, so Kestrel listened on the default port too.
+    /// </remarks>
+    [Theory]
+    [InlineData("--path --urls http://localhost:5210")]
+    [InlineData("--path -p")]
+    [InlineData("--path=--urls")]
+    public void A_path_value_that_is_another_switch_is_refused(string commandLine)
+    {
+        Action parse = () => SampleOptions.Parse(commandLine.Split(' '));
+
+        parse.Should().Throw<ArgumentException>().WithMessage("*no mount path*");
+    }
+
+    /// <summary>And a real path is still taken, in every spelling, so the guard is a guard.</summary>
+    [Theory]
+    [InlineData("--path /ops/marten")]
+    [InlineData("--path=/ops/marten")]
+    [InlineData("/PATH /ops/marten")]
+    [InlineData("--Path=/ops/marten")]
+    public void A_path_that_is_a_path_is_still_taken(string commandLine)
+    {
+        SampleOptions.Parse(commandLine.Split(' ')).Path.Should().Be("/ops/marten");
+    }
+
+    // ------------------------------------------------------------------------------------------------
     // What the host is handed
     // ------------------------------------------------------------------------------------------------
 

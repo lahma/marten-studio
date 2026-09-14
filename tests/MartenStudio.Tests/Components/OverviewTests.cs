@@ -121,9 +121,15 @@ public class OverviewTests
         context.StoreInfo.WithStore();
         page.Find(".ms-error-alert button").Click();
 
-        context.StoreInfo.Loads.Should().Be(2);
-        page.FindAll(".ms-error-alert").Should().BeEmpty();
-        page.StatCardValue("Databases").Should().Be("1");
+        // bUnit's Click dispatches through the renderer's dispatcher and discards the task, so the retry's
+        // reload has not necessarily started - let alone finished - when this line runs. Asserting on the
+        // next line is what failed the Release run of cbf5112 with "expected 2, found 1".
+        page.WaitForAssertion(() =>
+        {
+            context.StoreInfo.Loads.Should().Be(2);
+            page.FindAll(".ms-error-alert").Should().BeEmpty();
+            page.StatCardValue("Databases").Should().Be("1");
+        });
     }
 
     /// <summary>

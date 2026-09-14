@@ -130,6 +130,18 @@
     private bool interactive;
     private PersistingComponentStateSubscription persistingSubscription;
 
+    /// <summary>
+    /// Whether the first-render read of the browser's stored preferences has finished, however it went.
+    /// </summary>
+    /// <remarks>
+    /// <c>internal</c> rather than a <c>[Parameter]</c> or a rendered attribute: it is not a fact any
+    /// page needs, and the shipped public surface is two static classes, two classes and one record
+    /// (AGENTS.md hard rule 7). What it is for is the tests - a bUnit test that acts on the theme picker
+    /// before this is true is racing <see cref="LoadPreferencesAsync" /> rather than testing anything,
+    /// which is what <c>StudioLayoutTests</c> was doing about one full-suite run in four.
+    /// </remarks>
+    internal bool PreferencesLoaded => preferencesLoaded;
+
     protected override async Task OnInitializedAsync()
     {
         State.ScopeChanged += OnScopeChanged;
@@ -230,30 +242,51 @@
         interactive = true;
         SyncScopeToUrl();
 
-        if (!preferencesLoaded)
-        {
-            preferencesLoaded = await LoadPreferencesAsync();
-        }
+        await LoadPreferencesAsync();
+        preferencesLoaded = true;
+
+        // Unconditionally, and after the flag: the stored preferences may have moved the theme or the
+        // time zone, and this is the render that puts the answer - whichever way it went - on screen.
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
     /// Reads the browser's own remembered preferences once the circuit exists.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The cookie has already seeded <see cref="StudioState" /> in the prerender scope and persisted
     /// component state carried that across to the circuit, which is what keeps a dark studio from
     /// flashing light. This covers the case neither can: a preference stored only in
     /// <c>localStorage</c>, and a browser whose cookie was cleared.
+    /// </para>
+    /// <para>
+    /// <em>A stored preference never overwrites one the visitor expressed while it was being read.</em>
+    /// These are two awaited round trips to the browser, and on a slow one the visitor can use the theme
+    /// picker before they finish. What comes back was read before that click, so applying it would put
+    /// the theme they have just moved away from back on the screen - the picker snapping back on its own
+    /// a moment after it was used. <see cref="StudioState.PreferenceVersion" /> is stamped before the
+    /// awaits and checked after them, and the visitor wins: whatever they chose is both newer and
+    /// already written to the same storage this was reading.
+    /// </para>
     /// </remarks>
-    private async Task<bool> LoadPreferencesAsync()
+    private async Task LoadPreferencesAsync()
     {
         try
         {
-            string previousTheme = State.SelectedTheme;
-            string previousTimeZoneId = State.SelectedTimeZoneId;
+            long version = State.PreferenceVersion;
 
             string? storedTheme = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { StudioState.ThemePreferenceKey });
             string? storedTimeZoneId = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { StudioState.TimeZonePreferenceKey });
+
+            if (State.PreferenceVersion != version)
+            {
+                // The visitor picked something while the browser was being asked. Theirs is the newer
+                // answer and it has already been persisted, so there is nothing here to apply.
+                return;
+            }
+
+            string previousTimeZoneId = State.SelectedTimeZoneId;
 
             if (!string.IsNullOrWhiteSpace(storedTheme))
             {
@@ -265,25 +298,16 @@
                 State.SelectedTimeZoneId = storedTimeZoneId;
             }
 
-            bool timeZoneChanged = !string.Equals(previousTimeZoneId, State.SelectedTimeZoneId, StringComparison.Ordinal);
-            bool themeChanged = !string.Equals(previousTheme, State.SelectedTheme, StringComparison.Ordinal);
-
-            if (timeZoneChanged)
+            if (!string.Equals(previousTimeZoneId, State.SelectedTimeZoneId, StringComparison.Ordinal))
             {
+                // Every page re-renders its timestamps in the new zone. The theme needs no such notice:
+                // it is one attribute on this component's own root.
                 await State.NotifyAsync();
             }
-
-            if (timeZoneChanged || themeChanged)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
-
-            return true;
         }
         catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
             // JS interop is unavailable during prerendering, and a browser can refuse storage outright.
-            return false;
         }
     }
 
@@ -300,7 +324,7 @@
         if (!string.Equals(previous, State.SelectedTimeZoneId, StringComparison.Ordinal))
         {
             await State.NotifyAsync();
-            await PersistPreferenceAsync(StudioState.TimeZonePreferenceKey, State.SelectedTimeZoneId);
+            await PersistPreferenceAsync(StudioState.TimeZonePreferenceKey);
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -311,13 +335,27 @@
         State.SelectedTheme = args.Value?.ToString() ?? "system";
         if (!string.Equals(previous, State.SelectedTheme, StringComparison.Ordinal))
         {
-            await PersistPreferenceAsync(StudioState.ThemePreferenceKey, State.SelectedTheme);
+            await PersistPreferenceAsync(StudioState.ThemePreferenceKey);
             await InvokeAsync(StateHasChanged);
         }
     }
 
-    private async Task PersistPreferenceAsync(string key, string value)
+    /// <summary>
+    /// Writes one preference to the browser's own storage.
+    /// </summary>
+    /// <remarks>
+    /// The value is read from <see cref="StudioState" /> here rather than passed in, so what is written
+    /// is what the studio currently shows. Two clicks in quick succession are two handlers whose interop
+    /// calls can finish in either order; a value captured by the first and written after the second's had
+    /// landed would leave <c>localStorage</c> remembering the theme the visitor moved away from, and the
+    /// next visit would open on it.
+    /// </remarks>
+    private async Task PersistPreferenceAsync(string key)
     {
+        string value = string.Equals(key, StudioState.ThemePreferenceKey, StringComparison.Ordinal)
+            ? State.SelectedTheme
+            : State.SelectedTimeZoneId;
+
         try
         {
             await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", new object?[] { key, value });

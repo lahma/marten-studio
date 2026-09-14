@@ -29,8 +29,10 @@
                     </th>
                 }
                 <th class="ms-doc-col-expand" scope="col"><span class="ms-sr-only">Expand</span></th>
-                @foreach (DocumentColumnHeader header in Page.Columns)
+                @for (int headerIndex = 0; headerIndex < Page.Columns.Count; headerIndex++)
                 {
+                    DocumentColumnHeader header = Page.Columns[headerIndex];
+
                     <th scope="col" class="ms-doc-col ms-doc-col-@header.Kind.ToString().ToLowerInvariant()" @key="header.Key">
                         <button type="button"
                                 class="ms-doc-sort @(IsSorted(header) ? "ms-doc-sort-on" : null)"
@@ -48,8 +50,12 @@
                            sort makes the strip red on every collection in the store - a banner that is
                            always there is a banner nobody reads, and it drowned out the filter verdicts
                            the strip exists for. Here it is a mark on the header, which is where the fact
-                           belongs and where it is still visible. *@
-                        @if (IsSorted(header) && SortHint is { } hint)
+                           belongs and where it is still visible.
+
+                           Where the sort column is not on screen at all - the chooser hides it, or a
+                           pasted `?cols=` does - it falls back to the first header rather than
+                           disappearing: the scan it warns about happens either way. *@
+                        @if (ShowsSortHint(headerIndex) && SortHint is { } hint)
                         {
                             <span class="ms-doc-sort-hint ms-doc-sort-hint-@hint.Level.ToString().ToLowerInvariant()"
                                   title="@hint.Reason">@(hint.Level == IndexVerdictLevel.Red ? "!" : "?")</span>
@@ -284,6 +290,44 @@
 
     private bool IsSorted(DocumentColumnHeader header) =>
         string.Equals(header.Key, SortKey, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether the sort column is one of the columns on screen.
+    /// </summary>
+    /// <remarks>
+    /// It does not have to be. <c>DocumentDataService</c> keeps the sort column in the <c>select</c> list
+    /// whatever the chooser says, so a list can perfectly well be sorted by <c>mt_last_modified</c> with
+    /// no <c>mt_last_modified</c> header - either because the chooser hides it or because somebody pasted
+    /// a <c>?cols=</c> that does.
+    /// </remarks>
+    private bool SortColumnIsVisible
+    {
+        get
+        {
+            foreach (DocumentColumnHeader header in Page.Columns)
+            {
+                if (IsSorted(header))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the sort's index verdict belongs on this header.
+    /// </summary>
+    /// <remarks>
+    /// On the sorted header where there is one, and on the first header where there is not. A red verdict
+    /// says the sort is a sequential scan of the whole collection, which is the single most useful thing
+    /// the list can tell somebody about why it is slow - and hanging it off the sorted header alone meant
+    /// that hiding that column made the warning disappear while the scan it warned about carried on. It
+    /// is rendered somewhere rather than nowhere; the chip's own text names the column.
+    /// </remarks>
+    private bool ShowsSortHint(int index) =>
+        SortColumnIsVisible ? IsSorted(Page.Columns[index]) : index == 0;
 
     private string SortTitle(DocumentColumnHeader header) =>
         IsSorted(header) && SortDirectionValue == SortDirection.Descending

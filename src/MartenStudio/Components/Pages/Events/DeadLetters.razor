@@ -10,6 +10,7 @@
 @inject IProjectionDataService ProjectionData
 @inject StudioState State
 @inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
 @inject ToastService Toasts
 @inject NavigationManager Navigation
 @inject IOptions<MartenStudioOptions> Options
@@ -175,16 +176,22 @@
                                         }
                                         else
                                         {
+                                            @* Disabled, never hidden, for a visitor the write policy
+                                               refuses: "this studio can manage dead letters and your
+                                               account may not" is a different fact from "this studio
+                                               cannot manage dead letters". The service refuses regardless
+                                               (AGENTS.md hard rule 5). *@
                                             <button type="button"
-                                                    class="ms-button ms-button-danger"
-                                                    disabled="@working"
+                                                    class="ms-button ms-button-danger ms-dead-letter-discard"
+                                                    disabled="@(working || !mayManage)"
+                                                    title="@DiscardTitle"
                                                     @onclick="() => OpenDiscardAsync(row.Id)">
                                                 Discard
                                             </button>
 
                                             <button type="button"
-                                                    class="ms-button"
-                                                    disabled="@(working || !SupportsSkipping)"
+                                                    class="ms-button ms-dead-letter-skip"
+                                                    disabled="@(working || !SupportsSkipping || !mayManage)"
                                                     title="@SkipTitle"
                                                     @onclick="() => OpenSkipAsync(row.EventSequence)">
                                                 Skip event
@@ -198,13 +205,18 @@
                                         @if (Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
                                         {
                                             <button type="button"
-                                                    class="ms-button @(CanRewind(row.ProjectionName) ? string.Empty : "ms-btn-disabled")"
+                                                    class="ms-button ms-dead-letter-rewind @(CanRewind(row.ProjectionName) ? string.Empty : "ms-btn-disabled")"
                                                     disabled="@(working || !CanRewind(row.ProjectionName))"
                                                     title="@RewindTitle(row.ProjectionName)"
                                                     @onclick="() => OpenRewindAsync(row)">
                                                 Rewind subscription to this event
                                             </button>
                                         }
+
+                                        @* Once under the three buttons rather than three times: one
+                                           sentence is what the whole row of controls is refused by. *@
+                                        <WriteRefusal Refused="@(Capabilities.IsEnabled(StudioCapability.ManageDeadLetters) && !mayManage)"
+                                                      Capability="@nameof(StudioCapability.ManageDeadLetters)" />
                                     </div>
 
                                     @if (!string.IsNullOrWhiteSpace(actionError))
@@ -335,6 +347,18 @@
     private string? actionError;
     private string? signature;
 
+    /// <summary>
+    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor
+    /// discard, skip or rewind in the scope on screen.
+    /// </summary>
+    /// <remarks>
+    /// One question for all three, because all three answer to <c>ManageDeadLetters</c> and the policy is
+    /// asked with the capability on the resource. Fail-open by default: the common case is a host that
+    /// configured no write policy, and this is not the enforcement - <c>IEventDataService</c> resolves the
+    /// scope with the same capability and throws (AGENTS.md hard rule 5).
+    /// </remarks>
+    private bool mayManage = true;
+
     /// <summary>Only this projection's dead letters.</summary>
     [SupplyParameterFromQuery(Name = "projection")]
     public string? Projection { get; set; }
@@ -374,9 +398,25 @@
 
     private bool SupportsSkipping => shape?.HasIsSkipped == true;
 
-    private string SkipTitle => SupportsSkipping
-        ? "Marks the event skipped so the daemon steps over it"
-        : "This store has no mt_events.is_skipped column: the host did not enable event skipping";
+    /// <summary>The one sentence a visitor the write policy refuses is told, under the three buttons.</summary>
+    private string ManageRefusal => WritePolicyRefusal.For(StudioCapability.ManageDeadLetters);
+
+    /// <summary>
+    /// The policy first in every one of the three titles below.
+    /// </summary>
+    /// <remarks>
+    /// A visitor who may not manage dead letters at all does not need to be told which column their store
+    /// is missing or where the daemon is: that is advice about a button they cannot press either way.
+    /// </remarks>
+    private string DiscardTitle => mayManage
+        ? "Deletes the dead letter record; the event itself stays where it is"
+        : ManageRefusal;
+
+    private string SkipTitle => !mayManage
+        ? ManageRefusal
+        : SupportsSkipping
+            ? "Marks the event skipped so the daemon steps over it"
+            : "This store has no mt_events.is_skipped column: the host did not enable event skipping";
 
     /// <summary>
     /// Whether the daemon this process hosts could be asked to rewind <paramref name="projectionName" />.
@@ -389,7 +429,8 @@
     /// longer has would be asking the daemon for a shard it cannot build.
     /// </remarks>
     private bool CanRewind(string projectionName) =>
-        projections is { Daemon.IsHostedHere: true }
+        mayManage
+        && projections is { Daemon.IsHostedHere: true }
         && FindProjection(projectionName) is { IsAsync: true };
 
     private ProjectionInfo? FindProjection(string projectionName) =>
@@ -398,6 +439,11 @@
 
     private string RewindTitle(string projectionName)
     {
+        if (!mayManage)
+        {
+            return ManageRefusal;
+        }
+
         if (projections is null)
         {
             return "Marten Studio has not read the projections for this database yet";
@@ -570,6 +616,13 @@
         try
         {
             CancellationToken token = pageCancellation.Token;
+
+            // First, and before anything that can fail: a read that throws must not leave the write
+            // controls showing the last visitor's answer. Per visitor rather than per process, so it is
+            // asked here rather than read off the guard, once per load and never memoised - a cache that
+            // outlived a circuit would be how one person's answer gets shown to another. It touches no
+            // database, so it is free of hard rule 14.
+            mayManage = await Authorization.IsAuthorizedAsync(scope, StudioCapability.ManageDeadLetters, token);
 
             shape = await Events.DescribeAsync(scope, token);
 

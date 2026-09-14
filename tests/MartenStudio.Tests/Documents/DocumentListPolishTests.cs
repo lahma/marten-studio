@@ -144,6 +144,52 @@ public class DocumentListPolishTests
             "the sort's own verdict is still said, beside the column it is about");
     }
 
+    /// <summary>
+    /// A sort column the table is not showing still gets its verdict said, on the first header.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The sort column does not have to be on screen. <c>DocumentDataService</c> keeps it in the
+    /// <c>select</c> list whatever the chooser says, so a list can be ordered by <c>mt_last_modified</c>
+    /// with no <c>mt_last_modified</c> header - because the column chooser hides it, or because somebody
+    /// pasted a <c>?cols=</c> that does. Hanging the hint off the sorted header alone meant that hiding
+    /// the column made the red warning vanish while the sequential scan it warned about carried straight
+    /// on: the studio quietly stopped saying the single most useful thing it knows about why the page is
+    /// slow.
+    /// </para>
+    /// <para>
+    /// On the first header rather than in the search strip, because the strip is about filters and a
+    /// banner that is always there is one nobody reads - the reason the hint moved to the headers in the
+    /// first place. The chip's own reason text names the column, so nothing is ambiguous about which one
+    /// it is about.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_sort_verdict_for_a_hidden_column_is_still_rendered_somewhere()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Rail = FakeDocuments.Rail();
+        context.Data.Page = FakeDocuments.Page(
+            rows: [FakeDocuments.Row(Guid1)],
+            columns: [DocumentColumnKeys.HeaderFor(new DocumentColumn.Metadata(DocumentMetadataColumn.LastModified))],
+            verdict: SortOnly()) with
+        {
+            // Sorted by id, which the column list above does not carry.
+            SortKey = DocumentColumnKeys.Id,
+        };
+
+        var page = Render(context, "customer");
+
+        page.FindAll("th .ms-doc-sort-on").Should().BeEmpty("the sorted column is not on screen");
+
+        IElement hint = page.FindAll(".ms-doc-sort-hint").Should().ContainSingle().Subject;
+        hint.ClassList.Should().Contain("ms-doc-sort-hint-red");
+        hint.GetAttribute("title").Should().Contain("mt_last_modified");
+
+        page.FindAll("th.ms-doc-col")[0].QuerySelector(".ms-doc-sort-hint").Should().NotBeNull(
+            "the first data header is where it falls back to");
+    }
+
     /// <summary>A sort an index can serve says nothing: "this is indexed" is not news beside a header.</summary>
     [Fact]
     public void A_green_sort_renders_no_hint_at_all()

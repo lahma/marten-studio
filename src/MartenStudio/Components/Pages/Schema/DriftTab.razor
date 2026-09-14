@@ -3,6 +3,7 @@
 @inject ISchemaDataService SchemaData
 @inject StudioState State
 @inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
 @inject ToastService Toasts
 
 @*
@@ -197,12 +198,18 @@ else
         </div>
     }
 
+    @* Disabled and not hidden for a visitor the write policy refuses: "this studio can apply schema
+       changes and your account may not" is a different fact from "this studio cannot apply schema
+       changes". ISchemaDataService refuses regardless (AGENTS.md hard rule 5). *@
     <button type="button"
-            class="ms-button ms-button-danger"
-            disabled="@(busy || !preview.HasSql || !Acknowledged)"
+            class="ms-button ms-button-danger ms-schema-apply"
+            disabled="@(busy || !preview.HasSql || !Acknowledged || !mayApply)"
+            title="@ApplyTitle"
             @onclick="OpenApplyAsync">
         Apply @(preview.HasSql ? preview.ObjectCount.ToString(System.Globalization.CultureInfo.InvariantCulture) + " change(s)" : "changes")
     </button>
+
+    <WriteRefusal Refused="!mayApply" Capability="@nameof(StudioCapability.ApplySchemaChanges)" />
 
     @if (!preview.HasSql)
     {
@@ -257,6 +264,43 @@ else
     /// harmless case is how a box stops being read.
     /// </remarks>
     private bool Acknowledged => !preview.IsDestructive || acknowledged;
+
+    /// <summary>
+    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor
+    /// apply a migration to the database on screen.
+    /// </summary>
+    /// <remarks>
+    /// Asked once, when this tab is first rendered, and never memoised: the answer is about this
+    /// circuit's user. It defaults to <see langword="true" /> because the common case is a host that
+    /// configured no write policy at all, and fail-open is safe because this is not the enforcement -
+    /// <c>ISchemaDataService.ApplyAsync</c> resolves the scope with the same capability and throws
+    /// (AGENTS.md hard rule 5).
+    /// </remarks>
+    private bool mayApply = true;
+
+    private string ApplyTitle => mayApply
+        ? "Runs the previewed migration against this database"
+        : WritePolicyRefusal.For(StudioCapability.ApplySchemaChanges);
+
+    protected override async Task OnInitializedAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
+
+        try
+        {
+            mayApply = await Authorization.IsAuthorizedAsync(
+                scope,
+                StudioCapability.ApplySchemaChanges,
+                lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
 
     private string BadgeClass => check.Status switch
     {

@@ -15,6 +15,18 @@ namespace MartenStudio.Sample;
 /// pair and does take the token after it.
 /// </para>
 /// <para>
+/// <b>Three things are refused rather than guessed at</b>, each because guessing was silently wrong.
+/// An <c>=</c> value that is not a literal <c>true</c> or <c>false</c> — <c>--readonly=yes</c>,
+/// <c>--readonly=1</c>, <c>--readonly=on</c> — throws instead of yielding <see langword="false" />:
+/// writing the <c>=</c> is a claim that this token is the whole argument, and reading "yes" as "no" on
+/// the one switch that means <em>turn writes off</em> is the worst direction for a parser to fail in.
+/// A <c>--path</c> whose value begins with <c>-</c> throws instead of mounting the studio at
+/// <c>--urls</c> and swallowing the URL after it. And a switch is matched case-insensitively with a
+/// leading <c>/</c> read as <c>--</c>, so <c>--Anonymous</c> and <c>/anonymous</c> are the switch they
+/// obviously are rather than unrecognised tokens handed to the host — which is where they went before,
+/// and the host's provider then ate the token after them exactly as described below.
+/// </para>
+/// <para>
 /// <b>This is not how .NET's own command-line configuration provider reads arguments</b>, which is the
 /// whole reason the rule is written down. <c>WebApplication.CreateBuilder(args)</c> adds
 /// <c>CommandLineConfigurationProvider</c>, and that provider treats every <c>--key</c> without an
@@ -56,6 +68,10 @@ internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path
 
     /// <summary>The one switch that really is a <c>--key value</c> pair.</summary>
     private const string PathSwitch = "--path";
+
+    /// <summary>Every switch this record understands, in the canonical spelling <c>Normalize</c> maps to.</summary>
+    private static readonly string[] Switches =
+        [AnonymousSwitch, ReadOnlySwitch, AllowDataGenerationSwitch, PathSwitch];
 
     /// <summary>
     /// Whether the demo-data endpoints are mapped at all.
@@ -179,6 +195,8 @@ internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path
                 inline = token[(equals + 1)..];
             }
 
+            name = Normalize(name);
+
             switch (name)
             {
                 case AnonymousSwitch:
@@ -186,6 +204,18 @@ internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path
                 case AllowDataGenerationSwitch:
                     if (inline is not null)
                     {
+                        // An inline value is an explicit claim that this token is the whole argument, so
+                        // anything but a literal true/false is a mistake rather than somebody else's
+                        // token - and the one switch it matters most for is --readonly, where taking
+                        // "yes" for false would turn writes back on for a person who asked for them off.
+                        if (!IsBoolean(inline))
+                        {
+                            throw new ArgumentException(
+                                $"'{token}' is not a value this sample understands. {name} takes true or " +
+                                "false (any casing), or nothing at all, which means true.",
+                                nameof(args));
+                        }
+
                         yield return new Argument(token, name, IsTrue(inline), null);
                         break;
                     }
@@ -206,12 +236,26 @@ internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path
                 case PathSwitch:
                     if (inline is not null)
                     {
+                        if (inline.StartsWith('-'))
+                        {
+                            throw new ArgumentException(NotAPath(token, inline), nameof(args));
+                        }
+
                         yield return new Argument(token, name, false, inline);
                         break;
                     }
 
                     if (i + 1 < args.Length)
                     {
+                        // --path really is a --key value pair, so the token after it is consumed. One
+                        // that begins with a dash is another switch, not a mount path: taking it would
+                        // mount the studio at "--urls" *and* swallow the URL that followed, which is
+                        // exactly the silent failure HostArguments exists to stop.
+                        if (args[i + 1].StartsWith('-'))
+                        {
+                            throw new ArgumentException(NotAPath(token, args[i + 1]), nameof(args));
+                        }
+
                         yield return new Argument(token, name, false, args[i + 1]);
                         i++;
                         break;
@@ -226,6 +270,39 @@ internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path
             }
         }
     }
+
+    /// <summary>
+    /// The switch name this token spells, in the one form <see cref="Read" /> matches on.
+    /// </summary>
+    /// <remarks>
+    /// Case-insensitively, and with a leading <c>/</c> read as <c>--</c>. Both spellings are ones .NET's
+    /// own command-line configuration provider accepts, so a person who writes <c>--Anonymous</c> or
+    /// <c>/anonymous</c> has written something the host half of this command line understands perfectly
+    /// well - and before this, the sample half did not recognise it, passed the token through verbatim,
+    /// and the provider went back to swallowing whatever followed it. A switch that silently means
+    /// nothing because of its casing is worse than one that is not supported at all.
+    /// </remarks>
+    private static string Normalize(string name)
+    {
+        string dashed = name.StartsWith('/') ? "--" + name[1..] : name;
+
+        foreach (string known in Switches)
+        {
+            if (dashed.Equals(known, StringComparison.OrdinalIgnoreCase))
+            {
+                return known;
+            }
+        }
+
+        // Not one of ours. Returned unchanged rather than dashed, because an unrecognised token is passed
+        // on to the host verbatim and a rewritten one would not be the command line anybody typed.
+        return name;
+    }
+
+    /// <summary>Why a token after <c>--path</c> is another switch rather than a mount path.</summary>
+    private static string NotAPath(string token, string value) =>
+        $"'{token} {value}' has no mount path: '{value}' is another switch. Write the path after --path, " +
+        "as in --path /ops/marten, or use --path=/ops/marten.";
 
     private static bool IsBoolean(string token) =>
         token.Equals("true", StringComparison.OrdinalIgnoreCase) ||

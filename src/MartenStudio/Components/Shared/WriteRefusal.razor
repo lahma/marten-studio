@@ -1,0 +1,48 @@
+@using MartenStudio.Services
+
+@*
+    Why the mutating controls beside this are disabled, when the reason is the visitor rather than the
+    application.
+
+    It is a sentence and not a tooltip because a tooltip does not exist on a touch screen, and this is the
+    one refusal a person cannot work out from the screen on their own: the buttons are there, the studio
+    plainly supports the operation, and nothing they can change will make them work. The control stays
+    rendered and disabled rather than hidden - "this studio can do this and your account may not" is a
+    different fact from "this studio cannot do this", and somebody who cannot tell the two apart goes and
+    asks the wrong person for the wrong thing.
+
+    Nothing is said where the capability itself is off. That case is about the application rather than the
+    person, names the exact option a host would set, and has <CapabilityDisabled /> for it.
+
+    None of this is the enforcement: every mutating service resolves the scope with the same capability and
+    throws regardless of what was rendered (AGENTS.md hard rule 5).
+*@
+
+@if (Refused)
+{
+    <span class="ms-write-refusal" role="note">@WritePolicyRefusal.For(Capability)</span>
+}
+
+@code {
+    /// <summary>
+    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> refused this visitor.
+    /// </summary>
+    /// <remarks>
+    /// The page asks once per load and hands the answer down. A component that asked for itself would put
+    /// an <c>await</c> in a render path and would ask again for every row.
+    /// </remarks>
+    [Parameter]
+    public bool Refused { get; set; }
+
+    /// <summary>
+    /// The capability that was refused, by name.
+    /// </summary>
+    /// <remarks>
+    /// A string rather than the internal <c>StudioCapability</c> enum: the Razor compiler emits a public
+    /// component class, and a public parameter cannot have an internal type. Call sites pass
+    /// <c>nameof(StudioCapability.ArchiveStreams)</c>, which the compiler still checks.
+    /// </remarks>
+    [Parameter]
+    [EditorRequired]
+    public string Capability { get; set; } = string.Empty;
+}

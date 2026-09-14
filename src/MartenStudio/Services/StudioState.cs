@@ -38,6 +38,7 @@ internal sealed class StudioState
 
     private string selectedTheme = "system";
     private string selectedTimeZoneId = TimeZoneInfo.Local.Id;
+    private long preferenceVersion;
     private bool initialized;
 
     public StudioState(
@@ -109,15 +110,35 @@ internal sealed class StudioState
     public string SelectedTheme
     {
         get => selectedTheme;
-        set => selectedTheme = NormalizeTheme(value);
+        set => Set(ref selectedTheme, NormalizeTheme(value));
     }
 
     /// <summary>The time zone every timestamp is rendered in.</summary>
     public string SelectedTimeZoneId
     {
         get => selectedTimeZoneId;
-        set => selectedTimeZoneId = NormalizeTimeZoneId(value);
+        set => Set(ref selectedTimeZoneId, NormalizeTimeZoneId(value));
     }
+
+    /// <summary>
+    /// How many times <see cref="SelectedTheme" /> or <see cref="SelectedTimeZoneId" /> has actually
+    /// moved on this circuit.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A sequence number rather than a timestamp, and it exists for exactly one reason: reading the
+    /// browser's remembered preferences is two awaited JS round trips, and on a slow browser the visitor
+    /// can pick a theme while those are in flight. Without a stamp taken before the awaits and checked
+    /// after them, the answer that comes back - which was read <em>before</em> the click, so it is the
+    /// preference the visitor has just moved away from - is written over the one they chose, and the
+    /// picker snaps back on its own a moment after they used it.
+    /// </para>
+    /// <para>
+    /// Only a real change counts. Re-selecting the theme that is already on changes nothing and needs no
+    /// protecting, and counting it would make a stored time zone lose a race it never entered.
+    /// </para>
+    /// </remarks>
+    public long PreferenceVersion => Volatile.Read(ref preferenceVersion);
 
     /// <summary>Builds the listings and picks an opening scope, once per circuit.</summary>
     public async Task EnsureInitializedAsync(CancellationToken cancellationToken = default)
@@ -302,6 +323,21 @@ internal sealed class StudioState
     }
 
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    /// <summary>
+    /// Assigns one preference and counts it, so <see cref="PreferenceVersion" /> says whether the visitor
+    /// has expressed a preference since some earlier moment.
+    /// </summary>
+    private void Set(ref string field, string value)
+    {
+        if (string.Equals(field, value, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        field = value;
+        Interlocked.Increment(ref preferenceVersion);
+    }
 
     private TimeZoneInfo ResolveSelectedTimeZone()
     {
