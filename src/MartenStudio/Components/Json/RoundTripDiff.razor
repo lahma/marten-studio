@@ -1,0 +1,134 @@
+@using MartenStudio.Components.Json
+@using MartenStudio.Services.Json
+
+@*
+    The body of the dialog that stands between an edited document and the store (D7).
+
+    Marten has no untyped store API. Saving means deserializing into the document's CLR type and
+    serializing that back, so anything the type has no member for is gone the moment Save is pressed.
+    Refusing to edit would make the feature useless for exactly the schemas that need it; dropping the
+    data quietly would be dishonest. Showing the loss first is the third option, and it is the only one
+    that respects the person pressing the button.
+*@
+
+<div class="ms-round-trip">
+    <p class="@SummaryClass" role="status">
+        @if (Loss)
+        {
+            <strong>@_roundTrip.Summary()</strong>
+        }
+        else
+        {
+            <span>@_roundTrip.Summary()</span>
+        }
+        @if (DocumentTypeName is { Length: > 0 })
+        {
+            <span class="ms-round-trip-type">Saving goes through @DocumentTypeName.</span>
+        }
+    </p>
+
+    @if (Loss)
+    {
+        <p class="ms-round-trip-note">
+            These members are in the stored document but not on the CLR type, so saving removes them.
+        </p>
+    }
+
+    <JsonDiff Before="@Edited"
+              After="@RoundTripped"
+              RemovedTitle="Dropped"
+              ChangedTitle="Changed"
+              AddedTitle="Added"
+              EmptyText="Nothing is lost: the document survives the round trip unchanged." />
+
+    @if (Stored is { Length: > 0 })
+    {
+        <details class="ms-round-trip-changes">
+            <summary>Your changes to the stored document</summary>
+            <JsonDiff Before="@Stored"
+                      After="@Edited"
+                      RemovedTitle="Removed"
+                      ChangedTitle="Changed"
+                      AddedTitle="Added"
+                      EmptyText="You have not changed anything yet." />
+        </details>
+    }
+
+    @if (OnConfirm.HasDelegate || OnCancel.HasDelegate)
+    {
+        <div class="ms-round-trip-actions">
+            @if (OnCancel.HasDelegate)
+            {
+                <button type="button" class="ms-btn" @onclick="OnCancel">@CancelLabel</button>
+            }
+            @if (OnConfirm.HasDelegate)
+            {
+                <button type="button" class="@ConfirmClass" @onclick="OnConfirm">@ConfirmLabel</button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private JsonDiffResult _roundTrip = JsonDiffResult.Empty;
+    private string? _edited;
+    private string? _roundTripped;
+    private bool _diffed;
+
+    /// <summary>The document as the user edited it.</summary>
+    [Parameter]
+    public string? Edited { get; set; }
+
+    /// <summary>The same document after a trip through the CLR type.</summary>
+    [Parameter]
+    public string? RoundTripped { get; set; }
+
+    /// <summary>The document as it is in the store, when the dialog should also show what the user changed.</summary>
+    [Parameter]
+    public string? Stored { get; set; }
+
+    /// <summary>The name of the CLR type the save goes through.</summary>
+    [Parameter]
+    public string? DocumentTypeName { get; set; }
+
+    /// <summary>The confirm button's text.</summary>
+    [Parameter]
+    public string ConfirmLabel { get; set; } = "Save anyway";
+
+    /// <summary>The cancel button's text.</summary>
+    [Parameter]
+    public string CancelLabel { get; set; } = "Back to the editor";
+
+    /// <summary>Raised when the user accepts the loss.</summary>
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    /// <summary>Raised when the user goes back.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    /// <summary>The round-trip difference, for a parent component or a test.</summary>
+    internal JsonDiffResult Result => _roundTrip;
+
+    /// <summary>Whether saving would lose anything.</summary>
+    public bool Loss => !_roundTrip.Dropped.IsDefaultOrEmpty || !_roundTrip.Changed.IsDefaultOrEmpty;
+
+    private string SummaryClass => Loss
+        ? "ms-alert ms-alert-warning ms-round-trip-summary"
+        : "ms-alert ms-alert-info ms-round-trip-summary";
+
+    private string ConfirmClass => Loss ? "ms-btn ms-btn-danger" : "ms-btn ms-btn-primary";
+
+    protected override void OnParametersSet()
+    {
+        if (_diffed && ReferenceEquals(_edited, Edited) && ReferenceEquals(_roundTripped, RoundTripped))
+        {
+            return;
+        }
+
+        _diffed = true;
+        _edited = Edited;
+        _roundTripped = RoundTripped;
+        _roundTrip = RoundTripDiffer.Diff(Edited, RoundTripped);
+    }
+}

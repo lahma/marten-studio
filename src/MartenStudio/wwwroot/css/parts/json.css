@@ -1,0 +1,968 @@
+/*
+ * Marten Studio - JSON toolkit styles (packet W1).
+ *
+ * This file is folded into wwwroot/css/marten-studio.css by the orchestrator; it is kept separate only
+ * so that three packets can be written at once without three of them editing the same stylesheet. It
+ * follows that file's conventions exactly: every colour is a --ms-* custom property, the dark palette is
+ * declared three times (prefers-color-scheme for the system default, and .ms-studio[data-theme="light"]
+ * / [data-theme="dark"] for an explicit choice), and nothing here is a third-party rule (hard rule 3).
+ *
+ * Indentation matches marten-studio.css (4 spaces) rather than .editorconfig's css setting, because this
+ * text ends up inside that file.
+ */
+
+/* ==========================================================================
+   JSON AND DIFF TOKENS
+   ========================================================================== */
+
+:root {
+    /* --- JSON syntax palette --- */
+    --ms-json-key: #0f766e;
+    --ms-json-string: #b45309;
+    --ms-json-number: #1d4ed8;
+    --ms-json-boolean: #7c3aed;
+    --ms-json-null: #64748b;
+    --ms-json-punct: #94a3b8;
+    --ms-json-brace: #475569;
+    --ms-json-date: #0369a1;
+    --ms-json-guid: #6d28d9;
+    --ms-json-url: #2563eb;
+    --ms-json-binary: #9a3412;
+
+    /* --- JSON viewer chrome --- */
+    --ms-json-row-hover: #f1f5f9;
+    --ms-json-row-focus: #dbeafe;
+    --ms-json-guide: #e2e8f0;
+    --ms-json-gutter-bg: #f8fafc;
+    --ms-json-gutter-text: #94a3b8;
+    --ms-json-hit-bg: #fde68a;
+    --ms-json-hit-text: #422006;
+    --ms-json-badge-bg: #e0e7ff;
+    --ms-json-badge-text: #3730a3;
+    --ms-json-indent: 14px;
+    --ms-json-row-height: 20px;
+
+    /* --- Diff palette --- */
+    --ms-diff-add: #15803d;
+    --ms-diff-add-bg: #f0fdf4;
+    --ms-diff-add-border: #bbf7d0;
+    --ms-diff-del: #b91c1c;
+    --ms-diff-del-bg: #fef2f2;
+    --ms-diff-del-border: #fecaca;
+    --ms-diff-chg: #b45309;
+    --ms-diff-chg-bg: #fffbeb;
+    --ms-diff-chg-border: #fde68a;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ms-json-key: #5eead4;
+        --ms-json-string: #fbbf24;
+        --ms-json-number: #93c5fd;
+        --ms-json-boolean: #c4b5fd;
+        --ms-json-null: #94a3b8;
+        --ms-json-punct: #64748b;
+        --ms-json-brace: #cbd5e1;
+        --ms-json-date: #7dd3fc;
+        --ms-json-guid: #d8b4fe;
+        --ms-json-url: #93c5fd;
+        --ms-json-binary: #fdba74;
+
+        --ms-json-row-hover: #1e293b;
+        --ms-json-row-focus: #1e3a5f;
+        --ms-json-guide: #334155;
+        --ms-json-gutter-bg: #0f172a;
+        --ms-json-gutter-text: #64748b;
+        --ms-json-hit-bg: #78350f;
+        --ms-json-hit-text: #fef3c7;
+        --ms-json-badge-bg: #312e81;
+        --ms-json-badge-text: #c7d2fe;
+
+        --ms-diff-add: #4ade80;
+        --ms-diff-add-bg: #052e16;
+        --ms-diff-add-border: #166534;
+        --ms-diff-del: #f87171;
+        --ms-diff-del-bg: #450a0a;
+        --ms-diff-del-border: #991b1b;
+        --ms-diff-chg: #fbbf24;
+        --ms-diff-chg-bg: #422006;
+        --ms-diff-chg-border: #92400e;
+    }
+}
+
+.ms-studio[data-theme="light"] {
+    --ms-json-key: #0f766e;
+    --ms-json-string: #b45309;
+    --ms-json-number: #1d4ed8;
+    --ms-json-boolean: #7c3aed;
+    --ms-json-null: #64748b;
+    --ms-json-punct: #94a3b8;
+    --ms-json-brace: #475569;
+    --ms-json-date: #0369a1;
+    --ms-json-guid: #6d28d9;
+    --ms-json-url: #2563eb;
+    --ms-json-binary: #9a3412;
+
+    --ms-json-row-hover: #f1f5f9;
+    --ms-json-row-focus: #dbeafe;
+    --ms-json-guide: #e2e8f0;
+    --ms-json-gutter-bg: #f8fafc;
+    --ms-json-gutter-text: #94a3b8;
+    --ms-json-hit-bg: #fde68a;
+    --ms-json-hit-text: #422006;
+    --ms-json-badge-bg: #e0e7ff;
+    --ms-json-badge-text: #3730a3;
+
+    --ms-diff-add: #15803d;
+    --ms-diff-add-bg: #f0fdf4;
+    --ms-diff-add-border: #bbf7d0;
+    --ms-diff-del: #b91c1c;
+    --ms-diff-del-bg: #fef2f2;
+    --ms-diff-del-border: #fecaca;
+    --ms-diff-chg: #b45309;
+    --ms-diff-chg-bg: #fffbeb;
+    --ms-diff-chg-border: #fde68a;
+}
+
+.ms-studio[data-theme="dark"] {
+    --ms-json-key: #5eead4;
+    --ms-json-string: #fbbf24;
+    --ms-json-number: #93c5fd;
+    --ms-json-boolean: #c4b5fd;
+    --ms-json-null: #94a3b8;
+    --ms-json-punct: #64748b;
+    --ms-json-brace: #cbd5e1;
+    --ms-json-date: #7dd3fc;
+    --ms-json-guid: #d8b4fe;
+    --ms-json-url: #93c5fd;
+    --ms-json-binary: #fdba74;
+
+    --ms-json-row-hover: #1e293b;
+    --ms-json-row-focus: #1e3a5f;
+    --ms-json-guide: #334155;
+    --ms-json-gutter-bg: #0f172a;
+    --ms-json-gutter-text: #64748b;
+    --ms-json-hit-bg: #78350f;
+    --ms-json-hit-text: #fef3c7;
+    --ms-json-badge-bg: #312e81;
+    --ms-json-badge-text: #c7d2fe;
+
+    --ms-diff-add: #4ade80;
+    --ms-diff-add-bg: #052e16;
+    --ms-diff-add-border: #166534;
+    --ms-diff-del: #f87171;
+    --ms-diff-del-bg: #450a0a;
+    --ms-diff-del-border: #991b1b;
+    --ms-diff-chg: #fbbf24;
+    --ms-diff-chg-bg: #422006;
+    --ms-diff-chg-border: #92400e;
+}
+
+/* ==========================================================================
+   PROVISIONAL SHARED CHROME
+   Scoped to this packet's containers on purpose: P1.2 owns the real .ms-toolbar, .ms-segmented,
+   .ms-menu and .ms-pill. Drop these blocks when folding in if that packet already provides them.
+   ========================================================================== */
+
+.ms-json-toolbar,
+.ms-editor-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md) var(--ms-radius-md) 0 0;
+    background-color: var(--ms-color-surface-alt);
+}
+
+.ms-json-toolbar .ms-toolbar-group,
+.ms-editor-toolbar .ms-toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-json-toolbar .ms-toolbar-spacer,
+.ms-editor-toolbar .ms-toolbar-spacer {
+    flex: 1 1 auto;
+}
+
+.ms-json-toolbar .ms-segmented {
+    display: inline-flex;
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-md);
+    overflow: hidden;
+}
+
+.ms-json-toolbar .ms-segmented-item {
+    padding: 2px var(--ms-space-sm);
+    border: 0;
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text-secondary);
+    font: inherit;
+    font-size: var(--ms-font-size-xs);
+    cursor: pointer;
+}
+
+.ms-json-toolbar .ms-segmented-item + .ms-segmented-item {
+    border-left: 1px solid var(--ms-color-border);
+}
+
+.ms-json-toolbar .ms-segmented-item-active {
+    background-color: var(--ms-color-primary);
+    color: var(--ms-color-text-inverse);
+}
+
+.ms-json-toolbar .ms-segmented-item:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.ms-json-toolbar .ms-btn-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.ms-json-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text-secondary);
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.ms-json-icon-button:hover:not(:disabled) {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-json-icon-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ==========================================================================
+   JSON VIEWER
+   ========================================================================== */
+
+.ms-json {
+    display: flex;
+    flex-direction: column;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-json-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin: 0;
+    border-radius: 0;
+}
+
+.ms-json-banner-text {
+    flex: 1 1 auto;
+}
+
+.ms-json-tree {
+    border: 1px solid var(--ms-color-border);
+    border-top: 0;
+    border-radius: 0 0 var(--ms-radius-md) var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    padding: var(--ms-space-xs) 0;
+    overflow: auto;
+    max-height: 70vh;
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-json-tree:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+.ms-json-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 2px;
+    min-height: var(--ms-json-row-height);
+    padding: 0 var(--ms-space-sm) 0 0;
+    padding-left: calc(var(--ms-space-sm) + var(--ms-json-depth, 0) * var(--ms-json-indent));
+    border-left: 2px solid transparent;
+    line-height: var(--ms-json-row-height);
+    white-space: nowrap;
+}
+
+.ms-json-row:hover {
+    background-color: var(--ms-json-row-hover);
+}
+
+.ms-json-row-focused,
+.ms-json-row:focus-visible {
+    background-color: var(--ms-json-row-focus);
+    border-left-color: var(--ms-color-primary);
+    outline: none;
+}
+
+.ms-json-row-more {
+    color: var(--ms-color-text-secondary);
+    gap: var(--ms-space-xs);
+}
+
+.ms-json-toggle {
+    flex: 0 0 auto;
+    width: 14px;
+    border: 0;
+    background: none;
+    color: var(--ms-color-text-secondary);
+    font: inherit;
+    line-height: var(--ms-json-row-height);
+    text-align: center;
+    cursor: pointer;
+    padding: 0;
+}
+
+.ms-json-toggle-empty {
+    cursor: default;
+}
+
+.ms-json-key {
+    border: 0;
+    background: none;
+    padding: 0;
+    font: inherit;
+    color: var(--ms-json-key);
+    cursor: pointer;
+    text-align: left;
+}
+
+.ms-json-key:hover .ms-json-key-text,
+.ms-json-key:hover .ms-json-index {
+    text-decoration: underline;
+}
+
+.ms-json-index {
+    color: var(--ms-json-punct);
+}
+
+.ms-json-root {
+    color: var(--ms-json-brace);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-json-colon {
+    color: var(--ms-json-punct);
+    margin-right: var(--ms-space-xs);
+}
+
+.ms-json-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ms-json-brace {
+    color: var(--ms-json-brace);
+}
+
+.ms-json-summary {
+    color: var(--ms-json-brace);
+}
+
+.ms-json-count {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    margin-left: var(--ms-space-xs);
+}
+
+.ms-json-badge {
+    display: inline-block;
+    margin-left: var(--ms-space-xs);
+    padding: 0 6px;
+    border-radius: var(--ms-radius-full);
+    background-color: var(--ms-json-badge-bg);
+    color: var(--ms-json-badge-text);
+    font-size: var(--ms-font-size-xs);
+    font-family: var(--ms-font-family);
+}
+
+.ms-json-string {
+    color: var(--ms-json-string);
+}
+
+.ms-json-number {
+    color: var(--ms-json-number);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-json-bool {
+    color: var(--ms-json-boolean);
+}
+
+.ms-json-bool-glyph {
+    margin-right: 2px;
+}
+
+.ms-json-null {
+    color: var(--ms-json-null);
+    font-style: italic;
+}
+
+.ms-json-url .ms-json-url,
+a.ms-json-url {
+    color: var(--ms-json-url);
+    text-decoration: underline;
+}
+
+.ms-json-date .ms-json-string {
+    color: var(--ms-json-date);
+}
+
+.ms-json-guid .ms-json-string {
+    color: var(--ms-json-guid);
+}
+
+.ms-json-base64 .ms-json-string {
+    color: var(--ms-json-binary);
+}
+
+.ms-json-glyph {
+    vertical-align: -2px;
+    margin-right: 3px;
+    opacity: 0.8;
+}
+
+.ms-json-flag {
+    margin-left: var(--ms-space-xs);
+    padding: 0 4px;
+    border: 1px solid var(--ms-json-binary);
+    border-radius: var(--ms-radius-sm);
+    color: var(--ms-json-binary);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-json-more {
+    margin-left: var(--ms-space-xs);
+    border: 0;
+    background: none;
+    padding: 0;
+    color: var(--ms-color-primary);
+    font: inherit;
+    font-size: var(--ms-font-size-xs);
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.ms-json-hit {
+    background-color: var(--ms-json-hit-bg);
+    color: var(--ms-json-hit-text);
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+/* --- Search bar --- */
+
+.ms-json-search {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-top: 0;
+    background-color: var(--ms-color-surface);
+}
+
+.ms-json-search-glyph {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-json-search-input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.ms-json-search-count {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ms-json-search-none {
+    color: var(--ms-color-danger);
+}
+
+.ms-json-search-hint {
+    color: var(--ms-color-text-muted);
+}
+
+/* --- Toolbar extras --- */
+
+.ms-json-depth-value {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+    font-variant-numeric: tabular-nums;
+    min-width: 56px;
+    text-align: center;
+}
+
+.ms-json-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-json-footnote {
+    margin: var(--ms-space-xs) 0 0;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-json-notice {
+    margin: 0 0 var(--ms-space-xs);
+}
+
+.ms-json-live {
+    margin: 0;
+}
+
+/* ==========================================================================
+   RAW / CODE VIEW
+   ========================================================================== */
+
+.ms-code {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text);
+}
+
+.ms-code-body {
+    border: 1px solid var(--ms-color-border);
+    border-radius: 0 0 var(--ms-radius-md) var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    overflow: auto;
+    max-height: 70vh;
+}
+
+.ms-code-line {
+    display: flex;
+    align-items: flex-start;
+    min-height: var(--ms-json-row-height);
+    line-height: var(--ms-json-row-height);
+}
+
+.ms-code-line:hover {
+    background-color: var(--ms-json-row-hover);
+}
+
+.ms-code-gutter {
+    flex: 0 0 auto;
+    position: sticky;
+    left: 0;
+    min-width: 48px;
+    padding: 0 var(--ms-space-sm);
+    border-right: 1px solid var(--ms-color-border);
+    background-color: var(--ms-json-gutter-bg);
+    color: var(--ms-json-gutter-text);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+}
+
+.ms-code-text {
+    flex: 1 1 auto;
+    padding: 0 var(--ms-space-sm);
+    white-space: pre;
+    tab-size: 2;
+}
+
+.ms-code-wrap .ms-code-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-code-no-gutter .ms-code-gutter {
+    display: none;
+}
+
+.ms-code-key {
+    color: var(--ms-json-key);
+}
+
+.ms-code-string {
+    color: var(--ms-json-string);
+}
+
+.ms-code-number {
+    color: var(--ms-json-number);
+}
+
+.ms-code-bool {
+    color: var(--ms-json-boolean);
+}
+
+.ms-code-null {
+    color: var(--ms-json-null);
+    font-style: italic;
+}
+
+.ms-code-punct {
+    color: var(--ms-json-punct);
+}
+
+/* ==========================================================================
+   COPY MENU (native popover)
+   ========================================================================== */
+
+.ms-copy-menu {
+    min-width: 280px;
+    max-width: min(520px, 92vw);
+    padding: var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-lg);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    box-shadow: var(--ms-shadow-lg);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-copy-menu:popover-open {
+    display: block;
+}
+
+.ms-copy-menu::backdrop {
+    background-color: transparent;
+}
+
+.ms-copy-menu-header {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-bottom: 1px solid var(--ms-color-border);
+    margin-bottom: var(--ms-space-xs);
+}
+
+.ms-copy-menu-path {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.ms-menu-item {
+    display: block;
+    width: 100%;
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border: 0;
+    border-radius: var(--ms-radius-sm);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ms-menu-item:hover,
+.ms-menu-item:focus-visible {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-menu-item-label {
+    display: block;
+}
+
+.ms-menu-item-detail {
+    display: block;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+    overflow-wrap: anywhere;
+}
+
+.ms-menu-item-warning {
+    display: block;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-warning);
+}
+
+/* ==========================================================================
+   EDITOR
+   ========================================================================== */
+
+.ms-editor {
+    display: flex;
+    flex-direction: column;
+}
+
+.ms-editor-body {
+    display: flex;
+    border: 1px solid var(--ms-color-border);
+    border-top: 0;
+    border-radius: 0 0 var(--ms-radius-md) var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+    overflow: hidden;
+}
+
+.ms-editor-gutter {
+    flex: 0 0 auto;
+    min-width: 48px;
+    padding: var(--ms-space-sm) var(--ms-space-sm);
+    border-right: 1px solid var(--ms-color-border);
+    background-color: var(--ms-json-gutter-bg);
+    color: var(--ms-json-gutter-text);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    line-height: var(--ms-json-row-height);
+    text-align: right;
+    overflow: hidden;
+    user-select: none;
+}
+
+.ms-editor-gutter-line {
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-editor-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: var(--ms-space-sm);
+    border: 0;
+    background: none;
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    line-height: var(--ms-json-row-height);
+    resize: vertical;
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow-x: auto;
+    tab-size: 2;
+}
+
+.ms-editor-input:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+.ms-editor-status {
+    margin-top: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-editor-hint {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-editor-ok {
+    color: var(--ms-color-success);
+}
+
+.ms-editor-dirty {
+    padding: 0 var(--ms-space-sm);
+    border-radius: var(--ms-radius-full);
+    background-color: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-editor-error {
+    display: block;
+}
+
+.ms-editor-error-message {
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-editor-caret {
+    margin: var(--ms-space-xs) 0 0;
+    padding: var(--ms-space-xs);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-surface-alt);
+    white-space: pre;
+    overflow-x: auto;
+}
+
+.ms-editor-confirm {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-top: var(--ms-space-xs);
+}
+
+/* ==========================================================================
+   DIFF
+   ========================================================================== */
+
+.ms-diff {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-diff-empty {
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-diff-bucket {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+}
+
+.ms-diff-title {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-diff-marker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: var(--ms-radius-sm);
+    font-family: var(--ms-font-mono);
+}
+
+.ms-diff-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ms-diff-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    padding: 2px var(--ms-space-sm);
+    border-left: 3px solid transparent;
+    border-radius: var(--ms-radius-sm);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-diff-path {
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-diff-before,
+.ms-diff-after {
+    overflow-wrap: anywhere;
+}
+
+.ms-diff-arrow {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-diff-add {
+    background-color: var(--ms-diff-add-bg);
+    border-left-color: var(--ms-diff-add-border);
+    color: var(--ms-diff-add);
+}
+
+.ms-diff-del {
+    background-color: var(--ms-diff-del-bg);
+    border-left-color: var(--ms-diff-del-border);
+    color: var(--ms-diff-del);
+}
+
+.ms-diff-chg {
+    background-color: var(--ms-diff-chg-bg);
+    border-left-color: var(--ms-diff-chg-border);
+    color: var(--ms-diff-chg);
+}
+
+.ms-diff-row .ms-diff-before {
+    text-decoration: line-through;
+    opacity: 0.85;
+}
+
+/* ==========================================================================
+   ROUND-TRIP DIALOG BODY
+   ========================================================================== */
+
+.ms-round-trip {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-round-trip-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    flex-wrap: wrap;
+    margin: 0;
+}
+
+.ms-round-trip-type {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-round-trip-note {
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-round-trip-changes summary {
+    cursor: pointer;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-round-trip-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--ms-space-sm);
+}
+
+/* ==========================================================================
+   MOTION AND NARROW SCREENS
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+    .ms-json-row,
+    .ms-code-line,
+    .ms-menu-item {
+        transition: none;
+    }
+}
+
+@media (max-width: 900px) {
+    .ms-json-tree,
+    .ms-code-body {
+        max-height: 50vh;
+    }
+
+    .ms-json-toolbar,
+    .ms-editor-toolbar {
+        gap: var(--ms-space-xs);
+    }
+
+    .ms-copy-menu {
+        min-width: 0;
+        width: 92vw;
+    }
+}

@@ -1,0 +1,156 @@
+@using MartenStudio.Components.Json
+@using MartenStudio.Services.Json
+@implements IDisposable
+
+@*
+    The viewer's own search. It is deliberately not bound to Ctrl+F: the browser's find is the one
+    keystroke every user already owns, and a page that steals it to run a different search is a page
+    people stop trusting. `/` focuses this box instead, and only when focus is already inside the viewer.
+*@
+
+<div class="ms-json-search" role="search">
+    <span class="ms-json-search-glyph" aria-hidden="true">&#9906;</span>
+    <input @ref="_input"
+           type="search"
+           class="ms-input ms-json-search-input"
+           placeholder="@Placeholder"
+           aria-label="@Placeholder"
+           spellcheck="false"
+           autocomplete="off"
+           autocapitalize="off"
+           value="@_text"
+           @oninput="OnInputAsync"
+           @onkeydown="OnKeyDownAsync" />
+
+    <span class="ms-json-search-count">
+        @if (_text.Length == 0)
+        {
+            <span class="ms-json-search-hint">keys and values</span>
+        }
+        else if (MatchCount == 0)
+        {
+            <span class="ms-json-search-none">no matches</span>
+        }
+        else
+        {
+            <span class="ms-json-search-position">@(MatchIndex + 1) / @MatchCount</span>
+        }
+    </span>
+
+    <button type="button"
+            class="ms-json-icon-button"
+            title="Previous match (Shift+Enter)"
+            aria-label="Previous match"
+            disabled="@(MatchCount == 0)"
+            @onclick="OnPrevious">&#8593;</button>
+    <button type="button"
+            class="ms-json-icon-button"
+            title="Next match (Enter)"
+            aria-label="Next match"
+            disabled="@(MatchCount == 0)"
+            @onclick="OnNext">&#8595;</button>
+    <button type="button"
+            class="ms-json-icon-button"
+            title="Clear search"
+            aria-label="Clear search"
+            disabled="@(_text.Length == 0)"
+            @onclick="ClearAsync">&#10005;</button>
+</div>
+
+@code {
+    private ElementReference _input;
+    private string _text = string.Empty;
+    private CancellationTokenSource _debounce = new();
+
+    /// <summary>The placeholder and accessible name of the box.</summary>
+    [Parameter]
+    public string Placeholder { get; set; } = "Search this document";
+
+    /// <summary>How many matches the current term has.</summary>
+    [Parameter]
+    public int MatchCount { get; set; }
+
+    /// <summary>Which match is current, zero-based.</summary>
+    [Parameter]
+    public int MatchIndex { get; set; }
+
+    /// <summary>How long to wait after the last keystroke before searching.</summary>
+    [Parameter]
+    public int DebounceMilliseconds { get; set; } = 250;
+
+    /// <summary>Raised with the settled term.</summary>
+    [Parameter]
+    public EventCallback<string> OnTermChanged { get; set; }
+
+    /// <summary>Raised on Enter and on the down arrow.</summary>
+    [Parameter]
+    public EventCallback OnNext { get; set; }
+
+    /// <summary>Raised on Shift+Enter and on the up arrow.</summary>
+    [Parameter]
+    public EventCallback OnPrevious { get; set; }
+
+    /// <summary>Moves focus into the box, which is what <c>/</c> does.</summary>
+    public async Task FocusAsync()
+    {
+        try
+        {
+            await _input.FocusAsync();
+        }
+        catch (JSException)
+        {
+            // Prerendering, or the element is already gone. Focus is a convenience, never a requirement.
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private async Task OnInputAsync(ChangeEventArgs args)
+    {
+        _text = args.Value?.ToString() ?? string.Empty;
+
+        _debounce.Cancel();
+        _debounce.Dispose();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+
+        try
+        {
+            await Task.Delay(DebounceMilliseconds, token);
+            await OnTermChanged.InvokeAsync(_text);
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer keystroke owns the search now.
+        }
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        switch (args.Key)
+        {
+            case "Enter":
+                await (args.ShiftKey ? OnPrevious.InvokeAsync() : OnNext.InvokeAsync());
+                break;
+            case "Escape":
+                await ClearAsync();
+                break;
+            default:
+                break;
+        }
+    }
+
+    private async Task ClearAsync()
+    {
+        _text = string.Empty;
+        _debounce.Cancel();
+        await OnTermChanged.InvokeAsync(string.Empty);
+    }
+
+    public void Dispose()
+    {
+        _debounce.Cancel();
+        _debounce.Dispose();
+    }
+}

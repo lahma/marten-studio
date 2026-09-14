@@ -1,0 +1,332 @@
+@using System.Text
+@using System.Text.Json
+@using MartenStudio.Components.Json
+@using MartenStudio.Services.Json
+
+@*
+    One row of the flat model. Everything it needs arrives as a plain parameter - no model type crosses
+    this boundary, which is what keeps the whole JSON service layer internal while the component itself
+    is public, as every Razor component must be.
+
+    The row is the ARIA treeitem. The tree is flat in the DOM, so nesting is carried by aria-level,
+    aria-setsize and aria-posinset rather than by wrapping groups; that is the pattern a tree has to use
+    when its rows are rendered from a windowed list rather than from a recursive component tree.
+*@
+
+<div class="@RootClass"
+     role="treeitem"
+     aria-level="@(Depth + 1)"
+     aria-setsize="@SetSize"
+     aria-posinset="@PosInSet"
+     aria-expanded="@ExpandedAttribute"
+     tabindex="@(Focused ? 0 : -1)"
+     style="--ms-json-depth: @Depth"
+     data-node-id="@NodeId"
+     @ref="_element"
+     @onclick="RequestFocusAsync">
+
+    @if (IsContainer && ChildCount > 0)
+    {
+        <button type="button"
+                class="ms-json-toggle"
+                tabindex="-1"
+                aria-hidden="true"
+                @onclick="ToggleAsync"
+                @onclick:stopPropagation="true">@(Expanded ? "▾" : "▸")</button>
+    }
+    else
+    {
+        <span class="ms-json-toggle ms-json-toggle-empty" aria-hidden="true"></span>
+    }
+
+    <button type="button"
+            class="ms-json-key"
+            tabindex="-1"
+            popovertarget="@MenuElementId"
+            title="Copy value, path or expression"
+            @onclick="OpenMenuAsync"
+            @onclick:stopPropagation="true">
+        @if (Label is null)
+        {
+            <span class="ms-json-root">$</span>
+        }
+        else if (IsIndex)
+        {
+            <span class="ms-json-index">[@Label]</span>
+        }
+        else
+        {
+            <span class="ms-json-key-text">@Highlighted(Label)</span>
+        }
+    </button>
+
+    @if (Label is not null)
+    {
+        <span class="ms-json-colon" aria-hidden="true">:</span>
+    }
+
+    <span class="ms-json-value">
+        @if (IsContainer)
+        {
+            @if (Expanded)
+            {
+                <span class="ms-json-brace" aria-hidden="true">@(IsArray ? "[" : "{")</span>
+            }
+            else
+            {
+                <span class="ms-json-summary">
+                    <span class="ms-json-brace">@(IsArray ? "[…]" : "{…}")</span>
+                    <span class="ms-json-count">@ChildCount @CountNoun</span>
+                </span>
+                @if (MatchBadge > 0)
+                {
+                    <span class="ms-json-badge" title="@MatchBadge matching nodes are hidden here">@MatchBadge</span>
+                }
+            }
+        }
+        else
+        {
+            switch (Kind)
+            {
+                case JsonValueKind.String:
+                    <span class="ms-json-scalar @SemanticClass">
+                        @if (Semantic == "date")
+                        {
+                            <svg class="ms-json-glyph" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false"><rect x="2" y="3" width="12" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M2 6.5h12M5.5 1.5v3M10.5 1.5v3" fill="none" stroke="currentColor" stroke-width="1.4" /></svg>
+                        }
+                        else if (Semantic == "guid")
+                        {
+                            <svg class="ms-json-glyph" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false"><rect x="1.5" y="4" width="13" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1.4" /><path d="M4.5 8h1.5M7.5 8h1.5M10.5 8h1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+                        }
+
+                        @if (Semantic == "url")
+                        {
+                            <a class="ms-json-url" href="@Display" target="_blank" rel="noopener noreferrer">@VisibleText</a>
+                        }
+                        else
+                        {
+                            <span class="ms-json-string" title="@ValueTitle">"@Highlighted(VisibleText)"</span>
+                        }
+
+                        @if (Semantic == "base64")
+                        {
+                            <span class="ms-json-flag" title="This looks like base64-encoded data">binary?</span>
+                        }
+
+                        @if (IsLong)
+                        {
+                            <button type="button" class="ms-json-more" tabindex="-1" @onclick="ToggleStringAsync" @onclick:stopPropagation="true">
+                                @(ShowFullString ? "show less" : "… +" + OverflowSize)
+                            </button>
+                        }
+                    </span>
+                    break;
+
+                case JsonValueKind.Number:
+                    <span class="ms-json-scalar ms-json-number">@Highlighted(Display)</span>
+                    break;
+
+                case JsonValueKind.True:
+                case JsonValueKind.False:
+                    <span class="ms-json-scalar ms-json-bool">
+                        <span class="ms-json-bool-glyph" aria-hidden="true">@(Kind == JsonValueKind.True ? "✓" : "✗")</span>@Display</span>
+                    break;
+
+                default:
+                    <span class="ms-json-scalar ms-json-null">null</span>
+                    break;
+            }
+        }
+    </span>
+</div>
+
+@code {
+    private ElementReference _element;
+    private bool _autoFocused;
+
+    /// <summary>The node's id in the model, which is also the row's <c>@@key</c>.</summary>
+    [Parameter]
+    public int NodeId { get; set; }
+
+    /// <summary>Nesting depth, which drives the indent custom property.</summary>
+    [Parameter]
+    public int Depth { get; set; }
+
+    /// <summary>The member name, the array index as text, or <see langword="null"/> for the root.</summary>
+    [Parameter]
+    public string? Label { get; set; }
+
+    /// <summary>Whether <see cref="Label"/> is an array index rather than a member name.</summary>
+    [Parameter]
+    public bool IsIndex { get; set; }
+
+    /// <summary>The JSON kind of the value.</summary>
+    [Parameter]
+    public JsonValueKind Kind { get; set; } = JsonValueKind.Null;
+
+    /// <summary>The readable value; for a string, its unescaped text.</summary>
+    [Parameter]
+    public string Display { get; set; } = string.Empty;
+
+    /// <summary>What the scalar means: <c>date</c>, <c>guid</c>, <c>url</c>, <c>base64</c>, <c>text</c> or empty.</summary>
+    [Parameter]
+    public string Semantic { get; set; } = string.Empty;
+
+    /// <summary>How many children the node has.</summary>
+    [Parameter]
+    public int ChildCount { get; set; }
+
+    /// <summary>Whether the node is an object or an array.</summary>
+    [Parameter]
+    public bool IsContainer { get; set; }
+
+    /// <summary>Whether the container is an array rather than an object.</summary>
+    [Parameter]
+    public bool IsArray { get; set; }
+
+    /// <summary>Whether the container is currently expanded.</summary>
+    [Parameter]
+    public bool Expanded { get; set; }
+
+    /// <summary>How many siblings the node has, for <c>aria-setsize</c>.</summary>
+    [Parameter]
+    public int SetSize { get; set; } = 1;
+
+    /// <summary>The node's 1-based position among its siblings, for <c>aria-posinset</c>.</summary>
+    [Parameter]
+    public int PosInSet { get; set; } = 1;
+
+    /// <summary>Whether this row holds the tree's single <c>tabindex="0"</c>.</summary>
+    [Parameter]
+    public bool Focused { get; set; }
+
+    /// <summary>Whether this row should take DOM focus, because the keyboard just moved here.</summary>
+    [Parameter]
+    public bool AutoFocus { get; set; }
+
+    /// <summary>The current search term, highlighted wherever it appears in this row.</summary>
+    [Parameter]
+    public string? SearchTerm { get; set; }
+
+    /// <summary>How many matches are hidden inside this collapsed container.</summary>
+    [Parameter]
+    public int MatchBadge { get; set; }
+
+    /// <summary>Whether a long string is currently shown in full.</summary>
+    [Parameter]
+    public bool ShowFullString { get; set; }
+
+    /// <summary>How many characters of a string are shown before it is truncated.</summary>
+    [Parameter]
+    public int MaxInlineLength { get; set; } = 120;
+
+    /// <summary>The DOM id of the viewer's shared copy menu.</summary>
+    [Parameter]
+    public string MenuElementId { get; set; } = "ms-json-menu";
+
+    /// <summary>Raised with the node id when the expander is used.</summary>
+    [Parameter]
+    public EventCallback<int> OnToggle { get; set; }
+
+    /// <summary>Raised with the node id when the row is clicked.</summary>
+    [Parameter]
+    public EventCallback<int> OnFocusRequested { get; set; }
+
+    /// <summary>Raised with the node id when the copy menu is opened from this row.</summary>
+    [Parameter]
+    public EventCallback<int> OnMenuRequested { get; set; }
+
+    /// <summary>Raised with the node id when a long string is expanded or collapsed.</summary>
+    [Parameter]
+    public EventCallback<int> OnToggleString { get; set; }
+
+    private string RootClass => Focused ? "ms-json-row ms-json-row-focused" : "ms-json-row";
+
+    private string? ExpandedAttribute =>
+        IsContainer && ChildCount > 0 ? (Expanded ? "true" : "false") : null;
+
+    private string CountNoun => IsArray
+        ? ChildCount == 1 ? "item" : "items"
+        : ChildCount == 1 ? "property" : "properties";
+
+    private string SemanticClass => Semantic.Length == 0 ? string.Empty : "ms-json-" + Semantic;
+
+    /// <summary>
+    /// The hover text for a value. A date shows its ISO form verbatim - this packet converts no time
+    /// zones, and a tooltip that silently re-stated the value in the reader's zone would be a lie about
+    /// what the document says. A truncated string shows its whole text.
+    /// </summary>
+    private string? ValueTitle => Semantic switch
+    {
+        "date" => Display,
+        _ => IsLong && !ShowFullString ? Display : null,
+    };
+
+    private bool IsLong => Kind == JsonValueKind.String && Display.Length > MaxInlineLength;
+
+    private string VisibleText => IsLong && !ShowFullString ? Display[..MaxInlineLength] : Display;
+
+    private string OverflowSize =>
+        JsonModelBuilder.FormatBytes(Encoding.UTF8.GetByteCount(Display) - Encoding.UTF8.GetByteCount(VisibleText));
+
+    /// <summary>
+    /// The search term picked out of a piece of text. Written against the render tree rather than as
+    /// markup so that the highlight can never become a string of HTML built from a stored document.
+    /// </summary>
+    private RenderFragment Highlighted(string text) => builder =>
+    {
+        foreach (var run in JsonSearch.Highlight(text, SearchTerm))
+        {
+            if (run.IsMatch)
+            {
+                builder.OpenElement(0, "mark");
+                builder.AddAttribute(1, "class", "ms-json-hit");
+                builder.AddContent(2, run.Text);
+                builder.CloseElement();
+            }
+            else
+            {
+                builder.AddContent(3, run.Text);
+            }
+        }
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (AutoFocus == _autoFocused)
+        {
+            return;
+        }
+
+        _autoFocused = AutoFocus;
+        if (!AutoFocus)
+        {
+            return;
+        }
+
+        try
+        {
+            await _element.FocusAsync();
+        }
+        catch (JSException)
+        {
+            // Prerendering, or the row has already been replaced. Keyboard focus is a nicety here, and
+            // losing it must never take the circuit down with it.
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private Task ToggleAsync() => OnToggle.InvokeAsync(NodeId);
+
+    private Task RequestFocusAsync() => OnFocusRequested.InvokeAsync(NodeId);
+
+    private Task ToggleStringAsync() => OnToggleString.InvokeAsync(NodeId);
+
+    private async Task OpenMenuAsync()
+    {
+        await OnFocusRequested.InvokeAsync(NodeId);
+        await OnMenuRequested.InvokeAsync(NodeId);
+    }
+}

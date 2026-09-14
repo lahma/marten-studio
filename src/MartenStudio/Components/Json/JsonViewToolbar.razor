@@ -1,0 +1,171 @@
+@using MartenStudio.Components.Json
+@using MartenStudio.Services.Json
+
+@*
+    Every control that acts on the whole document. The tree/raw choice is a segmented control rather than
+    a checkbox because it is a choice between two views, and the depth stepper is a stepper rather than a
+    slider because the useful range is 1 to 9 and a slider cannot be operated from the keyboard precisely.
+*@
+
+<div class="ms-toolbar ms-json-toolbar">
+    <div class="ms-segmented" role="group" aria-label="View">
+        <button type="button"
+                class="@TreeButtonClass"
+                aria-pressed="@((!RawMode).ToString().ToLowerInvariant())"
+                disabled="@(!TreeAvailable)"
+                title="@TreeButtonTitle"
+                @onclick="ShowTreeAsync">Tree</button>
+        <button type="button"
+                class="@RawButtonClass"
+                aria-pressed="@RawMode.ToString().ToLowerInvariant()"
+                @onclick="ShowRawAsync">Raw</button>
+    </div>
+
+    @if (!RawMode)
+    {
+        <div class="ms-toolbar-group">
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="OnExpandAll" disabled="@(!TreeAvailable)">Expand all</button>
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="OnCollapseAll" disabled="@(!TreeAvailable)">Collapse all</button>
+        </div>
+
+        <div class="ms-toolbar-group ms-json-depth" role="group" aria-label="Expand to depth">
+            <button type="button"
+                    class="ms-json-icon-button"
+                    aria-label="Expand one level less"
+                    disabled="@(!TreeAvailable || Depth <= MinDepth)"
+                    @onclick="DecreaseDepthAsync">&#8722;</button>
+            <span class="ms-json-depth-value" aria-live="polite">depth @Depth</span>
+            <button type="button"
+                    class="ms-json-icon-button"
+                    aria-label="Expand one level more"
+                    disabled="@(!TreeAvailable || Depth >= MaxDepth)"
+                    @onclick="IncreaseDepthAsync">&#43;</button>
+        </div>
+    }
+    else
+    {
+        <div class="ms-toolbar-group">
+            <label class="ms-json-switch">
+                <input type="checkbox" checked="@Wrap" @onchange="OnWrapChangedAsync" />
+                <span>Wrap</span>
+            </label>
+            <label class="ms-json-switch">
+                <input type="checkbox" checked="@ShowLineNumbers" @onchange="OnLineNumbersChangedAsync" />
+                <span>Line numbers</span>
+            </label>
+        </div>
+    }
+
+    <div class="ms-toolbar-spacer"></div>
+
+    <div class="ms-toolbar-group">
+        <button type="button" class="ms-btn ms-btn-sm" @onclick="OnCopyDocument">Copy JSON</button>
+        @if (DownloadHref is { Length: > 0 })
+        {
+            <a class="ms-btn ms-btn-sm" href="@DownloadHref" download="@DownloadFileName">Download</a>
+        }
+        else
+        {
+            <span class="ms-btn ms-btn-sm ms-btn-disabled" title="@DownloadDisabledReason" aria-disabled="true">Download</span>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>The smallest depth the stepper allows.</summary>
+    public const int MinDepth = 1;
+
+    /// <summary>The largest depth the stepper allows.</summary>
+    public const int MaxDepth = 9;
+
+    /// <summary>Whether the raw view is showing.</summary>
+    [Parameter]
+    public bool RawMode { get; set; }
+
+    /// <summary>Raised when the tree/raw choice changes.</summary>
+    [Parameter]
+    public EventCallback<bool> RawModeChanged { get; set; }
+
+    /// <summary>Whether a tree exists to switch to.</summary>
+    [Parameter]
+    public bool TreeAvailable { get; set; } = true;
+
+    /// <summary>The current expand-to depth.</summary>
+    [Parameter]
+    public int Depth { get; set; } = 2;
+
+    /// <summary>Raised when the depth stepper moves.</summary>
+    [Parameter]
+    public EventCallback<int> DepthChanged { get; set; }
+
+    /// <summary>Whether the raw view wraps long lines.</summary>
+    [Parameter]
+    public bool Wrap { get; set; }
+
+    /// <summary>Raised when the wrap toggle changes.</summary>
+    [Parameter]
+    public EventCallback<bool> WrapChanged { get; set; }
+
+    /// <summary>Whether the raw view shows its line-number gutter.</summary>
+    [Parameter]
+    public bool ShowLineNumbers { get; set; } = true;
+
+    /// <summary>Raised when the line-number toggle changes.</summary>
+    [Parameter]
+    public EventCallback<bool> ShowLineNumbersChanged { get; set; }
+
+    /// <summary>Raised by "Copy JSON".</summary>
+    [Parameter]
+    public EventCallback OnCopyDocument { get; set; }
+
+    /// <summary>Raised by "Expand all".</summary>
+    [Parameter]
+    public EventCallback OnExpandAll { get; set; }
+
+    /// <summary>Raised by "Collapse all".</summary>
+    [Parameter]
+    public EventCallback OnCollapseAll { get; set; }
+
+    /// <summary>The <c>data:</c> URL the download anchor points at, or empty when the document is too large for one.</summary>
+    [Parameter]
+    public string? DownloadHref { get; set; }
+
+    /// <summary>The file name the download anchor suggests.</summary>
+    [Parameter]
+    public string DownloadFileName { get; set; } = "document.json";
+
+    /// <summary>Why the download is not offered.</summary>
+    [Parameter]
+    public string DownloadDisabledReason { get; set; } = "This document is too large to download from the browser.";
+
+    private string TreeButtonClass =>
+        RawMode ? "ms-segmented-item" : "ms-segmented-item ms-segmented-item-active";
+
+    private string RawButtonClass =>
+        RawMode ? "ms-segmented-item ms-segmented-item-active" : "ms-segmented-item";
+
+    private string TreeButtonTitle =>
+        TreeAvailable ? "Tree view" : "This document is too large for the tree";
+
+    private Task ShowTreeAsync() => SetModeAsync(false);
+
+    private Task ShowRawAsync() => SetModeAsync(true);
+
+    private Task DecreaseDepthAsync() => SetDepthAsync(Depth - 1);
+
+    private Task IncreaseDepthAsync() => SetDepthAsync(Depth + 1);
+
+    private Task SetModeAsync(bool raw) => raw == RawMode ? Task.CompletedTask : RawModeChanged.InvokeAsync(raw);
+
+    private Task SetDepthAsync(int depth)
+    {
+        var clamped = Math.Clamp(depth, MinDepth, MaxDepth);
+        return clamped == Depth ? Task.CompletedTask : DepthChanged.InvokeAsync(clamped);
+    }
+
+    private Task OnWrapChangedAsync(ChangeEventArgs args) =>
+        WrapChanged.InvokeAsync(args.Value is bool value && value);
+
+    private Task OnLineNumbersChangedAsync(ChangeEventArgs args) =>
+        ShowLineNumbersChanged.InvokeAsync(args.Value is bool value && value);
+}

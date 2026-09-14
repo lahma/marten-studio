@@ -1,0 +1,110 @@
+@using System.Collections.Immutable
+@using MartenStudio.Components.Json
+@using MartenStudio.Services.Json
+
+@*
+    Two documents, three buckets. Both sides are canonicalized first, so a member that moved and a number
+    that gained a trailing zero do not show up as changes - jsonb preserves neither, and a diff that
+    reports what the storage engine did rather than what the user did is noise.
+*@
+
+<div class="ms-diff">
+    @if (_result.IsEmpty)
+    {
+        <p class="ms-diff-empty">@EmptyText</p>
+    }
+    else
+    {
+        @foreach (var bucket in Buckets())
+        {
+            if (bucket.Entries.Length == 0)
+            {
+                continue;
+            }
+
+            <section class="ms-diff-bucket" @key="bucket.Kind">
+                <h4 class="ms-diff-title">
+                    <span class="@("ms-diff-marker ms-diff-" + bucket.Kind)" aria-hidden="true">@bucket.Marker</span>
+                    @bucket.Title
+                    <span class="ms-badge">@bucket.Entries.Length</span>
+                </h4>
+                <ul class="ms-diff-list">
+                    @foreach (var entry in bucket.Entries)
+                    {
+                        <li class="@("ms-diff-row ms-diff-" + bucket.Kind)" @key="entry.Path">
+                            <code class="ms-diff-path">@entry.Path</code>
+                            @if (entry.Before is not null)
+                            {
+                                <code class="ms-diff-before">@entry.Before</code>
+                            }
+                            @if (entry.Before is not null && entry.After is not null)
+                            {
+                                <span class="ms-diff-arrow" aria-hidden="true">&#8594;</span>
+                            }
+                            @if (entry.After is not null)
+                            {
+                                <code class="ms-diff-after">@entry.After</code>
+                            }
+                        </li>
+                    }
+                </ul>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    private JsonDiffResult _result = JsonDiffResult.Empty;
+    private string? _before;
+    private string? _after;
+    private bool _diffed;
+
+    /// <summary>The document as it is now.</summary>
+    [Parameter]
+    public string? Before { get; set; }
+
+    /// <summary>The document as it would be.</summary>
+    [Parameter]
+    public string? After { get; set; }
+
+    /// <summary>The heading for values present before and gone after.</summary>
+    [Parameter]
+    public string RemovedTitle { get; set; } = "Removed";
+
+    /// <summary>The heading for values that differ.</summary>
+    [Parameter]
+    public string ChangedTitle { get; set; } = "Changed";
+
+    /// <summary>The heading for values that appear.</summary>
+    [Parameter]
+    public string AddedTitle { get; set; } = "Added";
+
+    /// <summary>What to say when the two documents are the same.</summary>
+    [Parameter]
+    public string EmptyText { get; set; } = "The two documents are the same.";
+
+    /// <summary>The computed difference, for a parent component or a test.</summary>
+    internal JsonDiffResult Result => _result;
+
+    protected override void OnParametersSet()
+    {
+        if (_diffed && ReferenceEquals(_before, Before) && ReferenceEquals(_after, After))
+        {
+            return;
+        }
+
+        _diffed = true;
+        _before = Before;
+        _after = After;
+        _result = RoundTripDiffer.Diff(Before, After);
+    }
+
+    private IEnumerable<Bucket> Buckets()
+    {
+        yield return new Bucket(RemovedTitle, "del", "−", _result.Dropped);
+        yield return new Bucket(ChangedTitle, "chg", "≈", _result.Changed);
+        yield return new Bucket(AddedTitle, "add", "+", _result.Added);
+    }
+
+    private readonly record struct Bucket(string Title, string Kind, string Marker, ImmutableArray<JsonDiffEntry> Entries);
+}

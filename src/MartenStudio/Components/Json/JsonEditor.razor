@@ -1,0 +1,351 @@
+@using System.Text.Json
+@using MartenStudio.Components.Json
+@using MartenStudio.Services.Json
+@inject IJSRuntime JsRuntime
+
+@*
+    A textarea, and deliberately nothing more. CodeMirror and Monaco are both out: an embeddable Razor
+    class library that fetches a megabyte of editor from a CDN, or bundles one, has changed its host's
+    page - which is the single thing this project refuses to do (AGENTS.md hard rule 3, D2).
+
+    The textarea is bound on `change`, never on `input`. A Blazor Server circuit binding on `input` sends
+    one round trip per keystroke and re-renders the component each time; on a document of any size that
+    turns typing into a latency test.
+*@
+
+<div class="ms-editor">
+    <div class="ms-toolbar ms-editor-toolbar">
+        <button type="button" class="ms-btn ms-btn-sm" @onclick="FormatAsync">Format</button>
+        <button type="button" class="ms-btn ms-btn-sm" @onclick="ValidateAsync">Validate</button>
+        <div class="ms-toolbar-spacer"></div>
+        @if (IsDirty)
+        {
+            <span class="ms-pill ms-editor-dirty">unsaved changes</span>
+        }
+        <button type="button" class="ms-btn ms-btn-sm" @onclick="CancelAsync">Cancel</button>
+        <button type="button" class="ms-btn ms-btn-sm ms-btn-primary" @onclick="SaveAsync">Save</button>
+    </div>
+
+    <div class="ms-editor-body">
+        <div class="ms-editor-gutter" @ref="_gutter" aria-hidden="true">
+            @for (var line = 1; line <= LineCount; line++)
+            {
+                <div class="ms-editor-gutter-line" @key="line">@line</div>
+            }
+        </div>
+        <textarea @ref="_textArea"
+                  class="ms-editor-input"
+                  rows="@Rows"
+                  spellcheck="false"
+                  autocapitalize="off"
+                  autocomplete="off"
+                  autocorrect="off"
+                  aria-label="@Label"
+                  aria-describedby="@_statusId"
+                  value="@_text"
+                  @onchange="OnChangedAsync"
+                  @onkeydown="OnKeyDownAsync"></textarea>
+    </div>
+
+    <div id="@_statusId" class="ms-editor-status" role="status" aria-live="polite">
+        @if (_error is not null)
+        {
+            <div class="ms-alert ms-alert-error ms-editor-error">
+                <div class="ms-editor-error-message">@_error</div>
+                @if (_caretSource is not null)
+                {
+                    <pre class="ms-code ms-editor-caret"><code>@_caretSource
+@_caretLine</code></pre>
+                }
+            </div>
+        }
+        else if (_status is { Length: > 0 })
+        {
+            <span class="ms-editor-ok">@_status</span>
+        }
+        else
+        {
+            <span class="ms-editor-hint">Ctrl+Enter saves, Esc cancels. jsonb does not keep member order or whitespace.</span>
+        }
+    </div>
+
+    @if (_confirmingDiscard)
+    {
+        <div class="ms-alert ms-alert-warning ms-editor-confirm" role="alert">
+            <span>Discard your changes?</span>
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="KeepEditingAsync">Keep editing</button>
+            <button type="button" class="ms-btn ms-btn-sm ms-btn-danger" @onclick="DiscardAsync">Discard</button>
+        </div>
+    }
+</div>
+
+@code {
+    private static readonly JsonDocumentOptions ParseOptions = new() { MaxDepth = 64 };
+
+    private readonly string _statusId = "ms-editor-status-" + Guid.NewGuid().ToString("N")[..8];
+
+    private ElementReference _textArea;
+    private ElementReference _gutter;
+    private string _text = string.Empty;
+    private string _original = string.Empty;
+    private string? _error;
+    private string? _caretSource;
+    private string? _caretLine;
+    private string _status = string.Empty;
+    private bool _confirmingDiscard;
+    private bool _loaded;
+    private string? _loadedFrom;
+
+    /// <summary>The document to edit.</summary>
+    [Parameter]
+    public string? Json { get; set; }
+
+    /// <summary>The accessible name of the textarea.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Document JSON";
+
+    /// <summary>How tall the textarea is, in rows.</summary>
+    [Parameter]
+    public int Rows { get; set; } = 18;
+
+    /// <summary>Whether a dirty editor asks before discarding.</summary>
+    [Parameter]
+    public bool ConfirmDiscard { get; set; } = true;
+
+    /// <summary>Whether Save refuses while the text is not valid JSON.</summary>
+    [Parameter]
+    public bool ValidateBeforeSave { get; set; } = true;
+
+    /// <summary>Raised with the edited text.</summary>
+    [Parameter]
+    public EventCallback<string> OnSave { get; set; }
+
+    /// <summary>Raised when the edit is abandoned.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    /// <summary>Raised whenever the dirty state changes, so a page can guard navigation.</summary>
+    [Parameter]
+    public EventCallback<bool> OnDirtyChanged { get; set; }
+
+    /// <summary>The current text, which is what the round-trip dialog diffs.</summary>
+    public string Text => _text;
+
+    /// <summary>Whether the text differs from what was loaded.</summary>
+    public bool IsDirty => !string.Equals(_text, _original, StringComparison.Ordinal);
+
+    private int LineCount
+    {
+        get
+        {
+            var lines = 1;
+            foreach (var c in _text)
+            {
+                if (c == '\n')
+                {
+                    lines++;
+                }
+            }
+
+            return Math.Max(lines, Rows);
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (_loaded && ReferenceEquals(_loadedFrom, Json))
+        {
+            return;
+        }
+
+        _loaded = true;
+        _loadedFrom = Json;
+        _text = Json ?? string.Empty;
+        _original = _text;
+        _error = null;
+        _caretSource = null;
+        _caretLine = null;
+        _status = string.Empty;
+        _confirmingDiscard = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            // Soft tabs and a gutter that scrolls with the text. Both are pure convenience: if the
+            // helper is not in the lib module yet, Tab still moves focus and the gutter still lines up
+            // for every document that fits without scrolling.
+            await JsRuntime.InvokeVoidAsync("martenStudio.json.enhanceTextarea", _textArea, _gutter);
+        }
+        catch (JSException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private async Task OnChangedAsync(ChangeEventArgs args)
+    {
+        var wasDirty = IsDirty;
+        _text = args.Value?.ToString() ?? string.Empty;
+        _status = string.Empty;
+        _error = null;
+        _caretSource = null;
+        _caretLine = null;
+
+        if (wasDirty != IsDirty)
+        {
+            await OnDirtyChanged.InvokeAsync(IsDirty);
+        }
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && (args.CtrlKey || args.MetaKey))
+        {
+            await SaveAsync();
+            return;
+        }
+
+        if (args.Key == "Escape")
+        {
+            await CancelAsync();
+        }
+    }
+
+    /// <summary>
+    /// Pulls the textarea's live value across before acting on it. The binding is on <c>change</c>, which
+    /// has not fired yet when Ctrl+Enter arrives; clicking a button blurs the textarea and does fire it,
+    /// so only the keyboard path needs this.
+    /// </summary>
+    private async Task CommitAsync()
+    {
+        try
+        {
+            var live = await JsRuntime.InvokeAsync<string?>("martenStudio.json.readValue", new object?[] { _textArea });
+            if (live is not null)
+            {
+                _text = live;
+            }
+        }
+        catch (JSException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private async Task FormatAsync()
+    {
+        await CommitAsync();
+        try
+        {
+            _text = JsonPrettyPrinter.PrettyPrint(_text);
+            _error = null;
+            _caretSource = null;
+            _caretLine = null;
+            _status = "Formatted.";
+        }
+        catch (JsonException ex)
+        {
+            ShowParseError(ex);
+        }
+    }
+
+    private async Task ValidateAsync()
+    {
+        await CommitAsync();
+        Validate();
+    }
+
+    private bool Validate()
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(_text, ParseOptions);
+            _error = null;
+            _caretSource = null;
+            _caretLine = null;
+            _status = "Valid JSON.";
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            ShowParseError(ex);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Turns a <see cref="JsonException"/> into a line, a column and a caret under the offending
+    /// character. <c>BytePositionInLine</c> is a UTF-8 byte offset, so the caret can sit a place or two
+    /// off on a line with non-ASCII text - which is still far more useful than a bare message.
+    /// </summary>
+    private void ShowParseError(JsonException exception)
+    {
+        _status = string.Empty;
+
+        var line = (int)(exception.LineNumber ?? 0);
+        var column = (int)(exception.BytePositionInLine ?? 0);
+        _error = "Line " + (line + 1) + ", column " + (column + 1) + ": " + exception.Message;
+
+        var lines = _text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        if (line < 0 || line >= lines.Length)
+        {
+            _caretSource = null;
+            _caretLine = null;
+            return;
+        }
+
+        _caretSource = lines[line];
+        _caretLine = new string(' ', Math.Clamp(column, 0, _caretSource.Length)) + "^";
+    }
+
+    private async Task SaveAsync()
+    {
+        await CommitAsync();
+
+        if (ValidateBeforeSave && !Validate())
+        {
+            return;
+        }
+
+        await OnSave.InvokeAsync(_text);
+    }
+
+    private async Task CancelAsync()
+    {
+        if (ConfirmDiscard && IsDirty)
+        {
+            _confirmingDiscard = true;
+            return;
+        }
+
+        await OnCancel.InvokeAsync();
+    }
+
+    private Task KeepEditingAsync()
+    {
+        _confirmingDiscard = false;
+        return Task.CompletedTask;
+    }
+
+    private async Task DiscardAsync()
+    {
+        _confirmingDiscard = false;
+        _text = _original;
+        _error = null;
+        _caretSource = null;
+        _caretLine = null;
+        await OnDirtyChanged.InvokeAsync(false);
+        await OnCancel.InvokeAsync();
+    }
+}

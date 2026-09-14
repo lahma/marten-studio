@@ -1,0 +1,115 @@
+@using MartenStudio.Components.Json
+@using MartenStudio.Services.Json
+
+@*
+    The raw view: pretty-printed and coloured on the server, with a line-number gutter. No highlighter
+    runs in the browser, so there is nothing here that can collide with the host page's own scripts.
+*@
+
+<div class="@RootClass">
+    @if (_document.Notice is { Length: > 0 })
+    {
+        <p class="ms-alert ms-alert-warning ms-json-notice" role="status">@_document.Notice</p>
+    }
+
+    <div class="ms-code-body" aria-label="@Label" role="group">
+        @foreach (var line in _document.Lines)
+        {
+            <div class="ms-code-line" @key="line.Number">
+                @if (ShowLineNumbers)
+                {
+                    <span class="ms-code-gutter" aria-hidden="true">@line.Number</span>
+                }
+                <span class="ms-code-text">@Tokens(line)</span>
+            </div>
+        }
+    </div>
+
+    @if (ShowJsonbNote)
+    {
+        <p class="ms-json-footnote">
+            jsonb does not preserve member order or whitespace. This is Postgres's copy, re-indented -
+            not the bytes the application wrote.
+        </p>
+    }
+</div>
+
+@code {
+    private JsonRawDocument _document = JsonRawDocument.Empty;
+    private string? _rendered;
+    private bool _hasRendered;
+
+    /// <summary>The document text.</summary>
+    [Parameter]
+    public string? Json { get; set; }
+
+    /// <summary>Whether long lines wrap instead of scrolling.</summary>
+    [Parameter]
+    public bool Wrap { get; set; }
+
+    /// <summary>Whether the line-number gutter is shown.</summary>
+    [Parameter]
+    public bool ShowLineNumbers { get; set; } = true;
+
+    /// <summary>Above this many UTF-8 bytes only the first megabyte is rendered, unformatted.</summary>
+    [Parameter]
+    public int MaxBytes { get; set; } = 4 * 1024 * 1024;
+
+    /// <summary>The most lines to put in the DOM.</summary>
+    [Parameter]
+    public int MaxLines { get; set; } = JsonPrettyPrinter.DefaultMaxLines;
+
+    /// <summary>Whether to print the note about jsonb not preserving order or whitespace.</summary>
+    [Parameter]
+    public bool ShowJsonbNote { get; set; } = true;
+
+    /// <summary>The accessible name of the code block.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Raw JSON";
+
+    /// <summary>The pretty-printed text, which is what the toolbar's copy and download act on.</summary>
+    public string Text => _document.Text;
+
+    /// <summary>How many lines the document has, before any clamp.</summary>
+    public int TotalLines => _document.TotalLines;
+
+    private string RootClass =>
+        "ms-code ms-json-raw" +
+        (Wrap ? " ms-code-wrap" : string.Empty) +
+        (ShowLineNumbers ? string.Empty : " ms-code-no-gutter");
+
+    protected override void OnParametersSet()
+    {
+        // Re-render on a parameter change is cheap; re-pretty-printing a megabyte because the wrap
+        // toggle moved is not. The rendered document is keyed on the text alone.
+        if (_hasRendered && ReferenceEquals(_rendered, Json))
+        {
+            return;
+        }
+
+        _hasRendered = true;
+        _rendered = Json;
+        _document = JsonPrettyPrinter.Render(Json, MaxBytes, MaxLines);
+    }
+
+    private static RenderFragment Tokens(JsonLine line) => builder =>
+    {
+        foreach (var token in line.Tokens)
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", CssClass(token.Kind));
+            builder.AddContent(2, token.Text);
+            builder.CloseElement();
+        }
+    };
+
+    private static string CssClass(JsonTokenKind kind) => kind switch
+    {
+        JsonTokenKind.Key => "ms-code-key",
+        JsonTokenKind.String => "ms-code-string",
+        JsonTokenKind.Number => "ms-code-number",
+        JsonTokenKind.Boolean => "ms-code-bool",
+        JsonTokenKind.Null => "ms-code-null",
+        _ => "ms-code-punct",
+    };
+}

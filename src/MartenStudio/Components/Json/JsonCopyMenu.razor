@@ -1,0 +1,160 @@
+@using MartenStudio.Components.Json
+@using MartenStudio.Services.Json
+@inject IJSRuntime JsRuntime
+
+@*
+    The per-node menu, on the platform's own popover: one element, reused by every row, opened
+    declaratively by each row's key button through `popovertarget`. That is what makes it free of a
+    positioning library (hard rule 3) and free of a "click outside to close" handler - the browser's own
+    light dismiss does it.
+
+    There is exactly one of these per viewer rather than one per row. Twenty thousand hidden menus would
+    be twenty thousand components with their own parameters to diff on every render, for a thing the user
+    opens once.
+*@
+
+<div id="@ElementId"
+     popover="auto"
+     class="ms-menu ms-copy-menu"
+     role="menu"
+     aria-label="Copy from this node"
+     @ref="_element">
+    <div class="ms-copy-menu-header">
+        <span class="ms-copy-menu-path">@(string.IsNullOrEmpty(Path) ? "$" : Path)</span>
+    </div>
+
+    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyValueAsync">
+        <span class="ms-menu-item-label">Copy value</span>
+        <span class="ms-menu-item-detail">@Preview(ValueJson)</span>
+    </button>
+
+    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyJsonPathAsync">
+        <span class="ms-menu-item-label">Copy JSONPath</span>
+        <span class="ms-menu-item-detail">@JsonPath</span>
+    </button>
+
+    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyPgExpressionAsync">
+        <span class="ms-menu-item-label">Copy Postgres expression</span>
+        <span class="ms-menu-item-detail">@PgExpression</span>
+    </button>
+
+    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyPgTextPathAsync">
+        <span class="ms-menu-item-label">Copy Postgres <code>#&gt;&gt;</code> path</span>
+        <span class="ms-menu-item-detail">@PgTextPath</span>
+    </button>
+
+    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyLinqPathAsync">
+        <span class="ms-menu-item-label">Copy Marten LINQ path</span>
+        <span class="ms-menu-item-detail">@LinqPath</span>
+        @if (LinqNote is { Length: > 0 })
+        {
+            <span class="ms-menu-item-warning">@LinqNote</span>
+        }
+    </button>
+
+    <button type="button" class="ms-menu-item" role="menuitem" @onclick="CopyContainmentFilterAsync">
+        <span class="ms-menu-item-label">Copy containment filter</span>
+        <span class="ms-menu-item-detail">@Preview(ContainmentFilter)</span>
+    </button>
+</div>
+
+@code {
+    private ElementReference _element;
+
+    /// <summary>The DOM id every row's key button points its <c>popovertarget</c> at.</summary>
+    [Parameter]
+    public string ElementId { get; set; } = "ms-json-menu";
+
+    /// <summary>The dotted path of the node the menu is currently about.</summary>
+    [Parameter]
+    public string Path { get; set; } = string.Empty;
+
+    /// <summary>The node's value as JSON.</summary>
+    [Parameter]
+    public string ValueJson { get; set; } = string.Empty;
+
+    /// <summary>The node's JSONPath.</summary>
+    [Parameter]
+    public string JsonPath { get; set; } = "$";
+
+    /// <summary>The node's Postgres arrow expression.</summary>
+    [Parameter]
+    public string PgExpression { get; set; } = string.Empty;
+
+    /// <summary>The node's Postgres <c>#&gt;&gt;</c> path expression.</summary>
+    [Parameter]
+    public string PgTextPath { get; set; } = string.Empty;
+
+    /// <summary>The node's Marten LINQ path.</summary>
+    [Parameter]
+    public string LinqPath { get; set; } = "x";
+
+    /// <summary>Why the LINQ path could not be resolved against the CLR type, when it could not.</summary>
+    [Parameter]
+    public string? LinqNote { get; set; }
+
+    /// <summary>The jsonb containment filter that would match this node.</summary>
+    [Parameter]
+    public string ContainmentFilter { get; set; } = string.Empty;
+
+    /// <summary>Raised with the sentence to announce after a copy.</summary>
+    [Parameter]
+    public EventCallback<string> OnCopied { get; set; }
+
+    /// <summary>
+    /// Shows the popover. Used when the menu is opened from the keyboard, where there is no
+    /// <c>popovertarget</c> button being activated to do it declaratively.
+    /// </summary>
+    public async Task ShowAsync()
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.json.openMenu", _element);
+        }
+        catch (JSException)
+        {
+            // No JS module yet (prerender), or the browser has no popover support. The menu is still
+            // reachable with the mouse through the row's own popovertarget button.
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
+    private Task CopyValueAsync() => CopyAsync(ValueJson, "value");
+
+    private Task CopyJsonPathAsync() => CopyAsync(JsonPath, "JSONPath");
+
+    private Task CopyPgExpressionAsync() => CopyAsync(PgExpression, "Postgres expression");
+
+    private Task CopyPgTextPathAsync() => CopyAsync(PgTextPath, "Postgres path expression");
+
+    private Task CopyLinqPathAsync() => CopyAsync(LinqPath, "Marten LINQ path");
+
+    private Task CopyContainmentFilterAsync() => CopyAsync(ContainmentFilter, "containment filter");
+
+    private static string Preview(string value) =>
+        value.Length <= 48 ? value : value[..48] + "…";
+
+    private async Task CopyAsync(string text, string what)
+    {
+        var copied = false;
+        try
+        {
+            copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
+        }
+        catch (JSException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (System.Text.Json.JsonException)
+        {
+        }
+
+        await OnCopied.InvokeAsync(copied
+            ? "Copied the " + what + "."
+            : "Could not copy the " + what + ".");
+    }
+}
