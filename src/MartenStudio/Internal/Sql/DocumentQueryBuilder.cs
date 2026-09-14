@@ -29,6 +29,19 @@ internal readonly record struct IdParseResult(bool Success, object? Value, strin
     public static IdParseResult Failed(string error) => new(false, null, error);
 }
 
+/// <summary>Whether a single-document read locks the row it reads.</summary>
+internal enum DocumentRowLock
+{
+    /// <summary>A plain read. Every page uses this.</summary>
+    None,
+
+    /// <summary>
+    /// <c>for update</c>: the row stays as it was read until the reading transaction ends. Only the
+    /// write service uses this, and only inside the transaction that is about to write.
+    /// </summary>
+    ForUpdate,
+}
+
 /// <summary>
 /// Builds the two document reads: the list and the single document. Every identifier is quoted, every
 /// value is a parameter, and every sort key and column comes from the allow-list that
@@ -115,10 +128,41 @@ internal static class DocumentQueryBuilder
     /// Builds the single-document read. Returns <see langword="false"/> with a message when the id does not
     /// parse against its column type, which is a thing a link can say and not a thing to throw about.
     /// </summary>
+    /// <remarks>
+    /// The single read has no soft-delete predicate, deliberately: a document page reached by a link has
+    /// to be able to show a deleted row (and to undelete it), and the tri-state that hides them belongs
+    /// to the list.
+    /// </remarks>
     public static bool TryBuildSingle(
         DocumentTableInfo table,
         string rawId,
         string? tenantId,
+        [NotNullWhen(true)] out NpgsqlCommand? command,
+        [NotNullWhen(false)] out string? error) =>
+        TryBuildSingle(table, rawId, tenantId, DocumentRowLock.None, out command, out error);
+
+    /// <summary>
+    /// The same read, with the option of taking a row lock — which is what makes a write's concurrency
+    /// check an actual check rather than a hopeful one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="DocumentRowLock.ForUpdate"/> appends <c>for update</c>, so the row the studio just read
+    /// the version of cannot be changed by anybody else until the transaction that read it ends. Without
+    /// it, read committed lets another session commit between the studio's version check and its upsert,
+    /// and the studio overwrites an edit it told the user about — the lost update this check exists to
+    /// prevent.
+    /// </para>
+    /// <para>
+    /// Only ever used inside a Marten session's own transaction. A <c>for update</c> outside one takes a
+    /// lock and drops it on the next statement, which costs a lock and buys nothing.
+    /// </para>
+    /// </remarks>
+    public static bool TryBuildSingle(
+        DocumentTableInfo table,
+        string rawId,
+        string? tenantId,
+        DocumentRowLock rowLock,
         [NotNullWhen(true)] out NpgsqlCommand? command,
         [NotNullWhen(false)] out string? error)
     {
@@ -163,6 +207,11 @@ internal static class DocumentQueryBuilder
                 .Append('\n');
 
             AppendTenantFilter(sql, table, tenantId, builder);
+
+            if (rowLock == DocumentRowLock.ForUpdate)
+            {
+                sql.Append("for update\n");
+            }
 
             built.CommandText = sql.ToString();
             command = built;
