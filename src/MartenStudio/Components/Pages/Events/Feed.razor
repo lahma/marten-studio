@@ -55,7 +55,7 @@
 
         @if (highestSequence is { } highest)
         {
-            <span class="ms-follow-state" title="IMartenDatabase.FetchHighestEventSequenceNumber">
+            <span class="ms-follow-state" title="select max(seq_id) from the event store's mt_events">
                 high-water #@highest.ToString(CultureInfo.InvariantCulture)
             </span>
         }
@@ -460,7 +460,8 @@
     /// One tick of the shared loop. Does nothing unless follow mode is on.
     /// </summary>
     /// <remarks>
-    /// It asks <c>FetchHighestEventSequenceNumber</c> first and only reads events when that moved, so an
+    /// It asks <c>IEventDataService.GetHighestSequenceAsync</c> first and only reads events when that
+    /// moved, so an
     /// idle store costs one cheap query per interval rather than a page of the feed. The helper is what
     /// skips the tick entirely while the tab is hidden (D10), so there is no visibility check here.
     /// </remarks>

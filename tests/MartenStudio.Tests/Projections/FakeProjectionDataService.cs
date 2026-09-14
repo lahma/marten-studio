@@ -29,6 +29,12 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
     /// <summary>What <see cref="GetProjectionsAsync" /> throws, when a test is about the failure frame.</summary>
     public Exception? Failure { get; set; }
 
+    /// <summary>
+    /// Whether the database has event tables at all. <see langword="false" /> is the database nothing has
+    /// ever appended to, where every projection reads "never started" for a reason the page has to name.
+    /// </summary>
+    public bool HasEventStore { get; set; } = true;
+
     /// <summary>What a mutating call throws, when a test is about a refusal.</summary>
     public Exception? ActionFailure { get; set; }
 
@@ -195,7 +201,8 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
 
         List<ShardProgress> sorted = [.. progress.OrderByDescending(x => x.Lag).ThenBy(x => x.ShardName, StringComparer.OrdinalIgnoreCase)];
 
-        return Task.FromResult(new ProjectionsView(projections, sorted, Daemon, HighWaterMark, DateTimeOffset.UnixEpoch));
+        return Task.FromResult(
+            new ProjectionsView(projections, sorted, Daemon, HighWaterMark, DateTimeOffset.UnixEpoch, HasEventStore));
     }
 
     /// <inheritdoc />

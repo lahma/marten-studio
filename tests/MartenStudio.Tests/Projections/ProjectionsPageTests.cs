@@ -85,6 +85,26 @@ public class ProjectionsPageTests
         page.FindAll(".ms-no-daemon-banner").Should().ContainSingle();
     }
 
+    /// <summary>
+    /// A database with no event tables is why everything below reads "never started", and it is not the
+    /// same problem as a daemon nobody is hosting — so it is said in its own words and the daemon banner
+    /// stands down. Marten creates those tables on the first append; the studio never does (hard rule 14).
+    /// </summary>
+    [Fact]
+    public async Task A_database_with_no_event_store_says_so_instead_of_blaming_the_daemon()
+    {
+        await using var context = new StudioComponentContext();
+        context.ProjectionData.HasEventStore = false;
+        context.ProjectionData.WithNoDaemonHere().WithProjection("DailySales", sequence: 0, hasProgressRow: false);
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        page.Find(".ms-empty-title").TextContent.Should().Contain("No event store in this database");
+        page.FindAll(".ms-no-daemon-banner").Should().BeEmpty(
+            "the daemon is not the reason, and pointing an operator at it would send them the wrong way");
+    }
+
     [Fact]
     public async Task A_daemon_that_has_advanced_somewhere_else_raises_no_banner()
     {

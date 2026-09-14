@@ -53,7 +53,22 @@
             <ErrorAlert Message="@($"The last refresh failed: {loadError}")" OnRetry="RefreshAsync" />
         }
 
-        @if (view.NoDaemonAnywhere)
+        @* A database with no event tables is the reason for everything below it reading "never started",
+           and it is not the same problem as a daemon nobody is hosting - so it is said first, and the
+           daemon banner stands down. Marten creates those tables on the first append or daemon run; the
+           studio never creates them from a page (hard rule 14). *@
+        @if (!view.HasEventStore)
+        {
+            <div class="ms-empty">
+                <p class="ms-empty-title">No event store in this database</p>
+                <p class="ms-empty-description">
+                    There is no <code>mt_events</code>, <code>mt_streams</code> or
+                    <code>mt_event_progression</code> here. Marten creates them the first time this store
+                    appends an event or runs its daemon; Marten Studio never creates them from a page.
+                </p>
+            </div>
+        }
+        else if (view.NoDaemonAnywhere)
         {
             <div class="ms-alert ms-alert-warning ms-no-daemon-banner" role="alert">
                 <div class="ms-alert-content">
