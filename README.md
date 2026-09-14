@@ -257,8 +257,8 @@ Nine booleans, **all `false` by default**. A freshly mapped studio is a read-onl
 | `EditDocuments` | Edit a document's JSON and save it through the store's own serializer and session |
 | `DeleteDocuments` | Delete, soft-delete and undelete documents, one at a time or a selection |
 | `ArchiveStreams` | Archive an event stream |
-| `ManageDeadLetters` | Discard dead-letter records and mark events as skipped |
-| `ControlDaemon` | Start and stop projection agents and the async daemon hosted in this process |
+| `ManageDeadLetters` | Discard dead-letter records, mark events as skipped, and rewind a subscription to the event that failed |
+| `ControlDaemon` | Pause and resume the async daemon hosted in this process, start and stop individual projection agents while it is paused, and restart the high-water agent |
 | `RebuildProjections` | Rebuild a projection |
 | `CorrectProgression` | Advance the high-water mark, or correct projection progression in the database |
 | `ApplySchemaChanges` | Apply pending schema migrations |
@@ -353,15 +353,20 @@ JSON, headers and metadata, offers aggregate **time travel** (replayed on demand
 stream with `ArchiveStreams`. *Feed* is the global sequence, newest first, filtered by event type,
 sequence range, stream, tenant and the archived/skipped flags the store actually has, with a follow
 mode. *Event types* counts what the store has seen. *Dead letters* lists the daemon's failures with the
-exception, and with `ManageDeadLetters` discards a record or marks the underlying event as skipped — the
-latter only on a store that enabled event skipping, because it writes `mt_events.is_skipped` and a store
-without that column has no way to express the idea.
+exception, and with `ManageDeadLetters` discards a record, marks the underlying event as skipped — only on
+a store that enabled event skipping, because it writes `mt_events.is_skipped` and a store without that
+column has no way to express the idea — or rewinds the projection's subscription to the event that failed,
+behind a typed confirmation that states what gets replayed, where the daemon is hosted in this process.
 
 **Projections** — every registered projection with its shards, their state and progression against the
 high-water mark, refreshed from a lazy observer on `ShardStateTracker` where the daemon is hosted in
-this process and from polling where it is not. With the capabilities on: start/stop an agent, start/stop
-everything, restart the high-water agent (`ControlDaemon`), rebuild a projection behind a typed
-confirmation (`RebuildProjections`), and advance or correct progression (`CorrectProgression`). A rebuild
+this process and from polling where it is not. With the capabilities on: pause and resume the projection
+daemon, restart the high-water agent (`ControlDaemon`), rebuild a projection behind a typed confirmation
+(`RebuildProjections`), and advance or correct progression (`CorrectProgression`). Pausing is
+process-wide — it stops the coordinator's leadership runner and then every agent of every database this
+process hosts for that store — and it is the only stop that holds: with the coordinator running, it
+restarts any agent it finds missing within `LeadershipPollingTime`, so per-agent Start and Stop are
+offered only while the daemon is paused and are refused with that reason while it is not. A rebuild
 outlives the circuit that started it and is tracked by name. Where no daemon is hosted in this process,
 the page says so — that is a value, not an error, and the studio never starts a daemon of its own.
 
