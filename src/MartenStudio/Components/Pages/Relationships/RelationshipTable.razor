@@ -1,0 +1,108 @@
+@using MartenStudio.Components.Pages.Documents
+@using MartenStudio.Services.Relationships
+@using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph
+
+@*
+    The same relationships the diagram draws, as a table.
+
+    Not a fallback and not an afterthought: this is the accessible form of the picture and the only form
+    below 900px, so it has to carry every edge the SVG draws and the same links. RelationshipTableTests
+    asserts exactly that, against the layout the diagram was given, because a table that quietly listed
+    fewer rows than the picture had arrows would be a screen that tells two different stories depending on
+    who is reading it.
+*@
+
+<table class="ms-table ms-graph-table">
+    <caption class="ms-sr-only">
+        Every foreign key between the document types of this store, with the collection that points, the
+        collection pointed at, the column, and whether the database has the constraint.
+    </caption>
+    <thead>
+        <tr>
+            <th scope="col">From</th>
+            <th scope="col">Points at</th>
+            <th scope="col">Column</th>
+            <th scope="col">Member</th>
+            <th scope="col">State</th>
+            <th scope="col">On delete</th>
+        </tr>
+    </thead>
+    <tbody>
+        @for (int i = 0; i < Graph.Edges.Count; i++)
+        {
+            RelationshipEdge edge = Graph.Edges[i];
+
+            <tr class="ms-table-row ms-graph-row @RowClass(edge)" @key="i">
+                <td class="ms-table-cell">
+                    <a href="@HrefFor(edge.FromAlias)" class="ms-graph-row-link">
+                        <CollectionChip Alias="@edge.FromAlias" Hue="@Hue(edge.FromAlias)" Small="true" />
+                    </a>
+                </td>
+                <td class="ms-table-cell">
+                    <span class="ms-graph-row-arrow" aria-hidden="true">→</span>
+                    <a href="@HrefFor(edge.ToAlias)" class="ms-graph-row-link">
+                        <CollectionChip Alias="@edge.ToAlias" Hue="@Hue(edge.ToAlias)" Small="true" />
+                    </a>
+                </td>
+                <td class="ms-table-cell ms-table-cell-mono">@edge.Column</td>
+                <td class="ms-table-cell ms-table-cell-mono">@(edge.Member ?? "-")</td>
+                <td class="ms-table-cell">
+                    <span class="ms-badge @BadgeClass(edge)" title="@StateTitle(edge)">@edge.State</span>
+                </td>
+                <td class="ms-table-cell">@edge.OnDelete</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    /// <summary>The graph, as a <c>RelationshipGraph</c>. See <c>RelationshipGraph.razor</c> for why this is an object.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Builds the link to a collection's documents list.</summary>
+    [Parameter]
+    public Func<string, string> HrefFor { get; set; } = static _ => "#";
+
+    private GraphModel Graph => Model as GraphModel ?? GraphModel.None;
+
+    private int Hue(string alias)
+    {
+        foreach (RelationshipNode node in Graph.Nodes)
+        {
+            if (string.Equals(node.Alias, alias, StringComparison.OrdinalIgnoreCase))
+            {
+                return node.Hue;
+            }
+        }
+
+        return 210;
+    }
+
+    private static string RowClass(RelationshipEdge edge) => (edge.Declared, edge.Physical) switch
+    {
+        (true, false) => "ms-graph-row-declared",
+        (false, true) => "ms-graph-row-physical",
+        _ => string.Empty,
+    };
+
+    private static string BadgeClass(RelationshipEdge edge) => (edge.Declared, edge.Physical) switch
+    {
+        (true, true) => "ms-badge-subclass",
+        (true, false) => "ms-badge-warning",
+        (false, true) => "ms-badge-tenant",
+        _ => "ms-badge-subclass",
+    };
+
+    private static string StateTitle(RelationshipEdge edge) => (edge.Declared, edge.Physical) switch
+    {
+        (true, true) => "StoreOptions declares this key and the database has the constraint.",
+        (true, false) =>
+            "StoreOptions declares this key but the database has no such constraint - nothing is enforcing it. " +
+            "The Schema screen's migration preview is where that gets applied.",
+        (false, true) =>
+            "The database has this constraint and StoreOptions does not declare it. Marten does not know " +
+            "about it, and an apply under CreateOrUpdate would drop it.",
+        _ => string.Empty,
+    };
+}

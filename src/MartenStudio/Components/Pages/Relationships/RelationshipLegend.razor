@@ -1,0 +1,34 @@
+@*
+    What the three line styles mean. Constant markup - the swatches are the same CSS the diagram uses, so
+    a legend can never drift from the picture it explains.
+*@
+
+<ul class="ms-graph-legend">
+    <li class="ms-graph-legend-item">
+        <svg class="ms-graph-legend-swatch" viewBox="0 0 40 10" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+            <g class="ms-graph-edge ms-graph-edge-both">
+                <path class="ms-graph-edge-line" d="M 2 5 L 30 5" />
+                <path class="ms-graph-edge-arrow" d="M 38 5 L 29 9 L 29 1 Z" />
+            </g>
+        </svg>
+        <span>Declared and enforced - <code>StoreOptions</code> declares the key and Postgres has the constraint.</span>
+    </li>
+    <li class="ms-graph-legend-item">
+        <svg class="ms-graph-legend-swatch" viewBox="0 0 40 10" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+            <g class="ms-graph-edge ms-graph-edge-declared">
+                <path class="ms-graph-edge-line" d="M 2 5 L 30 5" />
+                <path class="ms-graph-edge-arrow" d="M 38 5 L 29 9 L 29 1 Z" />
+            </g>
+        </svg>
+        <span>Declared only - configured, never applied. Nothing is enforcing it.</span>
+    </li>
+    <li class="ms-graph-legend-item">
+        <svg class="ms-graph-legend-swatch" viewBox="0 0 40 10" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+            <g class="ms-graph-edge ms-graph-edge-physical">
+                <path class="ms-graph-edge-line" d="M 2 5 L 30 5" />
+                <path class="ms-graph-edge-arrow" d="M 38 5 L 29 9 L 29 1 Z" />
+            </g>
+        </svg>
+        <span>In the database only - Marten does not know about it, and an apply would drop it.</span>
+    </li>
+</ul>

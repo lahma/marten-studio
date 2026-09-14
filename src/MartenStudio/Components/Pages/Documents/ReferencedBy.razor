@@ -1,0 +1,113 @@
+@using MartenStudio.Services.Relationships
+@using ReferencedByModel = MartenStudio.Services.Relationships.ReferencedBy
+
+@*
+    The inbound half of a document's relationships: which collections point at it, and how many of their
+    documents point at this one.
+
+    The outbound half (RelatedDocumentsPanel) follows a declared foreign key from a column this document
+    already carries, which is one indexed read. This half is the opposite direction and is the expensive
+    one, which is why it is bounded: `select count(*) from (select 1 … limit 1001) x`, so the answer is
+    exact where a person needs it exact - three orders or three hundred, before they delete a customer -
+    and stops rather than paying for a sequential scan to say "lots".
+
+    Each row links to the pointing collection already filtered on this id. The filter is written with the
+    .NET member, not with the column, because the documents list's search grammar resolves a member to its
+    duplicated column and would read a column name as a JSON property that does not exist - so a row whose
+    member could not be resolved links to the unfiltered collection instead of to a link that answers
+    "nothing found" about data that is plainly there.
+*@
+
+@if (Referenced.Error is { Length: > 0 } error)
+{
+    <ErrorAlert Message="@error" />
+}
+else if (Referenced.Entries.Count > 0)
+{
+    <section class="ms-referenced" aria-label="Referenced by">
+        <h3 class="ms-doc-meta-title">Referenced by</h3>
+        <ul class="ms-referenced-list">
+            @foreach (ReferencedByEntry entry in Referenced.Entries)
+            {
+                <li class="ms-referenced-item" @key="entry.FromAlias + '.' + entry.Column">
+                    <a class="ms-referenced-link" href="@Href(entry)" title="@Title(entry)">
+                        <CollectionChip Alias="@entry.FromAlias" Hue="@entry.Hue" Small="true" />
+                        <span class="ms-referenced-count">@Count(entry)</span>
+                    </a>
+                    <span class="ms-referenced-column ms-mono">@(entry.Member ?? entry.Column)</span>
+                    @if (entry.Error is { Length: > 0 } rowError)
+                    {
+                        <span class="ms-badge ms-badge-warning" title="@rowError">not counted</span>
+                    }
+                    else if (!entry.Physical)
+                    {
+                        <span class="ms-badge ms-badge-warning"
+                              title="StoreOptions declares this key but the database has no such constraint.">declared only</span>
+                    }
+                    else if (!entry.Declared)
+                    {
+                        <span class="ms-badge ms-badge-tenant"
+                              title="The database has this constraint and StoreOptions does not declare it.">database only</span>
+                    }
+                </li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    /// <summary>
+    /// What points here, as a <c>ReferencedBy</c>. Typed <see cref="object" /> — see
+    /// <see cref="DocumentComponentModel" /> for why.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>This document's id, which becomes the filter each row links to.</summary>
+    [Parameter]
+    public string DocumentId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Builds the link to a collection's list, optionally filtered. The second argument is the search
+    /// expression in the list's own grammar, or <see langword="null" /> for the unfiltered list.
+    /// </summary>
+    [Parameter]
+    public Func<string, string?, string> HrefFor { get; set; } = static (_, _) => "#";
+
+    /// <summary>The inbound list, read back into the type it really is.</summary>
+    private ReferencedByModel Referenced => DocumentComponentModel.Read(Model, ReferencedByModel.None);
+
+    private string Href(ReferencedByEntry entry) => HrefFor(entry.FromAlias, Filter(entry));
+
+    /// <summary>
+    /// The search expression that shows exactly the rows this count counted, or <see langword="null" />.
+    /// </summary>
+    /// <remarks>
+    /// The value is quoted, and an embedded quote is doubled, because that is how the grammar spells an
+    /// escaped quote — and because quoting is what forces the literal to be compared as text, which is the
+    /// one form that converts cleanly to every id column type the studio supports.
+    /// </remarks>
+    private string? Filter(ReferencedByEntry entry) =>
+        entry.Member is { Length: > 0 } member && DocumentId.Length > 0
+            ? member + " = \"" + DocumentId.Replace("\"", "\"\"", StringComparison.Ordinal) + "\""
+            : null;
+
+    private string Count(ReferencedByEntry entry)
+    {
+        if (entry.Error is { Length: > 0 })
+        {
+            return "?";
+        }
+
+        string rows = entry.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+
+        return entry.IsCapped ? rows + "+" : rows;
+    }
+
+    private string Title(ReferencedByEntry entry) =>
+        entry.IsCapped
+            ? $"More than {entry.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} " +
+              $"{entry.FromAlias} documents point at this one through {entry.Column}."
+            : $"{entry.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} " +
+              $"{entry.FromAlias} document(s) point at this one through {entry.Column}.";
+}

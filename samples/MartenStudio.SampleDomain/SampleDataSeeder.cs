@@ -34,7 +34,7 @@ public sealed class SeedMarker
 public sealed class SampleDataSeeder : IInitialData
 {
     /// <summary>Bumped when the data below changes, so an existing database is re-seeded.</summary>
-    private const int SeedVersion = 2;
+    private const int SeedVersion = 3;
 
     /// <summary>How big <see cref="MediaAsset" />'s decoded payload is: base64 makes it about 2 MB.</summary>
     private const int MediaAssetBytes = 1_500_000;

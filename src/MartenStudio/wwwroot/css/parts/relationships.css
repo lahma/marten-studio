@@ -1,0 +1,280 @@
+/*
+ * Relationships (P10). Hand-rolled, prefixed ms-, driven by the design tokens in marten-studio.css;
+ * no third-party CSS, ever (AGENTS.md hard rule 3).
+ *
+ * This file is a *part*: the studio serves one stylesheet, and the orchestrator folds this block into
+ * marten-studio.css, which this packet does not edit because three other packets are editing it at the
+ * same time. Nothing here declares a token of its own - every colour, space and radius below is one the
+ * shared file already defines, which is what makes it work in both themes without a single
+ * prefers-color-scheme rule of its own.
+ */
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The page                                                                                         */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-graph-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ms-space-sm);
+}
+
+.ms-graph-readat {
+  font-size: var(--ms-font-size-xs);
+  color: var(--ms-color-text-muted);
+}
+
+.ms-graph-table-panel,
+.ms-graph-unmatched {
+  margin-top: var(--ms-space-lg);
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The diagram                                                                                      */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-graph {
+  margin-top: var(--ms-space-md);
+  padding: var(--ms-space-md);
+  overflow-x: auto;
+  background-color: var(--ms-color-surface);
+  border: 1px solid var(--ms-color-border);
+  border-radius: var(--ms-radius-lg);
+}
+
+.ms-graph-svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* --- Edges --- */
+
+.ms-graph-edge-hit {
+  /* A fat, invisible path under the visible one: an arrow two pixels wide is a hover target nobody
+     can hit, and widening the visible stroke instead would make a diagram of hairlines into one of
+     ropes. Stroke, not fill, so only the line itself is a target and not the area it encloses. */
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+}
+
+.ms-graph-edge-line {
+  fill: none;
+  stroke: var(--ms-color-border-strong);
+  stroke-width: 1.75;
+}
+
+.ms-graph-edge-arrow {
+  fill: var(--ms-color-border-strong);
+  stroke: none;
+}
+
+.ms-graph-edge-declared .ms-graph-edge-line {
+  /* Declared but not applied: dashed, and in the warning colour, because nothing is enforcing it. */
+  stroke: var(--ms-color-warning);
+  stroke-dasharray: 7 5;
+}
+
+.ms-graph-edge-declared .ms-graph-edge-arrow {
+  fill: var(--ms-color-warning);
+}
+
+.ms-graph-edge-physical .ms-graph-edge-line {
+  /* In the database only: dotted, in the informational colour - it is real, Marten just does not
+     know about it. */
+  stroke: var(--ms-color-info);
+  stroke-dasharray: 2 5;
+  stroke-linecap: round;
+}
+
+.ms-graph-edge-physical .ms-graph-edge-arrow {
+  fill: var(--ms-color-info);
+}
+
+.ms-graph-edge:hover .ms-graph-edge-line,
+.ms-graph-edge:focus-within .ms-graph-edge-line {
+  stroke: var(--ms-color-primary);
+  stroke-width: 2.75;
+}
+
+.ms-graph-edge:hover .ms-graph-edge-arrow,
+.ms-graph-edge:focus-within .ms-graph-edge-arrow {
+  fill: var(--ms-color-primary);
+}
+
+/* --- Nodes --- */
+
+.ms-graph-node {
+  cursor: pointer;
+}
+
+.ms-graph-node-box {
+  fill: var(--ms-color-surface);
+  stroke: var(--ms-color-border-strong);
+  stroke-width: 1.25;
+}
+
+.ms-graph-node:hover .ms-graph-node-box,
+.ms-graph-node:focus-visible .ms-graph-node-box {
+  fill: var(--ms-color-surface-hover);
+  stroke: var(--ms-color-primary);
+}
+
+.ms-graph-node-dot {
+  fill: hsl(var(--ms-collection-hue, 210) 60% 50%);
+  stroke: none;
+}
+
+@supports (color: oklch(50% 0.1 200)) {
+  .ms-graph-node-dot {
+    fill: oklch(var(--ms-collection-lightness) var(--ms-collection-chroma) var(--ms-collection-hue, 210));
+  }
+}
+
+.ms-graph-node-alias {
+  fill: var(--ms-color-text);
+  font-family: var(--ms-font-family);
+  font-size: var(--ms-font-size-base);
+  font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-graph-node-type {
+  fill: var(--ms-color-text-secondary);
+  font-family: var(--ms-font-mono);
+  font-size: var(--ms-font-size-xs);
+}
+
+.ms-graph-node-count {
+  fill: var(--ms-color-text-muted);
+  font-family: var(--ms-font-family);
+  font-size: var(--ms-font-size-xs);
+}
+
+/* Colour and width are the only things that change on hover, and both are instant unless the visitor
+   has said they do not mind motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .ms-graph-edge-line,
+  .ms-graph-edge-arrow,
+  .ms-graph-node-box {
+    transition: stroke 120ms ease, stroke-width 120ms ease, fill 120ms ease;
+  }
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The legend                                                                                       */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ms-space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--ms-font-size-xs);
+  color: var(--ms-color-text-secondary);
+}
+
+.ms-graph-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ms-space-xs);
+}
+
+.ms-graph-legend-swatch {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 10px;
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The table - the accessible form of the picture, and the only form on a narrow screen             */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-graph-row-link {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.ms-graph-row-link:hover .ms-collection-alias {
+  text-decoration: underline;
+}
+
+.ms-graph-row-arrow {
+  margin-right: var(--ms-space-xs);
+  color: var(--ms-color-text-muted);
+}
+
+.ms-graph-row-declared {
+  box-shadow: inset 3px 0 0 var(--ms-color-warning);
+}
+
+.ms-graph-row-physical {
+  box-shadow: inset 3px 0 0 var(--ms-color-info);
+}
+
+/*
+ * Below 900px the diagram goes away entirely and the table is the screen. A scaled-down SVG of
+ * twenty boxes on a phone is not a small diagram, it is an unreadable one - and the table says
+ * everything the picture does, which is why this is display: none and not a horizontal scroll.
+ */
+@media (max-width: 899px) {
+  .ms-graph {
+    display: none;
+  }
+
+  .ms-graph-legend {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Referenced by, on document detail                                                                */
+/* ---------------------------------------------------------------------------------------------- */
+
+.ms-referenced {
+  margin-top: var(--ms-space-md);
+}
+
+.ms-referenced-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ms-space-xs);
+  margin: var(--ms-space-sm) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ms-referenced-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ms-space-xs);
+  font-size: var(--ms-font-size-sm);
+}
+
+.ms-referenced-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ms-space-xs);
+  color: inherit;
+  text-decoration: none;
+}
+
+.ms-referenced-link:hover .ms-collection-alias {
+  text-decoration: underline;
+}
+
+.ms-referenced-count {
+  font-family: var(--ms-font-mono);
+  font-weight: var(--ms-font-weight-semibold);
+  color: var(--ms-color-text);
+}
+
+.ms-referenced-column {
+  color: var(--ms-color-text-muted);
+  font-size: var(--ms-font-size-xs);
+}

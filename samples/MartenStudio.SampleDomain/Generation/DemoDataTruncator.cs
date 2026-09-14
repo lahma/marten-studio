@@ -117,9 +117,10 @@ public sealed class DemoDataTruncator
     /// Three things here are not obvious. <c>Order</c> is hard-deleted rather than soft-deleted: the
     /// collection is configured <c>SoftDeleted()</c>, so the ordinary <c>DeleteWhere</c> would only set
     /// <c>mt_deleted</c> and leave a million rows in the table - the opposite of what "truncate" means.
-    /// It also goes first, in a transaction of its own, because it holds a foreign key to
-    /// <c>Customer</c>. And <c>Invoice</c> is conjoined multi-tenant, so it needs one session per
-    /// tenant; a session for one tenant cannot see, and therefore cannot delete, another tenant's rows.
+    /// <b>The order of the three batches is the dependency order</b>: <c>Order</c> and <c>Invoice</c>
+    /// both hold a foreign key to <c>Customer</c>, so both have to be gone before the customers are.
+    /// And <c>Invoice</c> is conjoined multi-tenant, so it needs one session per tenant; a session for
+    /// one tenant cannot see, and therefore cannot delete, another tenant's rows.
     /// </remarks>
     public async Task DeleteGeneratedDocumentsAsync(CancellationToken cancellationToken = default)
     {
@@ -136,6 +137,15 @@ public sealed class DemoDataTruncator
             await orders.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        // Invoices next, and before the customers for the same reason: Invoice declares a foreign key to
+        // Customer too, and deleting a customer an invoice still points at is the same 23503.
+        foreach (string tenantId in SampleStore.TenantIds)
+        {
+            await using IDocumentSession tenantSession = store.LightweightSession(tenantId);
+            tenantSession.DeleteWhere<Invoice>(static x => x.GeneratedRun != null);
+            await tenantSession.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         await using (IDocumentSession session = store.LightweightSession())
         {
             session.DeleteWhere<Customer>(static x => x.GeneratedRun != null);
@@ -145,13 +155,6 @@ public sealed class DemoDataTruncator
             session.DeleteWhere<MediaAsset>(static x => x.GeneratedRun != null);
 
             await session.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        foreach (string tenantId in SampleStore.TenantIds)
-        {
-            await using IDocumentSession tenantSession = store.LightweightSession(tenantId);
-            tenantSession.DeleteWhere<Invoice>(static x => x.GeneratedRun != null);
-            await tenantSession.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 

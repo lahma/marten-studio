@@ -1,0 +1,179 @@
+@page "/marten/relationships"
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Relationships
+@using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph
+@implements IDisposable
+@inject IRelationshipDataService RelationshipData
+@inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    The Relationships screen: one node per document type, one arrow per foreign key.
+
+    One read per navigation and no polling (D10 lists the pages that poll; this is not one of them). A
+    store's foreign keys change when somebody deploys a migration, not second by second, so a refresh
+    button is the honest affordance and a timer would be one more query per circuit per interval for a
+    picture that is the same every time.
+*@
+
+<PageTitle>Relationships</PageTitle>
+
+<div class="ms-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Relationships</h1>
+        <div class="ms-graph-actions">
+            @if (!loading && graph.ReadAt != DateTimeOffset.MinValue)
+            {
+                <span class="ms-graph-readat">Read @State.FormatInSelectedTimeZone(graph.ReadAt)</span>
+            }
+            <button type="button" class="ms-button" @onclick="LoadAsync" disabled="@loading">Refresh</button>
+        </div>
+    </div>
+
+    <p class="ms-schema-note">
+        Every foreign key between this store's document types, as <code>StoreOptions</code> declares them
+        and as Postgres actually has them. Counts are <code>pg_class</code> estimates; nothing on this
+        screen writes anything.
+    </p>
+
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (graph.Error is { Length: > 0 } error)
+    {
+        <ErrorAlert Message="@error" OnRetry="LoadAsync" />
+    }
+    else if (State.ActiveScope is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No Marten store to show</p>
+            <p class="ms-empty-description">
+                This application registered no Marten store that you are authorized to see.
+            </p>
+        </div>
+    }
+    else if (graph.IsEmpty)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No foreign keys are declared between the document types of this store</p>
+            <p class="ms-empty-description">
+                Marten declares one with
+                <code>opts.Schema.For&lt;Order&gt;().ForeignKey&lt;Customer&gt;(x =&gt; x.CustomerId)</code>,
+                which duplicates the member into its own column and puts a real constraint on it.
+            </p>
+        </div>
+    }
+    else
+    {
+        <RelationshipLegend />
+
+        <RelationshipGraph Model="@graph" HrefFor="@CollectionHref" />
+
+        <div class="ms-graph-table-panel">
+            <h2 class="ms-section-title">Relationships</h2>
+            <RelationshipTable Model="@graph" HrefFor="@CollectionHref" />
+        </div>
+
+        @if (graph.Unmatched.Count > 0)
+        {
+            <div class="ms-graph-unmatched">
+                <h2 class="ms-section-title">Not on the diagram</h2>
+                <p class="ms-schema-note">
+                    These foreign keys have an end that is not a document type of this store, so there is
+                    nothing to draw them between.
+                </p>
+                <table class="ms-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Constraint</th>
+                            <th scope="col">From</th>
+                            <th scope="col">Columns</th>
+                            <th scope="col">Points at</th>
+                            <th scope="col">Why</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (int i = 0; i < graph.Unmatched.Count; i++)
+                        {
+                            UnmatchedForeignKey key = graph.Unmatched[i];
+
+                            <tr class="ms-table-row" @key="i">
+                                <td class="ms-table-cell ms-table-cell-mono">@key.Name</td>
+                                <td class="ms-table-cell ms-table-cell-mono">@key.From</td>
+                                <td class="ms-table-cell ms-table-cell-mono">@key.Columns</td>
+                                <td class="ms-table-cell ms-table-cell-mono">@key.To</td>
+                                <td class="ms-table-cell">@key.Reason</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private GraphModel graph = GraphModel.None;
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+
+        // Idempotent, and normally already done by StudioLayout. Called here so the page also works when
+        // it is the only thing rendered, which is what a component test does.
+        await State.EnsureInitializedAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StudioScope? scope = State.ActiveScope;
+
+            graph = scope is null
+                ? GraphModel.None
+                : await RelationshipData.GetGraphAsync(scope, lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // The service answers with a value rather than throwing, so reaching here means something
+            // outside it did - the scope refusing to resolve, most likely. On the page either way: a
+            // failure the visitor cannot see is a page that silently shows nothing.
+            graph = GraphModel.Failed(exception.Message, DateTimeOffset.UtcNow);
+        }
+        finally
+        {
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// The link to a collection's list, scope and all. Built through <c>DocumentLinks</c> rather than by
+    /// hand: the scope travels in the query string (D9), and a diagram whose nodes dropped it would send
+    /// every click to the default store.
+    /// </summary>
+    private string CollectionHref(string alias) =>
+        DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias);
+
+    private async Task OnScopeChangedAsync() => await LoadAsync();
+
+    public void Dispose()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

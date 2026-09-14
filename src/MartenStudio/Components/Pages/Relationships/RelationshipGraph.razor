@@ -1,0 +1,177 @@
+@using MartenStudio.Internal.Sql
+@using MartenStudio.Services.Relationships
+@using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph
+
+@*
+    The foreign-key diagram, as inline SVG rendered by Blazor from a layout the server computed.
+
+    No library and no JavaScript. The layout is a pure function (GraphLayout), so the same store draws the
+    same picture in every session and in every process; everything interactive here is a link or a CSS
+    :hover / :focus-within rule, which is why the diagram survives a circuit that has lost its browser.
+
+    Accessibility: the <svg> is one image with a sentence for a name, and the nodes inside it are pointer
+    affordances rather than tab stops - the table beside it carries exactly the same relationships and the
+    same links as real, announced, focusable content. That is why the anchors here are tabindex="-1": an
+    element a keyboard can focus but a screen reader will not describe, because its container is
+    role="img", is worse than one it skips.
+
+    Arrowheads are drawn rather than referenced through <marker url(#id)>: see GraphLayout.Arrow for why a
+    fragment-only url() and the studio's <base href> do not get on.
+*@
+
+@if (Layout.Nodes.Count > 0)
+{
+<div class="ms-graph">
+    <svg class="ms-graph-svg"
+         viewBox="@Layout.ViewBox"
+         width="@Width"
+         height="@Height"
+         role="img"
+         aria-label="@Graph.Summary"
+         xmlns="http://www.w3.org/2000/svg">
+        <g class="ms-graph-edges">
+            @foreach (GraphEdgePath path in Layout.Edges)
+            {
+                <g class="ms-graph-edge @EdgeClass(Edge(path))" @key="path.Ordinal">
+                    <title>@Describe(Edge(path))</title>
+                    <path class="ms-graph-edge-hit" d="@path.Path" />
+                    <path class="ms-graph-edge-line" d="@path.Path" />
+                    @if (path.Arrow.Length > 0)
+                    {
+                        <path class="ms-graph-edge-arrow" d="@path.Arrow" />
+                    }
+                </g>
+            }
+        </g>
+        <g class="ms-graph-nodes">
+            @foreach (GraphNodeBox box in Layout.Nodes)
+            {
+                <a class="ms-graph-node"
+                   href="@HrefFor(box.Alias)"
+                   tabindex="-1"
+                   style="--ms-collection-hue: @Hue(box.Alias)"
+                   @key="box.Alias">
+                    <title>@Tooltip(box.Alias)</title>
+                    <rect class="ms-graph-node-box"
+                          x="@Number(box.X)" y="@Number(box.Y)"
+                          width="@Number(box.Width)" height="@Number(box.Height)"
+                          rx="8" ry="8" />
+                    <circle class="ms-graph-node-dot"
+                            cx="@Number(box.X + 15)" cy="@Number(box.Y + 21)" r="5" />
+                    <text class="ms-graph-node-alias" x="@Number(box.X + 28)" y="@Number(box.Y + 25)">@Truncate(box.Alias, 17)</text>
+                    <text class="ms-graph-node-type" x="@Number(box.X + 14)" y="@Number(box.Y + 42)">@Truncate(TypeNameOf(box.Alias), 22)</text>
+                    <text class="ms-graph-node-count" x="@Number(box.X + 14)" y="@Number(box.Y + 56)">@CountOf(box.Alias)</text>
+                </a>
+            }
+        </g>
+    </svg>
+</div>
+}
+
+@code {
+    /// <summary>
+    /// The graph, as a <c>RelationshipGraph</c>. Typed <see cref="object" /> for the reason
+    /// <see cref="MartenStudio.Components.Pages.Documents.DocumentComponentModel" /> records: the Razor
+    /// SDK emits every component as public, and a public parameter may not expose an internal type.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Builds the link to a collection's documents list.</summary>
+    [Parameter]
+    public Func<string, string> HrefFor { get; set; } = static _ => "#";
+
+    private GraphModel Graph => Model as GraphModel ?? GraphModel.None;
+
+    private GraphLayoutResult layout = GraphLayoutResult.Empty;
+
+    private Dictionary<string, RelationshipNode> nodes = [];
+
+    private GraphLayoutResult Layout => layout;
+
+    /// <summary>The intrinsic width, so the picture keeps its aspect ratio while it scales down.</summary>
+    private string Width => Number(layout.Width);
+
+    private string Height => Number(layout.Height);
+
+    protected override void OnParametersSet()
+    {
+        GraphModel graph = Graph;
+
+        nodes = new Dictionary<string, RelationshipNode>(StringComparer.OrdinalIgnoreCase);
+        foreach (RelationshipNode node in graph.Nodes)
+        {
+            nodes[node.Alias] = node;
+        }
+
+        List<string> aliases = [];
+        foreach (RelationshipNode node in graph.Nodes)
+        {
+            aliases.Add(node.Alias);
+        }
+
+        List<GraphLink> links = [];
+        foreach (RelationshipEdge edge in graph.Edges)
+        {
+            links.Add(new GraphLink(edge.FromAlias, edge.ToAlias));
+        }
+
+        layout = GraphLayout.Compute(aliases, links);
+    }
+
+    /// <summary>The edge a laid-out path came from. The ordinal is its index in the graph's own list.</summary>
+    private RelationshipEdge Edge(GraphEdgePath path) =>
+        path.Ordinal >= 0 && path.Ordinal < Graph.Edges.Count
+            ? Graph.Edges[path.Ordinal]
+            : new RelationshipEdge(path.FromAlias, path.ToAlias, string.Empty, null, false, false, "NoAction");
+
+    private static string EdgeClass(RelationshipEdge edge) => (edge.Declared, edge.Physical) switch
+    {
+        (true, true) => "ms-graph-edge-both",
+        (true, false) => "ms-graph-edge-declared",
+        (false, true) => "ms-graph-edge-physical",
+        _ => "ms-graph-edge-both",
+    };
+
+    private static string Describe(RelationshipEdge edge) =>
+        $"{edge.FromAlias}.{edge.Column} → {edge.ToAlias} ({edge.State}, on delete {edge.OnDelete})";
+
+    private int Hue(string alias) => nodes.TryGetValue(alias, out RelationshipNode? node) ? node.Hue : 210;
+
+    private string TypeNameOf(string alias) =>
+        nodes.TryGetValue(alias, out RelationshipNode? node) ? node.DisplayName : alias;
+
+    private string Tooltip(string alias) =>
+        nodes.TryGetValue(alias, out RelationshipNode? node)
+            ? $"{node.Alias} - {node.DisplayName}"
+            : alias;
+
+    /// <summary>
+    /// The node's row count, prefixed <c>~</c> because it is a <c>reltuples</c> estimate (D8). A table
+    /// Postgres has never analysed draws nothing at all rather than <c>~0</c>.
+    /// </summary>
+    private string CountOf(string alias)
+    {
+        if (!nodes.TryGetValue(alias, out RelationshipNode? node))
+        {
+            return string.Empty;
+        }
+
+        DocumentCount count = node.Count;
+
+        if (count.IsUnavailable)
+        {
+            return string.Empty;
+        }
+
+        string rows = count.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+
+        return (count.IsEstimate ? "~" : string.Empty) + rows + (count.Value == 1 ? " document" : " documents");
+    }
+
+    private static string Truncate(string value, int length) =>
+        value.Length <= length ? value : value[..Math.Max(length - 1, 1)] + "…";
+
+    private static string Number(double value) =>
+        value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+}

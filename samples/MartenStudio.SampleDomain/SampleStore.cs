@@ -54,8 +54,14 @@ public static class SampleStore
             .ForeignKey<Customer>(x => x.CustomerId)
             .UseOptimisticConcurrency(true);
 
+        // Conjoined multi-tenancy, and a foreign key from a conjoined type to a single-tenanted one -
+        // which Marten allows, and puts on the id column alone. It is the second edge of the demo's
+        // relationships graph, and the one that makes the "referenced by" count on a customer have to
+        // decide whose tenant's invoices it is counting: the predicate comes from the pointing
+        // collection's tenancy, not from the collection being pointed at.
         opts.Schema.For<Invoice>()
-            .MultiTenanted();
+            .MultiTenanted()
+            .ForeignKey<Customer>(x => x.CustomerId);
 
         // A hierarchy: one table, three .NET types, told apart by mt_doc_type. The subclasses are named
         // explicitly rather than discovered, because AddSubClassHierarchy() with no arguments scans the

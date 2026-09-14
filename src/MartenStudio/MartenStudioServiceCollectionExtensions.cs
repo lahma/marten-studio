@@ -9,6 +9,7 @@ using MartenStudio.Services.Events;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
+using MartenStudio.Services.Relationships;
 using MartenStudio.Services.Schema;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -145,6 +146,7 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<ISchemaDataService, SchemaDataService>();
         services.TryAddScoped<IConfigurationService, ConfigurationService>();
         services.TryAddScoped<IQueryService, QueryService>();
+        services.TryAddScoped<IRelationshipDataService, RelationshipDataService>();
 
         // Projections and the async daemon. The four singletons are process-wide on purpose: one
         // snapshot per interval however many circuits are watching, one tracker subscription per
