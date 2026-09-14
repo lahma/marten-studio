@@ -5706,3 +5706,9 @@ a.ms-event-chip:focus-visible {
     font-size: var(--ms-font-size-xs);
     width: 100%;
 }
+
+/* The rebuild dialog renders its scope table inside the shared confirm dialog (P5-fix); the
+   default 420px is too tight for a table list. */
+.ms-confirm-dialog:has(.ms-rebuild-scope) {
+    max-width: 44rem;
+}
