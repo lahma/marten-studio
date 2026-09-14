@@ -2,8 +2,10 @@ using Bunit;
 
 using MartenStudio.Components.Pages.Events;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Live;
 using MartenStudio.Tests.Components;
 
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 
 namespace MartenStudio.Tests.Events;
@@ -16,14 +18,14 @@ public class FeedTests
     [Fact]
     public async Task Every_filter_in_the_url_reaches_the_service()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.Shape = context.Data.Shape with { HasIsSkipped = true };
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Shape = context.EventData.Shape with { HasIsSkipped = true };
         context.Navigate(
             "marten/events/feed?types=OrderPlaced,OrderShipped&stream=abc&range=1h&archived=1&skipped=0&after=500");
 
         context.Render<Feed>();
 
-        EventFeedRequest request = context.Data.FeedRequests[^1];
+        EventFeedRequest request = context.EventData.FeedRequests[^1];
         request.EventTypes.Should().Equal("OrderPlaced", "OrderShipped");
         request.StreamId.Should().Be("abc");
         request.IncludeArchived.Should().BeTrue();
@@ -35,19 +37,19 @@ public class FeedTests
     [Fact]
     public async Task Skipped_events_are_included_by_default_because_leaving_them_out_hides_a_problem()
     {
-        using EventsComponentContext context = await NewContextAsync();
+        using StudioComponentContext context = await NewContextAsync();
 
         context.Render<Feed>();
 
-        context.Data.FeedRequests[^1].IncludeSkipped.Should().BeTrue();
-        context.Data.FeedRequests[^1].IncludeArchived.Should().BeFalse();
+        context.EventData.FeedRequests[^1].IncludeSkipped.Should().BeTrue();
+        context.EventData.FeedRequests[^1].IncludeArchived.Should().BeFalse();
     }
 
     [Fact]
     public async Task Each_card_links_to_its_stream_and_to_the_feed_filtered_to_its_type()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.Feed = new EventPage([FakeEventDataService.Event(7, streamId: "order-17")], 7, false);
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Feed = new EventPage([FakeEventDataService.Event(7, streamId: "order-17")], 7, false);
 
         IRenderedComponent<Feed> page = context.Render<Feed>();
 
@@ -59,8 +61,8 @@ public class FeedTests
     [Fact]
     public async Task A_binary_payload_is_reported_in_the_feed_too()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.Feed = new EventPage(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Feed = new EventPage(
             [FakeEventDataService.Event(7, json: null, hasBinary: true, binaryLength: 12)], 7, false);
 
         context.Render<Feed>().Find(".ms-event-binary").TextContent.Should().Contain("binary payload, 12 bytes");
@@ -69,8 +71,8 @@ public class FeedTests
     [Fact]
     public async Task The_older_link_carries_the_last_sequence_as_the_keyset_cursor()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.Feed = new EventPage(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Feed = new EventPage(
             [FakeEventDataService.Event(9), FakeEventDataService.Event(8)], 8, HasMore: true);
 
         IRenderedComponent<Feed> page = context.Render<Feed>();
@@ -83,7 +85,7 @@ public class FeedTests
     [Fact]
     public async Task Follow_is_unavailable_once_the_reader_has_paged_back()
     {
-        using EventsComponentContext context = await NewContextAsync();
+        using StudioComponentContext context = await NewContextAsync();
         context.Navigate("marten/events/feed?after=500&follow=1");
 
         IRenderedComponent<Feed> page = context.Render<Feed>();
@@ -95,7 +97,7 @@ public class FeedTests
     [Fact]
     public async Task Follow_off_says_so_and_polls_nothing()
     {
-        using EventsComponentContext context = await NewContextAsync();
+        using StudioComponentContext context = await NewContextAsync();
 
         IRenderedComponent<Feed> page = context.Render<Feed>();
 
@@ -110,16 +112,16 @@ public class FeedTests
     [Fact]
     public async Task Following_offers_new_events_as_a_pill_and_prepends_them_only_when_asked()
     {
-        using EventsComponentContext context = await NewContextAsync();
+        using StudioComponentContext context = await NewContextAsync();
 
         // A short interval so the test is about the behaviour rather than about waiting. Options
         // validation (one second minimum) runs in AddMartenStudio, which a component test does not use.
         context.Options.RefreshInterval = TimeSpan.FromMilliseconds(20);
 
-        context.Data.Feed = new EventPage([FakeEventDataService.Event(10)], 10, false);
-        context.Data.HighestSequences.Enqueue(10);
-        context.Data.HighestSequences.Enqueue(12);
-        context.Data.FeedDeltas.Enqueue(new EventPage(
+        context.EventData.Feed = new EventPage([FakeEventDataService.Event(10)], 10, false);
+        context.EventData.HighestSequences.Enqueue(10);
+        context.EventData.HighestSequences.Enqueue(12);
+        context.EventData.FeedDeltas.Enqueue(new EventPage(
             [FakeEventDataService.Event(12), FakeEventDataService.Event(11)], 11, false));
 
         context.Navigate("marten/events/feed?follow=1");
@@ -139,14 +141,14 @@ public class FeedTests
         page.FindAll(".ms-follow-pill").Should().BeEmpty();
 
         // The delta read asked for everything after the newest sequence the page already had.
-        context.Data.FeedRequests.Should().Contain(x => x.SinceSequence == 10);
+        context.EventData.FeedRequests.Should().Contain(x => x.SinceSequence == 10);
     }
 
     [Fact]
     public async Task A_failed_feed_read_renders_the_sql_state()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.Feed = EventPage.Failed(new EventDataError("cancelled", "57014", true));
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Feed = EventPage.Failed(new EventDataError("cancelled", "57014", true));
 
         context.Render<Feed>().Find(".ms-error-alert").TextContent.Should().Contain("[57014] cancelled");
     }
@@ -158,10 +160,10 @@ public class FeedTests
     [Fact]
     public async Task The_type_filter_offers_the_registered_types_and_the_ones_on_this_page()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.TypesWithoutCounts = new EventTypeList(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithoutCounts = new EventTypeList(
             [new EventTypeInfo("OrderPlaced", "X.OrderPlaced", true)], false);
-        context.Data.Feed = new EventPage([FakeEventDataService.Event(1, type: "LegacyThingHappened")], 1, false);
+        context.EventData.Feed = new EventPage([FakeEventDataService.Event(1, type: "LegacyThingHappened")], 1, false);
 
         IRenderedComponent<Feed> page = context.Render<Feed>();
 
@@ -172,11 +174,11 @@ public class FeedTests
     [Fact]
     public async Task The_skipped_switch_is_offered_only_where_the_store_records_skipped_events()
     {
-        using EventsComponentContext without = await NewContextAsync();
+        using StudioComponentContext without = await NewContextAsync();
         without.Render<Feed>().TextOfAll(".ms-event-filter-checkbox").Should().NotContain("Include skipped");
 
-        using EventsComponentContext with = await NewContextAsync();
-        with.Data.Shape = with.Data.Shape with { HasIsSkipped = true };
+        using StudioComponentContext with = await NewContextAsync();
+        with.EventData.Shape = with.EventData.Shape with { HasIsSkipped = true };
 
         with.Render<Feed>().TextOfAll(".ms-event-filter-checkbox").Should().Contain("Include skipped");
     }
@@ -189,13 +191,13 @@ public class FeedTests
     [Fact]
     public async Task The_pill_says_five_hundred_plus_once_the_buffer_has_had_to_drop_events()
     {
-        using EventsComponentContext context = await NewContextAsync();
+        using StudioComponentContext context = await NewContextAsync();
 
         context.Options.RefreshInterval = TimeSpan.FromMilliseconds(20);
 
-        context.Data.Feed = new EventPage([FakeEventDataService.Event(10)], 10, false);
-        context.Data.HighestSequences.Enqueue(10);
-        context.Data.HighestSequences.Enqueue(1_000);
+        context.EventData.Feed = new EventPage([FakeEventDataService.Event(10)], 10, false);
+        context.EventData.HighestSequences.Enqueue(10);
+        context.EventData.HighestSequences.Enqueue(1_000);
 
         // 501 is one more than the buffer holds: newest first, the way the builder returns them.
         List<EventRow> burst = [];
@@ -205,7 +207,7 @@ public class FeedTests
         }
 
         burst.Should().HaveCount(501);
-        context.Data.FeedDeltas.Enqueue(new EventPage(burst, 11, false));
+        context.EventData.FeedDeltas.Enqueue(new EventPage(burst, 11, false));
 
         context.Navigate("marten/events/feed?follow=1");
 
@@ -236,7 +238,9 @@ public class FeedTests
     {
         var js = new DisconnectingJsRuntime();
 
-        using var context = new EventsComponentContext(js);
+        // The runtime is registered through the shared context's configure hook, after bUnit's own and
+        // before anything resolves from the provider, so this one wins.
+        using var context = new StudioComponentContext(services => services.AddSingleton<IJSRuntime>(js));
         await context.ReadyAsync();
 
         // An empty feed on purpose. Every JSON body on the page brings a JsonView, whose own interop
@@ -245,8 +249,8 @@ public class FeedTests
         // for a reason that is not what it is about.
         IRenderedComponent<Feed> page = context.Render<Feed>();
 
-        js.DotNetReference.Should().BeOfType<DotNetObjectReference<Feed>>(
-            "the page watches the tab on its first render");
+        js.DotNetReference.Should().BeOfType<DotNetObjectReference<StudioLiveUpdates>>(
+            "the page's shared live-updates loop watches the tab on its first render");
 
         Func<Task> dispose = async () => await page.Instance.DisposeAsync();
 
@@ -259,8 +263,9 @@ public class FeedTests
         js.WatchToken.Should().NotBeNullOrWhiteSpace();
         js.UnwatchToken.Should().Be(js.WatchToken);
 
-        // A disposed DotNetObjectReference throws from Value; an undisposed one would answer the page.
-        var reference = (DotNetObjectReference<Feed>) js.DotNetReference!;
+        // A disposed DotNetObjectReference throws from Value; an undisposed one would answer the loop -
+        // and the loop holds the tick callback, which holds the component.
+        var reference = (DotNetObjectReference<StudioLiveUpdates>) js.DotNetReference!;
         Action read = () => _ = reference.Value;
         read.Should().Throw<ObjectDisposedException>("the reference must be released however interop went");
 
@@ -285,9 +290,9 @@ public class FeedTests
             .GetField("pageCancellation", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
             .GetValue(page)!;
 
-    private static async Task<EventsComponentContext> NewContextAsync()
+    private static async Task<StudioComponentContext> NewContextAsync()
     {
-        var context = new EventsComponentContext();
+        var context = new StudioComponentContext();
         await context.ReadyAsync();
         return context;
     }

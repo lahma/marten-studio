@@ -1,14 +1,287 @@
 @page "/marten"
+@using System.Globalization
 @using MartenStudio.Services
+@using MartenStudio.Services.Events
+@using MartenStudio.Services.Live
+@using MartenStudio.Services.Projections
+@using Microsoft.Extensions.Options
+@implements IAsyncDisposable
 @inject IStoreInfoService StoreInfo
+@inject IEventDataService Events
+@inject IProjectionDataService ProjectionData
+@inject StudioState State
+@inject StudioActionLog ActionLog
+@inject StudioAuthorization Authorization
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IOptions<MartenStudioOptions> Options
 
 <PageTitle>Overview</PageTitle>
 
-<div class="ms-page">
+<div class="ms-page ms-overview">
     <div class="ms-page-header">
         <h1 class="ms-page-title">Overview</h1>
+        <button type="button" class="ms-button ms-overview-refresh" @onclick="RefreshAsync">Refresh</button>
     </div>
 
+    @if (State.ActiveScope is not null)
+    {
+        @* ------------------------------------------------------------------------------------------
+           The tiles. Six numbers about the database the scope selector is pointed at, each linking to
+           the screen that explains it, each drawn from its own region so that one unreadable answer
+           does not blank the other five (plan section 4.8).
+           ------------------------------------------------------------------------------------------ *@
+        <div class="ms-stat-grid ms-overview-tiles">
+            <a class="ms-stat-link" href="@Link(EventLinks.StreamsRoute)">
+                <StatCard Title="Streams" Value="@counts.Streams.Display" Color="@CountColor(counts.Streams)" />
+            </a>
+
+            <a class="ms-stat-link" href="@Link(EventLinks.FeedRoute)">
+                <StatCard Title="Events" Value="@counts.Events.Display" Color="@CountColor(counts.Events)" />
+            </a>
+
+            <a class="ms-stat-link" href="@Link(ProjectionsRoute)">
+                <StatCard Title="High-water mark" Value="@HighWaterMarkValue" Color="@HighWaterMarkColor" />
+            </a>
+
+            <a class="ms-stat-link" href="@Link(ProjectionsRoute)">
+                <StatCard Title="Max projection lag" Value="@MaxLagValue" Color="@MaxLagColor" />
+            </a>
+
+            <a class="ms-stat-link" href="@Link(ProjectionsRoute)">
+                <StatCard Title="Daemon" Value="@DaemonValue" Color="@DaemonColor" />
+            </a>
+
+            <a class="ms-stat-link" href="@Link(EventLinks.DeadLettersRoute)">
+                <StatCard Title="Dead letters" Value="@DeadLetterValue" Color="@DeadLetterColor" />
+            </a>
+        </div>
+
+        @if (WorstShardName is { Length: > 0 } worst)
+        {
+            <p class="ms-muted ms-overview-worst">
+                The worst shard is <code>@worst</code>, @(projections.MaxLag.ToString("N0", CultureInfo.InvariantCulture))
+                events behind the high-water mark.
+            </p>
+        }
+
+        @if (countsRegion.Error is { Length: > 0 } countsError)
+        {
+            @* The tiles above already say "unknown"; this says why, and offers the retry. Everything
+               below is gated on the same answer, so a failure here is the one that has to be legible. *@
+            <ErrorAlert Message="@($"Marten Studio could not read this database's event tables: {countsError}")"
+                        OnRetry="RefreshAsync" />
+        }
+        else if (counts.Error is { } countsReadError)
+        {
+            <ErrorAlert Message="@countsReadError.Display" OnRetry="RefreshAsync" />
+        }
+        else if (!counts.TablesExist)
+        {
+            @* Nothing below this point has anything to read, and saying so is cheaper and more honest
+               than six tiles reading "unknown". It is also the reason the projection regions were never
+               asked: every Marten call that answers for projection progress opens with
+               EnsureStorageExistsAsync, and a landing page that created an event store because somebody
+               opened it is exactly what hard rule 14 exists to prevent. *@
+            <div class="ms-empty ms-overview-no-events">
+                <p class="ms-empty-title">This database has no event storage yet</p>
+                <p class="ms-empty-description">
+                    Nothing has appended an event, so there are no streams, no projection progress and no
+                    dead letters to report. The numbers appear on their own once the host's first append
+                    creates the tables.
+                </p>
+            </div>
+        }
+
+        @* ------------------------------------------------------------------------------------------
+           Projection health: the same rows the projections screen draws, in the same order - worst lag
+           first - so this is a prefix of that page rather than a second opinion about it.
+           ------------------------------------------------------------------------------------------ *@
+        @if (counts.TablesExist)
+        {
+            <section class="ms-section ms-overview-region ms-overview-projections">
+                <h2 class="ms-section-title">Projection health</h2>
+
+                @if (projectionsRegion.Error is { Length: > 0 } projectionError)
+                {
+                    <ErrorAlert Message="@projectionError" OnRetry="RefreshAsync" />
+                }
+                else if (projections.Error is { Length: > 0 } reported)
+                {
+                    <ErrorAlert Message="@reported" OnRetry="RefreshAsync" />
+                }
+                else if (projections.Progress.Count == 0)
+                {
+                    <div class="ms-empty">
+                        <p class="ms-empty-title">No async projection has any progress</p>
+                        <p class="ms-empty-description">
+                            @(projections.AsyncProjectionCount == 0
+                                ? "This store registers no async projection, so the daemon has nothing to run."
+                                : "The daemon has not written a progression row for any shard yet.")
+                        </p>
+                    </div>
+                }
+                else
+                {
+                    <table class="ms-table ms-overview-health">
+                        <thead>
+                            <tr>
+                                <th>Shard</th>
+                                <th>Sequence</th>
+                                <th>Lag</th>
+                                <th>State</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (ShardProgress shard in VisibleShards)
+                            {
+                                @* Keyed by the shard identity, which is unique and is not a value-equality
+                                   record: two shards with identical numbers must never share a key. *@
+                                <tr class="ms-table-row @SeverityClass(shard.Severity)" @key="shard.ShardName">
+                                    <td class="ms-table-cell ms-table-cell-mono">@shard.ShardName</td>
+                                    <td class="ms-table-cell ms-table-cell-mono">
+                                        @(shard.HasProgressRow
+                                            ? "#" + shard.Sequence.ToString("N0", CultureInfo.InvariantCulture)
+                                            : "never started")
+                                    </td>
+                                    <td class="ms-table-cell ms-table-cell-mono">@shard.Lag.ToString("N0", CultureInfo.InvariantCulture)</td>
+                                    <td class="ms-table-cell">@ShardState(shard)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+
+                    @if (projections.Progress.Count > MaxShardsShown)
+                    {
+                        <p class="ms-muted">
+                            <a href="@Link(ProjectionsRoute)">
+                                @((projections.Progress.Count - MaxShardsShown).ToString(CultureInfo.InvariantCulture))
+                                more on the projections screen
+                            </a>
+                        </p>
+                    }
+                }
+            </section>
+
+            @* ------------------------------------------------------------------------------------
+               Recent activity: what the store did, and what people did to it through the studio.
+               ------------------------------------------------------------------------------------ *@
+            <div class="ms-overview-columns">
+                <section class="ms-section ms-overview-region ms-overview-events">
+                    <h2 class="ms-section-title">Latest events</h2>
+
+                    @if (eventsRegion.Error is { Length: > 0 } eventsError)
+                    {
+                        <ErrorAlert Message="@eventsError" OnRetry="RefreshAsync" />
+                    }
+                    else if (recentEvents.Error is { } feedError)
+                    {
+                        <ErrorAlert Message="@feedError.Display" OnRetry="RefreshAsync" />
+                    }
+                    else if (recentEvents.Rows.Count == 0)
+                    {
+                        <p class="ms-muted">No event has been appended to this database.</p>
+                    }
+                    else
+                    {
+                        <ul class="ms-overview-list">
+                            @foreach (EventRow row in recentEvents.Rows)
+                            {
+                                <li class="ms-overview-list-item" @key="row.Sequence">
+                                    <span class="ms-overview-list-seq ms-mono">#@row.Sequence.ToString(CultureInfo.InvariantCulture)</span>
+                                    <a class="ms-overview-list-name" href="@TypeHref(row.EventType)">@row.EventType</a>
+                                    <a class="ms-overview-list-stream ms-mono ms-truncate" href="@StreamHref(row.StreamId)" title="@row.StreamId">@row.StreamId</a>
+                                    <TimeAgo Timestamp="row.Timestamp" />
+                                </li>
+                            }
+                        </ul>
+
+                        <p class="ms-muted">
+                            <a href="@Link(EventLinks.FeedRoute)">Open the feed</a>
+                        </p>
+                    }
+                </section>
+
+                <section class="ms-section ms-overview-region ms-overview-activity">
+                    <h2 class="ms-section-title">Recent studio activity</h2>
+
+                    @if (activityRegion.Error is { Length: > 0 } activityError)
+                    {
+                        <ErrorAlert Message="@activityError" OnRetry="RefreshAsync" />
+                    }
+                    else if (activity.Count == 0)
+                    {
+                        <p class="ms-muted">
+                            No one has changed anything through Marten Studio since this process started.
+                        </p>
+                    }
+                    else
+                    {
+                        <ul class="ms-overview-list">
+                            @foreach (StudioActionLogEntry entry in activity)
+                            {
+                                @* Keyed by the ring's own sequence number: the entry is a value-equality
+                                   record, and two identical actions a second apart would collide. *@
+                                <li class="ms-overview-list-item" @key="entry.Sequence">
+                                    <span class="ms-state-indicator">
+                                        <span class="ms-state-dot @(entry.Succeeded ? "ms-state-success" : "ms-state-error")" aria-hidden="true"></span>
+                                    </span>
+                                    <span class="ms-overview-list-name">@entry.Action</span>
+                                    <span class="ms-overview-list-stream ms-mono ms-truncate" title="@entry.Target">@entry.Target</span>
+                                    <TimeAgo Timestamp="entry.Timestamp" />
+                                </li>
+                            }
+                        </ul>
+
+                        <p class="ms-muted">
+                            <a href="@Link(ActivityRoute)">Open the activity log</a>
+                        </p>
+                    }
+                </section>
+            </div>
+
+            @* ------------------------------------------------------------------------------------
+               The streams panel names itself from the store's append mode, because the column it is
+               ordered by only means "last appended to" on a Quick store (ledger item; verified against
+               Marten 9.35).
+               ------------------------------------------------------------------------------------ *@
+            <section class="ms-section ms-overview-region ms-overview-streams">
+                <h2 class="ms-section-title">@recentStreams.Heading</h2>
+                <p class="ms-muted ms-overview-streams-note">@recentStreams.Explanation</p>
+
+                @if (streamsRegion.Error is { Length: > 0 } streamsError)
+                {
+                    <ErrorAlert Message="@streamsError" OnRetry="RefreshAsync" />
+                }
+                else if (recentStreams.Error is { } streamReadError)
+                {
+                    <ErrorAlert Message="@streamReadError.Display" OnRetry="RefreshAsync" />
+                }
+                else if (recentStreams.Rows.Count == 0)
+                {
+                    <p class="ms-muted">This database has no streams.</p>
+                }
+                else
+                {
+                    <ul class="ms-overview-list">
+                        @foreach (StreamRow stream in recentStreams.Rows)
+                        {
+                            <li class="ms-overview-list-item" @key="stream.Id">
+                                <a class="ms-overview-list-stream ms-mono ms-truncate" href="@StreamHref(stream.Id)" title="@stream.Id">@stream.Id</a>
+                                <span class="ms-overview-list-name">@(stream.AggregateType ?? "no aggregate type")</span>
+                                <span class="ms-mono">v@stream.Version.ToString(CultureInfo.InvariantCulture)</span>
+                                <TimeAgo Timestamp="stream.LastEvent" />
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+        }
+    }
+
+    @* ----------------------------------------------------------------------------------------------
+       Everything below is about the stores this application registered, rather than about the one
+       database the scope selector is pointed at, and it loads on its own.
+       ---------------------------------------------------------------------------------------------- *@
     @if (loading)
     {
         <LoadingSpinner />
@@ -32,7 +305,7 @@
     {
         @foreach (StoreOverview store in overview.Stores)
         {
-            <section class="ms-section" @key="store.Key">
+            <section class="ms-section ms-overview-store" @key="store.Key">
                 <h2 class="ms-section-title">
                     @store.DisplayName
                     <code class="ms-section-key">@store.Key</code>
@@ -113,23 +386,229 @@
 </div>
 
 @code {
+    /// <summary>The route of the projections screen, relative to the studio root.</summary>
+    private const string ProjectionsRoute = "projections";
+
+    /// <summary>The route of the activity log, relative to the studio root.</summary>
+    private const string ActivityRoute = "activity";
+
+    /// <summary>How many shards the health table shows before it points at the projections screen.</summary>
+    private const int MaxShardsShown = 8;
+
+    /// <summary>How many rows each "recent" list holds.</summary>
+    private const int RecentCount = 15;
+
+    /// <summary>How many streams the newest-streams panel holds.</summary>
+    private const int RecentStreamCount = 8;
+
+    /// <summary>What the daemon tile says when no coordinator is registered here.</summary>
+    private const string NotHostedHere = "not hosted in this process";
+
+    private readonly CancellationTokenSource pageCancellation = new();
+
+    private PageRegion countsRegion = null!;
+    private PageRegion projectionsRegion = null!;
+    private PageRegion deadLettersRegion = null!;
+    private PageRegion eventsRegion = null!;
+    private PageRegion streamsRegion = null!;
+    private PageRegion activityRegion = null!;
+
+    /// <summary>
+    /// This page's polling loop, built rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// <c>StudioLiveUpdates</c> is <c>IAsyncDisposable</c>, and a transient registration would leave the
+    /// circuit's container holding one per page visit for the life of the circuit. The page owns the loop
+    /// it creates, and the page disposes it.
+    /// </remarks>
+    private StudioLiveUpdates? live;
+
     private StudioOverview? overview;
+    private EventStoreCounts counts = EventStoreCounts.Unknown;
+    private ProjectionSummary projections = EmptySummary;
+    private EventPage recentEvents = EventPage.Empty;
+    private RecentStreams recentStreams = RecentStreams.Empty;
+    private List<StudioActionLogEntry> activity = [];
+    private long? deadLetters;
+
     private bool loading = true;
+    private bool started;
+    private bool disposed;
     private string? loadError;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    /// <summary>What the projection tiles show before anything has been read.</summary>
+    private static ProjectionSummary EmptySummary { get; } = new(
+        0, 0, 0, null, 0, 0,
+        new DaemonStatus(DaemonHostingState.NotHostedInThisProcess, false, "Unknown", [], false, null, "Nothing has been read yet."),
+        null);
+
+    private string? WorstShardName => projections.MaxLag > 0 ? projections.WorstShardName : null;
+
+    private IEnumerable<ShardProgress> VisibleShards => projections.Progress.Take(MaxShardsShown);
+
+    private string HighWaterMarkValue => projectionsRegion.Error is not null || projections.Error is not null
+        ? "unknown"
+        : "#" + projections.HighWaterMark.ToString("N0", CultureInfo.InvariantCulture);
+
+    private string HighWaterMarkColor => HighWaterMarkValue == "unknown" ? "warning" : "info";
+
+    private string MaxLagValue => projectionsRegion.Error is not null || projections.Error is not null
+        ? "unknown"
+        : projections.MaxLag.ToString("N0", CultureInfo.InvariantCulture);
+
+    private string MaxLagColor => MaxLagValue == "unknown"
+        ? "warning"
+        : projections.Severity switch
+        {
+            LagSeverity.Critical => "danger",
+            LagSeverity.Warning => "warning",
+            _ => "success",
+        };
+
+    /// <summary>
+    /// What the daemon tile says.
+    /// </summary>
+    /// <remarks>
+    /// "Not hosted in this process" is a value and not a fault (hard rule 11): an application whose
+    /// daemon runs elsewhere is a supported deployment, and a tile that coloured it red would be telling
+    /// an operator to fix something that is not broken.
+    /// </remarks>
+    private string DaemonValue
+    {
+        get
+        {
+            if (projectionsRegion.Error is not null || projections.Error is not null)
+            {
+                return "unknown";
+            }
+
+            if (!projections.Daemon.IsHostedHere)
+            {
+                return NotHostedHere;
+            }
+
+            if (projections.PausedCount > 0)
+            {
+                return "paused (" + projections.PausedCount.ToString(CultureInfo.InvariantCulture) + ")";
+            }
+
+            return projections.Daemon.IsRunning ? "running" : "stopped";
+        }
+    }
+
+    private string DaemonColor => DaemonValue switch
+    {
+        "unknown" => "warning",
+        NotHostedHere => "info",
+        "running" => "success",
+        _ => "warning",
+    };
+
+    private string DeadLetterValue => deadLettersRegion.Error is not null || deadLetters is null
+        ? "unknown"
+        : deadLetters.Value.ToString("N0", CultureInfo.InvariantCulture);
+
+    private string DeadLetterColor => DeadLetterValue switch
+    {
+        "unknown" => "warning",
+        _ => deadLetters > 0 ? "danger" : "success",
+    };
+
+    private static string CountColor(EventStoreCount count) => count.Value is null ? "warning" : "info";
+
+    private static string SeverityClass(LagSeverity severity) => severity switch
+    {
+        LagSeverity.Critical => "ms-row-danger",
+        LagSeverity.Warning => "ms-row-warning",
+        _ => string.Empty,
+    };
+
+    private static string ShardState(ShardProgress shard)
+    {
+        if (shard.HasFailed)
+        {
+            return shard.Failure ?? "failed";
+        }
+
+        if (shard.IsPaused)
+        {
+            return shard.PauseReason is { Length: > 0 } reason ? "paused: " + reason : "paused";
+        }
+
+        return shard.AgentStatus is { Length: > 0 } status ? status : "no agent reporting";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        countsRegion = new PageRegion(pageCancellation.Token);
+        projectionsRegion = new PageRegion(pageCancellation.Token);
+        deadLettersRegion = new PageRegion(pageCancellation.Token);
+        eventsRegion = new PageRegion(pageCancellation.Token);
+        streamsRegion = new PageRegion(pageCancellation.Token);
+        activityRegion = new PageRegion(pageCancellation.Token);
+
+        State.ScopeChanged += OnScopeChangedAsync;
+
+        await LoadAsync();
+        await LoadScopeRegionsAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || started || disposed)
+        {
+            return;
+        }
+
+        started = true;
+
+        live = LiveFactory.Create();
+
+        // No Failed handler: every region already keeps its own failure as a value and renders it, so a
+        // page-wide error banner would be a second, less precise copy of what is already on screen.
+        await live.StartAsync(Options.Value.RefreshInterval, TickAsync, pageCancellation.Token);
+    }
+
+    /// <summary>
+    /// One poll. Only the scope's regions: what stores this application registered does not change while
+    /// somebody is looking at the page, and re-reading it would open a connection per store per interval.
+    /// </summary>
+    /// <remarks>
+    /// The loop's token is ignored on purpose - each region carries its own, linked to the page's, which
+    /// is what keeps one region's cancellation out of the other five.
+    /// </remarks>
+    private async Task TickAsync(CancellationToken _)
+    {
+        await LoadScopeRegionsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshAsync()
+    {
+        await LoadAsync();
+        await LoadScopeRegionsAsync();
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        await LoadScopeRegionsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
 
     private async Task LoadAsync()
     {
-        loading = true;
+        loading = overview is null;
         loadError = null;
         StateHasChanged();
 
         try
         {
-            overview = await StoreInfo.GetOverviewAsync();
+            overview = await StoreInfo.GetOverviewAsync(pageCancellation.Token);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
         {
             // On the page rather than in the log only: a failure the visitor cannot see is a page that
             // silently shows nothing.
@@ -139,5 +618,169 @@
         {
             loading = false;
         }
+    }
+
+    /// <summary>
+    /// Reads the six regions that are about the database the scope selector is pointed at.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Sequential and not parallel, deliberately: everything here goes through the circuit's own scoped
+    /// services and a single Marten store, and fanning six reads out would buy a fraction of a second at
+    /// the cost of six concurrent connections per visitor per interval.
+    /// </para>
+    /// <para>
+    /// <b>The event-store regions are gated on the tables existing.</b> Every Marten call that answers for
+    /// projection progress or the high-water mark opens with <c>EnsureStorageExistsAsync(typeof(IEvent))</c>,
+    /// which applies the event store's migration under the database's own <c>AutoCreate</c> before it
+    /// reads anything. The studio's landing page must not be able to create an event store because
+    /// somebody opened it (hard rule 14), so the cheap <c>information_schema</c> answer
+    /// (<see cref="EventStoreCounts.TablesExist" />) is asked first and the rest is only asked when there
+    /// is already something to read.
+    /// </para>
+    /// </remarks>
+    private async Task LoadScopeRegionsAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
+
+        await countsRegion.RunAsync(async token => counts = await Events.GetEventStoreCountsAsync(scope, token));
+
+        await activityRegion.RunAsync(async token => activity = await ReadActivityAsync(token));
+
+        if (!counts.TablesExist)
+        {
+            projections = EmptySummary;
+            recentEvents = EventPage.Empty;
+            recentStreams = RecentStreams.Empty;
+            deadLetters = 0;
+            return;
+        }
+
+        await projectionsRegion.RunAsync(async token => projections = await ProjectionData.GetSummaryAsync(scope, token));
+
+        await deadLettersRegion.RunAsync(async token => deadLetters = await Events.CountDeadLettersAsync(scope, token));
+
+        await eventsRegion.RunAsync(async token => recentEvents = await Events.GetFeedAsync(
+            scope,
+            new EventFeedRequest { PageSize = RecentCount, IncludeArchived = false, IncludeSkipped = true },
+            token));
+
+        await streamsRegion.RunAsync(async token =>
+            recentStreams = await Events.GetRecentStreamsAsync(scope, RecentStreamCount, token));
+    }
+
+    /// <summary>
+    /// The audit ring, filtered exactly as the Activity screen filters it.
+    /// </summary>
+    /// <remarks>
+    /// The ring is process-wide and every circuit writes into it, so it is the one place in the studio
+    /// where one visitor's actions can be read by another. The per-store policy decides entry by entry,
+    /// against the store, database and tenant the action was aimed at.
+    /// </remarks>
+    private async Task<List<StudioActionLogEntry>> ReadActivityAsync(CancellationToken cancellationToken)
+    {
+        IReadOnlyList<StudioActionLogEntry> entries = ActionLog.GetLatest();
+
+        List<StudioActionLogEntry> allowed = await Authorization.FilterAsync(
+            entries,
+            static entry => new StudioScope(entry.StoreKey, entry.DatabaseId, entry.TenantId));
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return allowed.Count <= RecentCount ? allowed : [.. allowed.Take(RecentCount)];
+    }
+
+    private string Link(string route) => EventLinks.To(Options.Value, route, State.ActiveScope);
+
+    private string StreamHref(string streamId) => EventLinks.ToStream(Options.Value, State.ActiveScope, streamId);
+
+    private string TypeHref(string eventType) => EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            // Idempotent: Blazor disposes a component once and a test context disposes it again, and
+            // cancelling a disposed CancellationTokenSource throws.
+            return;
+        }
+
+        disposed = true;
+
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            try
+            {
+                await pageCancellation.CancelAsync();
+            }
+            finally
+            {
+                countsRegion?.Dispose();
+                projectionsRegion?.Dispose();
+                deadLettersRegion?.Dispose();
+                eventsRegion?.Dispose();
+                streamsRegion?.Dispose();
+                activityRegion?.Dispose();
+
+                pageCancellation.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// One independently loading part of the page: its own cancellation and its own failure.
+    /// </summary>
+    /// <remarks>
+    /// The point of the separate <see cref="CancellationTokenSource" /> is isolation rather than
+    /// cancellation. The Overview asks six different services six different questions, and a database
+    /// that refuses one of them - a statement timeout on the events count, say - must take out that tile
+    /// and nothing else. A single shared token would let one region's cancellation end the others
+    /// mid-read; a single shared error string would blank the page for one unreadable number.
+    /// </remarks>
+    private sealed class PageRegion : IDisposable
+    {
+        private readonly CancellationTokenSource cancellation;
+
+        public PageRegion(CancellationToken pageToken) =>
+            cancellation = CancellationTokenSource.CreateLinkedTokenSource(pageToken);
+
+        /// <summary>What went wrong the last time this region was read, or <see langword="null" />.</summary>
+        public string? Error { get; private set; }
+
+        /// <summary>Runs one read, and keeps its failure rather than raising it.</summary>
+        public async Task RunAsync(Func<CancellationToken, Task> read)
+        {
+            try
+            {
+                await read(cancellation.Token);
+                Error = null;
+            }
+            catch (OperationCanceledException)
+            {
+                // The page went away, or this region was cancelled. Neither is worth rendering.
+            }
+            catch (Exception exception)
+            {
+                Error = exception.Message;
+            }
+        }
+
+        public void Dispose() => cancellation.Dispose();
     }
 }

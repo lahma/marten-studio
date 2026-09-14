@@ -160,6 +160,10 @@ public static partial class MartenStudioServiceCollectionExtensions
         // life of the circuit. The page owns the loop it creates.
         services.TryAddScoped<StudioLiveUpdatesFactory>();
 
+        // The sidebar's badges. Scoped like the pages they point at, and reading through the same
+        // services, so a badge is subject to the same store, database and tenant policies as the screen.
+        services.TryAddScoped<INavIndicatorService, NavIndicatorService>();
+
         return services;
     }
 

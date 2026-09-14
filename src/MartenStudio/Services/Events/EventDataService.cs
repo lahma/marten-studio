@@ -9,6 +9,7 @@ using Marten.Services;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -42,10 +43,12 @@ namespace MartenStudio.Services.Events;
 /// other page alone (plan §4.8).
 /// </para>
 /// <para>
-/// <b>No daemon is touched here.</b> The Events screens read the database; whether a daemon is running in
-/// this process is a question for the projections page, and its absence is a value rather than an error.
-/// That is also why "Rewind subscription to this event" is not among the dead-letter actions in this
-/// release - rewinding needs a live daemon.
+/// <b>Exactly one call here touches a daemon.</b> Every read goes to the database, and whether a daemon
+/// runs in this process is a question the projections page answers; its absence is a value rather than an
+/// error. <see cref="RewindSubscriptionAsync" /> is the exception, because rewinding a subscription is
+/// something only a running daemon can be asked to do - and it asks through
+/// <see cref="MartenStudio.Services.Projections.DaemonAccessor" />, which finds the coordinator the host
+/// registered and never builds a second daemon (hard rule 11).
 /// </para>
 /// </remarks>
 internal sealed class EventDataService : IEventDataService
@@ -59,15 +62,23 @@ internal sealed class EventDataService : IEventDataService
     /// <summary>The action name for marking an event skipped.</summary>
     internal const string SkipEventAction = "Skip event";
 
+    /// <summary>The action name for rewinding a subscription to a dead letter's event.</summary>
+    internal const string RewindSubscriptionAction = "Rewind subscription";
+
     /// <summary>The most dead letters one page will read, however large a page is asked for.</summary>
     private const int MaxDeadLetterPageSize = 200;
 
     /// <summary>The most event types the screen will list.</summary>
     private const int MaxEventTypes = 2_000;
 
+    /// <summary>The most streams the Overview's panel will read, however many it asks for.</summary>
+    private const int MaxRecentStreams = 50;
+
     private readonly StudioScopeResolver resolver;
     private readonly StudioCapabilityGuard capabilities;
     private readonly StudioActionLog audit;
+    private readonly StudioAuthorization authorization;
+    private readonly DaemonAccessor daemons;
     private readonly ColumnCatalog catalog;
     private readonly IOptions<MartenStudioOptions> options;
     private readonly ILogger<EventDataService> logger;
@@ -76,6 +87,8 @@ internal sealed class EventDataService : IEventDataService
         StudioScopeResolver resolver,
         StudioCapabilityGuard capabilities,
         StudioActionLog audit,
+        StudioAuthorization authorization,
+        DaemonAccessor daemons,
         ColumnCatalog catalog,
         IOptions<MartenStudioOptions> options,
         ILogger<EventDataService> logger)
@@ -83,6 +96,8 @@ internal sealed class EventDataService : IEventDataService
         this.resolver = resolver;
         this.capabilities = capabilities;
         this.audit = audit;
+        this.authorization = authorization;
+        this.daemons = daemons;
         this.catalog = catalog;
         this.options = options;
         this.logger = logger;
@@ -403,6 +418,102 @@ internal sealed class EventDataService : IEventDataService
         {
             logger.LogDebug(exception, "Marten Studio could not read the highest event sequence");
             return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<EventStoreCounts> GetEventStoreCountsAsync(
+        StudioScope scope,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        try
+        {
+            ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+            await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+            EventTableInfo table = await DescribeTablesAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
+
+            if (table.EventColumns.Count == 0 || table.StreamColumns.Count == 0)
+            {
+                return EventStoreCounts.NoEventStorage;
+            }
+
+            var estimator = new CountEstimator { CommandTimeoutSeconds = CommandTimeoutSeconds };
+
+            DocumentCount streams = await estimator
+                .CountAsync(connection, table.Schema, EventTableInfo.StreamsTable, cancellationToken)
+                .ConfigureAwait(false);
+            DocumentCount events = await estimator
+                .CountAsync(connection, table.Schema, EventTableInfo.EventsTable, cancellationToken)
+                .ConfigureAwait(false);
+
+            return new EventStoreCounts(Convert(streams), Convert(events), TablesExist: true, Error: null);
+        }
+        catch (Exception exception) when (IsReadFailure(exception))
+        {
+            return EventStoreCounts.Failed(Describe(exception, "count the event store"));
+        }
+
+        static EventStoreCount Convert(DocumentCount count) => count switch
+        {
+            { IsUnavailable: true } => EventStoreCount.Unknown,
+            { IsEstimate: true } => EventStoreCount.Estimate(count.Value),
+            _ => EventStoreCount.Exact(count.Value),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<RecentStreams> GetRecentStreamsAsync(
+        StudioScope scope,
+        int take,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        try
+        {
+            ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+            // Read off the store's own configuration, not guessed: it is the fact that decides whether
+            // mt_streams.timestamp means "created" or "last appended to", and therefore what the panel
+            // above these rows may honestly be called.
+            EventAppendMode appendMode = resolved.Store.Options.Events.AppendMode;
+
+            await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+            EventTableInfo table = await DescribeTablesAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
+
+            if (table.StreamColumns.Count == 0)
+            {
+                return new RecentStreams([], appendMode, null);
+            }
+
+            await using NpgsqlCommand command = EventQueryBuilder.BuildRecentlyActiveStreams(
+                table,
+                Math.Clamp(take, 1, MaxRecentStreams),
+                resolved.TenantId,
+                options.Value.QueryTimeout);
+
+            command.Connection = connection;
+
+            List<StreamRow> rows = [];
+            await using (NpgsqlDataReader reader = await command
+                .ExecuteReaderAsync(CommandBehavior.SingleResult, cancellationToken).ConfigureAwait(false))
+            {
+                ColumnMap columns = ColumnMap.From(reader);
+
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    rows.Add(ReadStreamRow(reader, columns));
+                }
+            }
+
+            return new RecentStreams(rows, appendMode, null);
+        }
+        catch (Exception exception) when (IsReadFailure(exception))
+        {
+            return RecentStreams.Failed(Describe(exception, "read the newest streams"));
         }
     }
 
@@ -974,6 +1085,116 @@ internal sealed class EventDataService : IEventDataService
                 return "marked as skipped";
             },
             cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task RewindSubscriptionAsync(
+        StudioScope scope,
+        string projectionName,
+        long eventSequence,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectionName);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(eventSequence);
+
+        await MutateAsync(
+            scope,
+            StudioCapability.ManageDeadLetters,
+            RewindSubscriptionAction,
+            projectionName + " to #" + eventSequence.ToString(CultureInfo.InvariantCulture),
+            async (resolved, token) =>
+            {
+                // Hard rule 15: the sequence arrives from a dead-letter row, which Marten registers
+                // SingleTenanted, and the rewind reaches an API that applies no tenant predicate of its
+                // own. So a visitor scoped to one tenant has to be shown to be able to see the event
+                // before it is used, exactly as Skip event does - and the refusal says nothing about
+                // whose event it is (D5).
+                await using (NpgsqlConnection connection = await OpenAsync(resolved, token).ConfigureAwait(false))
+                {
+                    EventTableInfo table = await DescribeTablesAsync(resolved, connection, token).ConfigureAwait(false);
+
+                    if (table.HasTenantId && resolved.TenantId is not null)
+                    {
+                        await using NpgsqlCommand lookup =
+                            EventQueryBuilder.BuildEventBySequence(table, eventSequence, resolved.TenantId);
+
+                        lookup.Connection = connection;
+                        lookup.CommandTimeout = CommandTimeoutSeconds;
+
+                        List<EventRow> found = await ReadEventsAsync(lookup, table, token).ConfigureAwait(false);
+
+                        if (found.Count == 0)
+                        {
+                            throw new StudioNotAuthorizedException(resolved.Scope);
+                        }
+                    }
+                }
+
+                // Only ever the coordinator the host registered (hard rule 11). "Not hosted here" is a
+                // value the page renders, and this refuses regardless of what was rendered (hard rule 5).
+                DaemonHosting hosting = await daemons.ForScopeAsync(resolved, token).ConfigureAwait(false);
+                if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
+                {
+                    throw new StudioDaemonNotHostedException(hosting.Explanation);
+                }
+
+                string user = await authorization.UserNameAsync().ConfigureAwait(false);
+                logger.DaemonControlRequested(
+                    user,
+                    RewindSubscriptionAction,
+                    projectionName,
+                    resolved.Registration.Key,
+                    resolved.Database.Id.Identity);
+
+                long floor = RewindFloor(eventSequence);
+
+                await RewindToFloorAsync(daemon, projectionName, floor, token).ConfigureAwait(false);
+
+                return floor == 0
+                    ? "progression row removed, so the subscription replays from the first event"
+                    : $"progression set to #{floor.ToString(CultureInfo.InvariantCulture)}, so event "
+                        + $"#{eventSequence.ToString(CultureInfo.InvariantCulture)} and everything after it is re-applied";
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The floor a rewind is given so that <paramref name="eventSequence" /> is itself re-applied.
+    /// </summary>
+    /// <remarks>
+    /// One below, and the off-by-one is the whole point. Marten's
+    /// <c>RewindSubscriptionProgressAsync</c> writes the floor into <c>mt_event_progression.last_seq_id</c>,
+    /// which records the last sequence the shard has <em>already</em> processed, and the restarted agent
+    /// then asks for events strictly after it. Handing it the dead letter's own sequence would rewind the
+    /// shard to just past the event the visitor is trying to replay - the one thing the button must not
+    /// do. A floor of zero is Marten's "delete the progression row", which replays the projection from the
+    /// first event; that is the right answer when the poison event is #1.
+    /// </remarks>
+    /// <param name="eventSequence">The sequence to re-apply.</param>
+    internal static long RewindFloor(long eventSequence) => Math.Max(0, eventSequence - 1);
+
+    /// <summary>
+    /// The one call that rewinds a subscription, and the only place the argument order is chosen.
+    /// </summary>
+    /// <remarks>
+    /// <c>RewindSubscriptionAsync(string subscriptionName, CancellationToken token, long? sequenceFloor,
+    /// DateTimeOffset? timestamp)</c> - the token is the <em>second</em> parameter, not the last, and
+    /// both of the interesting arguments are optional and nullable (verified against JasperFx.Events
+    /// 2.69.3). A call written in the usual order would compile and silently mean
+    /// <c>sequenceFloor: 0</c>, which is a full replay of the projection rather than a rewind to one
+    /// event. There is also a five-argument overload that takes a tenant id; its default implementation
+    /// throws for a non-null tenant, and projection progression is per shard rather than per tenant, so
+    /// the studio uses the store-global one and the dialog says so.
+    /// </remarks>
+    internal static Task RewindToFloorAsync(
+        IProjectionDaemon daemon,
+        string projectionName,
+        long sequenceFloor,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(daemon);
+        return daemon.RewindSubscriptionAsync(projectionName, cancellationToken, sequenceFloor);
     }
 
     /// <summary>

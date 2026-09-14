@@ -9,6 +9,7 @@
 @inject StudioState State
 @inject NavigationManager Navigation
 @inject IJSRuntime JsRuntime
+@inject StudioLiveUpdatesFactory LiveFactory
 @inject IOptions<MartenStudioOptions> Options
 
 <PageTitle>Event feed</PageTitle>
@@ -144,28 +145,34 @@
     private readonly List<EventRow> pending = [];
 
     /// <summary>
-    /// What the browser-side watcher list is keyed on for this page.
+    /// This page's polling loop, built rather than injected.
     /// </summary>
     /// <remarks>
-    /// Not the <see cref="DotNetObjectReference{TValue}" />: Blazor marshals one as an id and the browser
-    /// materialises a fresh JS wrapper for every call, so the object that reaches <c>unwatch</c> is never
-    /// the object that reached <c>watch</c>. Keyed on a reference, <c>unwatch</c> removed nothing and the
-    /// document listener stayed attached for the life of the page. A string generated here survives the
-    /// round trip unchanged - the same token <c>StudioLiveUpdates</c> uses.
+    /// <para>
+    /// The shared helper rather than a <see cref="PeriodicTimer" /> of this page's own, which is what
+    /// stood here until the wiring packet. It is the same three things every live page needs and each of
+    /// them is easy to get subtly wrong once per page: pausing while the tab is hidden, keying the
+    /// browser-side visibility watcher on a string token rather than on a
+    /// <see cref="DotNetObjectReference{TValue}" /> that is re-marshalled on every call, and disposing
+    /// that reference however the interop goes.
+    /// </para>
+    /// <para>
+    /// The loop runs for the page's whole life rather than only while follow mode is on, so the tab
+    /// watcher is established on the first render exactly as it was before; the tick itself does nothing
+    /// unless <see cref="FollowFlag" /> is set. Built here and disposed here, because
+    /// <c>StudioLiveUpdates</c> is <c>IAsyncDisposable</c> and a transient registration would leave the
+    /// circuit's container holding one per page visit.
+    /// </para>
     /// </remarks>
-    private readonly string watchToken = Guid.NewGuid().ToString("N");
+    private StudioLiveUpdates? live;
 
     private List<string> availableTypes = [];
     private EventStoreShape? shape;
     private EventDataError? error;
-    private DotNetObjectReference<Feed>? selfReference;
-    private PeriodicTimer? timer;
-    private Task? followLoop;
-    private CancellationTokenSource? followCancellation;
     private long? highestSequence;
     private bool loading = true;
     private bool hasMore;
-    private bool tabHidden;
+    private bool started;
 
     /// <summary>Whether the pending buffer has had to drop events, so the pill says "500+" rather than "500".</summary>
     private bool pendingTrimmed;
@@ -229,8 +236,11 @@
             ? []
             : [.. Types.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
 
+    /// <summary>Whether the browser says this tab is in the background, as the loop last heard it.</summary>
+    private bool IsTabHidden => live?.IsHidden == true;
+
     private string FollowClass => FollowFlag
-        ? (tabHidden ? "ms-follow-paused" : "ms-follow-live")
+        ? (IsTabHidden ? "ms-follow-paused" : "ms-follow-live")
         : string.Empty;
 
     /// <summary>
@@ -266,7 +276,7 @@
                 return "not following";
             }
 
-            return tabHidden
+            return IsTabHidden
                 ? "paused - this tab is in the background"
                 : $"polling every {Options.Value.RefreshInterval.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture)}s";
         }
@@ -292,45 +302,25 @@
 
         signature = current;
         await LoadAsync();
-        await SyncFollowAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender)
+        if (!firstRender || started || disposed)
         {
             return;
         }
 
-        // One visibility watcher for the page's whole life, keyed on a string token rather than on the
-        // .NET reference. The JS module holds the watchers in a map and removes its own listener when the
-        // last one goes, so a closed circuit leaves nothing behind - but only if unwatch can find the
-        // entry, which a re-marshalled DotNetObjectReference cannot.
-        selfReference = DotNetObjectReference.Create(this);
+        started = true;
 
-        try
-        {
-            tabHidden = await JsRuntime.InvokeAsync<bool>(
-                "martenStudio.visibility.watch", pageCancellation.Token, watchToken, selfReference);
-        }
-        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
-        {
-            // Prerendering, a browser that will not answer, or a circuit that is already gone. Follow mode
-            // then simply never pauses, which is the safe way round. One filter rather than a ladder of
-            // catch clauses because JSDisconnectedException is not a JSException and a ladder misses it.
-        }
-    }
+        // One loop, and one visibility watcher, for the page's whole life. The helper keys the watcher on
+        // a string token rather than on the .NET reference, because Blazor marshals a
+        // DotNetObjectReference as an id and the browser makes a fresh wrapper for every call - so a
+        // watcher keyed on the reference could never be removed.
+        live = LiveFactory.Create();
+        live.Failed += OnPollFailedAsync;
 
-    /// <summary>Called by the JavaScript module when the tab is hidden or shown.</summary>
-    /// <remarks>
-    /// A <see cref="Task" />-returning method rather than <c>async void</c>: an unobserved exception out
-    /// of a JS-invoked handler kills the circuit silently (AGENTS.md hard rule 6).
-    /// </remarks>
-    [JSInvokable]
-    public async Task OnVisibilityChanged(bool hidden)
-    {
-        tabHidden = hidden;
-        await InvokeAsync(StateHasChanged);
+        await live.StartAsync(Options.Value.RefreshInterval, TickAsync, pageCancellation.Token);
     }
 
     private async Task ApplyScopeFromQueryAsync()
@@ -466,123 +456,73 @@
     // Follow mode
     // ------------------------------------------------------------------------------------------------
 
-    /// <summary>Starts or stops the poll to match what the URL now says.</summary>
-    private async Task SyncFollowAsync()
-    {
-        if (FollowFlag && followLoop is null)
-        {
-            await StartFollowAsync();
-        }
-        else if (!FollowFlag && followLoop is not null)
-        {
-            await StopFollowAsync();
-        }
-    }
-
-    private Task StartFollowAsync()
-    {
-        followCancellation = CancellationTokenSource.CreateLinkedTokenSource(pageCancellation.Token);
-        timer = new PeriodicTimer(Options.Value.RefreshInterval);
-        followLoop = PollAsync(timer, followCancellation.Token);
-        return Task.CompletedTask;
-    }
-
-    private async Task StopFollowAsync()
-    {
-        if (followCancellation is not null)
-        {
-            await followCancellation.CancelAsync();
-        }
-
-        timer?.Dispose();
-        timer = null;
-
-        if (followLoop is not null)
-        {
-            try
-            {
-                await followLoop;
-            }
-            catch (OperationCanceledException)
-            {
-            }
-
-            followLoop = null;
-        }
-
-        followCancellation?.Dispose();
-        followCancellation = null;
-    }
-
     /// <summary>
-    /// The poll. One <see cref="PeriodicTimer" /> for this page, paused while the tab is hidden and
-    /// cancelled on dispose (D10).
+    /// One tick of the shared loop. Does nothing unless follow mode is on.
     /// </summary>
     /// <remarks>
     /// It asks <c>FetchHighestEventSequenceNumber</c> first and only reads events when that moved, so an
-    /// idle store costs one cheap query per interval rather than a page of the feed. P5 introduces the
-    /// shared <c>StudioLiveUpdates</c> and its single-flight snapshot cache; this is deliberately a local
-    /// timer until then, so the two packets do not both define it.
+    /// idle store costs one cheap query per interval rather than a page of the feed. The helper is what
+    /// skips the tick entirely while the tab is hidden (D10), so there is no visibility check here.
     /// </remarks>
-    private async Task PollAsync(PeriodicTimer pollTimer, CancellationToken cancellationToken)
+    private async Task TickAsync(CancellationToken cancellationToken)
     {
-        try
+        if (!FollowFlag)
         {
-            while (await pollTimer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
-            {
-                if (tabHidden)
-                {
-                    continue;
-                }
-
-                StudioScope? scope = State.ActiveScope;
-                if (scope is null)
-                {
-                    continue;
-                }
-
-                long? highest = await Events.GetHighestSequenceAsync(scope, cancellationToken).ConfigureAwait(false);
-                if (highest is null)
-                {
-                    continue;
-                }
-
-                long known = KnownSequence();
-                highestSequence = highest;
-
-                if (highest <= known)
-                {
-                    await InvokeAsync(StateHasChanged);
-                    continue;
-                }
-
-                EventPage delta = await Events
-                    .GetFeedAsync(scope, BuildRequest(after: null, since: known, DeltaPageSize), cancellationToken)
-                    .ConfigureAwait(false);
-
-                // The buffers are read by the renderer, so they are only ever written on the renderer's
-                // synchronization context - a timer thread mutating a list a render is walking is the
-                // kind of bug that shows up once a fortnight as a torn page.
-                await InvokeAsync(() =>
-                {
-                    if (delta.Error is null && delta.Rows.Count > 0)
-                    {
-                        Merge(delta.Rows);
-                    }
-
-                    StateHasChanged();
-                });
-            }
+            return;
         }
-        catch (OperationCanceledException)
+
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
         {
-            // Follow was turned off, or the page went away.
+            return;
         }
-        catch (Exception exception)
+
+        long? highest = await Events.GetHighestSequenceAsync(scope, cancellationToken).ConfigureAwait(false);
+        if (highest is null)
         {
-            error = new EventDataError(exception.Message, null, true);
+            return;
+        }
+
+        long known = KnownSequence();
+        highestSequence = highest;
+
+        if (highest <= known)
+        {
             await InvokeAsync(StateHasChanged);
+            return;
         }
+
+        EventPage delta = await Events
+            .GetFeedAsync(scope, BuildRequest(after: null, since: known, DeltaPageSize), cancellationToken)
+            .ConfigureAwait(false);
+
+        // The buffers are read by the renderer, so they are only ever written on the renderer's
+        // synchronization context - a timer thread mutating a list a render is walking is the kind of bug
+        // that shows up once a fortnight as a torn page.
+        await InvokeAsync(() =>
+        {
+            if (delta.Error is null && delta.Rows.Count > 0)
+            {
+                Merge(delta.Rows);
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>
+    /// What the loop does with a tick that threw: puts it on the page and carries on.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Func{T, TResult}" /> returning a <see cref="Task" /> rather than an
+    /// <c>EventHandler</c>, because a handler that re-renders cannot be synchronous and the
+    /// <c>async void</c> an <c>EventHandler</c> forces is the one shape whose exception kills a circuit
+    /// silently (hard rule 6).
+    /// </remarks>
+    private Task OnPollFailedAsync(Exception exception)
+    {
+        error = new EventDataError(exception.Message, null, true);
+        return InvokeAsync(StateHasChanged);
     }
 
     /// <summary>The newest sequence this page already has, counting what is still in the pending buffer.</summary>
@@ -743,16 +683,17 @@
             Follow);
 
     /// <summary>
-    /// Gives the browser's .NET reference back, stops the poll and cancels the page's token - in that
-    /// order, and all of them however the interop call goes.
+    /// Stops the poll - which hands the browser's watch token back and disposes the .NET reference behind
+    /// it - and then cancels the page's token, whatever the interop did.
     /// </summary>
     /// <remarks>
-    /// The <c>finally</c> blocks are the point. Handing the watch token back is a best-effort courtesy to
-    /// a browser that may already be gone, but disposing the <see cref="DotNetObjectReference{TValue}" />
-    /// and the page's <see cref="CancellationTokenSource" /> is not optional: an undisposed reference pins
-    /// this component - and everything it holds - for the life of the process, and an uncancelled token
-    /// leaves whatever is mid-read running against a circuit nobody is on. Before this, an exception out
-    /// of <c>visibility.unwatch</c> skipped both.
+    /// The <c>finally</c> is the point. Handing the watch token back is a best-effort courtesy to a
+    /// browser that may already be gone, and an exception out of <c>visibility.unwatch</c> used to skip
+    /// the rest of this method: an undisposed <see cref="DotNetObjectReference{TValue}" /> pins the
+    /// object it wraps - and everything behind it - for the life of the process, and an uncancelled token
+    /// leaves whatever is mid-read running against a circuit nobody is on. The helper catches interop
+    /// loss with <c>StudioLiveUpdates.IsInteropUnavailable</c> and disposes its reference regardless;
+    /// this <c>finally</c> is the second belt.
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
@@ -769,25 +710,15 @@
 
         try
         {
-            await StopFollowAsync();
-
-            if (selfReference is not null)
+            if (live is not null)
             {
-                try
-                {
-                    await JsRuntime.InvokeVoidAsync("martenStudio.visibility.unwatch", watchToken);
-                }
-                catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
-                {
-                    // The circuit is already gone; the browser-side watcher drops the reference itself.
-                }
+                live.Failed -= OnPollFailedAsync;
+                await live.DisposeAsync();
+                live = null;
             }
         }
         finally
         {
-            selfReference?.Dispose();
-            selfReference = null;
-
             try
             {
                 await pageCancellation.CancelAsync();

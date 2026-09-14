@@ -495,3 +495,114 @@ internal sealed record AggregateSnapshot(
         long? streamVersion = null) =>
         new(typeName, version, null, false, null, reason, streamVersion);
 }
+
+/// <summary>
+/// How much is in this database's event store, as the Overview's tiles draw it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Deliberately <em>not</em> <c>IMartenDatabase.FetchEventStoreStatistics</c>, which the plan named
+/// before hard rule 14 existed. That method opens with
+/// <c>EnsureStorageExistsAsync(typeof(IEvent), token)</c> - it applies the event store's migration under
+/// the database's own <c>AutoCreate</c> before it counts anything, so an Overview tile would be a studio
+/// writing DDL because somebody opened the front page. The numbers here come from
+/// <c>pg_class.reltuples</c> through the studio's own <see cref="MartenStudio.Internal.Sql.CountEstimator" />
+/// instead, which is also what D8 asks for: an exact <c>count(*)</c> over <c>mt_events</c> on a busy
+/// store is a sequential scan per refresh per visitor.
+/// </para>
+/// <para>
+/// <see langword="null" /> is "could not tell", which is a different tile from zero (plan §4.8).
+/// </para>
+/// </remarks>
+/// <param name="Streams">How many rows <c>mt_streams</c> has.</param>
+/// <param name="Events">How many rows <c>mt_events</c> has.</param>
+/// <param name="TablesExist">Whether this database has event tables at all.</param>
+/// <param name="Error">What went wrong, or <see langword="null" />.</param>
+internal sealed record EventStoreCounts(
+    EventStoreCount Streams,
+    EventStoreCount Events,
+    bool TablesExist,
+    EventDataError? Error)
+{
+    /// <summary>Nothing read yet.</summary>
+    public static EventStoreCounts Unknown { get; } =
+        new(EventStoreCount.Unknown, EventStoreCount.Unknown, false, null);
+
+    /// <summary>A store whose event tables have never been created: a real zero, not a failure.</summary>
+    public static EventStoreCounts NoEventStorage { get; } =
+        new(EventStoreCount.Exact(0), EventStoreCount.Exact(0), false, null);
+
+    /// <summary>A read that failed. The tile says "unknown" and the rest of the page is unaffected.</summary>
+    public static EventStoreCounts Failed(EventDataError error) =>
+        new(EventStoreCount.Unknown, EventStoreCount.Unknown, false, error);
+}
+
+/// <summary>
+/// One row count, and whether it is exact.
+/// </summary>
+/// <param name="Value">The number of rows, or <see langword="null" /> when nobody could tell.</param>
+/// <param name="IsEstimate">Whether it came from <c>pg_class.reltuples</c> rather than <c>count(*)</c>.</param>
+internal readonly record struct EventStoreCount(long? Value, bool IsEstimate)
+{
+    /// <summary>Nobody could tell. Drawn differently from zero (plan §4.8).</summary>
+    public static EventStoreCount Unknown { get; } = new(null, false);
+
+    /// <summary>A <c>reltuples</c> estimate, which the UI prefixes with <c>~</c> (D8).</summary>
+    public static EventStoreCount Estimate(long value) => new(value, true);
+
+    /// <summary>An exact <c>count(*)</c>.</summary>
+    public static EventStoreCount Exact(long value) => new(value, false);
+
+    /// <summary>What a tile renders: <c>~12,345</c>, <c>0</c>, or <c>unknown</c>.</summary>
+    public string Display => Value is null
+        ? "unknown"
+        : (IsEstimate ? "~" : string.Empty) + Value.Value.ToString("N0", CultureInfo.InvariantCulture);
+}
+
+/// <summary>
+/// The newest streams, with the one fact that decides what the panel may honestly be called.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <c>EventQueryBuilder.BuildRecentlyActiveStreams</c> is a top-<em>n</em> over <c>mt_streams</c> ordered
+/// by <c>timestamp</c>, and what that column means depends on the store's append mode - verified against
+/// Marten 9.35. Under the default <see cref="EventAppendMode.Rich" /> the version bump never touches
+/// <c>timestamp</c>, so it keeps its <c>default now()</c> from stream creation and the panel is
+/// "newest streams"; under <c>Quick</c> and <c>QuickWithServerTimestamps</c> the append goes through
+/// <c>mt_quick_append_events</c>, which sets <c>timestamp = now()</c>, and the same query really is
+/// "recently active".
+/// </para>
+/// <para>
+/// So the label is read off the store rather than chosen once. A panel headed "Recently active" over a
+/// Rich store would be telling an operator that a quiet stream is busy, which is the kind of quiet lie an
+/// operations screen must not tell.
+/// </para>
+/// </remarks>
+/// <param name="Rows">The streams, newest first.</param>
+/// <param name="AppendMode">The store's <c>IReadOnlyEventStoreOptions.AppendMode</c>.</param>
+/// <param name="Error">What went wrong, or <see langword="null" />.</param>
+internal sealed record RecentStreams(
+    IReadOnlyList<StreamRow> Rows,
+    EventAppendMode AppendMode,
+    EventDataError? Error)
+{
+    /// <summary>Nothing read yet.</summary>
+    public static RecentStreams Empty { get; } = new([], EventAppendMode.Rich, null);
+
+    /// <summary>A read that failed.</summary>
+    public static RecentStreams Failed(EventDataError error) => new([], EventAppendMode.Rich, error);
+
+    /// <summary>Whether <c>mt_streams.timestamp</c> moves when a stream is appended to.</summary>
+    public bool TimestampTracksAppends => AppendMode != EventAppendMode.Rich;
+
+    /// <summary>What the panel is called on this store.</summary>
+    public string Heading => TimestampTracksAppends ? "Recently active streams" : "Newest streams";
+
+    /// <summary>Why it is called that, for the line under the heading.</summary>
+    public string Explanation => TimestampTracksAppends
+        ? $"Ordered by mt_streams.timestamp, which this store's {AppendMode} append mode updates on every "
+            + "append - so these are the streams that were written to most recently."
+        : $"Ordered by mt_streams.timestamp. This store appends in {AppendMode} mode, which never updates "
+            + "that column after the stream is created, so these are the newest streams rather than the "
+            + "busiest ones.";
+}

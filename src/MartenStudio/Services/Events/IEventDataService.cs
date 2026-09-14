@@ -63,6 +63,26 @@ internal interface IEventDataService
     Task<long?> GetHighestSequenceAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// How many streams and events this database holds, for the Overview's tiles.
+    /// </summary>
+    /// <remarks>
+    /// Estimates by default (D8), and never through <c>FetchEventStoreStatistics</c>, which applies the
+    /// event store's migration before it counts - see <see cref="EventStoreCounts" />.
+    /// </remarks>
+    Task<EventStoreCounts> GetEventStoreCountsAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The newest streams, with the store's append mode so the panel can name itself honestly.
+    /// </summary>
+    /// <param name="scope">The store, database and tenant.</param>
+    /// <param name="take">How many rows to read. Capped by the service.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    Task<RecentStreams> GetRecentStreamsAsync(
+        StudioScope scope,
+        int take,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Every event type the store knows, plus every type seen in <c>mt_events</c> that it does not.
     /// </summary>
     /// <param name="scope">The store, database and tenant.</param>
@@ -137,4 +157,40 @@ internal interface IEventDataService
     /// <exception cref="StudioNotAuthorizedException">The write policy refused this scope.</exception>
     /// <exception cref="InvalidOperationException">This store does not record skipped events.</exception>
     Task SkipEventAsync(StudioScope scope, long sequence, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rewinds one subscription so that the daemon re-applies <paramref name="eventSequence" /> and
+    /// everything after it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The third dead-letter action the design names, and the only one that needs a running daemon: it
+    /// goes through <c>DaemonAccessor</c> to the coordinator the host registered and never through
+    /// <c>store.BuildProjectionDaemonAsync()</c> (AGENTS.md hard rule 11). A process that hosts no daemon
+    /// gets <see cref="MartenStudio.Services.Projections.StudioDaemonNotHostedException" />, which is a
+    /// value the page renders rather than a fault.
+    /// </para>
+    /// <para>
+    /// This re-runs every event from <paramref name="eventSequence" /> to the high-water mark through that
+    /// projection, and Marten deletes the projection's existing dead letters at or above the floor on the
+    /// way - so the record being looked at disappears whether or not the replay succeeds.
+    /// </para>
+    /// </remarks>
+    /// <param name="scope">The store, database and tenant.</param>
+    /// <param name="projectionName">The projection or subscription to rewind, as the dead letter names it.</param>
+    /// <param name="eventSequence">
+    /// The sequence to re-apply. The floor handed to Marten is one <em>below</em> this, because the
+    /// progression row records the last sequence the shard has already done.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <exception cref="StudioCapabilityDeniedException">The capability is not enabled.</exception>
+    /// <exception cref="StudioNotAuthorizedException">The write policy refused this scope.</exception>
+    /// <exception cref="MartenStudio.Services.Projections.StudioDaemonNotHostedException">
+    /// No async daemon is hosted in this process.
+    /// </exception>
+    Task RewindSubscriptionAsync(
+        StudioScope scope,
+        string projectionName,
+        long eventSequence,
+        CancellationToken cancellationToken = default);
 }

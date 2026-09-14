@@ -1,7 +1,12 @@
+@using MartenStudio.Services
+@using MartenStudio.Services.Live
 @using Microsoft.Extensions.Options
-@implements IDisposable
+@implements IAsyncDisposable
 @inject NavigationManager Navigation
 @inject IOptions<MartenStudioOptions> Options
+@inject StudioState State
+@inject INavIndicatorService Indicators
+@inject StudioLiveUpdatesFactory LiveFactory
 
 <div class="ms-sidebar-brand">
     <svg class="ms-sidebar-brand-logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -36,6 +41,15 @@
                         <a class="ms-nav-link @NavClass(item.Route)" href="@Link(item.Route)">
                             @Icon(item.Icon)
                             <span class="ms-nav-link-text">@item.Label</span>
+                            @if (BadgeFor(item.Badge) is { } badge)
+                            {
+                                @* A sibling of the label, never part of it: the link's text is what a
+                                   screen reader announces and what every navigation test matches on, and
+                                   a count folded into it would change the name of the page. *@
+                                <span class="ms-nav-badge @badge.CssClass" title="@badge.Title" aria-label="@badge.Title">
+                                    @badge.Text
+                                </span>
+                            }
                         </a>
                     }
                 </li>
@@ -48,9 +62,25 @@
 {
     private const string ComingSoon = "Coming in a later release";
 
-    private sealed record NavItem(string Label, string? Route, string Icon);
+    /// <summary>Which indicator, if any, an entry carries.</summary>
+    private enum NavBadgeKind
+    {
+        /// <summary>No badge, ever.</summary>
+        None,
+
+        /// <summary>A red count when this database has dead letters.</summary>
+        DeadLetters,
+
+        /// <summary>An amber dot when a shard is lagging, paused or failed.</summary>
+        Projections
+    }
+
+    private sealed record NavItem(string Label, string? Route, string Icon, NavBadgeKind Badge = NavBadgeKind.None);
 
     private sealed record NavSection(string Title, NavItem[] Items);
+
+    /// <summary>What a badge renders as, once there is something to render.</summary>
+    private readonly record struct NavBadge(string Text, string CssClass, string Title);
 
     private static readonly NavSection[] Sections =
     [
@@ -65,11 +95,15 @@
             new("Streams", "events/streams", "stream"),
             new("Feed", "events/feed", "feed"),
             new("Event types", "events/types", "tag"),
-            new("Dead letters", "events/dead-letters", "alert")
+            new("Dead letters", "events/dead-letters", "alert", NavBadgeKind.DeadLetters)
         ]),
         new("Operations",
         [
-            new("Projections", "projections", "projection"),
+            new("Projections", "projections", "projection", NavBadgeKind.Projections),
+
+            // Schema deliberately carries no badge. Finding drift costs a CreateMigrationAsync, which is
+            // a schema-building call that hard rule 14 keeps off every navigation path - so drift stays
+            // behind the button on the schema screen that says what it may create.
             new("Schema", "schema", "schema")
         ]),
         new("System",
@@ -79,13 +113,101 @@
         ])
     ];
 
-    private string? currentRelativePath;
+    private readonly CancellationTokenSource cancellation = new();
 
-    protected override void OnInitialized()
+    /// <summary>
+    /// The sidebar's own polling loop, built rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// <c>StudioLiveUpdates</c> is <c>IAsyncDisposable</c>, so a transient registration would leave the
+    /// circuit's container holding one per navigation for the life of the circuit. This component owns
+    /// the loop and disposes it. It is a second loop beside the current page's, which costs one extra
+    /// visibility watcher and one cached read per interval: the snapshot cache behind
+    /// <see cref="INavIndicatorService" /> is what keeps it from being a second pair of queries.
+    /// </remarks>
+    private StudioLiveUpdates? live;
+
+    private NavIndicators indicators = NavIndicators.None;
+    private string? currentRelativePath;
+    private bool started;
+    private bool disposed;
+
+    protected override async Task OnInitializedAsync()
     {
         UpdateCurrentRelativePath(Navigation.Uri);
         Navigation.LocationChanged += OnLocationChanged;
+        State.ScopeChanged += OnScopeChangedAsync;
+
+        await RefreshIndicatorsAsync(cancellation.Token);
     }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || started || disposed)
+        {
+            return;
+        }
+
+        started = true;
+
+        live = LiveFactory.Create();
+
+        // No Failed handler: a badge that could not be read is a badge that is not drawn, and the
+        // sidebar is the last place in the studio that should put an error on the screen.
+        await live.StartAsync(Options.Value.RefreshInterval, TickAsync, cancellation.Token);
+    }
+
+    private async Task TickAsync(CancellationToken cancellationToken)
+    {
+        await RefreshIndicatorsAsync(cancellationToken);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        await RefreshIndicatorsAsync(cancellation.Token);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Reads the indicators, and treats every failure as "no badge".
+    /// </summary>
+    /// <remarks>
+    /// The service already answers <c>NavIndicators.None</c> rather than throwing; this is the second
+    /// belt, because the one thing the navigation must never do is stop rendering.
+    /// </remarks>
+    private async Task RefreshIndicatorsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            indicators = await Indicators.ReadAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception)
+        {
+            indicators = NavIndicators.None;
+        }
+    }
+
+    /// <summary>The badge an entry wears right now, or <see langword="null" /> for none.</summary>
+    private NavBadge? BadgeFor(NavBadgeKind kind) => kind switch
+    {
+        NavBadgeKind.DeadLetters when indicators.ShowDeadLetterCount => new NavBadge(
+            indicators.DeadLetters!.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture),
+            "ms-nav-badge-danger",
+            indicators.DeadLetters == 1
+                ? "One event the async daemon could not apply"
+                : $"{indicators.DeadLetters:N0} events the async daemon could not apply"),
+
+        NavBadgeKind.Projections when indicators.ProjectionsNeedAttention => new NavBadge(
+            string.Empty,
+            "ms-nav-badge-dot ms-nav-badge-warning",
+            indicators.ProjectionsExplanation ?? "A projection needs attention"),
+
+        _ => null,
+    };
 
     private string Link(string subPath) => StudioLink.To(Options.Value, subPath);
 
@@ -125,9 +247,49 @@
         _ = InvokeAsync(StateHasChanged);
     }
 
-    public void Dispose()
+    /// <summary>
+    /// Unsubscribes, stops the loop and cancels the token - in that order, and all of them however the
+    /// loop's own disposal goes.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent, because Blazor disposes a component once and a test context disposes it again, and a
+    /// <see cref="CancellationTokenSource" /> that has already been disposed throws from
+    /// <c>CancelAsync</c>. A second disposal must never be the thing that finally puts an exception on
+    /// the circuit.
+    /// </remarks>
+    public async ValueTask DisposeAsync()
     {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
         Navigation.LocationChanged -= OnLocationChanged;
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            try
+            {
+                await cancellation.CancelAsync();
+            }
+            finally
+            {
+                cancellation.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
     }
 
     /// <summary>

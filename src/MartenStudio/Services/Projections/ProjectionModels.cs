@@ -239,6 +239,15 @@ internal sealed record ProjectionsView(
 /// <param name="FailedCount">How many shards reported a failure.</param>
 /// <param name="Daemon">The daemon card's state, so the tile can say "not hosted in this process".</param>
 /// <param name="Error">What went wrong reading this, or <see langword="null" />. "Cannot report" is a value.</param>
+/// <param name="HighWaterMark">
+/// The store's highest event sequence, which every lag on this record is measured against. Its own tile
+/// on the Overview, because a high-water mark that is not moving is the first thing to look at when a
+/// projection is not either.
+/// </param>
+/// <param name="Shards">
+/// Every shard's progress, worst lag first - the same list and the same order the projections page draws,
+/// so the Overview's health table is a prefix of that page rather than a second opinion about it.
+/// </param>
 internal sealed record ProjectionSummary(
     int ProjectionCount,
     int AsyncProjectionCount,
@@ -247,10 +256,25 @@ internal sealed record ProjectionSummary(
     int PausedCount,
     int FailedCount,
     DaemonStatus Daemon,
-    string? Error)
+    string? Error,
+    long HighWaterMark = 0,
+    IReadOnlyList<ShardProgress>? Shards = null)
 {
     /// <summary>The colour the Overview tile wears.</summary>
     public LagSeverity Severity => ProjectionLagThresholds.Severity(MaxLag);
+
+    /// <summary>The shards, worst lag first, or an empty list when nothing could be read.</summary>
+    public IReadOnlyList<ShardProgress> Progress => Shards ?? [];
+
+    /// <summary>Whether anything about the projections is worth an amber dot in the navigation.</summary>
+    /// <remarks>
+    /// Three things, and each of them alone is enough: a shard lagging past the amber threshold, a shard
+    /// that is paused, and a shard that reported a failure. Deliberately not "the daemon is not hosted
+    /// here" - a host that runs its daemon in another process is a supported deployment and the studio
+    /// must not decorate it as a fault.
+    /// </remarks>
+    public bool NeedsAttention =>
+        MaxLag > ProjectionLagThresholds.Amber || PausedCount > 0 || FailedCount > 0;
 }
 
 /// <summary>

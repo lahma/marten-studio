@@ -67,6 +67,28 @@ internal sealed class FakeEventDataService : IEventDataService
     /// <summary>What the dead-letter count answers.</summary>
     public long? DeadLetterCount { get; set; }
 
+    /// <summary>
+    /// What the dead-letter count throws instead of answering.
+    /// </summary>
+    /// <remarks>
+    /// The real service answers <see langword="null" /> rather than throwing, so this is only for the
+    /// tests about a caller that must survive one that does not - the sidebar's badges, above all.
+    /// </remarks>
+    public Exception? CountFailure { get; set; }
+
+    /// <summary>How many times the dead letters were counted, for the caching tests.</summary>
+    public int DeadLetterCountReads { get; private set; }
+
+    /// <summary>What the Overview's stream and event tiles are told.</summary>
+    public EventStoreCounts Counts { get; set; } = new(
+        EventStoreCount.Estimate(1_200), EventStoreCount.Estimate(9_400), TablesExist: true, Error: null);
+
+    /// <summary>What the Overview's streams panel is given.</summary>
+    public RecentStreams Recent { get; set; } = RecentStreams.Empty;
+
+    /// <summary>The rewinds that were asked for, as "projection/sequence".</summary>
+    public List<string> Rewinds { get; } = [];
+
     /// <summary>What an event lookup by sequence answers.</summary>
     public EventRow? EventBySequence { get; set; }
 
@@ -159,6 +181,17 @@ internal sealed class FakeEventDataService : IEventDataService
         return Task.FromResult(next);
     }
 
+    public Task<EventStoreCounts> GetEventStoreCountsAsync(
+        StudioScope scope,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Counts);
+
+    public Task<RecentStreams> GetRecentStreamsAsync(
+        StudioScope scope,
+        int take,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Recent);
+
     public Task<EventTypeList> ListEventTypesAsync(
         StudioScope scope,
         bool withCounts,
@@ -190,8 +223,14 @@ internal sealed class FakeEventDataService : IEventDataService
         return Task.FromResult(DeadLetters);
     }
 
-    public Task<long?> CountDeadLettersAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
-        Task.FromResult(DeadLetterCount);
+    public Task<long?> CountDeadLettersAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        DeadLetterCountReads++;
+
+        return CountFailure is null
+            ? Task.FromResult(DeadLetterCount)
+            : Task.FromException<long?>(CountFailure);
+    }
 
     public Task<EventRow?> GetEventBySequenceAsync(
         StudioScope scope,
@@ -229,6 +268,21 @@ internal sealed class FakeEventDataService : IEventDataService
         }
 
         Skipped.Add(sequence);
+        return Task.CompletedTask;
+    }
+
+    public Task RewindSubscriptionAsync(
+        StudioScope scope,
+        string projectionName,
+        long eventSequence,
+        CancellationToken cancellationToken = default)
+    {
+        if (MutationFailure is not null)
+        {
+            return Task.FromException(MutationFailure);
+        }
+
+        Rewinds.Add(projectionName + "/" + eventSequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
         return Task.CompletedTask;
     }
 

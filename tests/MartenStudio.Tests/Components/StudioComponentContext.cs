@@ -2,6 +2,11 @@ using Bunit;
 
 using MartenStudio.Internal;
 using MartenStudio.Services;
+using MartenStudio.Services.Events;
+using MartenStudio.Services.Live;
+using MartenStudio.Services.Projections;
+using MartenStudio.Tests.Events;
+using MartenStudio.Tests.Projections;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authorization;
@@ -23,10 +28,13 @@ namespace MartenStudio.Tests.Components;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The two data sources are hand-written fakes - <see cref="FakeStudioScopeCatalog" /> for the header's
-/// listings and <see cref="FakeStoreInfoService" /> for the Overview's facts. Everything else is the
-/// real service, because those are the ones the components actually talk to and they are cheap. bUnit
-/// supplies the navigation manager and the JavaScript runtime.
+/// The data sources are hand-written fakes - <see cref="FakeStudioScopeCatalog" /> for the header's
+/// listings, <see cref="FakeStoreInfoService" /> for the Overview's store facts, and the events,
+/// projections and nav-indicator fakes that the shell itself now reaches for (the Overview's tiles and
+/// the sidebar's badges). Everything else is the real service, because those are the ones the components
+/// actually talk to and they are cheap. bUnit supplies the navigation manager and the JavaScript runtime.
+/// An area with more of its own to add either passes a <c>configure</c> action or derives, as
+/// <c>DocumentsComponentContext</c> does - there is one context class, not one per packet.
 /// </para>
 /// <para>
 /// The time zone is pinned to UTC: <see cref="StudioState" /> formats every timestamp in the selected
@@ -54,6 +62,9 @@ internal class StudioComponentContext : BunitContext
         Options = new MartenStudioOptions();
         Catalog = new FakeStudioScopeCatalog();
         StoreInfo = new FakeStoreInfoService();
+        EventData = new FakeEventDataService();
+        ProjectionData = new FakeProjectionDataService();
+        NavBadges = new FakeNavIndicatorService();
         AuthorizationService = new TestStoreAuthorizationService();
         AuthenticationState = new TestAuthenticationStateProvider();
 
@@ -66,6 +77,18 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
         Services.AddSingleton<IStudioScopeCatalog>(Catalog);
         Services.AddSingleton<IStoreInfoService>(StoreInfo);
+
+        // The area data services, faked. They are here rather than in a context of their own because
+        // every one of them is now reachable from the shell: the Overview reads events and projections
+        // for its tiles, and the sidebar reads both for its badges, so a layout test that did not have
+        // them would fail on a component it is not about.
+        Services.AddSingleton<IEventDataService>(EventData);
+        Services.AddSingleton<IProjectionDataService>(ProjectionData);
+        Services.AddSingleton<INavIndicatorService>(NavBadges);
+
+        // Every live page builds its own loop from this, so the circuit's container never tracks one.
+        Services.AddScoped<StudioLiveUpdatesFactory>();
+
         Services.AddSingleton<IAuthorizationService>(AuthorizationService);
         Services.AddSingleton<AuthenticationStateProvider>(AuthenticationState);
         Services.AddSingleton<StudioAuthorization>();
@@ -107,8 +130,24 @@ internal class StudioComponentContext : BunitContext
     /// <summary>What the header is offered.</summary>
     public FakeStudioScopeCatalog Catalog { get; }
 
-    /// <summary>What the Overview page is given.</summary>
+    /// <summary>What the Overview page is given about the stores this application registered.</summary>
     public FakeStoreInfoService StoreInfo { get; }
+
+    /// <summary>
+    /// What the Events pages - and the Overview's event tiles - are given.
+    /// </summary>
+    /// <remarks>
+    /// Named for its area rather than <c>Data</c>, because <c>DocumentsComponentContext</c> derives from
+    /// this class and already has a <c>Data</c> of its own; two areas sharing one name on a base class is
+    /// how a subclass silently starts hiding the wrong fake.
+    /// </remarks>
+    public FakeEventDataService EventData { get; }
+
+    /// <summary>What the projections page - and the Overview's projection tiles - are given.</summary>
+    public FakeProjectionDataService ProjectionData { get; }
+
+    /// <summary>What the sidebar's badges are told.</summary>
+    public FakeNavIndicatorService NavBadges { get; }
 
     /// <summary>The policy engine, and the record of what it was asked.</summary>
     public TestStoreAuthorizationService AuthorizationService { get; }
@@ -158,6 +197,32 @@ internal class StudioComponentContext : BunitContext
     public StudioComponentContext WithAllCapabilities()
     {
         Options.Capabilities = MartenStudioCapabilities.All();
+        return this;
+    }
+
+    /// <summary>Turns the master switch on, which turns every capability off however they were set.</summary>
+    public StudioComponentContext WithReadOnly()
+    {
+        Options.Capabilities = MartenStudioCapabilities.All();
+        Options.ReadOnly = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Settles an active scope, the way the layout does on a real circuit.
+    /// </summary>
+    /// <remarks>
+    /// A page rendered on its own never runs the layout, and every page that reads anything reads
+    /// <see cref="StudioState.ActiveScope" /> first - so without this it renders its "nothing selected"
+    /// state and the test is about nothing.
+    /// </remarks>
+    /// <param name="storeKey">The store to settle on.</param>
+    public async Task<StudioComponentContext> ReadyAsync(string storeKey = "default")
+    {
+        Catalog.WithStore(storeKey, storeKey == "default" ? "Default" : storeKey, databaseIdentities: "localhost.marten");
+
+        await State.EnsureInitializedAsync();
+
         return this;
     }
 

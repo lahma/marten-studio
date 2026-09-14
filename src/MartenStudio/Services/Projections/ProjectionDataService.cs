@@ -114,7 +114,9 @@ internal sealed class ProjectionDataService : IProjectionDataService
                 view.Progress.Count(static x => x.IsPaused),
                 view.Progress.Count(static x => x.HasFailed),
                 view.Daemon,
-                null);
+                null,
+                view.HighWaterMark,
+                view.Progress);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

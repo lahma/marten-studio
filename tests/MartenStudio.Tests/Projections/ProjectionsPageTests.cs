@@ -5,6 +5,7 @@ using Bunit;
 using JasperFx.Events.Projections;
 
 using MartenStudio.Services;
+using MartenStudio.Tests.Components;
 
 using Page = MartenStudio.Components.Pages.Projections.Projections;
 
@@ -19,7 +20,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_hosted_running_daemon_is_said_so_and_its_controls_are_offered()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
 
@@ -33,7 +34,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_daemon_hosted_here_but_stopped_is_drawn_differently_from_one_that_is_running()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithStoppedDaemon().WithProjection("DailySales");
         await context.ReadyAsync();
 
@@ -50,7 +51,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_daemon_hosted_elsewhere_still_renders_progress_and_explains_the_missing_controls()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithNoDaemonHere().WithProjection("DailySales", sequence: 900);
         await context.ReadyAsync();
 
@@ -75,7 +76,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task Nothing_running_the_projections_anywhere_raises_the_amber_banner()
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData.WithNoDaemonHere().WithProjection("DailySales", sequence: 0, hasProgressRow: false);
         await context.ReadyAsync();
 
@@ -87,7 +88,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_daemon_that_has_advanced_somewhere_else_raises_no_banner()
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData.WithNoDaemonHere().WithProjection("DailySales", sequence: 900);
         await context.ReadyAsync();
 
@@ -102,7 +103,7 @@ public class ProjectionsPageTests
     [InlineData(200_000, "ms-lag-critical")]
     public async Task Lag_wears_the_colour_of_its_severity(long highWaterMark, string expectedClass)
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData.HighWaterMark = highWaterMark;
         context.ProjectionData.WithProjection("DailySales", sequence: 1_000);
         await context.ReadyAsync();
@@ -115,7 +116,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task An_inline_projection_has_a_row_and_no_shard_progress()
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData.WithProjection("OrderSummary", ProjectionLifecycle.Inline);
         await context.ReadyAsync();
 
@@ -134,7 +135,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_shard_that_has_never_started_says_so_rather_than_showing_a_zero()
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData.WithProjection("DailySales", sequence: 0, hasProgressRow: false, agentStatus: null);
         await context.ReadyAsync();
 
@@ -146,7 +147,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_paused_shard_shows_its_reason_and_a_skipped_count()
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData.WithProjection(
             "ShipmentTracker", agentStatus: "Paused", pauseReason: "Too many errors", skipped: 3);
         await context.ReadyAsync();
@@ -168,7 +169,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task ReadOnly_hides_every_control()
     {
-        await using var context = new ProjectionsTestContext().WithReadOnly();
+        await using var context = new StudioComponentContext().WithReadOnly();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
 
@@ -186,7 +187,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_capability_that_is_off_disables_its_controls_and_names_the_option()
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
 
@@ -203,7 +204,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task Granting_the_capabilities_removes_the_disabled_notices()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
 
@@ -220,7 +221,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task Starting_and_stopping_a_shard_reaches_the_service_by_shard_name()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
 
@@ -236,7 +237,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_refused_action_is_reported_on_the_page()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         context.ProjectionData.ActionFailure =
             new StudioCapabilityDeniedException(StudioCapability.ControlDaemon, CapabilityDenialReason.Disabled);
@@ -253,7 +254,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_running_operation_is_shown_with_its_handle()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales").WithRunningOperation("abc123", "DailySales");
         await context.ReadyAsync();
 
@@ -275,7 +276,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task The_rebuild_dialog_states_the_scope_and_will_not_confirm_until_the_name_is_typed()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.HighWaterMark = 4_321;
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
@@ -313,7 +314,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task The_rebuild_dialog_states_the_per_shard_timeout_and_that_the_tables_are_emptied_first()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.ShardTimeout = TimeSpan.FromHours(2);
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
@@ -336,7 +337,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task The_rebuild_dialog_uses_the_shared_confirm_dialog()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
 
@@ -353,7 +354,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task Cancelling_the_rebuild_dialog_starts_nothing()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
 
@@ -377,7 +378,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_projection_that_is_already_being_rebuilt_cannot_be_rebuilt_again()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData
             .WithProjection("DailySales")
             .WithProjection("ShipmentTracker")
@@ -402,7 +403,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_rebuild_that_was_already_running_is_reported_as_such()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         context.ProjectionData.RebuildStarts = false;
         await context.ReadyAsync();
@@ -424,7 +425,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task Cancelling_a_running_operation_asks_first_and_then_reaches_the_service()
     {
-        await using var context = new ProjectionsTestContext().WithAllCapabilities();
+        await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales").WithRunningOperation("abc123", "DailySales");
         await context.ReadyAsync();
 
@@ -443,7 +444,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task Without_the_rebuild_capability_a_running_operation_offers_no_cancel()
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData.WithProjection("DailySales").WithRunningOperation("abc123", "DailySales");
         await context.ReadyAsync();
 
@@ -463,7 +464,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task Progression_rows_no_projection_claims_are_rendered_under_their_own_heading()
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData
             .WithProjection("DailySales")
             .WithUnregisteredShard("RetiredProjection:All", sequence: 17);
@@ -482,7 +483,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task With_nothing_unregistered_the_section_is_absent()
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
 
@@ -502,7 +503,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task The_page_leases_the_tracker_while_it_is_open_and_releases_it_on_dispose()
     {
-        var context = new ProjectionsTestContext();
+        var context = new StudioComponentContext();
         context.ProjectionData.WithProjection("DailySales");
         await context.ReadyAsync();
 
@@ -520,7 +521,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_live_shard_is_marked_as_coming_from_the_tracker()
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData.WithProjection("DailySales", isLive: true);
         await context.ReadyAsync();
 
@@ -536,7 +537,7 @@ public class ProjectionsPageTests
     [Fact]
     public async Task A_read_that_fails_is_reported_on_the_page_with_a_retry()
     {
-        await using var context = new ProjectionsTestContext();
+        await using var context = new StudioComponentContext();
         context.ProjectionData.Failure = new InvalidOperationException("the database went away");
         await context.ReadyAsync();
 

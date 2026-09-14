@@ -4,8 +4,10 @@
 @using MartenStudio.Components.Json
 @using MartenStudio.Services
 @using MartenStudio.Services.Events
+@using MartenStudio.Services.Projections
 @implements IAsyncDisposable
 @inject IEventDataService Events
+@inject IProjectionDataService ProjectionData
 @inject StudioState State
 @inject StudioCapabilityGuard Capabilities
 @inject ToastService Toasts
@@ -177,16 +179,20 @@
                                             </button>
                                         }
 
-                                        @* The third action the design names. It needs a running daemon,
-                                           which this page deliberately never reaches for, so it ships
-                                           disabled and says where it is going rather than pretending it
-                                           is not part of the design. *@
-                                        <button type="button"
-                                                class="ms-button ms-btn-disabled"
-                                                disabled
-                                                title="arrives with the projections page">
-                                            Rewind subscription to this event
-                                        </button>
+                                        @* The third action the design names, and the only one that needs
+                                           a running daemon. It is offered when there is one to ask and
+                                           says why when there is not - "the daemon runs somewhere else"
+                                           is a supported deployment, not a fault (hard rule 11). *@
+                                        @if (Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
+                                        {
+                                            <button type="button"
+                                                    class="ms-button @(CanRewind(row.ProjectionName) ? string.Empty : "ms-btn-disabled")"
+                                                    disabled="@(working || !CanRewind(row.ProjectionName))"
+                                                    title="@RewindTitle(row.ProjectionName)"
+                                                    @onclick="() => OpenRewindAsync(row)">
+                                                Rewind subscription to this event
+                                            </button>
+                                        }
                                     </div>
 
                                     @if (!string.IsNullOrWhiteSpace(actionError))
@@ -222,9 +228,69 @@
 <ConfirmDialog IsOpen="@(dialog is not DialogKind.None)"
                Title="@DialogTitle"
                Message="@DialogMessage"
+               ConfirmationPhrase="@DialogConfirmationPhrase"
                ConfirmText="@DialogConfirmText"
                OnConfirm="ConfirmAsync"
-               OnCancel="CancelDialog" />
+               OnCancel="CancelDialog">
+    @if (dialog == DialogKind.Rewind)
+    {
+        <div class="ms-rewind-scope">
+            @if (rewindScopeError is { Length: > 0 } scopeError)
+            {
+                <p class="ms-alert ms-alert-warning" role="alert">
+                    Marten Studio could not describe what this rewind would touch: @scopeError. The rewind
+                    itself is still available, and the service refuses it if the daemon is not here.
+                </p>
+            }
+
+            <div class="ms-kv">
+                <div class="ms-kv-row">
+                    <span class="ms-kv-key">Re-applied</span>
+                    <span class="ms-kv-value">
+                        @RewindEventCountText
+                    </span>
+                </div>
+                <div class="ms-kv-row">
+                    <span class="ms-kv-key">Progression set to</span>
+                    <span class="ms-kv-value ms-mono">
+                        @(RewindFloorText)
+                    </span>
+                </div>
+                <div class="ms-kv-row">
+                    <span class="ms-kv-key">Shards restarted</span>
+                    <span class="ms-kv-value ms-mono">
+                        @(rewindScope is { ShardNames.Count: > 0 }
+                            ? string.Join(", ", rewindScope.ShardNames)
+                            : "unknown")
+                    </span>
+                </div>
+                <div class="ms-kv-row">
+                    <span class="ms-kv-key">Tables written</span>
+                    <span class="ms-kv-value ms-mono">
+                        @(rewindScope is { TablesAffected.Count: > 0 }
+                            ? string.Join(", ", rewindScope.TablesAffected)
+                            : "none this projection declares")
+                    </span>
+                </div>
+            </div>
+
+            <p class="ms-muted">
+                Marten deletes this projection's dead letters at or above that sequence as part of the
+                rewind, so the record you are looking at goes away whether or not the replay succeeds. The
+                rows are rewritten in place rather than dropped: this is a rewind, not a rebuild.
+            </p>
+
+            @if (State.ActiveScope?.TenantId is { Length: > 0 } tenant)
+            {
+                <p class="ms-alert ms-alert-warning" role="alert">
+                    Projection progression is recorded per shard and not per tenant, so this rewind
+                    re-applies every tenant's events after that sequence - not only
+                    <code>@tenant</code>'s.
+                </p>
+            }
+        </div>
+    }
+</ConfirmDialog>
 
 @code {
     private const int PageSize = 50;
@@ -234,17 +300,22 @@
     {
         None,
         Discard,
-        Skip
+        Skip,
+        Rewind
     }
 
     private readonly CancellationTokenSource pageCancellation = new();
 
     private DeadLetterPage? page;
     private EventStoreShape? shape;
+    private ProjectionsView? projections;
     private EventRow? offending;
     private Guid? expanded;
     private Guid pendingDiscard;
     private long pendingSkip;
+    private DeadLetterRow? pendingRewind;
+    private RebuildScope? rewindScope;
+    private string? rewindScopeError;
     private DialogKind dialog = DialogKind.None;
     private bool loading = true;
     private bool loadingEvent;
@@ -295,10 +366,93 @@
         ? "Marks the event skipped so the daemon steps over it"
         : "This store has no mt_events.is_skipped column: the host did not enable event skipping";
 
+    /// <summary>
+    /// Whether the daemon this process hosts could be asked to rewind <paramref name="projectionName" />.
+    /// </summary>
+    /// <remarks>
+    /// Three things have to be true, and the service checks the first one again regardless of what was
+    /// rendered (hard rule 5): a daemon is hosted here, this store still registers a projection by that
+    /// name, and that projection is async. A dead letter can outlive the projection that wrote it - the
+    /// record is a document and the registration is code - and rewinding a projection this store no
+    /// longer has would be asking the daemon for a shard it cannot build.
+    /// </remarks>
+    private bool CanRewind(string projectionName) =>
+        projections is { Daemon.IsHostedHere: true }
+        && FindProjection(projectionName) is { IsAsync: true };
+
+    private ProjectionInfo? FindProjection(string projectionName) =>
+        projections?.Projections.FirstOrDefault(
+            x => string.Equals(x.Name, projectionName, StringComparison.OrdinalIgnoreCase));
+
+    private string RewindTitle(string projectionName)
+    {
+        if (projections is null)
+        {
+            return "Marten Studio has not read the projections for this database yet";
+        }
+
+        if (!projections.Daemon.IsHostedHere)
+        {
+            return projections.Daemon.Explanation;
+        }
+
+        ProjectionInfo? projection = FindProjection(projectionName);
+
+        if (projection is null)
+        {
+            return $"This store no longer registers a projection called '{projectionName}', so there is no "
+                + "shard for the daemon to restart. The record is still here because a dead letter is a "
+                + "document and outlives the code that wrote it.";
+        }
+
+        return projection.IsAsync
+            ? "Rewinds the subscription so the daemon re-applies this event and everything after it"
+            : $"'{projectionName}' runs {projection.Lifecycle}, not Async, so the daemon does not run it and "
+                + "there is no progression to rewind.";
+    }
+
+    /// <summary>The floor the rewind would write: one below the dead letter's own sequence.</summary>
+    private long RewindFloor => pendingRewind is { } row
+        ? Math.Max(0, row.EventSequence - 1)
+        : 0;
+
+    private string RewindFloorText => pendingRewind is null
+        ? "unknown"
+        : RewindFloor == 0
+            ? "no progression row, so the projection replays from its first event"
+            : "#" + RewindFloor.ToString("N0", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// How many events the replay covers, from the dead letter's own sequence to the high-water mark.
+    /// </summary>
+    private string RewindEventCountText
+    {
+        get
+        {
+            if (pendingRewind is not { } row)
+            {
+                return "unknown";
+            }
+
+            string from = "#" + row.EventSequence.ToString("N0", CultureInfo.InvariantCulture);
+
+            if (rewindScope is not { } scope || scope.EventsToReplay < row.EventSequence)
+            {
+                return $"every event from {from} onwards";
+            }
+
+            long count = scope.EventsToReplay - row.EventSequence + 1;
+
+            return $"{count.ToString("N0", CultureInfo.InvariantCulture)} events, {from} to the high-water "
+                + $"mark #{scope.EventsToReplay.ToString("N0", CultureInfo.InvariantCulture)}";
+        }
+    }
+
     private string DialogTitle => dialog switch
     {
         DialogKind.Discard => "Discard this dead letter?",
         DialogKind.Skip => "Mark this event as skipped?",
+        DialogKind.Rewind => "Rewind this subscription?",
         _ => "Confirm",
     };
 
@@ -311,10 +465,31 @@
             $"Event #{pendingSkip.ToString(CultureInfo.InvariantCulture)} is marked skipped, so the daemon " +
             "steps over it on the next attempt. The event stays in the store, and every projection that " +
             "reads it from now on will not see it.",
+        DialogKind.Rewind =>
+            $"The daemon stops '{pendingRewind?.ProjectionName}', moves its progression back and starts it "
+            + "again from there, so the event it failed on is re-applied along with everything after it. "
+            + "If the projection still throws, the same failure comes back as a new dead letter.",
         _ => string.Empty,
     };
 
-    private string DialogConfirmText => dialog == DialogKind.Skip ? "Skip event" : "Discard";
+    /// <summary>
+    /// The projection's own name, typed out, before a rewind runs.
+    /// </summary>
+    /// <remarks>
+    /// Only this action asks for it. Discarding a record and skipping one event each undo cheaply;
+    /// rewinding replays every event after a point through a projection, which on a production store is
+    /// minutes of work and a table being rewritten - and the row it is started from is one of forty in a
+    /// list that look alike.
+    /// </remarks>
+    private string? DialogConfirmationPhrase =>
+        dialog == DialogKind.Rewind ? pendingRewind?.ProjectionName : null;
+
+    private string DialogConfirmText => dialog switch
+    {
+        DialogKind.Skip => "Skip event",
+        DialogKind.Rewind => "Rewind subscription",
+        _ => "Discard",
+    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -393,6 +568,8 @@
                 Offset = OffsetValue,
                 PageSize = PageSize,
             }, token);
+
+            projections = await ReadProjectionsAsync(scope, token);
         }
         catch (OperationCanceledException)
         {
@@ -462,7 +639,72 @@
         return Task.CompletedTask;
     }
 
-    private void CancelDialog() => dialog = DialogKind.None;
+    /// <summary>
+    /// Opens the rewind confirmation, having first asked the projections service what it would touch.
+    /// </summary>
+    /// <remarks>
+    /// The facts come from <c>DescribeRebuildAsync</c>, which is where the studio already works out a
+    /// projection's shards, its tables and the high-water mark a replay runs to - the same numbers the
+    /// rebuild dialog shows, for an operation that costs the same kind of work. A projection it cannot
+    /// describe still opens the dialog, saying so: the service is what refuses the rewind, not this.
+    /// </remarks>
+    private async Task OpenRewindAsync(DeadLetterRow row)
+    {
+        actionError = null;
+        rewindScope = null;
+        rewindScopeError = null;
+        pendingRewind = row;
+        dialog = DialogKind.Rewind;
+
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
+
+        try
+        {
+            rewindScope = await ProjectionData.DescribeRebuildAsync(scope, row.ProjectionName, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            rewindScopeError = exception.Message;
+        }
+    }
+
+    /// <summary>
+    /// The daemon card and the registered projections, read as a value.
+    /// </summary>
+    /// <remarks>
+    /// A failure here takes the rewind button away and nothing else: this page is about dead letters, and
+    /// a projections service that cannot answer must not be able to blank the list (plan section 4.8).
+    /// </remarks>
+    private async Task<ProjectionsView?> ReadProjectionsAsync(StudioScope scope, CancellationToken token)
+    {
+        try
+        {
+            return await ProjectionData.GetProjectionsAsync(scope, token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private void CancelDialog()
+    {
+        dialog = DialogKind.None;
+        pendingRewind = null;
+        rewindScope = null;
+        rewindScopeError = null;
+    }
 
     private async Task ConfirmAsync()
     {
@@ -485,12 +727,26 @@
                 await Events.DiscardDeadLetterAsync(scope, pendingDiscard, pageCancellation.Token);
                 await Toasts.Success("The dead letter is discarded.");
             }
-            else
+            else if (kind == DialogKind.Skip)
             {
                 await Events.SkipEventAsync(scope, pendingSkip, pageCancellation.Token);
                 await Toasts.Success(
                     $"Event #{pendingSkip.ToString(CultureInfo.InvariantCulture)} is marked as skipped.");
             }
+            else if (pendingRewind is { } rewind)
+            {
+                await Events.RewindSubscriptionAsync(
+                    scope, rewind.ProjectionName, rewind.EventSequence, pageCancellation.Token);
+
+                await Toasts.Success(
+                    $"'{rewind.ProjectionName}' is rewound to #"
+                    + RewindFloor.ToString(CultureInfo.InvariantCulture)
+                    + $", so event #{rewind.EventSequence.ToString(CultureInfo.InvariantCulture)} is re-applied.");
+            }
+
+            pendingRewind = null;
+            rewindScope = null;
+            rewindScopeError = null;
 
             await LoadAsync();
         }

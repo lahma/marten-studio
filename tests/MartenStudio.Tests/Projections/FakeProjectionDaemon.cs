@@ -97,11 +97,35 @@ internal sealed class FakeProjectionDaemon : IProjectionDaemon
 
     public Task WaitForShardToBeRunning(string shardName, TimeSpan timeout) => throw NotUsed();
 
+    /// <summary>Every rewind, as "subscription/floor".</summary>
+    public List<string> Rewinds { get; } = [];
+
+    /// <summary>The floor the last rewind was given.</summary>
+    public long? LastSequenceFloor { get; private set; }
+
+    /// <summary>The timestamp the last rewind was given. The studio never sets one.</summary>
+    public DateTimeOffset? LastTimestamp { get; private set; }
+
+    /// <summary>
+    /// Records the rewind, so a test can see the floor and prove the argument order.
+    /// </summary>
+    /// <remarks>
+    /// The order is the thing worth pinning: the token is the <em>second</em> parameter and both of the
+    /// interesting arguments are optional, so a call written in the usual C# order would compile and
+    /// silently mean <c>sequenceFloor: 0</c> - a full replay of the projection rather than a rewind to
+    /// one event.
+    /// </remarks>
     public Task RewindSubscriptionAsync(
         string subscriptionName,
         CancellationToken token,
         long? sequenceFloor = 0,
-        DateTimeOffset? timestamp = null) => throw NotUsed();
+        DateTimeOffset? timestamp = null)
+    {
+        Rewinds.Add(subscriptionName + "/" + (sequenceFloor?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"));
+        LastSequenceFloor = sequenceFloor;
+        LastTimestamp = timestamp;
+        return Task.CompletedTask;
+    }
 
     public void Dispose() => ((IDisposable) Tracker).Dispose();
 

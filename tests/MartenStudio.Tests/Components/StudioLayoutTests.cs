@@ -1,3 +1,5 @@
+using AngleSharp.Dom;
+
 using Bunit;
 
 using JasperFx.Descriptors;
@@ -272,6 +274,138 @@ public class StudioLayoutTests
             "schema",
             "config",
             "activity");
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Navigation badges
+    // -------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Dead_letters_wear_a_red_count_when_there_are_any()
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.DeadLetters = 12;
+
+        var layout = RenderLayout(context);
+
+        IElement badge = Badge(layout, "Dead letters")!;
+
+        badge.TextContent.Trim().Should().Be("12");
+        badge.ClassList.Should().Contain("ms-nav-badge-danger");
+        badge.GetAttribute("title").Should().Contain("could not apply");
+    }
+
+    /// <summary>
+    /// The count is a decoration on the link, never part of it: the link's text is what a screen reader
+    /// announces and what every navigation test matches on, and a badge folded into it would rename the
+    /// page.
+    /// </summary>
+    [Fact]
+    public void A_badge_never_changes_the_text_of_the_link_it_decorates()
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.DeadLetters = 12;
+        context.NavBadges.ProjectionsNeedAttention = true;
+
+        var layout = RenderLayout(context);
+
+        layout.TextOfAll(".ms-nav-link:not(.ms-nav-link-disabled) .ms-nav-link-text")
+            .Should().Contain("Dead letters").And.Contain("Projections");
+
+        layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should()
+            .Contain("events/dead-letters").And.Contain("projections");
+    }
+
+    /// <summary>
+    /// Zero dead letters is good news, and "nobody could tell" is not news at all. Neither draws a badge -
+    /// a red nought would be an alarm about the absence of a problem.
+    /// </summary>
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(null)]
+    public void No_badge_is_drawn_for_zero_or_for_an_unreadable_count(long? count)
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.DeadLetters = count;
+
+        var layout = RenderLayout(context);
+
+        Badge(layout, "Dead letters").Should().BeNull();
+    }
+
+    [Fact]
+    public void Projections_wear_an_amber_dot_with_the_reason_in_its_tooltip()
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.ProjectionsNeedAttention = true;
+        context.NavBadges.ProjectionsExplanation = "OrderSummary:All is 5,000 events behind";
+
+        var layout = RenderLayout(context);
+
+        IElement badge = Badge(layout, "Projections")!;
+
+        badge.ClassList.Should().Contain("ms-nav-badge-dot").And.Contain("ms-nav-badge-warning");
+        badge.TextContent.Trim().Should().BeEmpty("a count of 'needs attention' would mean nothing");
+        badge.GetAttribute("title").Should().Be("OrderSummary:All is 5,000 events behind");
+        badge.GetAttribute("aria-label").Should().Be("OrderSummary:All is 5,000 events behind");
+    }
+
+    [Fact]
+    public void Projections_wear_nothing_while_every_shard_is_keeping_up()
+    {
+        using var context = new StudioComponentContext();
+
+        var layout = RenderLayout(context);
+
+        Badge(layout, "Projections").Should().BeNull();
+    }
+
+    /// <summary>
+    /// Schema deliberately has no badge: finding drift costs a <c>CreateMigrationAsync</c>, which hard
+    /// rule 14 keeps off every navigation path, so it stays behind the button that says what it may
+    /// create.
+    /// </summary>
+    [Fact]
+    public void Schema_carries_no_badge_because_drift_cannot_be_found_without_building_schema()
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.DeadLetters = 3;
+        context.NavBadges.ProjectionsNeedAttention = true;
+
+        var layout = RenderLayout(context);
+
+        Badge(layout, "Schema").Should().BeNull();
+    }
+
+    /// <summary>
+    /// The one thing the sidebar must never do is stop rendering. A badge is a decoration, and a
+    /// decoration that could take navigation down with it would be worse than no badge at all.
+    /// </summary>
+    [Fact]
+    public void An_indicator_service_that_throws_costs_the_badges_and_nothing_else()
+    {
+        using var context = new StudioComponentContext();
+        context.NavBadges.Failure = new InvalidOperationException("the database is gone");
+
+        var layout = RenderLayout(context);
+
+        layout.FindAll(".ms-nav-badge").Should().BeEmpty();
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(11);
+        layout.Markup.Should().Contain(BodyMarker);
+    }
+
+    /// <summary>The badge on the nav entry with this label, or <see langword="null" /> when it has none.</summary>
+    private static IElement? Badge(IRenderedComponent<StudioLayout> layout, string label)
+    {
+        foreach (IElement link in layout.FindAll(".ms-nav-link"))
+        {
+            if (string.Equals(link.QuerySelector(".ms-nav-link-text")?.TextContent.Trim(), label, StringComparison.Ordinal))
+            {
+                return link.QuerySelector(".ms-nav-badge");
+            }
+        }
+
+        throw new InvalidOperationException($"The sidebar has no entry called '{label}'.");
     }
 
     // -------------------------------------------------------------------------------------------

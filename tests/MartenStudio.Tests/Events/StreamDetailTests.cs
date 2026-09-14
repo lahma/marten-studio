@@ -19,19 +19,19 @@ public class StreamDetailTests
     [Fact]
     public async Task Without_an_id_the_page_says_so_rather_than_reading_anything()
     {
-        using EventsComponentContext context = await NewContextAsync();
+        using StudioComponentContext context = await NewContextAsync();
 
         IRenderedComponent<StreamDetail> page = context.Render<StreamDetail>();
 
         page.Find(".ms-empty-title").TextContent.Should().Be("No stream asked for");
-        context.Data.StreamStates.Should().BeEmpty();
+        context.EventData.StreamStates.Should().BeEmpty();
     }
 
     [Fact]
     public async Task The_header_carries_the_id_the_type_the_version_and_the_archived_banner()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream(archived: true, tenantId: "acme");
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream(archived: true, tenantId: "acme");
 
         IRenderedComponent<StreamDetail> page = Render(context);
 
@@ -49,9 +49,9 @@ public class StreamDetailTests
     [Fact]
     public async Task An_event_with_a_binary_payload_shows_the_indicator_and_no_body()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream();
-        context.Data.StreamWindows.Enqueue(new EventPage(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.StreamWindows.Enqueue(new EventPage(
             [FakeEventDataService.Event(1, json: null, hasBinary: true, binaryLength: 4096)], 1, false));
 
         IRenderedComponent<StreamDetail> page = Render(context);
@@ -63,9 +63,9 @@ public class StreamDetailTests
     [Fact]
     public async Task A_payload_whose_size_the_database_could_not_report_says_so_rather_than_zero()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream();
-        context.Data.StreamWindows.Enqueue(new EventPage(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.StreamWindows.Enqueue(new EventPage(
             [FakeEventDataService.Event(1, json: null, hasBinary: true, binaryLength: null)], 1, false));
 
         Render(context).Find(".ms-event-binary").TextContent.Should().Contain("size unknown");
@@ -75,9 +75,9 @@ public class StreamDetailTests
     [Fact]
     public async Task Every_optional_column_the_store_has_becomes_a_metadata_chip()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream();
-        context.Data.StreamWindows.Enqueue(new EventPage(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.StreamWindows.Enqueue(new EventPage(
             [
                 FakeEventDataService.Event(1, metadata: new Dictionary<string, string?>(StringComparer.Ordinal)
                 {
@@ -101,9 +101,9 @@ public class StreamDetailTests
     [Fact]
     public async Task A_skipped_event_wears_the_flag()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream();
-        context.Data.StreamWindows.Enqueue(new EventPage(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.StreamWindows.Enqueue(new EventPage(
             [FakeEventDataService.Event(1, isSkipped: true)], 1, false));
 
         Render(context).FindAll(".ms-event-flag-skipped").Should().NotBeEmpty();
@@ -118,9 +118,9 @@ public class StreamDetailTests
     [Fact]
     public async Task The_time_travel_picker_falls_back_to_the_stores_document_types()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream();
-        context.Data.Candidates.Add(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.Candidates.Add(
             new AggregateTypeCandidate(typeof(TimeTravelNote), "TimeTravelNote", "X.TimeTravelNote", AggregateCandidateSource.DocumentType));
 
         IRenderedComponent<StreamDetail> page = Render(context);
@@ -132,9 +132,9 @@ public class StreamDetailTests
     [Fact]
     public async Task A_projection_candidate_says_that_it_came_from_a_projection()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream();
-        context.Data.Candidates.Add(new AggregateTypeCandidate(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.Candidates.Add(new AggregateTypeCandidate(
             typeof(TimeTravelOrder), "TimeTravelOrder", "X.TimeTravelOrder", AggregateCandidateSource.SingleStreamProjection));
 
         Render(context).TextOfAll("#ms-time-travel-type option").Should()
@@ -144,8 +144,8 @@ public class StreamDetailTests
     [Fact]
     public async Task With_no_candidate_at_all_the_panel_says_there_is_nothing_to_replay_into()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream();
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
 
         Render(context).Find(".ms-time-travel").TextContent.Should()
             .Contain("nothing to replay this stream");
@@ -154,11 +154,11 @@ public class StreamDetailTests
     [Fact]
     public async Task Replaying_renders_the_aggregate_with_the_json_viewer()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream();
-        context.Data.Candidates.Add(new AggregateTypeCandidate(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.Candidates.Add(new AggregateTypeCandidate(
             typeof(TimeTravelOrder), "TimeTravelOrder", "X.TimeTravelOrder", AggregateCandidateSource.SingleStreamProjection));
-        context.Data.Snapshot = new AggregateSnapshot("TimeTravelOrder", 2, "{\"total\":42}", true);
+        context.EventData.Snapshot = new AggregateSnapshot("TimeTravelOrder", 2, "{\"total\":42}", true);
 
         IRenderedComponent<StreamDetail> page = Render(context, "&agg=X.TimeTravelOrder&v=2");
 
@@ -171,11 +171,11 @@ public class StreamDetailTests
     [Fact]
     public async Task A_replay_that_produced_nothing_says_so()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream();
-        context.Data.Candidates.Add(new AggregateTypeCandidate(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.Candidates.Add(new AggregateTypeCandidate(
             typeof(TimeTravelOrder), "TimeTravelOrder", "X.TimeTravelOrder", AggregateCandidateSource.SingleStreamProjection));
-        context.Data.Snapshot = AggregateSnapshot.NotFound("TimeTravelOrder", 2);
+        context.EventData.Snapshot = AggregateSnapshot.NotFound("TimeTravelOrder", 2);
 
         IRenderedComponent<StreamDetail> page = Render(context, "&agg=X.TimeTravelOrder&v=2");
 
@@ -200,11 +200,11 @@ public class StreamDetailTests
         AggregateMissingReason reason,
         string expected)
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream();
-        context.Data.Candidates.Add(new AggregateTypeCandidate(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.Candidates.Add(new AggregateTypeCandidate(
             typeof(TimeTravelOrder), "TimeTravelOrder", "X.TimeTravelOrder", AggregateCandidateSource.SingleStreamProjection));
-        context.Data.Snapshot = AggregateSnapshot.NotFound("TimeTravelOrder", 5, reason, streamVersion: 3);
+        context.EventData.Snapshot = AggregateSnapshot.NotFound("TimeTravelOrder", 5, reason, streamVersion: 3);
 
         IRenderedComponent<StreamDetail> page = Render(context, "&agg=X.TimeTravelOrder&v=2");
 
@@ -220,8 +220,8 @@ public class StreamDetailTests
     [Fact]
     public async Task Archiving_is_refused_in_the_ui_by_naming_the_option_that_would_enable_it()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.StreamStates[StreamId] = Stream();
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
 
         IRenderedComponent<StreamDetail> page = Render(context);
 
@@ -237,9 +237,9 @@ public class StreamDetailTests
     [Fact]
     public async Task Archiving_asks_for_the_id_to_be_typed_before_it_will_do_anything()
     {
-        using EventsComponentContext context = await NewContextAsync();
+        using StudioComponentContext context = await NewContextAsync();
         context.WithAllCapabilities();
-        context.Data.StreamStates[StreamId] = Stream();
+        context.EventData.StreamStates[StreamId] = Stream();
 
         IRenderedComponent<StreamDetail> page = Render(context);
 
@@ -254,16 +254,16 @@ public class StreamDetailTests
         await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = StreamId });
         await page.Find(".ms-confirm-actions button.ms-button-danger").ClickAsync(new());
 
-        context.Data.Archived.Should().Equal(StreamId);
+        context.EventData.Archived.Should().Equal(StreamId);
     }
 
     [Fact]
     public async Task A_refused_archive_is_shown_on_the_page_and_not_only_in_a_toast()
     {
-        using EventsComponentContext context = await NewContextAsync();
+        using StudioComponentContext context = await NewContextAsync();
         context.WithAllCapabilities();
-        context.Data.StreamStates[StreamId] = Stream();
-        context.Data.MutationFailure = new InvalidOperationException("the write policy said no");
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.MutationFailure = new InvalidOperationException("the write policy said no");
 
         IRenderedComponent<StreamDetail> page = Render(context);
 
@@ -277,9 +277,9 @@ public class StreamDetailTests
     [Fact]
     public async Task An_already_archived_stream_offers_no_archive_button()
     {
-        using EventsComponentContext context = await NewContextAsync();
+        using StudioComponentContext context = await NewContextAsync();
         context.WithAllCapabilities();
-        context.Data.StreamStates[StreamId] = Stream(archived: true);
+        context.EventData.StreamStates[StreamId] = Stream(archived: true);
 
         IRenderedComponent<StreamDetail> page = Render(context);
 
@@ -298,15 +298,15 @@ public class StreamDetailTests
             archived,
             tenantId);
 
-    private static IRenderedComponent<StreamDetail> Render(EventsComponentContext context, string extra = "")
+    private static IRenderedComponent<StreamDetail> Render(StudioComponentContext context, string extra = "")
     {
         context.Navigate("marten/events/streams/s?id=" + StreamId + extra);
         return context.Render<StreamDetail>();
     }
 
-    private static async Task<EventsComponentContext> NewContextAsync()
+    private static async Task<StudioComponentContext> NewContextAsync()
     {
-        var context = new EventsComponentContext();
+        var context = new StudioComponentContext();
         await context.ReadyAsync();
         return context;
     }

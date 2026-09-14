@@ -112,9 +112,22 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
         return this;
     }
 
+    /// <summary>
+    /// How many times anything read the projections.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GetSummaryAsync" /> goes through <see cref="GetProjectionsAsync" />, so this counts
+    /// both - which is what lets a test assert that a page did <em>not</em> ask. That matters because
+    /// every Marten call behind these answers opens with <c>EnsureStorageExistsAsync</c>, and a page that
+    /// asked about a database with no event tables would be applying a migration to draw a tile.
+    /// </remarks>
+    public int Reads { get; private set; }
+
     /// <inheritdoc />
     public Task<ProjectionsView> GetProjectionsAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
+        Reads++;
+
         if (Failure is not null)
         {
             return Task.FromException<ProjectionsView>(Failure);
@@ -126,9 +139,26 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Catches like the real one does. "Could not report" is a value on this record rather than an
+    /// exception (plan section 4.8), and a fake that threw instead would let a caller pass a test by
+    /// handling something the product never raises.
+    /// </remarks>
     public async Task<ProjectionSummary> GetSummaryAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
-        ProjectionsView view = await GetProjectionsAsync(scope, cancellationToken);
+        ProjectionsView view;
+        try
+        {
+            view = await GetProjectionsAsync(scope, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return new ProjectionSummary(
+                0, 0, 0, null, 0, 0,
+                new DaemonStatus(DaemonHostingState.NotHostedInThisProcess, false, "Unknown", [], false, null, exception.Message),
+                exception.Message);
+        }
+
         ShardProgress? worst = view.Progress.Count > 0 ? view.Progress[0] : null;
 
         return new ProjectionSummary(
@@ -139,7 +169,9 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
             view.Progress.Count(x => x.IsPaused),
             view.Progress.Count(x => x.HasFailed),
             view.Daemon,
-            null);
+            null,
+            view.HighWaterMark,
+            view.Progress);
     }
 
     /// <inheritdoc />

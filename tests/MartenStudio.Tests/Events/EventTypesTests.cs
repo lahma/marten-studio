@@ -15,8 +15,8 @@ public class EventTypesTests
     [Fact]
     public async Task The_types_are_listed_without_running_the_aggregate()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.TypesWithoutCounts = new EventTypeList(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithoutCounts = new EventTypeList(
             [
                 new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true),
                 new EventTypeInfo("OrderShipped", "Sample.OrderShipped", true),
@@ -25,7 +25,7 @@ public class EventTypesTests
 
         IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
 
-        context.Data.CountsRequested.Should().BeFalse("counting is a full scan and is behind the button");
+        context.EventData.CountsRequested.Should().BeFalse("counting is a full scan and is behind the button");
         page.TextOfAll(".ms-event-chip").Should().Equal("OrderPlaced", "OrderShipped");
         page.Markup.Should().Contain("not counted");
     }
@@ -33,17 +33,17 @@ public class EventTypesTests
     [Fact]
     public async Task Loading_counts_asks_for_them_and_shows_the_sequence_range()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.TypesWithoutCounts = new EventTypeList(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithoutCounts = new EventTypeList(
             [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true)], false);
-        context.Data.TypesWithCounts = new EventTypeList(
+        context.EventData.TypesWithCounts = new EventTypeList(
             [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true, 1234, 1, 9000)], true);
 
         IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
 
         await page.Find(".ms-page-header button").ClickAsync(new());
 
-        context.Data.CountsRequested.Should().BeTrue();
+        context.EventData.CountsRequested.Should().BeTrue();
         page.Markup.Should().Contain("1,234").And.Contain("#1").And.Contain("#9000");
     }
 
@@ -54,15 +54,15 @@ public class EventTypesTests
     [Fact]
     public async Task Unregistered_types_and_registered_types_with_no_events_are_both_flagged()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.TypesWithCounts = new EventTypeList(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithCounts = new EventTypeList(
             [
                 new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true, 12, 1, 12),
                 new EventTypeInfo("OrderCancelled", "Sample.OrderCancelled", true, 0),
                 new EventTypeInfo("LegacyThingHappened", null, false, 3, 4, 6),
             ],
             true);
-        context.Data.TypesWithoutCounts = context.Data.TypesWithCounts with { CountsLoaded = false };
+        context.EventData.TypesWithoutCounts = context.EventData.TypesWithCounts with { CountsLoaded = false };
 
         IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
 
@@ -75,8 +75,8 @@ public class EventTypesTests
     [Fact]
     public async Task Clicking_a_type_goes_to_the_feed_filtered_to_it()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.TypesWithoutCounts = new EventTypeList(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithoutCounts = new EventTypeList(
             [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true)], false);
 
         IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
@@ -88,8 +88,8 @@ public class EventTypesTests
     [Fact]
     public async Task A_failed_read_renders_the_sql_state()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.TypesWithoutCounts = EventTypeList.Failed(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithoutCounts = EventTypeList.Failed(
             new EventDataError("permission denied for table mt_events", "42501", false));
 
         context.Render<EventTypes>().Find(".ms-error-alert").TextContent.Should()
@@ -104,13 +104,13 @@ public class EventTypesTests
     [Fact]
     public async Task A_list_that_was_cut_short_says_so()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.TypesWithCounts = new EventTypeList(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithCounts = new EventTypeList(
             [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true, 12, 1, 12)],
             CountsLoaded: true,
             Error: null,
             IsTruncated: true);
-        context.Data.TypesWithoutCounts = context.Data.TypesWithCounts with { CountsLoaded = false };
+        context.EventData.TypesWithoutCounts = context.EventData.TypesWithCounts with { CountsLoaded = false };
 
         IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
 
@@ -120,8 +120,8 @@ public class EventTypesTests
     [Fact]
     public async Task A_complete_list_says_nothing_about_being_cut_short()
     {
-        using EventsComponentContext context = await NewContextAsync();
-        context.Data.TypesWithoutCounts = new EventTypeList(
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithoutCounts = new EventTypeList(
             [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true)], false);
 
         context.Render<EventTypes>().FindAll(".ms-alert-warning").Should().BeEmpty();
@@ -130,14 +130,14 @@ public class EventTypesTests
     [Fact]
     public async Task A_store_with_no_event_types_says_so()
     {
-        using EventsComponentContext context = await NewContextAsync();
+        using StudioComponentContext context = await NewContextAsync();
 
         context.Render<EventTypes>().Find(".ms-empty-title").TextContent.Should().Be("No event types");
     }
 
-    private static async Task<EventsComponentContext> NewContextAsync()
+    private static async Task<StudioComponentContext> NewContextAsync()
     {
-        var context = new EventsComponentContext();
+        var context = new StudioComponentContext();
         await context.ReadyAsync();
         return context;
     }
