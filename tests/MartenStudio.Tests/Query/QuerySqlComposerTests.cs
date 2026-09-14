@@ -17,8 +17,16 @@ namespace MartenStudio.Tests.Query;
 /// tenant filter, no soft-delete filter - so a clause of <c>where 1 = 1</c> run by somebody scoped to one
 /// tenant returned every tenant's rows and every soft-deleted row. The studio now composes and runs its
 /// own statement, so what these tests pin is that the tenant and soft-delete predicates are there, that
-/// they come <em>before</em> the visitor's parenthesised predicate, and that the text is the text that
-/// runs.
+/// they surround the visitor's parenthesised predicate, and that the text is the text that runs.
+/// </para>
+/// <para>
+/// The second round of tests is about the parentheses themselves. Composing the studio's terms in front of
+/// a parenthesised predicate is only a guarantee while the predicate stays inside the brackets the composer
+/// wrote, and it did not: <c>1 = 1) or (1 = 1</c> closed the composer's bracket and put its second half
+/// outside every predicate, which was measured returning four rows on a scope narrowed to one tenant. So
+/// there is a balance rule, the terms are repeated after the predicate as well as before it, the
+/// <c>order by</c> body is held to being a sort list, and the function denylist applies at every
+/// capability level rather than evaporating for a <c>RunSql</c> holder.
 /// </para>
 /// </remarks>
 public class QuerySqlComposerTests
@@ -108,11 +116,12 @@ public class QuerySqlComposerTests
 
     /// <summary>
     /// The one that was live-proven broken. A conjoined, soft-deleted collection read as one tenant has to
-    /// carry both predicates, and they have to come <em>before</em> the visitor's - a parenthesised
-    /// predicate cannot reach around an <c>and</c> that precedes it, however much <c>or</c> is inside it.
+    /// carry both predicates, and they have to surround the visitor's - a parenthesised predicate cannot
+    /// reach around an <c>and</c> that precedes it, however much <c>or</c> is inside it, and the copy
+    /// <em>after</em> it is the half that still holds if the parentheses are ever escaped.
     /// </summary>
     [Fact]
-    public void A_conjoined_soft_deleted_table_carries_both_predicates_in_front_of_the_visitors()
+    public void A_conjoined_soft_deleted_table_carries_both_predicates_on_both_sides_of_the_visitors()
     {
         ComposedQuery composed = QuerySqlComposer.Compose(
             Table(conjoined: true, softDeleted: true), "where 1 = 1 or true", 50, "acme");
@@ -127,6 +136,8 @@ public class QuerySqlComposerTests
               and (
                 1 = 1 or true
               )
+              and d."tenant_id" = @tenant
+              and d."mt_deleted" = false
             limit @limit
             """.ReplaceLineEndings("\n"));
 
@@ -135,6 +146,57 @@ public class QuerySqlComposerTests
         composed.Deleted.Should().Be(DeletedFilter.Exclude);
         composed.TenantOrdinal.Should().Be(2);
         composed.DeletedOrdinal.Should().Be(3);
+
+        composed.Parameters.Should().ContainSingle(x => x.Name == "tenant",
+            "the tenant is bound once and named twice; an Npgsql parameter may be referenced as often as it likes");
+    }
+
+    /// <summary>
+    /// Defence in depth, stated as a property rather than as a string: whatever the clause is, the studio's
+    /// own terms appear on <em>both</em> sides of it. <c>a and (X) and a</c> distributes over any <c>or</c>
+    /// the predicate turns out to contain, so an <c>or</c> disjunct that somehow escaped the parentheses is
+    /// still tenant-filtered and still soft-delete-filtered.
+    /// </summary>
+    [Theory]
+    [InlineData("where 1 = 1")]
+    [InlineData("where subject = 'x' or true")]
+    [InlineData("where (a = 1) and (b = 2)")]
+    [InlineData("where a = 1 order by d.id limit 5")]
+    public void The_studios_own_terms_bracket_the_visitors_predicate_on_both_sides(string clause)
+    {
+        ComposedQuery composed = QuerySqlComposer.Compose(
+            Table(conjoined: true, softDeleted: true), clause, 50, "acme");
+
+        int openBracket = composed.Statement.IndexOf("  and (\n", StringComparison.Ordinal);
+        int closeBracket = composed.Statement.IndexOf("\n  )\n", StringComparison.Ordinal);
+
+        openBracket.Should().BeGreaterThan(0, clause);
+        closeBracket.Should().BeGreaterThan(openBracket, clause);
+
+        string before = composed.Statement[..openBracket];
+        string after = composed.Statement[closeBracket..];
+
+        before.Should().Contain("and d.\"tenant_id\" = @tenant").And.Contain("and d.\"mt_deleted\" = false");
+        after.Should().Contain("and d.\"tenant_id\" = @tenant").And.Contain("and d.\"mt_deleted\" = false");
+    }
+
+    /// <summary>
+    /// The repeat is only worth having where there is something to repeat: a clause with no predicate has
+    /// no parentheses to escape from, and a second copy of the terms would be noise in the SQL tab.
+    /// </summary>
+    [Fact]
+    public void An_empty_predicate_gets_the_studios_terms_once_and_not_twice()
+    {
+        QuerySqlComposer.Compose(Table(conjoined: true, softDeleted: true), null, 50, "acme").Statement
+            .Should().Be(
+                """
+                select d."id", d."data"::text, d."tenant_id", d."mt_deleted"
+                from "studio"."mt_doc_person" as d
+                where 1 = 1
+                  and d."tenant_id" = @tenant
+                  and d."mt_deleted" = false
+                limit @limit
+                """.ReplaceLineEndings("\n"));
     }
 
     /// <summary>
@@ -346,9 +408,10 @@ public class QuerySqlComposerTests
     // ------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The clause runs outside the console's read-only transaction, so a second statement in it would
-    /// execute. <c>1 = 1; drop table x</c> is one Npgsql command holding two statements, and Postgres runs
-    /// both.
+    /// A clause needs no capability, so a second statement in it would be an ungated SQL console.
+    /// <c>1 = 1; drop table x</c> is one Npgsql command holding two statements, and Postgres runs both -
+    /// and the read-only transaction Mode A now runs in would not stop the second one from being
+    /// <c>select pg_advisory_lock(42)</c>.
     /// </summary>
     [Theory]
     [InlineData("where a = 1; drop table x")]
@@ -365,9 +428,10 @@ public class QuerySqlComposerTests
     }
 
     /// <summary>
-    /// The two shape rules hold even for somebody who may run SQL: Mode A does not run inside the console's
-    /// read-only transaction, so a second statement here would really write - which is more than
-    /// <c>RunSql</c> grants anywhere else.
+    /// The two shape rules hold even for somebody who may run SQL. <c>RunSql</c> lifts
+    /// <see cref="QuerySqlComposer.NestedReadKeywords" /> and nothing else, and a second statement here is
+    /// one Npgsql command the studio never showed anybody - which is more than <c>RunSql</c> grants
+    /// anywhere else.
     /// </summary>
     [Theory]
     [InlineData("where a = 1; drop table x")]
@@ -387,6 +451,193 @@ public class QuerySqlComposerTests
     public void A_clause_that_is_a_statement_of_its_own_is_refused(string clause)
     {
         QuerySqlComposer.CheckClause(clause, allowNestedReads: false).Allowed.Should().BeFalse(clause);
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Balanced parentheses. The clause is spliced between a `(` and a `)` the composer wrote, so a clause
+    // that closes one it never opened closes the studio's - and everything after it lands outside the
+    // tenant and soft-delete predicates. Measured returning four rows where the answer was one.
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Every spelling the adversarial review found, by name. The first is the one it measured: on a
+    /// conjoined, soft-deleted collection scoped to <c>acme</c>, <c>1 = 1) or (1 = 1</c> returned acme
+    /// live, acme deleted, globex live and globex deleted, because <c>and</c> binds tighter than <c>or</c>
+    /// and the second disjunct had no predicate in front of it at all. The second needs no unbalanced
+    /// <c>(</c> whatsoever: the composer puts its closing bracket on a line of its own, so a clause ending
+    /// in a <c>--</c> comment can supply the <c>)</c> from the free line that follows.
+    /// </summary>
+    [Theory]
+    [InlineData("1 = 1) or (1 = 1", ")")]
+    [InlineData("where 1 = 1) or (1 = 1", ")")]
+    [InlineData("a = 1 --\n) or (true", ")")]
+    [InlineData("data is not null -- \n) or (true", ")")]
+    [InlineData("x = 1) or (1=1 limit 5", ")")]
+    [InlineData("1=1) or (1=1 order by d.tenant_id limit 500", ")")]
+    [InlineData("a = 1)", ")")]
+    [InlineData("')' = ')' ) or (true", ")")]
+    [InlineData("a = 1 /* ( */ )", ")")]
+    [InlineData("(a = 1", "(")]
+    [InlineData("where (a = 1 and (b = 2)", "(")]
+    [InlineData("a = 1 and (", "(")]
+    public void A_clause_whose_brackets_do_not_balance_is_refused_at_both_capability_levels(
+        string clause,
+        string token)
+    {
+        foreach (bool mayRunSql in new[] { false, true })
+        {
+            SqlGuardResult refused = QuerySqlComposer.CheckClause(clause, mayRunSql);
+
+            refused.Allowed.Should().BeFalse($"{clause} (RunSql: {mayRunSql})");
+            refused.Token.Should().Be(token, clause);
+            refused.Position.Should().BeGreaterThanOrEqualTo(0, clause);
+            refused.Message.Should().Contain("Balance the brackets", clause);
+            refused.Message.Should().Contain("no capability lifts this one", clause);
+        }
+    }
+
+    /// <summary>
+    /// The anti-vacuity half. A bracket inside a string, a quoted identifier, a dollar body or a comment is
+    /// not a bracket, so the balance rule has to leave these alone - a rule that refuses everything is not
+    /// a rule, it is an outage.
+    /// </summary>
+    [Theory]
+    [InlineData("where ')' = ')'")]
+    [InlineData("where data ->> 'Name' = '((('")]
+    [InlineData("where name = 'it''s )'")]
+    [InlineData("where \")\" = 1")]
+    [InlineData("where x = $tag$ ) ) ( $tag$")]
+    [InlineData("where a = 1 -- ) ) (")]
+    [InlineData("where a = 1 /* ) ) ( */")]
+    [InlineData("where (a = 1 or b = 2) and (c = 3)")]
+    [InlineData("where lower(data ->> 'Name') like 'a%'")]
+    public void Brackets_inside_a_literal_or_a_comment_are_not_brackets(string clause)
+    {
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: false).Allowed.Should().BeTrue(clause);
+    }
+
+    /// <summary>
+    /// Postgres block comments <b>nest</b>, unlike C's: in <c>/* /* */ ) */</c> the <c>)</c> is still
+    /// inside the comment, and a scanner that stopped at the first <c>*/</c> would refuse a clause Postgres
+    /// is perfectly happy with. An unterminated nest is the opposite answer - "I cannot tell what this
+    /// would run" is a refusal, not a pass.
+    /// </summary>
+    [Fact]
+    public void Block_comments_nest_the_way_postgres_nests_them()
+    {
+        QuerySqlComposer.CheckClause("where a = 1 /* /* */ ) */", allowNestedReads: false)
+            .Allowed.Should().BeTrue("the ')' never leaves the comment");
+
+        QuerySqlComposer.CheckClause("where a = 1 /* /* */", allowNestedReads: false)
+            .Allowed.Should().BeFalse("the outer comment is never closed");
+    }
+
+    /// <summary>
+    /// <c>standard_conforming_strings</c> is on by default, so a backslash escapes <em>only</em> inside an
+    /// <c>E'…'</c> literal. Both halves matter, and they pull in opposite directions: in <c>E'it\'s ('</c>
+    /// the bracket is inside the string, while in <c>'x\'; drop table t --'</c> the quote after the
+    /// backslash <b>closes</b> the string and the <c>;</c> that follows is a second statement. A scanner
+    /// that treats backslashes as escapes everywhere gets the second one wrong, which is the more
+    /// expensive direction.
+    /// </summary>
+    [Fact]
+    public void A_backslash_escapes_in_an_E_string_and_nowhere_else()
+    {
+        QuerySqlComposer.CheckClause("where name = E'it\\'s ('", allowNestedReads: false)
+            .Allowed.Should().BeTrue("the '(' is inside the escaped literal");
+
+        SqlGuardResult refused = QuerySqlComposer.CheckClause(
+            "where name = 'x\\'; drop table t --'", allowNestedReads: false);
+
+        refused.Allowed.Should().BeFalse("the quote after the backslash closes the string");
+        refused.Reason.Should().Be(SqlRejectionReason.MultipleStatements);
+    }
+
+    /// <summary>
+    /// A dollar-quote tag follows the rules of an unquoted identifier, so it cannot begin with a digit:
+    /// <c>$1$</c> is a parameter placeholder. Reading it as a tag made the <c>;</c> scanner skip the span
+    /// between two of them, which is a scanner disagreeing with Postgres about where a string is - the one
+    /// thing it may never do, whether or not today's spelling happens to be exploitable.
+    /// </summary>
+    [Theory]
+    [InlineData("1 = 1 and 'x' = $1$;drop table x;--$1$")]
+    [InlineData("a = $2$;select 1;$2$")]
+    public void A_dollar_tag_that_starts_with_a_digit_is_a_parameter_and_hides_nothing(string clause)
+    {
+        SqlGuardResult refused = QuerySqlComposer.CheckClause(clause, allowNestedReads: false);
+
+        refused.Allowed.Should().BeFalse(clause);
+        refused.Reason.Should().Be(SqlRejectionReason.MultipleStatements);
+        refused.Token.Should().Be(";");
+
+        QuerySqlComposer.IndexOfStatementSeparator(clause).Should().BeGreaterThanOrEqualTo(0,
+            "the ';' scanner has to see it too, because that is the scanner that was blind");
+    }
+
+    /// <summary>
+    /// A real tag still works, so the rule above did not simply delete dollar quoting.
+    /// </summary>
+    [Theory]
+    [InlineData("where x = $$ ; $$")]
+    [InlineData("where x = $tag$ ; $tag$")]
+    [InlineData("where x = $_t1$ ; $_t1$")]
+    public void A_tag_that_starts_with_a_letter_or_an_underscore_is_still_a_body(string clause)
+    {
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: false).Allowed.Should().BeTrue(clause);
+        QuerySqlComposer.IndexOfStatementSeparator(clause).Should().Be(-1, clause);
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The `order by` body. It is spliced onto the statement verbatim, and Postgres 17 accepts a locking
+    // clause between `order by` and `limit` - which is how `for update` reached the server from the mode
+    // that needs no capability.
+    // ------------------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("where a = 1 order by 1 for update", "for")]
+    [InlineData("order by 1 for update", "for")]
+    [InlineData("where a = 1 order by d.id for no key update", "for")]
+    [InlineData("where a = 1 order by 1 fetch first 1 rows only", "fetch")]
+    [InlineData("where a = 1 order by 1 union select 1", "union")]
+    [InlineData("where a = 1 order by 1 intersect select 1", "intersect")]
+    [InlineData("where a = 1 order by 1 except select 1", "except")]
+    [InlineData("where a = 1 order by 1 into other_table", "into")]
+    public void A_sort_list_that_is_not_a_sort_list_is_refused_at_both_capability_levels(
+        string clause,
+        string token)
+    {
+        foreach (bool mayRunSql in new[] { false, true })
+        {
+            SqlGuardResult refused = QuerySqlComposer.CheckClause(clause, mayRunSql);
+
+            refused.Allowed.Should().BeFalse($"{clause} (RunSql: {mayRunSql})");
+            refused.Token.Should().Be(token, clause);
+            refused.Message.Should().Contain("not part of a sort list", clause);
+        }
+
+        QuerySqlComposer.TryPartition(clause, out _, out SqlGuardResult rejection).Should().BeFalse(clause);
+        rejection.Token.Should().Be(token);
+    }
+
+    /// <summary>
+    /// The anti-vacuity half again. <c>substring(x from 2 for 3)</c> and <c>overlay(…)</c> carry a
+    /// <c>for</c> of their own, inside the function's parentheses - the check is at depth zero for exactly
+    /// that reason.
+    /// </summary>
+    [Theory]
+    [InlineData("where a = 1 order by substring(data ->> 'Name' from 2 for 3)")]
+    [InlineData("where a = 1 order by d.id desc nulls last")]
+    [InlineData("where a = 1 order by lower(data ->> 'Name') collate \"C\"")]
+    [InlineData("where a = 1 order by (select 1 from t limit 1)")]
+    public void A_sort_list_that_is_one_survives_the_check(string clause)
+    {
+        QuerySqlComposer.TryPartition(clause, out ClauseParts parts, out SqlGuardResult rejection)
+            .Should().BeTrue(rejection.Message);
+
+        parts.OrderBy.Should().NotBeNullOrWhiteSpace(clause);
+
+        // `select`, `from` and `limit` inside that last one still need RunSql; that is a different rule.
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: true).Allowed.Should().BeTrue(clause);
     }
 
     // ------------------------------------------------------------------------------------------------
@@ -436,19 +687,72 @@ public class QuerySqlComposerTests
     }
 
     /// <summary>
-    /// With <c>RunSql</c> the same clauses run: a subquery is the point of the mode for somebody who could
-    /// have typed the whole thing into the console anyway. What it does <em>not</em> lift is the tenant and
-    /// soft-delete predicates, which are composed in either way - see
-    /// <see cref="A_conjoined_soft_deleted_table_carries_both_predicates_in_front_of_the_visitors" />.
+    /// With <c>RunSql</c> the <em>nested-read</em> clauses run: a subquery is the point of the mode for
+    /// somebody who could have typed the whole thing into the console anyway. What it does <em>not</em>
+    /// lift is the tenant and soft-delete predicates, which are composed in either way - see
+    /// <see cref="A_conjoined_soft_deleted_table_carries_both_predicates_on_both_sides_of_the_visitors" /> -
+    /// nor <see cref="QuerySqlComposer.DisallowedFunctions" />, which is the next test.
     /// </summary>
     [Theory]
     [InlineData("where id in (select id from other.t)")]
     [InlineData("where exists (select 1)")]
     [InlineData("where 1 = 1 union select id, data from other.t")]
-    [InlineData("where pg_sleep(10) is null")]
+    [InlineData("where d.id in (select id from t join u on true)")]
     public void The_same_clause_is_allowed_with_RunSql(string clause)
     {
         QuerySqlComposer.CheckClause(clause, allowNestedReads: true).Allowed.Should().BeTrue(clause);
+    }
+
+    /// <summary>
+    /// <b>The denylist never lifts.</b> <c>RunSql</c> used to turn <see cref="QuerySqlComposer.CheckClause" />
+    /// into "no <c>;</c>, no leading statement word, a placeable tail" and nothing else, so
+    /// <c>where pg_advisory_lock(42) is not null</c> was refused without the capability and <b>allowed with
+    /// it</b> - a session-level lock, taken from a <c>where</c> box, on a pooled connection that outlives
+    /// the request. A read-only transaction does not refuse an advisory lock; only the list does. So the
+    /// list applies to everybody, and only <see cref="QuerySqlComposer.NestedReadKeywords" /> answers to
+    /// the capability.
+    /// </summary>
+    [Theory]
+    [InlineData("where pg_advisory_lock(42) is not null")]
+    [InlineData("where pg_advisory_lock_shared(1, 2) is not null")]
+    [InlineData("where setval('s', 1) > 0")]
+    [InlineData("where nextval('s') > 0")]
+    [InlineData("where pg_terminate_backend(pg_backend_pid())")]
+    [InlineData("where pg_read_file('x') = ''")]
+    [InlineData("where set_config('statement_timeout', '0', false) is not null")]
+    [InlineData("where current_setting('is_superuser') = 'on'")]
+    [InlineData("where pg_sleep(10) is null")]
+    [InlineData("where pg_notify('c', 'p') is null")]
+    [InlineData("where 'mt_doc_person'::regclass is not null")]
+    [InlineData("where 'now'::regproc is not null")]
+    public void A_function_or_cast_the_denylist_names_is_refused_at_both_capability_levels(string clause)
+    {
+        foreach (bool mayRunSql in new[] { false, true })
+        {
+            SqlGuardResult refused = QuerySqlComposer.CheckClause(clause, mayRunSql);
+
+            refused.Allowed.Should().BeFalse($"{clause} (RunSql: {mayRunSql})");
+            refused.Token.Should().NotBeNullOrEmpty();
+            refused.Position.Should().BeGreaterThanOrEqualTo(0);
+            refused.Message.Should().Contain("whatever capabilities you hold");
+        }
+    }
+
+    /// <summary>
+    /// The mirror image, so the test above cannot pass by refusing everything: the words <c>RunSql</c>
+    /// really does lift stay lifted.
+    /// </summary>
+    [Fact]
+    public void RunSql_lifts_the_nested_read_words_and_only_those()
+    {
+        QuerySqlComposer.CheckClause("where id in (select id from other.t)", allowNestedReads: false)
+            .Allowed.Should().BeFalse();
+        QuerySqlComposer.CheckClause("where id in (select id from other.t)", allowNestedReads: true)
+            .Allowed.Should().BeTrue("a nested read is what the capability is for");
+
+        QuerySqlComposer.NestedReadKeywords.Should().NotIntersectWith(
+            QuerySqlComposer.DisallowedFunctions,
+            "a word in both lists would be lifted by one rule and refused by the other");
     }
 
     /// <summary>
@@ -553,8 +857,11 @@ public class QuerySqlComposerTests
 
     /// <summary>
     /// The console allows <c>pg_sleep</c> because a server-side <c>statement_timeout</c> bounds it inside
-    /// the read-only transaction. A Mode A read carries only a client-side <c>CommandTimeout</c>, so it
-    /// refuses it - the one deliberate disagreement between the two lists, and therefore worth pinning.
+    /// the read-only transaction. Mode A runs inside that same transaction now, so the timeout is no longer
+    /// the difference - the capability is: the console is gated on <c>RunSql</c> and a <c>where</c> clause
+    /// is gated on nothing, and parking a connection for the whole statement timeout with no capability is
+    /// cheaper than the studio should make it. The one deliberate disagreement between the two lists, and
+    /// therefore worth pinning.
     /// </summary>
     [Fact]
     public void Pg_sleep_is_the_one_the_console_allows_and_a_clause_does_not()

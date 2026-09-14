@@ -1,7 +1,16 @@
 using System.Text.Json;
 
+using JasperFx.MultiTenancy;
+
+using Marten.Schema;
+
+using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Query;
+
+using Npgsql;
+
+using NpgsqlTypes;
 
 namespace MartenStudio.Integration.Tests.Query;
 
@@ -298,9 +307,9 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
     }
 
     /// <summary>
-    /// Mode A needs no capability and does not run in the console's read-only transaction, so a clause
-    /// carrying a second statement would be an ungated SQL console. It is refused before anything is sent,
-    /// and the table is what it was.
+    /// Mode A needs no capability, so a clause carrying a second statement would be an ungated SQL
+    /// console - and a read-only transaction refuses writes, not a second `select` that takes a lock. It is
+    /// refused before anything is sent, and the table is what it was.
     /// </summary>
     [PostgresFact]
     public async Task A_clause_carrying_a_second_statement_is_refused_and_the_table_is_untouched()
@@ -507,8 +516,9 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
     }
 
     /// <summary>
-    /// An <c>or true</c> cannot widen the read either: the visitor's predicate is parenthesised and comes
-    /// last, so it can narrow what the studio's own terms let through and never add to it.
+    /// An <c>or true</c> cannot widen the read either: the visitor's predicate is parenthesised and the
+    /// studio's own terms sit on both sides of it, so it can narrow what they let through and never add to
+    /// it.
     /// </summary>
     [PostgresFact]
     public async Task As_one_tenant_an_or_true_clause_still_sees_only_that_tenant()
@@ -600,5 +610,395 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
             result.Error.Should().BeNull(
                 example.Snippet + " => " + (result.Error?.MessageText ?? string.Empty));
         }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Escaping the studio's parentheses. The visitor's predicate is spliced between a `(` and a `)` the
+    // composer wrote; a clause holding one more `)` than `(` closes the composer's bracket and everything
+    // after it lands outside the tenant and soft-delete predicates. The adversarial review measured four
+    // rows where the honest answer was one, on this very fixture.
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Every spelling the review tried, including the one that needs no unbalanced <c>(</c> at all: the
+    /// composer puts its closing bracket on a line of its own, so a clause ending in a <c>--</c> comment
+    /// supplies the <c>)</c> from the free line that follows.
+    /// </summary>
+    public static TheoryData<string> UnbalancedClauses() =>
+        new()
+        {
+            "1 = 1) or (1 = 1",
+            "where 1 = 1) or (1 = 1",
+            "data is not null -- \n) or (true",
+            "1=1) or (1=1 order by d.tenant_id limit 500",
+            "x = 1) or (1=1 limit 5",
+            "subject is not null)",
+            "(1 = 1",
+        };
+
+    [PostgresTheory]
+    [MemberData(nameof(UnbalancedClauses))]
+    public async Task As_one_tenant_a_clause_that_escapes_the_studios_bracket_is_refused_and_never_sent(
+        string clause)
+    {
+        StudioScope acme = QueryHarness.ScopeFor(QueryHarness.Acme);
+        string alias = await TicketAliasAsync(acme);
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            acme, new MartenQueryRequest(alias, clause), Token);
+
+        result.Rejection.Should().NotBeNull(clause);
+        result.Rejection!.Token.Should().BeOneOf(")", "(");
+        result.Error.Should().BeNull("nothing was sent");
+        result.Rows.Should().BeEmpty(clause);
+
+        // The harness grants RunSql, so this also covers the capability level the review probed at: a
+        // bracket is not something a capability lifts.
+        harness.Audit.GetLatest().First(x => x.Action == "MartenQuery").Succeeded.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The anti-vacuity half, and the proof that <em>both</em> halves of the fix are load-bearing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The first statement is the shape P6-fix shipped - the studio's terms in front of the visitor's
+    /// parenthesised predicate and nowhere else - written out here by hand because the composer no longer
+    /// produces it. Spliced with <c>1 = 1) or (1 = 1</c> it returns <b>four</b> rows on a scope narrowed to
+    /// <c>acme</c>: acme live, acme deleted, globex live, globex deleted. That is the leak, reproduced.
+    /// </para>
+    /// <para>
+    /// The second is what <see cref="QuerySqlComposer.Compose" /> writes for the same clause today, with
+    /// the guard deliberately bypassed. It returns one row, because the terms are repeated <em>after</em>
+    /// the predicate and <c>a and (X) and a</c> distributes over the <c>or</c>. So the clause is refused by
+    /// the guard <em>and</em> would be harmless if the guard ever missed it.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task The_shape_that_leaked_still_leaks_and_the_shape_the_composer_writes_does_not()
+    {
+        const string clause = "1 = 1) or (1 = 1";
+
+        DocumentTableInfo table = TicketTable();
+
+        table.TenancyStyle.Should().Be(TenancyStyle.Conjoined, "otherwise this proves nothing");
+        table.SoftDeleteEnabled.Should().BeTrue("otherwise this proves nothing");
+
+        string leaking =
+            $"select d.\"id\", d.\"tenant_id\", d.\"mt_deleted\"\nfrom {table.QualifiedName} as d\n" +
+            "where 1 = 1\n" +
+            "  and d.\"tenant_id\" = @tenant\n" +
+            "  and d.\"mt_deleted\" = false\n" +
+            "  and (\n    " + clause + "\n  )\n" +
+            "limit 500";
+
+        (await CountRowsAsync(leaking)).Should().Be(
+            4,
+            "the pre-fix shape really did put every tenant's rows and every deleted row outside the " +
+            "predicates, because `and` binds tighter than `or`");
+
+        ComposedQuery composed = QuerySqlComposer.Compose(table, clause, 500, QueryHarness.Acme);
+
+        (await CountRowsAsync(composed.Statement, QueryHarness.Acme)).Should().Be(
+            1,
+            "the terms are repeated after the visitor's predicate, so every disjunct is still filtered");
+
+        QuerySqlComposer.CheckClause(clause, allowNestedReads: true).Allowed.Should().BeFalse(
+            "and the guard refuses it before either of those statements is composed for real");
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The read-only transaction. Mode A used to run as a plain command on a read connection: no
+    // `SET TRANSACTION READ ONLY`, no server-side statement_timeout, no SqlConsoleRole - reached by the
+    // mode that needs no capability at all.
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The direct proof, and the only one that cannot be explained away by the clause guard: a function
+    /// the denylist has never heard of, whose body writes. Outside a read-only transaction the clause
+    /// inserts a row; inside one Postgres answers <c>25006</c> and the probe table stays empty.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_clause_that_reaches_a_writing_function_is_refused_by_the_transaction_as_25006()
+    {
+        string quoted = SqlIdentifier.Quote(harness.Schema);
+        string alias = await PersonAliasAsync();
+
+        await ExecuteAsync(
+            $"create table {quoted}.ms_probe (n int);\n" +
+            $"create function {quoted}.ms_touch() returns int language sql as " +
+            $"$fn$ insert into {quoted}.ms_probe values (1); select 1 $fn$;");
+
+        try
+        {
+            MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+                harness.Scope,
+                new MartenQueryRequest(alias, $"where {harness.Schema}.ms_touch() = 1"),
+                Token);
+
+            result.Rejection.Should().BeNull(
+                "the clause names nothing the guard refuses - the transaction is what has to stop it");
+            result.Error.Should().NotBeNull();
+            result.Error!.SqlState.Should().Be("25006", "cannot execute INSERT in a read-only transaction");
+
+            (await ScalarAsync($"select count(*) from {quoted}.ms_probe")).Should().Be(0L);
+        }
+        finally
+        {
+            await ExecuteAsync(
+                $"drop function if exists {quoted}.ms_touch(); drop table if exists {quoted}.ms_probe;");
+        }
+    }
+
+    /// <summary>
+    /// <c>for update</c> reached the server through the <c>order by</c> tail, at both capability levels -
+    /// Postgres accepts a locking clause between <c>ORDER BY</c> and <c>LIMIT</c>, so the studio was
+    /// handing out row-level write locks from the ungated read mode. It is refused now, and a second
+    /// connection with a one-millisecond <c>lock_timeout</c> proves no lock was left behind.
+    /// </summary>
+    [PostgresTheory]
+    [InlineData("where 1 = 1 order by d.id for update")]
+    [InlineData("order by 1 for update")]
+    [InlineData("where 1 = 1 order by 1 for no key update")]
+    public async Task A_locking_clause_in_the_tail_is_refused_and_leaves_no_lock(string clause)
+    {
+        StudioScope acme = QueryHarness.ScopeFor(QueryHarness.Acme);
+        string alias = await TicketAliasAsync(acme);
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            acme, new MartenQueryRequest(alias, clause), Token);
+
+        if (result.Rejection is null)
+        {
+            result.Error.Should().NotBeNull(clause);
+            result.Error!.SqlState.Should().Be("25006", "the read-only transaction is the second boundary");
+        }
+        else
+        {
+            result.Rejection.Token.Should().Be("for", clause);
+            result.Error.Should().BeNull("nothing was sent");
+        }
+
+        await AssertRowIsNotLockedAsync(TicketTable(), QueryHarness.AcmeLive);
+    }
+
+    /// <summary>
+    /// <c>RunSql</c> used to lift the function denylist entirely. Measured: with the capability granted,
+    /// <c>where pg_advisory_lock(42) is not null</c> was <b>allowed</b> - a session-level lock, taken from
+    /// a <c>where</c> box, on a pooled connection that outlives the request and that Marten's own daemon
+    /// contends for. A read-only transaction does not refuse an advisory lock; only the list does.
+    /// </summary>
+    [PostgresTheory]
+    [InlineData("where pg_advisory_lock(424242) is not null", "pg_advisory_lock")]
+    [InlineData("where pg_advisory_lock_shared(4, 2) is not null", "pg_advisory_lock_shared")]
+    [InlineData("where set_config('statement_timeout', '0', false) is not null", "set_config")]
+    [InlineData("where nextval('nothing') > 0", "nextval")]
+    [InlineData("where pg_sleep(30) is null", "pg_sleep")]
+    public async Task A_RunSql_holders_clause_is_still_refused_by_the_function_denylist(
+        string clause,
+        string token)
+    {
+        string alias = await PersonAliasAsync();
+
+        // The harness grants RunSql and the scope authorizes it, so this is the level the review probed at.
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            harness.Scope, new MartenQueryRequest(alias, clause), Token);
+
+        result.Rejection.Should().NotBeNull(clause);
+        result.Rejection!.Token.Should().Be(token);
+        result.Rejection.Message.Should().Contain("whatever capabilities you hold");
+        result.Error.Should().BeNull("nothing was sent");
+        result.Rows.Should().BeEmpty();
+
+        (await ScalarAsync("select count(*) from pg_locks where locktype = 'advisory'"))
+            .Should().Be(0L, "no advisory lock was taken, by this clause or by any that came before it");
+    }
+
+    /// <summary>
+    /// <b>A behaviour change worth pinning:</b> Mode A now honours
+    /// <see cref="MartenStudioOptions.SqlConsoleRole" />, because it runs the same preamble the console
+    /// does and that preamble ends in <c>SET LOCAL ROLE</c>. A host that configured a narrow role for the
+    /// console gets the ungated <c>where</c> box narrowed to the same thing - which is the direction a
+    /// surprise should go, since Mode A needs no capability and the console needs one.
+    /// </summary>
+    /// <remarks>
+    /// The role is proved by taking something away: it is granted <c>usage</c> on the schema and no
+    /// <c>select</c> on the table, so a read that really switched to it comes back as <c>42501</c>. The
+    /// role is a cluster-level object, so it is named after this schema and dropped in a <c>finally</c>.
+    /// </remarks>
+    [PostgresFact]
+    public async Task Mode_A_runs_as_the_configured_SqlConsoleRole()
+    {
+        const string schema = "martenqueryliverole";
+        const string role = "ms_role_" + schema;
+
+        await using QueryHarness scoped = await QueryHarness.CreateAsync(
+            fixture, schema, options => options.SqlConsoleRole = role);
+
+        string quoted = SqlIdentifier.Quote(schema);
+        string quotedRole = SqlIdentifier.Quote(role);
+
+        // `drop role` refuses while the role still holds a grant, and `drop owned by` refuses when the role
+        // is not there at all - so both, guarded, and run before as well as after in case a previous run
+        // was killed between the two.
+        string dropRole =
+            $"do $do$ begin if exists (select 1 from pg_roles where rolname = '{role}') then " +
+            $"drop owned by {quotedRole}; drop role {quotedRole}; end if; end $do$;";
+
+        await ExecuteAsync(dropRole);
+        await ExecuteAsync(
+            $"create role {quotedRole} nologin;\n" +
+            $"grant usage on schema {quoted} to {quotedRole};");
+
+        try
+        {
+            IReadOnlyList<QueryDocumentTypeInfo> types =
+                await scoped.Queries.ListDocumentTypesAsync(scoped.Scope, Token);
+            string alias = types.Single(x => x.TypeName == nameof(QueryPerson)).Alias;
+
+            MartenQueryResult result = await scoped.Queries.RunMartenQueryAsync(
+                scoped.Scope, new MartenQueryRequest(alias, "where 1 = 1"), Token);
+
+            result.Rejection.Should().BeNull("the clause is a plain filter; the role is what refuses it");
+            result.Error.Should().NotBeNull("SET LOCAL ROLE really happened");
+            result.Error!.SqlState.Should().Be("42501", "the role was never granted select on the table");
+            result.Rows.Should().BeEmpty();
+        }
+        finally
+        {
+            await ExecuteAsync(dropRole);
+        }
+    }
+
+    /// <summary>
+    /// A scope the visitor is not authorized for used to leave no trace: the resolve happened before any
+    /// audit call, so a <c>StudioNotAuthorizedException</c> went to the browser and nowhere else. Probing
+    /// stores, databases and tenants through this page is exactly what an incident asks about, and 9203 is
+    /// the entry the console has always written for the same refusal.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_scope_the_visitor_may_not_read_is_audited_as_9203()
+    {
+        await using QueryHarness denied = await QueryHarness.CreateAsync(
+            fixture,
+            "martenquerylivescope",
+            options => options.StoreAuthorizationPolicy = QueryHarness.DenyWritesPolicy);
+
+        await denied.Queries
+            .Invoking(x => x.RunMartenQueryAsync(
+                denied.Scope, new MartenQueryRequest("queryperson", "where 1 = 1"), Token))
+            .Should().ThrowAsync<StudioNotAuthorizedException>();
+
+        denied.Logs.Should().ContainSingle(x => x.EventId == 9203)
+            .Which.Message.Should().Contain(QueryHarness.DenyWritesPolicy, "9203 names the policy that refused");
+
+        StudioActionLogEntry entry = denied.Audit.GetLatest()[0];
+
+        entry.Action.Should().Be("MartenQuery");
+        entry.Succeeded.Should().BeFalse();
+        entry.Target.Should().Contain("where 1 = 1", "the ring records what was asked for");
+
+        denied.Logs.Should().NotContain(x => x.EventId == 9204, "nothing ran");
+    }
+
+    /// <summary>
+    /// The other refusal that used to leave no trace: an alias that is not there, or one the host's
+    /// <c>IsDocumentTypeVisible</c> hides. Typing an alias into the URL is how somebody looks for a
+    /// collection they were not offered.
+    /// </summary>
+    [PostgresFact]
+    public async Task An_unknown_alias_is_audited_as_a_failed_run()
+    {
+        await harness.Queries
+            .Invoking(x => x.RunMartenQueryAsync(
+                harness.Scope, new MartenQueryRequest("no-such-alias", "where 1 = 1"), Token))
+            .Should().ThrowAsync<KeyNotFoundException>();
+
+        StudioActionLogEntry entry = harness.Audit.GetLatest()[0];
+
+        entry.Action.Should().Be("MartenQuery");
+        entry.Succeeded.Should().BeFalse();
+        entry.Message.Should().Contain("no-such-alias");
+
+        harness.Logs.Should().Contain(x => x.EventId == 9205 && x.Message.Contains(
+            "no-such-alias", StringComparison.Ordinal));
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Helpers for the section above
+    // ------------------------------------------------------------------------------------------------
+
+    private DocumentTableInfo TicketTable()
+    {
+        IDocumentType ticket = harness.Store.Options.AllKnownDocumentTypes()
+            .Single(x => x.DocumentType == typeof(QueryTicket));
+
+        return DocumentTableInfo.FromDocumentType(ticket);
+    }
+
+    /// <summary>Runs <paramref name="sql" /> outside the studio entirely, and counts what came back.</summary>
+    private async Task<int> CountRowsAsync(string sql, string? tenantId = null)
+    {
+        await using NpgsqlConnection connection = await fixture.OpenAsync(Token);
+        await using var command = new NpgsqlCommand(sql, connection);
+
+        command.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Varchar)
+        {
+            Value = tenantId ?? QueryHarness.Acme,
+        });
+        command.Parameters.Add(new NpgsqlParameter("limit", NpgsqlDbType.Integer) { Value = 500 });
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(Token);
+
+        var rows = 0;
+
+        while (await reader.ReadAsync(Token))
+        {
+            rows++;
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Proves nothing holds a row lock, by trying to take one with a <c>lock_timeout</c> short enough that
+    /// a lock anybody else were holding would come back as <c>55P03</c> rather than as a wait.
+    /// </summary>
+    private async Task AssertRowIsNotLockedAsync(DocumentTableInfo table, Guid id)
+    {
+        await using NpgsqlConnection connection = await fixture.OpenAsync(Token);
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync(Token);
+
+        await using (var timeout = new NpgsqlCommand("set local lock_timeout = '1ms'", connection, transaction))
+        {
+            await timeout.ExecuteNonQueryAsync(Token);
+        }
+
+        await using var command = new NpgsqlCommand(
+            $"select 1 from {table.QualifiedName} where id = @id for update", connection, transaction);
+
+        command.Parameters.Add(new NpgsqlParameter("id", NpgsqlDbType.Uuid) { Value = id });
+
+        Func<Task> locking = async () => await command.ExecuteScalarAsync(Token);
+
+        await locking.Should().NotThrowAsync("a row somebody else has locked answers 55P03 in one millisecond");
+
+        await transaction.RollbackAsync(Token);
+    }
+
+    private async Task ExecuteAsync(string sql)
+    {
+        await using NpgsqlConnection connection = await fixture.OpenAsync(Token);
+        await using var command = new NpgsqlCommand(sql, connection);
+
+        await command.ExecuteNonQueryAsync(Token);
+    }
+
+    private async Task<object?> ScalarAsync(string sql)
+    {
+        await using NpgsqlConnection connection = await fixture.OpenAsync(Token);
+        await using var command = new NpgsqlCommand(sql, connection);
+
+        return await command.ExecuteScalarAsync(Token);
     }
 }

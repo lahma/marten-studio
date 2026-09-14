@@ -2,6 +2,7 @@
 @using System.Globalization
 @using Microsoft.Extensions.Options
 @using MartenStudio.Internal.Sql
+@using MartenStudio.Services.Live
 @using MartenStudio.Services.Query
 @implements IAsyncDisposable
 @inject IQueryService Queries
@@ -18,10 +19,12 @@
     A Marten `where` clause is a read against one document type the host registered: no capability needed,
     the same thing the documents list does with a search box. Because it needs no capability, the service
     holds it to being a *clause* that reads only the table it filters - no second statement, no statement of
-    its own, and without RunSql no subquery, union, join or catalog-probing function either. That is what
-    keeps this mode from being an ungated SQL console (QuerySqlComposer.CheckClause). A visitor who may run
-    SQL gets the rules lifted, because everything they would be refused here they could type into the
-    console instead.
+    its own, balanced brackets, a tail the composer can place, no function that reaches outside the row, and
+    without RunSql no subquery, union or join either. That is what keeps this mode from being an ungated SQL
+    console (QuerySqlComposer.CheckClause), and it runs inside the same read-only transaction the console
+    does. A visitor who may run SQL gets the *nested-read* rules lifted and only those, because everything
+    they refuse that person could type into the console instead - where the denylist and the transaction
+    still apply.
 
     The SQL console is arbitrary SQL against the whole database, so it is gated on RunSql, resolved with
     write-policy semantics, checked by the statement guard, run inside a read-only transaction and audited
@@ -115,13 +118,15 @@
                                  OnSave="BeginSaveAsync" />
 
                     <p class="ms-muted ms-query-note">
-                        Your predicate is parenthesised after the studio's own - the tenant when this
-                        collection is tenanted, and <code>mt_deleted = false</code> when it is soft-deleted -
-                        so a clause can narrow what you see but never widen it. A trailing
-                        <code>order by …</code>, <code>limit n</code> or <code>offset n</code> is lifted out
-                        of the predicate and placed on the statement; a <code>limit</code> of your own is
-                        clamped down to the Rows selector, never up. Everything else is SQL against this one
-                        table, values written into the clause rather than bound.
+                        Your predicate is parenthesised, with the studio's own terms on both sides of it -
+                        the tenant when this collection is tenanted, and <code>mt_deleted = false</code>
+                        when it is soft-deleted - so a clause can narrow what you see but never widen it.
+                        Your brackets have to balance, because a <code>)</code> with nothing to close would
+                        close the studio's. A trailing <code>order by …</code>, <code>limit n</code> or
+                        <code>offset n</code> is lifted out of the predicate and placed on the statement;
+                        a <code>limit</code> of your own is clamped down to the Rows selector, never up.
+                        Everything else is SQL against this one table, run inside a read-only transaction,
+                        values written into the clause rather than bound.
                     </p>
 
                     @if (documentTypes.Count == 0)
@@ -865,14 +870,17 @@
         }
         catch (JSException)
         {
+            // The browser answered and said no - the only one of these a person can do anything about, so
+            // it is the only one that is toasted. Listed first, so the filter below never sees it.
             await Toasts.Error("This browser would not take the download.");
         }
-        catch (Exception exception) when (exception is JSDisconnectedException
-            or InvalidOperationException or ObjectDisposedException or OperationCanceledException)
+        catch (Exception exception)
+            when (StudioLiveUpdates.IsInteropUnavailable(exception) && exception is not JSException)
         {
             // The circuit went away between the click and the call. There is nobody left to toast at, and
-            // JSDisconnectedException derives from Exception rather than from JSException, so it has to be
-            // named or it escapes the handler and kills what is left of the circuit.
+            // JSDisconnectedException derives from Exception rather than from JSException, so it has to go
+            // through the shared predicate (AGENTS.md hard rule 15) or it escapes the handler and kills
+            // what is left of the circuit.
         }
     }
 

@@ -183,6 +183,47 @@ internal sealed class ReadOnlySqlSession
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 
+        return await InTransactionAsync(
+                connection,
+                (transaction, token) => ReadAsync(connection, transaction, sql, bind, token),
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Opens the read-only transaction on <paramref name="connection" />, runs <paramref name="work" />
+    /// inside it, and rolls back whatever happened.
+    /// </summary>
+    /// <param name="connection">An already-open connection. It is not disposed here.</param>
+    /// <param name="work">
+    /// What to do inside the transaction. It is handed the transaction so that every command it issues is
+    /// enlisted in it - a command created without one runs outside the read-only flag.
+    /// </param>
+    /// <param name="cancellationToken">The token.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the preamble, and there is only one of it.</b>
+    /// <see cref="ExecuteAsync(NpgsqlConnection, string, Action{NpgsqlCommand}?, CancellationToken)" /> is
+    /// one caller and the Query page's Mode A reader is the other. Mode A used to run its composed
+    /// <c>select</c> as a plain command on a read connection, with no <c>SET TRANSACTION READ ONLY</c>, no
+    /// server-side <c>statement_timeout</c> and no <c>SET LOCAL ROLE</c> - which is what let a visitor
+    /// holding <c>RunSql</c> reach session-level state from the mode that needs no capability. Two copies
+    /// of <c>BEGIN; SET TRANSACTION READ ONLY; …</c> is how that happens again, so there is one.
+    /// </para>
+    /// <para>
+    /// A caller that needs the rows typed rather than formatted reads them itself: a Mode A row is a
+    /// document's whole <c>data</c> column, where <see cref="SqlValueFormatter" /> caps a console cell for
+    /// a grid. What it must not do is create its own connection or its own transaction.
+    /// </para>
+    /// </remarks>
+    public async Task<T> InTransactionAsync<T>(
+        NpgsqlConnection connection,
+        Func<NpgsqlTransaction, CancellationToken, Task<T>> work,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(work);
+
         if (options.Role is not null && !IsValidRoleName(options.Role))
         {
             throw new InvalidOperationException($"'{options.Role}' is not a valid Postgres role name.");
@@ -206,7 +247,7 @@ internal sealed class ReadOnlySqlSession
                 await SetLocalAsync(connection, transaction, "role", role, cancellationToken).ConfigureAwait(false);
             }
 
-            return await ReadAsync(connection, transaction, sql, bind, cancellationToken).ConfigureAwait(false);
+            return await work(transaction, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

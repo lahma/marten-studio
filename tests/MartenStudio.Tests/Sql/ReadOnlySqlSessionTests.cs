@@ -1,5 +1,7 @@
 using MartenStudio.Internal.Sql;
 
+using Npgsql;
+
 namespace MartenStudio.Tests.Sql;
 
 /// <summary>
@@ -73,6 +75,28 @@ public class ReadOnlySqlSessionTests
         var act = async () => await session.ExecuteAsync(null!, "select 1");
 
         await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    /// <summary>
+    /// The Mode A entry point takes the same checks in the same order, because it is the same method:
+    /// <c>ExecuteAsync</c> is a caller of <c>InTransactionAsync</c> rather than a second copy of the
+    /// preamble. Two copies of <c>BEGIN; SET TRANSACTION READ ONLY; …</c> is precisely how Mode A came to
+    /// have none at all.
+    /// </summary>
+    [Fact]
+    public async Task The_transaction_helper_the_query_page_uses_takes_the_same_checks()
+    {
+        var session = new ReadOnlySqlSession(new ReadOnlySqlOptions { Role = "bad; drop table x" });
+
+        var nullConnection = async () =>
+            await session.InTransactionAsync<int>(null!, (_, _) => Task.FromResult(1));
+
+        await nullConnection.Should().ThrowAsync<ArgumentNullException>();
+
+        var nullWork = async () =>
+            await session.InTransactionAsync<int>(new NpgsqlConnection(), null!);
+
+        await nullWork.Should().ThrowAsync<ArgumentNullException>();
     }
 
     [Fact]

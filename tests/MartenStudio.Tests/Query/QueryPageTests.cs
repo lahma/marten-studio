@@ -7,6 +7,7 @@ using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
+using MartenStudio.Tests.Conventions;
 
 using Microsoft.JSInterop;
 
@@ -531,6 +532,91 @@ public class QueryPageTests
         var page = context.Render<QueryPage>();
 
         page.Find("#ms-query-where").Should().NotBeNull("the textarea and its buttons still work");
+    }
+
+    /// <summary>
+    /// The editor survives every shape of "the browser is not there", and it does so through the
+    /// <em>shared</em> predicate. It used to carry a private copy, which had already drifted - it named
+    /// <c>ObjectDisposedException</c> and swapped <c>TaskCanceledException</c> for
+    /// <c>OperationCanceledException</c> - on the stated premise that
+    /// <c>StudioLiveUpdates.IsInteropUnavailable</c> was private, which it never was. AGENTS.md hard rule
+    /// 15 says there is one predicate; <see cref="QueryComponentsUseTheSharedInteropPredicate" /> is what
+    /// keeps the copy from coming back, and this is what proves the shared one does the job.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(InteropLossCases))]
+    public async Task The_editor_survives_every_shape_of_a_browser_that_is_not_there(
+        string name,
+        Exception thrown)
+    {
+        name.Should().NotBeNullOrEmpty();
+
+        using StudioComponentContext context = CreateContext(WithPerson());
+
+        context.JSInterop.Setup<bool>("martenStudio.query.enhanceEditor", _ => true).SetResult(true);
+        context.JSInterop.SetupVoid("martenStudio.query.releaseEditor", _ => true).SetException(thrown);
+
+        IRenderedComponent<QueryEditor> editor = context.Render<QueryEditor>(
+            parameters => parameters.Add(p => p.EditorId, "ms-query-where"));
+
+        QueryEditor instance = editor.Instance;
+        Func<Task> dispose = context.DisposeComponentsAsync;
+
+        await dispose.Should().NotThrowAsync(name);
+
+        SelfReferenceOf(instance).Should().BeNull(
+            "the DotNetObjectReference is released in a finally, whatever JavaScript did");
+    }
+
+    /// <summary>Every exception the shared predicate names, plus the one the private copy was added for.</summary>
+    public static TheoryData<string, Exception> InteropLossCases() =>
+        new()
+        {
+            { "the tab closed", new JSDisconnectedException("The circuit has disconnected.") },
+            { "the function is missing", new JSException("martenStudio.query is undefined") },
+            { "prerendering", new InvalidOperationException("JavaScript interop calls cannot be issued.") },
+            { "the call was cancelled", new TaskCanceledException("The operation was canceled.") },
+        };
+
+    /// <summary>
+    /// AGENTS.md hard rule 15, as a scan rather than as a review note: no component under
+    /// <c>Components/Pages/Query</c> declares an interop predicate of its own. A second copy is not merely
+    /// duplication - the one that was here had already drifted from the shared one in two places, so the
+    /// two disagreed about which exceptions mean "the browser is gone", and only one of them was the
+    /// answer the rest of the studio uses.
+    /// </summary>
+    [Fact]
+    public void QueryComponentsUseTheSharedInteropPredicate()
+    {
+        var directory = RepositoryRoot.Combine("src", "MartenStudio", "Components", "Pages", "Query");
+
+        string[] files = [.. Directory.EnumerateFiles(directory, "*.razor", SearchOption.AllDirectories)];
+
+        files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
+
+        List<string> offenders = [];
+        var callers = 0;
+
+        foreach (string file in files)
+        {
+            string text = File.ReadAllText(file);
+
+            if (text.Contains("bool IsInteropUnavailable(", StringComparison.Ordinal))
+            {
+                offenders.Add(Path.GetFileName(file));
+            }
+
+            if (text.Contains("StudioLiveUpdates.IsInteropUnavailable(", StringComparison.Ordinal))
+            {
+                callers++;
+            }
+        }
+
+        offenders.Should().BeEmpty(
+            "hard rule 15: there is one interop predicate, StudioLiveUpdates.IsInteropUnavailable. " +
+            "Offenders: " + string.Join(", ", offenders));
+
+        callers.Should().BeGreaterThan(0, "otherwise this scan would pass on a page with no interop at all");
     }
 
     private static object? SelfReferenceOf(QueryEditor editor) =>

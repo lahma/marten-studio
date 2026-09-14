@@ -146,14 +146,28 @@ internal sealed record ComposedQuery(
 /// where 1 = 1
 ///   and d."tenant_id" = @tenant
 ///   and d."mt_deleted" = false
-///   and (&lt;the visitor's predicate&gt;)
+///   and (
+///     &lt;the visitor's predicate&gt;
+///   )
+///   and d."tenant_id" = @tenant
+///   and d."mt_deleted" = false
 /// order by &lt;the visitor's sort list&gt;
 /// limit @limit
 /// </code>
 /// <para>
-/// The visitor's predicate is <b>parenthesised and last</b>, so no amount of <c>or</c> in it can reach
-/// around the studio's own terms: <c>where 1 = 1 and tenant_id = @tenant and (a = 1 or true)</c> still
-/// only sees one tenant.
+/// The visitor's predicate is <b>parenthesised</b>, so no amount of <c>or</c> in it can reach around the
+/// studio's own terms: <c>where 1 = 1 and tenant_id = @tenant and (a = 1 or true)</c> still only sees one
+/// tenant. That holds only while the parentheses are the ones the composer wrote, which is why
+/// <see cref="CheckClause" /> refuses a clause whose own brackets do not balance: <c>1 = 1) or (1 = 1</c>
+/// spliced into the shape above would close the studio's bracket early and leave its second half - and
+/// with it every row of every tenant - outside the tenant predicate, because <c>and</c> binds tighter than
+/// <c>or</c>. It was measured returning four rows where the honest answer was one.
+/// </para>
+/// <para>
+/// <b>The studio's own terms are then repeated after the visitor's predicate</b>, which costs nothing and
+/// is the defence that does not depend on a scanner being right: with <c>… and (X) and tenant = @tenant</c>
+/// every disjunct an escaped <c>or</c> could produce still carries the tenant and soft-delete terms on one
+/// side or the other. The balance check is the rule; this is what holds if the rule is ever wrong.
 /// </para>
 /// <para>
 /// <b><c>order by</c>, <c>limit</c> and <c>offset</c> are split off deterministically</b>, because neither
@@ -162,9 +176,14 @@ internal sealed record ComposedQuery(
 /// every string, quoted identifier, dollar-quoted body and comment - so a window function's
 /// <c>over (order by …)</c>, an aggregate's <c>order by</c> and a subquery's own <c>limit</c> are all left
 /// exactly where they were. What follows must then be
-/// <c>[order by …] [limit &lt;integer&gt;] [offset &lt;integer&gt;]</c> and nothing else; anything else is
-/// refused by name rather than guessed at. A <c>limit</c> the visitor wrote is clamped down to the
-/// studio's page size and never up.
+/// <c>[order by &lt;sort list&gt;] [limit &lt;integer&gt;] [offset &lt;integer&gt;]</c> and nothing else -
+/// each at most once, <c>order by</c> first, the two counts plain non-negative integers, and the sort list
+/// free of <c>for</c>, <c>fetch</c>, <c>into</c>, <c>union</c>, <c>intersect</c> and <c>except</c> at depth
+/// zero (<see cref="DisallowedOrderByWords" />). Anything else is refused by name rather than guessed at.
+/// <c>order by 1 for update</c> is why the sort list is checked at all: Postgres 17 accepts a locking
+/// clause between <c>ORDER BY</c> and <c>LIMIT</c>, and row-level write locks are not something the ungated
+/// read mode hands out. A <c>limit</c> the visitor wrote is clamped down to the studio's page size and
+/// never up.
 /// </para>
 /// <para>
 /// <b>Identifiers are quoted, values are parameters</b> (AGENTS.md hard rule 4). The table and every
@@ -219,12 +238,14 @@ internal static class QuerySqlComposer
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>pg_sleep</c> is here although the console allows it: the console bounds it with a server-side
-    /// <c>statement_timeout</c> inside its own read-only transaction, while a Mode A read carries only a
-    /// client-side <c>CommandTimeout</c> - which breaks the connection rather than producing a 57014 the
-    /// page can render - so the same call is a way to park a connection. The rest read the catalog, run a
-    /// statement of their own behind a function call (<c>query_to_xml</c>, <c>xpath</c>) or move a sequence
-    /// (<c>nextval</c>, <c>setval</c>) - none of which is a filter on the collection that was picked.
+    /// <c>pg_sleep</c> is here although the console allows it. Both now run inside the same read-only
+    /// transaction with the same server-side <c>statement_timeout</c>, so the timeout is no longer the
+    /// difference; the capability is. The console is gated on <c>RunSql</c> and a <c>where</c> clause is
+    /// gated on nothing at all, and "park a connection for the whole statement timeout, repeatedly, with
+    /// no capability" is a cheaper denial of service than the studio should hand to every visitor. The
+    /// rest read the catalog, run a statement of their own behind a function call (<c>query_to_xml</c>,
+    /// <c>xpath</c>) or move a sequence (<c>nextval</c>, <c>setval</c>) - none of which is a filter on the
+    /// collection that was picked, and none of which a read-only transaction refuses.
     /// </para>
     /// </remarks>
     internal static readonly string[] AdditionalDisallowedFunctions =
@@ -234,23 +255,61 @@ internal static class QuerySqlComposer
     ];
 
     /// <summary>
-    /// Functions that read, write or wait outside the row they are given. Refused unless the visitor may
-    /// run SQL.
+    /// Functions that read, write or wait outside the row they are given. Refused in a <c>where</c>
+    /// clause <b>whatever capabilities the visitor holds</b>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>One list, two callers.</b> <see cref="ReadOnlySqlGuard.DisallowedFunctions" /> is the same
     /// question asked of a different text, so it is unioned in here rather than restated: two lists
     /// answering it differently is exactly the drift a reviewer cannot see, and a function added to the
     /// console's denylist now reaches the ungated <c>where</c>-clause mode for free. What this file owns
     /// is only the difference, <see cref="AdditionalDisallowedFunctions" />.
+    /// </para>
+    /// <para>
+    /// <b><c>RunSql</c> does not lift this list, and used to.</b> That was measured: with the capability
+    /// granted, <c>where pg_advisory_lock(42) is not null</c> was allowed and took a <em>session-level</em>
+    /// lock on a pooled connection - one that outlives the transaction and the request, on the same
+    /// connection pool Marten's own daemon contends for. <c>RunSql</c> lifts
+    /// <see cref="NestedReadKeywords" /> and nothing else, because everything that list refuses is
+    /// something the same person could type into the console, and every entry <em>here</em> is something
+    /// the console refuses too (or, in the case of <see cref="AdditionalDisallowedFunctions" />, something
+    /// a filter has no business doing at all).
+    /// </para>
     /// </remarks>
     internal static readonly IReadOnlySet<string> DisallowedFunctions =
         new HashSet<string>(
             ReadOnlySqlGuard.DisallowedFunctions.Keys.Concat(AdditionalDisallowedFunctions),
             StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Casts that turn text into a database object, and so into a probe of the catalog.</summary>
+    /// <summary>
+    /// Casts that turn text into a database object, and so into a probe of the catalog. Refused whatever
+    /// capabilities the visitor holds, for the same reason <see cref="DisallowedFunctions" /> is.
+    /// </summary>
     internal static readonly string[] DisallowedCastTargets = ["regclass", "regproc"];
+
+    /// <summary>
+    /// Words that may not appear at parenthesis depth zero inside an <c>order by</c> body, because they
+    /// make the tail something other than a sort list.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The tail is spliced onto the studio's own statement, so whatever is between <c>order by</c> and
+    /// <c>limit</c> ends up there verbatim. Postgres 17 accepts <c>… order by 1 for update limit 5</c>,
+    /// which is how <c>where a = 1 order by 1 for update</c> reached the server from the ungated read mode
+    /// and took row-level write locks - measured, at both capability levels. <c>fetch</c> is the
+    /// SQL-standard spelling of the same corner (<c>fetch first … rows with ties</c>, and
+    /// <c>for update</c> after it); <c>into</c> writes a new table; <c>union</c>, <c>intersect</c> and
+    /// <c>except</c> bolt a second query on past the studio's predicates altogether.
+    /// </para>
+    /// <para>
+    /// Depth zero, so the ordinary <c>from</c>/<c>for</c> forms of <c>substring(x from 2 for 3)</c> and
+    /// <c>overlay(… placing … from … for …)</c> - which are inside the function's own parentheses - are
+    /// left alone.
+    /// </para>
+    /// </remarks>
+    internal static readonly string[] DisallowedOrderByWords =
+        ["for", "fetch", "into", "union", "intersect", "except"];
 
     /// <summary>
     /// The option a host sets to lift the nested-read rules. Spelled out rather than read from
@@ -265,34 +324,48 @@ internal static class QuerySqlComposer
     /// <param name="clause">The clause as typed.</param>
     /// <param name="allowNestedReads">
     /// Whether the visitor may run SQL - <c>RunSql</c> enabled <em>and</em> allowed by the write policy. A
-    /// visitor who may is left alone by the nested-read rules: subqueries, unions and <c>lateral</c> joins
-    /// are the point of the mode for them, and everything they would be refused here they could type into
-    /// the console instead.
+    /// visitor who may is left alone by the <em>nested-read</em> rules, and by nothing else: subqueries,
+    /// unions and <c>lateral</c> joins are the point of the mode for them, and everything
+    /// <see cref="NestedReadKeywords" /> refuses they could type into the console instead. Every other
+    /// rule here holds for them too.
     /// </param>
     /// <remarks>
     /// <para>
-    /// <b>This is load-bearing.</b> Mode A needs no capability and does not run inside the SQL console's
-    /// read-only transaction, so a clause that carried a second statement would <em>be</em> an ungated SQL
-    /// console: <c>1 = 1; drop table x</c> arrives at Npgsql as one command holding two statements, and
-    /// Postgres runs both.
+    /// <b>This is load-bearing.</b> Mode A needs no capability, so a clause that carried a second statement
+    /// would <em>be</em> an ungated SQL console: <c>1 = 1; drop table x</c> arrives at Npgsql as one command
+    /// holding two statements, and Postgres runs both - and a read-only transaction would not stop the
+    /// second one from being, say, <c>select pg_advisory_lock(42)</c>.
     /// </para>
     /// <para>
-    /// Four rules, in order, all structural rather than semantic. <b>Always:</b> no <c>;</c> outside a
+    /// Six rules, in order, all structural rather than semantic. <b>Always:</b> no <c>;</c> outside a
     /// string, a quoted identifier, a dollar-quoted body or a comment; the clause does not begin a
-    /// statement of its own; and its <c>order by</c> / <c>limit</c> / <c>offset</c> tail, if it has one, is
-    /// a shape the composer can place rather than guess at (<see cref="TryPartition" />).
+    /// statement of its own; <b>its parentheses balance</b>; its <c>order by</c> / <c>limit</c> /
+    /// <c>offset</c> tail, if it has one, is a shape the composer can place rather than guess at
+    /// (<see cref="TryPartition" />); no function that reads, writes or waits outside the row
+    /// (<see cref="DisallowedFunctions" />); and no <c>::regclass</c>/<c>::regproc</c> cast.
     /// <b>Without <c>RunSql</c>:</b> no word that reaches another relation
-    /// (<see cref="NestedReadKeywords" />), no function that reads, writes or waits outside the row
-    /// (<see cref="DisallowedFunctions" />), and no <c>::regclass</c>/<c>::regproc</c> cast. What is left
-    /// reads the selected table's own columns and JSON - which the visitor may see anyway, so the clause
-    /// grants nothing the collection browser did not already.
+    /// (<see cref="NestedReadKeywords" />). What is left reads the selected table's own columns and JSON -
+    /// which the visitor may see anyway, so the clause grants nothing the collection browser did not
+    /// already.
+    /// </para>
+    /// <para>
+    /// <b>The balance rule is the one that was missing, and it is not cosmetic.</b> The visitor's predicate
+    /// is spliced between a <c>(</c> and a <c>)</c> the composer wrote; a clause holding one more <c>)</c>
+    /// than <c>(</c> closes that bracket early and everything after it lands <em>outside</em> the tenant
+    /// and soft-delete predicates. <c>1 = 1) or (1 = 1</c> was measured returning four rows - two tenants,
+    /// live and deleted - where the honest answer was one. The same escape needs no unbalanced <c>(</c> at
+    /// all, because the composer puts its closing bracket on a line of its own: a clause ending in
+    /// <c>-- ⏎) or (true</c> supplies the <c>)</c> from the free line. So the walk refuses a <c>)</c> that
+    /// closes nothing <em>and</em> a <c>(</c> left open, by position, before the tail is split off - the
+    /// split is at parenthesis depth zero and there is no such thing while the depths are wrong.
     /// </para>
     /// <para>
     /// It is a scanner, not a parser. It is not the security boundary for the console (that is the
-    /// transaction, D13); it is the boundary for the <em>ungated</em> mode, which is why it errs towards
-    /// refusing and why every refusal names the capability that lifts it. The tenant and soft-delete
-    /// predicates are not its job at all - those are composed in, in front of the visitor's predicate, and
-    /// hold whatever the clause says.
+    /// transaction, D13); it is the first boundary for the <em>ungated</em> mode - the second being that
+    /// Mode A now runs inside that same read-only transaction - which is why it errs towards refusing and
+    /// why every refusal names what would lift it, if anything would. The tenant and soft-delete
+    /// predicates are not its job at all: those are composed in on both sides of the visitor's predicate,
+    /// and hold whatever the clause says.
     /// </para>
     /// </remarks>
     public static SqlGuardResult CheckClause(string? clause, bool allowNestedReads)
@@ -331,129 +404,111 @@ internal static class QuerySqlComposer
             }
         }
 
-        // The tail has to be placeable, for everybody: the studio's own predicates go in front of the
-        // visitor's, so `order by`, `limit` and `offset` cannot stay inside the parenthesised predicate and
-        // have to be lifted out. A tail the composer cannot read is refused by name rather than guessed at.
-        if (!TryPartition(clause, out _, out SqlGuardResult tail))
+        // One walk, and everything below reads it: the balance, the split point and the word rules all have
+        // to agree about where the strings, the comments and the dollar bodies are, and two scanners that
+        // nearly agree is how a `)` ends up in one of them and not the other.
+        ClauseScan scan = ClauseScan.Of(clause);
+
+        if (scan.Rejection is { } unreadable)
+        {
+            return unreadable;
+        }
+
+        if (BalanceRejection(scan) is { } unbalanced)
+        {
+            return unbalanced;
+        }
+
+        // The tail has to be placeable, for everybody: the studio's own predicates surround the visitor's,
+        // so `order by`, `limit` and `offset` cannot stay inside the parenthesised predicate and have to be
+        // lifted out. A tail the composer cannot read is refused by name rather than guessed at.
+        if (!TryPartitionScanned(clause, scan, out _, out SqlGuardResult tail))
         {
             return tail;
         }
 
-        return allowNestedReads ? SqlGuardResult.Allow(string.Empty, 0) : CheckForNestedReads(clause);
+        return CheckWords(clause, scan, allowNestedReads);
     }
 
     /// <summary>
-    /// The clause, token by token, looking for the words, functions and casts that reach outside the table
-    /// being filtered.
+    /// Why the clause's own parentheses cannot be spliced into the composer's, or <see langword="null" />.
+    /// </summary>
+    private static SqlGuardResult? BalanceRejection(ClauseScan scan)
+    {
+        if (scan.UnmatchedClose >= 0)
+        {
+            return SqlGuardResult.Reject(
+                SqlRejectionReason.DisallowedStatement,
+                "This clause closes a bracket it never opened. Your filter is wrapped in parentheses of the " +
+                "studio's own, after the tenant and soft-delete predicates, so a ')' with nothing to close " +
+                "would end that wrapper early and put the rest of the clause outside every predicate the " +
+                "studio composed. Balance the brackets; no capability lifts this one.",
+                ")",
+                scan.UnmatchedClose);
+        }
+
+        if (scan.Depth > 0)
+        {
+            return SqlGuardResult.Reject(
+                SqlRejectionReason.DisallowedStatement,
+                "This clause leaves a '(' open. Your filter is wrapped in parentheses of the studio's own, so " +
+                "an unclosed bracket would swallow them and whatever follows. Balance the brackets; no " +
+                "capability lifts this one.",
+                "(",
+                scan.UnmatchedOpen);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The clause's bare words, looking for the ones that reach outside the table being filtered.
     /// </summary>
     /// <remarks>
-    /// Strings, quoted identifiers, dollar-quoted bodies and comments are skipped - the same discipline
-    /// <see cref="ReadOnlySqlGuard" /> uses - so a document whose value happens to be the word
-    /// <c>select</c> is not a refusal, and a keyword hidden inside <c>$$…$$</c> is not an escape.
+    /// Strings, quoted identifiers, dollar-quoted bodies and comments never reach here - the scan skipped
+    /// them, the same discipline <see cref="ReadOnlySqlGuard" /> uses - so a document whose value happens
+    /// to be the word <c>select</c> is not a refusal, and a keyword hidden inside <c>$$…$$</c> is not an
+    /// escape. Only <see cref="NestedReadKeywords" /> answers to <paramref name="allowNestedReads" />.
     /// </remarks>
-    private static SqlGuardResult CheckForNestedReads(string clause)
+    private static SqlGuardResult CheckWords(string clause, ClauseScan scan, bool allowNestedReads)
     {
-        var i = 0;
-
-        while (i < clause.Length)
+        foreach (ScannedWord scanned in scan.Words)
         {
-            char c = clause[i];
+            string word = scanned.Text;
+            int start = scanned.Start;
 
-            if (c == '-' && i + 1 < clause.Length && clause[i + 1] == '-')
+            if (!allowNestedReads && Contains(NestedReadKeywords, word))
             {
-                while (i < clause.Length && clause[i] != '\n')
-                {
-                    i++;
-                }
-
-                continue;
+                return SqlGuardResult.Reject(
+                    SqlRejectionReason.DisallowedStatement,
+                    $"'{word}' makes this clause read outside the collection you picked. A filter that needs " +
+                    "it is a query, and queries run in the SQL console, which is gated on " + RunSqlOption + ".",
+                    word,
+                    start);
             }
 
-            if (c == '/' && i + 1 < clause.Length && clause[i + 1] == '*')
+            if (DisallowedFunctions.Contains(word))
             {
-                var commentEnd = clause.IndexOf("*/", i + 2, StringComparison.Ordinal);
-
-                if (commentEnd < 0)
-                {
-                    return Unreadable("/*", i, "an unterminated comment");
-                }
-
-                i = commentEnd + 2;
-                continue;
+                return SqlGuardResult.Reject(
+                    SqlRejectionReason.DisallowedFunction,
+                    $"'{word}' reads, writes or waits outside the row it is given, which is not something a " +
+                    "filter does. A where clause refuses it whatever capabilities you hold: " + RunSqlOption +
+                    " lifts the rules about reading another relation, and nothing lifts this one.",
+                    word,
+                    start);
             }
 
-            if (c is '\'' or '"')
+            if (start >= 2 && clause[start - 1] == ':' && clause[start - 2] == ':'
+                && Contains(DisallowedCastTargets, word))
             {
-                var quoteEnd = clause.IndexOf(c, i + 1);
-
-                if (quoteEnd < 0)
-                {
-                    return Unreadable(c.ToString(), i, "an unterminated string");
-                }
-
-                i = quoteEnd + 1;
-                continue;
+                return SqlGuardResult.Reject(
+                    SqlRejectionReason.DisallowedStatement,
+                    $"A '::{word}' cast turns text into a database object, which is a probe of the catalog " +
+                    "rather than a filter. A where clause refuses it whatever capabilities you hold: " +
+                    RunSqlOption + " lifts the rules about reading another relation, and nothing lifts this one.",
+                    "::" + word,
+                    start - 2);
             }
-
-            if (c == '$' && TryReadDollarTag(clause, i, out var tag))
-            {
-                var bodyEnd = clause.IndexOf(tag, i + tag.Length, StringComparison.Ordinal);
-
-                if (bodyEnd < 0)
-                {
-                    return Unreadable(tag, i, "an unterminated quoted body");
-                }
-
-                i = bodyEnd + tag.Length;
-                continue;
-            }
-
-            if (char.IsLetter(c) || c == '_')
-            {
-                var start = i;
-
-                while (i < clause.Length && (char.IsLetterOrDigit(clause[i]) || clause[i] == '_'))
-                {
-                    i++;
-                }
-
-                var word = clause[start..i];
-
-                if (Contains(NestedReadKeywords, word))
-                {
-                    return SqlGuardResult.Reject(
-                        SqlRejectionReason.DisallowedStatement,
-                        $"'{word}' makes this clause read outside the collection you picked. A filter that needs " +
-                        "it is a query, and queries run in the SQL console, which is gated on " + RunSqlOption + ".",
-                        word,
-                        start);
-                }
-
-                if (DisallowedFunctions.Contains(word))
-                {
-                    return SqlGuardResult.Reject(
-                        SqlRejectionReason.DisallowedStatement,
-                        $"'{word}' reads, writes or waits outside the row it is given, which is not something a " +
-                        "filter does. It runs in the SQL console, which is gated on " + RunSqlOption + ".",
-                        word,
-                        start);
-                }
-
-                if (start >= 2 && clause[start - 1] == ':' && clause[start - 2] == ':'
-                    && Contains(DisallowedCastTargets, word))
-                {
-                    return SqlGuardResult.Reject(
-                        SqlRejectionReason.DisallowedStatement,
-                        $"A '::{word}' cast turns text into a database object, which is a probe of the catalog " +
-                        "rather than a filter. It runs in the SQL console, which is gated on " + RunSqlOption + ".",
-                        "::" + word,
-                        start - 2);
-                }
-
-                continue;
-            }
-
-            i++;
         }
 
         return SqlGuardResult.Allow(string.Empty, 0);
@@ -558,25 +613,43 @@ internal static class QuerySqlComposer
         // number of terms - which is what makes the SQL tab readable, and what DocumentQueryBuilder does.
         sql.Append("where 1 = 1\n");
 
-        if (filterTenant && tenantColumn is not null)
+        void AppendStudioTerms()
         {
-            parameters.Add(new QuerySqlParameter(TenantParameter, NpgsqlDbType.Varchar, tenantId!));
-            sql.Append("  and ").Append(Column(tenantColumn)).Append(" = @").Append(TenantParameter).Append('\n');
+            if (filterTenant && tenantColumn is not null)
+            {
+                sql.Append("  and ").Append(Column(tenantColumn)).Append(" = @").Append(TenantParameter).Append('\n');
+            }
+
+            if (deletedColumn is not null && effectiveDeleted != DeletedFilter.Include)
+            {
+                sql.Append("  and ").Append(Column(deletedColumn))
+                    .Append(effectiveDeleted == DeletedFilter.Only ? " = true\n" : " = false\n");
+            }
         }
 
-        if (deletedColumn is not null && effectiveDeleted != DeletedFilter.Include)
+        if (filterTenant && tenantColumn is not null)
         {
-            sql.Append("  and ").Append(Column(deletedColumn))
-                .Append(effectiveDeleted == DeletedFilter.Only ? " = true\n" : " = false\n");
+            // Bound once and named twice: the terms appear on both sides of the visitor's predicate, and an
+            // Npgsql named parameter may be referenced as often as the statement likes.
+            parameters.Add(new QuerySqlParameter(TenantParameter, NpgsqlDbType.Varchar, tenantId!));
         }
+
+        AppendStudioTerms();
 
         if (parts.Predicate.Length > 0)
         {
-            // Parenthesised, and last: an `or` in the visitor's predicate cannot reach around the terms
-            // above it, which is the whole point of composing rather than appending. The closing bracket
-            // goes on a line of its own because a clause may end in a `--` comment, and a bracket inside
-            // one is a bracket that is not there.
+            // Parenthesised: an `or` in the visitor's predicate cannot reach around the terms above it,
+            // which is the whole point of composing rather than appending. The closing bracket goes on a
+            // line of its own because a clause may end in a `--` comment, and a bracket inside one is a
+            // bracket that is not there.
             sql.Append("  and (\n    ").Append(parts.Predicate).Append("\n  )\n");
+
+            // And then the same terms again, after it. CheckClause refuses a clause whose brackets do not
+            // balance, so nothing should ever escape the parentheses above; this is what holds if that is
+            // ever wrong. `a and (X) and a` distributes over any `or` the predicate turns out to contain,
+            // so every disjunct still carries the tenant and the soft-delete term. It costs one more index
+            // condition Postgres folds away, and it is free in the plan.
+            AppendStudioTerms();
         }
 
         if (parts.OrderBy is { Length: > 0 } orderBy)
@@ -635,24 +708,39 @@ internal static class QuerySqlComposer
     /// </remarks>
     internal static bool TryPartition(string? clause, out ClauseParts parts, out SqlGuardResult rejection)
     {
+        string text = clause ?? string.Empty;
+
+        return TryPartitionScanned(text, ClauseScan.Of(text), out parts, out rejection);
+    }
+
+    /// <summary>
+    /// The same, for a caller that has already walked the clause. One scan, so the split point and every
+    /// refusal agree about where the strings, comments and dollar bodies are.
+    /// </summary>
+    private static bool TryPartitionScanned(
+        string text,
+        ClauseScan scan,
+        out ClauseParts parts,
+        out SqlGuardResult rejection)
+    {
         parts = ClauseParts.Empty;
         rejection = SqlGuardResult.Allow(string.Empty, 0);
 
-        string text = (clause ?? string.Empty).Trim();
-
-        if (text.Length == 0)
+        if (text.AsSpan().Trim().Length == 0)
         {
             return true;
         }
 
-        int bodyStart = StartsWithWord(text, "where") ? "where".Length : 0;
+        int bodyStart = BodyStart(text);
 
-        if (!TryFindTailKeywords(text, bodyStart, out List<TailKeyword> keywords))
+        if (!scan.Readable)
         {
             // Unreadable quoting. CheckClause refuses it on its own; here the honest answer is "no tail".
             parts = new ClauseParts(text[bodyStart..].Trim(), null, null, null);
             return true;
         }
+
+        List<TailKeyword> keywords = TailKeywordsOf(scan, bodyStart);
 
         if (keywords.Count == 0)
         {
@@ -686,6 +774,15 @@ internal static class QuerySqlComposer
                 {
                     rejection = RejectTail(
                         "'order by' needs something to sort on.", TailKind.OrderBy, keyword.Start);
+                    return false;
+                }
+
+                // The sort list is spliced onto the studio's statement verbatim, so it has to be a sort
+                // list and not a place to hang `for update` off. Postgres accepts the locking clause
+                // between `order by` and `limit`, which is exactly where this body ends.
+                if (OrderByBodyRejection(scan, keyword.ValueStart, end) is { } badSort)
+                {
+                    rejection = badSort;
                     return false;
                 }
 
@@ -742,129 +839,358 @@ internal static class QuerySqlComposer
     private readonly record struct TailKeyword(string Kind, int Start, int ValueStart);
 
     /// <summary>
-    /// Every <c>order by</c>, <c>limit</c> and <c>offset</c> at parenthesis depth zero, in order.
+    /// Every <c>order by</c>, <c>limit</c> and <c>offset</c> at parenthesis depth zero, in order, from
+    /// <paramref name="from" /> onwards.
     /// </summary>
-    /// <returns><see langword="false" /> when the clause's quoting cannot be read.</returns>
-    private static bool TryFindTailKeywords(string sql, int from, out List<TailKeyword> keywords)
+    /// <remarks>
+    /// Depth is what makes the split safe: <c>rank() over (order by x)</c>,
+    /// <c>string_agg(x, ',' order by y)</c> and <c>id in (select id from t limit 5)</c> all sit at depth
+    /// one or more and stay in the predicate. <c>order</c> only counts when the very next word is
+    /// <c>by</c>, so a column called <c>order</c> is not a split point; <c>limit</c> and <c>offset</c> are
+    /// reserved words in Postgres and cannot be unquoted column names at all.
+    /// </remarks>
+    private static List<TailKeyword> TailKeywordsOf(ClauseScan scan, int from)
     {
-        keywords = [];
+        List<TailKeyword> keywords = [];
+        IReadOnlyList<ScannedWord> words = scan.Words;
 
-        var depth = 0;
-        var i = 0;
-        var sawOrder = false;
-        var pendingOrderStart = 0;
-
-        while (i < sql.Length)
+        for (var i = 0; i < words.Count; i++)
         {
-            char c = sql[i];
+            ScannedWord word = words[i];
 
-            if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+            if (word.Depth != 0 || word.Start < from)
             {
-                while (i < sql.Length && sql[i] != '\n')
-                {
-                    i++;
-                }
-
                 continue;
             }
 
-            if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+            if (string.Equals(word.Text, "order", StringComparison.OrdinalIgnoreCase))
             {
-                int end = sql.IndexOf("*/", i + 2, StringComparison.Ordinal);
-
-                if (end < 0)
+                if (i + 1 < words.Count
+                    && words[i + 1].Depth == 0
+                    && string.Equals(words[i + 1].Text, "by", StringComparison.OrdinalIgnoreCase))
                 {
-                    return false;
+                    keywords.Add(new TailKeyword(TailKind.OrderBy, word.Start, words[i + 1].End));
                 }
+            }
+            else if (string.Equals(word.Text, TailKind.Limit, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(word.Text, TailKind.Offset, StringComparison.OrdinalIgnoreCase))
+            {
+                keywords.Add(new TailKeyword(word.Text.ToLowerInvariant(), word.Start, word.End));
+            }
+        }
 
-                i = end + 2;
+        return keywords;
+    }
+
+    /// <summary>
+    /// Why the <c>order by</c> body between <paramref name="start" /> and <paramref name="end" /> is not a
+    /// sort list, or <see langword="null" />.
+    /// </summary>
+    private static SqlGuardResult? OrderByBodyRejection(ClauseScan scan, int start, int end)
+    {
+        foreach (ScannedWord word in scan.Words)
+        {
+            if (word.Start < start || word.Start >= end || word.Depth != 0)
+            {
                 continue;
             }
 
-            if (c is '\'' or '"')
+            if (Contains(DisallowedOrderByWords, word.Text))
             {
-                int end = sql.IndexOf(c, i + 1);
-
-                if (end < 0)
-                {
-                    return false;
-                }
-
-                i = end + 1;
-                continue;
+                return RejectTail(
+                    $"'{word.Text}' is not part of a sort list, and a clause's tail has to be " +
+                    "'[order by <sort list>] [limit <integer>] [offset <integer>]' and nothing else. " +
+                    $"'{word.Text}' there would change what the statement does rather than how its rows are " +
+                    "ordered - no capability lifts this one.",
+                    word.Text,
+                    word.Start);
             }
+        }
 
-            if (c == '$' && TryReadDollarTag(sql, i, out string tag))
-            {
-                int end = sql.IndexOf(tag, i + tag.Length, StringComparison.Ordinal);
+        return null;
+    }
 
-                if (end < 0)
-                {
-                    return false;
-                }
+    /// <summary>Where the predicate starts: past any leading whitespace and an optional <c>where</c>.</summary>
+    private static int BodyStart(string text)
+    {
+        var i = 0;
 
-                i = end + tag.Length;
-                continue;
-            }
-
-            if (c == '(')
-            {
-                depth++;
-                i++;
-                continue;
-            }
-
-            if (c == ')')
-            {
-                depth--;
-                i++;
-                continue;
-            }
-
-            if (char.IsLetter(c) || c == '_')
-            {
-                int start = i;
-
-                while (i < sql.Length && (char.IsLetterOrDigit(sql[i]) || sql[i] == '_'))
-                {
-                    i++;
-                }
-
-                string word = sql[start..i];
-
-                if (sawOrder)
-                {
-                    if (depth == 0 && string.Equals(word, "by", StringComparison.OrdinalIgnoreCase))
-                    {
-                        keywords.Add(new TailKeyword(TailKind.OrderBy, pendingOrderStart, i));
-                    }
-
-                    sawOrder = false;
-                }
-
-                if (depth != 0 || start < from)
-                {
-                    continue;
-                }
-
-                if (string.Equals(word, "order", StringComparison.OrdinalIgnoreCase))
-                {
-                    sawOrder = true;
-                    pendingOrderStart = start;
-                }
-                else if (string.Equals(word, TailKind.Limit, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(word, TailKind.Offset, StringComparison.OrdinalIgnoreCase))
-                {
-                    keywords.Add(new TailKeyword(word.ToLowerInvariant(), start, i));
-                }
-
-                continue;
-            }
-
+        while (i < text.Length && char.IsWhiteSpace(text[i]))
+        {
             i++;
         }
 
-        return true;
+        return StartsWithWordAt(text, i, "where") ? i + "where".Length : i;
+    }
+
+    /// <summary>One bare word a scan found: what it was, where it was, and how deep in parentheses.</summary>
+    /// <param name="Text">The word as typed.</param>
+    /// <param name="Start">Where it starts, zero-based.</param>
+    /// <param name="End">One past its last character.</param>
+    /// <param name="Depth">The parenthesis depth at its first character.</param>
+    private readonly record struct ScannedWord(string Text, int Start, int End, int Depth);
+
+    /// <summary>
+    /// One walk over a clause: every bare word with its depth, and what the parentheses did.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One scanner, three questions.</b> The balance check, the <c>order by</c> / <c>limit</c> /
+    /// <c>offset</c> split and the word rules all need to know where the strings, quoted identifiers,
+    /// dollar-quoted bodies and comments are, and three scanners that <em>nearly</em> agree is how a
+    /// <c>)</c> ends up visible to one of them and not to another. It is the same discipline
+    /// <see cref="ReadOnlySqlGuard" /> uses on a whole statement, and it agrees with Postgres about four
+    /// things that are easy to get wrong:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// block comments <b>nest</b> (<c>/* /* */ */</c> is one comment), unlike C's;
+    /// </description></item>
+    /// <item><description>
+    /// a doubled quote inside a literal is an escaped quote and does not end it (<c>'it''s'</c>);
+    /// </description></item>
+    /// <item><description>
+    /// a backslash escapes only inside an <c>E'…'</c> literal - with the default
+    /// <c>standard_conforming_strings = on</c> the quote after <c>'a\</c> <em>closes</em> the string; and
+    /// </description></item>
+    /// <item><description>
+    /// a dollar-quote tag follows the rules of an unquoted identifier, so <c>$1$</c> is a parameter
+    /// placeholder and not the start of a body - reading it as one let a <c>;</c> hide between two of them.
+    /// </description></item>
+    /// </list>
+    /// <para>
+    /// Anything it cannot read is a refusal rather than a guess, because "I cannot tell what this would
+    /// run" and "this is safe" are not the same answer.
+    /// </para>
+    /// </remarks>
+    private sealed class ClauseScan
+    {
+        private ClauseScan(List<ScannedWord> words, int depth, int unmatchedClose, int unmatchedOpen)
+        {
+            Words = words;
+            Depth = depth;
+            UnmatchedClose = unmatchedClose;
+            UnmatchedOpen = unmatchedOpen;
+        }
+
+        private ClauseScan(SqlGuardResult rejection)
+        {
+            Rejection = rejection;
+            Words = [];
+            UnmatchedClose = -1;
+            UnmatchedOpen = -1;
+        }
+
+        /// <summary>Every bare word outside a literal, a quoted identifier and a comment, in order.</summary>
+        public IReadOnlyList<ScannedWord> Words { get; }
+
+        /// <summary>How many <c>(</c> were still open at the end. Zero for a balanced clause.</summary>
+        public int Depth { get; }
+
+        /// <summary>Where the first <c>)</c> that closed nothing was, or <c>-1</c>.</summary>
+        public int UnmatchedClose { get; }
+
+        /// <summary>Where the first <c>(</c> that was never closed is, or <c>-1</c>.</summary>
+        public int UnmatchedOpen { get; }
+
+        /// <summary>Why the clause could not be read, when it could not.</summary>
+        public SqlGuardResult? Rejection { get; }
+
+        /// <summary>Whether the quoting could be read at all.</summary>
+        public bool Readable => Rejection is null;
+
+        /// <summary>Walks <paramref name="sql" /> once.</summary>
+        public static ClauseScan Of(string sql)
+        {
+            List<ScannedWord> words = [];
+            List<int> open = [];
+            var depth = 0;
+            var unmatchedClose = -1;
+            var i = 0;
+
+            while (i < sql.Length)
+            {
+                char c = sql[i];
+
+                if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+                {
+                    while (i < sql.Length && sql[i] != '\n')
+                    {
+                        i++;
+                    }
+
+                    continue;
+                }
+
+                if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+                {
+                    int start = i;
+
+                    if (!TrySkipBlockComment(sql, ref i))
+                    {
+                        return new ClauseScan(Unreadable("/*", start, "an unterminated comment"));
+                    }
+
+                    continue;
+                }
+
+                if (c is '\'' or '"')
+                {
+                    int start = i;
+
+                    if (!TrySkipQuoted(sql, ref i))
+                    {
+                        return new ClauseScan(Unreadable(c.ToString(), start, "an unterminated string"));
+                    }
+
+                    continue;
+                }
+
+                if (c == '$' && TryReadDollarTag(sql, i, out string tag))
+                {
+                    int end = sql.IndexOf(tag, i + tag.Length, StringComparison.Ordinal);
+
+                    if (end < 0)
+                    {
+                        return new ClauseScan(Unreadable(tag, i, "an unterminated quoted body"));
+                    }
+
+                    i = end + tag.Length;
+                    continue;
+                }
+
+                if (c == '(')
+                {
+                    open.Add(i);
+                    depth++;
+                    i++;
+                    continue;
+                }
+
+                if (c == ')')
+                {
+                    if (depth == 0)
+                    {
+                        // Remembered, not fatal here: the walk carries on so that a clause which is wrong in
+                        // two ways is described by the first thing that is wrong with it.
+                        if (unmatchedClose < 0)
+                        {
+                            unmatchedClose = i;
+                        }
+                    }
+                    else
+                    {
+                        depth--;
+                        open.RemoveAt(open.Count - 1);
+                    }
+
+                    i++;
+                    continue;
+                }
+
+                if (char.IsLetter(c) || c == '_')
+                {
+                    int start = i;
+
+                    while (i < sql.Length && (char.IsLetterOrDigit(sql[i]) || sql[i] == '_'))
+                    {
+                        i++;
+                    }
+
+                    words.Add(new ScannedWord(sql[start..i], start, i, depth));
+                    continue;
+                }
+
+                i++;
+            }
+
+            return new ClauseScan(words, depth, unmatchedClose, open.Count > 0 ? open[0] : -1);
+        }
+
+        /// <summary>Skips a <c>/* … */</c> comment, counting nesting the way Postgres does.</summary>
+        internal static bool TrySkipBlockComment(string sql, ref int i)
+        {
+            var depth = 0;
+
+            while (i < sql.Length)
+            {
+                if (sql[i] == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+                {
+                    depth++;
+                    i += 2;
+                    continue;
+                }
+
+                if (sql[i] == '*' && i + 1 < sql.Length && sql[i + 1] == '/')
+                {
+                    depth--;
+                    i += 2;
+
+                    if (depth == 0)
+                    {
+                        return true;
+                    }
+
+                    continue;
+                }
+
+                i++;
+            }
+
+            return false;
+        }
+
+        /// <summary>Skips a <c>'…'</c> literal or a <c>"…"</c> identifier, doubling and escapes included.</summary>
+        internal static bool TrySkipQuoted(string sql, ref int i)
+        {
+            char quote = sql[i];
+
+            // Backslash escapes exist in an E'' literal and nowhere else. With the default
+            // standard_conforming_strings = on, the backslash in 'a\' is an ordinary character and the
+            // quote after it CLOSES the string.
+            bool escapes = quote == '\'' && IsEscapeStringPrefix(sql, i);
+
+            i++;
+
+            while (i < sql.Length)
+            {
+                if (escapes && sql[i] == '\\' && i + 1 < sql.Length)
+                {
+                    i += 2;
+                    continue;
+                }
+
+                if (sql[i] == quote)
+                {
+                    if (i + 1 < sql.Length && sql[i + 1] == quote)
+                    {
+                        i += 2;
+                        continue;
+                    }
+
+                    i++;
+                    return true;
+                }
+
+                i++;
+            }
+
+            return false;
+        }
+
+        /// <summary>Whether the quote at <paramref name="quotePosition" /> opens an <c>E'…'</c> literal.</summary>
+        private static bool IsEscapeStringPrefix(string sql, int quotePosition)
+        {
+            if (quotePosition == 0 || sql[quotePosition - 1] is not ('e' or 'E'))
+            {
+                return false;
+            }
+
+            // The e has to be a token of its own; `date'…'` also ends in an e and is a typed literal.
+            int before = quotePosition - 2;
+
+            return before < 0 || !(char.IsLetterOrDigit(sql[before]) || sql[before] is '_' or '$');
+        }
     }
 
     private static bool TryParseCount(string value, out int count) =>
@@ -934,26 +1260,22 @@ internal static class QuerySqlComposer
 
             if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
             {
-                var end = sql.IndexOf("*/", i + 2, StringComparison.Ordinal);
-                if (end < 0)
+                if (!ClauseScan.TrySkipBlockComment(sql, ref i))
                 {
                     // Unterminated: the guard will refuse it anyway, and "present" is the safe answer.
                     return true;
                 }
 
-                i = end + 2;
                 continue;
             }
 
             if (c is '\'' or '"')
             {
-                var end = sql.IndexOf(c, i + 1);
-                if (end < 0)
+                if (!ClauseScan.TrySkipQuoted(sql, ref i))
                 {
                     return true;
                 }
 
-                i = end + 1;
                 continue;
             }
 
@@ -1024,27 +1346,25 @@ internal static class QuerySqlComposer
 
             if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
             {
-                var end = sql.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                var start = i;
 
-                if (end < 0)
+                if (!ClauseScan.TrySkipBlockComment(sql, ref i))
                 {
-                    return i;
+                    return start;
                 }
 
-                i = end + 2;
                 continue;
             }
 
             if (c is '\'' or '"')
             {
-                var end = sql.IndexOf(c, i + 1);
+                var start = i;
 
-                if (end < 0)
+                if (!ClauseScan.TrySkipQuoted(sql, ref i))
                 {
-                    return i;
+                    return start;
                 }
 
-                i = end + 1;
                 continue;
             }
 
@@ -1067,23 +1387,57 @@ internal static class QuerySqlComposer
         return -1;
     }
 
-    private static bool StartsWithWord(string sql, string word)
+    private static bool StartsWithWord(string sql, string word) => StartsWithWordAt(sql, 0, word);
+
+    /// <summary>Whether <paramref name="word" /> begins at <paramref name="index" /> as a whole word.</summary>
+    private static bool StartsWithWordAt(string sql, int index, string word)
     {
-        if (!sql.StartsWith(word, StringComparison.OrdinalIgnoreCase))
+        if (index + word.Length > sql.Length
+            || string.Compare(sql, index, word, 0, word.Length, StringComparison.OrdinalIgnoreCase) != 0)
         {
             return false;
         }
 
-        return sql.Length == word.Length || !char.IsLetterOrDigit(sql[word.Length]) && sql[word.Length] != '_';
+        int after = index + word.Length;
+
+        return after == sql.Length || !char.IsLetterOrDigit(sql[after]) && sql[after] != '_';
     }
 
+    /// <summary>
+    /// Reads the <c>$tag$</c> that opens a dollar-quoted body at <paramref name="position" />, if one does.
+    /// </summary>
+    /// <remarks>
+    /// <b>The first character of a tag has to be a letter or an underscore</b>, because a dollar-quote tag
+    /// follows the rules of an unquoted identifier and Postgres reads <c>$1</c> as a parameter placeholder.
+    /// Accepting a digit made <c>'x' = $1$;drop table x;--$1$</c> look like a quoted body to the <c>;</c>
+    /// scanner, which then skipped straight past both semicolons - a scanner disagreeing with Postgres
+    /// about where a string is, which is the one thing it may never do. <c>$$</c> with no tag at all is
+    /// still a body.
+    /// </remarks>
     private static bool TryReadDollarTag(string sql, int position, out string tag)
     {
+        tag = string.Empty;
+
         var probe = position + 1;
 
-        while (probe < sql.Length && (char.IsLetterOrDigit(sql[probe]) || sql[probe] == '_'))
+        if (probe >= sql.Length)
         {
+            return false;
+        }
+
+        if (sql[probe] != '$')
+        {
+            if (!char.IsLetter(sql[probe]) && sql[probe] != '_')
+            {
+                return false;
+            }
+
             probe++;
+
+            while (probe < sql.Length && (char.IsLetterOrDigit(sql[probe]) || sql[probe] == '_'))
+            {
+                probe++;
+            }
         }
 
         if (probe < sql.Length && sql[probe] == '$')
@@ -1092,7 +1446,6 @@ internal static class QuerySqlComposer
             return true;
         }
 
-        tag = string.Empty;
         return false;
     }
 }

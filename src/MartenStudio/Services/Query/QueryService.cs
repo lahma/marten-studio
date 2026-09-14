@@ -28,11 +28,23 @@ namespace MartenStudio.Services.Query;
 /// <c>select … from &lt;table&gt; as d &lt;clause&gt;</c> with <b>no tenant filter and no soft-delete
 /// filter</b> - so on a conjoined, soft-deleted collection a clause of <c>where 1 = 1</c> typed by
 /// somebody scoped to one tenant returned every tenant's rows and every deleted row. The studio therefore
-/// composes the statement itself (<see cref="QuerySqlComposer.Compose" />), with its own predicates in
-/// front of the visitor's, and runs it on <c>IMartenDatabase.CreateConnection(ConnectionUsage.Read)</c> -
+/// composes the statement itself (<see cref="QuerySqlComposer.Compose" />), with its own predicates on
+/// both sides of the visitor's, and runs it on <c>IMartenDatabase.CreateConnection(ConnectionUsage.Read)</c> -
 /// which is also what makes the SQL tab, the command that ran and the statement <c>EXPLAIN</c> planned all
 /// the same text. Rows come back as <c>data::text</c> and are never deserialized, so no property can be
 /// dropped on the way to the screen (AGENTS.md hard rule 10 the easy way: nothing serializes).
+/// </para>
+/// <para>
+/// <b>Mode A runs inside the same read-only transaction as the console</b>, through
+/// <see cref="ReadOnlySqlSession.InTransactionAsync{T}" />, and reads the rows itself because a document's
+/// <c>data</c> column must arrive whole where a console cell is capped for a grid. It did not used to, and
+/// that was the defect: a plain command on a read connection, with no <c>SET TRANSACTION READ ONLY</c>, no
+/// server-side <c>statement_timeout</c> and no <see cref="MartenStudioOptions.SqlConsoleRole" />, reached
+/// by a mode that needs no capability at all. The transaction is not the whole guard - an advisory lock
+/// and a <c>setval</c> are both "reads" as far as SQLSTATE 25006 is concerned, which is why
+/// <see cref="QuerySqlComposer.DisallowedFunctions" /> applies here whatever capabilities the visitor
+/// holds - but a clause that turns out to write now changes nothing, and a clause that hangs is cancelled
+/// by Postgres with a 57014 the page can render rather than by breaking the connection.
 /// </para>
 /// <para>
 /// <b>Mode B - the SQL console - is the one that is gated</b>, in this order, and the order is the
@@ -142,25 +154,52 @@ internal sealed class QueryService : IQueryService
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(request);
 
-        ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
-
-        IDocumentType documentType = FindDocumentType(resolved, request.Alias)
-            ?? throw new KeyNotFoundException(
-                $"Marten store '{scope.StoreKey}' has no visible document type with alias '{request.Alias}'.");
-
-        DocumentTableInfo table = DocumentTableInfo.FromDocumentType(documentType);
         MartenStudioOptions value = options.Value;
-        int limit = Math.Clamp(request.PageSize ?? value.DefaultPageSize, 1, value.MaxPageSize);
-        string? tenantId = scope.TenantId is { Length: > 0 } scoped ? scoped : null;
         string user = UserName();
         string clause = request.WhereClause ?? string.Empty;
         string target = Target(clause);
 
+        // The scope first, and audited when it is refused. Resolving before any audit call is how a refusal
+        // used to leave no trace at all: a visitor could probe stores, databases and tenants through this
+        // page and the only record of it was the exception the browser never showed. 9203 is the same entry
+        // the console writes for the same refusal, because it is the same refusal.
+        ResolvedScope resolved;
+
+        try
+        {
+            resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            audit.RecordScopeDenied(scope, ReadPolicyName(value), MartenQueryAction, target);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, "not authorized for this scope", clause);
+            throw;
+        }
+
+        if (FindDocumentType(resolved, request.Alias) is not { } documentType)
+        {
+            // An alias that is not there - or one the host's IsDocumentTypeVisible hides - is a failed run,
+            // not a silent one: typing an alias into the URL is exactly how somebody looks for a collection
+            // they were not offered.
+            string missing =
+                $"Marten store '{scope.StoreKey}' has no visible document type with alias '{request.Alias}'.";
+
+            audit.Record(MartenQueryAction, target, succeeded: false, missing, null, scope);
+            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, missing, clause);
+
+            throw new KeyNotFoundException(missing);
+        }
+
+        DocumentTableInfo table = DocumentTableInfo.FromDocumentType(documentType);
+        int limit = Math.Clamp(request.PageSize ?? value.DefaultPageSize, 1, value.MaxPageSize);
+        string? tenantId = scope.TenantId is { Length: > 0 } scoped ? scoped : null;
+
         // A where clause needs no capability, so it has to be a clause. Without RunSql it may read only the
-        // table that was picked; with RunSql the nested-read rules are lifted, because everything they
-        // refuse the same person could type into the console. The shape rules - one statement, not a
-        // statement of its own, and a tail the composer can place - hold either way: Mode A runs outside
-        // the console's read-only transaction, so a second statement here would really write.
+        // table that was picked; with RunSql the nested-read rules alone are lifted, because everything
+        // *they* refuse the same person could type into the console. Every other rule - one statement, not
+        // a statement of its own, balanced brackets, a placeable tail, and the function denylist - holds
+        // either way. The read-only transaction below is the second boundary, not a replacement for this
+        // one: it refuses writes, and an advisory lock or a `setval` is not a write.
         bool mayRunSql = await MayRunSqlAsync(scope, cancellationToken).ConfigureAwait(false);
         SqlGuardResult clauseGuard = QuerySqlComposer.CheckClause(request.WhereClause, mayRunSql);
 
@@ -197,26 +236,61 @@ internal sealed class QueryService : IQueryService
         MartenQueryScope queryScope = ScopeOf(composed, table);
         string statement = composed.Statement;
         var stopwatch = Stopwatch.StartNew();
-        List<MartenQueryRow> rows = [];
+        List<MartenQueryRow> rows;
+
+        // The same read-only transaction the console runs in, with the same three timeouts and the same
+        // optional SET LOCAL ROLE - one preamble, in ReadOnlySqlSession, rather than a second copy here.
+        // Mode A used to run as a plain command on a read connection, which is how `where
+        // pg_advisory_lock(42) is not null` from a RunSql holder took a session-level lock on a pooled
+        // connection. The transaction does not refuse that call (an advisory lock is not a write); what it
+        // does refuse is everything 25006 covers, and it guarantees a ROLLBACK whatever the clause did.
+        var session = new ReadOnlySqlSession(new ReadOnlySqlOptions
+        {
+            StatementTimeout = value.QueryTimeout,
+            MaxRows = limit,
+            Role = value.SqlConsoleRole,
+        });
 
         try
         {
-            await using NpgsqlCommand command = new(composed.Statement, connection)
-            {
-                // Every command the studio issues carries a timeout (plan §4.8). A clause somebody is still
-                // writing is exactly the kind of query that turns into a sequential scan of ten million rows.
-                CommandTimeout = (int) Math.Ceiling(value.QueryTimeout.TotalSeconds),
-            };
+            rows = await session.InTransactionAsync(
+                connection,
+                async (transaction, token) =>
+                {
+                    List<MartenQueryRow> read = [];
 
-            composed.Bind(command);
+                    await using NpgsqlCommand command = new(composed.Statement, connection, transaction)
+                    {
+                        // A little past the server-side statement_timeout, which is what should fire:
+                        // statement_timeout produces 57014 with a message and a position that the page
+                        // renders, while a client-side timeout only breaks the connection.
+                        CommandTimeout = (int) Math.Ceiling(value.QueryTimeout.TotalSeconds) + 5,
+                    };
 
-            await using NpgsqlDataReader reader = await command
-                .ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                    composed.Bind(command);
 
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                rows.Add(ReadRow(reader, composed));
-            }
+                    // Measured around the execution alone, as the console measures its own.
+                    stopwatch.Restart();
+
+                    await using NpgsqlDataReader reader = await command
+                        .ExecuteReaderAsync(token).ConfigureAwait(false);
+
+                    while (await reader.ReadAsync(token).ConfigureAwait(false))
+                    {
+                        if (read.Count >= composed.Limit)
+                        {
+                            // The composed statement carries `limit @limit`, so this never fires. It is here
+                            // because the cap is a server-side clamp (plan §4.8) and a cap that exists in
+                            // exactly one place is a cap one edit away from being gone.
+                            break;
+                        }
+
+                        read.Add(ReadRow(reader, composed));
+                    }
+
+                    return read;
+                },
+                cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException
             && FindPostgresException(exception) is { } postgres)
@@ -734,6 +808,14 @@ internal sealed class QueryService : IQueryService
 
     private static string WritePolicyName(MartenStudioOptions value) =>
         value.WriteAuthorizationPolicy ?? value.StoreAuthorizationPolicy ?? "(none)";
+
+    /// <summary>
+    /// The policy a Mode A refusal names. A <c>where</c> clause is resolved with no capability, so the
+    /// policy that answered is the store policy - naming the write policy in the log would send whoever
+    /// reads 9203 to the wrong setting.
+    /// </summary>
+    private static string ReadPolicyName(MartenStudioOptions value) =>
+        value.StoreAuthorizationPolicy ?? "(none)";
 
     /// <summary>
     /// The statement as the audit ring's target: enough to recognise it, on one line. The <em>whole</em>

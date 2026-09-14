@@ -1,3 +1,4 @@
+@using MartenStudio.Services.Live
 @implements IAsyncDisposable
 @inject IJSRuntime JsRuntime
 
@@ -171,7 +172,7 @@
             registered = await JsRuntime.InvokeAsync<bool>(
                 "martenStudio.query.enhanceEditor", new object?[] { textArea, selfReference });
         }
-        catch (Exception exception) when (IsInteropUnavailable(exception))
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
         {
             // Prerendering, a circuit that closed between the render and this call, or a lib module that
             // does not carry the query helpers yet. The buttons still work; only the keyboard chords are
@@ -231,7 +232,7 @@
                 await JsRuntime.InvokeVoidAsync("martenStudio.query.releaseEditor", new object?[] { textArea });
             }
         }
-        catch (Exception exception) when (IsInteropUnavailable(exception))
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
         {
             // The circuit is already gone, which is the usual way a page is disposed.
         }
@@ -242,33 +243,6 @@
             selfReference = null;
         }
     }
-
-    /// <summary>
-    /// Whether this is JavaScript being unreachable rather than a bug.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// All of these happen normally. <c>JSException</c> is the function being missing;
-    /// <c>InvalidOperationException</c> is prerendering, where there is no circuit to call into yet;
-    /// <c>ObjectDisposedException</c> is the runtime having been torn down already; and
-    /// <b><c>JSDisconnectedException</c> is the common one</b> - the browser closed the tab, so the circuit
-    /// went with it, and there is nothing left to release. It derives from <see cref="Exception" /> and
-    /// from none of the others, so a <c>catch (JSException)</c> list does not see it and the exception
-    /// escapes <c>DisposeAsync</c>: on the server that is an unhandled exception logged with no component
-    /// in the stack, for a page that was only being closed. <c>OperationCanceledException</c> (and with it
-    /// <c>TaskCanceledException</c>) is the same event arriving as a cancellation instead.
-    /// </para>
-    /// <para>
-    /// This repeats <c>StudioLiveUpdates</c>'s private predicate rather than sharing it: that one is
-    /// private to a service in another area, and a component reaching into it - or that member being made
-    /// internal for this - would couple two things that only happen to agree. If a third copy appears, it
-    /// is worth a shared helper.
-    /// </para>
-    /// </remarks>
-    private static bool IsInteropUnavailable(Exception exception) =>
-        exception is JSException or JSDisconnectedException or InvalidOperationException
-            or ObjectDisposedException or OperationCanceledException
-        || exception is System.Text.Json.JsonException;
 
     private async Task OnChangedAsync(ChangeEventArgs args) =>
         await CommitAsync(args.Value?.ToString());
