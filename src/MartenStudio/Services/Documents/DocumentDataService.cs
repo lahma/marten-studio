@@ -310,6 +310,28 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
             CountEstimator estimator = Counter();
 
+            // A tenant-scoped count of a conjoined collection never goes near the whole-table threshold.
+            // Two reasons, both load-bearing. Cost: Marten puts tenant_id first in a conjoined table's
+            // primary key, so `count(*) where tenant_id = @t` is index-backed and proportional to this
+            // tenant's rows, not the table's - the threshold describes a query this is not. Disclosure:
+            // the threshold path answers with the whole-table reltuples, which is every tenant's
+            // cardinality - the very number the rail withholds (CrossTenantEstimateNote) and the number
+            // pressing "=" exists to replace. The adversarial review of P2-perf measured the leak: a
+            // visitor scoped to one tenant pressed "=" and got the whole store's count under an
+            // "estimate only" title.
+            if (resolved.TenantId is not null && context.Table.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined)
+            {
+                return await estimator
+                    .CountExactAsync(
+                        connection,
+                        context.Table,
+                        resolved.TenantId,
+                        DeletedFilter.Include,
+                        commandTimeout: null,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             // The cheap answer first, even though an exact one was asked for: it is what
             // ExactCountThreshold is compared against, and on a collection above the threshold it is also
             // the answer. A button is not a reason to start a sequential scan over ten million rows.
@@ -317,10 +339,8 @@ internal sealed partial class DocumentDataService : IDocumentDataService
                 .EstimateAsync(connection, context.Table.Schema, context.Table.Table, cancellationToken)
                 .ConfigureAwait(false);
 
-            // Tenant-scoped, because the rail is: a scope narrowed to 'acme' that answered "6" beside a
-            // collection showing three invoices would be answering a question nobody asked. Deleted rows
-            // are counted, because the estimate this replaces is a whole-table reltuples and the two
-            // numbers sit in the same badge.
+            // Deleted rows are counted, because the estimate this replaces is a whole-table reltuples and
+            // the two numbers sit in the same badge.
             return await CountWithinThresholdAsync(
                     estimator,
                     connection,

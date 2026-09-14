@@ -59,6 +59,12 @@ public class DocumentCountThresholdLiveTests(DocumentCountThresholdLiveTests.Fix
     /// <summary>Per tenant, on the conjoined collection.</summary>
     public const int TenantedRows = 12;
 
+    /// <summary>
+    /// Rows per tenant in the conjoined collection whose whole table sits <em>above</em> the threshold:
+    /// two tenants of these is 120 against a threshold of 100.
+    /// </summary>
+    public const int WideTenantedRows = 60;
+
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     /// <summary>
@@ -76,6 +82,7 @@ public class DocumentCountThresholdLiveTests(DocumentCountThresholdLiveTests.Fix
         private static readonly string[] Tables =
         [
             "countedthing", "bigthing", "smallthing", "tinything", "heavything", "lockedthing", "tenantedthing",
+            "widetenantedthing",
         ];
 
         /// <summary>No demo data: these tests want collections of known, deliberate sizes.</summary>
@@ -93,6 +100,7 @@ public class DocumentCountThresholdLiveTests(DocumentCountThresholdLiveTests.Fix
             options.Schema.For<HeavyThing>();
             options.Schema.For<LockedThing>();
             options.Schema.For<TenantedThing>().MultiTenanted();
+            options.Schema.For<WideTenantedThing>().MultiTenanted();
         }
 
         /// <inheritdoc />
@@ -122,8 +130,10 @@ public class DocumentCountThresholdLiveTests(DocumentCountThresholdLiveTests.Fix
 
             await WriteTenantedAsync("acme");
             await WriteTenantedAsync("globex");
+            await WriteWideTenantedAsync("acme");
+            await WriteWideTenantedAsync("globex");
 
-            await AnalyzeAsync("mt_doc_countedthing", "mt_doc_tinything", "mt_doc_tenantedthing");
+            await AnalyzeAsync("mt_doc_countedthing", "mt_doc_tinything", "mt_doc_tenantedthing", "mt_doc_widetenantedthing");
 
             // A heap Postgres has measured and a row count it has not: the guard reads relpages out of the
             // same pg_class row the estimate came from, and there is no way to make a table genuinely
@@ -145,6 +155,18 @@ public class DocumentCountThresholdLiveTests(DocumentCountThresholdLiveTests.Fix
             // ... and only now the rows that make the estimate stale. A count(*) of countedthing answers
             // 500 from here on; reltuples goes on saying 300, because nothing will analyse it again.
             await WriteAsync<CountedThing>(CountedReal - CountedAnalysed);
+        }
+
+        private async Task WriteWideTenantedAsync(string tenantId)
+        {
+            await using IDocumentSession session = Marten.Store.LightweightSession(tenantId);
+
+            for (var i = 0; i < WideTenantedRows; i++)
+            {
+                session.Store(new WideTenantedThing { Id = Guid.NewGuid() });
+            }
+
+            await session.SaveChangesAsync();
         }
 
         private async Task WriteTenantedAsync(string tenantId)
@@ -452,6 +474,40 @@ public class DocumentCountThresholdLiveTests(DocumentCountThresholdLiveTests.Fix
         acme.Find("tinything")!.Count.IsEstimate.Should().BeTrue();
     }
 
+    /// <summary>
+    /// The "=" button under a tenant scope answers this tenant's count even when the whole table is above
+    /// the threshold - and never the whole-table estimate.
+    /// </summary>
+    /// <remarks>
+    /// The adversarial review of P2-perf measured the leak this closes: the exact-count path read the
+    /// whole-table <c>reltuples</c> first, found it above the threshold, and answered with <em>that</em>
+    /// number marked "estimate only" - every tenant's cardinality, handed to a visitor scoped to one, on
+    /// the very button the rail's note told them to press. The threshold does not describe this query's
+    /// cost either: Marten puts <c>tenant_id</c> first in a conjoined table's primary key, so a
+    /// tenant-predicated <c>count(*)</c> is index-backed and proportional to this tenant's rows.
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_tenant_scoped_exact_count_of_a_conjoined_collection_above_the_threshold_is_this_tenants_count()
+    {
+        using var documents = Documents();
+
+        CollectionRail everyone = await documents.Service.GetCollectionsAsync(Scope, Token);
+        DocumentCount whole = everyone.Find("widetenantedthing")!.Count;
+
+        whole.IsEstimate.Should().BeTrue("with no tenant in scope the whole-table estimate is the answer");
+        whole.Value.Should().Be(WideTenantedRows * 2);
+        (WideTenantedRows * 2).Should().BeGreaterThan((int) Threshold,
+            "this collection has to sit above the threshold for the test to be about the branch it claims");
+
+        DocumentCount asked = await documents.Service.CountExactAsync(
+            MartenFixture.ScopeFor("acme"), "widetenantedthing", Token);
+
+        asked.IsEstimate.Should().BeFalse("a tenant-scoped count is index-backed and is never refused for the table's size");
+        asked.IsExactRefused.Should().BeFalse();
+        asked.Value.Should().Be(WideTenantedRows, "and it is this tenant's number, never the whole table's");
+        asked.Value.Should().NotBe(WideTenantedRows * 2);
+    }
+
     private async Task AssertNeverAnalysedAsync(string table)
     {
         await using NpgsqlConnection connection = await Postgres.OpenAsync(Token);
@@ -498,3 +554,9 @@ public sealed class LockedThing : ThresholdDocument;
 
 /// <summary>Conjoined-tenanted, so a scoped visitor must not be shown a whole-table number.</summary>
 public sealed class TenantedThing : ThresholdDocument;
+
+/// <summary>
+/// Conjoined-tenanted and, as a whole table, above the threshold: the collection on which pressing "="
+/// under a tenant scope must answer this tenant's exact count and never the whole-table estimate.
+/// </summary>
+public sealed class WideTenantedThing : ThresholdDocument;
