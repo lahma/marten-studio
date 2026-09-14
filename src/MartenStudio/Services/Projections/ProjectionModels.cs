@@ -191,6 +191,12 @@ internal static class DaemonDefaults
     /// Verified against JasperFx.Events 2.69.3.
     /// </summary>
     public const int LeadershipPollingMilliseconds = 5_000;
+
+    /// <summary>
+    /// <c>DaemonSettings.AgentPauseTime</c>'s default: a <c>TimeSpan</c> of one second. Verified against
+    /// JasperFx.Events 2.69.3.
+    /// </summary>
+    public const int AgentPauseMilliseconds = 1_000;
 }
 
 /// <summary>
@@ -212,14 +218,50 @@ internal static class DaemonControlMessages
         "Pausing stops the projection agents of every database this process hosts for this store until " +
         "somebody resumes them.";
 
-    /// <summary>Why a per-agent start or stop is pointless while the coordinator is running.</summary>
-    /// <param name="leadershipPollingTime">
-    /// The real interval, read from the store's own <c>LeadershipPollingTime</c> rather than assumed.
-    /// </param>
-    public static string AgentControlNeedsPause(TimeSpan leadershipPollingTime) =>
+    /// <summary>What a resume reaches, which is the same set the pause did.</summary>
+    /// <remarks>
+    /// Its own sentence rather than <see cref="PauseIsProcessWide" /> reused: an audit entry that told
+    /// the reader a resume "stops the projection agents … until somebody resumes them" describes the
+    /// opposite of what happened, and the ring is read long after the button was pressed.
+    /// </remarks>
+    public const string ResumeIsProcessWide =
+        "Resuming restarts the projection agents of every database this process hosts for this store.";
+
+    /// <summary>
+    /// Why a per-agent start or stop is pointless while the coordinator's leadership loop is running.
+    /// </summary>
+    /// <remarks>
+    /// <b>Two intervals, and the loop uses whichever applies.</b> <c>ProjectionCoordinatorBase</c>'s loop
+    /// ends each pass with <c>Task.Delay(leadershipPollingTime)</c> - unless any resolved daemon reports
+    /// a paused agent, in which case it is <c>Task.Delay(agentPauseTime)</c>, which defaults to one
+    /// second and is therefore five times shorter (verified against JasperFx.Events 2.69.3). Quoting the
+    /// leadership interval alone told somebody watching a paused shard that they had five seconds when
+    /// they had one, so the sentence names the smaller and says when the other applies.
+    /// </remarks>
+    /// <param name="leadershipPollingTime">The store's own <c>LeadershipPollingTime</c>.</param>
+    /// <param name="agentPauseTime">The store's own <c>AgentPauseTime</c>.</param>
+    public static string AgentControlNeedsPause(TimeSpan leadershipPollingTime, TimeSpan agentPauseTime) =>
         string.Create(
             CultureInfo.InvariantCulture,
-            $"The projection coordinator restarts agents every {leadershipPollingTime.TotalSeconds:0.#} s (LeadershipPollingTime); pause the daemon first.");
+            $"The projection coordinator restarts agents as often as every {Sooner(leadershipPollingTime, agentPauseTime).TotalSeconds:0.#} s (LeadershipPollingTime {leadershipPollingTime.TotalSeconds:0.#} s, or AgentPauseTime {agentPauseTime.TotalSeconds:0.#} s while any shard is paused); pause the daemon first.");
+
+    /// <summary>
+    /// Why per-agent controls are refused although the studio's pause is still on the record.
+    /// </summary>
+    /// <remarks>
+    /// The studio recorded a pause and the daemon says it is running, which means somebody resumed the
+    /// coordinator without going through this studio - the host's own code, another process, a restart.
+    /// The leadership loop is therefore back, and a stop issued now would be undone by it; saying so is
+    /// the only honest thing to render, because the recorded pause is real and so is the running daemon.
+    /// </remarks>
+    /// <param name="leadershipPollingTime">The store's own <c>LeadershipPollingTime</c>.</param>
+    /// <param name="agentPauseTime">The store's own <c>AgentPauseTime</c>.</param>
+    public static string PauseNoLongerInEffect(TimeSpan leadershipPollingTime, TimeSpan agentPauseTime) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"Marten Studio's pause is still on the record, but this daemon reports that it is running - something outside the studio resumed it. Its leadership loop restarts agents as often as every {Sooner(leadershipPollingTime, agentPauseTime).TotalSeconds:0.#} s, so pause it again before starting or stopping one.");
+
+    private static TimeSpan Sooner(TimeSpan left, TimeSpan right) => left <= right ? left : right;
 }
 
 /// <summary>
@@ -243,8 +285,15 @@ internal static class DaemonControlMessages
 /// about the default.
 /// </param>
 /// <param name="CoordinatedDatabases">
-/// Every database of this store that a pause would reach, by identity. Named in the confirm dialog
-/// because pausing is not scoped to the database the selector is on.
+/// Every database of this store that a pause would reach <em>and</em> that this visitor is allowed to
+/// see. Named in the confirm dialog because pausing is not scoped to the database the selector is on -
+/// and filtered through the store policy for the same reason the operation itself is: a dialog that
+/// listed a database the visitor may not address would be telling them it exists.
+/// </param>
+/// <param name="AgentPauseMilliseconds">
+/// The store's own <c>AgentPauseTime</c>, which is what the coordinator's loop sleeps for instead while
+/// any shard is paused - one second by default, against five for the leadership interval. Both are
+/// carried because the refusal hint has to name whichever applies.
 /// </param>
 internal sealed record DaemonStatus(
     DaemonHostingState Hosting,
@@ -256,7 +305,8 @@ internal sealed record DaemonStatus(
     string Explanation,
     StudioDaemonPause? PausedByStudio = null,
     int LeadershipPollingMilliseconds = DaemonDefaults.LeadershipPollingMilliseconds,
-    IReadOnlyList<string>? CoordinatedDatabases = null)
+    IReadOnlyList<string>? CoordinatedDatabases = null,
+    int AgentPauseMilliseconds = DaemonDefaults.AgentPauseMilliseconds)
 {
     /// <summary>Whether this process can be asked to start, stop or rebuild anything.</summary>
     public bool IsHostedHere => Hosting == DaemonHostingState.Hosted;
@@ -267,18 +317,39 @@ internal sealed record DaemonStatus(
     /// <summary>How often the coordinator restarts agents it finds missing.</summary>
     public TimeSpan LeadershipPollingTime => TimeSpan.FromMilliseconds(LeadershipPollingMilliseconds);
 
+    /// <summary>What that loop sleeps for instead while any shard is paused.</summary>
+    public TimeSpan AgentPauseTime => TimeSpan.FromMilliseconds(AgentPauseMilliseconds);
+
     /// <summary>Every database a pause or resume of this store would reach.</summary>
     public IReadOnlyList<string> Databases => CoordinatedDatabases ?? [];
+
+    /// <summary>
+    /// Whether the studio's recorded pause and the daemon's own answer disagree.
+    /// </summary>
+    /// <remarks>
+    /// The studio recorded a pause, and this daemon says it is running. That is not a studio bug and not
+    /// a stale record: <c>PauseAsync</c> stops the leadership runner and then every resolved daemon, and
+    /// <c>JasperFxAsyncDaemon.IsRunning</c> is its high-water agent's <c>IsRunning</c>, which
+    /// <c>StopAllAsync</c> stops - so a pause that is still in effect reports
+    /// <see cref="IsRunning" /> <see langword="false" />. Seeing it <see langword="true" /> means
+    /// somebody resumed the coordinator outside this studio: the host's own code, another process, a
+    /// restart. The leadership loop is back, so the controls that only make sense while it is stopped go
+    /// away and the card says why rather than continuing to claim the pause holds.
+    /// </remarks>
+    public bool PauseNoLongerInEffect => IsHostedHere && IsPausedByStudio && IsRunning;
 
     /// <summary>
     /// Whether one agent may be started or stopped from here right now.
     /// </summary>
     /// <remarks>
-    /// Only while the studio's own pause is in effect. With the coordinator running, its leadership loop
-    /// starts every shard missing from <c>CurrentAgents()</c> on its next pass, so a stop is undone
-    /// within <see cref="LeadershipPollingTime" /> and the control would be a lie.
+    /// Only while the studio's own pause is in effect <em>and</em> the daemon agrees it is stopped. With
+    /// the coordinator running, its leadership loop starts every shard missing from
+    /// <c>CurrentAgents()</c> on its next pass, so a stop is undone within
+    /// <see cref="LeadershipPollingTime" /> - or within <see cref="AgentPauseTime" /> when any shard is
+    /// paused - and the control would be a lie. The recorded pause alone is not enough for that promise,
+    /// because the record says what the studio did and not what is true now.
     /// </remarks>
-    public bool CanControlAgents => IsHostedHere && IsPausedByStudio;
+    public bool CanControlAgents => IsHostedHere && IsPausedByStudio && !IsRunning;
 
     /// <summary>
     /// Why a per-agent start or stop is refused right now, or <see langword="null" /> when it is not.
@@ -287,9 +358,13 @@ internal sealed record DaemonStatus(
     /// <see langword="null" /> when no daemon is hosted here as well, because that case already has its
     /// own explanation on the card and two reasons for one disabled button is one too many.
     /// </remarks>
-    public string? AgentControlRefusal => IsHostedHere && !IsPausedByStudio
-        ? DaemonControlMessages.AgentControlNeedsPause(LeadershipPollingTime)
-        : null;
+    public string? AgentControlRefusal => (IsHostedHere, IsPausedByStudio, IsRunning) switch
+    {
+        (false, _, _) => null,
+        (true, true, true) => DaemonControlMessages.PauseNoLongerInEffect(LeadershipPollingTime, AgentPauseTime),
+        (true, false, _) => DaemonControlMessages.AgentControlNeedsPause(LeadershipPollingTime, AgentPauseTime),
+        _ => null,
+    };
 
     /// <summary>How long ago the high-water mark was polled, against <paramref name="now" />.</summary>
     public TimeSpan? HighWaterAge(DateTimeOffset now) =>
@@ -304,12 +379,24 @@ internal sealed record DaemonStatus(
 /// <param name="Daemon">The daemon card.</param>
 /// <param name="HighWaterMark">The store's highest event sequence, which every lag is measured against.</param>
 /// <param name="ReadAt">When this was read, so a stale poll can be told apart from a stalled shard.</param>
+/// <param name="HasEventStore">
+/// Whether this database has an event store at all.
+/// <para>
+/// A third state beside "nothing has happened" and "could not read": the tables are simply not there, so
+/// there is no progression to report and no high-water mark to measure against, and every number on this
+/// record is zero for that reason rather than because a projection has stalled. The studio answers it
+/// from <c>information_schema</c> and never by asking Marten, whose own progress reads would create the
+/// event store to answer (hard rule 14) - so a page that draws this as "no event store in this database"
+/// is drawing the fact, not a failure.
+/// </para>
+/// </param>
 internal sealed record ProjectionsView(
     IReadOnlyList<ProjectionInfo> Projections,
     IReadOnlyList<ShardProgress> Progress,
     DaemonStatus Daemon,
     long HighWaterMark,
-    DateTimeOffset ReadAt)
+    DateTimeOffset ReadAt,
+    bool HasEventStore = true)
 {
     /// <summary>An empty view, for a scope that could not be read.</summary>
     public static ProjectionsView Empty { get; } = new(

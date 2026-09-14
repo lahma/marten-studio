@@ -128,10 +128,30 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
         return this;
     }
 
-    /// <summary>Says how often this store's coordinator restarts the agents it finds missing.</summary>
-    public FakeProjectionDataService WithLeadershipPollingTime(int milliseconds)
+    /// <summary>
+    /// Says Marten Studio paused this store's coordinator and that the daemon is running anyway - the
+    /// state a host resuming the coordinator itself leaves behind.
+    /// </summary>
+    public FakeProjectionDataService WithStudioPauseThatWasLifted(string user = "admin")
     {
-        Daemon = Daemon with { LeadershipPollingMilliseconds = milliseconds };
+        Daemon = WithStudioPause(user).Daemon with { IsRunning = true };
+        return this;
+    }
+
+    /// <summary>Says how often this store's coordinator restarts the agents it finds missing.</summary>
+    /// <param name="milliseconds">The store's <c>LeadershipPollingTime</c>.</param>
+    /// <param name="agentPauseMilliseconds">
+    /// Its <c>AgentPauseTime</c>, which is the interval the loop uses instead while any shard is paused
+    /// and therefore the one the hint quotes when it is the smaller of the two.
+    /// </param>
+    public FakeProjectionDataService WithLeadershipPollingTime(int milliseconds, int? agentPauseMilliseconds = null)
+    {
+        Daemon = Daemon with
+        {
+            LeadershipPollingMilliseconds = milliseconds,
+            AgentPauseMilliseconds = agentPauseMilliseconds ?? Daemon.AgentPauseMilliseconds,
+        };
+
         return this;
     }
 

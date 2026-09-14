@@ -97,7 +97,7 @@ public class DaemonControlPageTests
     {
         FakeProjectionDataService data = new FakeProjectionDataService()
             .WithProjection("DailySales")
-            .WithLeadershipPollingTime(1_000);
+            .WithLeadershipPollingTime(1_000, agentPauseMilliseconds: 1_000);
 
         await using StudioComponentContext context = await ReadyAsync(data);
 
@@ -110,7 +110,8 @@ public class DaemonControlPageTests
         stop.HasAttribute("disabled").Should().BeTrue();
 
         const string reason =
-            "The projection coordinator restarts agents every 1 s (LeadershipPollingTime); pause the daemon first.";
+            "The projection coordinator restarts agents as often as every 1 s (LeadershipPollingTime 1 s, " +
+            "or AgentPauseTime 1 s while any shard is paused); pause the daemon first.";
 
         start.GetAttribute("title").Should().Be(reason);
         stop.GetAttribute("title").Should().Be(reason);
@@ -137,6 +138,43 @@ public class DaemonControlPageTests
         page.Find(".ms-shard-stop").Click();
 
         page.WaitForAssertion(() => data.Calls.Should().Equal("StopAgent:DailySales:All"));
+    }
+
+    /// <summary>
+    /// A pause the host lifted itself takes the controls away again, and the card says which of the two
+    /// facts is the true one.
+    /// </summary>
+    /// <remarks>
+    /// The studio's record of its own pause is all <c>IsPausedByStudio</c> can mean - the coordinator has
+    /// no public paused flag - but the daemon's <c>IsRunning</c> is live, and a running daemon means the
+    /// leadership loop is back. Enabling per-agent controls on the record alone would offer a stop that
+    /// the loop undoes within a poll, which is exactly what the pause requirement exists to prevent.
+    /// </remarks>
+    [Fact]
+    public async Task A_studio_pause_the_host_lifted_disables_the_per_agent_controls_and_says_so()
+    {
+        FakeProjectionDataService data = new FakeProjectionDataService()
+            .WithProjection("DailySales")
+            .WithStudioPauseThatWasLifted();
+
+        await using StudioComponentContext context = await ReadyAsync(data);
+
+        IRenderedComponent<Page> page = context.Render<Page>();
+
+        page.Find(".ms-daemon-headline").TextContent.Trim()
+            .Should().Be("Hosted and running - the studio's pause is no longer in effect");
+
+        page.Find(".ms-daemon-paused-by").Should().NotBeNull("the studio really did pause it");
+        page.Find(".ms-daemon-pause-lifted").TextContent
+            .Should().Contain("this daemon reports that it is running");
+        page.FindAll(".ms-daemon-pause-effect").Should().BeEmpty(
+            "the sentence about what a pause reaches is about a pause that is in effect");
+
+        page.Find(".ms-shard-start").HasAttribute("disabled").Should().BeTrue();
+        page.Find(".ms-shard-stop").HasAttribute("disabled").Should().BeTrue();
+
+        page.Find(".ms-shard-control-hint").TextContent.Trim()
+            .Should().StartWith("Marten Studio's pause is still on the record");
     }
 
     /// <summary>

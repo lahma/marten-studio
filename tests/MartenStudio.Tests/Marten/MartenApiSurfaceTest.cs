@@ -524,9 +524,28 @@ public class MartenApiSurfaceTest
             .Be<Task<IReadOnlyList<Weasel.Core.DbObjectName>>>();
         RequireMethod(database, "ExistingTableFor", typeof(Type));
         RequireMethod(database, "SchemaTables", typeof(CancellationToken));
+        // The three the studio deliberately does NOT call, pinned so that a Marten change to any of them
+        // is still noticed. Each opens with EnsureStorageExistsAsync(typeof(IEvent), token) - a Weasel
+        // migration of the event store under the database's own AutoCreate - so a read or navigation
+        // path calling one creates or alters mt_events, mt_streams, mt_events_sequence and
+        // mt_event_progression (hard rule 14). MartenStudio.Internal.Sql.ProjectionProgressQueries
+        // re-expresses the two the studio needs as its own parameterised SQL, and
+        // NoSchemaBuildingCallTests pins their absence from src/.
         RequireMethod(database, "FetchEventStoreStatistics", typeof(CancellationToken));
         RequireMethod(database, "AllProjectionProgress", typeof(CancellationToken))
             .ReturnType.Should().Be<Task<IReadOnlyList<ShardState>>>();
+
+        // The per-tenant overload, whose SQL the studio's own progression read reproduces: a trailing
+        // ':{tenantId}' comparison on the progression name, which only ever matches under
+        // UseTenantPartitionedEvents because that is the only mode where ShardName.Identity carries a
+        // tenant slot. It is NOT on IMartenDatabase: it is a default interface method on
+        // JasperFx.Events.IEventDatabase whose default body throws for a non-null tenant, and
+        // MartenDatabase overrides it. So the pin is on the interface that declares it.
+        RequireMethod(typeof(JasperFx.Events.IEventDatabase), "AllProjectionProgress", typeof(string), typeof(CancellationToken))
+            .ReturnType.Should().Be<Task<IReadOnlyList<ShardState>>>();
+        typeof(JasperFx.Events.IEventDatabase).IsAssignableFrom(MartenType("Marten.Storage.MartenDatabase"))
+            .Should().BeTrue("MartenDatabase is what overrides the throwing default");
+
         RequireMethod(database, "FetchProjectionProgressFor", typeof(ShardName[]), typeof(CancellationToken));
         RequireMethod(database, "ProjectionProgressFor", typeof(ShardName), typeof(CancellationToken));
         RequireMethod(database, "FetchHighestEventSequenceNumber", typeof(CancellationToken))
@@ -693,6 +712,14 @@ public class MartenApiSurfaceTest
         // Milliseconds, and an int - not a TimeSpan.
         RequireProperty(typeof(DaemonSettings), "LeadershipPollingTime").PropertyType.Should().Be<int>();
         new DaemonSettings().LeadershipPollingTime.Should().Be(5000, "the documented default");
+
+        // And the interval the same loop uses instead while any resolved daemon has a paused agent:
+        // ProjectionCoordinatorBase ends each pass with Task.Delay(agentPauseTime) rather than the
+        // leadership interval whenever ResolvedDaemons().Any(x => x.HasAnyPaused()). A TimeSpan where
+        // the other is an int of milliseconds, and five times shorter by default - which is why the
+        // studio's refusal hint quotes the smaller of the two.
+        RequireProperty(typeof(DaemonSettings), "AgentPauseTime").PropertyType.Should().Be<TimeSpan>();
+        new DaemonSettings().AgentPauseTime.Should().Be(TimeSpan.FromSeconds(1), "the documented default");
 
         // The two members the plan reached for, neither of which exists.
         typeof(IReadOnlyStoreOptions).GetProperty("Projections").Should().BeNull(
@@ -1183,6 +1210,19 @@ public class MartenApiSurfaceTest
 
         RequireProperty(typeof(MartenReadOnlyEventStoreOptions), "IgnoredIndexes").PropertyType
             .Should().Be<IReadOnlyList<string>>();
+
+        // Where the event tables live, which is what the studio's own progression and high-water reads
+        // qualify their identifiers with. EventGraph is the concrete type and the interface is what
+        // IDocumentStore.Options hands out, so both are pinned: the studio only ever has the interface.
+        RequireProperty(eventGraph, "DatabaseSchemaName").PropertyType.Should().Be<string>();
+        RequireProperty(typeof(MartenReadOnlyEventStoreOptions), "DatabaseSchemaName").PropertyType
+            .Should().Be<string>();
+
+        // And the one option that changes which statement the high-water read is: under per-tenant
+        // partitioning the store-global mt_events_sequence is never advanced, so Marten - and the studio
+        // after it - reads coalesce(max(seq_id), 0) from mt_events instead.
+        RequireProperty(typeof(MartenReadOnlyEventStoreOptions), "UseTenantPartitionedEvents").PropertyType
+            .Should().Be<bool>();
 
         RequireMethod(typeof(global::Marten.Events.IEventStoreOptions), "IgnoreIndex", typeof(string))
             .ReturnType.Should().Be<global::Marten.Events.IEventStoreOptions>();

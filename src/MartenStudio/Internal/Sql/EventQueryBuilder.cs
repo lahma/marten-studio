@@ -656,9 +656,18 @@ internal static class EventQueryBuilder
     }
 
     /// <summary>
-    /// The highest event sequence. A <em>fallback</em>: the services normally ask Marten with
-    /// <c>IMartenDatabase.FetchHighestEventSequenceNumber</c>, which is the supported route.
+    /// The highest sequence number <c>mt_events</c> actually holds.
     /// </summary>
+    /// <remarks>
+    /// <b>Not</b> the number the pages call the high-water mark, and not what
+    /// <c>IMartenDatabase.FetchHighestEventSequenceNumber</c> answers either: that is the event
+    /// sequence's <c>last_value</c>, which runs ahead of the table because numbers are handed out before
+    /// the transaction that took them commits. The studio reads it - with its own SQL, because Marten's
+    /// call migrates first (hard rule 14) - through
+    /// <see cref="ProjectionProgressQueries.BuildHighWaterMark" />. This one is the physical maximum, the
+    /// same thing Marten's own <c>FetchMaxEventSequenceAsync</c> reads, and it is what a reader of the
+    /// events table needs when the question is "what is the last event that is really there".
+    /// </remarks>
     public static NpgsqlCommand BuildHighestSequence(EventTableInfo table)
     {
         ArgumentNullException.ThrowIfNull(table);

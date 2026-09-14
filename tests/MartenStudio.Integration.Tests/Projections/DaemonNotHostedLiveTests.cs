@@ -50,9 +50,6 @@ public class DaemonNotHostedLiveTests(PostgresFixture postgres) : ProjectionsTes
     /// There is nothing here to ask, and the service says so rather than quietly doing nothing - the
     /// refusal lives where the operation does, not in the markup.
     /// </summary>
-    /// <summary>
-    /// There is nothing here to ask, and the service says so rather than quietly doing nothing.
-    /// </summary>
     /// <remarks>
     /// All three shapes: the coordinator controls resolve no coordinator, and the per-agent controls
     /// resolve no daemon. The per-agent refusal is a <em>throw</em> here and not a

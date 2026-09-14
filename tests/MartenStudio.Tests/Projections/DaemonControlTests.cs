@@ -62,20 +62,88 @@ public class DaemonControlTests
         ProjectionDataService.IsBookkeepingRow(shardName).Should().BeFalse();
 
     // --------------------------------------------------------------------------------------------
+    // Attributing a progression row to a tenant
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A row belongs to a tenant when its name <em>parses</em> with that tenant, not when it ends in it.
+    /// </summary>
+    /// <remarks>
+    /// The studio's progression read narrows to a tenant with a trailing-substring comparison in SQL,
+    /// which is the most a string comparison can do - and <c>ShardName.Identity</c> without a tenant is
+    /// <c>{Name}:{ShardKey}</c>, so a projection sliced by a shard key that happens to equal a tenant id
+    /// ends in the same suffix. Marten's own per-tenant read settles it by parsing, and so does this:
+    /// <c>Foo:acme</c>'s trailing segment is a shard key, <c>Orders:All:acme</c>'s is a tenant. Getting
+    /// this wrong reports one tenant's progress as another's, which is the same class of mistake as
+    /// reading another tenant's rows.
+    /// </remarks>
+    [Theory]
+    [InlineData("Orders:All:acme", "acme", true)]
+    [InlineData("Orders:V2:All:acme", "acme", true)]
+    [InlineData("HighWaterMark:acme", "acme", true)]
+    [InlineData("Foo:acme", "acme", false)]
+    [InlineData("Orders:All:acme", "beta", false)]
+    [InlineData("Orders:All", "acme", false)]
+    [InlineData("HighWaterAllocationFence", "acme", false)]
+    [InlineData("", "acme", false)]
+    public void A_progression_row_belongs_to_the_tenant_its_name_parses_with(
+        string progressionName, string tenantId, bool expected) =>
+        ProjectionDataService.BelongsToTenant(progressionName, tenantId).Should().Be(expected);
+
+    // --------------------------------------------------------------------------------------------
     // The daemon card's control state
     // --------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// The refusal quotes the interval that actually applies, which is the smaller of the two.
+    /// </summary>
+    /// <remarks>
+    /// <c>ProjectionCoordinatorBase</c>'s loop sleeps <c>LeadershipPollingTime</c> between passes -
+    /// unless any resolved daemon reports a paused agent, when it sleeps <c>AgentPauseTime</c> instead
+    /// (one second by default, five times shorter). Quoting the leadership interval alone told somebody
+    /// watching a paused shard that they had five seconds when they had one.
+    /// </remarks>
     [Fact]
     public void A_running_coordinator_refuses_per_agent_control_and_quotes_the_stores_own_interval()
     {
-        DaemonStatus status = Hosted() with { LeadershipPollingMilliseconds = 1_500 };
+        DaemonStatus status = Hosted() with { LeadershipPollingMilliseconds = 1_500, AgentPauseMilliseconds = 500 };
 
         status.IsPausedByStudio.Should().BeFalse();
         status.CanControlAgents.Should().BeFalse();
         status.LeadershipPollingTime.Should().Be(TimeSpan.FromMilliseconds(1_500));
+        status.AgentPauseTime.Should().Be(TimeSpan.FromMilliseconds(500));
 
         status.AgentControlRefusal.Should()
-            .Be("The projection coordinator restarts agents every 1.5 s (LeadershipPollingTime); pause the daemon first.");
+            .Be("The projection coordinator restarts agents as often as every 0.5 s (LeadershipPollingTime 1.5 s, "
+                + "or AgentPauseTime 0.5 s while any shard is paused); pause the daemon first.");
+    }
+
+    /// <summary>
+    /// A recorded pause is not a promise that the daemon is still stopped.
+    /// </summary>
+    /// <remarks>
+    /// <c>JasperFxAsyncDaemon.IsRunning</c> is its high-water agent's, and the coordinator's
+    /// <c>PauseAsync()</c> stops that agent - so a pause that still holds reports <c>IsRunning</c>
+    /// false. Both true at once means somebody resumed the coordinator outside this studio: its
+    /// leadership loop is back, and per-agent controls offered on the strength of the record alone would
+    /// be undone within a poll, which is the exact failure the pause requirement exists to prevent.
+    /// </remarks>
+    [Fact]
+    public void A_recorded_pause_that_the_daemon_contradicts_takes_the_per_agent_controls_away_again()
+    {
+        DaemonStatus status = Hosted() with
+        {
+            IsRunning = true,
+            PausedByStudio = new StudioDaemonPause("default", "admin", DateTimeOffset.UnixEpoch, "localhost.marten", null),
+        };
+
+        status.IsPausedByStudio.Should().BeTrue("the studio really did pause it, and the record stands");
+        status.PauseNoLongerInEffect.Should().BeTrue();
+        status.CanControlAgents.Should().BeFalse("the leadership loop is running again");
+
+        status.AgentControlRefusal.Should()
+            .StartWith("Marten Studio's pause is still on the record, but this daemon reports that it is running")
+            .And.Contain("as often as every 1 s", "the smaller interval is the one that applies");
     }
 
     [Fact]
@@ -112,6 +180,7 @@ public class DaemonControlTests
     public void The_polling_interval_defaults_to_the_documented_five_seconds()
     {
         Hosted().LeadershipPollingTime.Should().Be(TimeSpan.FromSeconds(5));
+        Hosted().AgentPauseTime.Should().Be(TimeSpan.FromSeconds(1));
         Hosted().Databases.Should().BeEmpty("a status that named none names none, rather than throwing");
     }
 
@@ -192,6 +261,33 @@ public class DaemonControlTests
 
         ProjectionDataService.LeadershipPollingMillisecondsOf(untouched)
             .Should().Be(DaemonDefaults.LeadershipPollingMilliseconds);
+    }
+
+    /// <summary>
+    /// And the same for the interval the loop uses while a shard is paused, by the same route.
+    /// </summary>
+    /// <remarks>
+    /// <c>DaemonSettings.AgentPauseTime</c> is a <c>TimeSpan</c> where <c>LeadershipPollingTime</c> is an
+    /// <c>int</c> of milliseconds - verified against JasperFx.Events 2.69.3 - so the two are read the
+    /// same way and converted differently, and both defaults are pinned here rather than assumed.
+    /// </remarks>
+    [Fact]
+    public void The_stores_configured_agent_pause_time_is_what_the_hint_quotes_while_a_shard_is_paused()
+    {
+        using IDocumentStore configured = DocumentStore.For(options =>
+        {
+            options.Connection(NeverConnected);
+            options.Projections.AgentPauseTime = TimeSpan.FromMilliseconds(250);
+        });
+
+        ProjectionDataService.AgentPauseMillisecondsOf(configured).Should().Be(250);
+        ProjectionDataService.AgentPauseTimeOf(configured).Should().Be(TimeSpan.FromMilliseconds(250));
+
+        using IDocumentStore untouched = DocumentStore.For(options => options.Connection(NeverConnected));
+
+        ProjectionDataService.AgentPauseMillisecondsOf(untouched)
+            .Should().Be(DaemonDefaults.AgentPauseMilliseconds);
+        DaemonDefaults.AgentPauseMilliseconds.Should().Be(1_000, "JasperFx's own documented default");
     }
 
     private const string NeverConnected =

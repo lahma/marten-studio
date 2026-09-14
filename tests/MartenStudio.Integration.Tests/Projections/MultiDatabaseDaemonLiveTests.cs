@@ -8,11 +8,13 @@ using JasperFx.MultiTenancy;
 using Marten;
 using Marten.Storage;
 
+using MartenStudio.Integration.Tests.Documents;
 using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain.Events;
 using MartenStudio.Services;
 using MartenStudio.Services.Projections;
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -271,6 +273,110 @@ public class MultiDatabaseDaemonLiveTests(PostgresFixture postgres) : IAsyncLife
         views[SecondaryIdentifier].HighWaterMark.Should().BeGreaterThan(0);
     }
 
+    /// <summary>
+    /// A pause reaches every database of the store, so a visitor who may not reach one of them may not
+    /// pause at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>IProjectionCoordinator.PauseAsync()</c> stops the leadership runner and then
+    /// <c>StopAllAsync()</c>s every daemon that coordinator has resolved - which is both of this store's
+    /// databases, not the one the scope selector names. <c>StudioScopeResolver</c> authorizes the scope in
+    /// the URL and nothing else, so on a host whose <c>StoreAuthorizationPolicy</c> scopes by database -
+    /// which the scope selector honours, so it is a shape hosts are expected to have - a visitor allowed
+    /// only the primary could stop the secondary's projections, and the confirm dialog would have named
+    /// the secondary while doing it.
+    /// </para>
+    /// <para>
+    /// Every database is therefore asked for before the coordinator is touched, and the first refusal is
+    /// a scope denial: the audit ring records the attempt as a failed <c>PauseDaemon</c>, the log gets
+    /// 9203, and both daemons are still running afterwards - which is the assertion that would fail if
+    /// the check were removed, because this studio is wired to the coordinator that is really running.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_pause_is_refused_when_the_visitor_may_not_reach_every_database_it_would_stop()
+    {
+        IReadOnlyList<IMartenDatabase> databases = await Store.Storage.AllDatabases();
+        databases.Should().HaveCount(2);
+
+        string visible = databases[0].Id.Identity;
+        string hidden = databases[1].Id.Identity;
+
+        var policy = new FakeStoreAuthorizationService();
+        policy.Allow(resource => !string.Equals(resource.DatabaseIdentifier, hidden, StringComparison.Ordinal));
+
+        var logs = new CapturingLogs();
+
+        await using ServiceProvider restricted = BuildRestrictedStudio(policy, logs);
+
+        using IServiceScope scope = restricted.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IProjectionDataService>();
+
+        // The database this visitor IS allowed - so the scope itself resolves, and the only thing that can
+        // refuse is the check over the other one.
+        var asked = new StudioScope(MartenStoreRegistry.DefaultStoreKey, visible, null);
+
+        Func<Task> pausing = () => service.PauseDaemonAsync(asked, Token);
+
+        await pausing.Should().ThrowAsync<StudioNotAuthorizedException>(
+            "a pause of this store would stop a database this visitor may not address");
+
+        var ring = restricted.GetRequiredService<StudioActionLogService>();
+
+        ring.GetLatest().Should().Contain(x => x.Action == "PauseDaemon" && !x.Succeeded);
+        logs.EventIds.Should().Contain(9203, "a scope denial is logged as one");
+
+        // Nothing was paused: this studio is wired to the coordinator that is actually running.
+        var coordinator = host!.Services.GetRequiredService<MartenCoordinator>();
+        IReadOnlyList<IProjectionDaemon> daemons = await coordinator.AllDaemonsAsync();
+
+        daemons.Should().HaveCount(2);
+        daemons.Should().AllSatisfy(daemon => daemon.IsRunning.Should().BeTrue());
+
+        // And the card never names the database the visitor may not see.
+        ProjectionsView view = await service.GetProjectionsAsync(asked, Token);
+
+        view.Daemon.Databases.Should().Equal(visible);
+    }
+
+    /// <summary>
+    /// A second studio over the <em>same</em> store and the same running coordinator, with a store policy
+    /// that refuses one of the two databases.
+    /// </summary>
+    /// <remarks>
+    /// Its own container rather than the class's, because the policy is what the test is about and the
+    /// other tests here need none. The store and the coordinator are the running host's own instances, so
+    /// a refusal that did not happen would really pause the daemons the other tests depend on - which is
+    /// what makes "both are still running" worth asserting.
+    /// </remarks>
+    private ServiceProvider BuildRestrictedStudio(FakeStoreAuthorizationService policy, CapturingLogs logs)
+    {
+        var services = new ServiceCollection();
+
+        services.AddLogging(builder => builder.AddProvider(new CapturingLoggerProvider(logs)));
+
+        services.AddSingleton(Store);
+        services.AddSingleton(host!.Services.GetRequiredService<MartenCoordinator>());
+
+        services.AddAuthorization();
+        services.AddSingleton<AuthenticationStateProvider, AnonymousAuthenticationStateProvider>();
+
+        // Registered after AddAuthorization so that this is the one resolved: the fake is the host's
+        // policy, expressed as the answer rather than as a requirement handler.
+        services.AddSingleton<IAuthorizationService>(policy);
+
+        services.AddMartenStudio(options =>
+        {
+            options.Capabilities = MartenStudioCapabilities.All();
+            options.StoreAuthorizationPolicy = "studio-store";
+            options.WriteAuthorizationPolicy = "studio-write";
+            options.DiscoverTenantIds = false;
+        });
+
+        return services.BuildServiceProvider();
+    }
+
     private async Task<ProjectionsView> ReadAsync(StudioScope scope)
     {
         using IServiceScope serviceScope = host!.Services.CreateScope();
@@ -356,5 +462,18 @@ public class MultiDatabaseDaemonLiveTests(PostgresFixture postgres) : IAsyncLife
     {
         public override Task<AuthenticationState> GetAuthenticationStateAsync() =>
             Task.FromResult(new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity())));
+    }
+
+    /// <summary>
+    /// Puts everything the studio logs into a <see cref="CapturingLogs" />, so a test can assert on the
+    /// event id rather than on prose.
+    /// </summary>
+    private sealed class CapturingLoggerProvider(CapturingLogs logs) : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) => logs.CreateLogger<CapturingLoggerProvider>();
+
+        public void Dispose()
+        {
+        }
     }
 }

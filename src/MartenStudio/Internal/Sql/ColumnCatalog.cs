@@ -175,7 +175,28 @@ internal sealed class ColumnCatalog
         order by ordinal_position
         """;
 
+    /// <summary>
+    /// Whether one sequence exists, which <see cref="Sql"/> cannot answer.
+    /// </summary>
+    /// <remarks>
+    /// A sequence has no columns, so it is invisible to <c>information_schema.columns</c> and to
+    /// <c>information_schema.tables</c> alike. The studio has exactly one question of this shape -
+    /// does <c>mt_events_sequence</c> exist, which is what the high-water read needs to know before it
+    /// runs (<see cref="ProjectionProgressQueries"/>) - and it is the same database, the same catalog and
+    /// the same reason for expiring, so it shares this class rather than becoming a service of its own.
+    /// </remarks>
+    internal const string SequenceSql =
+        """
+        select exists (
+            select 1
+            from information_schema.sequences
+            where sequence_schema = @schema and sequence_name = @sequence
+        )
+        """;
+
     private readonly CatalogCache<TableColumns> cache = new();
+
+    private readonly CatalogCache<bool> sequences = new();
 
     /// <summary>How long a catalog read may take before it is abandoned.</summary>
     public int CommandTimeoutSeconds { get; init; } = 15;
@@ -207,16 +228,55 @@ internal sealed class ColumnCatalog
         return read;
     }
 
+    /// <summary>Whether a sequence of this name exists in this schema, from the cache when it has it.</summary>
+    /// <param name="connection">An open connection to the database in question.</param>
+    /// <param name="schema">The schema the sequence would live in.</param>
+    /// <param name="sequence">The sequence name.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public async Task<bool> HasSequenceAsync(
+        NpgsqlConnection connection,
+        string schema,
+        string sequence,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sequence);
+
+        var key = CacheKey(connection, schema, sequence);
+
+        if (sequences.TryGet(key, out var cached))
+        {
+            return cached;
+        }
+
+        await using var command = new NpgsqlCommand(SequenceSql, connection) { CommandTimeout = CommandTimeoutSeconds };
+
+        command.Parameters.Add(new NpgsqlParameter("schema", NpgsqlDbType.Text) { Value = schema });
+        command.Parameters.Add(new NpgsqlParameter("sequence", NpgsqlDbType.Text) { Value = sequence });
+
+        var exists = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is true;
+
+        sequences.Set(key, exists);
+
+        return exists;
+    }
+
     /// <summary>Forgets one table, for when the studio has just applied a schema change.</summary>
     public void Invalidate(NpgsqlConnection connection, string schema, string table)
     {
         ArgumentNullException.ThrowIfNull(connection);
 
         cache.Remove(CacheKey(connection, schema, table));
+        sequences.Remove(CacheKey(connection, schema, table));
     }
 
     /// <summary>Forgets everything.</summary>
-    public void Clear() => cache.Clear();
+    public void Clear()
+    {
+        cache.Clear();
+        sequences.Clear();
+    }
 
     private async Task<TableColumns> ReadAsync(
         NpgsqlConnection connection,

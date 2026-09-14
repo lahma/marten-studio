@@ -49,7 +49,24 @@
             <strong>Paused by Marten Studio</strong>
             <span class="ms-muted">(@PausedByUser, @PausedAtText)</span>
         </p>
-        <p class="ms-muted ms-daemon-explanation ms-daemon-pause-effect">@ControlExplanation</p>
+
+        @if (PauseNoLongerInEffect)
+        {
+            @* The record and the daemon disagree, and the daemon is the one that is true now: something
+               outside this studio resumed the coordinator, so its leadership loop is back and the
+               per-agent controls are gone with it. *@
+            <p class="ms-daemon-explanation ms-daemon-pause-lifted" role="status">
+                <strong>but this daemon reports that it is running.</strong>
+                <span class="ms-muted">
+                    Something outside Marten Studio resumed it. Pause it again before starting or
+                    stopping one agent.
+                </span>
+            </p>
+        }
+        else
+        {
+            <p class="ms-muted ms-daemon-explanation ms-daemon-pause-effect">@ControlExplanation</p>
+        }
     }
 
     @if (!IsHostedHere)
@@ -123,10 +140,23 @@
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
 
+    /// <summary>
+    /// Whether the studio's recorded pause and the daemon's own answer disagree.
+    /// </summary>
+    /// <remarks>
+    /// <c>JasperFxAsyncDaemon.IsRunning</c> is its high-water agent's, and the coordinator's
+    /// <c>PauseAsync()</c> stops that agent - so a pause that still holds reports
+    /// <see cref="IsRunning" /> <see langword="false" />. Both true at once means somebody resumed the
+    /// coordinator outside this studio, and the card must say that rather than keep claiming a pause
+    /// which no longer stops anything.
+    /// </remarks>
+    private bool PauseNoLongerInEffect => IsHostedHere && IsPausedByStudio && IsRunning;
+
     private string Headline => (IsHostedHere, IsPausedByStudio, IsRunning, HasAnyPaused) switch
     {
         (false, _, _, _) => "Not hosted in this process",
-        (true, true, _, _) => "Hosted, paused by Marten Studio",
+        (true, true, true, _) => "Hosted and running - the studio's pause is no longer in effect",
+        (true, true, false, _) => "Hosted, paused by Marten Studio",
         (true, false, false, _) => "Hosted, stopped",
         (true, false, true, true) => "Hosted, running, paused shards",
         _ => "Hosted and running"

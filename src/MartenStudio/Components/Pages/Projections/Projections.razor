@@ -507,6 +507,11 @@
 
     private async Task OnScopeChangedAsync()
     {
+        // The refusal was about the daemon of the scope being left: a different store or database has a
+        // different coordinator, a pause of its own or none, and carrying the sentence across would
+        // explain the new scope with the old one's facts.
+        agentRefusal = null;
+
         ReleaseLease();
         await SubscribeToLiveStateAsync();
         await LoadAsync(pageCancellation.Token);

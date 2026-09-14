@@ -71,14 +71,17 @@ internal interface INavIndicatorService
 /// </para>
 /// <para>
 /// <b>The projection half is gated on the event tables existing</b> (hard rule 14).
-/// <see cref="IProjectionDataService.GetSummaryAsync" /> reaches
-/// <c>IMartenDatabase.FetchHighestEventSequenceNumber</c> and <c>AllProjectionProgress</c>, and both of
-/// those open with <c>EnsureStorageExistsAsync(typeof(IEvent))</c> - a Weasel migration of the event
-/// store under the database's own <c>AutoCreate</c>. The sidebar is on <em>every</em> route, so an
-/// ungated badge would mean that a host whose database has no event tables got them created by opening
-/// <c>/marten/documents</c>. <see cref="IEventDataService.DescribeAsync" /> answers the same question
-/// from <c>information_schema</c> through the studio's own cached column catalog, and the projection
-/// read only happens when it says there is already something to read.
+/// <see cref="IProjectionDataService.GetSummaryAsync" /> used to reach
+/// <c>IMartenDatabase.FetchHighestEventSequenceNumber</c> and <c>AllProjectionProgress</c>, both of which
+/// open with <c>EnsureStorageExistsAsync(typeof(IEvent))</c> - a Weasel migration of the event store
+/// under the database's own <c>AutoCreate</c>. The sidebar is on <em>every</em> route, so an ungated
+/// badge meant that a host whose database had no event tables got them created by opening
+/// <c>/marten/documents</c>. That service now reads the progression table and the event sequence with the
+/// studio's own SQL and answers "no event store here" as a value, so this gate is no longer what stands
+/// between the sidebar and a migration - it is kept because it is still the cheaper answer:
+/// <see cref="IEventDataService.DescribeAsync" /> is one <c>information_schema</c> read through the
+/// shared, expiring column catalog, and it spares a database with no event store the two queries that
+/// would each return nothing.
 /// </para>
 /// <para>
 /// <b>Authorization comes before the cache, not inside it.</b>

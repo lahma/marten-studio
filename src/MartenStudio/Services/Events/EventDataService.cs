@@ -401,20 +401,35 @@ internal sealed class EventDataService : IEventDataService
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
-            // Marten's own read rather than the builder's max(seq_id) fallback, because it is the
-            // supported route - but be clear about what it answers. Verified by decompiling Marten 9.35's
-            // MartenDatabase: it is `select last_value from <schema>.mt_events_sequence` (or, only on a
-            // store with UseTenantPartitionedEvents, `select coalesce(max(seq_id), 0) from mt_events`).
-            // So it is neither the daemon's high-water mark nor a count of committed events: a sequence's
-            // last_value runs ahead of what is visible, because numbers are handed out before the
-            // transaction that took them commits and are burned outright when it rolls back. It is also
-            // database-wide and never tenant-scoped.
+            // Marten's own statement, run on the studio's own connection - not
+            // IMartenDatabase.FetchHighestEventSequenceNumber, which opens with
+            // EnsureStorageExistsAsync(typeof(IEvent), token) and would therefore let the feed's follow
+            // tick create an event store, on a timer, on a database that has none (hard rule 14, and see
+            // ProjectionProgressQueries for where that was verified in Marten 9.35).
+            //
+            // Be clear about what the number is: `select last_value from <schema>.mt_events_sequence`,
+            // or on a store with UseTenantPartitionedEvents `select coalesce(max(seq_id), 0) from
+            // mt_events`. So it is neither the daemon's high-water mark nor a count of committed events -
+            // a sequence's last_value runs ahead of what is visible, because numbers are handed out
+            // before the transaction that took them commits and are burned outright when it rolls back.
+            // It is also database-wide and never tenant-scoped.
             //
             // That is exactly the right shape for what the feed uses it for - a cheap "has anything
             // happened" tripwire that is allowed to be optimistic, since the delta read that follows is
             // the tenant-scoped, page-bounded one (EventQueryBuilder.BuildFeed). It would be the wrong
-            // number to render as "this tenant has N events".
-            return await resolved.Database.FetchHighestEventSequenceNumber(cancellationToken).ConfigureAwait(false);
+            // number to render as "this tenant has N events". A database with no event store answers
+            // null, which is the same "nothing to follow" the caller already handles.
+            await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+            return await ProjectionProgressQueries
+                .ReadHighWaterMarkAsync(
+                    connection,
+                    catalog,
+                    resolved.Store.Options.Events.DatabaseSchemaName,
+                    resolved.Store.Options.Events.UseTenantPartitionedEvents,
+                    options.Value.QueryTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
@@ -778,6 +793,34 @@ internal sealed class EventDataService : IEventDataService
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
             int pageSize = Math.Clamp(query.PageSize, 1, MaxDeadLetterPageSize);
+
+            // Hard rule 14, and the one read in this service that cannot be re-expressed as the studio's
+            // own SQL: the tenant axis of a dead letter is a property *inside* the JSON body, so this has
+            // to be a Marten query (D6) - and every Marten query opens with EnsureStorageExistsAsync for
+            // its document type, which on a database that has never run the daemon creates
+            // mt_doc_deadletterevent and Marten's whole helper-function set under the database's own
+            // AutoCreate. Proven live: it is what NavIndicatorNoDdlLiveTests found on its first run.
+            // So the table is probed through the shared, expiring column catalog first - the same probe
+            // CountDeadLettersAsync makes - and its absence is a real empty page rather than a migration.
+            //
+            // What the probe cannot prevent is Marten applying a *pending change* to a table that does
+            // exist; that is true of any Marten session read and is the reason the studio reads documents
+            // with its own SQL everywhere it can.
+            await using (NpgsqlConnection probe = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false))
+            {
+                TableColumns deadLetters = await catalog
+                    .GetAsync(
+                        probe,
+                        resolved.Store.Options.Events.DatabaseSchemaName,
+                        EventTableInfo.DeadLetterTable,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (!deadLetters.Exists)
+                {
+                    return DeadLetterPage.Empty;
+                }
+            }
 
             await using IQuerySession session = OpenQuerySession(resolved);
 
