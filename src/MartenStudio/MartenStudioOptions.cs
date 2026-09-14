@@ -97,9 +97,11 @@ public sealed class MartenStudioOptions
     public int MaxSqlConsoleRows { get; set; } = 500;
 
     /// <summary>
-    /// When set, the SQL console runs <c>SET LOCAL ROLE</c> to this Postgres role inside its read-only
-    /// transaction, which is the only mechanism that narrows what the console can read. Must be a plain
-    /// identifier.
+    /// When set, the SQL console <em>and</em> the Query page's Marten <c>where</c> clause run
+    /// <c>SET LOCAL ROLE</c> to this Postgres role inside their read-only transaction, which is the only
+    /// mechanism that narrows what either can read. Must be a plain identifier, and it must be able to
+    /// <c>select</c> from the document tables, or the <c>where</c> clause - which needs no capability -
+    /// answers <c>42501</c> for everybody.
     /// </summary>
     public string? SqlConsoleRole { get; set; }
 
