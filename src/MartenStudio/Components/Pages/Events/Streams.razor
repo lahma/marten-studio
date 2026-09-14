@@ -111,7 +111,7 @@
                 @foreach (StreamRow row in page.Rows)
                 {
                     <tr class="ms-table-row" @key="row.Id">
-                        <td class="ms-table-cell ms-table-cell-mono">
+                        <td class="ms-table-cell ms-table-cell-mono ms-id-cell" title="@row.Id">
                             <a href="@StreamHref(row.Id)">@row.Id</a>
                             <CopyBadge Value="@row.Id" />
                         </td>

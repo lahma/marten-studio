@@ -473,10 +473,16 @@ layer of the authorization contract does.
 | `--readonly` | Set `MartenStudioOptions.ReadOnly`, which turns every mutating capability off however they were configured. |
 | `--path /ops/marten` | Mount the studio somewhere other than `/marten`, which is what exercises the sub-path re-rooting. |
 
-> **Argument order matters.** `WebApplication.CreateBuilder(args)` adds .NET's command-line
-> configuration provider, which reads `--key value` pairs — so a bare boolean switch swallows whatever
-> follows it. Write `dotnet run --urls http://localhost:5000 --anonymous` (pairs first) or give the
-> boolean switches explicit values (`--anonymous true`), not `--anonymous --urls …`.
+> **Argument order does not matter.** The sample's boolean switches — `--anonymous`, `--readonly`,
+> `--allow-data-generation` — are switches, not `--key value` pairs: writing one means `true` and the
+> token after it is left alone, so `dotnet run -- --anonymous --urls http://localhost:5000` and
+> `dotnet run -- --urls http://localhost:5000 --anonymous` do the same thing. An explicit value is
+> still accepted where a script wants to pass a variable (`--readonly false`, `--readonly=false`), and
+> only a literal `true` or `false` counts as one. `--path /ops/marten` is a pair and does take the
+> token after it. This needs saying because .NET's own command-line configuration provider does *not*
+> work that way — it reads `--key value` pairs, so a bare switch would otherwise swallow your `--urls`
+> and then drop the URL without a word; `SampleOptions.HostArguments` reconciles the two before the
+> host sees the arguments.
 
 ### Demo data generator
 

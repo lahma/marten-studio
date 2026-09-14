@@ -15,7 +15,11 @@ using Microsoft.AspNetCore.Authorization;
 
 SampleOptions sample = SampleOptions.Parse(args);
 
-WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+// Not `args`: a bare `--anonymous` lets the command-line configuration provider bind the switch to the
+// *next* token and then drop what is left, so `--anonymous --urls http://localhost:5210` silently lost
+// the URL. SampleOptions.HostArguments rewrites the demo's own switches to `--key=value` and passes
+// every other argument through untouched. See the note on SampleOptions.
+WebApplicationBuilder builder = WebApplication.CreateBuilder(SampleOptions.HostArguments(args));
 
 // Started before AddMarten, because AddMarten needs the connection string. No silent localhost fallback:
 // either something configured a database, or a throwaway container is started, or the host refuses (D18).
