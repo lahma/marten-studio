@@ -76,23 +76,27 @@
                           HasAnyPaused="view.Daemon.HasAnyPaused"
                           HighWaterAge="@HighWaterAgeText"
                           HighWaterMark="view.HighWaterMark"
-                          Explanation="@view.Daemon.Explanation">
+                          Explanation="@view.Daemon.Explanation"
+                          IsPausedByStudio="view.Daemon.IsPausedByStudio"
+                          PausedByUser="@view.Daemon.PausedByStudio?.User"
+                          PausedAtText="@PausedAtText"
+                          ControlExplanation="@DaemonControlMessages.PauseIsProcessWide">
             @if (!Capabilities.ReadOnly)
             {
                 <div class="ms-daemon-actions ms-actions">
                     <button type="button"
-                            class="ms-button ms-daemon-start-all"
+                            class="ms-button ms-daemon-pause"
                             disabled="@(!ControlEnabled)"
                             title="@ControlTitle"
-                            @onclick="StartAllAsync">
-                        Start all
+                            @onclick="() => AskAsync(PendingAction.PauseDaemon)">
+                        Pause daemon
                     </button>
                     <button type="button"
-                            class="ms-button ms-daemon-stop-all"
+                            class="ms-button ms-daemon-resume"
                             disabled="@(!ControlEnabled)"
                             title="@ControlTitle"
-                            @onclick="StopAllAsync">
-                        Stop all
+                            @onclick="() => AskAsync(PendingAction.ResumeDaemon)">
+                        Resume daemon
                     </button>
                     <button type="button"
                             class="ms-button ms-daemon-restart-high-water"
@@ -117,10 +121,24 @@
                     </button>
                 </div>
 
+                @if (ControlEnabled && AgentControlRefusal is { Length: > 0 })
+                {
+                    @* Why the per-shard Start and Stop buttons below are disabled. On the page rather
+                       than only in hover text, because it names the thing to do about it. *@
+                    <p class="ms-muted ms-daemon-explanation ms-shard-control-hint">@AgentControlRefusal</p>
+                }
+
+                @if (agentRefusal is { Length: > 0 })
+                {
+                    @* A refusal that came back from the service after the button was clicked anyway. A
+                       hint and not an error toast: nothing failed, and nothing was changed. *@
+                    <p class="ms-muted ms-daemon-explanation ms-agent-refusal" role="status">@agentRefusal</p>
+                }
+
                 @if (!Capabilities.IsEnabled(StudioCapability.ControlDaemon))
                 {
                     <CapabilityDisabled Capability="@nameof(StudioCapability.ControlDaemon)"
-                                        Action="Starting and stopping projection shards" />
+                                        Action="Pausing and resuming the projection daemon" />
                 }
 
                 @if (!Capabilities.IsEnabled(StudioCapability.CorrectProgression))
@@ -263,17 +281,20 @@
                                 <td class="ms-table-cell ms-table-cell-actions">
                                     @if (!Capabilities.ReadOnly)
                                     {
+                                        @* Disabled, never hidden, while the coordinator is running: the
+                                           option has to stay discoverable, and the hover text - like the
+                                           hint on the card - says exactly what would make it work. *@
                                         <button type="button"
                                                 class="ms-btn ms-btn-sm ms-shard-start"
-                                                disabled="@(!ControlEnabled)"
-                                                title="@ControlTitle"
+                                                disabled="@(!AgentControlEnabled)"
+                                                title="@AgentControlTitle"
                                                 @onclick="() => StartAgentAsync(shard.ShardName)">
                                             Start
                                         </button>
                                         <button type="button"
                                                 class="ms-btn ms-btn-sm ms-shard-stop"
-                                                disabled="@(!ControlEnabled)"
-                                                title="@ControlTitle"
+                                                disabled="@(!AgentControlEnabled)"
+                                                title="@AgentControlTitle"
                                                 @onclick="() => StopAgentAsync(shard.ShardName)">
                                             Stop
                                         </button>
@@ -370,7 +391,9 @@
         None,
         AdvanceHighWaterMark,
         CorrectProgression,
-        CancelOperation
+        CancelOperation,
+        PauseDaemon,
+        ResumeDaemon
     }
 
     private readonly CancellationTokenSource pageCancellation = new();
@@ -394,6 +417,15 @@
     private bool loading = true;
     private bool started;
     private string? loadError;
+
+    /// <summary>
+    /// The reason a per-agent control did nothing, when one came back from the service.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <c>loadError</c> and from the toasts on purpose: a refusal is not a failure.
+    /// Nothing was changed, nothing threw, and the visitor is being told what to do instead.
+    /// </remarks>
+    private string? agentRefusal;
 
     protected override async Task OnInitializedAsync()
     {
@@ -527,6 +559,21 @@
 
     private bool CorrectEnabled => Capabilities.IsEnabled(StudioCapability.CorrectProgression);
 
+    /// <summary>
+    /// Whether one agent may be started or stopped right now.
+    /// </summary>
+    /// <remarks>
+    /// The capability, a daemon here, <em>and</em> the studio's own pause being in effect. With the
+    /// coordinator running, its leadership loop restarts every agent missing from
+    /// <c>CurrentAgents()</c> within <c>LeadershipPollingTime</c>, so the button would appear to work and
+    /// then silently undo itself. The service refuses this independently (AGENTS.md hard rule 5); this is
+    /// only what stops the button being offered.
+    /// </remarks>
+    private bool AgentControlEnabled => ControlEnabled && view?.Daemon.CanControlAgents == true;
+
+    /// <summary>Why the per-agent controls are disabled, when the reason is the coordinator.</summary>
+    private string? AgentControlRefusal => view?.Daemon.AgentControlRefusal;
+
     /// <summary>Whether a running operation may be asked to stop from here.</summary>
     private bool CancelEnabled => !Capabilities.ReadOnly && Capabilities.IsEnabled(StudioCapability.RebuildProjections);
 
@@ -542,6 +589,18 @@
         CancelEnabled ? EventCallback.Factory.Create<string>(this, AskCancelAsync) : default;
 
     private string ControlTitle => Title(StudioCapability.ControlDaemon, needsDaemon: true);
+
+    /// <summary>
+    /// The hover text of a per-agent control: the capability, then the daemon, then the coordinator.
+    /// </summary>
+    private string AgentControlTitle
+    {
+        get
+        {
+            string common = Title(StudioCapability.ControlDaemon, needsDaemon: true);
+            return common.Length > 0 ? common : AgentControlRefusal ?? string.Empty;
+        }
+    }
 
     private string CorrectTitle => Title(StudioCapability.CorrectProgression, needsDaemon: false);
 
@@ -589,16 +648,58 @@
     // ------------------------------------------------------------------------------------------------
 
     private Task StartAgentAsync(string shardName) =>
-        RunAsync($"Started {shardName}", (scope, token) => ProjectionData.StartAgentAsync(scope, shardName, token));
+        ControlAgentAsync(
+            $"Started {shardName}",
+            (scope, token) => ProjectionData.StartAgentAsync(scope, shardName, token));
 
     private Task StopAgentAsync(string shardName) =>
-        RunAsync($"Stopped {shardName}", (scope, token) => ProjectionData.StopAgentAsync(scope, shardName, token));
+        ControlAgentAsync(
+            $"Stopped {shardName}",
+            (scope, token) => ProjectionData.StopAgentAsync(scope, shardName, token));
 
-    private Task StartAllAsync() =>
-        RunAsync("Started every shard", (scope, token) => ProjectionData.StartAllAsync(scope, token));
+    /// <summary>
+    /// One per-agent control, whose "no" is not an error.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RunAsync" /> reports every non-success as a red toast, which is right for a throw and
+    /// wrong for this: a refused agent control changed nothing, failed at nothing, and its answer is a
+    /// sentence telling the visitor to pause the daemon first. It goes on the page as a hint.
+    /// </remarks>
+    private async Task ControlAgentAsync(
+        string success,
+        Func<StudioScope, CancellationToken, Task<DaemonControlResult>> action)
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
 
-    private Task StopAllAsync() =>
-        RunAsync("Stopped every shard", (scope, token) => ProjectionData.StopAllAsync(scope, token));
+        try
+        {
+            DaemonControlResult result = await action(scope, pageCancellation.Token);
+
+            if (result.Applied)
+            {
+                agentRefusal = null;
+                await Toasts.Success(success);
+            }
+            else
+            {
+                agentRefusal = result.Reason;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            await Toasts.Error(exception.Message);
+        }
+
+        await LoadAsync(pageCancellation.Token);
+        await InvokeAsync(StateHasChanged);
+    }
 
     private Task RestartHighWaterAsync() =>
         RunAsync("Restarted the high water agent", (scope, token) => ProjectionData.RestartHighWaterAgentAsync(scope, token));
@@ -702,6 +803,19 @@
                     (scope, token) => ProjectionData.CancelOperationAsync(scope, operationId, token));
                 break;
 
+            case PendingAction.PauseDaemon:
+                await RunAsync(
+                    "The projection daemon is paused",
+                    (scope, token) => ProjectionData.PauseDaemonAsync(scope, token));
+                break;
+
+            case PendingAction.ResumeDaemon:
+                agentRefusal = null;
+                await RunAsync(
+                    "The projection daemon is resuming",
+                    (scope, token) => ProjectionData.ResumeDaemonAsync(scope, token));
+                break;
+
             default:
                 break;
         }
@@ -712,11 +826,42 @@
         PendingAction.AdvanceHighWaterMark => "Advance the high water mark?",
         PendingAction.CorrectProgression => "Correct the progression?",
         PendingAction.CancelOperation => "Stop this operation?",
+        PendingAction.PauseDaemon => "Pause the projection daemon?",
+        PendingAction.ResumeDaemon => "Resume the projection daemon?",
         _ => string.Empty
     };
 
+    /// <summary>
+    /// The databases a pause or resume reaches, named in the dialog.
+    /// </summary>
+    /// <remarks>
+    /// The coordinator is per store, not per database: it stops its leadership runner and then every
+    /// daemon it has resolved. So the dialog names every database of this store rather than the one the
+    /// scope selector is on, because that is the set the operation is actually about.
+    /// </remarks>
+    private string AffectedDatabases
+    {
+        get
+        {
+            IReadOnlyList<string> databases = view?.Daemon.Databases ?? [];
+
+            return databases.Count > 0
+                ? string.Join(", ", databases)
+                : (State.ActiveScope?.DatabaseId ?? "this store's database");
+        }
+    }
+
     private string PendingMessage => pending switch
     {
+        PendingAction.PauseDaemon =>
+            DaemonControlMessages.PauseIsProcessWide
+            + $" That is every database this store has here: {AffectedDatabases}. Nothing projects "
+            + "asynchronously while it is paused - inline projections are unaffected - and it stays "
+            + "paused after you close this page, until somebody resumes it.",
+        PendingAction.ResumeDaemon =>
+            "This restarts the projection coordinator, which brings the agents of every database this "
+            + $"store has here back up: {AffectedDatabases}. Any agent you started or stopped by hand "
+            + "while it was paused goes back to whatever the coordinator decides.",
         PendingAction.AdvanceHighWaterMark =>
             "This moves the high water mark to the latest event sequence. Every async projection then treats "
             + "the events it has not processed as already gone: they will never be projected. This exists for "
@@ -817,6 +962,11 @@
     private string FreshnessTitle => view is null
         ? string.Empty
         : $"Read {State.FormatInSelectedTimeZone(view.ReadAt)}; refreshed every {Options.Value.RefreshInterval.TotalSeconds:0.#} s and paused while this tab is hidden.";
+
+    /// <summary>When the studio paused this store's coordinator, in the visitor's selected time zone.</summary>
+    private string PausedAtText => view?.Daemon.PausedByStudio is { } pause
+        ? State.FormatInSelectedTimeZone(pause.PausedAt)
+        : string.Empty;
 
     private string HighWaterAgeText
     {

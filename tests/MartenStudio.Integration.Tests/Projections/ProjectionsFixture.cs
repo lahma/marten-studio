@@ -51,6 +51,29 @@ internal sealed class ProjectionsFixture : IAsyncDisposable
         Scope = new StudioScope(MartenStoreRegistry.DefaultStoreKey, database.Id.Identity, null);
     }
 
+    /// <summary>
+    /// How often this fixture's projection coordinator restarts the agents it finds missing.
+    /// </summary>
+    /// <remarks>
+    /// Configured, not assumed - and read back off <see cref="Store" /> by
+    /// <see cref="ConfiguredLeadershipPollingTime" />, so a test that waits "two polls" is waiting on the
+    /// store's own setting rather than on a number a test author typed twice.
+    /// </remarks>
+    public static TimeSpan LeadershipPollingTime { get; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// The interval as the <em>store</em> reports it, which is what a test must wait on.
+    /// </summary>
+    /// <remarks>
+    /// The route is the one the studio itself uses and it is not the obvious one:
+    /// <c>IDocumentStore.Options</c> is <c>IReadOnlyStoreOptions</c>, which has no <c>Projections</c>
+    /// member, and <c>IReadOnlyDaemonSettings</c> does not surface <c>LeadershipPollingTime</c> either.
+    /// What works is that <c>Events.Daemon</c> <em>is</em> the store's <c>ProjectionOptions</c>, which
+    /// derives from <c>DaemonSettings</c>. Pinned by <c>MartenApiSurfaceTest</c>.
+    /// </remarks>
+    public TimeSpan ConfiguredLeadershipPollingTime =>
+        TimeSpan.FromMilliseconds(((DaemonSettings) Store.Options.Events.Daemon).LeadershipPollingTime);
+
     /// <summary>The document schema this class owns.</summary>
     public string Schema { get; }
 
@@ -71,6 +94,12 @@ internal sealed class ProjectionsFixture : IAsyncDisposable
 
     /// <summary>The process's audit ring.</summary>
     public StudioActionLogService ActionLog => host.Services.GetRequiredService<StudioActionLogService>();
+
+    /// <summary>The pauses this process issued, which is the only paused state anybody can report.</summary>
+    public DaemonControlState ControlState => host.Services.GetRequiredService<DaemonControlState>();
+
+    /// <summary>The event schema, which is where <c>mt_event_progression</c> lives.</summary>
+    public string EventSchema => Schema + "_events";
 
     /// <summary>
     /// Builds the host, creates the schemas, seeds the demo's event streams and starts the daemon.
@@ -109,6 +138,12 @@ internal sealed class ProjectionsFixture : IAsyncDisposable
                 options.DatabaseSchemaName = schema;
                 options.Events.DatabaseSchemaName = eventSchema;
                 options.AutoCreateSchemaObjects = AutoCreate.All;
+
+                // A second rather than the default five. Every "and it stays that way" assertion in this
+                // suite is measured in leadership polls, and the default would make each of them eleven
+                // seconds of wall clock. The tests read the number back off the store rather than
+                // repeating it, so changing it here changes the waits and nothing else.
+                options.Projections.LeadershipPollingTime = (int) LeadershipPollingTime.TotalMilliseconds;
             })
             .UseLightweightSessions();
 
@@ -215,6 +250,53 @@ internal sealed class ProjectionsFixture : IAsyncDisposable
             if (DateTimeOffset.UtcNow >= deadline)
             {
                 throw new TimeoutException($"Waited {limit.TotalSeconds:0} s for {what} and it did not happen.");
+            }
+
+            await timer.WaitForNextTickAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Asserts that <paramref name="condition" /> keeps holding for <paramref name="duration" />, and
+    /// fails the moment it stops.
+    /// </summary>
+    /// <remarks>
+    /// The other half of <see cref="WaitForAsync" />, and the non-vacuity of every pause assertion in
+    /// this suite. "The agents are gone" is satisfied a millisecond after a stop the coordinator is about
+    /// to undo; "the agents are still gone two leadership polls later" is not, and it is exactly what the
+    /// old <c>StopAllAsync</c> could never have satisfied. Sampled repeatedly rather than one
+    /// <c>Task.Delay</c> and one check, so a state that flickers back and forth fails rather than passing
+    /// on the sample that happened to land in a gap.
+    /// </remarks>
+    /// <param name="condition">What must stay true.</param>
+    /// <param name="what">Named in the failure.</param>
+    /// <param name="duration">How long it must stay true for.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    public static async Task AssertHoldsForAsync(
+        Func<Task<bool>> condition,
+        string what,
+        TimeSpan duration,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(condition);
+
+        DateTimeOffset start = DateTimeOffset.UtcNow;
+        DateTimeOffset deadline = start + duration;
+
+        using PeriodicTimer timer = new(TimeSpan.FromMilliseconds(100));
+
+        while (true)
+        {
+            if (!await condition())
+            {
+                throw new InvalidOperationException(
+                    $"Expected {what} to hold for {duration.TotalSeconds:0.#} s, and it stopped holding after " +
+                    $"{(DateTimeOffset.UtcNow - start).TotalSeconds:0.#} s.");
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                return;
             }
 
             await timer.WaitForNextTickAsync(cancellationToken);

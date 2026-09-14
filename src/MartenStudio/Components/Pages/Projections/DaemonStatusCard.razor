@@ -41,6 +41,17 @@
         </div>
     </div>
 
+    @if (IsPausedByStudio)
+    {
+        @* The coordinator has no public paused flag, so this line is the studio reporting what the
+           studio did - never an inference from "no agents have been running for a while". *@
+        <p class="ms-daemon-explanation ms-daemon-paused-by">
+            <strong>Paused by Marten Studio</strong>
+            <span class="ms-muted">(@PausedByUser, @PausedAtText)</span>
+        </p>
+        <p class="ms-muted ms-daemon-explanation ms-daemon-pause-effect">@ControlExplanation</p>
+    }
+
     @if (!IsHostedHere)
     {
         <p class="ms-muted ms-daemon-explanation">@Explanation</p>
@@ -85,23 +96,48 @@
     [Parameter]
     public string Explanation { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Whether Marten Studio itself paused this store's projection coordinator.
+    /// </summary>
+    /// <remarks>
+    /// Only ever what this process recorded doing. There is no public "is paused" on
+    /// <c>IProjectionCoordinator</c>, so a daemon paused by something else - or by a studio in another
+    /// process - draws as "hosted, stopped" and says nothing it cannot know.
+    /// </remarks>
+    [Parameter]
+    public bool IsPausedByStudio { get; set; }
+
+    /// <summary>Who paused it, as the audit entry names them.</summary>
+    [Parameter]
+    public string? PausedByUser { get; set; }
+
+    /// <summary>When they paused it, already formatted in the visitor's selected time zone.</summary>
+    [Parameter]
+    public string? PausedAtText { get; set; }
+
+    /// <summary>One sentence on what pausing actually reaches, shown while it is paused.</summary>
+    [Parameter]
+    public string ControlExplanation { get; set; } = string.Empty;
+
     /// <summary>The controls the page puts inside the card, so the card owns no gating of its own.</summary>
     [Parameter]
     public RenderFragment? ChildContent { get; set; }
 
-    private string Headline => (IsHostedHere, IsRunning, HasAnyPaused) switch
+    private string Headline => (IsHostedHere, IsPausedByStudio, IsRunning, HasAnyPaused) switch
     {
-        (false, _, _) => "Not hosted in this process",
-        (true, false, _) => "Hosted, stopped",
-        (true, true, true) => "Hosted, running, paused shards",
+        (false, _, _, _) => "Not hosted in this process",
+        (true, true, _, _) => "Hosted, paused by Marten Studio",
+        (true, false, false, _) => "Hosted, stopped",
+        (true, false, true, true) => "Hosted, running, paused shards",
         _ => "Hosted and running"
     };
 
-    private string StateClass => (IsHostedHere, IsRunning, HasAnyPaused) switch
+    private string StateClass => (IsHostedHere, IsPausedByStudio, IsRunning, HasAnyPaused) switch
     {
-        (false, _, _) => "info",
-        (true, false, _) => "error",
-        (true, true, true) => "paused",
+        (false, _, _, _) => "info",
+        (true, true, _, _) => "paused",
+        (true, false, false, _) => "error",
+        (true, false, true, true) => "paused",
         _ => "success"
     };
 }

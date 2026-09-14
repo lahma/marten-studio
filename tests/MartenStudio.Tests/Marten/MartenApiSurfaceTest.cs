@@ -25,6 +25,7 @@ using Polly;
 
 using JasperFxCoordinator = JasperFx.Events.Daemon.IProjectionCoordinator;
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using ProjectionOptions = Marten.Events.Projections.ProjectionOptions;
 using MartenEventStoreOperations = Marten.Events.IEventStoreOperations;
 using MartenMetadataConfig = Marten.Events.IReadonlyMetadataConfig;
 using MartenQueryEventStore = Marten.Events.IQueryEventStore;
@@ -655,6 +656,103 @@ public class MartenApiSurfaceTest
         withoutDaemon.Should().NotContain(x => x.ServiceType == typeof(MartenCoordinator),
             "no AddAsyncDaemon means no coordinator, which is DaemonHosting.NotHostedInThisProcess");
         withoutDaemon.Should().NotContain(x => x.ServiceType == typeof(JasperFxCoordinator));
+    }
+
+    /// <summary>
+    /// P5-fix-2: the only two controls that survive the coordinator, and the interval that undoes the
+    /// others.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>IProjectionDaemon.StopAllAsync()</c> and <c>StopAgentAsync()</c> do stop things, and the
+    /// coordinator starts them again at its next leadership poll - <c>ProjectionCoordinatorBase</c>'s
+    /// loop starts every shard of every set it holds the lock for that is missing from
+    /// <c>daemon.CurrentAgents()</c>, and <c>JasperFxAsyncDaemon.StopAgentAsync</c> is what removes it
+    /// from that map. <c>PauseAsync()</c> is the one that holds, because it stops the loop first.
+    /// </para>
+    /// <para>
+    /// The interval it holds against is <c>DaemonSettings.LeadershipPollingTime</c>, an <c>int</c> of
+    /// <em>milliseconds</em>. Getting at it is the awkward part, and this fact pins the route: neither
+    /// <c>IReadOnlyStoreOptions</c> (no <c>Projections</c> member at all - the plan named
+    /// <c>store.Options.Projections</c>, which does not exist on what <c>IDocumentStore.Options</c>
+    /// hands out) nor <c>IReadOnlyDaemonSettings</c> exposes it. What does is the object identity:
+    /// <c>IReadOnlyEventStoreOptions.Daemon</c> <em>is</em> the store's <c>ProjectionOptions</c>, and
+    /// <c>ProjectionOptions</c> derives from <c>DaemonSettings</c>. So the studio pattern-matches, and
+    /// this is the test that fails if that ever stops being true.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_coordinator_pauses_and_resumes_and_its_polling_interval_is_reachable_from_the_store()
+    {
+        foreach (var coordinator in new[] { typeof(MartenCoordinator), typeof(JasperFxCoordinator) })
+        {
+            RequireMethod(coordinator, "PauseAsync").ReturnType.Should().Be<Task>();
+            RequireMethod(coordinator, "ResumeAsync").ReturnType.Should().Be<Task>();
+        }
+
+        // Milliseconds, and an int - not a TimeSpan.
+        RequireProperty(typeof(DaemonSettings), "LeadershipPollingTime").PropertyType.Should().Be<int>();
+        new DaemonSettings().LeadershipPollingTime.Should().Be(5000, "the documented default");
+
+        // The two members the plan reached for, neither of which exists.
+        typeof(IReadOnlyStoreOptions).GetProperty("Projections").Should().BeNull(
+            "IDocumentStore.Options is IReadOnlyStoreOptions, which has no Projections member");
+        typeof(IReadOnlyDaemonSettings).GetProperty("LeadershipPollingTime").Should().BeNull(
+            "IReadOnlyDaemonSettings does not surface it either, which is why the studio pattern-matches");
+
+        // The route that does work, asserted as the type relationship and then as the object identity.
+        RequireProperty(typeof(StoreOptions), "Projections").PropertyType.Should().Be<ProjectionOptions>();
+        typeof(DaemonSettings).IsAssignableFrom(typeof(ProjectionOptions)).Should().BeTrue(
+            "ProjectionOptions : ProjectionGraph<,,> : DaemonSettings");
+
+        // DocumentStore.For never opens a connection (see SqlTestStore), so a real store is cheap here
+        // and is the only thing that can prove the identity rather than the inheritance.
+        using IDocumentStore store = DocumentStore.For(x =>
+        {
+            x.Connection(DummyConnectionString);
+            x.Projections.LeadershipPollingTime = 1234;
+        });
+
+        IReadOnlyDaemonSettings daemon = store.Options.Events.Daemon;
+
+        daemon.Should().BeOfType<ProjectionOptions>(
+            "IReadOnlyEventStoreOptions.Daemon is implemented as the store's own ProjectionOptions");
+        ((DaemonSettings)daemon).LeadershipPollingTime.Should().Be(1234);
+    }
+
+    /// <summary>
+    /// P5-fix-2: which progression names are Marten's bookkeeping rather than a projection's shard.
+    /// </summary>
+    /// <remarks>
+    /// <c>ShardName</c> composes every real identity with at least one colon and hard-codes the
+    /// high-water forms to <c>HighWaterMark</c> and <c>HighWaterMark:{tenant}</c>; the other two
+    /// bookkeeping rows are <c>HighWaterStatisticsDetector</c>'s two internal <c>ProgressionName</c>
+    /// constants, which is why they are spelled out here rather than referenced.
+    /// </remarks>
+    [Fact]
+    public void ShardName_identities_tell_a_bookkeeping_row_from_a_real_shard()
+    {
+        ShardName.HighWaterMarkFor().Identity.Should().Be("HighWaterMark");
+        ShardName.HighWaterMarkFor().IsHighWaterMark.Should().BeTrue();
+        ShardName.HighWaterMarkFor("acme").Identity.Should().Be("HighWaterMark:acme");
+
+        // Every real shard identity carries a colon, in all three grammars.
+        ShardName.Compose("DailySales").Identity.Should().Be("DailySales:All");
+        ShardName.Compose("DailySales", "All", "acme").Identity.Should().Be("DailySales:All:acme");
+        ShardName.Compose("DailySales", "All", null, 2).Identity.Should().Be("DailySales:V2:All");
+
+        // And the two statistics rows, whose ProgressionName constants are internal to Marten. Spelled
+        // out because a rename there has to fail here rather than silently reintroduce a fake projection
+        // that is permanently behind by the high-water detection gap.
+        var detector = typeof(IDocumentStore).Assembly
+            .GetType("Marten.Events.Daemon.HighWater.HighWaterAllocationFence");
+        var stuck = typeof(IDocumentStore).Assembly
+            .GetType("Marten.Events.Daemon.HighWater.HighWaterStuckGap");
+
+        detector.Should().NotBeNull();
+        stuck.Should().NotBeNull();
+        detector!.GetField("ProgressionName")!.GetRawConstantValue().Should().Be("HighWaterAllocationFence");
+        stuck!.GetField("ProgressionName")!.GetRawConstantValue().Should().Be("HighWaterStuckGap");
     }
 
     /// <summary>

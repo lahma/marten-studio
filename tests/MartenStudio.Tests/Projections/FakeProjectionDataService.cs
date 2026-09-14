@@ -32,6 +32,15 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
     /// <summary>What a mutating call throws, when a test is about a refusal.</summary>
     public Exception? ActionFailure { get; set; }
 
+    /// <summary>
+    /// What a per-agent Start or Stop answers.
+    /// </summary>
+    /// <remarks>
+    /// Applied by default. A refusal is a <em>result</em> and not an exception, because the coordinator
+    /// restarting the agent a second later is not a failure - nothing was changed and nothing threw.
+    /// </remarks>
+    public DaemonControlResult AgentControl { get; set; } = DaemonControlResult.Done;
+
     /// <summary>Every mutating call the page made, in order.</summary>
     public List<string> Calls { get; } = [];
 
@@ -99,6 +108,37 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
     public FakeProjectionDataService WithStoppedDaemon()
     {
         Daemon = new DaemonStatus(DaemonHostingState.Hosted, false, "Solo", [], false, null, "The async daemon is hosted in this process.");
+        return this;
+    }
+
+    /// <summary>
+    /// Says Marten Studio itself paused this store's coordinator, which is what makes the per-agent
+    /// controls meaningful.
+    /// </summary>
+    public FakeProjectionDataService WithStudioPause(string user = "admin", DateTimeOffset? at = null)
+    {
+        Daemon = Daemon with
+        {
+            IsRunning = false,
+            Agents = [],
+            PausedByStudio = new StudioDaemonPause(
+                "default", user, at ?? DateTimeOffset.UnixEpoch, "localhost.marten", null)
+        };
+
+        return this;
+    }
+
+    /// <summary>Says how often this store's coordinator restarts the agents it finds missing.</summary>
+    public FakeProjectionDataService WithLeadershipPollingTime(int milliseconds)
+    {
+        Daemon = Daemon with { LeadershipPollingMilliseconds = milliseconds };
+        return this;
+    }
+
+    /// <summary>Says which databases a pause of this store would reach.</summary>
+    public FakeProjectionDataService WithDatabases(params string[] databases)
+    {
+        Daemon = Daemon with { CoordinatedDatabases = databases };
         return this;
     }
 
@@ -198,18 +238,24 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
     }
 
     /// <inheritdoc />
-    public Task StartAgentAsync(StudioScope scope, string shardName, CancellationToken cancellationToken = default) =>
-        Record("StartAgent:" + shardName);
+    public async Task<DaemonControlResult> StartAgentAsync(StudioScope scope, string shardName, CancellationToken cancellationToken = default)
+    {
+        await Record("StartAgent:" + shardName);
+        return AgentControl;
+    }
 
     /// <inheritdoc />
-    public Task StopAgentAsync(StudioScope scope, string shardName, CancellationToken cancellationToken = default) =>
-        Record("StopAgent:" + shardName);
+    public async Task<DaemonControlResult> StopAgentAsync(StudioScope scope, string shardName, CancellationToken cancellationToken = default)
+    {
+        await Record("StopAgent:" + shardName);
+        return AgentControl;
+    }
 
     /// <inheritdoc />
-    public Task StartAllAsync(StudioScope scope, CancellationToken cancellationToken = default) => Record("StartAll");
+    public Task PauseDaemonAsync(StudioScope scope, CancellationToken cancellationToken = default) => Record("PauseDaemon");
 
     /// <inheritdoc />
-    public Task StopAllAsync(StudioScope scope, CancellationToken cancellationToken = default) => Record("StopAll");
+    public Task ResumeDaemonAsync(StudioScope scope, CancellationToken cancellationToken = default) => Record("ResumeDaemon");
 
     /// <inheritdoc />
     public Task RestartHighWaterAgentAsync(StudioScope scope, CancellationToken cancellationToken = default) =>

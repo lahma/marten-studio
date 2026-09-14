@@ -4,9 +4,12 @@ using JasperFx.Events.Projections;
 using Marten;
 
 using MartenStudio.SampleDomain.Events;
+using MartenStudio.Services;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
+
+using Npgsql;
 
 namespace MartenStudio.Integration.Tests.Projections;
 
@@ -81,44 +84,282 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
         view.Progress.Select(x => x.Lag).Should().BeInDescendingOrder();
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // Daemon control (P5-fix-2)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The stop that holds, and the proof that it holds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This replaces <c>Stopping_and_starting_every_agent_reaches_the_real_daemon</c>, which asked the
+    /// <em>daemon</em> to stop everything and then waited for zero agents. That wait could only ever
+    /// pass by sampling the gap: <c>ProjectionCoordinatorBase</c>'s leadership loop starts every shard
+    /// missing from <c>CurrentAgents()</c> on its next pass, so the agents were back within a
+    /// <c>LeadershipPollingTime</c>. It passed locally and timed out on both CI runs.
+    /// </para>
+    /// <para>
+    /// The holding assertion below is what makes this test non-vacuous, and it is exactly what the old
+    /// code could not have satisfied at any budget.
+    /// </para>
+    /// </remarks>
     [PostgresFact]
-    public async Task Stopping_and_starting_one_agent_reaches_the_real_daemon()
+    public async Task Pausing_leaves_no_agents_for_at_least_two_leadership_polls_and_resuming_brings_them_back()
     {
-        string shard = await ShardOfAsync(DailySalesName);
+        TimeSpan poll = Fixture.ConfiguredLeadershipPollingTime;
 
-        await Fixture.UseAsync(service => service.StopAgentAsync(Fixture.Scope, shard, Token));
+        try
+        {
+            await Fixture.UseAsync(service => service.PauseDaemonAsync(Fixture.Scope, Token));
 
-        await ProjectionsFixture.WaitForAsync(
-            async () => !await HasAgentAsync(shard),
-            $"the daemon to drop the agent for {shard}",
-            cancellationToken: Token);
+            Fixture.ControlState.Find(Fixture.Scope.StoreKey).Should().NotBeNull("the studio records its own pauses");
 
-        await Fixture.UseAsync(service => service.StartAgentAsync(Fixture.Scope, shard, Token));
+            await ProjectionsFixture.WaitForAsync(
+                async () => (await CurrentAgentsAsync()).Count == 0,
+                "the paused coordinator to leave no agents running",
+                StopBudget,
+                Token);
 
-        await ProjectionsFixture.WaitForAsync(
-            () => HasAgentAsync(shard),
-            $"the daemon to run the agent for {shard} again",
-            cancellationToken: Token);
+            // The half the old test could not have: it stays that way. Two leadership polls plus a
+            // second, so a coordinator that was going to restart them has had two chances to.
+            await ProjectionsFixture.AssertHoldsForAsync(
+                async () => (await CurrentAgentsAsync()).Count == 0,
+                "a paused coordinator leaving no agents running",
+                (2 * poll) + TimeSpan.FromSeconds(1),
+                Token);
 
-        Fixture.ActionLog.GetLatest().Select(x => x.Action).Should().Contain(["StopAgent", "StartAgent"]);
-    }
+            ProjectionsView paused = await Fixture.UseAsync(service => service.GetProjectionsAsync(Fixture.Scope, Token));
 
-    [PostgresFact]
-    public async Task Stopping_and_starting_every_agent_reaches_the_real_daemon()
-    {
-        await Fixture.UseAsync(service => service.StopAllAsync(Fixture.Scope, Token));
+            paused.Daemon.IsPausedByStudio.Should().BeTrue();
+            paused.Daemon.PausedByStudio!.StoreKey.Should().Be(Fixture.Scope.StoreKey);
+            paused.Daemon.CanControlAgents.Should().BeTrue("per-agent control is the point of pausing");
+            paused.Daemon.LeadershipPollingTime.Should().Be(poll, "the card quotes the store's own setting");
 
-        await ProjectionsFixture.WaitForAsync(
-            async () => (await CurrentAgentsAsync()).Count == 0,
-            "the daemon to stop every agent",
-            cancellationToken: Token);
-
-        await Fixture.UseAsync(service => service.StartAllAsync(Fixture.Scope, Token));
+            Fixture.ActionLog.GetLatest().Should().Contain(x => x.Action == "PauseDaemon" && x.Succeeded);
+        }
+        finally
+        {
+            // Even when an assertion above failed: every other test in this class needs a running daemon,
+            // and xunit v3 orders by test-case id rather than by source order.
+            await Fixture.UseAsync(service => service.ResumeDaemonAsync(Fixture.Scope, Token));
+        }
 
         await ProjectionsFixture.WaitForAsync(
             async () => (await CurrentAgentsAsync()).Count > 0,
-            "the daemon to start its agents again",
+            "the resumed coordinator to bring its agents back",
             cancellationToken: Token);
+
+        Fixture.ControlState.Find(Fixture.Scope.StoreKey).Should().BeNull("resuming forgets the pause");
+
+        ProjectionsView resumed = await Fixture.UseAsync(service => service.GetProjectionsAsync(Fixture.Scope, Token));
+
+        resumed.Daemon.IsPausedByStudio.Should().BeFalse();
+        resumed.Daemon.CanControlAgents.Should().BeFalse();
+        resumed.Daemon.AgentControlRefusal.Should().Contain("LeadershipPollingTime");
+
+        Fixture.ActionLog.GetLatest().Should().Contain(x => x.Action == "ResumeDaemon" && x.Succeeded);
+    }
+
+    /// <summary>
+    /// While the coordinator is paused, one agent can be started and it stays started.
+    /// </summary>
+    [PostgresFact]
+    public async Task While_paused_one_agent_can_be_started_and_nothing_stops_it_again()
+    {
+        string shard = await ShardOfAsync(DailySalesName);
+        TimeSpan poll = Fixture.ConfiguredLeadershipPollingTime;
+
+        try
+        {
+            await Fixture.UseAsync(service => service.PauseDaemonAsync(Fixture.Scope, Token));
+
+            await ProjectionsFixture.WaitForAsync(
+                async () => (await CurrentAgentsAsync()).Count == 0,
+                "the paused coordinator to leave no agents running",
+                StopBudget,
+                Token);
+
+            DaemonControlResult started = await Fixture.UseAsync(
+                service => service.StartAgentAsync(Fixture.Scope, shard, Token));
+
+            started.Applied.Should().BeTrue();
+            started.Reason.Should().BeNull();
+
+            await ProjectionsFixture.WaitForAsync(
+                () => HasAgentAsync(shard),
+                $"the daemon to run the agent for {shard}",
+                cancellationToken: Token);
+
+            await ProjectionsFixture.AssertHoldsForAsync(
+                () => HasAgentAsync(shard),
+                $"the agent for {shard} staying started while the coordinator is paused",
+                (2 * poll) + TimeSpan.FromSeconds(1),
+                Token);
+
+            DaemonControlResult stopped = await Fixture.UseAsync(
+                service => service.StopAgentAsync(Fixture.Scope, shard, Token));
+
+            stopped.Applied.Should().BeTrue();
+
+            await ProjectionsFixture.WaitForAsync(
+                async () => !await HasAgentAsync(shard),
+                $"the daemon to drop the agent for {shard}",
+                StopBudget,
+                Token);
+
+            await ProjectionsFixture.AssertHoldsForAsync(
+                async () => !await HasAgentAsync(shard),
+                $"the agent for {shard} staying stopped while the coordinator is paused",
+                (2 * poll) + TimeSpan.FromSeconds(1),
+                Token);
+
+            Fixture.ActionLog.GetLatest().Should().Contain(x => x.Action == "StartAgent" && x.Succeeded);
+            Fixture.ActionLog.GetLatest().Should().Contain(x => x.Action == "StopAgent" && x.Succeeded);
+        }
+        finally
+        {
+            await Fixture.UseAsync(service => service.ResumeDaemonAsync(Fixture.Scope, Token));
+        }
+
+        await ProjectionsFixture.WaitForAsync(
+            async () => (await CurrentAgentsAsync()).Count > 0,
+            "the resumed coordinator to bring its agents back",
+            cancellationToken: Token);
+    }
+
+    /// <summary>
+    /// With the coordinator running, a per-agent control is refused rather than performed - and the
+    /// refusal is a result the page renders as a hint, not an exception and not a capability denial.
+    /// </summary>
+    [PostgresFact]
+    public async Task While_the_coordinator_runs_per_agent_control_is_refused_and_changes_nothing()
+    {
+        string shard = await ShardOfAsync(DailySalesName);
+        TimeSpan poll = Fixture.ConfiguredLeadershipPollingTime;
+
+        await ProjectionsFixture.WaitForAsync(
+            () => HasAgentAsync(shard),
+            $"the coordinator to be running the agent for {shard}",
+            cancellationToken: Token);
+
+        IReadOnlyList<string> before = await CurrentAgentsAsync();
+
+        DaemonControlResult stop = await Fixture.UseAsync(
+            service => service.StopAgentAsync(Fixture.Scope, shard, Token));
+        DaemonControlResult start = await Fixture.UseAsync(
+            service => service.StartAgentAsync(Fixture.Scope, shard, Token));
+
+        foreach (DaemonControlResult result in new[] { stop, start })
+        {
+            result.Applied.Should().BeFalse();
+            result.Reason.Should().Contain("LeadershipPollingTime");
+            result.Reason.Should().Contain("pause the daemon first");
+        }
+
+        // The reason quotes this store's own interval, not the 5 s default.
+        stop.Reason.Should().Contain($"every {poll.TotalSeconds:0.#} s");
+
+        // And nothing moved: the agent set is what it was, two leadership polls later.
+        await ProjectionsFixture.AssertHoldsForAsync(
+            async () => (await CurrentAgentsAsync()).SequenceEqual(before, StringComparer.OrdinalIgnoreCase),
+            "the daemon's agent set being unchanged by a refused control",
+            (2 * poll) + TimeSpan.FromSeconds(1),
+            Token);
+
+        // Audited as an attempt that did nothing, and never as a success.
+        IReadOnlyList<StudioActionLogEntry> log = Fixture.ActionLog.GetLatest();
+
+        log.Should().Contain(x =>
+            x.Action == "StopAgent"
+            && !x.Succeeded
+            && x.Capability == nameof(StudioCapability.ControlDaemon)
+            && x.Message!.Contains("LeadershipPollingTime", StringComparison.Ordinal));
+
+        log.Where(x => x.Action is "StartAgent" or "StopAgent")
+            .Should().NotContain(x => x.Succeeded, "nothing was applied, so nothing may be recorded as done");
+    }
+
+    /// <summary>
+    /// Marten's own bookkeeping rows are not projections, whatever they do to their sequence.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three bookkeeping rows, written straight into <c>mt_event_progression</c> because Marten writes
+    /// them only under conditions a test cannot force. What each proves differs: Marten 9.35's
+    /// <c>ProjectionProgressStatement</c> already excludes <c>HighWaterAllocationFence</c> and
+    /// <c>HighWaterStuckGap</c> at the SQL level, so for those two the studio's predicate is a belt to
+    /// Marten's braces - but <c>HighWaterMark:{tenant}</c> is excluded by nothing, and it is the one that
+    /// would otherwise arrive as an unregistered shard with a lag of its own.
+    /// </para>
+    /// <para>
+    /// A fourth row, <c>RetiredProjection:All</c>, is the control and is what makes the rest
+    /// non-vacuous: it is written the same way, at the same sequence, and it <em>does</em> arrive - as an
+    /// unregistered shard, and as the worst lag on the screen. Without it "no bookkeeping row appeared"
+    /// would also pass on a read path that had stopped seeing progression rows at all.
+    /// </para>
+    /// <para>
+    /// Everything is written at sequence 1 because the failure this is about is a sort: the table is
+    /// ordered by lag descending, so a bookkeeping row that trails by design takes the top of an
+    /// operations screen and the Overview's worst-lag tile with it.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task Marten_bookkeeping_rows_are_never_projections_and_never_the_worst_lag()
+    {
+        const string control = "RetiredProjection:All";
+
+        string[] bookkeeping = ["HighWaterAllocationFence", "HighWaterStuckGap", "HighWaterMark:acme"];
+        string[] rows = [.. bookkeeping, control];
+
+        try
+        {
+            await WriteProgressionRowsAsync(rows, sequence: 1);
+
+            // They really are in the table - otherwise everything below would pass by there being
+            // nothing to find.
+            (await ProgressionNamesAsync()).Should().Contain(rows);
+
+            // The control arrives. This is the read path working, stated before anything is asserted
+            // about what does not arrive.
+            await ProjectionsFixture.WaitForAsync(
+                async () =>
+                {
+                    ProjectionsView view = await Fixture.UseAsync(
+                        service => service.GetProjectionsAsync(Fixture.Scope, Token));
+
+                    return view.UnregisteredShards.Any(x => x.ShardName == control);
+                },
+                $"the control row {control} to arrive as an unregistered shard",
+                cancellationToken: Token);
+
+            // And no bookkeeping row ever does - held across the snapshot cache's whole time-to-live
+            // several times over, so these are fresh queries and not the entry that was already in hand.
+            await ProjectionsFixture.AssertHoldsForAsync(
+                async () =>
+                {
+                    ProjectionsView view = await Fixture.UseAsync(
+                        service => service.GetProjectionsAsync(Fixture.Scope, Token));
+
+                    return bookkeeping.All(row =>
+                        view.Progress.All(x => x.ShardName != row)
+                        && view.UnregisteredShards.All(x => x.ShardName != row)
+                        && view.Projections.All(x => x.Name != row));
+                },
+                "Marten's bookkeeping rows staying out of the projections table",
+                TimeSpan.FromSeconds(5),
+                Token);
+
+            ProjectionSummary summary = await Fixture.UseAsync(service => service.GetSummaryAsync(Fixture.Scope, Token));
+
+            bookkeeping.Should().NotContain(
+                x => x == summary.WorstShardName,
+                "a bookkeeping row is never what the Overview's worst-lag tile is about");
+        }
+        finally
+        {
+            await DeleteProgressionRowsAsync(rows);
+        }
     }
 
     [PostgresFact]
@@ -320,4 +561,83 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
 
     private async Task<bool> HasAgentAsync(string shardName) =>
         (await CurrentAgentsAsync()).Any(x => string.Equals(x, shardName, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// How long a pause is given to leave no agents running.
+    /// </summary>
+    /// <remarks>
+    /// <c>DaemonSettings.StopAndDrainTimeout</c> is five seconds and applies <em>per agent</em>: a pause
+    /// drains each one in turn, and this fixture's store has more than one async projection. Sixty
+    /// seconds is generous rather than tight on purpose - the thing being measured is whether the agents
+    /// come back, and the wait is on the condition either way.
+    /// </remarks>
+    private static readonly TimeSpan StopBudget = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Writes bookkeeping rows straight into <c>mt_event_progression</c>.
+    /// </summary>
+    /// <remarks>
+    /// Raw SQL, in a test, deliberately: Marten writes <c>HighWaterAllocationFence</c> and
+    /// <c>HighWaterStuckGap</c> only under high-water conditions a test cannot force, and
+    /// <c>HighWaterMark:{tenant}</c> only under per-tenant high water. The studio's own rule - no SQL
+    /// outside <c>Internal/Sql</c> - is about the shipped library; this is the fixture stating a database
+    /// state, which is the only way to state this one.
+    /// </remarks>
+    private async Task WriteProgressionRowsAsync(IEnumerable<string> names, long sequence)
+    {
+        await using NpgsqlConnection connection = await OpenAsync();
+
+        foreach (string name in names)
+        {
+            await using NpgsqlCommand command = connection.CreateCommand();
+
+            command.CommandText =
+                $"insert into {Fixture.EventSchema}.mt_event_progression (name, last_seq_id) values (@name, @seq) " +
+                "on conflict (name) do update set last_seq_id = excluded.last_seq_id";
+
+            command.Parameters.AddWithValue("name", name);
+            command.Parameters.AddWithValue("seq", sequence);
+
+            await command.ExecuteNonQueryAsync(Token);
+        }
+    }
+
+    private async Task DeleteProgressionRowsAsync(IEnumerable<string> names)
+    {
+        await using NpgsqlConnection connection = await OpenAsync();
+        await using NpgsqlCommand command = connection.CreateCommand();
+
+        command.CommandText = $"delete from {Fixture.EventSchema}.mt_event_progression where name = ANY(@names)";
+        command.Parameters.AddWithValue("names", names.ToArray());
+
+        await command.ExecuteNonQueryAsync(Token);
+    }
+
+    private async Task<IReadOnlyList<string>> ProgressionNamesAsync()
+    {
+        await using NpgsqlConnection connection = await OpenAsync();
+        await using NpgsqlCommand command = connection.CreateCommand();
+
+        command.CommandText = $"select name from {Fixture.EventSchema}.mt_event_progression";
+
+        List<string> names = [];
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(Token);
+        while (await reader.ReadAsync(Token))
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// A connection of the test's own, opened from the same database the studio resolved.
+    /// </summary>
+    private async Task<NpgsqlConnection> OpenAsync()
+    {
+        NpgsqlConnection connection = (NpgsqlConnection) Fixture.Database.CreateConnection();
+        await connection.OpenAsync(Token);
+        return connection;
+    }
 }

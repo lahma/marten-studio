@@ -28,7 +28,7 @@ public class ProjectionsPageTests
 
         page.Find(".ms-daemon-headline").TextContent.Trim().Should().Be("Hosted and running");
         page.Find(".ms-daemon-card").ClassList.Should().Contain("ms-daemon-success");
-        page.Find(".ms-daemon-start-all").HasAttribute("disabled").Should().BeFalse();
+        page.Find(".ms-daemon-pause").HasAttribute("disabled").Should().BeFalse();
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class ProjectionsPageTests
         page.Find("[data-shard='DailySales:All'] .ms-shard-lag").TextContent.Trim().Should().Be("100");
 
         // And every control that needs a daemon is disabled rather than missing.
-        page.Find(".ms-daemon-start-all").HasAttribute("disabled").Should().BeTrue();
+        page.Find(".ms-daemon-pause").HasAttribute("disabled").Should().BeTrue();
         page.Find(".ms-projection-rebuild").HasAttribute("disabled").Should().BeTrue();
     }
 
@@ -175,7 +175,8 @@ public class ProjectionsPageTests
 
         var page = context.Render<Page>();
 
-        page.FindAll(".ms-daemon-start-all").Should().BeEmpty();
+        page.FindAll(".ms-daemon-pause").Should().BeEmpty();
+        page.FindAll(".ms-daemon-resume").Should().BeEmpty();
         page.FindAll(".ms-projection-rebuild").Should().BeEmpty();
         page.FindAll(".ms-shard-start").Should().BeEmpty();
     }
@@ -193,24 +194,29 @@ public class ProjectionsPageTests
 
         var page = context.Render<Page>();
 
-        IElement startAll = page.Find(".ms-daemon-start-all");
-        startAll.HasAttribute("disabled").Should().BeTrue();
-        startAll.GetAttribute("title").Should().Contain("MartenStudioOptions.Capabilities.ControlDaemon");
+        IElement pause = page.Find(".ms-daemon-pause");
+        pause.HasAttribute("disabled").Should().BeTrue();
+        pause.GetAttribute("title").Should().Contain("MartenStudioOptions.Capabilities.ControlDaemon");
 
         page.Markup.Should().Contain("MartenStudioOptions.Capabilities.ControlDaemon");
         page.FindAll(".ms-capability-disabled").Should().HaveCount(2, "ControlDaemon and CorrectProgression are both off");
     }
 
+    /// <summary>
+    /// With the capabilities granted the notices go, and the per-agent controls come back - but only
+    /// once the coordinator has been paused, because with it running they would undo themselves.
+    /// </summary>
     [Fact]
     public async Task Granting_the_capabilities_removes_the_disabled_notices()
     {
         await using var context = new StudioComponentContext().WithAllCapabilities();
-        context.ProjectionData.WithProjection("DailySales");
+        context.ProjectionData.WithProjection("DailySales").WithStudioPause();
         await context.ReadyAsync();
 
         var page = context.Render<Page>();
 
         page.FindAll(".ms-capability-disabled").Should().BeEmpty();
+        page.Find(".ms-daemon-pause").HasAttribute("disabled").Should().BeFalse();
         page.Find(".ms-shard-start").HasAttribute("disabled").Should().BeFalse();
     }
 
@@ -218,19 +224,25 @@ public class ProjectionsPageTests
     // Actions
     // --------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// With the coordinator paused the per-agent controls act on the daemon, and they name the shard.
+    /// </summary>
     [Fact]
     public async Task Starting_and_stopping_a_shard_reaches_the_service_by_shard_name()
     {
         await using var context = new StudioComponentContext().WithAllCapabilities();
-        context.ProjectionData.WithProjection("DailySales");
+        context.ProjectionData.WithProjection("DailySales").WithStudioPause();
         await context.ReadyAsync();
 
         var page = context.Render<Page>();
 
         page.Find(".ms-shard-stop").Click();
+        page.WaitForAssertion(() => context.ProjectionData.Calls.Should().Equal("StopAgent:DailySales:All"));
+
         page.Find(".ms-shard-start").Click();
 
-        context.ProjectionData.Calls.Should().Equal("StopAgent:DailySales:All", "StartAgent:DailySales:All");
+        page.WaitForAssertion(() => context.ProjectionData.Calls
+            .Should().Equal("StopAgent:DailySales:All", "StartAgent:DailySales:All"));
     }
 
     /// <summary>A service refusal is what the visitor sees, not what the log sees.</summary>
@@ -245,10 +257,13 @@ public class ProjectionsPageTests
 
         var page = context.Render<Page>();
 
-        page.Find(".ms-daemon-start-all").Click();
+        page.Find(".ms-daemon-restart-high-water").Click();
 
-        context.Toasts.Messages.Should().ContainSingle();
-        context.Toasts.Messages[0].Message.Should().Contain("MartenStudioOptions.Capabilities.ControlDaemon");
+        page.WaitForAssertion(() =>
+        {
+            context.Toasts.Messages.Should().ContainSingle();
+            context.Toasts.Messages[0].Message.Should().Contain("MartenStudioOptions.Capabilities.ControlDaemon");
+        });
     }
 
     [Fact]
@@ -273,6 +288,20 @@ public class ProjectionsPageTests
     /// <summary>Its Cancel button.</summary>
     private const string CancelButton = ".ms-confirm-actions .ms-button:not(.ms-button-danger)";
 
+    /// <summary>
+    /// Why every click below is followed by a <c>WaitFor…</c> rather than a <c>Find</c>.
+    /// </summary>
+    /// <remarks>
+    /// Opening the rebuild dialog awaits <c>DescribeRebuildAsync</c> before <c>rebuild</c> is set, and a
+    /// bUnit <c>Click()</c> returns as soon as the handler yields - so the dialog is not in the markup
+    /// yet on the next line. In Debug on a warm machine the continuation usually runs first and the bare
+    /// <c>Find</c> passed; on GitHub Actions in Release it did not, and
+    /// <c>The_rebuild_dialog_states_the_scope_and_will_not_confirm_until_the_name_is_typed</c> failed
+    /// with <c>No elements were found that matches the selector '.ms-confirm-dialog'</c>. The rule for
+    /// this file: after any action whose handler awaits anything, wait on the assertion.
+    /// </remarks>
+    private const string ConfirmDialog = ".ms-confirm-dialog";
+
     [Fact]
     public async Task The_rebuild_dialog_states_the_scope_and_will_not_confirm_until_the_name_is_typed()
     {
@@ -285,8 +314,9 @@ public class ProjectionsPageTests
 
         page.Find(".ms-projection-rebuild").Click();
 
-        page.Find(".ms-confirm-dialog").TextContent.Should().Contain("4,321");
-        page.Find(".ms-confirm-dialog").TextContent.Should().Contain("mt_doc_dailysales");
+        IElement dialog = page.WaitForElement(ConfirmDialog);
+        dialog.TextContent.Should().Contain("4,321");
+        dialog.TextContent.Should().Contain("mt_doc_dailysales");
 
         // Nothing typed: the button is there and refuses.
         page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue();
@@ -296,15 +326,15 @@ public class ProjectionsPageTests
 
         // The wrong name does not do either.
         page.Find(".ms-confirm-input").Input("dailysales");
-        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue();
+        page.WaitForAssertion(() => page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue());
 
         // The right one does.
         page.Find(".ms-confirm-input").Input("DailySales");
-        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeFalse();
+        page.WaitForAssertion(() => page.Find(ConfirmButton).HasAttribute("disabled").Should().BeFalse());
 
         page.Find(ConfirmButton).Click();
 
-        context.ProjectionData.Calls.Should().Contain("Rebuild:DailySales");
+        page.WaitForAssertion(() => context.ProjectionData.Calls.Should().Contain("Rebuild:DailySales"));
     }
 
     /// <summary>
@@ -323,7 +353,7 @@ public class ProjectionsPageTests
 
         page.Find(".ms-projection-rebuild").Click();
 
-        page.Find(".ms-rebuild-timeout").TextContent.Should().Contain("2 h");
+        page.WaitForElement(".ms-rebuild-timeout").TextContent.Should().Contain("2 h");
 
         string note = page.Find(".ms-rebuild-timeout-note").TextContent;
         note.Should().Contain("emptied first");
@@ -345,7 +375,7 @@ public class ProjectionsPageTests
 
         page.Find(".ms-projection-rebuild").Click();
 
-        page.FindAll(".ms-confirm-dialog").Should().ContainSingle();
+        page.WaitForAssertion(() => page.FindAll(ConfirmDialog).Should().ContainSingle());
         page.FindAll(".ms-confirm-input").Should().ContainSingle();
         page.FindAll(".ms-rebuild-input").Should().BeEmpty("the private type-to-confirm box is gone");
         page.Find(".ms-rebuild-scope").TextContent.Should().Contain("DailySales:All");
@@ -361,9 +391,11 @@ public class ProjectionsPageTests
         var page = context.Render<Page>();
 
         page.Find(".ms-projection-rebuild").Click();
+        page.WaitForElement(ConfirmDialog);
+
         page.Find(CancelButton).Click();
 
-        page.FindAll(".ms-confirm-dialog").Should().BeEmpty();
+        page.WaitForAssertion(() => page.FindAll(ConfirmDialog).Should().BeEmpty());
         context.ProjectionData.Calls.Should().NotContain("Rebuild:DailySales");
     }
 
@@ -411,11 +443,15 @@ public class ProjectionsPageTests
         var page = context.Render<Page>();
 
         page.Find(".ms-projection-rebuild").Click();
+        page.WaitForElement(ConfirmDialog);
+
         page.Find(".ms-confirm-input").Input("DailySales");
+        page.WaitForAssertion(() => page.Find(ConfirmButton).HasAttribute("disabled").Should().BeFalse());
+
         page.Find(ConfirmButton).Click();
 
-        context.Toasts.Messages.Select(x => x.Message)
-            .Should().Contain(x => x.Contains("already being rebuilt", StringComparison.Ordinal));
+        page.WaitForAssertion(() => context.Toasts.Messages.Select(x => x.Message)
+            .Should().Contain(x => x.Contains("already being rebuilt", StringComparison.Ordinal)));
     }
 
     /// <summary>
@@ -433,12 +469,12 @@ public class ProjectionsPageTests
 
         page.Find("[data-operation='abc123'] .ms-operation-cancel").Click();
 
-        page.Find(".ms-confirm-dialog").TextContent.Should().Contain("leaves the projection partial");
+        page.WaitForElement(ConfirmDialog).TextContent.Should().Contain("leaves the projection partial");
         context.ProjectionData.Calls.Should().NotContain("CancelOperation:abc123");
 
         page.Find(ConfirmButton).Click();
 
-        context.ProjectionData.Calls.Should().Contain("CancelOperation:abc123");
+        page.WaitForAssertion(() => context.ProjectionData.Calls.Should().Contain("CancelOperation:abc123"));
     }
 
     [Fact]

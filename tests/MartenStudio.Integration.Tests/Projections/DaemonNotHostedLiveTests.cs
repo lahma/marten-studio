@@ -50,15 +50,33 @@ public class DaemonNotHostedLiveTests(PostgresFixture postgres) : ProjectionsTes
     /// There is nothing here to ask, and the service says so rather than quietly doing nothing - the
     /// refusal lives where the operation does, not in the markup.
     /// </summary>
+    /// <summary>
+    /// There is nothing here to ask, and the service says so rather than quietly doing nothing.
+    /// </summary>
+    /// <remarks>
+    /// All three shapes: the coordinator controls resolve no coordinator, and the per-agent controls
+    /// resolve no daemon. The per-agent refusal is a <em>throw</em> here and not a
+    /// <see cref="DaemonControlResult" />, because "there is no daemon in this process" is a different
+    /// thing from "the coordinator would undo this" - one is the deployment, the other is a state the
+    /// visitor can change from this page.
+    /// </remarks>
     [PostgresFact]
     public async Task Controlling_a_daemon_that_is_not_here_is_refused_with_a_reason()
     {
-        Func<Task> starting = () => Fixture.UseAsync(service => service.StartAllAsync(Fixture.Scope, Token));
+        Func<Task> pausing = () => Fixture.UseAsync(service => service.PauseDaemonAsync(Fixture.Scope, Token));
+
+        (await pausing.Should().ThrowAsync<StudioDaemonNotHostedException>())
+            .WithMessage("*AddAsyncDaemon*");
+
+        Fixture.ActionLog.GetLatest().Should().Contain(x => x.Action == "PauseDaemon" && !x.Succeeded);
+
+        Func<Task> starting = () => Fixture.UseAsync(
+            service => service.StartAgentAsync(Fixture.Scope, "DailySales:All", Token));
 
         (await starting.Should().ThrowAsync<StudioDaemonNotHostedException>())
             .WithMessage("*AddAsyncDaemon*");
 
-        Fixture.ActionLog.GetLatest().Should().Contain(x => x.Action == "StartAllAgents" && !x.Succeeded);
+        Fixture.ActionLog.GetLatest().Should().Contain(x => x.Action == "StartAgent" && !x.Succeeded);
     }
 
     [PostgresFact]
@@ -116,13 +134,31 @@ public class ProjectionCapabilityGatingLiveTests(PostgresFixture postgres) : Pro
         view.Projections.Should().NotBeEmpty();
     }
 
+    /// <summary>
+    /// Every control on this screen, including the two new coordinator ones and the per-agent pair.
+    /// </summary>
+    /// <remarks>
+    /// The per-agent controls answer a refusal with a result rather than a throw, but only for the
+    /// coordinator's sake: a capability that is off is still a throw, because the option is the answer
+    /// and the exception is what carries its name.
+    /// </remarks>
     [PostgresFact]
     public async Task Controlling_the_daemon_is_refused_and_names_the_option()
     {
-        Func<Task> starting = () => Fixture.UseAsync(service => service.StartAllAsync(Fixture.Scope, Token));
+        Func<Task>[] controls =
+        [
+            () => Fixture.UseAsync(service => service.PauseDaemonAsync(Fixture.Scope, Token)),
+            () => Fixture.UseAsync(service => service.ResumeDaemonAsync(Fixture.Scope, Token)),
+            () => Fixture.UseAsync(service => service.StartAgentAsync(Fixture.Scope, "DailySales:All", Token)),
+            () => Fixture.UseAsync(service => service.StopAgentAsync(Fixture.Scope, "DailySales:All", Token)),
+            () => Fixture.UseAsync(service => service.RestartHighWaterAgentAsync(Fixture.Scope, Token))
+        ];
 
-        (await starting.Should().ThrowAsync<StudioCapabilityDeniedException>())
-            .WithMessage("*MartenStudioOptions.Capabilities.ControlDaemon*");
+        foreach (Func<Task> control in controls)
+        {
+            (await control.Should().ThrowAsync<StudioCapabilityDeniedException>())
+                .WithMessage("*MartenStudioOptions.Capabilities.ControlDaemon*");
+        }
     }
 
     [PostgresFact]
@@ -149,13 +185,18 @@ public class ProjectionCapabilityGatingLiveTests(PostgresFixture postgres) : Pro
     [PostgresFact]
     public async Task Every_refusal_is_audited()
     {
-        Func<Task> starting = () => Fixture.UseAsync(service => service.StopAllAsync(Fixture.Scope, Token));
+        Func<Task> pausing = () => Fixture.UseAsync(service => service.PauseDaemonAsync(Fixture.Scope, Token));
+        Func<Task> resuming = () => Fixture.UseAsync(service => service.ResumeDaemonAsync(Fixture.Scope, Token));
 
-        await starting.Should().ThrowAsync<StudioCapabilityDeniedException>();
+        await pausing.Should().ThrowAsync<StudioCapabilityDeniedException>();
+        await resuming.Should().ThrowAsync<StudioCapabilityDeniedException>();
 
-        Fixture.ActionLog.GetLatest().Should().Contain(x =>
-            x.Action == "StopAllAgents"
-            && !x.Succeeded
-            && x.Capability == nameof(StudioCapability.ControlDaemon));
+        foreach (string action in new[] { "PauseDaemon", "ResumeDaemon" })
+        {
+            Fixture.ActionLog.GetLatest().Should().Contain(x =>
+                x.Action == action
+                && !x.Succeeded
+                && x.Capability == nameof(StudioCapability.ControlDaemon));
+        }
     }
 }

@@ -146,12 +146,15 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<IConfigurationService, ConfigurationService>();
         services.TryAddScoped<IQueryService, QueryService>();
 
-        // Projections and the async daemon. The three singletons are process-wide on purpose: one
+        // Projections and the async daemon. The four singletons are process-wide on purpose: one
         // snapshot per interval however many circuits are watching, one tracker subscription per
-        // database however many pages are open, and a rebuild that outlives the circuit that started it.
+        // database however many pages are open, a rebuild that outlives the circuit that started it, and
+        // one record of which coordinators this process has paused - a pause is a fact about the process,
+        // and the circuit that reads it back is rarely the one that issued it.
         services.TryAddSingleton<StudioSnapshotCache>();
         services.TryAddSingleton<StudioLiveState>();
         services.TryAddSingleton<StudioOperationTracker>();
+        services.TryAddSingleton<DaemonControlState>();
         services.TryAddScoped<DaemonAccessor>();
         services.TryAddScoped<IProjectionDataService, ProjectionDataService>();
 

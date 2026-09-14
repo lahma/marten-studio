@@ -53,17 +53,40 @@ internal interface IProjectionDataService
     /// </returns>
     Task<IDisposable> SubscribeToLiveStateAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
-    /// <summary>Starts one shard. Requires <c>ControlDaemon</c>.</summary>
-    Task StartAgentAsync(StudioScope scope, string shardName, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Starts one shard, if the studio's own pause is in effect. Requires <c>ControlDaemon</c>.
+    /// </summary>
+    /// <returns>
+    /// Whether the daemon was asked, and the reason when it was not. While the coordinator is running it
+    /// is never asked: its leadership loop starts every shard missing from <c>CurrentAgents()</c> within
+    /// <c>LeadershipPollingTime</c>, so the control would be undone before anybody saw it work.
+    /// </returns>
+    Task<DaemonControlResult> StartAgentAsync(StudioScope scope, string shardName, CancellationToken cancellationToken = default);
 
-    /// <summary>Stops one shard. Requires <c>ControlDaemon</c>.</summary>
-    Task StopAgentAsync(StudioScope scope, string shardName, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Stops one shard, if the studio's own pause is in effect. Requires <c>ControlDaemon</c>.
+    /// </summary>
+    /// <returns>Whether the daemon was asked, and the reason when it was not.</returns>
+    Task<DaemonControlResult> StopAgentAsync(StudioScope scope, string shardName, CancellationToken cancellationToken = default);
 
-    /// <summary>Starts every shard. Requires <c>ControlDaemon</c>.</summary>
-    Task StartAllAsync(StudioScope scope, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Pauses this store's projection coordinator. Requires <c>ControlDaemon</c>.
+    /// </summary>
+    /// <remarks>
+    /// Process-wide, and deliberately so: the coordinator stops its leadership runner and then stops
+    /// every agent of every database it has resolved. This is the only stop that holds - asking a daemon
+    /// to stop while its coordinator runs is undone at the coordinator's next poll.
+    /// </remarks>
+    Task PauseDaemonAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
-    /// <summary>Stops every shard. Requires <c>ControlDaemon</c>.</summary>
-    Task StopAllAsync(StudioScope scope, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Resumes this store's projection coordinator. Requires <c>ControlDaemon</c>.
+    /// </summary>
+    /// <remarks>
+    /// Restarts the leadership runner, which brings the agents back on its first iteration, and forgets
+    /// the pause the studio had recorded.
+    /// </remarks>
+    Task ResumeDaemonAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
     /// <summary>Restarts the high-water agent. Requires <c>ControlDaemon</c>.</summary>
     Task RestartHighWaterAgentAsync(StudioScope scope, CancellationToken cancellationToken = default);

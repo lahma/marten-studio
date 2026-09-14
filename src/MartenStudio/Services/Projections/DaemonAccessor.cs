@@ -15,11 +15,20 @@ namespace MartenStudio.Services.Projections;
 /// <param name="State">Whether a daemon was reachable.</param>
 /// <param name="Daemon">The daemon, when there is one. Never touched when <paramref name="State" /> is not <c>Hosted</c>.</param>
 /// <param name="Explanation">Plain words, rendered on the card.</param>
-internal sealed record DaemonHosting(DaemonHostingState State, IProjectionDaemon? Daemon, string Explanation)
+/// <param name="Databases">
+/// Every database of this store, by <c>DatabaseId.Identity</c> - the set a coordinator pause would
+/// reach. Enumerated on the way to the daemon rather than asked for a second time, because
+/// <c>IMartenStorage.AllDatabases()</c> is a query on a master-table tenancy.
+/// </param>
+internal sealed record DaemonHosting(
+    DaemonHostingState State,
+    IProjectionDaemon? Daemon,
+    string Explanation,
+    IReadOnlyList<string>? Databases = null)
 {
     /// <summary>The daemon answered.</summary>
-    public static DaemonHosting Hosted(IProjectionDaemon daemon) =>
-        new(DaemonHostingState.Hosted, daemon, "The async daemon is hosted in this process.");
+    public static DaemonHosting Hosted(IProjectionDaemon daemon, IReadOnlyList<string> databases) =>
+        new(DaemonHostingState.Hosted, daemon, "The async daemon is hosted in this process.", databases);
 
     /// <summary>There is no daemon here, and this is why.</summary>
     public static DaemonHosting NotHosted(string explanation) =>
@@ -134,7 +143,7 @@ internal sealed class DaemonAccessor
                 ? coordinator.DaemonForMainDatabase()
                 : await DaemonForAsync(coordinator, scope.Database, cancellationToken).ConfigureAwait(false);
 
-            return DaemonHosting.Hosted(daemon);
+            return DaemonHosting.Hosted(daemon, [.. databases.Select(static x => x.Id.Identity)]);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -147,6 +156,35 @@ internal sealed class DaemonAccessor
             return DaemonHosting.NotHosted(
                 $"A daemon coordinator is registered, but it could not answer for this database: {exception.Message}");
         }
+    }
+
+    /// <summary>
+    /// The coordinator for the store in <paramref name="scope" />, or <see langword="null" /> when this
+    /// process hosts none for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same single resolution path as <see cref="ForScopeAsync" /> - both go through
+    /// <see cref="ResolveCoordinator" />, so an ancillary store's generic
+    /// <c>IProjectionCoordinator&lt;T&gt;</c> is found here exactly as it is there and there is never a
+    /// second answer to "which coordinator is this store's".
+    /// </para>
+    /// <para>
+    /// Exposed separately because pause and resume are operations on the <em>coordinator</em> and not on
+    /// a daemon: <c>PauseAsync()</c> stops the leadership runner - the thing that otherwise restarts
+    /// every stopped agent within <c>LeadershipPollingTime</c> - and only then stops the daemons. A stop
+    /// aimed at one database's daemon cannot do that, which is why the studio's "stop everything" is
+    /// this and not <c>IProjectionDaemon.StopAllAsync()</c> (AGENTS.md hard rule 11's sibling problem:
+    /// the supported daemon is the coordinator's, so the supported way to stop it is the coordinator's
+    /// too).
+    /// </para>
+    /// </remarks>
+    /// <param name="scope">An already-resolved scope: the authorization has happened before this is called.</param>
+    public MartenCoordinator? CoordinatorForScope(ResolvedScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return ResolveCoordinator(scope.Registration);
     }
 
     /// <summary>

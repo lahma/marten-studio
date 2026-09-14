@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using JasperFx.Events.Projections;
 
 namespace MartenStudio.Services.Projections;
@@ -154,6 +156,73 @@ internal enum DaemonHostingState
 internal sealed record DaemonAgentInfo(string ShardName, string Status, long Position, long HighWaterMark);
 
 /// <summary>
+/// What a per-agent control did, or the reason it did nothing.
+/// </summary>
+/// <remarks>
+/// A result rather than an exception, because "the coordinator would undo this within a second" is not
+/// a failure and must not be rendered as one. It is not a capability refusal either - the visitor may
+/// well hold <c>ControlDaemon</c>, and the operation is available the moment the daemon is paused - so
+/// it is neither <see cref="StudioCapabilityDeniedException" /> nor
+/// <see cref="StudioDaemonNotHostedException" />. The page renders <see cref="Reason" /> as a hint next
+/// to a disabled button; the service refuses regardless of what was rendered (AGENTS.md hard rule 5).
+/// </remarks>
+/// <param name="Applied">Whether the daemon was actually asked.</param>
+/// <param name="Reason">Why it was not, in words a page can show. <see langword="null" /> when it was.</param>
+internal sealed record DaemonControlResult(bool Applied, string? Reason)
+{
+    /// <summary>The daemon was asked and it accepted.</summary>
+    public static DaemonControlResult Done { get; } = new(true, null);
+
+    /// <summary>The daemon was not asked, and this is why.</summary>
+    public static DaemonControlResult Refused(string reason) => new(false, reason);
+}
+
+/// <summary>
+/// JasperFx's own daemon defaults, used only where a store's real setting could not be read.
+/// </summary>
+/// <remarks>
+/// Its own type rather than a constant on <see cref="DaemonStatus" />, because a record's primary
+/// constructor cannot use a constant declared in its own body as a parameter default (CS0103).
+/// </remarks>
+internal static class DaemonDefaults
+{
+    /// <summary>
+    /// <c>DaemonSettings.LeadershipPollingTime</c>'s default: an <c>int</c> of milliseconds, 5000.
+    /// Verified against JasperFx.Events 2.69.3.
+    /// </summary>
+    public const int LeadershipPollingMilliseconds = 5_000;
+}
+
+/// <summary>
+/// The sentences the daemon controls explain themselves with, in one place so the service's refusal and
+/// the page's hint cannot drift apart.
+/// </summary>
+internal static class DaemonControlMessages
+{
+    /// <summary>
+    /// What pausing actually does, said in one sentence because it is bigger than the page it is on.
+    /// </summary>
+    /// <remarks>
+    /// <c>IProjectionCoordinator.PauseAsync()</c> stops the leadership runner and then calls
+    /// <c>StopAllAsync()</c> on <em>every</em> daemon that coordinator has resolved - which is every
+    /// database of this store that this process is running projections for, not the one the scope
+    /// selector names.
+    /// </remarks>
+    public const string PauseIsProcessWide =
+        "Pausing stops the projection agents of every database this process hosts for this store until " +
+        "somebody resumes them.";
+
+    /// <summary>Why a per-agent start or stop is pointless while the coordinator is running.</summary>
+    /// <param name="leadershipPollingTime">
+    /// The real interval, read from the store's own <c>LeadershipPollingTime</c> rather than assumed.
+    /// </param>
+    public static string AgentControlNeedsPause(TimeSpan leadershipPollingTime) =>
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"The projection coordinator restarts agents every {leadershipPollingTime.TotalSeconds:0.#} s (LeadershipPollingTime); pause the daemon first.");
+}
+
+/// <summary>
 /// What the daemon card draws.
 /// </summary>
 /// <param name="Hosting">Whether a daemon is reachable from this process.</param>
@@ -163,6 +232,20 @@ internal sealed record DaemonAgentInfo(string ShardName, string Status, long Pos
 /// <param name="HasAnyPaused">Whether the daemon reports any paused shard.</param>
 /// <param name="HighWaterLastPolledAt">When the high-water agent last polled, when the daemon says.</param>
 /// <param name="Explanation">Plain words for whoever is reading the card, especially when it is not hosted here.</param>
+/// <param name="PausedByStudio">
+/// The pause this process issued through Marten Studio, or <see langword="null" /> when it has issued
+/// none. The coordinator has no public paused flag at all, so this is the only honest answer available:
+/// it says what the studio did, and never guesses at what somebody else did.
+/// </param>
+/// <param name="LeadershipPollingMilliseconds">
+/// The store's own <c>LeadershipPollingTime</c>, which is how often the coordinator restarts every agent
+/// it finds missing. The number the refusal hint quotes, so the hint is about this store rather than
+/// about the default.
+/// </param>
+/// <param name="CoordinatedDatabases">
+/// Every database of this store that a pause would reach, by identity. Named in the confirm dialog
+/// because pausing is not scoped to the database the selector is on.
+/// </param>
 internal sealed record DaemonStatus(
     DaemonHostingState Hosting,
     bool IsRunning,
@@ -170,10 +253,43 @@ internal sealed record DaemonStatus(
     IReadOnlyList<DaemonAgentInfo> Agents,
     bool HasAnyPaused,
     DateTimeOffset? HighWaterLastPolledAt,
-    string Explanation)
+    string Explanation,
+    StudioDaemonPause? PausedByStudio = null,
+    int LeadershipPollingMilliseconds = DaemonDefaults.LeadershipPollingMilliseconds,
+    IReadOnlyList<string>? CoordinatedDatabases = null)
 {
     /// <summary>Whether this process can be asked to start, stop or rebuild anything.</summary>
     public bool IsHostedHere => Hosting == DaemonHostingState.Hosted;
+
+    /// <summary>Whether Marten Studio is the reason this store's agents are not running.</summary>
+    public bool IsPausedByStudio => PausedByStudio is not null;
+
+    /// <summary>How often the coordinator restarts agents it finds missing.</summary>
+    public TimeSpan LeadershipPollingTime => TimeSpan.FromMilliseconds(LeadershipPollingMilliseconds);
+
+    /// <summary>Every database a pause or resume of this store would reach.</summary>
+    public IReadOnlyList<string> Databases => CoordinatedDatabases ?? [];
+
+    /// <summary>
+    /// Whether one agent may be started or stopped from here right now.
+    /// </summary>
+    /// <remarks>
+    /// Only while the studio's own pause is in effect. With the coordinator running, its leadership loop
+    /// starts every shard missing from <c>CurrentAgents()</c> on its next pass, so a stop is undone
+    /// within <see cref="LeadershipPollingTime" /> and the control would be a lie.
+    /// </remarks>
+    public bool CanControlAgents => IsHostedHere && IsPausedByStudio;
+
+    /// <summary>
+    /// Why a per-agent start or stop is refused right now, or <see langword="null" /> when it is not.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="null" /> when no daemon is hosted here as well, because that case already has its
+    /// own explanation on the card and two reasons for one disabled button is one too many.
+    /// </remarks>
+    public string? AgentControlRefusal => IsHostedHere && !IsPausedByStudio
+        ? DaemonControlMessages.AgentControlNeedsPause(LeadershipPollingTime)
+        : null;
 
     /// <summary>How long ago the high-water mark was polled, against <paramref name="now" />.</summary>
     public TimeSpan? HighWaterAge(DateTimeOffset now) =>
