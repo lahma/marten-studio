@@ -136,12 +136,27 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
             // case, which has to be listed rather than turned into anonymous nodes.
             await using NpgsqlConnection connection = await Postgres.OpenAsync();
 
+            // The partitioned pair is the shape Marten's tenant partitioning produces
+            // (MartenManagedTenantListPartitions): Postgres copies the key declared on the parent onto
+            // every partition, and onto the parent once per referenced partition, so a catalog read that
+            // did not ask for conparentid = 0 would report this one key as four - three of them naming
+            // tables (…_acme, …_globex) no mapping knows and no visibility filter can recognise.
             await using var command = new NpgsqlCommand(
                 $"""
                  create table "{Schema}"."legacy_parent" (id uuid primary key);
                  create table "{Schema}"."legacy_child" (
                      id uuid primary key,
                      parent_id uuid constraint legacy_child_parent_fkey references "{Schema}"."legacy_parent" (id));
+
+                 create table "{Schema}"."legacy_parted" (
+                     id uuid,
+                     tenant_id varchar not null,
+                     parent_id uuid constraint legacy_parted_parent_fkey references "{Schema}"."legacy_parent" (id),
+                     primary key (tenant_id, id)) partition by list (tenant_id);
+                 create table "{Schema}"."legacy_parted_acme"
+                     partition of "{Schema}"."legacy_parted" for values in ('acme');
+                 create table "{Schema}"."legacy_parted_globex"
+                     partition of "{Schema}"."legacy_parted" for values in ('globex');
                  """,
                 connection);
 
@@ -262,6 +277,34 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
     }
 
     /// <summary>
+    /// A partitioned table's key is reported once — the one somebody declared — and never once per
+    /// partition.
+    /// </summary>
+    /// <remarks>
+    /// Postgres clones a foreign key declared on a partitioned table onto every partition, and onto the
+    /// parent once per referenced partition. On a store using Marten's tenant partitioning that is a row
+    /// per tenant per key, each naming <c>mt_doc_&lt;alias&gt;_&lt;tenant&gt;</c> — a table the mappings do not know,
+    /// so every one would be listed as a key "on a table no document type maps": the tenant list printed
+    /// on a page the visitor may be scoped to one tenant of, and past <c>IsDocumentTypeVisible</c>, which
+    /// can only recognise the parent. Found by the adversarial review of P10, measured on a live catalog.
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_partitioned_tables_key_is_reported_once_and_never_once_per_partition()
+    {
+        RelationshipGraph graph = await ReadAsync();
+
+        graph.Unmatched.Should().ContainSingle(x => x.Name == "legacy_parted_parent_fkey",
+            "the parent's declared key is the only one of the four rows Postgres holds that anybody wrote");
+
+        graph.Unmatched.Should().OnlyContain(x => !x.From.Contains("legacy_parted_acme", StringComparison.Ordinal)
+                                                  && !x.From.Contains("legacy_parted_globex", StringComparison.Ordinal),
+            "a partition name is a tenant id on a store that partitions by tenant");
+
+        graph.Unmatched.Should().OnlyContain(x => !x.To.Contains("legacy_parted_acme", StringComparison.Ordinal)
+                                                  && !x.To.Contains("legacy_parted_globex", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// The event store's own <c>mt_events → mt_streams</c> key is real, and its schema is one of the
     /// store's own, so a screen that reported every constraint it found would open on a list of Marten's
     /// bookkeeping that nobody can act on.
@@ -271,7 +314,9 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
     {
         RelationshipGraph graph = await ReadAsync();
 
-        graph.Unmatched.Should().OnlyContain(x => x.Name == "legacy_child_parent_fkey");
+        graph.Unmatched.Should().OnlyContain(
+            x => x.Name == "legacy_child_parent_fkey" || x.Name == "legacy_parted_parent_fkey",
+            "the two keys this fixture creates outside the mappings are the only ones worth reporting");
 
         graph.Unmatched.Should().NotContain(
             x => x.From.Contains("mt_events", StringComparison.Ordinal)

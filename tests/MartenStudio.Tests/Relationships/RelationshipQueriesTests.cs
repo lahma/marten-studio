@@ -27,6 +27,19 @@ public class RelationshipQueriesTests
             "came back the other way round would not match the declared one");
     }
 
+    /// <summary>
+    /// Postgres clones a foreign key declared on a partitioned table onto every partition, and onto the
+    /// parent once per referenced partition. On a tenant-partitioned store that is one row per tenant per
+    /// key, each naming a table (<c>mt_doc_&lt;alias&gt;_&lt;tenant&gt;</c>) the store's mappings do not know — so
+    /// they would be listed as keys "on a table no document type maps", printing the tenant list and
+    /// walking past <c>IsDocumentTypeVisible</c>, which can only recognise the parent.
+    /// </summary>
+    [Fact]
+    public void The_catalog_read_takes_the_declared_key_and_never_a_partitions_copy_of_it() =>
+        RelationshipQueries.ForeignKeysSql.Should().Contain("con.conparentid = 0",
+            "a clone carries a non-zero conparentid; a key declared on a partition itself carries zero " +
+            "and is still reported");
+
     [Fact]
     public void The_catalog_read_resolves_both_ends_of_the_constraint()
     {

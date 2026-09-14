@@ -76,6 +76,17 @@ internal static class RelationshipQueries
     /// <c>name</c> and <c>"char"</c> types, and reading them as text is what keeps the mapping from
     /// depending on how Npgsql happens to handle those two.
     /// </para>
+    /// <para>
+    /// <b><c>conparentid = 0</c> keeps the clones out.</b> Postgres copies a foreign key declared on a
+    /// partitioned table onto every partition, and onto the parent once per referenced partition, so one
+    /// declared key on a tenant-partitioned collection (<c>MartenManagedTenantListPartitions</c>) becomes
+    /// as many rows as there are tenants, on tables named <c>mt_doc_&lt;alias&gt;_&lt;tenant&gt;</c>. Those names are
+    /// not in the store's mappings, so every one of them would be reported as a key "on a table no
+    /// document type maps" - printing the tenant list on a page a visitor may be scoped to one tenant of,
+    /// and walking straight past <c>IsDocumentTypeVisible</c>, which can only recognise the parent.
+    /// A clone has a non-zero <c>conparentid</c>; a key declared directly on a partition has zero and is
+    /// still reported, which is right.
+    /// </para>
     /// </remarks>
     internal const string ForeignKeysSql =
         """
@@ -97,7 +108,7 @@ internal static class RelationshipQueries
         join pg_catalog.pg_namespace ns on ns.oid = cl.relnamespace
         join pg_catalog.pg_class fcl on fcl.oid = con.confrelid
         join pg_catalog.pg_namespace fns on fns.oid = fcl.relnamespace
-        where con.contype = 'f' and ns.nspname = any(@schemas)
+        where con.contype = 'f' and con.conparentid = 0 and ns.nspname = any(@schemas)
         order by ns.nspname, cl.relname, con.conname
         """;
 
