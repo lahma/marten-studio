@@ -118,8 +118,13 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             List<DocumentTableInfo> tables = [];
-            HashSet<string> schemas = new(StringComparer.Ordinal) { resolved.Store.Options.DatabaseSchemaName };
-            HashSet<string> knownTables = new(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> schemas = SchemaNames(resolved.Store);
+
+            // Every table a mapping claims, visible or not. Building this from the *visible* types was how
+            // a hidden document type came back: its table matched no known mapping, so discovery offered it
+            // as "Discovered (unregistered)", with counts, a list and a detail page - the exact data
+            // IsDocumentTypeVisible was set to keep off the screen (P2-fix B3).
+            HashSet<string> knownTables = ClaimedTables(resolved.Store);
 
             foreach (IDocumentType documentType in VisibleDocumentTypes(resolved.Store))
             {
@@ -127,7 +132,6 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
                 tables.Add(table);
                 schemas.Add(table.Schema);
-                knownTables.Add(DocumentBrowseQueries.Key(table.Schema, table.Table));
             }
 
             // The schemas come from the mappings rather than from `Storage.AllSchemaNames()`: the latter
@@ -147,7 +151,12 @@ internal sealed partial class DocumentDataService : IDocumentDataService
                 DocumentTableInfo table = tables[index++];
 
                 DocumentCount count = await CountForRailAsync(
-                        connection, estimates, table, () => exactCountsSpent++ < MaxExactCountsPerRail, cancellationToken)
+                        connection,
+                        estimates,
+                        table,
+                        resolved.TenantId,
+                        () => exactCountsSpent++ < MaxExactCountsPerRail,
+                        cancellationToken)
                     .ConfigureAwait(false);
 
                 registered.Add(Describe(documentType, table, count));
@@ -156,7 +165,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             registered.Sort(static (left, right) => string.CompareOrdinal(left.Alias, right.Alias));
 
             List<CollectionInfo> discovered = await DiscoverAsync(
-                    resolved, connection, knownTables, estimates, cancellationToken)
+                    resolved, connection, [.. schemas], knownTables, estimates, cancellationToken)
                 .ConfigureAwait(false);
 
             List<CollectionGroup> groups =
@@ -204,8 +213,18 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
             var estimator = new CountEstimator { CommandTimeoutSeconds = CommandTimeoutSeconds };
 
+            // Tenant-scoped, because the rail is: a scope narrowed to 'acme' that answered "6" beside a
+            // collection showing three invoices would be answering a question nobody asked. Deleted rows
+            // are counted, because the estimate this replaces is a whole-table reltuples and the two
+            // numbers sit in the same badge.
             return await estimator
-                .CountExactAsync(connection, context.Table.Schema, context.Table.Table, cancellationToken)
+                .CountExactAsync(
+                    connection,
+                    context.Table,
+                    resolved.TenantId,
+                    DeletedFilter.Include,
+                    commandTimeout: null,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -225,50 +244,67 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
-        await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        List<DocumentTableInfo> tables = [];
-
-        foreach (IDocumentType documentType in VisibleDocumentTypes(resolved.Store))
+        try
         {
-            DocumentTableInfo table = DocumentTableInfo.FromDocumentType(documentType);
+            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-            if (table.HasMetadata(DocumentMetadataColumn.LastModified))
+            List<DocumentTableInfo> tables = [];
+
+            foreach (IDocumentType documentType in VisibleDocumentTypes(resolved.Store))
             {
-                tables.Add(table);
+                // Against the physical columns, like every other read: a union branch that named a
+                // mt_last_modified the table does not have any more would take the whole region down, and
+                // one branch per collection is a lot of chances for the configuration to be ahead of the
+                // database.
+                DocumentTableInfo table = DocumentTableInfo.FromDocumentType(documentType)
+                    .WithPhysicalColumns(await columnCatalog
+                        .GetAsync(connection, documentType.TableName.Schema, documentType.TableName.Name, cancellationToken)
+                        .ConfigureAwait(false));
+
+                if (table.HasMetadata(DocumentMetadataColumn.LastModified))
+                {
+                    tables.Add(table);
+                }
             }
+
+            var perTable = Math.Clamp(limit, 1, 100);
+
+            await using NpgsqlCommand? command = DocumentBrowseQueries.BuildRecent(
+                tables, resolved.TenantId, perTable, Math.Clamp(limit, 1, 200), CommandTimeoutSeconds);
+
+            if (command is null)
+            {
+                return [];
+            }
+
+            command.Connection = connection;
+            command.CommandTimeout = CommandTimeoutSeconds;
+
+            List<RecentDocument> recent = [];
+
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var alias = reader.GetString(0);
+
+                recent.Add(new RecentDocument(
+                    alias,
+                    reader.GetString(1),
+                    reader.GetFieldValue<DateTimeOffset>(2),
+                    CollectionColorizer.HueFor(alias)));
+            }
+
+            return recent;
         }
-
-        var perTable = Math.Clamp(limit, 1, 100);
-
-        await using NpgsqlCommand? command = DocumentBrowseQueries.BuildRecent(
-            tables, scope.TenantId, perTable, Math.Clamp(limit, 1, 200));
-
-        if (command is null)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            // The _recent pseudo-collection is one region of a page. A store where one table of fifty has
+            // drifted must lose that region, not the documents browser.
+            logger.LogWarning(exception, "Marten Studio could not read the recent documents of {StoreKey}", scope.StoreKey);
             return [];
         }
-
-        command.Connection = connection;
-        command.CommandTimeout = CommandTimeoutSeconds;
-
-        List<RecentDocument> recent = [];
-
-        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            var alias = reader.GetString(0);
-
-            recent.Add(new RecentDocument(
-                alias,
-                reader.GetString(1),
-                reader.GetFieldValue<DateTimeOffset>(2),
-                CollectionColorizer.HueFor(alias)));
-        }
-
-        return recent;
     }
 
     /// <inheritdoc />
@@ -383,13 +419,73 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             TenantId = resolved.TenantId,
             Columns = queryColumns,
             MaxInlineDocumentBytes = options.Value.MaxInlineDocumentBytes,
+            CommandTimeoutSeconds = CommandTimeoutSeconds,
         };
 
-        DocumentCount estimate = await EstimateAsync(connection, table, request.ExactCount, cancellationToken)
+        DocumentCount estimate = await EstimateAsync(
+                connection, table, resolved.TenantId, query.IncludeDeleted, request.ExactCount, cancellationToken)
             .ConfigureAwait(false);
 
-        await using NpgsqlCommand command = DocumentQueryBuilder.BuildList(table, query);
+        // Built before the verdict gate, and its refusals folded back into the verdict. A predicate the
+        // collection cannot answer - `is:deleted` on a collection that is not soft-deleted, `tenant:` on a
+        // single-tenant one, an `id:` that is not a GUID - used to throw out of here after the strip had
+        // already been drawn green, and the page rendered an ArgumentException's text (parameter name and
+        // all) beside a green badge. It is a grammar error like any other (W2-fix-2).
+        if (!DocumentQueryBuilder.TryBuildList(table, query, out NpgsqlCommand? command, out DocumentQueryRefusal refusal))
+        {
+            // Paging is not something anybody typed into the search box: an offset past the studio's cap,
+            // or a cursor from a stale bookmark, belongs in the page's error region rather than as a red
+            // badge on a search that is perfectly good.
+            if (!refusal.IsFilter)
+            {
+                return DocumentPage.Failed(refusal.Message);
+            }
 
+            SearchVerdict refused = WithRefusal(verdict, refusal.Message);
+
+            return new DocumentPage
+            {
+                Columns = visible,
+                AvailableColumns = available,
+                Estimate = estimate,
+                Sql = string.Empty,
+                Verdict = refused,
+                DocumentClrType = context.ClrType,
+                NamingPolicy = context.NamingPolicy,
+                SortKey = DocumentColumnKeys.KeyFor(sort),
+                Direction = direction,
+                State = DocumentListState.BlockedByVerdict,
+                Suggestion = refused.Suggestion,
+            };
+        }
+
+        await using (command)
+        {
+            return await ReadPageAsync(
+                    connection, command, table, context, request, verdict, estimate, visible, available,
+                    queryColumns, sort, direction, sortOrdinal, pageSize, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Runs the built list read, or withholds it because the filter's verdict is red.</summary>
+    private async Task<DocumentPage> ReadPageAsync(
+        NpgsqlConnection connection,
+        NpgsqlCommand command,
+        DocumentTableInfo table,
+        CollectionContext context,
+        DocumentListRequest request,
+        SearchVerdict verdict,
+        DocumentCount estimate,
+        IReadOnlyList<DocumentColumnHeader> visible,
+        IReadOnlyList<DocumentColumnHeader> available,
+        List<DocumentColumn> queryColumns,
+        DocumentColumn sort,
+        SortDirection direction,
+        int sortOrdinal,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
         var sql = command.CommandText;
         List<string> parameterNames = [];
 
@@ -455,9 +551,28 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         };
     }
 
+    /// <summary>
+    /// The number under the collection's title: the free estimate, or an exact count when one was asked
+    /// for — or when there is no estimate to be had.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The exact count is scoped the way the list is, by tenant and by the soft-delete tri-state, so the
+    /// header and the rows agree about what is being counted.
+    /// </para>
+    /// <para>
+    /// A never-analysed table has no estimate at all — <c>reltuples</c> is <c>-1</c>, which is the state
+    /// every freshly seeded collection is in — so the header pays for one <c>count(*)</c> under the
+    /// studio's own query timeout rather than printing "~0 documents" over a page of rows. If that scan
+    /// runs past the timeout the answer stays unknown, and the header says nothing rather than something
+    /// false.
+    /// </para>
+    /// </remarks>
     private async Task<DocumentCount> EstimateAsync(
         NpgsqlConnection connection,
         DocumentTableInfo table,
+        string? tenantId,
+        DeletedFilter deleted,
         bool exact,
         CancellationToken cancellationToken)
     {
@@ -465,14 +580,30 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            return exact
-                ? await estimator.CountExactAsync(connection, table.Schema, table.Table, cancellationToken).ConfigureAwait(false)
-                : await estimator.EstimateAsync(connection, table.Schema, table.Table, cancellationToken).ConfigureAwait(false);
+            if (!exact)
+            {
+                DocumentCount estimate = await estimator
+                    .EstimateAsync(connection, table.Schema, table.Table, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (!estimate.IsUnknown)
+                {
+                    return estimate;
+                }
+            }
+
+            return await estimator
+                .CountExactAsync(connection, table, tenantId, deleted, commandTimeout: null, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (PostgresException exception)
         {
             logger.LogWarning(exception, "Marten Studio could not count '{Alias}'", table.Alias);
-            return DocumentCount.Unavailable;
+            // 57014 is statement_timeout: the table is certainly there and its size is simply not worth
+            // what it would cost to find out, which is "unknown" rather than "could not be reached".
+            return string.Equals(exception.SqlState, "57014", StringComparison.Ordinal)
+                ? DocumentCount.Unknown
+                : DocumentCount.Unavailable;
         }
     }
 
@@ -704,6 +835,34 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         };
     }
 
+    /// <summary>
+    /// Folds a builder refusal into the verdict, so it lands where every other thing the studio could not
+    /// make sense of lands: as an error chip in the parse strip, with the rest of the verdict intact.
+    /// </summary>
+    /// <remarks>
+    /// The position is the whole search text rather than a range, because the refusal is about the
+    /// collection rather than about a character — <c>is:deleted</c> parses perfectly and is simply not
+    /// something this collection can answer.
+    /// </remarks>
+    internal static SearchVerdict WithRefusal(SearchVerdict verdict, string message)
+    {
+        ArgumentNullException.ThrowIfNull(verdict);
+
+        List<SearchChip> chips = [.. verdict.Chips, new SearchChip(
+            SearchChipKind.Error, message, IndexVerdictLevel.Red, message, null)];
+
+        List<SearchGrammarError> errors = [.. verdict.Errors, new SearchGrammarError(message, 0, 1)];
+
+        return verdict with
+        {
+            Level = IndexVerdictLevel.Red,
+            FilterLevel = IndexVerdictLevel.Red,
+            Chips = chips,
+            Errors = errors,
+            Suggestion = verdict.Suggestion,
+        };
+    }
+
     /// <summary>One filter term, written back out in the grammar's own words.</summary>
     internal static string DescribePredicate(DocumentPredicate predicate) => predicate switch
     {
@@ -773,20 +932,9 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     {
         if (keys.Count > 0)
         {
-            List<DocumentColumnHeader> chosen = [DocumentColumnKeys.HeaderFor(DocumentColumn.ById)];
-            HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase) { DocumentColumnKeys.Id };
-
-            foreach (var key in keys)
-            {
-                DocumentColumn? column = DocumentColumnKeys.Resolve(table, key);
-
-                if (column is not null && seen.Add(DocumentColumnKeys.KeyFor(column)))
-                {
-                    chosen.Add(DocumentColumnKeys.HeaderFor(column));
-                }
-            }
-
-            return chosen;
+            // Resolved and capped in one place, because `?cols=` is a query string: see
+            // DocumentColumnKeys.MaxColumns.
+            return DocumentColumnKeys.ResolveAll(table, keys);
         }
 
         // An unregistered table gets id, data and its metadata and nothing else: the other columns are
@@ -866,20 +1014,32 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         documentType.UseOptimisticConcurrency,
         documentType.IsHierarchy());
 
+    /// <summary>
+    /// The <c>mt_doc_*</c> tables the database has that no visible mapping claims.
+    /// </summary>
+    /// <remarks>
+    /// The table list comes from <c>information_schema</c> and never from
+    /// <c>IMartenDatabase.DocumentTables()</c>, which is <c>AllObjects()</c> by another name and applies
+    /// Marten's HiLo migration on the way (P2-fix B4; see
+    /// <see cref="DocumentBrowseQueries.ListDocumentTablesAsync"/>).
+    /// </remarks>
     private async Task<List<CollectionInfo>> DiscoverAsync(
         ResolvedScope resolved,
         NpgsqlConnection connection,
+        IReadOnlyList<string> schemas,
         HashSet<string> knownTables,
         IReadOnlyDictionary<string, long> estimates,
         CancellationToken cancellationToken)
     {
         List<CollectionInfo> discovered = [];
 
-        IReadOnlyList<DbObjectName> tables;
+        IReadOnlyList<DocumentBrowseQueries.DocumentTableName> tables;
 
         try
         {
-            tables = await resolved.Database.DocumentTables().ConfigureAwait(false);
+            tables = await DocumentBrowseQueries
+                .ListDocumentTablesAsync(connection, schemas, CommandTimeoutSeconds, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -887,7 +1047,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             return discovered;
         }
 
-        foreach (DbObjectName name in tables)
+        foreach (DocumentBrowseQueries.DocumentTableName name in tables)
         {
             if (knownTables.Contains(DocumentBrowseQueries.Key(name.Schema, name.Name)) ||
                 string.Equals(name.Name, CollectionAliases.DeadLetterTable, StringComparison.OrdinalIgnoreCase))
@@ -906,7 +1066,8 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
             DocumentTableInfo table = DocumentTableInfo.FromDiscoveredTable(name.Schema, name.Name, physical.Columns);
 
-            DocumentCount count = await CountForRailAsync(connection, estimates, table, static () => true, cancellationToken)
+            DocumentCount count = await CountForRailAsync(
+                    connection, estimates, table, resolved.TenantId, static () => true, cancellationToken)
                 .ConfigureAwait(false);
 
             discovered.Add(new CollectionInfo
@@ -947,6 +1108,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         NpgsqlConnection connection,
         IReadOnlyDictionary<string, long> estimates,
         DocumentTableInfo table,
+        string? tenantId,
         Func<bool> budget,
         CancellationToken cancellationToken)
     {
@@ -955,6 +1117,9 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             return DocumentCount.Unavailable;
         }
 
+        // The estimate stands whenever there is one, tenant or no tenant: reltuples describes the whole
+        // table and nothing narrower, and D8 is that the rail costs one cheap query rather than one
+        // sequential scan per collection. Only a table Postgres has never looked at is worth paying for.
         if (rows >= 0)
         {
             return DocumentCount.Estimate(rows);
@@ -962,7 +1127,9 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         if (!budget())
         {
-            return DocumentCount.Unavailable;
+            // Not "zero documents": the table is there and nobody has measured it. The badge draws nothing
+            // rather than a number the rest of the page would contradict.
+            return DocumentCount.Unknown;
         }
 
         var estimator = new CountEstimator { CommandTimeoutSeconds = CommandTimeoutSeconds };
@@ -970,13 +1137,16 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         try
         {
             return await estimator
-                .CountExactAsync(connection, table.Schema, table.Table, cancellationToken)
+                .CountExactAsync(connection, table, tenantId, DeletedFilter.Include, commandTimeout: null, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (PostgresException exception)
         {
             logger.LogWarning(exception, "Marten Studio could not count '{Alias}'", table.Alias);
-            return DocumentCount.Unavailable;
+
+            return string.Equals(exception.SqlState, "57014", StringComparison.Ordinal)
+                ? DocumentCount.Unknown
+                : DocumentCount.Unavailable;
         }
     }
 
@@ -1001,10 +1171,77 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     }
 
     /// <summary>
+    /// Every table a mapping claims — hidden types and Marten's own bookkeeping included.
+    /// </summary>
+    /// <remarks>
+    /// <b>This is the visibility gate, not a display filter (P2-fix B3).</b> Discovery offers every
+    /// <c>mt_doc_*</c> table that no known mapping claims; building "known" out of the <em>visible</em>
+    /// mappings therefore handed a hidden type's table straight back in the Discovered band, where it had a
+    /// row count, a list and a detail page. <c>IsDocumentTypeVisible</c> is documented as a gate a host sets
+    /// to keep data off this screen, so the set of tables discovery must skip is the set of tables Marten
+    /// knows about at all.
+    /// </remarks>
+    private static HashSet<string> ClaimedTables(IDocumentStore store)
+    {
+        HashSet<string> tables = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (IDocumentType documentType in store.Options.AllKnownDocumentTypes())
+        {
+            tables.Add(DocumentBrowseQueries.Key(documentType.TableName.Schema, documentType.TableName.Name));
+        }
+
+        return tables;
+    }
+
+    /// <summary>
+    /// Whether a table belongs to a mapping this visitor may not see, or to Marten's own bookkeeping.
+    /// </summary>
+    /// <remarks>
+    /// The other half of <see cref="ClaimedTables"/>: discovery skips these, and
+    /// <see cref="LoadContextAsync"/> refuses to open one by name. Without the second half, hiding a type
+    /// only hid it from the rail — <c>/marten/documents/customer</c> typed into the address bar still fell
+    /// through to the discovered-table branch and read the very same rows.
+    /// </remarks>
+    private bool IsHiddenOrInfrastructure(IDocumentStore store, string schema, string table)
+    {
+        if (string.Equals(table, CollectionAliases.DeadLetterTable, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        Func<Type, bool>? visible = options.Value.IsDocumentTypeVisible;
+
+        foreach (IDocumentType documentType in store.Options.AllKnownDocumentTypes())
+        {
+            if (!string.Equals(documentType.TableName.Name, table, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(documentType.TableName.Schema, schema, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            return CollectionAliases.IsMartenInfrastructure(documentType.DocumentType) ||
+                   (visible is not null && !visible(documentType.DocumentType));
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The schemas this store owns, from <c>StoreOptions</c>.
+    /// </summary>
+    /// <remarks>
+    /// Never <c>IMartenDatabase.AllSchemaNames()</c>, which is <c>AllObjects()</c> and applies Marten's
+    /// HiLo migration on the way through. <c>SchemaDeclarationReader</c> reads the same mappings without
+    /// touching the database, and keeps its own fallback for a store whose configuration will not build.
+    /// </remarks>
+    private static HashSet<string> SchemaNames(IDocumentStore store) =>
+        new(MartenStudio.Services.Schema.SchemaDeclarationReader.SchemaNames(store.Options), StringComparer.Ordinal);
+
+    /// <summary>
     /// Everything one collection is, resolved once per call: its table as the database really has it, the
     /// mapping behind it when there is one, and the subclass filter when the alias names a subclass.
     /// </summary>
-    private sealed record CollectionContext(
+    internal sealed record CollectionContext(
         DocumentTableInfo Table,
         IDocumentType? DocumentType,
         Type? ClrType,
@@ -1059,16 +1296,24 @@ internal sealed partial class DocumentDataService : IDocumentDataService
                 namingPolicy);
         }
 
-        // Not a mapped type: it may still be a table the database has and StoreOptions does not.
-        foreach (DbObjectName name in await resolved.Database.DocumentTables().ConfigureAwait(false))
-        {
-            var tableAlias = name.Name.StartsWith("mt_doc_", StringComparison.OrdinalIgnoreCase)
-                ? name.Name["mt_doc_".Length..]
-                : name.Name;
+        // Not a mapped type the visitor may see. It may still be a table the database has and StoreOptions
+        // does not - but a table that belongs to a mapping this visitor may not see is refused here rather
+        // than falling through to the discovered branch, which would read the very rows
+        // IsDocumentTypeVisible was set to hide (P2-fix B3).
+        IReadOnlyList<DocumentBrowseQueries.DocumentTableName> tables = await DocumentBrowseQueries
+            .ListDocumentTablesAsync(connection, [.. SchemaNames(resolved.Store)], CommandTimeoutSeconds, cancellationToken)
+            .ConfigureAwait(false);
 
-            if (!string.Equals(tableAlias, alias, StringComparison.OrdinalIgnoreCase))
+        foreach (DocumentBrowseQueries.DocumentTableName name in tables)
+        {
+            if (!string.Equals(name.Alias, alias, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
+            }
+
+            if (IsHiddenOrInfrastructure(resolved.Store, name.Schema, name.Name))
+            {
+                return null;
             }
 
             TableColumns physical = await columnCatalog

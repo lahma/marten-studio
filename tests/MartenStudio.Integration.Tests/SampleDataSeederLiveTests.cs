@@ -25,8 +25,13 @@ namespace MartenStudio.Integration.Tests;
 /// soft-deleted orders and conjoined invoices are exactly the rows a raw <c>count(*)</c> would get wrong.
 /// </para>
 /// </remarks>
-public class SampleDataSeederLiveTests(PostgresFixture postgres) : MartenTestBase(postgres)
+public class SampleDataSeederLiveTests(SampleDataSeederLiveTests.Fixture fixture)
+    : MartenTestBase(fixture), IClassFixture<SampleDataSeederLiveTests.Fixture>
 {
+    /// <summary>The demo store and its seed, once for the class.</summary>
+    /// <param name="postgres">The assembly's container.</param>
+    public sealed class Fixture(PostgresFixture postgres) : MartenClassFixture(postgres);
+
     [PostgresFact]
     public async Task Both_halves_of_the_seeder_ran()
     {

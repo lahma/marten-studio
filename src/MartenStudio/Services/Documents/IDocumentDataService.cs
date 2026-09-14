@@ -92,6 +92,22 @@ internal interface IDocumentDataService
         string id,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The same, for a document the caller has already loaded.
+    /// </summary>
+    /// <remarks>
+    /// The detail page has the row in its hand: it calls <see cref="GetDocumentAsync"/> to render the
+    /// document and then asked for the related documents by id, which read the very same row a second time
+    /// — a second scope resolution, a second connection, a second single-row read and a second size query,
+    /// for a handful of column values already on screen. This overload is the one a page should use; the
+    /// id form remains for a caller that has not loaded it.
+    /// </remarks>
+    Task<RelatedDocuments> GetRelatedAsync(
+        StudioScope scope,
+        string alias,
+        DocumentDetail detail,
+        CancellationToken cancellationToken = default);
+
     /// <summary>Whether an event stream with this id exists, so the detail page can offer "view stream".</summary>
     Task<bool> StreamExistsAsync(StudioScope scope, string id, CancellationToken cancellationToken = default);
 

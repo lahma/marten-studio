@@ -5,10 +5,10 @@ using JasperFx.MultiTenancy;
 
 using Marten;
 using Marten.Schema;
+using Marten.Services;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Query;
 
 using Microsoft.Extensions.Logging;
 
@@ -50,7 +50,14 @@ internal sealed partial class DocumentDataService
 
             DocumentTableInfo table = context.Table;
 
-            if (!DocumentQueryBuilder.TryBuildSingle(table, id, resolved.TenantId, out NpgsqlCommand? command, out var error))
+            if (!DocumentQueryBuilder.TryBuildSingle(
+                    table,
+                    id,
+                    resolved.TenantId,
+                    DocumentRowLock.None,
+                    CommandTimeoutSeconds,
+                    out NpgsqlCommand? command,
+                    out var error))
             {
                 // A malformed id is an ordinary thing - somebody pasted half a GUID into the address bar -
                 // so the page says what shape the query would have had, and offers to look elsewhere.
@@ -78,10 +85,9 @@ internal sealed partial class DocumentDataService
 
                 await reader.DisposeAsync().ConfigureAwait(false);
 
-                detail = await WithSizesAsync(connection, table, detail, resolved.TenantId, cancellationToken)
-                    .ConfigureAwait(false);
-
-                return DocumentDetailResult.Ok(await WithUpsertFunctionAsync(resolved, table, detail).ConfigureAwait(false));
+                return DocumentDetailResult.Ok(
+                    await WithSizesAsync(connection, table, detail, resolved.TenantId, cancellationToken)
+                        .ConfigureAwait(false));
             }
         }
         catch (PostgresException postgres)
@@ -104,6 +110,23 @@ internal sealed partial class DocumentDataService
     {
         ArgumentNullException.ThrowIfNull(scope);
 
+        DocumentDetailResult document = await GetDocumentAsync(scope, alias, id, cancellationToken).ConfigureAwait(false);
+
+        return document.Detail is { } detail
+            ? await GetRelatedAsync(scope, alias, detail, cancellationToken).ConfigureAwait(false)
+            : RelatedDocuments.None;
+    }
+
+    /// <inheritdoc />
+    public async Task<RelatedDocuments> GetRelatedAsync(
+        StudioScope scope,
+        string alias,
+        DocumentDetail detail,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(detail);
+
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
         try
@@ -115,13 +138,6 @@ internal sealed partial class DocumentDataService
                 .ConfigureAwait(false);
 
             if (context?.DocumentType is null || context.DocumentType.ForeignKeys.Count == 0)
-            {
-                return RelatedDocuments.None;
-            }
-
-            DocumentDetailResult document = await GetDocumentAsync(scope, alias, id, cancellationToken).ConfigureAwait(false);
-
-            if (document.Detail is not { } detail)
             {
                 return RelatedDocuments.None;
             }
@@ -141,8 +157,11 @@ internal sealed partial class DocumentDataService
                 var value = detail.Columns.FirstOrDefault(x =>
                     string.Equals(x.Name, column, StringComparison.OrdinalIgnoreCase))?.Value;
 
+                // Only among the types this visitor may see. A foreign key is a declared relationship, but
+                // it is not a reason to name a collection the host hid, nor to link into Marten's own
+                // dead-letter table (P2-fix H4).
                 IDocumentType? target = foreignKey.LinkedTable is { } linked
-                    ? FindByTable(resolved.Store, linked)
+                    ? FindVisibleByTable(resolved.Store, linked)
                     : null;
 
                 if (target is null)
@@ -150,8 +169,16 @@ internal sealed partial class DocumentDataService
                     continue;
                 }
 
+                // WithPhysicalColumns, because the target's id column is what the probe binds against: a
+                // strong-typed id guesses Unknown from the CLR type and would be sent as an untyped
+                // literal, which cannot use the primary key and fails outright against some column types.
+                DocumentTableInfo targetTable = DocumentTableInfo.FromDocumentType(target)
+                    .WithPhysicalColumns(await columnCatalog
+                        .GetAsync(connection, target.TableName.Schema, target.TableName.Name, cancellationToken)
+                        .ConfigureAwait(false));
+
                 var exists = value is not null && await ExistsAsync(
-                        connection, DocumentTableInfo.FromDocumentType(target), value, resolved.TenantId, cancellationToken)
+                        connection, targetTable, value, resolved.TenantId, cancellationToken)
                     .ConfigureAwait(false);
 
                 links.Add(new RelatedDocumentLink(
@@ -186,9 +213,15 @@ internal sealed partial class DocumentDataService
         {
             // Streams are read through a Marten session rather than raw SQL: FetchStreamStateAsync already
             // knows which identity style this store uses and which table that means.
-            await using IQuerySession session = resolved.TenantId is { } tenant
-                ? resolved.Store.QuerySession(tenant)
-                : resolved.Store.QuerySession();
+            //
+            // Pinned to the scope's database with SessionOptions.ForDatabase. QuerySession(tenant) routes
+            // through the store's own tenancy, which on a multi-database store picks the database that
+            // tenant maps to - not the one the visitor selected and the store policy authorized - and
+            // QuerySession() with no argument picks the default database outright.
+            await using IQuerySession session = resolved.Store.QuerySession(
+                resolved.TenantId is { } tenant
+                    ? SessionOptions.ForDatabase(tenant, resolved.Database)
+                    : SessionOptions.ForDatabase(resolved.Database));
 
             if (resolved.Store.Options.Events.StreamIdentity == StreamIdentity.AsGuid)
             {
@@ -261,6 +294,13 @@ internal sealed partial class DocumentDataService
         return probes;
     }
 
+    /// <summary>Whether one id is in one collection, in the cheapest read Postgres will accept.</summary>
+    /// <remarks>
+    /// <c>select 1 … limit 1</c> rather than a one-row list: the list's select list carries
+    /// <c>octet_length(data::text)</c>, which detoasts and decompresses every document it touches, and this
+    /// method is called once per collection by the id probe and once per foreign key by the related-
+    /// documents strip.
+    /// </remarks>
     private async Task<bool> ExistsAsync(
         NpgsqlConnection connection,
         DocumentTableInfo table,
@@ -268,32 +308,24 @@ internal sealed partial class DocumentDataService
         string? tenantId,
         CancellationToken cancellationToken)
     {
-        if (!DocumentQueryBuilder.ParseId(table.IdColumnType, id).Success)
+        if (!DocumentQueryBuilder.TryBuildExists(
+                table, id, tenantId, CommandTimeoutSeconds, out NpgsqlCommand? command))
         {
             return false;
         }
 
-        var query = new DocumentListQuery
-        {
-            Predicates = [new DocumentPredicate.IdEquals(id)],
-            Sort = DocumentColumn.ById,
-            PageSize = 1,
-            IncludeDeleted = table.SoftDeleteEnabled ? DeletedFilter.Include : DeletedFilter.Exclude,
-            TenantId = tenantId,
-            Columns = [],
-            MaxInlineDocumentBytes = 0,
-        };
-
         try
         {
-            await using NpgsqlCommand command = DocumentQueryBuilder.BuildList(table, query);
+            await using (command)
+            {
+                command.Connection = connection;
 
-            command.Connection = connection;
-            command.CommandTimeout = CommandTimeoutSeconds;
+                await using NpgsqlDataReader reader = await command
+                    .ExecuteReaderAsync(cancellationToken)
+                    .ConfigureAwait(false);
 
-            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-
-            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+                return await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (PostgresException exception)
         {
@@ -306,9 +338,17 @@ internal sealed partial class DocumentDataService
         }
     }
 
-    private static IDocumentType? FindByTable(IDocumentStore store, DbObjectName table)
+    /// <summary>
+    /// The visible mapping whose table a foreign key points at, or <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="VisibleDocumentTypes"/> rather than <c>AllKnownDocumentTypes()</c>: a related-documents
+    /// strip that named a hidden collection, linked to it and said whether the row is there is the
+    /// visibility gate leaking through a relationship the host never thought about.
+    /// </remarks>
+    private IDocumentType? FindVisibleByTable(IDocumentStore store, DbObjectName table)
     {
-        foreach (IDocumentType documentType in store.Options.AllKnownDocumentTypes())
+        foreach (IDocumentType documentType in VisibleDocumentTypes(store))
         {
             if (string.Equals(documentType.TableName.Name, table.Name, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(documentType.TableName.Schema, table.Schema, StringComparison.OrdinalIgnoreCase))
@@ -377,9 +417,12 @@ internal sealed partial class DocumentDataService
         }
 
         var storedType = metadata.GetValueOrDefault(DocumentMetadataColumn.DotNetType);
-        var expectedType = context.ClrType?.AssemblyQualifiedName is { } qualified
-            ? qualified
-            : context.ClrType?.FullName;
+        var rowAlias = metadata.GetValueOrDefault(DocumentMetadataColumn.DocumentType);
+
+        // The type this *row* is, not the type the collection's root is. On a hierarchy every row carries
+        // its subclass in mt_doc_type, and comparing a Car row against Vehicle's name reported a mismatch
+        // on every subclass row in the store (P2-fix H3).
+        DotNetTypeCheck check = CheckDotNetType(context, rowAlias, storedType);
 
         return new DocumentDetail
         {
@@ -391,8 +434,9 @@ internal sealed partial class DocumentDataService
             Duplicated = duplicated,
             TableName = table.QualifiedName,
             StoredDotNetType = storedType,
-            ExpectedDotNetType = expectedType,
-            DotNetTypeMismatch = IsDotNetTypeMismatch(storedType, context.ClrType),
+            ExpectedDotNetType = check.Expected,
+            DotNetTypeMismatch = check.Mismatch,
+            DotNetTypeWarning = check.Warning,
             ClrType = context.ClrType,
             NamingPolicy = context.NamingPolicy,
             IsRegistered = context.IsRegistered,
@@ -403,75 +447,73 @@ internal sealed partial class DocumentDataService
         };
     }
 
+    /// <summary>What the <c>mt_dotnet_type</c> comparison came to.</summary>
+    /// <param name="Expected">The full name of the type this row should hold, when one could be resolved.</param>
+    /// <param name="Mismatch">Whether the stored name names a different type.</param>
+    /// <param name="Warning">Something worth saying that is not a mismatch, or <see langword="null"/>.</param>
+    internal readonly record struct DotNetTypeCheck(string? Expected, bool Mismatch, string? Warning);
+
     /// <summary>
-    /// Whether <c>mt_dotnet_type</c> names a different type from the one the mapping expects.
+    /// Compares <c>mt_dotnet_type</c> with the type this row is supposed to be.
     /// </summary>
     /// <remarks>
-    /// Compared on the type name only, not on the assembly-qualified string: Marten writes the fully
-    /// qualified name including the assembly version, so a mismatch on the whole string would fire on
-    /// every store whose assembly was rebuilt, which is every store. What matters — and what makes
-    /// deserialization produce something other than what the mapping expects — is the type moving or
-    /// being renamed.
+    /// <para>
+    /// <b>On a hierarchy the expected type is the row's own subclass</b>, resolved through
+    /// <c>IDocumentType.TypeFor(mt_doc_type)</c> — which is Marten's own mapping from discriminator to CLR
+    /// type, and the only correct answer. Comparing every row of a hierarchy against the root's name was
+    /// reporting a mismatch on each of them, and the old defence against that — accepting any stored name
+    /// whose last segment matched the expected simple name — forgave the very thing this check exists to
+    /// find: a type that moved to another namespace.
+    /// </para>
+    /// <para>
+    /// <c>TypeFor</c> throws <see cref="ArgumentOutOfRangeException"/> for an alias no subclass claims
+    /// (verified against Marten 9.35). That is a real finding — a row whose discriminator names a subclass
+    /// this store no longer registers deserializes as nothing at all — so it becomes a warning rather than
+    /// an exception or a silent pass.
+    /// </para>
+    /// <para>
+    /// The comparison is on the type name only, never on the assembly-qualified string: Marten writes the
+    /// assembly version into it, so comparing the whole thing would fire on every store whose assembly was
+    /// rebuilt, which is every store.
+    /// </para>
     /// </remarks>
-    internal static bool IsDotNetTypeMismatch(string? storedType, Type? expected)
+    /// <param name="context">The collection, with its mapping when there is one.</param>
+    /// <param name="rowAlias">The row's <c>mt_doc_type</c>, when the column exists.</param>
+    /// <param name="storedType">The row's <c>mt_dotnet_type</c>, when the column exists.</param>
+    internal static DotNetTypeCheck CheckDotNetType(CollectionContext context, string? rowAlias, string? storedType)
     {
-        if (string.IsNullOrWhiteSpace(storedType) || expected is null)
+        ArgumentNullException.ThrowIfNull(context);
+
+        Type? expected = context.ClrType;
+        string? warning = null;
+
+        if (!string.IsNullOrWhiteSpace(rowAlias) && context.DocumentType is { } documentType)
         {
-            return false;
+            try
+            {
+                expected = documentType.TypeFor(rowAlias);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                warning =
+                    $"This row's mt_doc_type is '{rowAlias}', which is not a subclass '{documentType.Alias}' " +
+                    "registers any more. Marten cannot deserialize it.";
+            }
+        }
+
+        var expectedName = expected?.FullName;
+
+        if (string.IsNullOrWhiteSpace(storedType) || expectedName is null)
+        {
+            return new DotNetTypeCheck(expectedName, false, warning);
         }
 
         var storedName = storedType.Split(',', 2)[0].Trim();
-        var expectedName = expected.FullName;
 
-        if (expectedName is null)
-        {
-            return false;
-        }
-
-        if (string.Equals(storedName, expectedName, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        // A hierarchy's rows carry the *subclass* type, which is a different name from the root and is
-        // exactly right rather than a mismatch. Nested type names use '+' where the CLR does.
-        return !storedName.EndsWith("." + expected.Name, StringComparison.Ordinal) &&
-               !storedName.EndsWith("+" + expected.Name, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// Names the <c>mt_upsert_&lt;alias&gt;</c> function when the database actually has one.
-    /// </summary>
-    /// <remarks>
-    /// Looked up rather than composed. Marten 9 writes documents with inline SQL and creates no
-    /// per-document upsert function, so a pane that printed the conventional name would be naming an
-    /// object that is not there - which is precisely the kind of thing somebody would then go looking for
-    /// in psql.
-    /// </remarks>
-    private async Task<DocumentDetail> WithUpsertFunctionAsync(
-        ResolvedScope resolved,
-        DocumentTableInfo table,
-        DocumentDetail detail)
-    {
-        var wanted = "mt_upsert_" + table.Alias;
-
-        try
-        {
-            foreach (DbObjectName function in await resolved.Database.Functions().ConfigureAwait(false))
-            {
-                if (string.Equals(function.Name, wanted, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(function.Schema, table.Schema, StringComparison.OrdinalIgnoreCase))
-                {
-                    return detail with { UpsertFunction = SqlIdentifier.Qualify(function.Schema, function.Name) };
-                }
-            }
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            logger.LogDebug(exception, "Marten Studio could not list the functions of the database");
-        }
-
-        return detail;
+        return new DotNetTypeCheck(
+            expectedName,
+            !string.Equals(storedName, expectedName, StringComparison.Ordinal),
+            warning);
     }
 
     private async Task<DocumentDetail> WithSizesAsync(
@@ -481,7 +523,8 @@ internal sealed partial class DocumentDataService
         string? tenantId,
         CancellationToken cancellationToken)
     {
-        if (!DocumentBrowseQueries.TryBuildSizes(table, detail.Id, tenantId, out NpgsqlCommand? command, out _))
+        if (!DocumentBrowseQueries.TryBuildSizes(
+                table, detail.Id, tenantId, CommandTimeoutSeconds, out NpgsqlCommand? command, out _))
         {
             return detail;
         }

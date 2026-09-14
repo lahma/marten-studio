@@ -32,12 +32,15 @@ namespace MartenStudio.Integration.Tests;
 /// re-pointed at that schema, which is why the demo's own <c>studio_sample</c> is never touched.
 /// </para>
 /// <para>
-/// <b>Reusing it from a later packet.</b> Derive a test class from <see cref="MartenTestBase" />, and
-/// override <see cref="MartenTestBase.ConfigureStore" /> to add document or event types, or
-/// <see cref="MartenTestBase.ConfigureStudio" /> to turn capabilities on. Override
-/// <see cref="MartenTestBase.SeedAsync" /> for data this class alone needs - the sample seeder has already
-/// run by then. Everything a test needs is on the base class: <see cref="MartenTestBase.Store" />,
-/// <see cref="MartenTestBase.Scope" /> and <see cref="MartenTestBase.Services" />.
+/// <b>Reusing it from a later packet.</b> Declare a nested <c>public sealed class Fixture(PostgresFixture
+/// postgres) : MartenClassFixture(postgres)</c> in the test class, override
+/// <see cref="MartenClassFixture.ConfigureStore" /> to add document or event types, or
+/// <see cref="MartenClassFixture.ConfigureStudio" /> to turn capabilities on, and
+/// <see cref="MartenClassFixture.SeedAsync" /> for data this class alone needs - the sample seeder has
+/// already run by then. Derive the test class from <see cref="MartenTestBase" /> and add
+/// <c>IClassFixture&lt;Fixture&gt;</c>; everything a test needs is on the base class:
+/// <see cref="MartenTestBase.Store" />, <see cref="MartenTestBase.Scope" /> and
+/// <see cref="MartenTestBase.Services" />.
 /// </para>
 /// </remarks>
 public sealed class MartenFixture : IAsyncDisposable
@@ -180,33 +183,44 @@ public sealed class MartenFixture : IAsyncDisposable
 }
 
 /// <summary>
-/// A test class with its own Marten schema, its own studio container and the sample data already in it.
+/// One Marten store, one studio container and one seeded schema, built <b>once for a whole test class</b>.
 /// </summary>
 /// <remarks>
-/// When Docker is absent nothing is created and every test in the class skips - use
+/// <para>
+/// <b>Why this is a class fixture and not <c>IAsyncLifetime</c> on the test class.</b> xunit constructs a
+/// test class per test <em>method</em>, so an <c>IAsyncLifetime</c> that built the store rebuilt it — and
+/// re-ran <c>ApplyAllConfiguredChangesToDatabaseAsync</c> and the seeder — once per test. That is not a
+/// tidiness point: <c>DocumentPagingLiveTests</c> seeds ten thousand customers, and it was seeding them
+/// five times per run. A class fixture is constructed once, before the first test of the class, and
+/// disposed after the last.
+/// </para>
+/// <para>
+/// <b>Isolation is still per class.</b> The schema is named after the fixture's <em>declaring</em> type,
+/// so the conventional shape — a nested <c>public sealed class Fixture : MartenClassFixture</c> inside the
+/// test class — gives every class its own schema, exactly as the old base class did, while letting several
+/// classes run in parallel.
+/// </para>
+/// <para>
+/// <b>Reusing it.</b> Derive a nested fixture, override <see cref="ConfigureStore" /> to add document or
+/// event types, <see cref="ConfigureStudio" /> to turn capabilities on, <see cref="SeedSampleData" /> to
+/// turn the demo data off, and <see cref="SeedAsync" /> for data this class alone needs. Then derive the
+/// test class from <see cref="MartenTestBase" /> and add <c>IClassFixture&lt;…&gt;</c>.
+/// </para>
+/// <para>
+/// When Docker is absent nothing is created and every test in the class skips — use
 /// <see cref="PostgresFactAttribute" /> so that they do.
+/// </para>
 /// </remarks>
-public abstract class MartenTestBase(PostgresFixture postgres) : IAsyncLifetime
+/// <param name="postgres">The assembly's shared container.</param>
+public abstract class MartenClassFixture(PostgresFixture postgres) : IAsyncLifetime
 {
     private MartenFixture? fixture;
 
-    /// <summary>The fixture, once <see cref="InitializeAsync" /> has run.</summary>
-    protected MartenFixture Marten => fixture
+    /// <summary>The store and container, once <see cref="InitializeAsync" /> has run.</summary>
+    public MartenFixture Marten => fixture
         ?? throw new InvalidOperationException(
             "The Marten fixture is not running. A test that needs it must be a [PostgresFact] so that it " +
             "skips instead of failing when Docker is absent.");
-
-    /// <summary>The store, as the sample host configures it.</summary>
-    protected IDocumentStore Store => Marten.Store;
-
-    /// <summary>The studio's container.</summary>
-    protected IServiceProvider Services => Marten.Services;
-
-    /// <summary>The scope every data call is made with.</summary>
-    internal StudioScope Scope => Marten.Scope;
-
-    /// <summary>This class's schema.</summary>
-    protected string Schema => Marten.Schema;
 
     /// <summary>
     /// The shared container, for the rare test that has to reach the database without the studio -
@@ -214,7 +228,10 @@ public abstract class MartenTestBase(PostgresFixture postgres) : IAsyncLifetime
     /// <c>CreateConnection()</c> is not a substitute: Npgsql strips the password out of
     /// <c>ConnectionString</c>, so a connection string taken from it cannot be reopened.
     /// </summary>
-    protected PostgresFixture Postgres { get; } = postgres;
+    public PostgresFixture Postgres { get; } = postgres;
+
+    /// <summary>The schema this fixture's tables live in.</summary>
+    public string Schema { get; private set; } = string.Empty;
 
     /// <inheritdoc />
     public async ValueTask InitializeAsync()
@@ -224,16 +241,18 @@ public abstract class MartenTestBase(PostgresFixture postgres) : IAsyncLifetime
             return;
         }
 
-        var schema = GetType().Name.ToLowerInvariant();
+        // The declaring type, so a nested `Fixture` is named after the test class that owns it rather
+        // than colliding with every other nested `Fixture` in the assembly.
+        Schema = (GetType().DeclaringType ?? GetType()).Name.ToLowerInvariant();
 
         // Dropped before it is created, because the container is reused between local runs and would
         // otherwise be carrying this class's tables from an earlier one.
-        await Postgres.CreateSchemaAsync(schema);
-        await Postgres.CreateSchemaAsync(schema + "_events");
+        await Postgres.CreateSchemaAsync(Schema);
+        await Postgres.CreateSchemaAsync(Schema + "_events");
 
         fixture = await MartenFixture.CreateAsync(
             Postgres.ConnectionString,
-            schema,
+            Schema,
             ConfigureStore,
             ConfigureStudio);
 
@@ -271,6 +290,35 @@ public abstract class MartenTestBase(PostgresFixture postgres) : IAsyncLifetime
 
     /// <summary>Data this class alone needs, written after the sample seeder has run.</summary>
     protected virtual Task SeedAsync() => Task.CompletedTask;
+}
+
+/// <summary>
+/// A test class reading one <see cref="MartenClassFixture" />: everything it needs, without the lifecycle.
+/// </summary>
+/// <remarks>
+/// The test class still has to declare <c>IClassFixture&lt;TFixture&gt;</c> — that is what makes xunit
+/// build the fixture once and hand it to the constructor.
+/// </remarks>
+/// <param name="fixture">The class's fixture.</param>
+public abstract class MartenTestBase(MartenClassFixture fixture)
+{
+    /// <summary>The store and container for this class.</summary>
+    protected MartenFixture Marten => fixture.Marten;
+
+    /// <summary>The store, as the sample host configures it.</summary>
+    protected IDocumentStore Store => Marten.Store;
+
+    /// <summary>The studio's container.</summary>
+    protected IServiceProvider Services => Marten.Services;
+
+    /// <summary>The scope every data call is made with.</summary>
+    internal StudioScope Scope => Marten.Scope;
+
+    /// <summary>This class's schema.</summary>
+    protected string Schema => Marten.Schema;
+
+    /// <summary>The shared container. See <see cref="MartenClassFixture.Postgres" />.</summary>
+    protected PostgresFixture Postgres => fixture.Postgres;
 
     /// <summary>A scoped documents data service.</summary>
     internal MartenFixture.ScopedService<IDocumentDataService> Documents() => Marten.Documents();

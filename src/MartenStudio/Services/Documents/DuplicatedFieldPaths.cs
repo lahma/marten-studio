@@ -170,16 +170,20 @@ internal static class DuplicatedFieldPaths
             return AgreementState.Agrees;
         }
 
-        // `1000.00` from a numeric column and `1000` from the JSON are the same number; `True` from
-        // Npgsql and `true` from the document are the same boolean. Neither is a drift worth a red dot.
+        // `1000.00` from a numeric column and `1000` from the JSON are the same number, and that is a
+        // rendering difference rather than a drift. It is the *only* one tolerated: booleans already
+        // arrive as `true`/`false` from both sides, because DocumentDataService.DisplayValue renders them
+        // that way, so nothing else needs forgiving.
         if (decimal.TryParse(columnValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var left) &&
             decimal.TryParse(jsonValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var right))
         {
             return left == right ? AgreementState.Agrees : AgreementState.Differs;
         }
 
-        return string.Equals(columnValue, jsonValue, StringComparison.OrdinalIgnoreCase)
-            ? AgreementState.Agrees
-            : AgreementState.Differs;
+        // Ordinal, deliberately. A case-insensitive comparison here says "agrees" about a column holding
+        // `ADA@EXAMPLE.COM` beside a document holding `ada@example.com` — which is precisely the drift
+        // this dot exists to catch, because the column is what a filter reads and Postgres compares it
+        // case-sensitively unless somebody made it citext.
+        return AgreementState.Differs;
     }
 }

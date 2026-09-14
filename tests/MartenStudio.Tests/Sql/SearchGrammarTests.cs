@@ -290,6 +290,35 @@ public class SearchGrammarTests
         act.Should().NotThrow();
     }
 
+    /// <summary>
+    /// <c>type:&lt;alias&gt;</c> filters a hierarchy — the fourth reserved keyword.
+    /// </summary>
+    /// <remarks>
+    /// It exists because the verdict strip already wrote a subclass filter back out as <c>type:car</c>:
+    /// a chip a user can read and cannot type teaches a syntax the search box then treats as free text.
+    /// </remarks>
+    [Fact]
+    public void The_type_keyword_is_a_subclass_filter()
+    {
+        SearchGrammar.Parse("type:car").Predicates.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new DocumentPredicate.SubclassIs("car"));
+
+        SearchGrammar.Parse("TYPE:Car").Predicates.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new DocumentPredicate.SubclassIs("Car"));
+    }
+
+    /// <summary>
+    /// A document that genuinely has a JSON property called <c>type</c> is still reachable: the keyword is
+    /// only the bare word in front of a colon, so quoting the path or using an explicit operator gets the
+    /// property back.
+    /// </summary>
+    [Theory]
+    [InlineData("\"type\": car")]
+    [InlineData("type = car")]
+    public void A_json_property_called_type_is_still_reachable(string search) =>
+        SearchGrammar.Parse(search).Predicates.Should().ContainSingle()
+            .Which.Should().BeOfType<DocumentPredicate.FieldCompare>();
+
     private static SearchValue Value(string text) =>
         SearchGrammar.Parse(text).Predicates.OfType<DocumentPredicate.FieldCompare>().Single().Value;
 }

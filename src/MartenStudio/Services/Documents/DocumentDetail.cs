@@ -94,29 +94,45 @@ internal sealed record DocumentDetail
     public required string TableName { get; init; }
 
     /// <summary>
-    /// The <c>mt_upsert_&lt;alias&gt;</c> function this collection is written through, when the database
-    /// has one.
+    /// The function this collection is written through — always <see langword="null" /> on Marten 9.
     /// </summary>
     /// <remarks>
-    /// <see langword="null" /> on a store Marten 9 built: it generates the write SQL inline and creates no
-    /// per-document upsert function at all (verified against 9.35 — the function list of a fresh store
-    /// holds only Marten's shared helpers). The name is still looked up rather than assumed, because a
-    /// database migrated from an older Marten keeps the functions, and "which function writes this row"
-    /// is the question the pane exists to answer.
+    /// <para>
+    /// A constant, and that is the finding rather than a shortcut. Marten 9 generates the write SQL inline
+    /// and creates no <c>mt_upsert_&lt;alias&gt;</c> function at all (AGENTS.md D6, verified against a live
+    /// 9.35 schema by P7). The studio used to look it up per detail load through
+    /// <c>IMartenDatabase.Functions()</c> — which is <c>AllObjects()</c>, which builds Marten's feature
+    /// schemas, which applies the HiLo migration: a read path running DDL, on its own connection, with no
+    /// command timeout and no cancellation token, to discover something that is never there (P2-fix B4).
+    /// </para>
+    /// <para>
+    /// Nothing sets it, so the pane says "none — written with inline SQL", which is both the truth and the
+    /// more useful answer. It stays settable rather than becoming a constant so that a future Marten that
+    /// brings the functions back has somewhere to put them without the pane's markup changing twice.
+    /// </para>
     /// </remarks>
     public string? UpsertFunction { get; init; }
 
     /// <summary>What <c>mt_dotnet_type</c> holds, when the column exists.</summary>
     public string? StoredDotNetType { get; init; }
 
-    /// <summary>What the mapping says the type is, for comparison.</summary>
+    /// <summary>
+    /// The full name of the type this row should hold — on a hierarchy, the subclass its
+    /// <c>mt_doc_type</c> names rather than the collection's root.
+    /// </summary>
     public string? ExpectedDotNetType { get; init; }
 
     /// <summary>
-    /// Whether the two disagree. A mismatch means the row was written by a different assembly version or
-    /// a renamed type, and deserializing it may not produce what the mapping expects.
+    /// Whether the two disagree. A mismatch means the row was written by a renamed or moved type, and
+    /// deserializing it may not produce what the mapping expects.
     /// </summary>
     public bool DotNetTypeMismatch { get; init; }
+
+    /// <summary>
+    /// Something about the row's type that is worth saying and is not a mismatch — a <c>mt_doc_type</c>
+    /// naming a subclass this store no longer registers — or <see langword="null" />.
+    /// </summary>
+    public string? DotNetTypeWarning { get; init; }
 
     /// <summary>The CLR type, so the JSON viewer can resolve Marten LINQ paths.</summary>
     public Type? ClrType { get; init; }

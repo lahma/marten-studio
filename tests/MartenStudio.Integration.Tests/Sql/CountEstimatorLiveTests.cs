@@ -21,11 +21,15 @@ public class CountEstimatorLiveTests(PostgresFixture fixture) : PostgresTestBase
 
     /// <summary>
     /// A freshly seeded table has never been analysed, and Postgres reports <c>reltuples = -1</c> for it.
-    /// That is the case a naive estimator gets wrong by showing "about -1 documents" on a new store's very
-    /// first page, which is why the threshold exists.
     /// </summary>
+    /// <remarks>
+    /// That number is not a count and it is not zero: it means nobody has measured this table. Reporting
+    /// it as <c>Estimate(0)</c> put "~0 documents" over a page of a thousand rows on a new store's very
+    /// first page (P2-fix H2), so the estimator says <c>Unknown</c> and the caller decides whether the
+    /// exact count is worth paying for. <c>CountAsync</c> decides that it is.
+    /// </remarks>
     [PostgresFact]
-    public async Task A_table_that_has_never_been_analysed_falls_through_to_the_exact_count()
+    public async Task A_table_that_has_never_been_analysed_is_unknown_and_falls_through_to_the_exact_count()
     {
         var estimator = new CountEstimator();
 
@@ -33,12 +37,14 @@ public class CountEstimatorLiveTests(PostgresFixture fixture) : PostgresTestBase
 
         var estimate = await estimator.EstimateAsync(connection, Schema, "mt_doc_thing");
 
-        estimate.IsUnavailable.Should().BeFalse();
-        estimate.Value.Should().Be(0, "Postgres reports -1 for a table with no statistics, which is not a count");
+        estimate.IsUnknown.Should().BeTrue("Postgres reports -1 for a table with no statistics");
+        estimate.IsEstimate.Should().BeFalse("there is no estimate - that is the whole point");
+        estimate.Value.Should().Be(0);
 
         var count = await estimator.CountAsync(connection, Schema, "mt_doc_thing");
 
         count.IsEstimate.Should().BeFalse();
+        count.IsUnknown.Should().BeFalse();
         count.Value.Should().Be(1000);
     }
 

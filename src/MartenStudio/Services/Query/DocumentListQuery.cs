@@ -155,4 +155,15 @@ internal sealed record DocumentListQuery
     /// The threshold above which <c>data</c> is not inlined. The list still reports every document's size.
     /// </summary>
     public int MaxInlineDocumentBytes { get; init; } = DefaultMaxInlineDocumentBytes;
+
+    /// <summary>
+    /// The command timeout the built read carries, in seconds. Zero leaves Npgsql's own default.
+    /// </summary>
+    /// <remarks>
+    /// On the query rather than on the builder call so that no caller can build a list read and forget it:
+    /// Npgsql's default is thirty seconds and has nothing to do with the host's <c>QueryTimeout</c>, and a
+    /// read that outlives the option configured to bound it is exactly the denial of service D8 exists to
+    /// prevent.
+    /// </remarks>
+    public int CommandTimeoutSeconds { get; init; }
 }

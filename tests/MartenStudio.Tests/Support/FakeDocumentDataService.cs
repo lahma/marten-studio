@@ -81,6 +81,12 @@ internal sealed class FakeDocumentDataService : IDocumentDataService
         string id,
         CancellationToken cancellationToken = default) => Task.FromResult(Related);
 
+    public Task<RelatedDocuments> GetRelatedAsync(
+        StudioScope scope,
+        string alias,
+        DocumentDetail detail,
+        CancellationToken cancellationToken = default) => Task.FromResult(Related);
+
     public Task<bool> StreamExistsAsync(StudioScope scope, string id, CancellationToken cancellationToken = default) =>
         Task.FromResult(StreamExists);
 

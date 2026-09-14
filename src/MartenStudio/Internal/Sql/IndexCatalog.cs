@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 using MartenStudio.Services.Query;
 
 using Npgsql;
@@ -21,7 +19,9 @@ namespace MartenStudio.Internal.Sql;
 /// <para>
 /// Cached like <see cref="ColumnCatalog"/>, and for the same reason: the verdict is asked for on every
 /// search, indexes only change with a migration, and the cache key is the database identity rather than
-/// the connection string, which holds a password.
+/// the connection string, which holds a password. Bounded and expiring for the same reasons too — see
+/// <see cref="CatalogCache{TValue}"/> — which matters more here than anywhere else in the studio, because
+/// a stale index list is a verdict that tells somebody to add the index they have just added.
 /// </para>
 /// </remarks>
 internal sealed class IndexCatalog
@@ -35,7 +35,7 @@ internal sealed class IndexCatalog
         order by indexname
         """;
 
-    private readonly ConcurrentDictionary<string, IReadOnlyList<PostgresIndex>> cache = new(StringComparer.Ordinal);
+    private readonly CatalogCache<IReadOnlyList<PostgresIndex>> cache = new();
 
     /// <summary>How long an index read may take before it is abandoned.</summary>
     public int CommandTimeoutSeconds { get; init; } = 15;
@@ -53,7 +53,7 @@ internal sealed class IndexCatalog
 
         var key = $"{connection.Host}:{connection.Port}/{connection.Database}/{schema}/{table}";
 
-        if (cache.TryGetValue(key, out var cached))
+        if (cache.TryGet(key, out var cached))
         {
             return cached;
         }
@@ -73,7 +73,7 @@ internal sealed class IndexCatalog
             }
         }
 
-        cache[key] = indexes;
+        cache.Set(key, indexes);
 
         return indexes;
     }

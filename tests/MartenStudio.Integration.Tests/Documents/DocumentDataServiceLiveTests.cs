@@ -1,3 +1,4 @@
+using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Query;
@@ -15,46 +16,52 @@ namespace MartenStudio.Integration.Tests.Documents;
 /// reach: that the SQL the builders produce is SQL Postgres accepts, against tables Marten made, for every
 /// identity type and every metadata shape the sample domain has.
 /// </remarks>
-public class DocumentDataServiceLiveTests(PostgresFixture postgres) : MartenTestBase(postgres)
+public class DocumentDataServiceLiveTests(DocumentDataServiceLiveTests.Fixture fixture)
+    : MartenTestBase(fixture), IClassFixture<DocumentDataServiceLiveTests.Fixture>
 {
-    /// <summary>
-    /// The sample's two tenants, named outright.
-    /// </summary>
-    /// <remarks>
-    /// A host with conjoined <em>documents</em> and a single-tenant event store has to name them: the
-    /// studio's tenant discovery falls back to querying <c>mt_streams</c>, and that tier only runs when
-    /// the event store itself is conjoined. See the packet report - this is a gap in tenant discovery, not
-    /// in the documents browser.
-    /// </remarks>
-    protected override void ConfigureStudio(MartenStudioOptions options)
+    /// <summary>One store, one schema and one seed for the whole class.</summary>
+    /// <param name="postgres">The assembly's container.</param>
+    public sealed class Fixture(PostgresFixture postgres) : MartenClassFixture(postgres)
     {
-        foreach (string tenantId in SampleStore.TenantIds)
+        /// <summary>
+        /// The sample's two tenants, named outright.
+        /// </summary>
+        /// <remarks>
+        /// A host with conjoined <em>documents</em> and a single-tenant event store has to name them: the
+        /// studio's tenant discovery falls back to querying <c>mt_streams</c>, and that tier only runs
+        /// when the event store itself is conjoined. See the packet report - this is a gap in tenant
+        /// discovery, not in the documents browser.
+        /// </remarks>
+        protected override void ConfigureStudio(MartenStudioOptions options)
         {
-            options.KnownTenantIds.Add(tenantId);
+            foreach (string tenantId in SampleStore.TenantIds)
+            {
+                options.KnownTenantIds.Add(tenantId);
+            }
         }
-    }
 
-    /// <summary>An <c>mt_doc_*</c> table Marten knows nothing about, for the Discovered band.</summary>
-    protected override async Task SeedAsync()
-    {
-        await using NpgsqlConnection connection = await Postgres.OpenAsync();
+        /// <summary>An <c>mt_doc_*</c> table Marten knows nothing about, for the Discovered band.</summary>
+        protected override async Task SeedAsync()
+        {
+            await using NpgsqlConnection connection = await Postgres.OpenAsync();
 
-        await using var command = new NpgsqlCommand(
-            $"""
-             create table if not exists "{Schema}"."mt_doc_orphan" (
-                 id uuid primary key,
-                 data jsonb not null,
-                 mt_last_modified timestamptz default transaction_timestamp()
-             );
-             insert into "{Schema}"."mt_doc_orphan" (id, data)
-             values ('8f1d5a6e-0000-0000-0000-0000000000ff', @json::jsonb)
-             on conflict (id) do nothing;
-             """,
-            connection);
+            await using var command = new NpgsqlCommand(
+                $"""
+                 create table if not exists "{Schema}"."mt_doc_orphan" (
+                     id uuid primary key,
+                     data jsonb not null,
+                     mt_last_modified timestamptz default transaction_timestamp()
+                 );
+                 insert into "{Schema}"."mt_doc_orphan" (id, data)
+                 values ('8f1d5a6e-0000-0000-0000-0000000000ff', @json::jsonb)
+                 on conflict (id) do nothing;
+                 """,
+                connection);
 
-        command.Parameters.AddWithValue("json", """{"Left":"behind"}""");
+            command.Parameters.AddWithValue("json", """{"Left":"behind"}""");
 
-        await command.ExecuteNonQueryAsync();
+            await command.ExecuteNonQueryAsync();
+        }
     }
 
     [PostgresFact]
@@ -104,6 +111,78 @@ public class DocumentDataServiceLiveTests(PostgresFixture postgres) : MartenTest
 
         exact.IsEstimate.Should().BeFalse();
         exact.Value.Should().Be(25);
+    }
+
+    /// <summary>
+    /// P2-fix H1: an exact count answers for the scope the page is in.
+    /// </summary>
+    /// <remarks>
+    /// The rail's estimate is a whole-table <c>reltuples</c> and cannot be anything else, but the number a
+    /// visitor asks for by pressing "=" has to be the number of rows they can see. Six invoices under a
+    /// scope showing three is the studio answering a question nobody asked.
+    /// </remarks>
+    [PostgresFact]
+    public async Task An_exact_count_of_a_conjoined_collection_counts_the_tenant_in_scope()
+    {
+        using var documents = Documents();
+
+        DocumentCount everyone = await documents.Service.CountExactAsync(
+            Scope, "invoice", TestContext.Current.CancellationToken);
+
+        DocumentCount acme = await documents.Service.CountExactAsync(
+            MartenFixture.ScopeFor("acme"), "invoice", TestContext.Current.CancellationToken);
+
+        everyone.Value.Should().Be(6, "the seeder writes three invoices for each of the two tenants");
+        acme.Value.Should().Be(3);
+        acme.IsEstimate.Should().BeFalse();
+
+        // ... and the list under the same scope shows exactly those rows, so the header and the grid agree.
+        DocumentPage page = await documents.Service.ListAsync(
+            MartenFixture.ScopeFor("acme"),
+            "invoice",
+            new DocumentListRequest { PageSize = 100, ExactCount = true },
+            TestContext.Current.CancellationToken);
+
+        page.Rows.Should().HaveCount(3);
+        page.Estimate.Value.Should().Be(3);
+    }
+
+    /// <summary>
+    /// P2-fix H2: a table Postgres has never analysed says how big it is, or says it does not know.
+    /// </summary>
+    /// <remarks>
+    /// <c>reltuples</c> is <c>-1</c> until the first <c>ANALYZE</c> — the state every freshly seeded
+    /// collection is in, which is to say the state of every store a new user opens the studio against.
+    /// Mapping that to <c>Estimate(0)</c> drew "~0 documents" over a page of twenty-five customers.
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_never_analysed_collection_reports_its_real_size_rather_than_about_zero()
+    {
+        // The anti-vacuity half: this really is a never-analysed table, so the assertions below are about
+        // the case they claim to be about. Twenty-five rows is under autovacuum's analyze threshold of
+        // fifty, so nothing will have measured it behind the test's back.
+        await using (NpgsqlConnection connection = await Postgres.OpenAsync(TestContext.Current.CancellationToken))
+        {
+            DocumentCount raw = await new CountEstimator()
+                .EstimateAsync(connection, Schema, "mt_doc_customer", TestContext.Current.CancellationToken);
+
+            raw.IsUnknown.Should().BeTrue("pg_class.reltuples is -1 until the first ANALYZE");
+            raw.IsEstimate.Should().BeFalse();
+        }
+
+        using var documents = Documents();
+
+        CollectionRail rail = await documents.Service.GetCollectionsAsync(Scope, TestContext.Current.CancellationToken);
+        CollectionInfo customer = rail.Find("customer")!;
+
+        customer.Count.Value.Should().Be(25);
+        customer.Count.IsEstimate.Should().BeFalse("there is no estimate to be had, so the rail paid for the truth");
+
+        DocumentPage page = await documents.Service.ListAsync(
+            Scope, "customer", new DocumentListRequest { PageSize = 5 }, TestContext.Current.CancellationToken);
+
+        page.Estimate.IsUnavailable.Should().BeFalse();
+        page.Estimate.Value.Should().Be(25, "the header must not say ~0 over a page of rows");
     }
 
     [PostgresFact]
@@ -236,6 +315,37 @@ public class DocumentDataServiceLiveTests(PostgresFixture postgres) : MartenTest
         cars.Sql.Should().Contain("mt_doc_type");
     }
 
+    /// <summary>
+    /// P2-fix follow-up 10: the chip the verdict strip renders is a term the search box accepts.
+    /// </summary>
+    /// <remarks>
+    /// Browsing <c>/marten/documents/car</c> adds a subclass predicate, which the strip writes back out as
+    /// <c>type:car</c> — a syntax the grammar had no keyword for, so copying the chip into the search box
+    /// produced a free-text search for the words "type:car" instead.
+    /// </remarks>
+    [PostgresFact]
+    public async Task The_type_keyword_filters_a_hierarchy_the_way_the_verdict_chip_spells_it()
+    {
+        using var documents = Documents();
+
+        DocumentPage typed = await documents.Service.ListAsync(
+            Scope,
+            "vehicle",
+            new DocumentListRequest { Search = "type:car", PageSize = 100 },
+            TestContext.Current.CancellationToken);
+
+        typed.State.Should().Be(DocumentListState.Loaded, typed.Error);
+        typed.Rows.Should().HaveCount(6);
+        typed.Rows.Should().OnlyContain(x => x.DocumentTypeAlias == "car");
+        typed.Sql.Should().Contain("mt_doc_type");
+
+        // Green, because Marten 9.35's DocumentTable adds an index on mt_doc_type for a hierarchy - so the
+        // advisor's own fallback ("Marten creates no index on it", which would be amber) is not reached
+        // here. Either way the read is not withheld, which is what the assertion above is about.
+        typed.Verdict.FilterLevel.Should().NotBe(IndexVerdictLevel.Red);
+        typed.Verdict.Chips.Should().Contain(x => x.Text == "type:car");
+    }
+
     [PostgresFact]
     public async Task A_document_with_every_metadata_column_reports_every_one_of_them()
     {
@@ -313,10 +423,105 @@ public class DocumentDataServiceLiveTests(PostgresFixture postgres) : MartenTest
         detail.TableName.Should().Be($"\"{Schema}\".\"mt_doc_customer\"");
 
         // Marten 9 writes documents with inline SQL and creates no per-document upsert function, so the
-        // pane must say "none" rather than name an object psql would not find.
+        // pane says "none - written with inline SQL" rather than naming an object psql would not find.
+        //
+        // The studio no longer asks the database this question - IMartenDatabase.Functions() is
+        // AllObjects(), which applies Marten's HiLo migration, and a detail page may not run DDL (P2-fix
+        // B4). This test asks it instead, and is now the anti-vacuity proof for that constant: a Marten
+        // that brought the upsert functions back would fail here rather than leave the pane quietly wrong.
         IReadOnlyList<Weasel.Core.DbObjectName> functions = await Store.Storage.Database.Functions();
         functions.Should().NotContain(x => x.Name == "mt_upsert_customer");
         detail.UpsertFunction.Should().BeNull();
+    }
+
+    /// <summary>
+    /// P2-fix H3: a subclass row is compared against its own type, not against the hierarchy's root.
+    /// </summary>
+    /// <remarks>
+    /// Every row of <c>mt_doc_vehicle</c> holds <c>MartenStudio.SampleDomain.Documents.Car</c> or
+    /// <c>…Truck</c> in <c>mt_dotnet_type</c>, and the root mapping is <c>Vehicle</c>. Comparing the two
+    /// reported a type mismatch on every subclass row in the store, which is the warning that is supposed
+    /// to mean something has genuinely gone wrong.
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_subclass_row_read_through_its_root_is_not_a_dotnet_type_mismatch()
+    {
+        using var documents = Documents();
+
+        DocumentPage vehicles = await documents.Service.ListAsync(
+            Scope, "vehicle", new DocumentListRequest { PageSize = 100 }, TestContext.Current.CancellationToken);
+
+        vehicles.Rows.Should().NotBeEmpty();
+
+        foreach (DocumentRow row in vehicles.Rows)
+        {
+            DocumentDetail detail = (await documents.Service.GetDocumentAsync(
+                Scope, "vehicle", row.Id, TestContext.Current.CancellationToken)).Detail!;
+
+            detail.DotNetTypeMismatch.Should().BeFalse(
+                "row '{0}' is a {1} and mt_dotnet_type says so", row.Id, row.DocumentTypeAlias);
+            detail.DotNetTypeWarning.Should().BeNull();
+            detail.ExpectedDotNetType.Should().Be(detail.StoredDotNetType!.Split(',')[0]);
+        }
+
+        // ... and reading the very same row through the subclass alias says the same thing.
+        DocumentPage cars = await documents.Service.ListAsync(
+            Scope, "car", new DocumentListRequest(), TestContext.Current.CancellationToken);
+
+        DocumentDetail car = (await documents.Service.GetDocumentAsync(
+            Scope, "car", cars.Rows[0].Id, TestContext.Current.CancellationToken)).Detail!;
+
+        car.DotNetTypeMismatch.Should().BeFalse();
+        car.ExpectedDotNetType.Should().EndWith(".Car");
+    }
+
+    /// <summary>
+    /// The other half of H3: a row whose <c>mt_dotnet_type</c> names a type in another namespace really is
+    /// a mismatch. The old comparison forgave it, because it accepted any stored name whose last segment
+    /// matched — which was how it avoided flagging every subclass row, and which made the check vacuous.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_row_whose_dotnet_type_names_another_namespace_is_a_mismatch()
+    {
+        using var documents = Documents();
+
+        DocumentPage cars = await documents.Service.ListAsync(
+            Scope, "car", new DocumentListRequest(), TestContext.Current.CancellationToken);
+
+        var id = cars.Rows[0].Id;
+
+        DocumentDetail before = (await documents.Service.GetDocumentAsync(
+            Scope, "car", id, TestContext.Current.CancellationToken)).Detail!;
+
+        var original = before.StoredDotNetType!;
+
+        try
+        {
+            await SetColumnAsync("mt_doc_vehicle", "mt_dotnet_type", id, "Somewhere.Else.Car, Somewhere.Else");
+
+            DocumentDetail drifted = (await documents.Service.GetDocumentAsync(
+                Scope, "car", id, TestContext.Current.CancellationToken)).Detail!;
+
+            drifted.DotNetTypeMismatch.Should().BeTrue("a Car that says it lives in another namespace is not a Car");
+        }
+        finally
+        {
+            await SetColumnAsync("mt_doc_vehicle", "mt_dotnet_type", id, original);
+        }
+    }
+
+    private async Task SetColumnAsync(string table, string column, string id, string value)
+    {
+        await using NpgsqlConnection connection = await Postgres.OpenAsync(TestContext.Current.CancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            $"update \"{Schema}\".\"{table}\" set \"{column}\" = @value where id = @id",
+            connection);
+
+        command.Parameters.AddWithValue("value", value);
+        command.Parameters.AddWithValue("id", Guid.Parse(id));
+
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
     [PostgresFact]
@@ -348,20 +553,41 @@ public class DocumentDataServiceLiveTests(PostgresFixture postgres) : MartenTest
 
         var id = page.Rows[0].Id;
 
-        await using (NpgsqlConnection connection = await Postgres.OpenAsync(TestContext.Current.CancellationToken))
-        {
-            await using var command = new NpgsqlCommand(
-                $"update \"{Schema}\".\"mt_doc_customer\" set email = 'drifted@example.com' where id = @id",
-                connection);
-
-            command.Parameters.AddWithValue("id", Guid.Parse(id));
-            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
-        }
-
-        DocumentDetail detail = (await documents.Service.GetDocumentAsync(
+        DocumentDetail before = (await documents.Service.GetDocumentAsync(
             Scope, "customer", id, TestContext.Current.CancellationToken)).Detail!;
 
-        detail.Duplicated.Single(x => x.ColumnName == "email").State.Should().Be(AgreementState.Differs);
+        var original = before.Duplicated.Single(x => x.ColumnName == "email").ColumnValue!;
+
+        try
+        {
+            await SetEmailColumnAsync(id, "drifted@example.com");
+
+            DocumentDetail detail = (await documents.Service.GetDocumentAsync(
+                Scope, "customer", id, TestContext.Current.CancellationToken)).Detail!;
+
+            detail.Duplicated.Single(x => x.ColumnName == "email").State.Should().Be(AgreementState.Differs);
+        }
+        finally
+        {
+            // The store is built once for the whole class now, so a test that writes has to put the row
+            // back: the agreement test above reads the same first row and would otherwise pass or fail
+            // depending on the order xunit happened to run them in.
+            await SetEmailColumnAsync(id, original);
+        }
+    }
+
+    private async Task SetEmailColumnAsync(string id, string email)
+    {
+        await using NpgsqlConnection connection = await Postgres.OpenAsync(TestContext.Current.CancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            $"update \"{Schema}\".\"mt_doc_customer\" set email = @email where id = @id",
+            connection);
+
+        command.Parameters.AddWithValue("email", email);
+        command.Parameters.AddWithValue("id", Guid.Parse(id));
+
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
     [PostgresFact]
@@ -537,6 +763,46 @@ public class DocumentDataServiceLiveTests(PostgresFixture postgres) : MartenTest
         page.State.Should().Be(DocumentListState.Loaded, page.Error);
         page.Sql.Should().Contain("nulls last");
         page.Rows.Select(x => x.Cells[1]).Should().BeInAscendingOrder();
+    }
+
+    /// <summary>
+    /// P2-fix follow-up 2 (the ledger's W2-fix-2): a filter this collection cannot answer is a chip, not a
+    /// stack trace.
+    /// </summary>
+    /// <remarks>
+    /// Each of these parses perfectly — the grammar has no way to know whether a collection is
+    /// soft-deleted, conjoined, or what shape its id column is — and used to be discovered only when the
+    /// query builder threw, which happened after the verdict strip had been composed. The page rendered
+    /// <c>ArgumentException.Message</c>, parameter name and all, beside a green badge.
+    /// </remarks>
+    [PostgresTheory]
+    [InlineData("is:deleted", "*not soft-deleted*")]
+    [InlineData("tenant:acme", "*not conjoined-tenanted*")]
+    [InlineData("id:not-a-guid", "*not a GUID*")]
+    public async Task A_filter_this_collection_cannot_answer_is_a_grammar_error_and_not_an_exception(
+        string search,
+        string expected)
+    {
+        using var documents = Documents();
+
+        DocumentPage page = await documents.Service.ListAsync(
+            Scope,
+            "customer",
+            new DocumentListRequest { Search = search, RunAnyway = true },
+            TestContext.Current.CancellationToken);
+
+        page.State.Should().Be(DocumentListState.BlockedByVerdict);
+        page.Error.Should().BeNull("a refusal is a verdict, not a failure of the page");
+        page.Rows.Should().BeEmpty();
+
+        page.Verdict.HasErrors.Should().BeTrue();
+        page.Verdict.Level.Should().Be(IndexVerdictLevel.Red);
+        page.Verdict.FilterLevel.Should().Be(IndexVerdictLevel.Red, "the badge must not stay green");
+
+        SearchGrammarError error = page.Verdict.Errors.Should().ContainSingle().Subject;
+
+        error.Message.Should().Match(expected);
+        error.Message.Should().NotContain("Parameter", "a C# parameter name is not something to show a visitor");
     }
 
     [PostgresFact]

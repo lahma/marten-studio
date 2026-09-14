@@ -163,4 +163,33 @@ public class SearchVerdictTests
         verdict.Level.Should().Be(IndexVerdictLevel.Amber);
         verdict.Chips.Should().ContainSingle().Which.Text.Should().Be("type:sqltestvipcustomer");
     }
+
+    /// <summary>
+    /// A builder refusal lands in the verdict, not beside it.
+    /// </summary>
+    /// <remarks>
+    /// P2-fix follow-up 2: a predicate the collection cannot answer used to throw after the strip had been
+    /// composed, so the page rendered an exception message under a green badge. Folded in here it is an
+    /// error chip like any other, the rest of the verdict survives, and the badge turns red.
+    /// </remarks>
+    [Fact]
+    public void A_builder_refusal_becomes_an_error_chip_and_turns_the_badge_red()
+    {
+        SearchVerdict green = Evaluate("id:00000000-0000-0000-0000-000000000001");
+
+        green.Level.Should().Be(IndexVerdictLevel.Green, "the precondition for this test to mean anything");
+
+        SearchVerdict refused = DocumentDataService.WithRefusal(
+            green, "'sqltestcustomer' is not soft-deleted, so it has no mt_deleted column to filter on.");
+
+        refused.Level.Should().Be(IndexVerdictLevel.Red);
+        refused.FilterLevel.Should().Be(IndexVerdictLevel.Red);
+        refused.HasErrors.Should().BeTrue();
+
+        refused.Errors.Should().ContainSingle()
+            .Which.Message.Should().Contain("not soft-deleted").And.NotContain("Parameter");
+
+        refused.Chips.Should().HaveCount(green.Chips.Count + 1, "the terms that did parse are still shown");
+        refused.Chips[^1].Kind.Should().Be(SearchChipKind.Error);
+    }
 }

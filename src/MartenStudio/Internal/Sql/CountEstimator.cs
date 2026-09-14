@@ -1,3 +1,7 @@
+using System.Text;
+
+using MartenStudio.Services.Query;
+
 using Npgsql;
 
 using NpgsqlTypes;
@@ -8,9 +12,19 @@ namespace MartenStudio.Internal.Sql;
 /// How many documents a collection holds — or the honest admission that the studio could not find out.
 /// </summary>
 /// <remarks>
+/// <para>
 /// "Cannot report" is a value, not an error (plan §4.8): a table that has been dropped under the studio,
 /// or a database that refused the read, must be drawn differently from a collection that genuinely holds
 /// nothing. <see cref="IsEstimate"/> is what the UI prefixes with <c>~</c> (D8).
+/// </para>
+/// <para>
+/// <see cref="Unknown"/> is the third answer, and it is why <see cref="IsUnknown"/> exists beside
+/// <see cref="IsUnavailable"/>. Postgres reports <c>reltuples = -1</c> for a table it has never analysed,
+/// which is every freshly seeded collection; rendering that as <c>~0</c> beside a collection that visibly
+/// has rows in it is the studio telling a lie it could have avoided by asking. So a never-analysed table
+/// reports "unknown" — a table that is certainly there and whose size nobody has measured — and the caller
+/// decides whether an exact <c>count(*)</c> is worth paying for.
+/// </para>
 /// </remarks>
 /// <param name="Value">The number of rows, or zero when <paramref name="IsUnavailable"/>.</param>
 /// <param name="IsEstimate">Whether this came from <c>pg_class.reltuples</c> rather than <c>count(*)</c>.</param>
@@ -19,6 +33,19 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
 {
     /// <summary>The count could not be established — the table is gone, or the read was refused.</summary>
     public static DocumentCount Unavailable { get; } = new(0, false, true);
+
+    /// <summary>
+    /// The table is there and Postgres has never analysed it, so there is no estimate to report.
+    /// </summary>
+    /// <remarks>
+    /// A kind of <see cref="IsUnavailable"/> on purpose: every caller that already draws "no number" draws
+    /// this correctly without being changed, and the ones that can do something about it —
+    /// <c>CountAsync</c>, and the list header — branch on <see cref="IsUnknown"/>.
+    /// </remarks>
+    public static DocumentCount Unknown { get; } = new(0, false, true) { IsUnknown = true };
+
+    /// <summary>Whether the table has simply never been analysed, rather than having refused the read.</summary>
+    public bool IsUnknown { get; init; }
 
     /// <summary>A <c>reltuples</c> estimate.</summary>
     public static DocumentCount Estimate(long value) => new(value, true, false);
@@ -76,6 +103,13 @@ internal sealed class CountEstimator
     {
         var estimate = await EstimateAsync(connection, schema, table, cancellationToken).ConfigureAwait(false);
 
+        // A never-analysed table is the one case where the cheap answer says nothing at all, so it is worth
+        // the round trip rather than being reported as "no number" on a collection that plainly has rows.
+        if (estimate.IsUnknown)
+        {
+            return await CountExactAsync(connection, schema, table, cancellationToken).ConfigureAwait(false);
+        }
+
         if (estimate.IsUnavailable)
         {
             return estimate;
@@ -114,8 +148,9 @@ internal sealed class CountEstimator
 
         var rows = Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
 
-        // -1 is Postgres for "never analysed", not for "minus one row".
-        return rows < 0 ? DocumentCount.Estimate(0) : DocumentCount.Estimate(rows);
+        // -1 is Postgres for "never analysed", not for "minus one row" and not for "empty". Reporting it as
+        // an estimate of zero is the studio saying "~0 documents" about a collection it has not looked at.
+        return rows < 0 ? DocumentCount.Unknown : DocumentCount.Estimate(rows);
     }
 
     /// <summary>An exact <c>count(*)</c> of the whole table.</summary>
@@ -180,6 +215,64 @@ internal sealed class CountEstimator
     }
 
     /// <summary>
+    /// An exact <c>count(*)</c> that counts the same rows the list is showing: this tenant's, and the
+    /// soft-delete tri-state the page is on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The three-argument overloads count the whole table, which is right for a rail whose estimate is a
+    /// whole-table <c>reltuples</c> and wrong everywhere a scope narrows what is on screen. A number under
+    /// a list of three invoices that says six is not a rounding error — it is the studio answering a
+    /// different question from the one the page asked.
+    /// </para>
+    /// <para>
+    /// It takes a <see cref="DocumentTableInfo"/> rather than a schema and table name because that is the
+    /// only way to know whether <c>tenant_id</c> and <c>mt_deleted</c> exist and what they are called: on a
+    /// single-tenant collection there is nothing to filter by, and a table with
+    /// <c>DisableInformationalFields()</c> has no soft-delete column at all.
+    /// </para>
+    /// </remarks>
+    /// <param name="connection">An open connection.</param>
+    /// <param name="table">The collection, with its physical columns already settled.</param>
+    /// <param name="tenantId">The tenant in scope, or <see langword="null"/> for all of them.</param>
+    /// <param name="deleted">The soft-delete tri-state; ignored on a collection that is not soft-deleted.</param>
+    /// <param name="commandTimeout">A bound on the scan, overriding <see cref="CommandTimeoutSeconds"/>.</param>
+    /// <param name="cancellationToken">The usual.</param>
+    public async Task<DocumentCount> CountExactAsync(
+        NpgsqlConnection connection,
+        DocumentTableInfo table,
+        string? tenantId,
+        DeletedFilter deleted,
+        TimeSpan? commandTimeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(table);
+
+        var tenantColumn = tenantId is not null && table.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined
+            ? table.MetadataColumnName(DocumentMetadataColumn.TenantId)
+            : null;
+
+        await using var command = new NpgsqlCommand(ExactSql(table, tenantColumn, deleted), connection)
+        {
+            CommandTimeout = commandTimeout is { } timeout
+                ? Math.Max((int)Math.Ceiling(timeout.TotalSeconds), 1)
+                : CommandTimeoutSeconds,
+        };
+
+        if (tenantColumn is not null)
+        {
+            command.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Varchar) { Value = tenantId! });
+        }
+
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+
+        return result is null or DBNull
+            ? DocumentCount.Unavailable
+            : DocumentCount.Exact(Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
     /// The exact-count query. The only things interpolated are quoted identifiers; the tenant is a
     /// parameter, and its predicate is emitted only when there is a tenant, because this method is given a
     /// table name rather than a <see cref="DocumentTableInfo"/> and cannot ask whether the column exists.
@@ -187,4 +280,33 @@ internal sealed class CountEstimator
     internal static string ExactSql(string schema, string table, string? tenantId = null) =>
         "select count(*) from " + SqlIdentifier.Qualify(schema, table) +
         (tenantId is null ? string.Empty : " where " + SqlIdentifier.Quote("tenant_id") + " = @tenant");
+
+    /// <summary>
+    /// The scoped exact-count query. Identifiers are quoted and come from the table's own column set; the
+    /// tenant is the only value, and it is a parameter.
+    /// </summary>
+    internal static string ExactSql(DocumentTableInfo table, string? tenantColumn, DeletedFilter deleted)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        var sql = new StringBuilder("select count(*) from ").Append(table.QualifiedName);
+        var clauses = 0;
+
+        if (tenantColumn is not null)
+        {
+            sql.Append(" where ").Append(SqlIdentifier.Quote(tenantColumn)).Append(" = @tenant");
+            clauses++;
+        }
+
+        if (table.SoftDeleteEnabled &&
+            deleted != DeletedFilter.Include &&
+            table.MetadataColumnName(DocumentMetadataColumn.IsSoftDeleted) is { } deletedColumn)
+        {
+            sql.Append(clauses == 0 ? " where " : " and ")
+                .Append(SqlIdentifier.Quote(deletedColumn))
+                .Append(deleted == DeletedFilter.Only ? " = true" : " = false");
+        }
+
+        return sql.ToString();
+    }
 }

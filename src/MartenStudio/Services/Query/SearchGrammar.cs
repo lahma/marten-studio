@@ -107,10 +107,17 @@ internal abstract record DocumentPredicate
     /// <c>mt_doc_type = &lt;alias&gt;</c> — one subclass of a hierarchy.
     /// </summary>
     /// <remarks>
-    /// Not something the grammar produces: a hierarchy's subclasses share their root's table and are told
-    /// apart by the discriminator column, so browsing <c>/marten/documents/car</c> is browsing the vehicle
-    /// table with this predicate added. It is a predicate rather than a flag on the query so that it goes
-    /// through the same allow-listed builder, gets its own index verdict, and shows up in "Show SQL".
+    /// <para>
+    /// A hierarchy's subclasses share their root's table and are told apart by the discriminator column, so
+    /// browsing <c>/marten/documents/car</c> is browsing the vehicle table with this predicate added. It is
+    /// a predicate rather than a flag on the query so that it goes through the same allow-listed builder,
+    /// gets its own index verdict, and shows up in "Show SQL".
+    /// </para>
+    /// <para>
+    /// The grammar also spells it <c>type:&lt;alias&gt;</c>, because the verdict strip already writes it
+    /// back out that way: a chip a user can read and cannot type is a chip that teaches a syntax the search
+    /// box then rejects.
+    /// </para>
     /// </remarks>
     /// <param name="Alias">The subclass alias, as <c>IDocumentType.AliasFor</c> reports it.</param>
     public sealed record SubclassIs(string Alias) : DocumentPredicate;
@@ -139,7 +146,7 @@ internal sealed record SearchGrammarResult(
 /// <summary>
 /// The document search grammar of plan §3.4:
 /// <c>id:&lt;value&gt;</c> · <c>field op value</c> (dotted paths) · <c>@&gt; {json}</c> ·
-/// <c>field ~ text</c> · free text · <c>is:deleted</c> · <c>tenant:x</c>.
+/// <c>field ~ text</c> · free text · <c>is:deleted</c> · <c>tenant:x</c> · <c>type:&lt;alias&gt;</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -154,9 +161,12 @@ internal sealed record SearchGrammarResult(
 /// there. Quoting a path segment is how a JSON key with a dot or a space in it is reached.
 /// </para>
 /// <para>
-/// <c>id</c>, <c>is</c> and <c>tenant</c> are reserved in front of a colon, and <c>id = …</c> is read as
-/// the primary key too, because on a Marten document the JSON <c>Id</c> property and the <c>id</c> column
-/// are the same value and the column is the one with the index on it.
+/// <c>id</c>, <c>is</c>, <c>tenant</c> and <c>type</c> are reserved in front of a colon, and <c>id = …</c>
+/// is read as the primary key too, because on a Marten document the JSON <c>Id</c> property and the
+/// <c>id</c> column are the same value and the column is the one with the index on it. A document that
+/// genuinely has a JSON property called <c>type</c> is still reachable — quote the path
+/// (<c>"type": value</c> is a path segment, not the keyword) or use an explicit operator
+/// (<c>type = value</c>).
 /// </para>
 /// </remarks>
 internal static class SearchGrammar
@@ -261,6 +271,14 @@ internal static class SearchGrammar
             if (string.Equals(keyword, "tenant", StringComparison.OrdinalIgnoreCase))
             {
                 predicates.Add(new DocumentPredicate.Tenant(token.Raw));
+                return;
+            }
+
+            // The one keyword whose need was found by reading the output: the verdict strip renders a
+            // subclass filter as `type:car`, so `type:car` has to be something a person can type back.
+            if (string.Equals(keyword, "type", StringComparison.OrdinalIgnoreCase))
+            {
+                predicates.Add(new DocumentPredicate.SubclassIs(token.Raw));
                 return;
             }
 

@@ -20,6 +20,90 @@ namespace MartenStudio.Internal.Sql;
 /// </remarks>
 internal static class DocumentBrowseQueries
 {
+    /// <summary>One <c>mt_doc_*</c> table the database has, as <c>information_schema</c> reports it.</summary>
+    /// <param name="Schema">The schema.</param>
+    /// <param name="Name">The table name.</param>
+    internal sealed record DocumentTableName(string Schema, string Name)
+    {
+        /// <summary>The alias the browser gives it: the table name with Marten's prefix taken off.</summary>
+        public string Alias => Name.StartsWith(TablePrefix, StringComparison.OrdinalIgnoreCase)
+            ? Name[TablePrefix.Length..]
+            : Name;
+    }
+
+    /// <summary>The prefix Marten gives every document table.</summary>
+    public const string TablePrefix = "mt_doc_";
+
+    /// <summary>
+    /// Lists the document tables of the given schemas, from <c>information_schema</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This exists because <c>IMartenDatabase.DocumentTables()</c> is not a read.</b> It is
+    /// <c>AllObjects().OfType&lt;DocumentTable&gt;()</c>, <c>AllObjects()</c> is
+    /// <c>BuildFeatureSchemas().SelectMany(x =&gt; x.Objects)</c>, and Marten's feature set includes the
+    /// lazy HiLo <c>Sequences</c> feature for any store with a numeric or HiLo id — whose factory blocks on
+    /// <c>Migrator.ApplyAllAsync</c> under the database's own <c>AutoCreate</c>. A collections rail that
+    /// called it created <c>mt_hilo</c> and <c>mt_get_next_hi</c> because somebody opened a tab, on a
+    /// connection of Marten's own with no command timeout and no cancellation token (P7 proved this live;
+    /// <c>SchemaNoDdlLiveTests</c> is the regression).
+    /// </para>
+    /// <para>
+    /// The schemas come from <c>StoreOptions</c> — never from <c>AllSchemaNames()</c>, which is the same
+    /// call by another name.
+    /// </para>
+    /// </remarks>
+    internal const string DocumentTablesSql =
+        """
+        select table_schema, table_name
+        from information_schema.tables
+        where table_schema = any(@schemas)
+          and table_type = 'BASE TABLE'
+          and table_name like 'mt\_doc\_%'
+        order by table_schema, table_name
+        """;
+
+    /// <summary>Every <c>mt_doc_*</c> table in the given schemas, in name order.</summary>
+    /// <param name="connection">An open connection.</param>
+    /// <param name="schemas">The schemas the store declares; empty means no query is run.</param>
+    /// <param name="commandTimeoutSeconds">How long the catalog read may take.</param>
+    /// <param name="cancellationToken">The usual.</param>
+    public static async Task<IReadOnlyList<DocumentTableName>> ListDocumentTablesAsync(
+        NpgsqlConnection connection,
+        IReadOnlyList<string> schemas,
+        int commandTimeoutSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(schemas);
+
+        List<DocumentTableName> tables = [];
+
+        if (schemas.Count == 0)
+        {
+            return tables;
+        }
+
+        await using var command = new NpgsqlCommand(DocumentTablesSql, connection)
+        {
+            CommandTimeout = commandTimeoutSeconds,
+        };
+
+        command.Parameters.Add(new NpgsqlParameter("schemas", NpgsqlDbType.Array | NpgsqlDbType.Text)
+        {
+            Value = schemas.ToArray(),
+        });
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            tables.Add(new DocumentTableName(reader.GetString(0), reader.GetString(1)));
+        }
+
+        return tables;
+    }
+
     /// <summary>
     /// Every table's <c>reltuples</c> in one round trip.
     /// </summary>
@@ -89,10 +173,17 @@ internal static class DocumentBrowseQueries
     /// value, TOAST compression included, which is usually a fraction of the text length and is what a
     /// person asking "why is this table so big" actually wants.
     /// </remarks>
+    /// <param name="table">The collection.</param>
+    /// <param name="rawId">The id as typed.</param>
+    /// <param name="tenantId">The tenant in scope, when the collection is conjoined.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout; zero leaves Npgsql's own default.</param>
+    /// <param name="command">The read, when the id parsed.</param>
+    /// <param name="error">Why it did not, otherwise.</param>
     public static bool TryBuildSizes(
         DocumentTableInfo table,
         string rawId,
         string? tenantId,
+        int commandTimeoutSeconds,
         [NotNullWhen(true)] out NpgsqlCommand? command,
         [NotNullWhen(false)] out string? error)
     {
@@ -107,7 +198,7 @@ internal static class DocumentBrowseQueries
             return false;
         }
 
-        var built = new NpgsqlCommand();
+        var built = DocumentQueryBuilder.NewCommand(commandTimeoutSeconds);
 
         try
         {
@@ -168,15 +259,17 @@ internal static class DocumentBrowseQueries
     /// <param name="tenantId">The tenant to filter conjoined collections by, or <see langword="null"/>.</param>
     /// <param name="perTable">How many rows each branch reads.</param>
     /// <param name="total">How many rows the whole union returns.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout; zero leaves Npgsql's own default.</param>
     public static NpgsqlCommand? BuildRecent(
         IReadOnlyList<DocumentTableInfo> tables,
         string? tenantId,
         int perTable,
-        int total)
+        int total,
+        int commandTimeoutSeconds = 0)
     {
         ArgumentNullException.ThrowIfNull(tables);
 
-        var command = new NpgsqlCommand();
+        var command = DocumentQueryBuilder.NewCommand(commandTimeoutSeconds);
 
         try
         {

@@ -19,6 +19,21 @@ internal static class DocumentColumnKeys
     /// <summary>The key for the id column.</summary>
     public const string Id = "id";
 
+    /// <summary>
+    /// How many columns <c>?cols=</c> may name, id included.
+    /// </summary>
+    /// <remarks>
+    /// A query string is attacker-supplied, and every extra key is another expression in the select list of
+    /// a query that is about to run against somebody's production database. Twenty-four is past any
+    /// readable grid and well short of a URL that turns one page render into a hundred JSON extractions.
+    /// </remarks>
+    public const int MaxColumns = 24;
+
+    /// <summary>
+    /// How deep a <c>json:</c> path may go. Each segment is another <c>#&gt;&gt;</c> step on every row.
+    /// </summary>
+    public const int MaxJsonPathDepth = 8;
+
     private const string MetadataPrefix = "meta:";
     private const string DuplicatedPrefix = "dup:";
     private const string JsonPrefix = "json:";
@@ -81,10 +96,50 @@ internal static class DocumentColumnKeys
         {
             var path = trimmed[JsonPrefix.Length..].Split('.', StringSplitOptions.RemoveEmptyEntries);
 
-            return path.Length == 0 ? null : new DocumentColumn.JsonPath(path);
+            // A path with no segments is not a column, and one with forty is a URL turning every row of
+            // the page into forty JSON traversals. Both are dropped rather than refused: an unusable key
+            // in a bookmark has always been something this method answers null to.
+            return path.Length is 0 or > MaxJsonPathDepth ? null : new DocumentColumn.JsonPath(path);
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Resolves the whole <c>?cols=</c> list against a table: id first, every key that names a real column
+    /// after it, duplicates dropped, and never more than <see cref="MaxColumns"/> of them.
+    /// </summary>
+    /// <remarks>
+    /// The cap is here rather than at the call site because this is the boundary the query string crosses.
+    /// The id column is always first and always present — it is the link to the document and the tiebreaker
+    /// of every sort — so it is counted against the cap rather than added on top of it.
+    /// </remarks>
+    /// <param name="table">The collection the keys are resolved against.</param>
+    /// <param name="keys">The keys, in the order they were asked for.</param>
+    public static List<DocumentColumnHeader> ResolveAll(DocumentTableInfo table, IReadOnlyList<string> keys)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(keys);
+
+        List<DocumentColumnHeader> chosen = [HeaderFor(DocumentColumn.ById)];
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase) { Id };
+
+        foreach (var key in keys)
+        {
+            if (chosen.Count >= MaxColumns)
+            {
+                break;
+            }
+
+            DocumentColumn? column = Resolve(table, key);
+
+            if (column is not null && seen.Add(KeyFor(column)))
+            {
+                chosen.Add(HeaderFor(column));
+            }
+        }
+
+        return chosen;
     }
 
     /// <summary>The header text for a column.</summary>

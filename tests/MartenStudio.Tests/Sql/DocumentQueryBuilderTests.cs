@@ -472,5 +472,190 @@ public class DocumentQueryBuilderTests
     public void An_unidentified_id_column_is_sent_as_an_untyped_literal() =>
         DocumentIdColumnTypes.DbType(DocumentIdColumnType.Unknown).Should().Be(NpgsqlDbType.Unknown);
 
+    /// <summary>
+    /// A request that does not fit the collection comes back as a message, and the message is fit to
+    /// render.
+    /// </summary>
+    /// <remarks>
+    /// The <c>Try</c> form exists so a page never has to catch an exception to find out that
+    /// <c>is:deleted</c> means nothing here. What made that an actual bug rather than a style point is
+    /// where the old exception surfaced: after the verdict strip had been composed, so the page drew a
+    /// green badge and an <c>ArgumentException.Message</c> underneath it — parameter name included.
+    /// </remarks>
+    [Theory]
+    [InlineData("is:deleted", "*not soft-deleted*")]
+    [InlineData("tenant:acme", "*not conjoined-tenanted*")]
+    [InlineData("id:not-a-guid", "*not a GUID*")]
+    public void A_predicate_the_collection_cannot_answer_is_refused_with_a_message(string search, string expected)
+    {
+        var built = DocumentQueryBuilder.TryBuildList(
+            SqlTestTables.MetadataLess(),
+            new DocumentListQuery { Predicates = SearchGrammar.Parse(search).Predicates },
+            out var command,
+            out DocumentQueryRefusal refusal);
+
+        built.Should().BeFalse();
+        command.Should().BeNull();
+        refusal.Message.Should().Match(expected);
+        refusal.Message.Should().NotContain("Parameter", "the message is rendered to whoever typed the search");
+        refusal.IsFilter.Should().BeTrue("this belongs in the parse strip, beside the terms that did parse");
+    }
+
+    /// <summary>
+    /// A paging refusal is a refusal too, but it does not belong in the search box's verdict.
+    /// </summary>
+    [Fact]
+    public void An_offset_past_the_cap_is_refused_as_paging_rather_than_as_a_filter()
+    {
+        DocumentQueryBuilder.TryBuildList(
+                SqlTestTables.FullyFeatured(),
+                new DocumentListQuery { Offset = DocumentQueryBuilder.MaxOffset + 1 },
+                out _,
+                out DocumentQueryRefusal refusal)
+            .Should().BeFalse();
+
+        refusal.Message.Should().Contain("keyset cursor");
+        refusal.Message.Should().NotContain("Parameter");
+        refusal.IsFilter.Should().BeFalse("nobody typed an offset into the search box");
+    }
+
+    [Fact]
+    public void A_request_that_does_fit_comes_back_through_the_same_door()
+    {
+        DocumentQueryBuilder.TryBuildList(
+                SqlTestTables.FullyFeatured(), new DocumentListQuery(), out var command, out DocumentQueryRefusal refusal)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            refusal.Message.Should().BeNull();
+            command!.CommandText.Should().Contain("from \"studio_sql\".\"mt_doc_sqltestcustomer\"");
+        }
+    }
+
+    /// <summary>
+    /// A genuine programming error is still an exception: <c>TryBuildList</c> catches refusals, not bugs.
+    /// </summary>
+    [Fact]
+    public void A_request_the_builder_could_never_have_assembled_is_still_a_throw()
+    {
+        // An empty JSON path is not something a user can type: the grammar cannot produce one and the
+        // column keys reject it. Reaching the builder with one is a bug in the studio, and a bug must not
+        // be rendered to a visitor as though they had mistyped something.
+        var act = () => DocumentQueryBuilder.TryBuildList(
+            SqlTestTables.FullyFeatured(),
+            new DocumentListQuery { Sort = new DocumentColumn.JsonPath([]) },
+            out _,
+            out _);
+
+        act.Should().Throw<ArgumentException>().Which.Should().NotBeOfType<DocumentQueryRefusedException>();
+    }
+
+    [Fact]
+    public void Every_built_read_carries_the_studios_command_timeout_when_one_is_given()
+    {
+        using var list = DocumentQueryBuilder.BuildList(
+            SqlTestTables.FullyFeatured(), new DocumentListQuery { CommandTimeoutSeconds = 7 });
+
+        list.CommandTimeout.Should().Be(7);
+
+        DocumentQueryBuilder.TryBuildSingle(
+                SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), "acme", DocumentRowLock.None, 7,
+                out var single, out _)
+            .Should().BeTrue();
+
+        using (single)
+        {
+            single!.CommandTimeout.Should().Be(7);
+        }
+
+        DocumentQueryBuilder.TryBuildExists(
+                SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), "acme", 7, out var exists)
+            .Should().BeTrue();
+
+        using (exists)
+        {
+            exists!.CommandTimeout.Should().Be(7);
+        }
+    }
+
+    /// <summary>
+    /// The existence probe reads no column of the row.
+    /// </summary>
+    /// <remarks>
+    /// It used to be a one-row list, whose select list carries <c>octet_length(data::text)</c> — which
+    /// detoasts and decompresses the document. The id probe does this once per collection and the related
+    /// strip once per foreign key, so the difference is megabytes to answer a yes/no.
+    /// </remarks>
+    [Fact]
+    public void The_existence_probe_selects_nothing_and_stops_at_the_first_row()
+    {
+        DocumentQueryBuilder.TryBuildExists(
+                SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), "acme", 0, out var command)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            command!.CommandText.Should().StartWith("select 1\n");
+            command.CommandText.Should().NotContain("data");
+            command.CommandText.Should().Contain("where d.\"id\" = @id");
+            command.CommandText.Should().Contain("and d.\"tenant_id\" = @tenant");
+            command.CommandText.Should().EndWith("limit 1");
+        }
+    }
+
+    [Fact]
+    public void An_id_that_cannot_fit_the_column_is_not_probed_at_all() =>
+        DocumentQueryBuilder.TryBuildExists(SqlTestTables.FullyFeatured(), "not-a-guid", null, 0, out var command)
+            .Should().BeFalse(command?.CommandText);
+
+    /// <summary>
+    /// A conjoined collection read with no tenant in scope reads a named row, not an arbitrary one.
+    /// </summary>
+    /// <remarks>
+    /// The same id exists once per tenant on such a table, so <c>where id = @id</c> alone matched several
+    /// rows and the reader took whichever came back first — a link that shows a different tenant's
+    /// document on different days, and, under <c>for update</c>, a lock on a row nobody named.
+    /// </remarks>
+    [Fact]
+    public void A_conjoined_read_with_no_tenant_is_ordered_and_limited_to_one_row()
+    {
+        DocumentQueryBuilder.TryBuildSingle(
+                SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), null, out var command, out _)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            command!.CommandText.Should().Contain("order by d.\"tenant_id\"");
+            command.CommandText.Should().Contain("limit 1");
+            command.CommandText.Should().Contain("-- conjoined", "the Show SQL disclosure has to say why");
+        }
+
+        // With a tenant there is exactly one row by construction, so nothing is added.
+        DocumentQueryBuilder.TryBuildSingle(
+                SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), "acme", out var scoped, out _)
+            .Should().BeTrue();
+
+        using (scoped)
+        {
+            scoped!.CommandText.Should().NotContain("limit 1");
+        }
+    }
+
+    [Fact]
+    public void A_locked_conjoined_read_puts_the_lock_after_the_ordering()
+    {
+        DocumentQueryBuilder.TryBuildSingle(
+                SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), null, DocumentRowLock.ForUpdate,
+                out var command, out _)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            command!.CommandText.IndexOf("order by", StringComparison.Ordinal).Should()
+                .BeLessThan(command.CommandText.IndexOf("for update", StringComparison.Ordinal));
+        }
+    }
+
     private static NpgsqlParameter Parameter(NpgsqlCommand command, string name) => command.Parameters[name];
 }

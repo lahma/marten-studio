@@ -44,6 +44,73 @@ internal sealed record PostgresColumn(string Name, string DataType, string UdtNa
     };
 }
 
+/// <summary>
+/// The little bounded, expiring cache the two schema catalogs share.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Both things it does are corrections, not optimisations.</b> A cache with no expiry remembers a
+/// migration that has since happened: somebody adds a duplicated field, applies it from the Schema screen
+/// or from their own deployment, and every documents page in every circuit goes on selecting the old
+/// column set until the process restarts. A cache with no bound grows with the number of distinct tables
+/// a long-lived process is ever asked about — which on a multi-database, multi-tenant host is not a small
+/// number, and is attacker-influenced, because the table name comes from a URL.
+/// </para>
+/// <para>
+/// Overflow clears the whole thing rather than evicting least-recently-used. An LRU needs per-entry
+/// bookkeeping and a lock on the read path to be correct; the cost of being wrong here is one extra read
+/// of a system view, so the cheap answer is the right one.
+/// </para>
+/// </remarks>
+/// <typeparam name="TValue">What is cached.</typeparam>
+internal sealed class CatalogCache<TValue>
+{
+    private readonly ConcurrentDictionary<string, Entry> entries = new(StringComparer.Ordinal);
+
+    /// <summary>How long an entry stays usable. Sixty seconds by default.</summary>
+    public TimeSpan Ttl { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>How many entries the cache holds before it forgets everything and starts again.</summary>
+    public int MaxEntries { get; init; } = 512;
+
+    /// <summary>The cached value, when there is one that has not expired.</summary>
+    public bool TryGet(string key, out TValue value)
+    {
+        if (entries.TryGetValue(key, out var entry) && entry.ExpiresAt > Environment.TickCount64)
+        {
+            value = entry.Value;
+            return true;
+        }
+
+        value = default!;
+        return false;
+    }
+
+    /// <summary>Remembers a value until the TTL runs out.</summary>
+    public void Set(string key, TValue value)
+    {
+        // Checked before the insert, so the dictionary never holds more than MaxEntries + the racing
+        // writers that got past this line, which is bounded by the number of threads.
+        if (entries.Count >= MaxEntries)
+        {
+            entries.Clear();
+        }
+
+        entries[key] = new Entry(value, Environment.TickCount64 + (long) Ttl.TotalMilliseconds);
+    }
+
+    /// <summary>Forgets one key.</summary>
+    public void Remove(string key) => entries.TryRemove(key, out _);
+
+    /// <summary>Forgets everything.</summary>
+    public void Clear() => entries.Clear();
+
+    /// <summary>How many entries are held, expired ones included. For tests.</summary>
+    internal int Count => entries.Count;
+
+    private readonly record struct Entry(TValue Value, long ExpiresAt);
+}
+
 /// <summary>The columns of one table, keyed by name, in ordinal order.</summary>
 /// <param name="Schema">The schema asked for.</param>
 /// <param name="Table">The table asked for.</param>
@@ -79,6 +146,12 @@ internal sealed record TableColumns(string Schema, string Table, IReadOnlyList<P
 /// string, which holds a password and would put it into a dictionary key and a debugger view.
 /// A failed read is not cached, so a database that was unreachable once is asked again.
 /// </para>
+/// <para>
+/// Entries expire after <see cref="CatalogCache{TValue}.Ttl"/> and the cache is bounded — see
+/// <see cref="CatalogCache{TValue}"/> for why both matter. <see cref="Clear"/> is still the right call
+/// immediately after the studio itself applies a schema change; the TTL is what covers the migrations it
+/// did not make.
+/// </para>
 /// </remarks>
 internal sealed class ColumnCatalog
 {
@@ -91,7 +164,7 @@ internal sealed class ColumnCatalog
         order by ordinal_position
         """;
 
-    private readonly ConcurrentDictionary<string, TableColumns> cache = new(StringComparer.Ordinal);
+    private readonly CatalogCache<TableColumns> cache = new();
 
     /// <summary>How long a catalog read may take before it is abandoned.</summary>
     public int CommandTimeoutSeconds { get; init; } = 15;
@@ -109,7 +182,7 @@ internal sealed class ColumnCatalog
 
         var key = CacheKey(connection, schema, table);
 
-        if (cache.TryGetValue(key, out var cached))
+        if (cache.TryGet(key, out var cached))
         {
             return cached;
         }
@@ -118,7 +191,7 @@ internal sealed class ColumnCatalog
 
         // Losing a race here costs one extra read of a system view and nothing else, which is cheaper than
         // holding a lock across the round trip.
-        cache[key] = read;
+        cache.Set(key, read);
 
         return read;
     }
@@ -128,7 +201,7 @@ internal sealed class ColumnCatalog
     {
         ArgumentNullException.ThrowIfNull(connection);
 
-        cache.TryRemove(CacheKey(connection, schema, table), out _);
+        cache.Remove(CacheKey(connection, schema, table));
     }
 
     /// <summary>Forgets everything.</summary>

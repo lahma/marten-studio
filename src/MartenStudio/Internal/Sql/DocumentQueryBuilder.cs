@@ -29,6 +29,45 @@ internal readonly record struct IdParseResult(bool Success, object? Value, strin
     public static IdParseResult Failed(string error) => new(false, null, error);
 }
 
+/// <summary>
+/// A document read the builder will not assemble because the request does not fit the collection.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This is the difference between "the page asked for something this collection cannot do" —
+/// <c>is:deleted</c> on a collection that is not soft-deleted, <c>tenant:</c> on a single-tenant one, an
+/// <c>id:</c> that is not a GUID — and "the studio built a query wrong", which stays an ordinary
+/// <see cref="ArgumentException"/>. Only the first kind belongs on screen beside the search box, and
+/// <see cref="DocumentQueryBuilder.TryBuildList"/> is what turns it into a message rather than a stack
+/// trace under a green badge.
+/// </para>
+/// <para>
+/// It derives from <see cref="ArgumentException"/> so that nothing which already catches one changes
+/// behaviour, and it is constructed <em>without</em> a parameter name on purpose: the framework appends
+/// <c>(Parameter 'query')</c> to <see cref="Exception.Message"/>, and the name of a C# parameter is not
+/// something to show the person who typed a search term.
+/// </para>
+/// </remarks>
+internal sealed class DocumentQueryRefusedException(string message, bool isFilter = true) : ArgumentException(message)
+{
+    /// <summary>
+    /// Whether this is about the <em>filter</em> — a search term, a column or a sort key — rather than
+    /// about paging.
+    /// </summary>
+    /// <remarks>
+    /// The two belong in different places on screen. A filter this collection cannot answer is a chip in
+    /// the parse strip, beside the terms that did parse; an offset past the studio's cap, or a cursor whose
+    /// id does not fit the id column, is not something anybody typed into the search box, and putting it
+    /// there would attach a red badge to a search that is perfectly good.
+    /// </remarks>
+    public bool IsFilter { get; } = isFilter;
+}
+
+/// <summary>Why a document read could not be built, and where the page should say so.</summary>
+/// <param name="Message">The reason, phrased for the person who caused it.</param>
+/// <param name="IsFilter">Whether it belongs in the parse strip rather than in the page's error region.</param>
+internal readonly record struct DocumentQueryRefusal(string Message, bool IsFilter);
+
 /// <summary>Whether a single-document read locks the row it reads.</summary>
 internal enum DocumentRowLock
 {
@@ -62,9 +101,11 @@ internal enum DocumentRowLock
 /// <para>
 /// <b>Errors.</b> A request the builder cannot honour — a sort key the table has no column for, an offset
 /// past <see cref="MaxOffset"/>, <c>is:deleted</c> on a collection with no soft delete, a filter on a
-/// malformed id — throws <see cref="ArgumentException"/>, because it is a request that should not have
-/// been assembled. The one exception is the single-document id, which is typed by a human and therefore
-/// comes back as an <see cref="IdParseResult"/>.
+/// malformed id — throws <see cref="DocumentQueryRefusedException"/>, which is an
+/// <see cref="ArgumentException"/> carrying a message fit to render. Read paths call
+/// <see cref="TryBuildList"/> and turn it into a chip beside the search box; a genuine programming error
+/// (a column case the builder has no SQL for) stays a plain <see cref="ArgumentException"/>. The
+/// single-document id is typed by a human and comes back as an <see cref="IdParseResult"/> instead.
 /// </para>
 /// </remarks>
 internal static class DocumentQueryBuilder
@@ -81,7 +122,43 @@ internal static class DocumentQueryBuilder
     private static readonly string DataRef = Alias + "." + SqlIdentifier.Quote(DocumentTableInfo.DataColumn);
     private static readonly string IdRef = Alias + "." + SqlIdentifier.Quote(DocumentTableInfo.IdColumn);
 
+    /// <summary>
+    /// Builds the document list query, or says why the collection cannot answer this request.
+    /// </summary>
+    /// <remarks>
+    /// The <c>Try</c> form is what a page calls. A request that does not fit the collection is an ordinary
+    /// thing — somebody typed <c>is:deleted</c> into a collection that is not soft-deleted — and it has to
+    /// be a message beside the search box, in the same place as every other thing the parser could not do,
+    /// rather than an exception thrown after the verdict strip has already been drawn green.
+    /// </remarks>
+    /// <param name="table">The collection.</param>
+    /// <param name="query">The request.</param>
+    /// <param name="command">The read, when it could be built.</param>
+    /// <param name="refusal">Why it could not, and where the page should say so.</param>
+    public static bool TryBuildList(
+        DocumentTableInfo table,
+        DocumentListQuery query,
+        [NotNullWhen(true)] out NpgsqlCommand? command,
+        out DocumentQueryRefusal refusal)
+    {
+        try
+        {
+            command = BuildList(table, query);
+            refusal = default;
+            return true;
+        }
+        catch (DocumentQueryRefusedException refused)
+        {
+            command = null;
+            refusal = new DocumentQueryRefusal(refused.Message, refused.IsFilter);
+            return false;
+        }
+    }
+
     /// <summary>Builds the document list query.</summary>
+    /// <exception cref="DocumentQueryRefusedException">
+    /// The request does not fit the collection. Prefer <see cref="TryBuildList"/> on a read path.
+    /// </exception>
     public static NpgsqlCommand BuildList(DocumentTableInfo table, DocumentListQuery query)
     {
         ArgumentNullException.ThrowIfNull(table);
@@ -89,18 +166,18 @@ internal static class DocumentQueryBuilder
 
         if (query.Offset < 0)
         {
-            throw new ArgumentException("An offset cannot be negative.", nameof(query));
+            throw new DocumentQueryRefusedException("An offset cannot be negative.", isFilter: false);
         }
 
         if (query.Offset > MaxOffset)
         {
-            throw new ArgumentException(
+            throw new DocumentQueryRefusedException(
                 $"An offset of {query.Offset.ToString(CultureInfo.InvariantCulture)} is past the " +
                 $"{MaxOffset.ToString(CultureInfo.InvariantCulture)} the studio will page to. Use the keyset cursor.",
-                nameof(query));
+                isFilter: false);
         }
 
-        var command = new NpgsqlCommand();
+        var command = NewCommand(query.CommandTimeoutSeconds);
 
         try
         {
@@ -164,6 +241,36 @@ internal static class DocumentQueryBuilder
         string? tenantId,
         DocumentRowLock rowLock,
         [NotNullWhen(true)] out NpgsqlCommand? command,
+        [NotNullWhen(false)] out string? error) =>
+        TryBuildSingle(table, rawId, tenantId, rowLock, 0, out command, out error);
+
+    /// <summary>
+    /// The single-document read, with a row lock and a command timeout.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A conjoined collection read with no tenant in scope is made deterministic here.</b> The same id
+    /// exists once per tenant on such a table, so <c>where id = @id</c> alone matches several rows and the
+    /// reader takes whichever one Postgres happened to return — which means the same link shows a different
+    /// tenant's document on different days, and, with <see cref="DocumentRowLock.ForUpdate"/>, locks a row
+    /// nobody named. The read is therefore ordered by <c>tenant_id</c> and limited to one row, and the SQL
+    /// says so in a comment, because the "Show SQL" disclosure is where that has to be visible.
+    /// </para>
+    /// </remarks>
+    /// <param name="table">The collection.</param>
+    /// <param name="rawId">The id as typed.</param>
+    /// <param name="tenantId">The tenant in scope, or <see langword="null"/> for all of them.</param>
+    /// <param name="rowLock">Whether to take a row lock.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout; zero leaves Npgsql's own default.</param>
+    /// <param name="command">The read, when the id parsed.</param>
+    /// <param name="error">Why it did not, otherwise.</param>
+    public static bool TryBuildSingle(
+        DocumentTableInfo table,
+        string rawId,
+        string? tenantId,
+        DocumentRowLock rowLock,
+        int commandTimeoutSeconds,
+        [NotNullWhen(true)] out NpgsqlCommand? command,
         [NotNullWhen(false)] out string? error)
     {
         ArgumentNullException.ThrowIfNull(table);
@@ -177,7 +284,7 @@ internal static class DocumentQueryBuilder
             return false;
         }
 
-        var built = new NpgsqlCommand();
+        var built = NewCommand(commandTimeoutSeconds);
 
         try
         {
@@ -207,6 +314,15 @@ internal static class DocumentQueryBuilder
                 .Append('\n');
 
             AppendTenantFilter(sql, table, tenantId, builder);
+
+            if (tenantId is null && table.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined &&
+                table.MetadataColumnName(DocumentMetadataColumn.TenantId) is { } tenantColumn)
+            {
+                sql.Append("-- conjoined, and no tenant is in scope: this id exists once per tenant, so the\n");
+                sql.Append("-- first by tenant_id is read rather than whichever row came back first\n");
+                sql.Append("order by ").Append(Column(tenantColumn)).Append('\n');
+                sql.Append("limit 1\n");
+            }
 
             if (rowLock == DocumentRowLock.ForUpdate)
             {
@@ -261,6 +377,22 @@ internal static class DocumentQueryBuilder
         IReadOnlyList<string> rawIds,
         string? tenantId,
         [NotNullWhen(true)] out NpgsqlCommand? command,
+        out IReadOnlyList<string?> idErrors) =>
+        TryBuildMany(table, rawIds, tenantId, 0, out command, out idErrors);
+
+    /// <summary>The many-document read, with a command timeout.</summary>
+    /// <param name="table">The table to read.</param>
+    /// <param name="rawIds">The ids as they arrived, in the order the caller wants them answered.</param>
+    /// <param name="tenantId">The tenant in scope, when the collection is conjoined.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout; zero leaves Npgsql's own default.</param>
+    /// <param name="command">The read, when at least one id parsed.</param>
+    /// <param name="idErrors">One entry per requested id: <see langword="null"/> when it parsed.</param>
+    public static bool TryBuildMany(
+        DocumentTableInfo table,
+        IReadOnlyList<string> rawIds,
+        string? tenantId,
+        int commandTimeoutSeconds,
+        [NotNullWhen(true)] out NpgsqlCommand? command,
         out IReadOnlyList<string?> idErrors)
     {
         ArgumentNullException.ThrowIfNull(table);
@@ -291,7 +423,7 @@ internal static class DocumentQueryBuilder
             return false;
         }
 
-        var built = new NpgsqlCommand();
+        var built = NewCommand(commandTimeoutSeconds);
 
         try
         {
@@ -329,6 +461,92 @@ internal static class DocumentQueryBuilder
             built.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Builds the cheapest possible "is this id in this collection" read: <c>select 1 … limit 1</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately not a one-row <see cref="BuildList"/>. The list's select is
+    /// <c>octet_length(data::text)</c> on every row it touches, which detoasts and decompresses the whole
+    /// document — so probing twenty-five collections for an id, or checking a related document's existence,
+    /// moved megabytes to answer a yes/no question. This reads no column of the row at all and stops at the
+    /// first match.
+    /// </para>
+    /// <para>
+    /// Soft-deleted rows count as present: the detail page links to them, and "the row you are pointing at
+    /// has been deleted" is a different and more useful answer than "there is nothing there".
+    /// </para>
+    /// </remarks>
+    /// <param name="table">The collection to probe.</param>
+    /// <param name="rawId">The id as typed.</param>
+    /// <param name="tenantId">The tenant in scope, when the collection is conjoined.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout; zero leaves Npgsql's own default.</param>
+    /// <param name="command">The probe, when the id parsed against this collection's id column.</param>
+    public static bool TryBuildExists(
+        DocumentTableInfo table,
+        string rawId,
+        string? tenantId,
+        int commandTimeoutSeconds,
+        [NotNullWhen(true)] out NpgsqlCommand? command)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        var parsed = ParseId(table.IdColumnType, rawId);
+
+        if (!parsed.Success)
+        {
+            command = null;
+            return false;
+        }
+
+        var built = NewCommand(commandTimeoutSeconds);
+
+        try
+        {
+            var builder = new ParameterBuilder(built);
+            var sql = new StringBuilder();
+
+            sql.Append("select 1\n");
+            sql.Append("from ").Append(table.QualifiedName).Append(AsAlias).Append('\n');
+            sql.Append("where ").Append(IdRef).Append(" = ")
+                .Append(builder.Add(DocumentIdColumnTypes.DbType(table.IdColumnType), parsed.Value!, "id"))
+                .Append('\n');
+
+            AppendTenantFilter(sql, table, tenantId, builder);
+
+            sql.Append("limit 1");
+
+            built.CommandText = sql.ToString();
+            command = built;
+            return true;
+        }
+        catch
+        {
+            built.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// A command with the studio's timeout on it, which is the one property every read here must set.
+    /// </summary>
+    /// <remarks>
+    /// Npgsql's own default is thirty seconds and is not the studio's <c>QueryTimeout</c>; a command that
+    /// forgot to set it is a read that outlives the option the host configured to bound it. Zero means
+    /// "leave Npgsql's default", for the callers that set the timeout themselves after building.
+    /// </remarks>
+    internal static NpgsqlCommand NewCommand(int commandTimeoutSeconds)
+    {
+        var command = new NpgsqlCommand();
+
+        if (commandTimeoutSeconds > 0)
+        {
+            command.CommandTimeout = commandTimeoutSeconds;
+        }
+
+        return command;
     }
 
     /// <summary>
@@ -500,8 +718,8 @@ internal static class DocumentQueryBuilder
 
         if (!table.SoftDeleteEnabled && query.IncludeDeleted == DeletedFilter.Only)
         {
-            throw new ArgumentException(
-                $"'{table.Alias}' is not soft-deleted, so it has no deleted documents to show.", nameof(query));
+            throw new DocumentQueryRefusedException(
+                $"'{table.Alias}' is not soft-deleted, so it has no deleted documents to show.");
         }
 
         if (table.SoftDeleteEnabled && !statedExplicitly)
@@ -597,7 +815,8 @@ internal static class DocumentQueryBuilder
 
         if (!lastId.Success)
         {
-            throw new ArgumentException($"The page cursor's id is not usable: {lastId.Error}", nameof(query));
+            throw new DocumentQueryRefusedException(
+                $"The page cursor's id is not usable: {lastId.Error}", isFilter: false);
         }
 
         var idParameter = builder.Add(DocumentIdColumnTypes.DbType(table.IdColumnType), lastId.Value!, "i");
@@ -636,7 +855,8 @@ internal static class DocumentQueryBuilder
 
                 if (!parsed.Success)
                 {
-                    throw new ArgumentException(parsed.Error, nameof(predicate));
+                    throw new DocumentQueryRefusedException(
+                        parsed.Error ?? "That id cannot be used against this collection.");
                 }
 
                 return IdRef + " = " + builder.Add(DocumentIdColumnTypes.DbType(table.IdColumnType), parsed.Value!);
@@ -646,9 +866,8 @@ internal static class DocumentQueryBuilder
             {
                 if (table.TenancyStyle != JasperFx.MultiTenancy.TenancyStyle.Conjoined)
                 {
-                    throw new ArgumentException(
-                        $"'{table.Alias}' is not conjoined-tenanted, so it has no tenant_id to filter on.",
-                        nameof(predicate));
+                    throw new DocumentQueryRefusedException(
+                        $"'{table.Alias}' is not conjoined-tenanted, so it has no tenant_id to filter on.");
                 }
 
                 return Column(MetadataColumnName(table, DocumentMetadataColumn.TenantId)) + " = " +
@@ -659,9 +878,8 @@ internal static class DocumentQueryBuilder
             {
                 if (!table.SoftDeleteEnabled)
                 {
-                    throw new ArgumentException(
-                        $"'{table.Alias}' is not soft-deleted, so it has no mt_deleted column to filter on.",
-                        nameof(predicate));
+                    throw new DocumentQueryRefusedException(
+                        $"'{table.Alias}' is not soft-deleted, so it has no mt_deleted column to filter on.");
                 }
 
                 return Column(MetadataColumnName(table, DocumentMetadataColumn.IsSoftDeleted)) + " = " +
@@ -671,9 +889,8 @@ internal static class DocumentQueryBuilder
             case DocumentPredicate.SubclassIs subclass:
             {
                 var column = table.MetadataColumnName(DocumentMetadataColumn.DocumentType)
-                    ?? throw new ArgumentException(
-                        $"'{table.Alias}' is not a hierarchy, so it has no mt_doc_type column to filter on.",
-                        nameof(predicate));
+                    ?? throw new DocumentQueryRefusedException(
+                        $"'{table.Alias}' is not a hierarchy, so it has no mt_doc_type column to filter on.");
 
                 // Marten writes the discriminator lower-cased, and compares it the same way.
                 return Column(column) + " = " +
@@ -770,13 +987,14 @@ internal static class DocumentQueryBuilder
             return converted!;
         }
 
-        throw new ArgumentException($"The page cursor's sort value '{value}' does not fit the column it orders by.");
+        throw new DocumentQueryRefusedException(
+            $"The page cursor's sort value '{value}' does not fit the column it orders by.", isFilter: false);
     }
 
     private static string MetadataColumnName(DocumentTableInfo table, DocumentMetadataColumn column) =>
         table.MetadataColumnName(column)
-        ?? throw new ArgumentException(
-            $"'{table.Alias}' has no {column} metadata column: the store has it disabled.", nameof(column));
+        ?? throw new DocumentQueryRefusedException(
+            $"'{table.Alias}' has no {column} metadata column: the store has it disabled.");
 
     private static string DuplicatedColumnName(DocumentTableInfo table, string columnName) =>
         Duplicated(table, columnName).ColumnName;
@@ -791,7 +1009,7 @@ internal static class DocumentQueryBuilder
             }
         }
 
-        throw new ArgumentException($"'{table.Alias}' has no duplicated column named '{columnName}'.", nameof(columnName));
+        throw new DocumentQueryRefusedException($"'{table.Alias}' has no duplicated column named '{columnName}'.");
     }
 
     /// <summary>The Npgsql type of the <c>any(…)</c> array parameter for a given id column.</summary>

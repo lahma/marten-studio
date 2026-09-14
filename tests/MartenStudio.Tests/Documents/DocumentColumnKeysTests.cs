@@ -81,6 +81,47 @@ public class DocumentColumnKeysTests
             .Should().Be(new DocumentColumn.Metadata(DocumentMetadataColumn.LastModified));
     }
 
+    /// <summary>
+    /// <c>?cols=</c> arrives from a URL, so both of its dimensions are capped.
+    /// </summary>
+    /// <remarks>
+    /// Every key is another expression in the select list of a query about to run against somebody's
+    /// production database, and every path segment is another <c>#&gt;&gt;</c> step on every row of the
+    /// page. Neither cap is reachable by a person using the column chooser.
+    /// </remarks>
+    [Fact]
+    public void The_column_list_is_capped_because_it_comes_from_a_query_string()
+    {
+        var keys = Enumerable.Range(0, 200)
+            .Select(i => "json:Property" + i.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
+
+        List<DocumentColumnHeader> resolved = DocumentColumnKeys.ResolveAll(SqlTestTables.FullyFeatured(), keys);
+
+        resolved.Should().HaveCount(DocumentColumnKeys.MaxColumns);
+        resolved[0].Key.Should().Be(DocumentColumnKeys.Id, "the id is the link to the document and the sort tiebreaker");
+    }
+
+    [Fact]
+    public void A_json_path_deeper_than_the_cap_is_not_a_column()
+    {
+        var deep = "json:" + string.Join('.', Enumerable.Repeat("a", DocumentColumnKeys.MaxJsonPathDepth + 1));
+        var allowed = "json:" + string.Join('.', Enumerable.Repeat("a", DocumentColumnKeys.MaxJsonPathDepth));
+
+        DocumentColumnKeys.Resolve(SqlTestTables.FullyFeatured(), deep).Should().BeNull();
+        DocumentColumnKeys.Resolve(SqlTestTables.FullyFeatured(), allowed).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void The_column_list_keeps_the_order_asked_for_and_drops_repeats_and_unknowns()
+    {
+        List<DocumentColumnHeader> resolved = DocumentColumnKeys.ResolveAll(
+            SqlTestTables.FullyFeatured(),
+            ["dup:email", "meta:NotAColumn", "dup:email", "id", "meta:LastModified"]);
+
+        resolved.Select(x => x.Key).Should().Equal("id", "dup:email", "meta:LastModified");
+    }
+
     [Fact]
     public void The_header_says_what_kind_of_column_it_is_so_a_cell_knows_how_to_draw_itself()
     {

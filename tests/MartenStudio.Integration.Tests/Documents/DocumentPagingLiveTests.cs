@@ -5,6 +5,8 @@ using MartenStudio.SampleDomain.Documents;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Query;
 
+using Npgsql;
+
 namespace MartenStudio.Integration.Tests.Documents;
 
 /// <summary>
@@ -21,38 +23,62 @@ namespace MartenStudio.Integration.Tests.Documents;
 /// The sample seeder is off here: these tests want one large collection, not the demo.
 /// </para>
 /// </remarks>
-public class DocumentPagingLiveTests(PostgresFixture postgres) : MartenTestBase(postgres)
+public class DocumentPagingLiveTests(DocumentPagingLiveTests.Fixture fixture)
+    : MartenTestBase(fixture), IClassFixture<DocumentPagingLiveTests.Fixture>
 {
     private const int TotalCustomers = 10_000;
     private const int PageSize = 500;
 
-    /// <inheritdoc />
-    protected override bool SeedSampleData => false;
-
-    /// <inheritdoc />
-    protected override async Task SeedAsync()
+    /// <summary>
+    /// Ten thousand customers, seeded once for the whole class.
+    /// </summary>
+    /// <remarks>
+    /// This is the clearest reason the fixture had to stop being <c>IAsyncLifetime</c> on the test class:
+    /// xunit builds one test class instance per test method, so the seed below used to run five times a
+    /// run - fifty thousand documents to prove five things about ten thousand.
+    /// </remarks>
+    /// <param name="postgres">The assembly's container.</param>
+    public sealed class Fixture(PostgresFixture postgres) : MartenClassFixture(postgres)
     {
-        await using IDocumentSession session = Store.LightweightSession();
+        /// <inheritdoc />
+        protected override bool SeedSampleData => false;
 
-        // Deliberately written in one batch per thousand: Marten's UpdateBatchSize decides the rest, and a
-        // single SaveChangesAsync for ten thousand documents is one very large command.
-        for (var batch = 0; batch < TotalCustomers / 1_000; batch++)
+        /// <inheritdoc />
+        protected override async Task SeedAsync()
         {
-            for (var i = 0; i < 1_000; i++)
-            {
-                var index = (batch * 1_000) + i;
+            await using IDocumentSession session = Marten.Store.LightweightSession();
 
-                session.Store(new Customer
+            // Deliberately written in one batch per thousand: Marten's UpdateBatchSize decides the rest,
+            // and a single SaveChangesAsync for ten thousand documents is one very large command.
+            for (var batch = 0; batch < TotalCustomers / 1_000; batch++)
+            {
+                for (var i = 0; i < 1_000; i++)
                 {
-                    Id = Guid.NewGuid(),
-                    Name = $"Customer {index:00000}",
-                    Email = $"customer{index:00000}@example.com",
-                    Address = new Address($"{index} Example Street", "Helsinki", "00100", "FI"),
-                    RegisteredAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).AddMinutes(index),
-                });
+                    var index = (batch * 1_000) + i;
+
+                    session.Store(new Customer
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = $"Customer {index:00000}",
+                        Email = $"customer{index:00000}@example.com",
+                        Address = new Address($"{index} Example Street", "Helsinki", "00100", "FI"),
+                        RegisteredAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).AddMinutes(index),
+                    });
+                }
+
+                await session.SaveChangesAsync();
             }
 
-            await session.SaveChangesAsync();
+            // Analysed on purpose, and this is the point of the estimate tests below rather than an aside.
+            // Postgres reports reltuples = -1 until the first ANALYZE, which is "never measured" and not
+            // "empty" - so without this the collection has no estimate at all, and the D8 assertion that
+            // a collection this size is *estimated* rather than scanned would be testing the opposite
+            // path. A ten-million-row production table has been autovacuumed; this makes the fixture look
+            // like one.
+            await using NpgsqlConnection connection = await Postgres.OpenAsync();
+            await using var analyze = new NpgsqlCommand($"analyze \"{Schema}\".\"mt_doc_customer\"", connection);
+
+            await analyze.ExecuteNonQueryAsync();
         }
     }
 
@@ -145,6 +171,12 @@ public class DocumentPagingLiveTests(PostgresFixture postgres) : MartenTestBase(
 
         page.Estimate.IsUnavailable.Should().BeFalse();
         page.Estimate.IsEstimate.Should().BeTrue();
+        page.Estimate.IsUnknown.Should().BeFalse("the fixture analysed the table, so there is an estimate");
+
+        // The value, not only the flag. A `reltuples` of -1 used to become Estimate(0), so a header reading
+        // "~0 documents" over ten thousand rows passed an IsEstimate assertion perfectly happily.
+        page.Estimate.Value.Should().Be(TotalCustomers,
+            "ANALYZE over a table of this size reads every page, so the estimate is exact here");
 
         DocumentCount exact = await documents.Service.CountExactAsync(
             Scope, "customer", TestContext.Current.CancellationToken);

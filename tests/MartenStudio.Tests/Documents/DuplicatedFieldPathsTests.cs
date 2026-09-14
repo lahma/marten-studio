@@ -87,9 +87,14 @@ public class DuplicatedFieldPathsTests
     // Postgres renders a numeric as 1000.00 and System.Text.Json as 1000; that is not a drift.
     [InlineData("1000.00", "1000", "Agrees")]
     [InlineData("1000.00", "1000.01", "Differs")]
-    // Npgsql renders a boolean as True and the document as true.
-    [InlineData("True", "true", "Agrees")]
-    public void Agreement_tolerates_the_ways_the_two_sides_render_the_same_value(
+    // Both sides of a boolean arrive as true/false: DocumentDataService.DisplayValue renders the column
+    // that way, so there is nothing to forgive.
+    [InlineData("true", "true", "Agrees")]
+    // ... and the comparison is ordinal, so a column that differs only in case differs. That is the drift
+    // the dot exists to catch: the column is what an indexed filter reads, and Postgres compares it
+    // case-sensitively unless somebody made it citext.
+    [InlineData("ADA@EXAMPLE.COM", "ada@example.com", "Differs")]
+    public void Agreement_tolerates_only_the_renderings_that_are_genuinely_the_same_value(
         string? column,
         string? json,
         string expected)
