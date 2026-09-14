@@ -324,7 +324,18 @@ public class MultiDatabaseDaemonLiveTests(PostgresFixture postgres) : IAsyncLife
 
         var ring = restricted.GetRequiredService<StudioActionLogService>();
 
-        ring.GetLatest().Should().Contain(x => x.Action == "PauseDaemon" && !x.Succeeded);
+        StudioActionLogEntry refusal = ring.GetLatest()
+            .Should().ContainSingle(x => x.Action == "PauseDaemon" && !x.Succeeded).Subject;
+
+        // The database the visitor could not reach, not the one they asked for. The check that refuses
+        // throws with the refused scope on it, and that is only worth anything because the catch records
+        // `denied.Scope`; recording the requested scope - which is what it used to do - threw the one new
+        // fact away and left an entry naming a database nothing was wrong with.
+        refusal.DatabaseId.Should().Be(
+            hidden,
+            "an audit entry for a refusal has to say which database was refused");
+        refusal.DatabaseId.Should().NotBe(visible);
+
         logs.EventIds.Should().Contain(9203, "a scope denial is logged as one");
 
         // Nothing was paused: this studio is wired to the coordinator that is actually running.

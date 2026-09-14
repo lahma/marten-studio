@@ -1224,6 +1224,19 @@ public class MartenApiSurfaceTest
         RequireProperty(typeof(MartenReadOnlyEventStoreOptions), "UseTenantPartitionedEvents").PropertyType
             .Should().Be<bool>();
 
+        // The other option that changes a statement, and the one the studio had wrong. It is on the
+        // read-only interface - which is all IDocumentStore.Options hands out - so the studio can ask it
+        // without touching StoreOptions. What it decides is whether Marten's ShardStateSelector hydrates
+        // heartbeat / agent_status / pause_reason / running_on_node and the four failure_* columns at
+        // all; the columns themselves are created unconditionally by EventProgressionTable (Marten 9.35,
+        // #5309), so a store can have every one of them and be writing none. It defaults to false, which
+        // is the case the studio has to get right rather than the exception.
+        RequireProperty(typeof(MartenReadOnlyEventStoreOptions), "EnableExtendedProgressionTracking").PropertyType
+            .Should().Be<bool>();
+
+        new StoreOptions().Events.EnableExtendedProgressionTracking.Should().BeFalse(
+            "off is the default, so 'the table has the column' can never mean 'something writes it'");
+
         RequireMethod(typeof(global::Marten.Events.IEventStoreOptions), "IgnoreIndex", typeof(string))
             .ReturnType.Should().Be<global::Marten.Events.IEventStoreOptions>();
 

@@ -106,6 +106,38 @@ public class FeedTests
     }
 
     /// <summary>
+    /// The high-water tooltip names the statement the service really runs.
+    /// </summary>
+    /// <remarks>
+    /// It used to read <c>select max(seq_id) from the event store's mt_events</c>, which is
+    /// <c>ProjectionProgressQueries.BuildHighWaterMark</c>'s <em>other</em> branch - the one taken only on
+    /// a store with <c>Events.UseTenantPartitionedEvents</c>, and therefore the wrong one for essentially
+    /// every store that will ever see this page. A tooltip that names a statement is a claim about what
+    /// was run against the database, and this is what keeps it one.
+    /// </remarks>
+    [Fact]
+    public async Task The_high_water_tooltip_names_the_statement_that_produced_the_number()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.HighestSequences.Enqueue(4_711);
+
+        IRenderedComponent<Feed> page = context.Render<Feed>();
+
+        // The other .ms-follow-state is the "not following" label, which carries no title.
+        var label = page.WaitForElement(".ms-follow-bar .ms-follow-state[title]");
+
+        label.TextContent.Should().Contain("high-water #4711");
+
+        var title = label.GetAttribute("title")!;
+
+        title.Should().StartWith(
+            "select last_value from the event store's mt_events_sequence",
+            "that is the branch every store without tenant-partitioned events takes");
+        title.Should().Contain("tenant-partitioned events");
+        title.Should().Contain("coalesce(max(seq_id), 0) from mt_events");
+    }
+
+    /// <summary>
     /// Follow mode polls the high-water mark, reads only the delta, and offers it as a pill rather than
     /// moving the page under whoever is reading it.
     /// </summary>

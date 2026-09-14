@@ -55,7 +55,7 @@
 
         @if (highestSequence is { } highest)
         {
-            <span class="ms-follow-state" title="select max(seq_id) from the event store's mt_events">
+            <span class="ms-follow-state" title="@HighWaterTitle">
                 high-water #@highest.ToString(CultureInfo.InvariantCulture)
             </span>
         }
@@ -139,6 +139,30 @@
     /// pulling ten thousand rows down a circuit nobody can read.
     /// </summary>
     private const int DeltaPageSize = 200;
+
+    /// <summary>
+    /// What the number beside "high-water" is, named as the statement that produced it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>IEventDataService.GetHighestSequenceAsync</c> runs
+    /// <c>ProjectionProgressQueries.BuildHighWaterMark</c>, which is
+    /// <c>select last_value from "{event schema}"."mt_events_sequence"</c> - and only on a store with
+    /// <c>StoreOptions.Events.UseTenantPartitionedEvents</c>, where every tenant draws <c>seq_id</c> from a
+    /// partition sequence of its own and the store-global sequence is never advanced,
+    /// <c>select coalesce(max(seq_id), 0) from mt_events</c>. This tooltip used to name only the second
+    /// branch, which is the wrong one for essentially every store.
+    /// </para>
+    /// <para>
+    /// Spelled here rather than carried back from the service. The Query page's SQL tab hands the
+    /// statement text back because the SQL <em>is</em> the subject of that screen; here it would mean a
+    /// new field on the event DTOs, threaded through the follow tick, to fill in a title attribute - and
+    /// the honest two-branch sentence fits in one.
+    /// </para>
+    /// </remarks>
+    private const string HighWaterTitle =
+        "select last_value from the event store's mt_events_sequence - or, on a store with "
+        + "tenant-partitioned events, coalesce(max(seq_id), 0) from mt_events";
 
     private readonly CancellationTokenSource pageCancellation = new();
     private readonly List<EventRow> rows = [];

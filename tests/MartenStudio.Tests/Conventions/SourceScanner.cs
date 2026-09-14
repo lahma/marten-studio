@@ -59,10 +59,45 @@ internal static class SourceScanner
     /// the next apostrophe anywhere in the file, and the rule would stop applying to whatever fell inside.
     /// </para>
     /// </remarks>
-    public static string StripCommentsAndStrings(string source)
+    public static string StripCommentsAndStrings(string source) =>
+        StripCommentsAndStrings(source, out _);
+
+    /// <summary>
+    /// The same pass, and whether it ran off the end of the input still inside a string literal or a
+    /// block comment.
+    /// </summary>
+    /// <param name="source">The file's text.</param>
+    /// <param name="endedInsideQuotedOrComment">
+    /// <see langword="true" /> when the last quoted or commented region this pass opened was never closed,
+    /// which means everything from there to the end of the file came out blank.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// This is the flag that stops a scanner from going quietly vacuous for a whole file. The pass pairs
+    /// quotes naively - it knows nothing about raw string literals - and <c>src/</c> contains several
+    /// (<c>NavMenu.Icon</c>'s SVG bodies, <c>QueryExampleBuilder</c>'s interpolated
+    /// <c>$$"""…"…"""</c>). Today the quote counts inside them happen to come out even, so the pass
+    /// resynchronises and every rule still applies; one odd count would leave it "inside a string" to the
+    /// end of the file, and <em>both</em> <see cref="NoAsyncVoidTests" /> and
+    /// <see cref="NoSchemaBuildingCallTests" /> would stop applying to everything after it without
+    /// anything failing.
+    /// </para>
+    /// <para>
+    /// Teaching the pass raw string literals would be the other fix, and a bigger one - the delimiter is
+    /// any run of three or more quotes and the closing run has to match it. Reporting the state is enough,
+    /// because the failure mode being defended against is silence: a file this pass cannot follow now
+    /// fails the conventions suite by name
+    /// (<see cref="NoSchemaBuildingCallTests.Every_scanned_file_is_one_the_scanner_can_follow_to_the_end" />)
+    /// instead of quietly exempting itself.
+    /// </para>
+    /// </remarks>
+    public static string StripCommentsAndStrings(string source, out bool endedInsideQuotedOrComment)
     {
+        ArgumentNullException.ThrowIfNull(source);
+
         var result = new StringBuilder(source.Length);
         var index = 0;
+        var unterminated = false;
 
         while (index < source.Length)
         {
@@ -71,27 +106,34 @@ internal static class SourceScanner
 
             if (current == '/' && next == '/')
             {
+                // A line comment is closed by the end of the file as much as by a newline, so running off
+                // the end here is not a failure to follow the source.
                 index = BlankUntilNewLine(source, result, index);
             }
             else if (current == '/' && next == '*')
             {
-                index = BlankUntil(source, result, index + 2, "*/");
+                index = BlankUntil(source, result, index + 2, "*/", out bool openBlock);
+                unterminated |= openBlock;
             }
             else if (current == '@' && next == '*')
             {
-                index = BlankUntil(source, result, index + 2, "*@");
+                index = BlankUntil(source, result, index + 2, "*@", out bool openRazor);
+                unterminated |= openRazor;
             }
             else if (current == '@' && next == '"')
             {
-                index = BlankVerbatimString(source, result, index + 2);
+                index = BlankVerbatimString(source, result, index + 2, out bool openVerbatim);
+                unterminated |= openVerbatim;
             }
             else if (current == '"')
             {
-                index = BlankQuoted(source, result, index, '"');
+                index = BlankQuoted(source, result, index, '"', out bool openString);
+                unterminated |= openString;
             }
             else if (current == '\'' && IsCharacterLiteral(source, index))
             {
-                index = BlankQuoted(source, result, index, '\'');
+                index = BlankQuoted(source, result, index, '\'', out bool openChar);
+                unterminated |= openChar;
             }
             else
             {
@@ -100,6 +142,7 @@ internal static class SourceScanner
             }
         }
 
+        endedInsideQuotedOrComment = unterminated;
         return result.ToString();
     }
 
@@ -137,7 +180,12 @@ internal static class SourceScanner
         return index;
     }
 
-    private static int BlankUntil(string source, StringBuilder result, int index, string terminator)
+    private static int BlankUntil(
+        string source,
+        StringBuilder result,
+        int index,
+        string terminator,
+        out bool unterminated)
     {
         result.Append("  ");
 
@@ -150,11 +198,13 @@ internal static class SourceScanner
             index++;
         }
 
+        unterminated = index >= source.Length;
+
         result.Append("  ");
         return Math.Min(index + 2, source.Length);
     }
 
-    private static int BlankVerbatimString(string source, StringBuilder result, int index)
+    private static int BlankVerbatimString(string source, StringBuilder result, int index, out bool unterminated)
     {
         result.Append("  ");
 
@@ -171,6 +221,7 @@ internal static class SourceScanner
                 }
 
                 result.Append(' ');
+                unterminated = false;
                 return index + 1;
             }
 
@@ -178,10 +229,11 @@ internal static class SourceScanner
             index++;
         }
 
+        unterminated = true;
         return index;
     }
 
-    private static int BlankQuoted(string source, StringBuilder result, int index, char quote)
+    private static int BlankQuoted(string source, StringBuilder result, int index, char quote, out bool unterminated)
     {
         result.Append(' ');
         index++;
@@ -198,6 +250,8 @@ internal static class SourceScanner
             result.Append(source[index] == '\n' ? '\n' : ' ');
             index++;
         }
+
+        unterminated = index >= source.Length;
 
         if (index < source.Length)
         {

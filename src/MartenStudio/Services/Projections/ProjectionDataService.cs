@@ -341,9 +341,9 @@ internal sealed class ProjectionDataService : IProjectionDataService
             audit.RecordCapabilityDenied(denial, action, projectionName);
             throw;
         }
-        catch (StudioNotAuthorizedException)
+        catch (StudioNotAuthorizedException denied)
         {
-            audit.RecordScopeDenied(scope, PolicyName(StudioCapability.RebuildProjections), action, projectionName);
+            audit.RecordScopeDenied(denied.Scope, PolicyName(StudioCapability.RebuildProjections), action, projectionName);
             throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -422,9 +422,9 @@ internal sealed class ProjectionDataService : IProjectionDataService
             audit.RecordCapabilityDenied(denial, action, operationId);
             throw;
         }
-        catch (StudioNotAuthorizedException)
+        catch (StudioNotAuthorizedException denied)
         {
-            audit.RecordScopeDenied(scope, PolicyName(capability), action, operationId);
+            audit.RecordScopeDenied(denied.Scope, PolicyName(capability), action, operationId);
             throw;
         }
     }
@@ -501,6 +501,11 @@ internal sealed class ProjectionDataService : IProjectionDataService
                 connection,
                 catalog,
                 EventSchemaOf(resolved),
+                // The store's own flag, not the shape of the table: Marten creates the extended columns on
+                // every migrated progression table and reads them only when this is on, so a store that
+                // has the columns and not the flag has telemetry nothing is maintaining. See
+                // ProjectionProgressQueries for the whole of it.
+                resolved.Store.Options.Events.EnableExtendedProgressionTracking,
                 tenantId,
                 CommandTimeout,
                 cancellationToken)
@@ -604,9 +609,14 @@ internal sealed class ProjectionDataService : IProjectionDataService
     /// shards.
     /// </summary>
     /// <remarks>
-    /// The same mapping <c>Marten.Events.Daemon.Progress.ShardStateSelector</c> performs, so a row read
-    /// here and a row read by Marten are the same <see cref="ShardState" />. <c>Timestamp</c> is set by
-    /// the constructor to "now" in both cases and means "when this was read", not when the shard moved.
+    /// The same mapping <c>Marten.Events.Daemon.Progress.ShardStateSelector</c> performs - <em>given the
+    /// same columns</em>, which is why the read that produced <paramref name="row" /> asks for the
+    /// extended ones only under <c>EnableExtendedProgressionTracking</c>, exactly as the selector hydrates
+    /// them only under that flag. A row read here and a row read by Marten are then the same
+    /// <see cref="ShardState" />: with the flag off both leave <c>AgentStatus</c>, <c>PauseReason</c>,
+    /// <c>LastHeartbeat</c> and <c>Failure</c> unset rather than reconstructing them from columns nothing
+    /// is writing. <c>Timestamp</c> is set by the constructor to "now" in both cases and means "when this
+    /// was read", not when the shard moved.
     /// </remarks>
     private static ShardState ToShardState(ProgressionRow row) =>
         new(row.Name, row.Sequence)
@@ -965,9 +975,10 @@ internal sealed class ProjectionDataService : IProjectionDataService
             audit.RecordCapabilityDenied(denial, action, target);
             throw;
         }
-        catch (StudioNotAuthorizedException)
+        catch (StudioNotAuthorizedException denied)
         {
-            audit.RecordScopeDenied(scope, PolicyName(capability), action, target);
+            // The scope the refusal names, not the one that was asked for - see CoordinatorControlAsync.
+            audit.RecordScopeDenied(denied.Scope, PolicyName(capability), action, target);
             throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -1048,9 +1059,10 @@ internal sealed class ProjectionDataService : IProjectionDataService
             audit.RecordCapabilityDenied(denial, action, target);
             throw;
         }
-        catch (StudioNotAuthorizedException)
+        catch (StudioNotAuthorizedException denied)
         {
-            audit.RecordScopeDenied(scope, PolicyName(capability), action, target);
+            // The scope the refusal names, not the one that was asked for - see CoordinatorControlAsync.
+            audit.RecordScopeDenied(denied.Scope, PolicyName(capability), action, target);
             throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -1121,9 +1133,13 @@ internal sealed class ProjectionDataService : IProjectionDataService
             audit.RecordCapabilityDenied(denial, action, target);
             throw;
         }
-        catch (StudioNotAuthorizedException)
+        catch (StudioNotAuthorizedException denied)
         {
-            audit.RecordScopeDenied(scope, PolicyName(capability), action, target);
+            // The scope the refusal names, and not the one that was asked for. They are the same thing
+            // when the scope resolver refused, and they are deliberately different when
+            // RequireEveryCoordinatedDatabaseAsync did: the entry then says which database the visitor
+            // could not reach, which is the one fact this refusal knows and the requested scope does not.
+            audit.RecordScopeDenied(denied.Scope, PolicyName(capability), action, target);
             throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -1186,8 +1202,10 @@ internal sealed class ProjectionDataService : IProjectionDataService
 
             if (!allowed)
             {
-                // The refused scope, not the one that was asked for: the audit entry then says which
-                // database the visitor was not allowed to reach, which is the fact worth keeping.
+                // The refused scope, not the one that was asked for, so that the audit entry says which
+                // database the visitor was not allowed to reach. That only happens because the catch in
+                // CoordinatorControlAsync records `denied.Scope` rather than the requested `scope` - the
+                // two are one fact, and this throw is worth nothing on its own.
                 throw new StudioNotAuthorizedException(new StudioScope(resolved.Registration.Key, databaseId, null));
             }
         }
@@ -1230,9 +1248,10 @@ internal sealed class ProjectionDataService : IProjectionDataService
             audit.RecordCapabilityDenied(denial, action, target);
             throw;
         }
-        catch (StudioNotAuthorizedException)
+        catch (StudioNotAuthorizedException denied)
         {
-            audit.RecordScopeDenied(scope, PolicyName(capability), action, target);
+            // The scope the refusal names, not the one that was asked for - see CoordinatorControlAsync.
+            audit.RecordScopeDenied(denied.Scope, PolicyName(capability), action, target);
             throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

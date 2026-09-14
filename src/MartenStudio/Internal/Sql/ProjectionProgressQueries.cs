@@ -65,11 +65,21 @@ internal sealed record ProgressionRow(
 /// <c>select coalesce(max(seq_id), 0) from …mt_events</c>.
 /// </para>
 /// <para>
-/// <b>The select list is built from the physical columns</b> (<see cref="ColumnCatalog" />), not from the
-/// two <c>StoreOptions</c> flags Marten branches on. A store whose <c>EnableExtendedProgressionTracking</c>
-/// was switched on without the migration having been applied has the flag and not the columns, and
-/// Marten's own read raises <c>42703</c> on it; the point of this packet is that a read path must not be
-/// the thing that fixes that by migrating. What the table has is what is selected, and there is no
+/// <b>The optional columns are read only when the flag and the catalog both say so.</b> The two are
+/// different questions and the studio has to ask both. Marten 9.35's <c>EventProgressionTable</c> creates
+/// <c>heartbeat</c>, <c>agent_status</c>, <c>pause_reason</c>, <c>running_on_node</c> and the four
+/// <c>failure_*</c> columns on <em>every</em> migrated table, deliberately ungated (#5309: gating the DDL
+/// made two stores over one schema resolve each other's columns as extras and drop them in turn). So the
+/// presence of a column says nothing about whether anything writes it - that is
+/// <c>Events.EnableExtendedProgressionTracking</c>, which defaults to <see langword="false" /> and is what
+/// <c>ShardStateSelector</c> branches on. A select driven by the catalog alone therefore reconstructs, on
+/// a store that once ran with the flag on and then turned it off - or one sharing a schema with a store
+/// that has it on - an <c>AgentStatus</c>, a <c>PauseReason</c> and a <c>ShardFailure</c> that
+/// <c>IMartenDatabase.AllProjectionProgress</c> would not report: a running shard drawn as paused with a
+/// failure, out of telemetry nothing is maintaining. The flag decides whether to ask at all; the catalog
+/// is then still consulted, as the <c>42703</c> guard for the reverse case - a store whose flag was
+/// switched on without the migration having been applied, which Marten's own read raises rather than
+/// survives, and which a read path must never be the thing that fixes by migrating. There is no
 /// <c>select *</c> (hard rule 10).
 /// </para>
 /// </remarks>
@@ -137,6 +147,11 @@ internal static class ProjectionProgressQueries
     /// probe the table first and answer "no event store here" instead of building a statement against a
     /// table that does not exist.
     /// </param>
+    /// <param name="extendedProgressionTracking">
+    /// <c>StoreOptions.Events.EnableExtendedProgressionTracking</c>, which is what decides whether anything
+    /// <em>writes</em> the optional columns. No default: a wrong guess either invents telemetry or drops
+    /// it, and both are silent.
+    /// </param>
     /// <param name="tenantId">
     /// When set, only rows whose name ends in <c>:{tenantId}</c>. Marten's own filter, and the caller
     /// decides when it means anything - see <c>ProjectionDataService</c>.
@@ -145,6 +160,7 @@ internal static class ProjectionProgressQueries
     public static NpgsqlCommand BuildProgressionRows(
         string schema,
         IReadOnlyCollection<string> physicalColumns,
+        bool extendedProgressionTracking,
         string? tenantId = null,
         TimeSpan? commandTimeout = null)
     {
@@ -160,7 +176,7 @@ internal static class ProjectionProgressQueries
             sql.Append("select ").Append(SqlIdentifier.Quote(NameColumn))
                 .Append(", ").Append(SqlIdentifier.Quote(SequenceColumn));
 
-            foreach (var column in SelectedOptionalColumns(physicalColumns))
+            foreach (var column in SelectedOptionalColumns(physicalColumns, extendedProgressionTracking))
             {
                 sql.Append(", ").Append(SqlIdentifier.Quote(column));
             }
@@ -249,6 +265,10 @@ internal static class ProjectionProgressQueries
     /// <param name="connection">An open read connection to the database in scope.</param>
     /// <param name="catalog">The shared, expiring <c>information_schema</c> catalog.</param>
     /// <param name="schema">The event store's schema.</param>
+    /// <param name="extendedProgressionTracking">
+    /// <c>StoreOptions.Events.EnableExtendedProgressionTracking</c>. With it off the optional columns are
+    /// not asked for, because nothing is writing them - see the class remarks.
+    /// </param>
     /// <param name="tenantId">The tenant suffix filter, or <see langword="null" /> for every row.</param>
     /// <param name="commandTimeout">A bound on the read.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
@@ -260,6 +280,7 @@ internal static class ProjectionProgressQueries
         NpgsqlConnection connection,
         ColumnCatalog catalog,
         string schema,
+        bool extendedProgressionTracking,
         string? tenantId,
         TimeSpan? commandTimeout,
         CancellationToken cancellationToken = default)
@@ -278,12 +299,13 @@ internal static class ProjectionProgressQueries
 
         string[] columns = [.. table.Columns.Select(x => x.Name)];
 
-        await using NpgsqlCommand command = BuildProgressionRows(schema, columns, tenantId, commandTimeout);
+        await using NpgsqlCommand command =
+            BuildProgressionRows(schema, columns, extendedProgressionTracking, tenantId, commandTimeout);
         command.Connection = connection;
 
         // Which optional columns were selected decides what the ordinals after the first two mean, so the
         // reader walks the same list the builder did rather than asking the reader for names.
-        string[] selected = [.. SelectedOptionalColumns(columns)];
+        string[] selected = [.. SelectedOptionalColumns(columns, extendedProgressionTracking)];
 
         List<ProgressionRow> rows = [];
 
@@ -353,9 +375,22 @@ internal static class ProjectionProgressQueries
         };
     }
 
-    /// <summary>The optional columns this table has, in select order.</summary>
-    internal static IEnumerable<string> SelectedOptionalColumns(IReadOnlyCollection<string> physicalColumns) =>
-        OptionalColumns.Where(x => physicalColumns.Contains(x, StringComparer.Ordinal));
+    /// <summary>
+    /// The optional columns this read asks for, in select order: none at all unless the store's own flag
+    /// says something is writing them, and then only those the table really has.
+    /// </summary>
+    /// <param name="physicalColumns">What <c>information_schema</c> says the table has.</param>
+    /// <param name="extendedProgressionTracking">
+    /// <c>StoreOptions.Events.EnableExtendedProgressionTracking</c>. The columns exist on every migrated
+    /// table regardless of it (Marten 9.35 #5309), so this is the half that decides whether the values
+    /// mean anything.
+    /// </param>
+    internal static IEnumerable<string> SelectedOptionalColumns(
+        IReadOnlyCollection<string> physicalColumns,
+        bool extendedProgressionTracking) =>
+        extendedProgressionTracking
+            ? OptionalColumns.Where(x => physicalColumns.Contains(x, StringComparer.Ordinal))
+            : [];
 
     private static ProgressionRow ReadRow(NpgsqlDataReader reader, string[] selected)
     {
