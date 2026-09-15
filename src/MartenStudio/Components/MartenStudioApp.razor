@@ -35,9 +35,26 @@
     *@
     <Routes @rendermode="RenderMode.InteractiveServer" />
     @*
-        Relative, so it resolves against the studio-rooted <base href> above: every mount serves its own
-        copy of the framework script at {Path}/_framework/blazor.web.js.
+        The studio's own browser helpers, and deliberately not a Blazor JS initializer.
+
+        A `*.lib.module.js` in an RCL's wwwroot is one by convention, and Blazor loads the initializers of
+        every referenced RCL into *every* Blazor app in the process. So a host that runs its own Blazor
+        Server app fetched this file from the site root on every page it served - pages that never mention
+        the studio, its own login page included - and where AuthorizationPolicy is set that path is
+        authorized too, so the fetch redirected to the login page, came back as text/html, and the console
+        logged a MIME-type error on every page load. "Registering the studio must never change host
+        behaviour" includes not making the host's app execute a script belonging to a package it merely
+        references, so the file is an ordinary script under `js/` and this is what asks for it (issue #2).
+
+        Both srcs are relative, so they resolve against the studio-rooted <base href> above: every mount
+        serves its own copy of each, under {Path}. The helpers come first because blazor.web.js starts the
+        circuit that calls them.
+
+        Here rather than in <head> because it is also what carries the remembered theme onto the
+        prerendered markup, and it needs that markup parsed to find it. That is still sooner than the JS
+        initializer ever ran.
     *@
+    <script src="_content/MartenStudio/js/marten-studio.js"></script>
     <script src="_framework/blazor.web.js"></script>
 </body>
 </html>

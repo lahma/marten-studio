@@ -1,4 +1,32 @@
-export function afterWebStarted() {
+/*
+ * Marten Studio's browser helpers.
+ *
+ * Deliberately NOT a Blazor JS initializer. It used to be one - `wwwroot/MartenStudio.lib.module.js`,
+ * exporting `afterWebStarted` - and Blazor loads the initializers of every referenced RCL into every
+ * Blazor app in the process. A host that runs its own Blazor Server app therefore fetched this file from
+ * the *site root* on every page it served, including pages that have nothing to do with the studio; where
+ * MartenStudioOptions.AuthorizationPolicy is set, that path is authorized too, so the fetch was redirected
+ * to the login page, came back as text/html, and the browser logged a MIME-type error on every page load -
+ * the host's unauthenticated login page included. Registering the studio must never change how the host
+ * behaves, and that was the host's own app executing a script belonging to something it had only
+ * referenced (issue #2).
+ *
+ * So it is an ordinary classic script now, loaded by the studio's own shell from a path that is relative
+ * to the studio-rooted <base href>. Only the studio's pages ask for it, it resolves under whatever mount
+ * path the studio was given, and a host that never opens the studio never fetches it.
+ *
+ * It runs at the end of <body>, which is earlier than `afterWebStarted` ever ran: the prerendered DOM is
+ * parsed, so applyRememberedTheme below still has .ms-studio elements to find, and the globals are all
+ * defined before blazor.web.js starts the circuit that calls them. Every assignment is `x = x || {...}`
+ * and every enhance* is idempotent, so re-running it costs nothing.
+ */
+(function martenStudioBrowserHelpers() {
+    // As `export function afterWebStarted()` this file was an ES module, and therefore strict. A classic
+    // script is not, so strictness is asked for rather than inherited: nothing in here behaves
+    // differently under it today, and a future typo should keep throwing rather than quietly minting a
+    // global.
+    "use strict";
+
     window.martenStudio = window.martenStudio || {};
 
     window.martenStudio.prefs = window.martenStudio.prefs || {
@@ -551,4 +579,4 @@ export function afterWebStarted() {
             return false;
         }
     };
-}
+})();

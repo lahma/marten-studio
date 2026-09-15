@@ -159,7 +159,7 @@ model, the phased delivery plan — lives in the approved plan at
     that disposal with it, leaving the `DotNetObjectReference` that pins the component undisposed and the
     page's `CancellationTokenSource` uncancelled. A filter still rethrows anything that is a real bug.
 
-## Design decisions (D1–D23)
+## Design decisions (D1–D24)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the
 rationale is not.
@@ -320,6 +320,27 @@ unaffected — it simply has nothing to validate here. If a screen ever grows a 
 token back with it, scoped to that endpoint rather than to the whole studio.
 `StudioEndpointsTest.A_host_that_never_calls_UseAntiforgery_still_serves_the_studio` is the regression.
 
+**D24 — The package ships no Blazor JS initializer; the shell loads `js/marten-studio.js` itself.** A
+file named `*.lib.module.js` in an RCL's `wwwroot` *is* a JS initializer — nothing declares it, the
+filename alone is the declaration — and Blazor loads the initializers of every referenced RCL into
+**every** Blazor app in the process. A host that runs its own Blazor Server app therefore fetched the
+studio's initializer from the **site root** on every page it served, including pages that never mention
+the studio; with `AuthorizationPolicy` set, that path is authorized too, so the fetch was redirected to
+the login page, came back as `text/html`, and the browser logged a MIME-type error on every page load —
+the host's own unauthenticated login page included. That is the host's behaviour changed by the act of
+referencing this package, which is the thing this project exists to refuse, and it made
+`AuthorizationPolicy` unusable for exactly the hosts most likely to set it (issue #2). The file is an
+ordinary classic script at `wwwroot/js/marten-studio.js` now, loaded by `MartenStudioApp.razor` with a
+**relative** `src` so it resolves against the studio-rooted `<base href>` and lands on the
+`_content/MartenStudio` mirror under the mount path. It sits at the end of `<body>`, before
+`blazor.web.js`: the prerendered markup is parsed by then, so the remembered theme is still applied to
+it — sooner than `afterWebStarted` ever ran — and every global is defined before the circuit that calls
+them starts. Measured, not assumed: the built asset manifest has no `js-initializer` dependency group at
+all. *The alternative that was rejected:* keeping the initializer and making it no-op outside the
+studio's circuit. It fixes nothing — the fetch, the redirect and the console error all happen before any
+of its code runs. `NoJsInitializerTests` is the regression, on both halves: no `*.lib.module.js` under
+`wwwroot`, and a shell that still asks for the script it replaced it with.
+
 ## Package budget
 
 Complete, as of the bootstrap commit. Versions are centrally pinned in `Directory.Packages.props`, with
@@ -446,6 +467,8 @@ src/MartenStudio/Internal/               startup authorization guard, endpoint m
 src/MartenStudio/Services/               toast service; scoped state and data services come later
 src/MartenStudio/wwwroot/                static web assets, packed under `_content/MartenStudio/`
 src/MartenStudio/wwwroot/css/            the one stylesheet
+src/MartenStudio/wwwroot/js/             the studio's browser helpers, loaded by the shell (never a
+                                         Blazor JS initializer - see MartenStudioApp.razor)
 samples/                                 Demo host and demo domain; never packed
 samples/MartenStudio.Sample/             The sample ASP.NET Core host (D18) - README snippet regions
 samples/MartenStudio.SampleDomain/       The demo domain, shared with the integration tests; deliberately

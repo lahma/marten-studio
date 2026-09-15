@@ -184,7 +184,7 @@ public class JsonViewTests
         context.Render<JsonView>(p => p.Add(c => c.Json, Sample));
 
         // Razor decides preventDefault at render time, which can only be "always" - swallowing Tab - or
-        // "never". The condition is per key and per target, so it is answered in the lib module.
+        // "never". The condition is per key and per target, so it is answered in marten-studio.js.
         context.JSInterop.Invocations["martenStudio.json.captureTreeKeys"].Should().ContainSingle();
     }
 

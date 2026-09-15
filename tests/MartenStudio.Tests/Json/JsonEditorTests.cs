@@ -143,7 +143,7 @@ public class JsonEditorTests
             .Add(c => c.Json, """{"a":1}""")
             .Add(c => c.OnSave, EventCallback.Factory.Create<string>(this, text => saved = text)));
 
-        // This is what the lib module's keydown handler does: it carries textarea.value across, so the
+        // This is what marten-studio.js's keydown handler does: it carries textarea.value across, so the
         // server never needs the keystroke itself and never needs to read the value back either.
         await view.InvokeAsync(() => view.Instance.OnEditorSaveAsync("""{"a":2}"""));
 

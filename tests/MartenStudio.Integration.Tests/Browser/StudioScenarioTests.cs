@@ -250,7 +250,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
 
     /// <summary>
     /// The same first scenario against a studio mounted at <c>/ops/marten</c>, plus the four things a
-    /// sub-path mount gets wrong: the framework script, the stylesheet, the JS initializer and the
+    /// sub-path mount gets wrong: the framework script, the stylesheet, the browser helpers and the
     /// circuit's own negotiate all have to answer under the mount path.
     /// </summary>
     /// <remarks>
@@ -283,7 +283,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
                      {
                          BrowserSuiteFixture.SubPath + "/_framework/blazor.web.js",
                          BrowserSuiteFixture.SubPath + "/_content/MartenStudio/css/marten-studio.css",
-                         BrowserSuiteFixture.SubPath + "/_content/MartenStudio/MartenStudio.lib.module.js",
+                         BrowserSuiteFixture.SubPath + "/_content/MartenStudio/js/marten-studio.js",
                      })
             {
                 IAPIResponse response = await studio.Page.APIRequest.GetAsync(host.Url(path));
