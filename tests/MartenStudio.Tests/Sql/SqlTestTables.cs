@@ -42,6 +42,16 @@ internal static class SqlTestTables
         DocumentTableInfo.FromDocumentType(SqlTestStore.DocumentType<SqlTestTicket>());
 
     /// <summary>
+    /// A type whose <c>[Version]</c> member Marten has registered a search alias for, plus one real
+    /// duplicated field beside it, so the two are told apart rather than lumped together.
+    /// </summary>
+    public static DocumentTableInfo Versioned() =>
+        DocumentTableInfo.FromDocumentType(SqlTestStore
+            .DocumentType<SqlTestVersionedNote>(options =>
+                options.Schema.For<SqlTestVersionedNote>().Duplicate(x => x.Text))
+            .WithLinqSearchAliasFor("mt_version", nameof(SqlTestVersionedNote.Version)));
+
+    /// <summary>
     /// A hierarchy, so <c>mt_doc_type</c> exists and the subclass verdict has something to judge.
     /// </summary>
     public static DocumentTableInfo Hierarchy() =>

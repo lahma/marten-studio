@@ -86,11 +86,16 @@
     }
     else
     {
+        @* Keyed on the ordinal: the text is not a key. AddRecent dedupes on text + mode + alias, and the
+           list is rendered without filtering by alias, so running the same where clause against two
+           collections puts two siblings here under one key - and a duplicate @key throws inside Blazor's
+           diff builder, which ends the circuit rather than the render. Reachable by a visitor with no
+           capability at all. The list is rebuilt whole, so position is stable. *@
         <ul class="ms-query-drawer-list ms-query-drawer-recent">
-            @foreach (SavedQuery query in recent)
+            @for (int ordinal = 0; ordinal < recent.Count; ordinal++)
             {
-                SavedQuery current = query;
-                <li class="ms-query-drawer-item" @key="current.Text">
+                SavedQuery current = recent[ordinal];
+                <li class="ms-query-drawer-item" @key="ordinal">
                     <button type="button" class="ms-query-drawer-pick" title="@current.Text" @onclick="() => PickAsync(current)">
                         @current.Name
                     </button>

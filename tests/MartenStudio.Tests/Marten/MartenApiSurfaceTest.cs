@@ -23,6 +23,8 @@ using Npgsql;
 
 using Polly;
 
+using Weasel.Postgresql.Tables;
+
 using JasperFxCoordinator = JasperFx.Events.Daemon.IProjectionCoordinator;
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
 using ProjectionOptions = Marten.Events.Projections.ProjectionOptions;
@@ -160,6 +162,52 @@ public class MartenApiSurfaceTest
         RequireMethod(documentType, "IsHierarchy").ReturnType.Should().Be<bool>();
         RequireMethod(documentType, "AliasFor", typeof(Type)).ReturnType.Should().Be<string>();
         RequireMethod(documentType, "TypeFor", typeof(string)).ReturnType.Should().Be<Type>();
+    }
+
+    /// <summary>
+    /// <b>Not every <c>DuplicatedField</c> is a column</b>, which is the correction issue #1 bought.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Marten registers a duplicated field for every metadata column a Marten attribute named a member
+    /// for — <c>[Version]</c>, <c>[CreatedAt]</c>, <c>[TenantId]</c> and the rest — so that a LINQ
+    /// comparison against the member reads the column rather than the JSON. The field carries the
+    /// <em>metadata</em> column's name (<c>mt_version</c>) and is marked <c>OnlyForSearching</c>;
+    /// <c>Marten.Storage.DocumentTable</c> builds its columns from
+    /// <c>DuplicatedFields.Where(x =&gt; !x.OnlyForSearching)</c> and creates none for it.
+    /// </para>
+    /// <para>
+    /// The registration is <c>MetadataColumn.RegisterForLinqSearching</c>, called from the
+    /// <c>DocumentSchema</c> constructor — which <c>DocumentMapping</c> holds behind a
+    /// <c>Lazy&lt;T&gt;</c>. That is why the studio shipped without noticing: a mapping resolved out of a
+    /// store that has never built its schema reports no such field, and one out of a store that has
+    /// served a single query reports them all. So the assertion below builds the field the way Marten
+    /// does rather than waiting for the lazy; the live proof that Marten really does this is
+    /// <c>DocumentDetailVersionedLiveTests</c> in the integration suite.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_DuplicatedField_says_whether_it_is_a_real_column_or_only_a_LINQ_alias()
+    {
+        RequireProperty(typeof(DuplicatedField), "OnlyForSearching").PropertyType.Should().Be<bool>();
+
+        using IDocumentStore store = DocumentStore.For(x => x.Connection(DummyConnectionString));
+        var mapping = (DocumentMapping) store.Options.FindOrResolveDocumentType(typeof(SampleVersioned));
+
+        // MetadataColumn.RegisterForLinqSearching is internal, so this is that method's body, verbatim.
+        MemberInfo member = typeof(SampleVersioned).GetProperty(nameof(SampleVersioned.Version))!;
+        mapping.DuplicateField([member], columnName: mapping.Metadata.Version.Name).OnlyForSearching = true;
+
+        DuplicatedField registered = mapping.DuplicatedFields.Should().ContainSingle().Subject;
+        registered.ColumnName.Should().Be("mt_version", "it names the metadata column, not a column of its own");
+        registered.OnlyForSearching.Should().BeTrue();
+
+        // Marten.Storage.DocumentTable is internal, so the table it would create is built by name. It is
+        // the whole point of the assertion: the alias adds no column, and mt_version appears once.
+        var table = (Table) Activator.CreateInstance(MartenType("Marten.Storage.DocumentTable"), mapping)!;
+
+        table.Columns.Select(x => x.Name).Should().ContainSingle(x => x == "mt_version",
+            "Marten's own table has the column once - the LINQ alias adds nothing to it");
     }
 
     /// <summary>
@@ -1342,7 +1390,8 @@ public class MartenApiSurfaceTest
 
         foreach (DuplicatedField duplicated in documentType.DuplicatedFields)
         {
-            _ = (duplicated.ColumnName, duplicated.MemberName, duplicated.PgType, duplicated.DbType);
+            _ = (duplicated.ColumnName, duplicated.MemberName, duplicated.PgType, duplicated.DbType,
+                duplicated.OnlyForSearching);
         }
 
         // --- event store configuration ----------------------------------------------------------------
@@ -1490,6 +1539,15 @@ public class MartenApiSurfaceTest
     internal class SampleAggregate
     {
         public Guid Id { get; set; }
+    }
+
+    /// <summary>A document whose version is a member, which is what makes Marten register an alias.</summary>
+    internal class SampleVersioned
+    {
+        public Guid Id { get; set; }
+
+        [Version]
+        public Guid Version { get; set; }
     }
 
     /// <summary>A hierarchy root, for the TypeFor probe. Never stored anywhere.</summary>

@@ -120,6 +120,122 @@ public class DocumentTableInfoTests
         info.FindDuplicated([]).Should().BeNull();
     }
 
+    /// <summary>
+    /// The metadata alias Marten registers for a <c>[Version]</c> member is not a duplicated column, and
+    /// the studio must not read it as one. Issue #1.
+    /// </summary>
+    /// <remarks>
+    /// Marten names that alias after the metadata column the member is stored in — <c>mt_version</c> —
+    /// and marks it <c>OnlyForSearching</c>, which is how its own <c>DocumentTable</c> knows to create no
+    /// column for it. Taking it for a real duplicated field put <c>mt_version</c> in the single-document
+    /// select list twice and in the metadata pane twice, and the second <c>&lt;tr&gt;</c> carrying a key
+    /// the first one already had took the Blazor circuit down with it: a 500 on the detail view of every
+    /// document whose type has a <c>[Version]</c> property.
+    /// </remarks>
+    [Fact]
+    public void A_metadata_column_a_Version_member_names_is_not_a_duplicated_column()
+    {
+        var info = DocumentTableInfo.FromDocumentType(SqlTestStore
+            .DocumentType<SqlTestVersionedNote>()
+            .WithLinqSearchAliasFor("mt_version", nameof(SqlTestVersionedNote.Version)));
+
+        info.MetadataColumns.Select(x => x.ColumnName).Should().Contain("mt_version",
+            "the column is real - it is where Marten keeps the version");
+        info.DuplicatedColumns.Should().BeEmpty(
+            "the LINQ alias names that same column and adds no column of its own");
+
+        info.MetadataColumns.Select(x => x.ColumnName)
+            .Concat(info.DuplicatedColumns.Select(x => x.ColumnName))
+            .Should().OnlyHaveUniqueItems("every column of the table is named once");
+    }
+
+    /// <summary>
+    /// Dropped from the columns, kept for the search box: <c>Version:</c> still reads
+    /// <c>mt_version</c> rather than the JSON copy of it.
+    /// </summary>
+    /// <remarks>
+    /// This is the half of the fix that is easy to miss. Marten registered that alias precisely so a
+    /// comparison against the member reads the column, and the JSON copy is not an equivalent answer: the
+    /// version binder mints the new value <em>after</em> the document has been serialised, so
+    /// <c>data ->> 'Version'</c> is one write behind <c>mt_version</c> forever. Losing it would have
+    /// turned an indexed column read into a wrong answer, quietly.
+    /// </remarks>
+    [Fact]
+    public void An_aliased_member_is_still_searchable_against_the_column_it_is_stored_in()
+    {
+        var info = SqlTestTables.Versioned();
+
+        info.DuplicatedColumns.Select(x => x.ColumnName).Should().BeEquivalentTo(["text"],
+            "the alias is not a column, and nothing that lists columns may see it");
+
+        var found = info.FindDuplicated(["Version"]);
+
+        found.Should().NotBeNull();
+        found!.ColumnName.Should().Be("mt_version");
+        found.IsMetadataAlias.Should().BeTrue("it is where Marten stores the member, not a column made for it");
+
+        info.FindDuplicated(["mt_version"])!.ColumnName.Should().Be("mt_version");
+        info.FindDuplicated(["Text"])!.IsMetadataAlias.Should().BeFalse("that one really is a duplicated field");
+    }
+
+    /// <summary>
+    /// An alias for a column the table does not have is dropped, like every other column claim the
+    /// configuration makes and the database does not honour.
+    /// </summary>
+    /// <remarks>
+    /// <c>Policies.DisableInformationalFields()</c> leaves a table of <c>id</c> and <c>data</c>. An alias
+    /// that survived it would compile <c>Version:…</c> into a predicate naming a column that is not
+    /// there, which fails at Postgres on every page render.
+    /// </remarks>
+    [Fact]
+    public void An_alias_for_a_column_the_table_does_not_have_is_reconciled_away()
+    {
+        var read = SqlTestTables.Versioned().WithPhysicalColumns(new TableColumns(
+            SqlTestStore.Schema,
+            "mt_doc_sqltestversionednote",
+            [
+                new PostgresColumn("id", "uuid", "uuid", false),
+                new PostgresColumn("data", "jsonb", "jsonb", false),
+                new PostgresColumn("text", "character varying", "varchar", true),
+            ]));
+
+        read.MetadataAliases.Should().BeEmpty();
+        read.FindDuplicated(["Version"]).Should().BeNull("there is no mt_version column to read");
+        read.FindDuplicated(["Text"]).Should().NotBeNull();
+    }
+
+    /// <summary>The physical type wins for an alias too, exactly as it does for a metadata column.</summary>
+    [Fact]
+    public void An_alias_binds_the_type_the_column_really_is()
+    {
+        var read = SqlTestTables.Versioned().WithPhysicalColumns(new TableColumns(
+            SqlTestStore.Schema,
+            "mt_doc_sqltestversionednote",
+            [
+                new PostgresColumn("id", "uuid", "uuid", false),
+                new PostgresColumn("data", "jsonb", "jsonb", false),
+                new PostgresColumn("mt_version", "integer", "int4", false),
+            ]));
+
+        read.FindDuplicated(["Version"])!.DbType.Should().Be(NpgsqlTypes.NpgsqlDbType.Integer,
+            "a hand-migrated or IRevisioned mt_version is int4, whatever the member's CLR type says");
+    }
+
+    /// <summary>
+    /// The same rule, with a real duplicated field beside the alias so that the filter is shown to drop
+    /// one and keep the other rather than simply dropping everything.
+    /// </summary>
+    [Fact]
+    public void A_real_duplicated_field_survives_beside_the_alias()
+    {
+        var info = DocumentTableInfo.FromDocumentType(SqlTestStore
+            .DocumentType<SqlTestVersionedNote>(options =>
+                options.Schema.For<SqlTestVersionedNote>().Duplicate(x => x.Text))
+            .WithLinqSearchAliasFor("mt_version", nameof(SqlTestVersionedNote.Version)));
+
+        info.DuplicatedColumns.Select(x => x.ColumnName).Should().BeEquivalentTo(["text"]);
+    }
+
     [Theory]
     [InlineData("uuid", "Uuid")]
     [InlineData("int4", "Int4")]

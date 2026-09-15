@@ -78,10 +78,12 @@
             }
             else
             {
+                @* Keyed on the ordinal: one statement can raise the same notice twice, verbatim, and a
+                   repeated @key ends the circuit rather than the render. *@
                 <ul class="ms-query-messages">
-                    @foreach (string message in Messages)
+                    @for (int ordinal = 0; ordinal < Messages.Count; ordinal++)
                     {
-                        <li class="ms-query-message" @key="message">@message</li>
+                        <li class="ms-query-message" @key="ordinal">@Messages[ordinal]</li>
                     }
                 </ul>
             }

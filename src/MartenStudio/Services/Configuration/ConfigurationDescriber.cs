@@ -5,6 +5,7 @@ using JasperFx.Descriptors;
 using Marten;
 using Marten.Linq.Members;
 using Marten.Schema;
+using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 
 using Weasel.Postgresql.Tables;
@@ -204,7 +205,12 @@ internal static class ConfigurationDescriber
         ];
 
         List<DuplicatedFieldConfiguration> duplicated = [];
-        foreach (DuplicatedField field in documentType.DuplicatedFields)
+
+        // The columns Marten really adds. A [Version] or [CreatedAt] member also shows up in
+        // DuplicatedFields, naming the metadata column it lives in and creating no column of its own; it
+        // is listed among this type's metadata, and listing it here as well would say the host duplicated
+        // a member into a column it never asked for. See MartenDuplicatedFields.
+        foreach (DuplicatedField field in MartenDuplicatedFields.Physical(documentType))
         {
             duplicated.Add(new DuplicatedFieldConfiguration(field.MemberName, field.ColumnName, field.PgType));
         }

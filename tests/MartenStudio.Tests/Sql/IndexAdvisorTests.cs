@@ -62,6 +62,33 @@ public class IndexAdvisorTests
         verdict.Suggestion.Should().Be("options.Schema.For<SqlTestCustomer>().Index(x => x.Email);");
     }
 
+    /// <summary>
+    /// A member a metadata column stores gets index advice, never "duplicate it" — because Marten would
+    /// discard that.
+    /// </summary>
+    /// <remarks>
+    /// <c>Duplicate(x =&gt; x.Version)</c> against a <c>[Version]</c> member does not produce a second
+    /// column: Marten re-points that very field at <c>mt_version</c> and marks it search-only. Advice a
+    /// person can follow and then find nothing changed is worse than no advice, and this screen's only
+    /// claim is that its advice is true.
+    /// </remarks>
+    [Fact]
+    public void A_member_a_metadata_column_stores_is_advised_to_index_that_column_not_to_duplicate_it()
+    {
+        var value = Guid.NewGuid();
+
+        var verdict = IndexAdvisor.Evaluate(
+                SqlTestTables.Versioned(),
+                [],
+                SearchGrammar.Parse($"version = {value:D}").Predicates)
+            .Predicates.Single().Verdict;
+
+        verdict.Level.ToString().Should().Be("Red");
+        verdict.Reason.Should().Contain("mt_version is where Marten stores Version");
+        verdict.Reason.Should().NotContain("duplicated field");
+        verdict.Suggestion.Should().Be("options.Schema.For<SqlTestVersionedNote>().Index(x => x.Version);");
+    }
+
     [Fact]
     public void A_property_that_is_only_in_the_json_is_red_and_suggests_duplicating_it()
     {

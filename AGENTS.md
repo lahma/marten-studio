@@ -82,6 +82,22 @@ model, the phased delivery plan — lives in the approved plan at
     `DisableInformationalFields()` has no `mt_last_modified` at all. Build the column set with
     `DocumentTableInfo.FromDocumentType(...).WithPhysicalColumns(...)`, which settles it against
     `information_schema`, and never `select *`.
+    **And `IDocumentType.DuplicatedFields` is not a list of columns.** Marten registers a *search-only*
+    duplicated field for every metadata column a Marten attribute named a member for — `[Version]`,
+    `[CreatedAt]`, `[LastModified]`, `[TenantId]`, `[CorrelationId]`, `[CausationId]`, `[LastModifiedBy]`
+    — so that a LINQ comparison against the member reads the column instead of the JSON. Each one carries
+    the *metadata* column's name (`mt_version`, not a column of its own) and is marked `OnlyForSearching`;
+    Marten's own `DocumentTable` builds its columns from `DuplicatedFields.Where(x => !x.OnlyForSearching)`
+    and creates nothing for one. Enumerate them through `MartenDuplicatedFields.Physical` — anything that
+    describes the table's columns takes that, and `MetadataAliases` (via
+    `DocumentTableInfo.FindDuplicated`) is the *only* place the other half may be seen, because that is
+    the search path, where reading the column is the point. Getting this wrong named `mt_version` twice in
+    a select list and rendered two `<tr>` under one Blazor `@key`, which ends the circuit rather than the
+    render: issue #1, a 500 on the detail view of every document whose type has a `[Version]` property.
+    They also appear *late* — `DocumentMapping` holds the `DocumentSchema` that registers them behind a
+    `Lazy<T>`, so a mapping from a store that has never built its schema reports none of them, which is
+    every unit test here, and a store that has served one query reports them all, which is every
+    application. Test the shape with `SqlTestStore.WithLinqSearchAliasFor`, and prove Marten's half live.
 11. **Never call `store.BuildProjectionDaemonAsync()`.** It starts a *second* daemon alongside the host's
     own, and the two fight over the same advisory locks until one hangs. The only supported way to reach a
     running daemon is the DI-registered coordinator, and its absence is a value —
