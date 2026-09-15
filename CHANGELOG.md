@@ -16,6 +16,16 @@
   drawer (the same where clause run against two collections repeats its text — reachable by a visitor
   with no capability at all), the SQL console's Postgres notices, and the destructive-statement list in
   the schema migration dialog.
+- The package no longer ships a Blazor JS initializer, so a host that runs a Blazor app of its own stops
+  fetching a studio script on every page it serves ([#2](https://github.com/lahma/marten-studio/issues/2)).
+  A `*.lib.module.js` in an RCL's `wwwroot` is a JS initializer by convention, and Blazor loads the
+  initializers of every referenced RCL into *every* Blazor app in the process — from the site root, on
+  pages that never mention the studio. With `AuthorizationPolicy` set that path is authorized too, so the
+  fetch redirected to the login page, came back as `text/html`, and the console logged a MIME-type error
+  on every page load, the host's own unauthenticated login page included. The helpers are an ordinary
+  script at `_content/MartenStudio/js/marten-studio.js` now, loaded by the studio's own shell relative to
+  its `<base href>`, so it resolves under the mount path and only the studio's pages ask for it. Nothing
+  else changes: the same helpers, applied to the prerendered markup sooner than the initializer ran.
 
 # 0.1.0
 
