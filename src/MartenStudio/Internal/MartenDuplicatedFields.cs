@@ -52,4 +52,33 @@ internal static class MartenDuplicatedFields
             }
         }
     }
+
+    /// <summary>
+    /// The other half: the fields that are <em>not</em> columns, each naming the metadata column its
+    /// member is stored in.
+    /// </summary>
+    /// <remarks>
+    /// These are not nothing, which is why they are handed back rather than simply dropped. Marten
+    /// registered each one so that a comparison against the member reads the column, and the studio's
+    /// search box wants exactly that: <c>Version:&lt;guid&gt;</c> should compile to
+    /// <c>mt_version = $1</c> and not to <c>(data #&gt;&gt; '{Version}') = $1</c>, which reads a copy that
+    /// is one write out of date - Marten's version binder mints the new value after the document has been
+    /// serialised, so the JSON never agrees with the column. What they must not do is appear anywhere
+    /// that describes the table's <em>columns</em>: the select list, the metadata pane, the column
+    /// chooser, the configuration screen.
+    /// </remarks>
+    /// <param name="documentType">The mapping to read.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="documentType" /> is null.</exception>
+    public static IEnumerable<DuplicatedField> SearchAliases(IDocumentType documentType)
+    {
+        ArgumentNullException.ThrowIfNull(documentType);
+
+        foreach (DuplicatedField field in documentType.DuplicatedFields)
+        {
+            if (field.OnlyForSearching)
+            {
+                yield return field;
+            }
+        }
+    }
 }

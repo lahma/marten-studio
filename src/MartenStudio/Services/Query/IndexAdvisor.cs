@@ -393,19 +393,23 @@ internal static class IndexAdvisor
         {
             var verdict = ForColumn(indexes, duplicated.ColumnName);
 
+            // "a duplicated field" is only true of half of these. The other half is a metadata column the
+            // member is stored in, and telling somebody to Duplicate(x => x.Version) would be advice
+            // Marten discards: it re-points that very field at mt_version and marks it search-only.
+            var what = duplicated.IsMetadataAlias
+                ? $"{duplicated.ColumnName} is where Marten stores {duplicated.MemberPath}"
+                : $"{duplicated.ColumnName} is a duplicated field";
+
             return verdict.Level switch
             {
-                IndexVerdictLevel.Green => verdict with
-                {
-                    Reason = $"{duplicated.ColumnName} is a duplicated field and leads an index.",
-                },
+                IndexVerdictLevel.Green => verdict with { Reason = $"{what} and leads an index." },
                 IndexVerdictLevel.Amber => verdict with
                 {
                     Reason = $"{duplicated.ColumnName} is in an index but does not lead it.",
                 },
                 _ => new IndexVerdict(
                     IndexVerdictLevel.Red,
-                    $"{duplicated.ColumnName} is a duplicated field, but no index covers it, so every row is read.",
+                    $"{what}, but no index covers it, so every row is read.",
                     Index(table, path)),
             };
         }

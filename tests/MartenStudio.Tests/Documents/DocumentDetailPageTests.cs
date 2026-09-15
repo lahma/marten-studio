@@ -136,8 +136,10 @@ public class DocumentDetailPageTests
 
         var page = Render(context);
 
-        // The throw is in the diff builder, so it needs a second render to reach: in the browser that is
-        // the interactive render arriving over the circuit and diffing against the prerendered markup.
+        // Measured rather than reasoned about, because it is easy to get backwards: with the fix reverted
+        // this pane's *first* render draws all six rows and throws nothing, and the render after it is the
+        // one that throws. So the second render is not decoration - without it the test passes either way
+        // and proves nothing. In the browser it is the interactive render arriving over the circuit.
         page.Render();
 
         page.TextOfAll(".ms-doc-meta-table tbody th").Where(x => x == "mt_version").Should().HaveCount(4,

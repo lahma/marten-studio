@@ -9,7 +9,13 @@
   for real duplicated columns, so `mt_version` was named twice in the single-document select list and
   rendered twice in the metadata pane, and the second row carrying a key the first already had threw
   inside Blazor's diff builder. The pane also keys its rows on position now, so a repeated column name
-  costs a repeated row rather than a session.
+  costs a repeated row rather than a session. A filter typed as `Version:` still reads `mt_version`
+  rather than the JSON copy of it, which Marten leaves one write behind, and the index advisor no longer
+  suggests a `Duplicate(x => x.Version)` that Marten would discard.
+- Three other lists keyed on values that are not unique no longer end a session either: the recent-query
+  drawer (the same where clause run against two collections repeats its text — reachable by a visitor
+  with no capability at all), the SQL console's Postgres notices, and the destructive-statement list in
+  the schema migration dialog.
 
 # 0.1.0
 

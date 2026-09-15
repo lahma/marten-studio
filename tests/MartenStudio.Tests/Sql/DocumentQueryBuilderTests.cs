@@ -152,6 +152,29 @@ public class DocumentQueryBuilderTests
         Parameter(command, "p0").NpgsqlDbType.Should().Be(NpgsqlDbType.Text);
     }
 
+    /// <summary>
+    /// A filter on a member a metadata column stores reads that column, not the JSON copy of it.
+    /// </summary>
+    /// <remarks>
+    /// The JSON is not a second opinion here, it is a wrong one: Marten's version binder mints the new
+    /// value after the document has been serialised, so <c>data ->> 'Version'</c> is permanently one
+    /// write behind <c>mt_version</c>. A search that compiled to the JSON path would answer confidently
+    /// and wrongly, which is worse than refusing.
+    /// </remarks>
+    [Fact]
+    public void A_filter_on_a_member_a_metadata_column_stores_reads_that_column()
+    {
+        var value = Guid.NewGuid();
+        var predicates = SearchGrammar.Parse($"version = {value:D}").Predicates;
+
+        using var command = DocumentQueryBuilder.BuildList(
+            SqlTestTables.Versioned(), new DocumentListQuery { Predicates = predicates });
+
+        command.CommandText.Should().Contain("and d.\"mt_version\" = @p0");
+        command.CommandText.Should().NotContain("#>>", "the JSON copy of the version is one write out of date");
+        Parameter(command, "p0").NpgsqlDbType.Should().Be(NpgsqlDbType.Uuid);
+    }
+
     [Fact]
     public void A_numeric_filter_on_a_duplicated_int_column_binds_an_integer()
     {

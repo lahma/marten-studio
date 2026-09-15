@@ -176,10 +176,15 @@ else
         <div class="ms-alert ms-alert-error ms-schema-destructive" role="alert">
             <div class="ms-alert-content">
                 <p><strong>This migration removes or rewrites objects.</strong> @MigrationRisk.Warning</p>
+                @* Keyed on the ordinal: nothing guarantees two destructive statements differ as text,
+                   and this is the one list that must never fail to render - it is what somebody reads
+                   before typing the confirmation. *@
                 <ul class="ms-destructive-list">
-                    @foreach (DestructiveStatement statement in preview.DestructiveStatements)
+                    @for (int ordinal = 0; ordinal < preview.DestructiveStatements.Count; ordinal++)
                     {
-                        <li @key="statement.Statement">
+                        DestructiveStatement statement = preview.DestructiveStatements[ordinal];
+
+                        <li @key="ordinal">
                             <span class="ms-destructive-kind">@statement.Kind</span>
                             <code class="ms-destructive-statement">@statement.Statement</code>
                         </li>

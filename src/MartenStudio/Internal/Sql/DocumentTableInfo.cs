@@ -127,6 +127,19 @@ internal sealed record DocumentMetadataColumnInfo(DocumentMetadataColumn Column,
 internal sealed record DuplicatedColumnInfo(string MemberPath, string ColumnName, NpgsqlDbType DbType, string PgType)
 {
     /// <summary>
+    /// Whether this is a metadata column a member is stored in, rather than a column duplicated for it.
+    /// </summary>
+    /// <remarks>
+    /// Both are real columns that a filter can read and an index can serve, which is why they share a
+    /// type and a lookup. They differ in what a person can do about them: a duplicated field is the
+    /// host's <c>Duplicate(x =&gt; …)</c> and can be added, while <c>mt_version</c> exists because
+    /// <c>[Version]</c> named a member and no <c>Duplicate</c> call will ever produce another one —
+    /// Marten re-points such a field at the metadata column and marks it search-only. So the index
+    /// advisor must not answer "duplicate this field" for one. See <see cref="MartenDuplicatedFields" />.
+    /// </remarks>
+    public bool IsMetadataAlias { get; init; }
+
+    /// <summary>
     /// The member path with every separator removed and folded to lower case, which is what a search
     /// term's dotted path is matched against.
     /// </summary>
@@ -211,6 +224,19 @@ internal sealed record DocumentTableInfo
     /// <summary>The duplicated-field columns, in Marten's order.</summary>
     public IReadOnlyList<DuplicatedColumnInfo> DuplicatedColumns { get; init; } = [];
 
+    /// <summary>
+    /// Members a metadata column already stores — <c>Version</c> in <c>mt_version</c>, <c>CreatedAt</c> in
+    /// <c>mt_created_at</c> — which a search term may name and nothing may list as a column.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately a second list rather than entries in <see cref="DuplicatedColumns" />. Everything that
+    /// describes the table's columns reads that one — the select list, the metadata pane, the column
+    /// chooser, the configuration screen — and an entry here in any of those places is the duplicate that
+    /// ended a circuit. Only <see cref="FindDuplicated" /> looks here, which is the search path and the
+    /// index advisor. See <see cref="MartenDuplicatedFields" />.
+    /// </remarks>
+    public IReadOnlyList<DuplicatedColumnInfo> MetadataAliases { get; init; } = [];
+
     /// <summary>Single or conjoined tenancy; conjoined is what puts <c>tenant_id</c> into every predicate.</summary>
     public TenancyStyle TenancyStyle { get; init; } = TenancyStyle.Single;
 
@@ -259,14 +285,28 @@ internal sealed record DocumentTableInfo
 
         foreach (var candidate in DuplicatedColumns)
         {
-            if (string.Equals(candidate.NormalizedPath, wanted, StringComparison.Ordinal) ||
-                string.Equals(DuplicatedColumnInfo.Normalize(candidate.ColumnName), wanted, StringComparison.Ordinal))
+            if (Matches(candidate, wanted))
+            {
+                return candidate;
+            }
+        }
+
+        // Then the metadata columns a member is stored in, which are columns too and are the one place a
+        // filter on such a member should read. Second, not first, so a real duplicated field always wins
+        // if a store somehow has both.
+        foreach (var candidate in MetadataAliases)
+        {
+            if (Matches(candidate, wanted))
             {
                 return candidate;
             }
         }
 
         return null;
+
+        static bool Matches(DuplicatedColumnInfo candidate, string wanted) =>
+            string.Equals(candidate.NormalizedPath, wanted, StringComparison.Ordinal) ||
+            string.Equals(DuplicatedColumnInfo.Normalize(candidate.ColumnName), wanted, StringComparison.Ordinal);
     }
 
     /// <summary>Adapts a registered Marten document type.</summary>
@@ -337,6 +377,20 @@ internal sealed record DocumentTableInfo
             duplicated.Add(new DuplicatedColumnInfo(field.MemberName, field.ColumnName, field.DbType, field.PgType));
         }
 
+        // The ones that were dropped, kept where only the search path can see them: the column they name
+        // is already in MetadataColumns, so they must never reach a select list - but a filter typed as
+        // `Version:<guid>` should still read that column rather than the JSON copy of it, which Marten
+        // leaves one write behind.
+        List<DuplicatedColumnInfo> aliases = [];
+
+        foreach (var field in MartenDuplicatedFields.SearchAliases(documentType))
+        {
+            aliases.Add(new DuplicatedColumnInfo(field.MemberName, field.ColumnName, field.DbType, field.PgType)
+            {
+                IsMetadataAlias = true,
+            });
+        }
+
         return new DocumentTableInfo
         {
             Schema = documentType.TableName.Schema,
@@ -346,6 +400,7 @@ internal sealed record DocumentTableInfo
             IdColumnType = DocumentIdColumnTypes.FromClrType(documentType.IdType),
             MetadataColumns = columns,
             DuplicatedColumns = duplicated,
+            MetadataAliases = aliases,
             TenancyStyle = documentType.TenancyStyle,
             SoftDeleteEnabled = softDeleted,
             IsRegistered = true,
@@ -404,6 +459,20 @@ internal sealed record DocumentTableInfo
             }
         }
 
+        // The aliases are held to the same reconciliation, and for a sharper reason: a store with
+        // DisableInformationalFields() has no mt_version at all, so an alias for it would compile a filter
+        // against a column that is not there. The physical type wins over the member's CLR type too - an
+        // IRevisioned document's mt_version is integer where the member says bigint.
+        List<DuplicatedColumnInfo> aliases = [];
+
+        foreach (var alias in MetadataAliases)
+        {
+            if (physicalColumns.Find(alias.ColumnName) is { } physical)
+            {
+                aliases.Add(PhysicalDbTypeOf(physical) is { } dbType ? alias with { DbType = dbType } : alias);
+            }
+        }
+
         var softDeleteColumn = MetadataColumnName(DocumentMetadataColumn.IsSoftDeleted) ?? "mt_deleted";
         var softDeletedAtColumn = MetadataColumnName(DocumentMetadataColumn.SoftDeletedAt) ?? "mt_deleted_at";
         var tenantColumn = MetadataColumnName(DocumentMetadataColumn.TenantId) ?? "tenant_id";
@@ -416,6 +485,7 @@ internal sealed record DocumentTableInfo
         {
             MetadataColumns = metadata,
             DuplicatedColumns = duplicated,
+            MetadataAliases = aliases,
             IdColumnType = physicalColumns.Find(IdColumn) is { } id
                 ? DocumentIdColumnTypes.FromUdtName(id.UdtName)
                 : IdColumnType,

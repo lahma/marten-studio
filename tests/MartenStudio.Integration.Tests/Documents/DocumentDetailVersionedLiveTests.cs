@@ -48,6 +48,7 @@ public class DocumentDetailVersionedLiveTests(DocumentDetailVersionedLiveTests.F
             ArgumentNullException.ThrowIfNull(options);
 
             options.Schema.For<VersionedSiteDocument>();
+            options.Schema.For<RevisionedSiteDocument>();
         }
 
         /// <inheritdoc />
@@ -56,6 +57,7 @@ public class DocumentDetailVersionedLiveTests(DocumentDetailVersionedLiveTests.F
             await using IDocumentSession session = Marten.Store.LightweightSession();
 
             session.Store(new VersionedSiteDocument { Id = Id, Name = "Marten Studio" });
+            session.Store(new RevisionedSiteDocument { Id = Id, Name = "Marten Studio" });
 
             await session.SaveChangesAsync();
         }
@@ -79,6 +81,36 @@ public class DocumentDetailVersionedLiveTests(DocumentDetailVersionedLiveTests.F
 
         MartenDuplicatedFields.Physical(documentType).Should().BeEmpty(
             "this type duplicates nothing into a column of its own");
+    }
+
+    /// <summary>
+    /// The issue's own shape: <c>[Version] public long Version</c>, which Marten routes to
+    /// <c>Metadata.Revision</c> rather than to <c>Metadata.Version</c> — same column, same alias.
+    /// </summary>
+    /// <remarks>
+    /// <c>VersionAttribute</c> switches on the member's type: a <c>Guid</c> sets <c>Version.Member</c> and
+    /// turns on optimistic concurrency, a <c>long</c> sets <c>Revision.Member</c>, turns on numeric
+    /// revisions and <em>disables</em> <c>Version</c>. Both end up stored in <c>mt_version</c> and both
+    /// therefore get the same search alias, so one filter fixes both — but the reported repro was the
+    /// <c>long</c> one, and a fix tested only against the <c>Guid</c> one would not have said so.
+    /// </remarks>
+    [PostgresFact]
+    public void A_long_version_member_routes_to_the_revision_column_and_gets_the_same_alias()
+    {
+        IDocumentType documentType = Store.Options.FindOrResolveDocumentType(typeof(RevisionedSiteDocument));
+
+        DuplicatedField alias = documentType.DuplicatedFields
+            .Should().ContainSingle(x => x.ColumnName == "mt_version").Subject;
+
+        alias.OnlyForSearching.Should().BeTrue();
+
+        DocumentTableInfo table = DocumentTableInfo.FromDocumentType(documentType);
+
+        table.DuplicatedColumns.Should().BeEmpty();
+        table.MetadataColumns.Should().Contain(x => x.Column == DocumentMetadataColumn.Revision,
+            "a long [Version] member is Marten's numeric revision");
+        table.FindDuplicated(["Version"])!.ColumnName.Should().Be("mt_version",
+            "it is still searchable against the column it is stored in");
     }
 
     /// <summary>The table the studio builds names every column once.</summary>
@@ -135,6 +167,23 @@ public class VersionedSiteDocument
     /// <summary>Marten keeps this in step with <c>mt_version</c>.</summary>
     [Version]
     public Guid Version { get; set; }
+
+    /// <summary>Something to read back.</summary>
+    public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// The other <c>[Version]</c> shape, and the one the issue actually reported: a <c>long</c>, which Marten
+/// routes to its numeric revision.
+/// </summary>
+public class RevisionedSiteDocument
+{
+    /// <summary>The identity.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Marten keeps this in step with <c>mt_version</c>, as an integer.</summary>
+    [Version]
+    public long Version { get; set; }
 
     /// <summary>Something to read back.</summary>
     public string Name { get; set; } = string.Empty;
