@@ -462,9 +462,12 @@ tenant, because there is nothing to filter on and hiding it would hide something
   `app.UsePathBase("/…")` so that the routes and the `<base href>` agree; mounting at
   `MapMartenStudio("/ops/marten")` and stripping `/ops` at the proxy without a matching `UsePathBase` is
   the shape that renders locally and 404s in production.
-- **Static assets.** `app.MapStaticAssets()` (or `UseStaticFiles()`) serves the stylesheet the normal
-  way. The studio also maps its own `_content/MartenStudio/{**path}` endpoints as a fallback, so an
-  API-only host that configures neither still gets a styled, interactive studio.
+- **Static assets.** `app.MapStaticAssets()` (or `UseStaticFiles()`) serves the stylesheet and the
+  studio's browser helpers the normal way. The studio also maps its own
+  `_content/MartenStudio/{**path}` endpoints as a fallback, so an API-only host that configures neither
+  still gets a styled, interactive studio. Both are asked for by the studio's own pages and by nothing
+  else: the package ships no Blazor JS initializer, so a host that runs a Blazor app of its own never
+  fetches anything of the studio's on pages that have nothing to do with it.
 - **Not trimmable.** `IsTrimmable=false` is stated in the csproj on purpose. Blazor Server sets
   `[Parameter]` properties by name from the render tree and the document viewer deserializes into types
   discovered from `IDocumentType.DocumentType` at run time; a trimmer told it may cut has no way to see

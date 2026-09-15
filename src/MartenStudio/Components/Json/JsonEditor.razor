@@ -246,7 +246,7 @@
         }
     }
 
-    /// <summary>Saves the text the browser has, sent by the Ctrl+Enter handler in the lib module.</summary>
+    /// <summary>Saves the text the browser has, sent by the Ctrl+Enter handler in marten-studio.js.</summary>
     /// <param name="text">The textarea's live value at the moment the shortcut was pressed.</param>
     [JSInvokable]
     public async Task OnEditorSaveAsync(string? text)
@@ -263,7 +263,7 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Cancels the edit, sent by the Esc handler in the lib module.</summary>
+    /// <summary>Cancels the edit, sent by the Esc handler in marten-studio.js.</summary>
     /// <param name="text">
     /// The textarea's live value, for the same reason the save path carries it: Esc pressed on text the
     /// <c>change</c> event has not reported yet would otherwise look like a clean editor and discard what
@@ -282,7 +282,7 @@
     }
 
     /// <summary>
-    /// Releases the reference the lib module holds. Without this the component stays reachable from the
+    /// Releases the reference marten-studio.js holds. Without this the component stays reachable from the
     /// JS side for the life of the circuit, which on a page that opens an editor per document is a leak
     /// with a shape - one live component per document ever edited.
     /// </summary>

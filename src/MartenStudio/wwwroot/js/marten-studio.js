@@ -21,6 +21,12 @@
  * and every enhance* is idempotent, so re-running it costs nothing.
  */
 (function martenStudioBrowserHelpers() {
+    // As `export function afterWebStarted()` this file was an ES module, and therefore strict. A classic
+    // script is not, so strictness is asked for rather than inherited: nothing in here behaves
+    // differently under it today, and a future typo should keep throwing rather than quietly minting a
+    // global.
+    "use strict";
+
     window.martenStudio = window.martenStudio || {};
 
     window.martenStudio.prefs = window.martenStudio.prefs || {

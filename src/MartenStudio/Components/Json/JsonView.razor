@@ -282,7 +282,7 @@
 
     /// <summary>The largest document offered as a browser download, in UTF-8 bytes.</summary>
     /// <remarks>
-    /// Lower than the tree threshold on purpose. Without a <c>download.text</c> helper in the lib module
+    /// Lower than the tree threshold on purpose. Without a <c>download.text</c> helper in marten-studio.js
     /// the only way to offer a download is a <c>data:</c> URL, and that URL is a second, percent-encoded
     /// copy of the whole document sitting in the render tree. 128 KiB keeps that copy from dominating the
     /// page; raising it is safe as soon as the download goes through JS instead.
@@ -377,7 +377,7 @@
             return null;
         }
 
-        // A data: URL rather than a JS-driven save, because the lib module has no download helper yet and
+        // A data: URL rather than a JS-driven save, because marten-studio.js has no download helper yet and
         // an anchor needs no interop at all. See the packet report.
         return "data:application/json;charset=utf-8," + Uri.EscapeDataString(Json);
     }

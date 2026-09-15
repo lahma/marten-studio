@@ -46,6 +46,44 @@ public class NoJsInitializerTests
     }
 
     /// <summary>
+    /// The other two conventions that would put this package inside the host's own app. Same failure,
+    /// different filename.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>*.razor.css</c> anywhere in the RCL is bundled into the <em>host's</em> own
+    /// <c>{HostAssembly}.styles.css</c> — a global stylesheet the host injects into every page it serves.
+    /// That is hard rule 3's "an embeddable component that injects global styles" exactly, arrived at by
+    /// a filename rather than by a decision, and it would be as invisible in review as the JS initializer
+    /// was. Hand-rolled <c>ms-</c> rules in the one stylesheet are the only styling this package has.
+    /// </para>
+    /// <para>
+    /// And a <c>&lt;JSModule&gt;</c> item is the way an initializer comes back <em>without</em> a
+    /// <c>wwwroot</c> filename to catch it, so the csproj is checked too.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Nothing_else_in_the_package_is_loaded_into_the_hosts_own_app_by_convention()
+    {
+        string projectRoot = RepositoryRoot.Combine("src", "MartenStudio");
+
+        string[] scopedStylesheets = Directory
+            .GetFiles(projectRoot, "*.razor.css", SearchOption.AllDirectories)
+            .Where(x => !x.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(x => !x.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Select(x => Path.GetRelativePath(projectRoot, x).Replace('\\', '/'))
+            .ToArray();
+
+        scopedStylesheets.Should().BeEmpty(
+            "a scoped stylesheet is bundled into the host's own {HostAssembly}.styles.css, which is a " +
+            "global style sheet on every page the host serves; found: " + string.Join(", ", scopedStylesheets));
+
+        File.ReadAllText(Path.Combine(projectRoot, "MartenStudio.csproj"))
+            .Should().NotContain("<JSModule",
+                "a JSModule item registers a JS initializer without a wwwroot filename to catch it");
+    }
+
+    /// <summary>
     /// The other half: the helpers are only useful if something asks for them, and only the studio may.
     /// </summary>
     [Fact]

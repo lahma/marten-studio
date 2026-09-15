@@ -348,6 +348,7 @@ public class StudioEndpointsTest
             // Studio-rooted, at the default path too: the studio always takes its own /_blazor, framework
             // script and asset mirror under Path, and the document base is what points the browser there.
             body.Should().Contain("<base href=\"/marten/\"");
+            body.Should().Contain("<script src=\"_content/MartenStudio/js/marten-studio.js\">");
             body.Should().Contain("<script src=\"_framework/blazor.web.js\">");
             body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/MartenStudio/css/marten-studio.css\"");
             body.Should().Contain("<title>Marten Studio</title>");
@@ -484,6 +485,7 @@ public class StudioEndpointsTest
             {
                 ["_framework/blazor.web.js"] = "// blazor.web.js"u8.ToArray(),
                 ["_content/MartenStudio/css/marten-studio.css"] = ":root { }"u8.ToArray(),
+                ["_content/MartenStudio/js/marten-studio.js"] = "// marten-studio.js"u8.ToArray(),
             }));
 
         app.MapMartenStudio().AllowAnonymous();
@@ -500,6 +502,15 @@ public class StudioEndpointsTest
             script.StatusCode.Should().Be(HttpStatusCode.OK);
             script.Content.Headers.ContentType!.MediaType.Should().Be("text/javascript");
             (await script.Content.ReadAsByteArrayAsync(Token)).Should().NotBeEmpty();
+
+            // The studio's own helpers, which the shell asks for relative to its <base href> and which no
+            // Blazor convention loads any more (D24). The media type is the assertion that matters: this
+            // is the file whose text/html response filled a host's console with MIME-type errors, and a
+            // wrong type here stops being cosmetic the moment a host sends X-Content-Type-Options: nosniff.
+            using var helpers = await client.GetAsync(new Uri("/ops/marten/_content/MartenStudio/js/marten-studio.js", UriKind.Relative), Token);
+            helpers.StatusCode.Should().Be(HttpStatusCode.OK);
+            helpers.Content.Headers.ContentType!.MediaType.Should().Be("text/javascript");
+            (await helpers.Content.ReadAsByteArrayAsync(Token)).Should().NotBeEmpty();
 
             // The root-level asset endpoint stays for hosts that do not path-forward.
             using var rootCss = await client.GetAsync(new Uri("/_content/MartenStudio/css/marten-studio.css", UriKind.Relative), Token);
