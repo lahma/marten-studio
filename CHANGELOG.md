@@ -1,3 +1,16 @@
+# 0.1.1
+
+- The detail view of a document whose type has a `[Version]` property no longer answers 500 and
+  terminates the Blazor circuit ([#1](https://github.com/lahma/marten-studio/issues/1)). Marten
+  registers a *search-only* duplicated field for every metadata column a Marten attribute names a member
+  for — `[Version]`, `[CreatedAt]`, `[TenantId]` and the rest — so that a LINQ comparison against the
+  member reads the column rather than the JSON. It carries the metadata column's own name, `mt_version`,
+  and Marten creates no column for it: its own `DocumentTable` skips exactly these. The studio took them
+  for real duplicated columns, so `mt_version` was named twice in the single-document select list and
+  rendered twice in the metadata pane, and the second row carrying a key the first already had threw
+  inside Blazor's diff builder. The pane also keys its rows on position now, so a repeated column name
+  costs a repeated row rather than a session.
+
 # 0.1.0
 
 - First release. Marten Studio is an embeddable Blazor Server admin UI for MartenDB, shipped as one

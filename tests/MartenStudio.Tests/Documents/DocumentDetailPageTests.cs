@@ -106,6 +106,44 @@ public class DocumentDetailPageTests
         page.FindAll(".ms-json-null").Should().NotBeEmpty("a null column is drawn as null, not as blank");
     }
 
+    /// <summary>
+    /// A column name repeated in the Columns table renders, rather than ending the session. Issue #1.
+    /// </summary>
+    /// <remarks>
+    /// The repeat itself is fixed where it was made — <c>MartenDuplicatedFields</c> — so this is the other
+    /// half: the pane keys its rows on the ordinal, because a duplicate <c>@key</c> throws inside Blazor's
+    /// diff builder, which is not a place a component can catch anything. The exception escapes the render
+    /// and terminates the circuit, so the page does not show an error, it stops existing. Every repeat
+    /// still to be found now costs a duplicated row instead of a 500.
+    /// </remarks>
+    [Fact]
+    public void A_repeated_column_name_renders_twice_rather_than_taking_the_circuit_down()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail(
+            columns:
+            [
+                new PhysicalColumnValue("id", Id, PhysicalColumnRole.Identity),
+                new PhysicalColumnValue("data", null, PhysicalColumnRole.Data),
+                new PhysicalColumnValue("mt_version", "00000000-0000-0000-0000-000000000001", PhysicalColumnRole.Metadata),
+                new PhysicalColumnValue("mt_version", "00000000-0000-0000-0000-000000000001", PhysicalColumnRole.Duplicated),
+            ],
+            duplicated:
+            [
+                new DuplicatedFieldAgreement("mt_version", "Version", ["Version"], "1", "1", AgreementState.Agrees),
+                new DuplicatedFieldAgreement("mt_version", "Version", ["Version"], "1", "1", AgreementState.Agrees),
+            ]));
+
+        var page = Render(context);
+
+        // The throw is in the diff builder, so it needs a second render to reach: in the browser that is
+        // the interactive render arriving over the circuit and diffing against the prerendered markup.
+        page.Render();
+
+        page.TextOfAll(".ms-doc-meta-table tbody th").Where(x => x == "mt_version").Should().HaveCount(4,
+            "twice in the Columns table and twice in the Duplicated fields table - and no exception");
+    }
+
     [Fact]
     public void A_duplicated_field_that_has_drifted_from_its_json_gets_a_red_dot_and_says_why()
     {

@@ -328,7 +328,11 @@ internal sealed record DocumentTableInfo
 
         List<DuplicatedColumnInfo> duplicated = [];
 
-        foreach (var field in documentType.DuplicatedFields)
+        // Physical, not every entry in DuplicatedFields: a [Version] or [CreatedAt] member gets a
+        // search-only duplicated field naming the metadata column it is stored in, and Marten creates no
+        // column for one. See MartenDuplicatedFields - taking those for real columns put mt_version in the
+        // select list twice and in the metadata pane twice.
+        foreach (var field in MartenDuplicatedFields.Physical(documentType))
         {
             duplicated.Add(new DuplicatedColumnInfo(field.MemberName, field.ColumnName, field.DbType, field.PgType));
         }

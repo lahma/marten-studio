@@ -4,6 +4,7 @@ using Marten;
 using Marten.Schema;
 
 using MartenStudio.Services.Configuration;
+using MartenStudio.Tests.Sql;
 
 namespace MartenStudio.Tests.Configuration;
 
@@ -123,6 +124,28 @@ public class ConfigurationDescriberTests
         customer.DuplicatedFields[0].Member.Should().Be("Email");
         customer.DuplicatedFields[0].Column.Should().Be("email");
         customer.DuplicatedFields[0].PgType.Should().Be("varchar");
+    }
+
+    /// <summary>
+    /// The LINQ alias Marten registers for a <c>[Version]</c> member is not a duplicated field, and this
+    /// screen must not report it as one. Issue #1.
+    /// </summary>
+    /// <remarks>
+    /// Every row on this screen is a claim about what the host configured. Saying that a host duplicated
+    /// <c>Version</c> into a column called <c>mt_version</c> would be reporting a decision nobody made —
+    /// the column is already in this type's metadata list, and Marten creates none of its own for the
+    /// alias.
+    /// </remarks>
+    [Fact]
+    public void A_LINQ_alias_for_a_metadata_column_is_not_reported_as_a_duplicated_field()
+    {
+        DocumentTypeConfiguration described = ConfigurationDescriber.DescribeDocumentType(SqlTestStore
+            .DocumentType<SqlTestVersionedNote>(options =>
+                options.Schema.For<SqlTestVersionedNote>().Duplicate(x => x.Text))
+            .WithLinqSearchAliasFor("mt_version", nameof(SqlTestVersionedNote.Version)));
+
+        described.MetadataColumns.Should().Contain("mt_version");
+        described.DuplicatedFields.Select(x => x.Column).Should().BeEquivalentTo(["text"]);
     }
 
     [Fact]

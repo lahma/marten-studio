@@ -89,9 +89,18 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach (PhysicalColumnValue column in Detail.Columns)
+                @* Keyed on the ordinal, as ReferencedBy is and for the same reason: a column name is not a
+                   key. It only has to repeat once for Blazor's diff builder to throw, and that exception
+                   escapes the render rather than the component, so it takes the whole circuit with it -
+                   which is what issue #1 was, a 500 on the detail view of every document whose type has a
+                   [Version] property. The cause of that repeat is fixed in MartenDuplicatedFields; this is
+                   what makes the pane incapable of ending a session over any repeat still to be found. The
+                   list is rebuilt whole on every read, so position is stable. *@
+                @for (int ordinal = 0; ordinal < Detail.Columns.Count; ordinal++)
                 {
-                    <tr @key="column.Name" class="ms-doc-meta-row-@column.Role.ToString().ToLowerInvariant()">
+                    PhysicalColumnValue column = Detail.Columns[ordinal];
+
+                    <tr @key="ordinal" class="ms-doc-meta-row-@column.Role.ToString().ToLowerInvariant()">
                         <th scope="row" class="ms-mono">@column.Name</th>
                         <td>
                             @if (column.Role == PhysicalColumnRole.Data)
@@ -128,9 +137,11 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (DuplicatedFieldAgreement field in Detail.Duplicated)
+                    @for (int ordinal = 0; ordinal < Detail.Duplicated.Count; ordinal++)
                     {
-                        <tr @key="field.ColumnName">
+                        DuplicatedFieldAgreement field = Detail.Duplicated[ordinal];
+
+                        <tr @key="ordinal">
                             <td>
                                 <span class="ms-agree-dot ms-agree-@field.State.ToString().ToLowerInvariant()"
                                       title="@AgreementTitle(field)"

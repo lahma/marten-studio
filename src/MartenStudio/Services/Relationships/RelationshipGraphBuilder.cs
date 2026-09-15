@@ -2,6 +2,7 @@ using Marten;
 using Marten.Linq.Members;
 using Marten.Schema;
 
+using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Documents;
 
@@ -356,7 +357,10 @@ internal static class RelationshipGraphBuilder
     {
         ArgumentNullException.ThrowIfNull(documentType);
 
-        foreach (DuplicatedField field in documentType.DuplicatedFields)
+        // Physical only: a search-only duplicated field names a metadata column rather than one of its
+        // own, so matching against it would answer "Version" for mt_version and send the referenced-by
+        // link filtering on a member that is not a duplicated column at all. See MartenDuplicatedFields.
+        foreach (DuplicatedField field in MartenDuplicatedFields.Physical(documentType))
         {
             if (string.Equals(field.ColumnName, column, StringComparison.OrdinalIgnoreCase))
             {
