@@ -62,6 +62,16 @@ internal static class DisplayValueHelper
     /// name comes back exactly as it went in, because the screens render the raw value in the cell's
     /// <c>title</c> and a half-parsed name in the cell beside it would be a lie rather than a summary.
     /// </para>
+    /// <para>
+    /// And the walk is bounded, because the string it walks is data. A generic argument nests another
+    /// whole qualified name, so <c>[[</c> repeated deeply enough is one stack frame per level - about
+    /// 2 750 levels ends the <em>process</em> with a <see cref="StackOverflowException" />, which no
+    /// <c>catch</c> anywhere can stop and which takes the host application down with the studio. The
+    /// names Marten records come from a store's own <c>mt_events.dotnet_type</c> column, so they are
+    /// whatever was written there. Sixty-four levels is far past anything a real closed generic
+    /// reaches and is nowhere near the stack; past it the name simply does not parse, and an
+    /// unparsable name is already a case this returns unchanged.
+    /// </para>
     /// </remarks>
     /// <param name="assemblyQualifiedName">The name Marten recorded, or <see langword="null" />.</param>
     /// <returns>
@@ -78,7 +88,7 @@ internal static class DisplayValueHelper
         int position = 0;
         StringBuilder builder = new();
 
-        if (!TryReadType(assemblyQualifiedName, ref position, builder, nested: false)
+        if (!TryReadType(assemblyQualifiedName, ref position, builder, nested: false, depth: 0)
             || position != assemblyQualifiedName.Length
             || builder.Length == 0)
         {
@@ -87,6 +97,15 @@ internal static class DisplayValueHelper
 
         return builder.ToString();
     }
+
+    /// <summary>
+    /// How deep a nest of generic arguments <see cref="PrettyTypeName" /> will walk before giving up.
+    /// </summary>
+    /// <remarks>
+    /// A bound on a recursive walk over data, not a judgement about type names. <c>Dictionary&lt;string,
+    /// List&lt;Compacted&lt;DailySales&gt;&gt;&gt;</c> is three.
+    /// </remarks>
+    private const int MaxNesting = 64;
 
     /// <summary>
     /// Reads one type specification - name, generic arguments, array suffixes and the assembly
@@ -99,9 +118,17 @@ internal static class DisplayValueHelper
     /// Whether this is a generic argument, which ends at the <c>]</c> its caller will consume rather
     /// than at the end of the string.
     /// </param>
+    /// <param name="depth">How many generic argument lists are already open above this one.</param>
     /// <returns>Whether it parsed.</returns>
-    private static bool TryReadType(string text, ref int position, StringBuilder output, bool nested)
+    private static bool TryReadType(string text, ref int position, StringBuilder output, bool nested, int depth)
     {
+        // The bound is checked on the way in rather than on the way out, so the frame that would have
+        // been too deep is never entered (see MaxNesting).
+        if (depth > MaxNesting)
+        {
+            return false;
+        }
+
         StringBuilder name = new();
 
         while (position < text.Length)
@@ -140,7 +167,7 @@ internal static class DisplayValueHelper
             if (position + 1 < text.Length && text[position + 1] == '[')
             {
                 // `Type`1[[arg],[arg]]` - the generic argument list, which each type has at most one of.
-                if (readArguments || !TryReadArguments(text, ref position, output))
+                if (readArguments || !TryReadArguments(text, ref position, output, depth))
                 {
                     return false;
                 }
@@ -184,8 +211,9 @@ internal static class DisplayValueHelper
     /// <param name="text">The whole name being read.</param>
     /// <param name="position">At the opening <c>[</c> of the list; left just past its <c>]</c>.</param>
     /// <param name="output">Where the readable form is written.</param>
+    /// <param name="depth">How many generic argument lists are already open above this one.</param>
     /// <returns>Whether it parsed.</returns>
-    private static bool TryReadArguments(string text, ref int position, StringBuilder output)
+    private static bool TryReadArguments(string text, ref int position, StringBuilder output, int depth)
     {
         position++;
 
@@ -199,7 +227,7 @@ internal static class DisplayValueHelper
 
             position++;
 
-            if (!TryReadType(text, ref position, arguments, nested: true))
+            if (!TryReadType(text, ref position, arguments, nested: true, depth: depth + 1))
             {
                 return false;
             }

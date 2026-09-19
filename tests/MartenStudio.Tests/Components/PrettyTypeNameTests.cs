@@ -84,4 +84,75 @@ public class PrettyTypeNameTests
     {
         DisplayValueHelper.PrettyTypeName(garbage).Should().BeSameAs(garbage);
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // The walk is over data, so the walk is bounded
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A generic argument nests another whole qualified name, so the parse is one stack frame per level
+    /// and the string it parses comes out of a store's <c>mt_events.dotnet_type</c> column. At roughly
+    /// 2 750 levels the unbounded version ended the <em>process</em> with a
+    /// <see cref="StackOverflowException" />, which no <c>catch</c> can stop and which takes the host
+    /// application down with the studio - so the bound is not politeness, it is the difference between
+    /// a cell that reads badly and an application that is gone.
+    /// </summary>
+    /// <remarks>
+    /// Asserted well past the bound and well short of the real stack, so this test proves the bound
+    /// rather than the stack: at 4 000 levels an unbounded walk is long dead, and a bounded one returns
+    /// the input because a name it will not finish reading is a name it did not parse.
+    /// </remarks>
+    [Theory]
+    [InlineData(4_000)]
+    [InlineData(200)]
+    [InlineData(65)]
+    public void A_name_nested_past_the_bound_comes_back_untouched(int levels)
+    {
+        string nested = Nest(levels);
+
+        DisplayValueHelper.PrettyTypeName(nested).Should().BeSameAs(nested);
+    }
+
+    /// <summary>And the bound is past anything a real closed generic reaches.</summary>
+    [Theory]
+    [InlineData(1, "Outer<Leaf>")]
+    [InlineData(3, "Outer<Outer<Outer<Leaf>>>")]
+    [InlineData(64, null)]
+    public void A_name_nested_within_the_bound_still_reads(int levels, string? expected)
+    {
+        string? read = DisplayValueHelper.PrettyTypeName(Nest(levels));
+
+        read.Should().NotBeNull();
+        read!.Should().StartWith("Outer<").And.EndWith(">");
+        read.Split("Outer<").Length.Should().Be(levels + 1, "one wrapper per level");
+
+        if (expected is not null)
+        {
+            read.Should().Be(expected);
+        }
+    }
+
+    /// <summary>
+    /// <c>Outer`1[[Outer`1[[ … [[Leaf, A]] … , A]], A]], A</c>, nested <paramref name="levels" /> deep.
+    /// </summary>
+    /// <param name="levels">How many generic argument lists to open.</param>
+    /// <returns>A synthetic assembly-qualified name.</returns>
+    private static string Nest(int levels)
+    {
+        System.Text.StringBuilder builder = new();
+
+        for (int i = 0; i < levels; i++)
+        {
+            builder.Append("Outer`1[[");
+        }
+
+        builder.Append("Leaf, A");
+
+        for (int i = 0; i < levels; i++)
+        {
+            builder.Append("]], A");
+        }
+
+        return builder.ToString();
+    }
 }

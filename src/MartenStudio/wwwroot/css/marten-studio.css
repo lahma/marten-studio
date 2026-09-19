@@ -6999,6 +6999,32 @@ a.ms-event-chip:focus-visible {
     mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
 }
 
+/*
+   And the cue gives way to the focus ring, because the two cannot coexist.
+
+   A mask clips everything the element paints to its own border box, and the ring above is drawn
+   *outside* that box - `outline-offset: 2px`. So on any region that could actually scroll, which on a
+   phone is every one of them, the mask clipped the ring away entirely: about twenty tab stops that
+   took focus and showed nothing, in both themes. That is WCAG 2.4.7 failed by the very rule that made
+   the regions reachable from the keyboard in the first place, which is worse than the clipping this
+   section exists to fix - a keyboard user who cannot see where they are cannot use the page at all,
+   whereas the cue only tells a sighted user something the scrollbar is also telling them.
+
+   Nothing else will do. `outline-offset: -2px` would draw the ring inside the box and survive the
+   mask, but an inset ring on a scroll container sits on top of the first row's text and moves with the
+   scroll. A second element to carry the ring is the wrapper `.ms-table-wrap` has not got. So the mask
+   is switched off for exactly as long as the region has focus: the cue returns the moment focus
+   leaves, and it is never the only indication that a region scrolls - the scrollbar is there, and a
+   keyboard user who has focus can simply press the arrow keys.
+
+   These rules must stay *after* the three above: same specificity, so order is what decides.
+*/
+.ms-table-scroll:focus-visible,
+.ms-table-wrap:focus-visible {
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
 /* --------------------------------------------------------------------------
    UX-1. The columns that made the tables wide
    -------------------------------------------------------------------------- */
@@ -7099,6 +7125,22 @@ a.ms-event-chip:focus-visible {
 */
 .ms-overview-region {
     min-width: 0;
+}
+
+/*
+   Query: the pane the editor sits in, once the two panes stack.
+
+   `.ms-query-layout` is `align-items: flex-start`, which below 1024px is the *cross* axis, so a stacked
+   pane is sized to fit its own content rather than to the column it is in. `.ms-query-side` already says
+   `width: 100%` there; `.ms-query-main` did not, so it took the textarea's intrinsic preferred width -
+   about 400px from the `cols` default - and `/query` was the last page still 426px wide inside a 334px
+   column on a phone. The textarea below it is already `width: 100%` and already shrinkable; it was only
+   ever the pane that refused.
+*/
+@media (max-width: 1024px) {
+    .ms-query-main {
+        width: 100%;
+    }
 }
 
 /* ==========================================================================
