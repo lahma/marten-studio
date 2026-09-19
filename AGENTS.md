@@ -341,6 +341,30 @@ studio's circuit. It fixes nothing — the fetch, the redirect and the console e
 of its code runs. `NoJsInitializerTests` is the regression, on both halves: no `*.lib.module.js` under
 `wwwroot`, and a shell that still asks for the script it replaced it with.
 
+**D25 — Every data table sits in its own labelled scroll region, and the shell never scrolls sideways.**
+`.ms-main` hides horizontal overflow on purpose, so the studio never grows a page-level scrollbar inside
+a host page; the cost was that a table wider than the content column was simply cut off with no cue and
+no way to reach the columns on the right — measured in the 0.2.0 UX pass at 1 691 px of table in a
+1 200 px column on Event types, and every table on a phone. So a `<table class="ms-table">` is always
+inside `<TableScroll Label="…">` (`Components/Shared/TableScroll.razor`: `role="region"`, an accessible
+name, `tabindex="0"`, `overflow-x: auto`) or, for the documents list, its own `.ms-table-wrap` carrying
+the same three attributes. A document-wide observer in `js/marten-studio.js` stamps
+`data-scroll-start`/`data-scroll-end` on a region that can scroll further and the stylesheet fades that
+edge with a `mask-image`; the mask is lifted while the region has `:focus-visible`, because a mask clips
+the element's painted output to its border box and the focus ring is painted outside it — with both on,
+the ~20 tab stops the regions add were invisible. `TablesAreScrollableTests` walks every `.razor` in
+`src/` with a tag stack and fails on a bare table, with an anti-vacuity theory of its own. Where a table
+is wide because of what a column *prints* (an assembly-qualified type name, three constant scope
+columns, a wrapped timestamp), fix the column first — the region is the floor, not the answer.
+
+**D26 — The stylesheet's UX sections are appended in cascade order, and later wins on purpose.** The
+0.2.0 pass landed five parallel packets in one file. Each put its new rules in a titled section at the
+end (`UX-2`, `UX-3`, `UX-1`, `UX-4`, `UX-5`, in that order) and edited an existing rule in place only
+where its report says so; several sections deliberately re-declare an earlier selector (`.ms-event-card`,
+`.ms-projection-note`, `.ms-overview-list-stream`, `.ms-doc-detail-actions`) and win by source order.
+Keep that when touching those selectors: a rule added *before* the section that overrides it is a rule
+that does nothing, and `StylesheetTests` (plus its `.Shell` part) pins the ones that were measured.
+
 ## Package budget
 
 Complete, as of the bootstrap commit. Versions are centrally pinned in `Directory.Packages.props`, with
@@ -461,7 +485,8 @@ src/                                     The shipped library, and nothing else
 src/MartenStudio/                        The Razor Class Library: public API, Internal/ (guard, SQL
                                          builders), Components/, Services/, wwwroot/
 src/MartenStudio/Components/             route table, links, shell — pages come later
-src/MartenStudio/Components/Shared/      small building-block components
+src/MartenStudio/Components/Shared/      small building-block components: TableScroll (D25), CopyButton,
+                                         dialogs, chips, the empty and error states
 src/MartenStudio/Internal/               startup authorization guard, endpoint marker,
                                          mapped-endpoint tracking; later SQL builders
 src/MartenStudio/Services/               toast service; scoped state and data services come later
@@ -480,7 +505,8 @@ tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to lea
 tests/MartenStudio.Tests/Marten/         MartenApiSurfaceTest - the Marten 9.35 contract, pinned
 tests/MartenStudio.Integration.Tests/    Testcontainers Postgres + Playwright. Needs Docker
 src/MartenStudio/Internal/Sql/           The only place a Postgres identifier becomes SQL text (hard rule 4)
-src/MartenStudio/Components/Layout/      Shell chrome: layout, nav, scope selector, capability chip
+src/MartenStudio/Components/Layout/      Shell chrome: layout, nav, scope selector, capability chip, the
+                                         preferences popover (theme and time zone, behind the gear)
 src/MartenStudio/Components/Pages/       The routed pages; each @page must be rooted at /marten
 samples/MartenStudio.SampleDomain/Documents/  The demo document types
 samples/MartenStudio.Sample/Auth/        Cookie auth, the three demo users, the two policies
@@ -600,9 +626,11 @@ There are seven kinds of test, in two projects:
 5. **Conventions** (`tests/MartenStudio.Tests/Conventions/`) — rules too easy to break silently to leave to
    review: the workflows are the generated ones and still carry the permissions they need; the AGENTS.md
    layout tree matches disk; no `async void` in `src/`; README snippets equal the `#region` bodies in the
-   sample's `Program.cs`. `NoAsyncVoidTests` strips comments and string literals before scanning, which is
-   exactly what makes it capable of being silently vacuous, so it carries an anti-vacuity theory that
-   proves the scanner still catches a synthetic `async void` and still ignores one in prose.
+   sample's `Program.cs`; every `.ms-table` in `src/` is inside a scroll region (D25); the stylesheet
+   still carries the shell rules the 0.2.0 UX pass measured (`StylesheetTests` and its `.Shell` part).
+   `NoAsyncVoidTests` and `TablesAreScrollableTests` both strip comments before scanning, which is
+   exactly what makes them capable of being silently vacuous, so each carries an anti-vacuity theory that
+   proves the scanner still catches a synthetic offender and still ignores one in prose.
 6. **Marten API surface** (`tests/MartenStudio.Tests/Marten/MartenApiSurfaceTest.cs`) — the contract with
    Marten 9.35, pinned two ways at once. A `CompileOnlyAsync` method that is never executed puts every
    member the design depends on into real C#, so the *compiler* checks signatures, generic constraints and
