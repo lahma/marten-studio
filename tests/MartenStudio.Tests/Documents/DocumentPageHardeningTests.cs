@@ -191,7 +191,13 @@ public class DocumentPageHardeningTests
         context.Navigate($"marten/documents/customer/doc?id={Id}");
         var page = context.Render<DetailPage>(parameters => parameters.Add(x => x.Alias, "customer"));
 
-        page.Invoking(x => x.FindAll("button").First(b => b.TextContent.Trim() == "Copy JSON").Click())
+        // The header's own copy, through the detail page's CopyTextAsync, rather than the viewer's:
+        // the two go through different components and it is this one the filter is on. Since the three
+        // copies became one menu the button is a menu item, so the selector names the menu.
+        page.Invoking(x => x
+                .FindAll(".ms-doc-copy-popover .ms-menu-item")
+                .First(b => b.TextContent.Contains("Copy JSON", StringComparison.Ordinal))
+                .Click())
             .Should().NotThrow();
     }
 

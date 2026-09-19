@@ -84,31 +84,33 @@
                     These foreign keys have an end that is not a document type of this store, so there is
                     nothing to draw them between.
                 </p>
-                <table class="ms-table">
-                    <thead>
-                        <tr>
-                            <th scope="col">Constraint</th>
-                            <th scope="col">From</th>
-                            <th scope="col">Columns</th>
-                            <th scope="col">Points at</th>
-                            <th scope="col">Why</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @for (int i = 0; i < graph.Unmatched.Count; i++)
-                        {
-                            UnmatchedForeignKey key = graph.Unmatched[i];
-
-                            <tr class="ms-table-row" @key="i">
-                                <td class="ms-table-cell ms-table-cell-mono">@key.Name</td>
-                                <td class="ms-table-cell ms-table-cell-mono">@key.From</td>
-                                <td class="ms-table-cell ms-table-cell-mono">@key.Columns</td>
-                                <td class="ms-table-cell ms-table-cell-mono">@key.To</td>
-                                <td class="ms-table-cell">@key.Reason</td>
+                <TableScroll Label="Foreign keys not on the diagram table">
+                    <table class="ms-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Constraint</th>
+                                <th scope="col">From</th>
+                                <th scope="col">Columns</th>
+                                <th scope="col">Points at</th>
+                                <th scope="col">Why</th>
                             </tr>
-                        }
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < graph.Unmatched.Count; i++)
+                            {
+                                UnmatchedForeignKey key = graph.Unmatched[i];
+
+                                <tr class="ms-table-row" @key="i">
+                                    <td class="ms-table-cell ms-table-cell-mono">@key.Name</td>
+                                    <td class="ms-table-cell ms-table-cell-mono">@key.From</td>
+                                    <td class="ms-table-cell ms-table-cell-mono">@key.Columns</td>
+                                    <td class="ms-table-cell ms-table-cell-mono">@key.To</td>
+                                    <td class="ms-table-cell">@key.Reason</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
             </div>
         }
     }

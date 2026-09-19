@@ -122,33 +122,35 @@
                 }
                 else
                 {
-                    <table class="ms-table ms-overview-health">
-                        <thead>
-                            <tr>
-                                <th>Shard</th>
-                                <th>Sequence</th>
-                                <th>Lag</th>
-                                <th>State</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (ShardProgress shard in VisibleShards)
-                            {
-                                @* Keyed by the shard identity, which is unique and is not a value-equality
-                                   record: two shards with identical numbers must never share a key. *@
-                                <tr class="ms-table-row @SeverityClass(shard.Severity)" @key="shard.ShardName">
-                                    <td class="ms-table-cell ms-table-cell-mono">@shard.ShardName</td>
-                                    <td class="ms-table-cell ms-table-cell-mono">
-                                        @(shard.HasProgressRow
-                                            ? "#" + shard.Sequence.ToString("N0", CultureInfo.InvariantCulture)
-                                            : "never started")
-                                    </td>
-                                    <td class="ms-table-cell ms-table-cell-mono">@shard.Lag.ToString("N0", CultureInfo.InvariantCulture)</td>
-                                    <td class="ms-table-cell">@ShardState(shard)</td>
+                    <TableScroll Label="Projection health table">
+                        <table class="ms-table ms-overview-health">
+                            <thead>
+                                <tr>
+                                    <th>Shard</th>
+                                    <th>Sequence</th>
+                                    <th>Lag</th>
+                                    <th>State</th>
                                 </tr>
-                            }
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                @foreach (ShardProgress shard in VisibleShards)
+                                {
+                                    @* Keyed by the shard identity, which is unique and is not a value-equality
+                                       record: two shards with identical numbers must never share a key. *@
+                                    <tr class="ms-table-row @SeverityClass(shard.Severity)" @key="shard.ShardName">
+                                        <td class="ms-table-cell ms-table-cell-mono">@shard.ShardName</td>
+                                        <td class="ms-table-cell ms-table-cell-mono">
+                                            @(shard.HasProgressRow
+                                                ? "#" + shard.Sequence.ToString("N0", CultureInfo.InvariantCulture)
+                                                : "never started")
+                                        </td>
+                                        <td class="ms-table-cell ms-table-cell-mono">@shard.Lag.ToString("N0", CultureInfo.InvariantCulture)</td>
+                                        <td class="ms-table-cell">@ShardState(shard)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
 
                     @if (projections.Progress.Count > MaxShardsShown)
                     {

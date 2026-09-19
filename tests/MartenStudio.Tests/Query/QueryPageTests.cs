@@ -206,6 +206,59 @@ public class QueryPageTests
     }
 
     /// <summary>
+    /// The results grid already had a scroll container of its own, so it is not wrapped in a second one -
+    /// two nested scrollers means the outer never scrolls. It takes the shared class instead, which is
+    /// what carries the edge cue, the focus ring and the keyboard reachability.
+    /// </summary>
+    [Fact]
+    public void The_results_grid_is_a_labelled_scroll_region_rather_than_two_nested_ones()
+    {
+        FakeQueryService service = WithPerson();
+        service.SqlResult = FakeQueryService.OneRow();
+
+        using StudioComponentContext context = CreateContext(service, runSql: true);
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-sql").Click();
+        RunEditor(page, "ms-query-sql", "select id, doc, note from x");
+
+        var table = page.Find("table.ms-query-grid");
+        table.ShouldBeInsideALabelledScrollRegion();
+
+        var region = table.ParentElement!;
+        region.ClassList.Should().Contain("ms-query-grid-scroll").And.Contain("ms-table-scroll");
+        page.FindAll(".ms-table-scroll .ms-table-scroll").Should().BeEmpty("a scroller inside a scroller never scrolls");
+    }
+
+    /// <summary>
+    /// The other half of this page's results. The Marten where-clause mode renders its own two-column
+    /// table rather than the SQL console's grid, and that one had no scroll container at all - the id
+    /// column plus a JSON viewer per row is wider than a phone, and the whole of it was clipped.
+    /// </summary>
+    [Fact]
+    public void The_marten_result_rows_are_in_a_labelled_scroll_region_too()
+    {
+        FakeQueryService service = WithPerson();
+        service.MartenResult = new MartenQueryResult(
+            "person",
+            [new MartenQueryRow("42", """{"Name":"Alice"}""")],
+            "select d.\"id\", d.\"data\"::text from \"studio\".\"mt_doc_person\" as d limit @limit",
+            ["@limit = 50"],
+            TimeSpan.FromMilliseconds(4),
+            50,
+            true,
+            null,
+            ExplainResult.Unavailable("No plan: fetching one runs EXPLAIN."));
+
+        using StudioComponentContext context = CreateContext(service);
+
+        var page = context.Render<QueryPage>();
+        RunEditor(page, "ms-query-where", "where data ->> 'Name' = 'Alice'");
+
+        page.Find("table.ms-query-marten-rows").ShouldBeInsideALabelledScrollRegion();
+    }
+
+    /// <summary>
     /// The guard's refusal is rendered as a sentence with a caret, never as an exception: it is the most
     /// common thing that happens on this page after a typo.
     /// </summary>

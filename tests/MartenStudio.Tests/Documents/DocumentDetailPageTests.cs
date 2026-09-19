@@ -1,3 +1,5 @@
+using AngleSharp.Dom;
+
 using Bunit;
 
 using MartenStudio.Internal.Sql;
@@ -195,6 +197,28 @@ public class DocumentDetailPageTests
         Render(context).Find(".ms-doc-meta .ms-alert-info").TextContent.Should().Contain("read-only");
     }
 
+    /// <summary>
+    /// Both metadata tables scroll, and their value cells may break anywhere.
+    /// </summary>
+    /// <remarks>
+    /// A 40-character e-mail in a value cell has no break point of its own, so the cell asked for its own
+    /// width and the panel grew past its column - 1235px inside 1200px on a desktop and 534px inside
+    /// 334px on a phone, which gave the whole detail page a horizontal overflow it could not scroll.
+    /// </remarks>
+    [Fact]
+    public void The_metadata_tables_scroll_and_their_value_cells_may_break_anywhere()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        var page = Render(context);
+
+        page.FindAll(".ms-doc-meta-table").Should().HaveCount(2, "the columns and the duplicated fields");
+        page.ShouldPutEveryTableInALabelledScrollRegion();
+        page.FindAll(".ms-doc-meta-table .ms-doc-meta-value").Should().NotBeEmpty(
+            "the value cells are the ones that carry an e-mail or an id and the ones allowed to wrap");
+    }
+
     [Fact]
     public void A_soft_deleted_document_says_so_without_hiding_itself()
     {
@@ -205,6 +229,10 @@ public class DocumentDetailPageTests
             .Should().Contain("soft-deleted");
     }
 
+    /// <summary>
+    /// The same assertion as before the three copy buttons became one menu: the menu item is the button,
+    /// and it reaches the same handler.
+    /// </summary>
     [Fact]
     public async Task Copy_as_C_sharp_record_puts_a_record_for_this_document_on_the_clipboard()
     {
@@ -213,9 +241,7 @@ public class DocumentDetailPageTests
 
         var page = Render(context);
 
-        await page.FindAll(".ms-doc-detail-actions .ms-btn")
-            .First(x => x.TextContent.Trim() == "Copy as C# record")
-            .ClickAsync(new MouseEventArgs());
+        await CopyMenuItem(page, "Copy as C# record").ClickAsync(new MouseEventArgs());
 
         var invocation = context.JSInterop.Invocations["martenStudio.clipboard.copyText"].Single();
 
@@ -233,12 +259,187 @@ public class DocumentDetailPageTests
 
         var page = Render(context);
 
-        await page.FindAll(".ms-doc-detail-actions .ms-btn")
-            .First(x => x.TextContent.Trim() == "Copy id")
-            .ClickAsync(new MouseEventArgs());
+        await CopyMenuItem(page, "Copy id").ClickAsync(new MouseEventArgs());
 
         context.JSInterop.Invocations["martenStudio.clipboard.copyText"].Single()
             .Arguments[0].Should().Be(Id);
+    }
+
+    /// <summary>Copy JSON is the third item, and it copies the document rather than the id.</summary>
+    [Fact]
+    public async Task Copy_json_from_the_menu_copies_the_document_as_it_is_stored()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        var page = Render(context);
+
+        await CopyMenuItem(page, "Copy JSON").ClickAsync(new MouseEventArgs());
+
+        context.JSInterop.Invocations["martenStudio.clipboard.copyText"].Single()
+            .Arguments[0].Should().Be("""{"Name":"Customer 01","Email":"a@b.c"}""");
+    }
+
+    /// <summary>
+    /// The menu carries exactly the three copies the header used to spell out, and nothing else moved
+    /// into it.
+    /// </summary>
+    [Fact]
+    public void The_copy_menu_offers_the_three_copies_the_header_used_to_spell_out()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        var page = Render(context);
+
+        page.TextOfAll(".ms-doc-copy-popover .ms-menu-item .ms-menu-item-label")
+            .Should().Equal("Copy JSON", "Copy id", "Copy as C# record");
+
+        IElement menu = page.Find(".ms-doc-copy-popover");
+        menu.GetAttribute("role").Should().Be("menu");
+        menu.GetAttribute("popover").Should().Be(
+            "auto",
+            "light dismiss and Escape are the platform's, not a click-outside handler of ours");
+
+        page.Find(".ms-doc-copy-menu-button").GetAttribute("popovertarget")
+            .Should().Be(menu.GetAttribute("id"));
+    }
+
+    /// <summary>
+    /// A menu is one tab stop with a roving tabindex inside it, so the arrow keys have to move which
+    /// item is focusable. Keeping <c>role="menu"</c> and leaving three tab stops behind would tell a
+    /// screen-reader user this is a menu and then behave like a row of buttons.
+    /// </summary>
+    [Fact]
+    public async Task The_arrow_keys_move_the_roving_tabindex_between_the_copy_menu_items()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        var page = Render(context);
+
+        Tabindexes(page).Should().Equal("0", "-1", "-1");
+
+        await page.Find(".ms-doc-copy-popover").KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        Tabindexes(page).Should().Equal("-1", "0", "-1");
+
+        await page.Find(".ms-doc-copy-popover").KeyDownAsync(new KeyboardEventArgs { Key = "End" });
+        Tabindexes(page).Should().Equal("-1", "-1", "0");
+
+        await page.Find(".ms-doc-copy-popover").KeyDownAsync(new KeyboardEventArgs { Key = "ArrowDown" });
+        Tabindexes(page).Should().Equal(["0", "-1", "-1"], "the end wraps round to the top");
+
+        context.JSInterop.Invocations["martenStudio.json.focusElement"].Should().NotBeEmpty(
+            "moving the tabindex without moving DOM focus would leave the keyboard where it was");
+    }
+
+    /// <summary>
+    /// The button says whether the menu is open. The browser opens and closes a popover on its own -
+    /// Escape, a click anywhere else - so the flag is driven by the toggle event rather than by the
+    /// click that happened to open it.
+    /// </summary>
+    [Fact]
+    public async Task The_copy_button_reports_whether_the_menu_is_open()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        var page = Render(context);
+
+        page.Find(".ms-doc-copy-menu-button").GetAttribute("aria-expanded").Should().Be("false");
+
+        await page.Find(".ms-doc-copy-popover").TriggerEventAsync("ontoggle", EventArgs.Empty);
+        page.Find(".ms-doc-copy-menu-button").GetAttribute("aria-expanded").Should().Be("true");
+
+        await page.Find(".ms-doc-copy-popover").TriggerEventAsync("ontoggle", EventArgs.Empty);
+        page.Find(".ms-doc-copy-menu-button").GetAttribute("aria-expanded").Should().Be("false");
+    }
+
+    /// <summary>
+    /// Nine equal-weight buttons, three of them copies and two of them repeated in the viewer's own
+    /// toolbar sixty pixels below, is not a header anybody reads. Six controls: Open in Query, Download,
+    /// the copy menu, the previous/next pair, Edit and Delete.
+    /// </summary>
+    [Fact]
+    public void The_header_carries_six_controls_and_a_stream_link_is_the_seventh()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        Controls(Render(context)).Should().Equal(
+            "Open in Query", "Download", "Copy", "◂▸", "Edit", "Delete");
+
+        using var withStream = new DocumentsComponentContext();
+        withStream.Data.Detail = DocumentDetailResult.Ok(Detail());
+        withStream.Data.StreamExists = true;
+
+        Controls(Render(withStream)).Should().Equal(
+            "Open in Query", "View stream", "Download", "Copy", "◂▸", "Edit", "Delete");
+    }
+
+    /// <summary>
+    /// The previous/next pair is two icon buttons, so each carries its own accessible name. The old
+    /// glyphs were text - a screen reader read "black left-pointing triangle" - and they inherited the
+    /// button's font, which rendered them at a different weight in every browser.
+    /// </summary>
+    [Fact]
+    public void The_previous_and_next_buttons_are_named_rather_than_drawn_as_text()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        var page = Render(context);
+
+        List<IElement> nav = [.. page.FindAll(".ms-doc-detail-nav a")];
+
+        nav.Select(x => x.GetAttribute("aria-label"))
+            .Should().Equal("Previous document", "Next document");
+        nav.Select(x => x.GetAttribute("title")).Should().Equal(
+            "The previous document on the list you came from",
+            "The next document on the list you came from");
+
+        nav.Should().OnlyContain(x => x.QuerySelector("svg") != null, "the glyph is inline SVG");
+        nav.Should().OnlyContain(
+            x => x.TextContent.Trim().Length == 0,
+            "and nothing but the SVG, so there is no ◀ for a screen reader to read out");
+
+        // Nothing came back from a list, so both ends are disabled - exactly as they were before.
+        nav.Should().OnlyContain(x => x.GetAttribute("aria-disabled") == "true");
+        nav.Should().OnlyContain(x => x.ClassList.Contains("ms-btn-disabled"));
+    }
+
+    private static IElement CopyMenuItem<T>(IRenderedComponent<T> page, string label)
+        where T : Microsoft.AspNetCore.Components.IComponent =>
+        page.FindAll(".ms-doc-copy-popover .ms-menu-item")
+            .First(x => x.QuerySelector(".ms-menu-item-label")!.TextContent.Trim() == label);
+
+    private static List<string> Tabindexes<T>(IRenderedComponent<T> page)
+        where T : Microsoft.AspNetCore.Components.IComponent =>
+        [.. page.FindAll(".ms-doc-copy-popover .ms-menu-item").Select(x => x.GetAttribute("tabindex") ?? string.Empty)];
+
+    /// <summary>
+    /// The header's controls, in order, with the previous/next pair counted as the one control it reads
+    /// as. Everything inside <c>.ms-doc-detail-nav</c> is that pair; everything else with
+    /// <c>.ms-btn</c> stands on its own.
+    /// </summary>
+    private static List<string> Controls<T>(IRenderedComponent<T> page)
+        where T : Microsoft.AspNetCore.Components.IComponent
+    {
+        List<string> controls = [];
+
+        foreach (IElement element in page.FindAll(".ms-doc-detail-actions .ms-btn, .ms-doc-detail-actions .ms-doc-detail-nav"))
+        {
+            if (element.ClassList.Contains("ms-doc-detail-nav"))
+            {
+                controls.Add("◂▸");
+            }
+            else if (element.Closest(".ms-doc-detail-nav") is null)
+            {
+                controls.Add(element.TextContent.Trim());
+            }
+        }
+
+        return controls;
     }
 
     [Fact]

@@ -182,6 +182,9 @@
     private string? _capturedTreeId;
     private int _matchIndex = -1;
     private string _searchTerm = string.Empty;
+
+    /// <summary>What <see cref="ShowSearch" /> was on the previous parameter set; null before the first.</summary>
+    private bool? _searchShown;
     private string _announcement = string.Empty;
     private string? _downloadHref;
     private string _typeahead = string.Empty;
@@ -302,6 +305,19 @@
 
     protected override void OnParametersSet()
     {
+        // A host that takes the search bar away takes the only controls that could step through or
+        // clear the matches with it - and the highlighting, the badges on collapsed containers and the
+        // scroll position it moved to all survive a parameter change, because they are not part of the
+        // model. So a viewer that loses its search bar loses its search: this runs before the
+        // short-circuit below, because a parent may change only this parameter (an event card does
+        // exactly that when its toolbar closes) and the model is then untouched.
+        if (_searchShown == true && !ShowSearch)
+        {
+            ClearSearch();
+        }
+
+        _searchShown = ShowSearch;
+
         // Everything the model is built from, not just the document. A parent that re-renders with the
         // same Json and a different Column - or a raised MaxNodesForTree, or a different LongString -
         // has asked for a different model, and short-circuiting on the document alone left the old one
@@ -347,6 +363,15 @@
         LongString = LongString,
     };
 
+    /// <summary>Everything a search leaves behind: the term, the hits, the cursor and the badges.</summary>
+    private void ClearSearch()
+    {
+        _matches = ImmutableArray<JsonMatch>.Empty;
+        _badges = [];
+        _matchIndex = -1;
+        _searchTerm = string.Empty;
+    }
+
     private void Rebuild() => Rebuild(BuildOptions());
 
     private void Rebuild(JsonModelOptions options)
@@ -355,10 +380,7 @@
         _expanded.Clear();
         _expandedStrings.Clear();
         _windows.Clear();
-        _matches = ImmutableArray<JsonMatch>.Empty;
-        _badges = [];
-        _matchIndex = -1;
-        _searchTerm = string.Empty;
+        ClearSearch();
         _focusedNodeId = _model.HasNodes ? 0 : -1;
         _autoFocusNodeId = -1;
         _focusedIsMore = false;

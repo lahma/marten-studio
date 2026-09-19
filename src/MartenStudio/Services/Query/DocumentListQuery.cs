@@ -146,10 +146,26 @@ internal sealed record DocumentListQuery
     public string? TenantId { get; init; }
 
     /// <summary>
-    /// The optional columns to select. Empty means "every enabled metadata column and every duplicated
-    /// column", which is what the page shows before anyone touches the column chooser.
+    /// The columns to select beyond the id, the capped <c>data</c> and its size, or
+    /// <see langword="null"/> when the caller has expressed no preference.
     /// </summary>
-    public IReadOnlyList<DocumentColumn> Columns { get; init; } = [];
+    /// <remarks>
+    /// <para>
+    /// <see langword="null"/> means "whatever this table has": every enabled metadata column and every
+    /// duplicated column. It is the convenience a test or an ad-hoc read wants, and it is what this
+    /// property used to mean when it was empty.
+    /// </para>
+    /// <para>
+    /// An <em>empty list</em> is not that. It means "exactly nothing beyond the id", which is a real
+    /// answer and not an omission: a type with <c>Metadata(m =&gt; m.LastModified.Enabled = false)</c>
+    /// and no duplicated field has no other column worth a header, and so does a discovered table whose
+    /// only metadata column the page does not show. While the two were the same value, such a read
+    /// selected columns the grid never rendered — harmless, because the reader maps by column rather
+    /// than by ordinal, but it made "Show SQL" disagree with the headers above it, which is exactly the
+    /// thing that disclosure exists to prevent (D14).
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<DocumentColumn>? Columns { get; init; }
 
     /// <summary>
     /// The threshold above which <c>data</c> is not inlined. The list still reports every document's size.

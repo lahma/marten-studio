@@ -1,9 +1,20 @@
 @using System.Globalization
+@using System.Text.Json
 @using MartenStudio.Components.Json
 @using MartenStudio.Services
+@using MartenStudio.Services.Json
+@using MartenStudio.Services.Live
 @inject StudioState State
+@inject IJSRuntime JsRuntime
 
 @* One event, on the timeline or in the feed.
+
+   Compact by default. A feed is fifty of these, and a card that carries the JSON viewer's whole toolbar
+   carries seven controls that are bigger than the three facts a reader is scanning for - which event,
+   which stream, what happened. The two controls a reader reaches for from the list (copy this body,
+   open the rest) are icon buttons on the identity line; everything else - Raw, depth, expand, collapse,
+   download, search - arrives with the toolbar when "Event actions" is pressed, on the one card somebody
+   is actually investigating.
 
    Every parameter is a primitive or a BCL type, the way JsonViewRow's are: the row records live in
    MartenStudio.Services.Events and are internal, and the Razor compiler emits a public component class,
@@ -42,28 +53,70 @@
             </span>
         }
 
+        @* The stream rides on the identity line rather than owning a row of its own: it is part of
+           "which event is this", and a row of its own cost fifty lines on the feed. *@
+        @if (ShowStream && !string.IsNullOrEmpty(StreamId))
+        {
+            <span class="ms-event-card-stream" @onclick:stopPropagation="true">
+                <span class="ms-event-meta-key">stream</span>
+                @if (string.IsNullOrEmpty(StreamHref))
+                {
+                    <span class="ms-event-meta-value">@StreamId</span>
+                }
+                else
+                {
+                    <a class="ms-event-meta-value" href="@StreamHref">@StreamId</a>
+                }
+            </span>
+        }
+
         <span class="ms-event-card-spacer"></span>
+
+        @* Both buttons stop the bubble for the same reason the type chip does: in a stream's timeline
+           the card itself is the selector, and copying a body is not "select this version". *@
+        <span class="ms-event-card-actions">
+            <button type="button"
+                    class="@CopyButtonClass"
+                    aria-label="Copy event JSON"
+                    title="@CopyTitle"
+                    disabled="@(!HasJson)"
+                    @onclick="CopyJsonAsync"
+                    @onclick:stopPropagation="true">
+                @if (_copied)
+                {
+                    <svg class="ms-event-card-action-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="3,9.5 7,13.5 15,4.5" />
+                    </svg>
+                }
+                else
+                {
+                    <svg class="ms-event-card-action-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="4" y="4" width="10" height="12" rx="1.5" />
+                        <path d="M7 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1" />
+                    </svg>
+                }
+            </button>
+            <button type="button"
+                    class="ms-event-card-action ms-event-card-more"
+                    aria-label="Event actions"
+                    aria-expanded="@_expanded.ToString().ToLowerInvariant()"
+                    title="@MoreTitle"
+                    disabled="@(!HasJson)"
+                    @onclick="ToggleExpanded"
+                    @onclick:stopPropagation="true">
+                <svg class="ms-event-card-action-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                    <circle cx="9" cy="3.5" r="1.3" fill="currentColor" stroke="none" />
+                    <circle cx="9" cy="9" r="1.3" fill="currentColor" stroke="none" />
+                    <circle cx="9" cy="14.5" r="1.3" fill="currentColor" stroke="none" />
+                </svg>
+            </button>
+        </span>
 
         <span class="ms-event-card-seq" title="Global event sequence">#@Sequence.ToString(CultureInfo.InvariantCulture)</span>
         <span class="ms-event-card-time" title="@State.FormatInSelectedTimeZone(Timestamp)">
             <TimeAgo Timestamp="Timestamp" />
         </span>
     </div>
-
-    @if (ShowStream && !string.IsNullOrEmpty(StreamId))
-    {
-        <div class="ms-event-card-header" @onclick:stopPropagation="true">
-            <span class="ms-event-meta-key">stream</span>
-            @if (string.IsNullOrEmpty(StreamHref))
-            {
-                <span class="ms-event-meta-value">@StreamId</span>
-            }
-            else
-            {
-                <a class="ms-event-meta-value" href="@StreamHref">@StreamId</a>
-            }
-        </div>
-    }
 
     @if (Metadata.Count > 0)
     {
@@ -74,7 +127,7 @@
                 {
                     <span class="ms-event-meta-chip" @key="entry.Key">
                         <span class="ms-event-meta-key">@entry.Key</span>
-                        <span class="ms-event-meta-value" title="@entry.Value">@entry.Value</span>
+                        <span class="ms-event-meta-value" title="@entry.Value">@ChipText(entry.Key, entry.Value)</span>
                     </span>
                 }
             }
@@ -83,7 +136,7 @@
 
     @* The viewer has its own buttons - expand, copy, raw - and none of them means "select this event". *@
     <div class="ms-event-card-body" @onclick:stopPropagation="true">
-        @if (string.IsNullOrWhiteSpace(Json))
+        @if (!HasJson)
         {
             <p class="ms-event-card-empty">
                 @(HasBinary
@@ -94,15 +147,40 @@
         else
         {
             <JsonView Json="@Json"
+                      Class="@JsonViewClass"
                       Label="@($"{EventType} body")"
                       AutoExpandDepth="1"
-                      ShowSearch="false"
+                      ShowToolbar="_expanded"
+                      ShowSearch="_expanded"
                       DownloadFileName="@($"{EventType}-{Sequence.ToString(CultureInfo.InvariantCulture)}.json")" />
         }
     </div>
+
+    @* What the copy did, said out loud. The icon swap is invisible to a screen reader and the title is
+       not announced on activation; the button's aria-label is deliberately constant, because a control
+       whose accessible name changes under the reader is a different control to them. So the outcome
+       goes in a live region instead - the same shape JsonView's own announcer has. *@
+    <span class="ms-event-card-live ms-sr-only" role="status" aria-live="polite">@_announcement</span>
 </div>
 
 @code {
+    /// <summary>The <c>mt_events</c> column whose value is an assembly-qualified .NET type name.</summary>
+    private const string DotNetTypeColumn = "mt_dotnet_type";
+
+    /// <summary>How deep <see cref="Shorten" /> will walk a nested generic before it gives up.</summary>
+    /// <remarks>
+    /// This walks a string that came out of a database column, not a <see cref="Type" />. Marten writes
+    /// it, but nothing stops a hand-written or corrupted <c>mt_dotnet_type</c> from nesting
+    /// <c>[[ ]]</c> as far as the column allows, and a recursive walk over attacker-shaped text with no
+    /// bound is a stack overflow that takes the process down - not the circuit, the process. Sixteen is
+    /// past anything a real event type reaches and past anything a reader could still make sense of.
+    /// </remarks>
+    private const int MaxTypeNameDepth = 16;
+
+    private bool _expanded;
+    private bool _copied;
+    private string _announcement = string.Empty;
+
     /// <summary>The global event sequence.</summary>
     [Parameter]
     public long Sequence { get; set; }
@@ -136,7 +214,7 @@
     [Parameter]
     public string? TypeHref { get; set; }
 
-    /// <summary>Whether the stream row is shown - the feed wants it, a stream's own timeline does not.</summary>
+    /// <summary>Whether the stream is named on the identity line - the feed wants it, a stream's own timeline does not.</summary>
     [Parameter]
     public bool ShowStream { get; set; }
 
@@ -179,6 +257,8 @@
     [Parameter]
     public EventCallback<long> OnSelect { get; set; }
 
+    private bool HasJson => !string.IsNullOrWhiteSpace(Json);
+
     private string CardClass
     {
         get
@@ -198,10 +278,257 @@
         }
     }
 
+    /// <summary>
+    /// Without the toolbar the tree is the top of the body, so it wears the border and the corners the
+    /// toolbar was carrying.
+    /// </summary>
+    private string JsonViewClass => _expanded ? "ms-event-json" : "ms-event-json ms-event-json-bare";
+
+    private string CopyButtonClass => _copied
+        ? "ms-event-card-action ms-event-card-copy ms-event-card-action-copied"
+        : "ms-event-card-action ms-event-card-copy";
+
+    private string CopyTitle
+    {
+        get
+        {
+            if (!HasJson)
+            {
+                return "This event has no JSON body to copy";
+            }
+
+            return _copied ? "Copied" : "Copy this event's JSON";
+        }
+    }
+
+    private string MoreTitle => HasJson
+        ? (_expanded ? "Hide this event's viewer controls" : "Show this event's viewer controls")
+        : "This event has no JSON body";
+
     /// <summary>"N bytes", or an honest "size unknown" when <c>octet_length</c> came back null.</summary>
     private string BinaryDescription => BinaryLength is { } length
         ? length.ToString("N0", CultureInfo.InvariantCulture) + " bytes"
         : "size unknown";
+
+    /// <summary>
+    /// What a metadata chip shows. Everything is shown as the column holds it except
+    /// <c>mt_dotnet_type</c>, whose assembly-qualified value is the widest string on the page and whose
+    /// interesting part is the last segment; the whole of it stays in the chip's <c>title</c>.
+    /// </summary>
+    private static string? ChipText(string column, string? value) =>
+        string.Equals(column, DotNetTypeColumn, StringComparison.Ordinal) ? ShortDotNetTypeName(value) : value;
+
+    /// <summary>
+    /// The readable short name of an assembly-qualified .NET type name -
+    /// <c>MartenStudio.SampleDomain.Events.OrderShipped, MartenStudio.SampleDomain</c> is
+    /// <c>OrderShipped</c>.
+    /// </summary>
+    /// <remarks>
+    /// Generic arguments are shortened too rather than dropped: Marten writes
+    /// <c>$"{eventType.FullName}, {eventType.Assembly.GetName().Name}"</c> (JasperFx's
+    /// <c>IEventRegistry</c>), and <c>FullName</c> of a closed generic carries every argument
+    /// assembly-qualified inside <c>[[ ]]</c>. Taking the text after the last dot of that would answer
+    /// <c>DailySales</c> for a <c>Compacted&lt;DailySales&gt;</c>, which names the wrong type.
+    /// </remarks>
+    private static string ShortDotNetTypeName(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? string.Empty : Shorten(value.Trim(), 0);
+
+    private static string Shorten(string name, int depth)
+    {
+        string type = TypePartOf(name);
+
+        if (depth >= MaxTypeNameDepth)
+        {
+            // Past the bound the name is not readable anyway, so answer the outermost segment and stop
+            // walking: it is the one thing in there that still tells a reader what they are looking at.
+            int cut = type.IndexOf('[', StringComparison.Ordinal);
+            return LastSegment(cut < 0 ? type : type[..cut]);
+        }
+
+        // An array's rank specifiers are part of its name - Foo[] is not Foo, and Foo[][,] is neither -
+        // so they come off first and go back on at the end. They are the only trailing [ ] group whose
+        // contents are commas, which is what tells them apart from a generic argument list.
+        string suffix = string.Empty;
+        while (TryTakeRankSpecifier(type, out string trimmed, out string rank))
+        {
+            type = trimmed;
+            suffix = rank + suffix;
+        }
+
+        int bracket = type.IndexOf('[', StringComparison.Ordinal);
+        if (bracket < 0)
+        {
+            return LastSegment(type) + suffix;
+        }
+
+        string open = LastSegment(type[..bracket]);
+        List<string> arguments = [];
+        int argumentDepth = 0;
+        int start = -1;
+        for (int i = bracket; i < type.Length; i++)
+        {
+            char c = type[i];
+            if (c == '[')
+            {
+                if (argumentDepth == 1)
+                {
+                    start = i + 1;
+                }
+
+                argumentDepth++;
+            }
+            else if (c == ']')
+            {
+                argumentDepth--;
+                if (argumentDepth == 1 && start >= 0)
+                {
+                    arguments.Add(Shorten(type[start..i], depth + 1));
+                    start = -1;
+                }
+            }
+        }
+
+        return arguments.Count == 0
+            ? open + suffix
+            : open + "<" + string.Join(", ", arguments) + ">" + suffix;
+    }
+
+    /// <summary>The type name alone: everything before the first comma outside a <c>[ ]</c> group.</summary>
+    private static string TypePartOf(string name)
+    {
+        int depth = 0;
+        int end = name.Length;
+        for (int i = 0; i < name.Length; i++)
+        {
+            char c = name[i];
+            if (c == '[')
+            {
+                depth++;
+            }
+            else if (c == ']')
+            {
+                depth--;
+            }
+            else if (c == ',' && depth == 0)
+            {
+                end = i;
+                break;
+            }
+        }
+
+        return name[..end].Trim();
+    }
+
+    /// <summary>
+    /// Takes one trailing array rank specifier - <c>[]</c>, <c>[,]</c>, <c>[,,]</c> - off
+    /// <paramref name="type" />.
+    /// </summary>
+    private static bool TryTakeRankSpecifier(string type, out string trimmed, out string rank)
+    {
+        trimmed = type;
+        rank = string.Empty;
+
+        if (type.Length < 2 || type[^1] != ']')
+        {
+            return false;
+        }
+
+        int depth = 0;
+        for (int i = type.Length - 1; i >= 0; i--)
+        {
+            char c = type[i];
+            if (c == ']')
+            {
+                depth++;
+            }
+            else if (c == '[')
+            {
+                depth--;
+                if (depth > 0)
+                {
+                    continue;
+                }
+
+                // Only commas inside, or it is a generic argument list rather than a rank.
+                string inside = type[(i + 1)..^1];
+                if (inside.Length > 0 && inside.Any(static x => x != ','))
+                {
+                    return false;
+                }
+
+                trimmed = type[..i];
+                rank = type[i..];
+                return trimmed.Length > 0;
+            }
+            else if (depth == 0)
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The name after the last namespace or nesting separator, with the generic arity dropped.</summary>
+    /// <remarks>
+    /// The separator is found before the arity tick is dropped, not after: a nested generic's
+    /// <see cref="Type.FullName" /> is <c>A.Outer`1+Inner</c>, and cutting at the first tick first would
+    /// answer <c>Outer</c> - the type that <em>contains</em> the one this event is.
+    /// </remarks>
+    private static string LastSegment(string type)
+    {
+        int separator = type.LastIndexOfAny(['.', '+']);
+        string segment = separator >= 0 && separator < type.Length - 1 ? type[(separator + 1)..] : type;
+        int tick = segment.IndexOf('`', StringComparison.Ordinal);
+        return tick > 0 ? segment[..tick] : segment;
+    }
+
+    protected override void OnParametersSet()
+    {
+        // The copied flash belongs to the click, not to the card: a parent that re-renders - follow mode
+        // prepending events, the timeline reloading - has handed this card a new state to report on.
+        // The expanded toolbar is deliberately not reset here: it is the reader's choice, and a poll
+        // that collapsed it under them would be the same page moving while it is read that follow mode
+        // exists to avoid. It goes when the card does, because @key is per event.
+        _copied = false;
+        _announcement = string.Empty;
+    }
+
+    private void ToggleExpanded() => _expanded = !_expanded;
+
+    private async Task CopyJsonAsync()
+    {
+        string text = Json ?? string.Empty;
+        if (text.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            // The same text the viewer's own "Copy JSON" produces, so the two controls on one card
+            // cannot put different bytes on the clipboard.
+            text = JsonPrettyPrinter.PrettyPrint(text);
+        }
+        catch (JsonException)
+        {
+            // Copy what is there rather than nothing; the card already shows the parse failure.
+        }
+
+        bool copied = false;
+        try
+        {
+            copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // A closed tab, a prerender, a circuit that has already gone: there is no clipboard to
+            // write to and no failure to report to a reader who is not there.
+        }
+
+        _copied = copied;
+        _announcement = copied ? "Copied the event JSON" : "Could not copy";
+    }
 
     private async Task SelectAsync()
     {

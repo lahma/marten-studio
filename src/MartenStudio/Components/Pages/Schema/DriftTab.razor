@@ -91,25 +91,27 @@
 
     @if (check.Objects.Count > 0)
     {
-        <table class="ms-table">
-            <thead>
-                <tr>
-                    <th>Object</th>
-                    <th>Kind</th>
-                    <th>Difference</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (SchemaObjectDifference difference in check.Objects)
-                {
-                    <tr class="ms-table-row" @key="difference.Name">
-                        <td class="ms-table-cell ms-table-cell-mono">@difference.Name</td>
-                        <td class="ms-table-cell">@difference.Kind</td>
-                        <td class="ms-table-cell">@difference.Difference</td>
+        <TableScroll Label="Schema differences table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Object</th>
+                        <th>Kind</th>
+                        <th>Difference</th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (SchemaObjectDifference difference in check.Objects)
+                    {
+                        <tr class="ms-table-row" @key="difference.Name">
+                            <td class="ms-table-cell ms-table-cell-mono">@difference.Name</td>
+                            <td class="ms-table-cell">@difference.Kind</td>
+                            <td class="ms-table-cell">@difference.Difference</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
     }
 }
 
@@ -123,25 +125,27 @@
 
     @if (preview.Deltas.Count > 0)
     {
-        <table class="ms-table">
-            <thead>
-                <tr>
-                    <th>Object</th>
-                    <th>Kind</th>
-                    <th>Difference</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (SchemaObjectDifference delta in preview.Deltas)
-                {
-                    <tr class="ms-table-row" @key="delta.Name">
-                        <td class="ms-table-cell ms-table-cell-mono">@delta.Name</td>
-                        <td class="ms-table-cell">@delta.Kind</td>
-                        <td class="ms-table-cell">@delta.Difference</td>
+        <TableScroll Label="Migration preview differences table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Object</th>
+                        <th>Kind</th>
+                        <th>Difference</th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (SchemaObjectDifference delta in preview.Deltas)
+                    {
+                        <tr class="ms-table-row" @key="delta.Name">
+                            <td class="ms-table-cell ms-table-cell-mono">@delta.Name</td>
+                            <td class="ms-table-cell">@delta.Kind</td>
+                            <td class="ms-table-cell">@delta.Difference</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
     }
 }
 

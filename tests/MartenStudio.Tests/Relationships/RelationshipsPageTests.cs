@@ -236,6 +236,36 @@ public class RelationshipsPageTests
         relationships.LastScope!.StoreKey.Should().Be("second");
     }
 
+    /// <summary>
+    /// The relationships table is six columns wide and is the only form of the picture below 900px, so
+    /// it is the one that must not be clipped - and the "Not on the diagram" table beside it is five
+    /// columns of qualified table names, which clipped the same way.
+    /// </summary>
+    [Fact]
+    public void Every_table_on_the_page_is_in_a_scroll_region_rather_than_being_clipped()
+    {
+        using var context = NewContext(out FakeRelationshipDataService relationships);
+        relationships.Graph = relationships.Graph with
+        {
+            Unmatched =
+            [
+                new UnmatchedForeignKey(
+                    "mt_doc_order_warehouse_id_fkey",
+                    "studio_sample.mt_doc_order",
+                    "warehouse_id",
+                    "public.warehouses",
+                    Declared: true,
+                    Physical: false,
+                    "public.warehouses is not a document type of this store"),
+            ],
+        };
+
+        var page = context.Render<RelationshipsPage>();
+
+        page.FindAll("table.ms-table").Should().HaveCount(2, "the unmatched key has to render its table for this to prove anything");
+        page.ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
     /// <summary>The "from → to" pair a title on the picture describes.</summary>
     private static string Pair(IElement title)
     {

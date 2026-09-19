@@ -64,33 +64,35 @@
                 }
                 else
                 {
-                    <table class="ms-table">
-                        <thead>
-                            <tr>
-                                <th>Identity</th>
-                                <th>Engine</th>
-                                <th>Server</th>
-                                <th>Port</th>
-                                <th>Database</th>
-                                <th>Schema</th>
-                                <th>Tenants</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (ConfiguredDatabase database in configuration.Store.Databases)
-                            {
-                                <tr class="ms-table-row" @key="database.Identity">
-                                    <td class="ms-table-cell ms-table-cell-mono">@database.Identity</td>
-                                    <td class="ms-table-cell">@database.Engine</td>
-                                    <td class="ms-table-cell ms-table-cell-mono">@database.Server</td>
-                                    <td class="ms-table-cell ms-num">@(database.Port?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "default")</td>
-                                    <td class="ms-table-cell ms-table-cell-mono">@database.DatabaseName</td>
-                                    <td class="ms-table-cell ms-table-cell-mono">@database.Schema</td>
-                                    <td class="ms-table-cell ms-table-cell-mono">@(database.TenantIds.Count == 0 ? "-" : string.Join(", ", database.TenantIds))</td>
+                    <TableScroll Label="Databases table">
+                        <table class="ms-table">
+                            <thead>
+                                <tr>
+                                    <th>Identity</th>
+                                    <th>Engine</th>
+                                    <th>Server</th>
+                                    <th>Port</th>
+                                    <th>Database</th>
+                                    <th>Schema</th>
+                                    <th>Tenants</th>
                                 </tr>
-                            }
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                @foreach (ConfiguredDatabase database in configuration.Store.Databases)
+                                {
+                                    <tr class="ms-table-row" @key="database.Identity">
+                                        <td class="ms-table-cell ms-table-cell-mono">@database.Identity</td>
+                                        <td class="ms-table-cell">@database.Engine</td>
+                                        <td class="ms-table-cell ms-table-cell-mono">@database.Server</td>
+                                        <td class="ms-table-cell ms-num">@(database.Port?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "default")</td>
+                                        <td class="ms-table-cell ms-table-cell-mono">@database.DatabaseName</td>
+                                        <td class="ms-table-cell ms-table-cell-mono">@database.Schema</td>
+                                        <td class="ms-table-cell ms-table-cell-mono">@(database.TenantIds.Count == 0 ? "-" : string.Join(", ", database.TenantIds))</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
                 }
             </div>
         </section>
@@ -173,25 +175,27 @@
                         }
                         else
                         {
-                            <table class="ms-table">
-                                <thead>
-                                    <tr>
-                                        <th>Member</th>
-                                        <th>Column</th>
-                                        <th>Postgres type</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (DuplicatedFieldConfiguration field in documentType.DuplicatedFields)
-                                    {
-                                        <tr class="ms-table-row" @key="field.Column">
-                                            <td class="ms-table-cell ms-table-cell-mono">@field.Member</td>
-                                            <td class="ms-table-cell ms-table-cell-mono">@field.Column</td>
-                                            <td class="ms-table-cell ms-table-cell-mono">@field.PgType</td>
+                            <TableScroll Label="@DuplicatedFieldsLabel(documentType.Alias)">
+                                <table class="ms-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Member</th>
+                                            <th>Column</th>
+                                            <th>Postgres type</th>
                                         </tr>
-                                    }
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (DuplicatedFieldConfiguration field in documentType.DuplicatedFields)
+                                        {
+                                            <tr class="ms-table-row" @key="field.Column">
+                                                <td class="ms-table-cell ms-table-cell-mono">@field.Member</td>
+                                                <td class="ms-table-cell ms-table-cell-mono">@field.Column</td>
+                                                <td class="ms-table-cell ms-table-cell-mono">@field.PgType</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </TableScroll>
                         }
 
                         <h4 class="ms-config-group-title">Indexes</h4>
@@ -201,23 +205,25 @@
                         }
                         else
                         {
-                            <table class="ms-table">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Definition</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (ConfiguredIndex index in documentType.Indexes)
-                                    {
-                                        <tr class="ms-table-row" @key="index.Name">
-                                            <td class="ms-table-cell ms-table-cell-mono">@index.Name</td>
-                                            <td class="ms-table-cell ms-index-definition">@index.Definition</td>
+                            <TableScroll Label="@IndexesLabel(documentType.Alias)">
+                                <table class="ms-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Definition</th>
                                         </tr>
-                                    }
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (ConfiguredIndex index in documentType.Indexes)
+                                        {
+                                            <tr class="ms-table-row" @key="index.Name">
+                                                <td class="ms-table-cell ms-table-cell-mono">@index.Name</td>
+                                                <td class="ms-table-cell ms-index-definition">@index.Definition</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </TableScroll>
                         }
 
                         <h4 class="ms-config-group-title">Foreign keys</h4>
@@ -227,27 +233,29 @@
                         }
                         else
                         {
-                            <table class="ms-table">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Columns</th>
-                                        <th>References</th>
-                                        <th>On delete</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (ConfiguredForeignKey key in documentType.ForeignKeys)
-                                    {
-                                        <tr class="ms-table-row" @key="key.Name">
-                                            <td class="ms-table-cell ms-table-cell-mono">@key.Name</td>
-                                            <td class="ms-table-cell ms-table-cell-mono">@key.Columns</td>
-                                            <td class="ms-table-cell ms-table-cell-mono">@key.LinkedTable (@key.LinkedColumns)</td>
-                                            <td class="ms-table-cell">@key.OnDelete</td>
+                            <TableScroll Label="@ForeignKeysLabel(documentType.Alias)">
+                                <table class="ms-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Columns</th>
+                                            <th>References</th>
+                                            <th>On delete</th>
                                         </tr>
-                                    }
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (ConfiguredForeignKey key in documentType.ForeignKeys)
+                                        {
+                                            <tr class="ms-table-row" @key="key.Name">
+                                                <td class="ms-table-cell ms-table-cell-mono">@key.Name</td>
+                                                <td class="ms-table-cell ms-table-cell-mono">@key.Columns</td>
+                                                <td class="ms-table-cell ms-table-cell-mono">@key.LinkedTable (@key.LinkedColumns)</td>
+                                                <td class="ms-table-cell">@key.OnDelete</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </TableScroll>
                         }
 
                         <h4 class="ms-config-group-title">Subclasses</h4>
@@ -276,6 +284,19 @@
 @code {
     private readonly CancellationTokenSource lifetime = new();
     private readonly HashSet<string> expanded = new(StringComparer.Ordinal);
+
+    // Every expanded document type renders these three tables, so the scroll regions are named after the
+    // type as well as after the table. Four cards open at once would otherwise announce four landmarks
+    // all called "Indexes table", which is a worse answer than no label at all.
+
+    /// <summary>The scroll region's name for one document type's duplicated fields.</summary>
+    private static string DuplicatedFieldsLabel(string alias) => alias + " duplicated fields table";
+
+    /// <summary>The scroll region's name for one document type's indexes.</summary>
+    private static string IndexesLabel(string alias) => alias + " indexes table";
+
+    /// <summary>The scroll region's name for one document type's foreign keys.</summary>
+    private static string ForeignKeysLabel(string alias) => alias + " foreign keys table";
 
     private StudioConfiguration? configuration;
     private string filter = string.Empty;

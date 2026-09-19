@@ -13,7 +13,9 @@
     want when you paste it into a ticket.
 *@
 
-<div class="ms-table-wrap">
+@* The same labelled, keyboard-reachable scroll region every other table sits in (TableScroll); the
+   class stays because the stylesheet and the edge-cue observer both know it by this name. *@
+<div class="ms-table-wrap" role="region" aria-label="Documents table" tabindex="0">
     <table class="ms-table ms-doc-table">
         <thead>
             <tr>

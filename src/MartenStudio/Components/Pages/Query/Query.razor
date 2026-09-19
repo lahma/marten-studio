@@ -170,41 +170,43 @@
                             }
                             else
                             {
-                                <table class="ms-table ms-query-marten-rows">
-                                    <thead>
-                                        <tr>
-                                            <th scope="col">id</th>
-                                            <th scope="col">document</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (MartenQueryRow row in result.Rows)
-                                        {
-                                            MartenQueryRow current = row;
-                                            <tr class="ms-table-row" @key="current.Id">
-                                                <td class="ms-table-cell ms-table-cell-mono ms-query-row-id">
-                                                    <a class="ms-details-link" href="@DocumentLink(result.Alias, current.Id)">@current.Id</a>
-                                                    @if (current.TenantId is { Length: > 0 } rowTenant)
-                                                    {
-                                                        <span class="ms-chip ms-query-row-tenant">@rowTenant</span>
-                                                    }
-                                                    @if (current.IsDeleted == true)
-                                                    {
-                                                        <span class="ms-chip ms-chip-warning ms-query-row-deleted">deleted</span>
-                                                    }
-                                                </td>
-                                                <td class="ms-table-cell ms-query-row-document">
-                                                    <JsonView Json="@current.Json"
-                                                              Label="Document"
-                                                              AutoExpandDepth="1"
-                                                              ShowSearch="false"
-                                                              ShowToolbar="false"
-                                                              DownloadFileName="document.json" />
-                                                </td>
+                                <TableScroll Label="Query results table">
+                                    <table class="ms-table ms-query-marten-rows">
+                                        <thead>
+                                            <tr>
+                                                <th scope="col">id</th>
+                                                <th scope="col">document</th>
                                             </tr>
-                                        }
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (MartenQueryRow row in result.Rows)
+                                            {
+                                                MartenQueryRow current = row;
+                                                <tr class="ms-table-row" @key="current.Id">
+                                                    <td class="ms-table-cell ms-table-cell-mono ms-query-row-id">
+                                                        <a class="ms-details-link" href="@DocumentLink(result.Alias, current.Id)">@current.Id</a>
+                                                        @if (current.TenantId is { Length: > 0 } rowTenant)
+                                                        {
+                                                            <span class="ms-chip ms-query-row-tenant">@rowTenant</span>
+                                                        }
+                                                        @if (current.IsDeleted == true)
+                                                        {
+                                                            <span class="ms-chip ms-chip-warning ms-query-row-deleted">deleted</span>
+                                                        }
+                                                    </td>
+                                                    <td class="ms-table-cell ms-query-row-document">
+                                                        <JsonView Json="@current.Json"
+                                                                  Label="Document"
+                                                                  AutoExpandDepth="1"
+                                                                  ShowSearch="false"
+                                                                  ShowToolbar="false"
+                                                                  DownloadFileName="document.json" />
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </TableScroll>
                             }
                         }
                     }

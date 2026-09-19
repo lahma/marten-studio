@@ -507,6 +507,85 @@ public class SchemaPageTests
         page.Markup.Should().Contain("Copy failed");
     }
 
+    // --------------------------------------------------------------------------------------------
+    // The width of them
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The Tables tab is twelve columns and measured 1424px inside a 1200px column: INDEX SCANS was cut
+    /// in half and the two vacuum timestamps past it were not on the screen at all. The Indexes tab was
+    /// 1104px inside 1040px. Both scroll now rather than being clipped.
+    /// </summary>
+    [Fact]
+    public void The_Tables_tab_scrolls_rather_than_being_clipped()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema);
+        schema.Tables = new SchemaTables(
+            [
+                new TableStats("studio", "mt_doc_customer", 98304, 65536, 32768, 1200, 1200, 3, 4, 500,
+                    DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, "customer", "Customer", false),
+            ],
+            ["studio"],
+            1048576,
+            null);
+
+        context.Navigate("/marten/schema?tab=tables");
+
+        context.Render<SchemaPage>().ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
+    /// <summary>
+    /// Both of the Indexes tab's tables - the installed ones and the declared-but-missing ones - and not
+    /// only whichever of them a test happened to populate.
+    /// </summary>
+    [Fact]
+    public void Both_of_the_Indexes_tabs_tables_scroll_rather_than_being_clipped()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema);
+        schema.Indexes = new SchemaIndexes(
+            [
+                new IndexInfo("studio", "mt_doc_customer", "mt_doc_customer_idx_name",
+                    "CREATE INDEX ...", 8192, 12, 40, false, false, true, "customer", null),
+            ],
+            [new MissingIndex("studio", "mt_doc_note", "mt_doc_note_idx_text", "CREATE INDEX ...", "note")],
+            [],
+            null);
+
+        context.Navigate("/marten/schema?tab=indexes");
+
+        var page = context.Render<SchemaPage>();
+
+        page.FindAll("table.ms-table").Should().HaveCount(2, "the missing indexes are a table of their own");
+        page.ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
+    /// <summary>Both difference tables on the Drift tab: the check's, and the preview's deltas.</summary>
+    [Fact]
+    public void The_Drift_tabs_difference_tables_scroll_rather_than_being_clipped()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema);
+        schema.Check = SchemaCheck.Differences(
+            [new SchemaObjectDifference("studio.mt_doc_customer", "Table", "Update")],
+            ["studio"],
+            "Marten reports differences.");
+        schema.Preview = new MigrationPreview(
+            "alter table studio.mt_doc_customer add column mt_version uuid;",
+            1,
+            [new SchemaObjectDifference("studio.mt_doc_customer", "Table", "Update")],
+            "Update",
+            null);
+
+        // Neither table exists until the button that reads the database has been pressed: nothing on
+        // this tab runs on navigation, because building Marten's feature schemas can create its own
+        // bookkeeping objects (AGENTS.md hard rule 14).
+        var page = context.Render<SchemaPage>();
+        ClickButton(page, "Check schema");
+        ClickPreview(page);
+
+        page.FindAll("table.ms-table").Should().HaveCount(2, "the check's differences and the preview's deltas");
+        page.ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
     /// <summary>
     /// Clicks the Drift tab's Preview button, found by its text.
     /// </summary>

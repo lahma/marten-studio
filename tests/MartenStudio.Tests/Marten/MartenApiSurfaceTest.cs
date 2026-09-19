@@ -36,7 +36,7 @@ using MartenReadOnlyEventStoreOptions = Marten.Events.IReadOnlyEventStoreOptions
 namespace MartenStudio.Tests.Marten;
 
 /// <summary>
-/// Pins down the Marten 9.35 surface the implementation plan depends on, so that a version bump which
+/// Pins down the Marten surface the implementation plan depends on, so that a version bump which
 /// renames or removes one of these members fails <em>here</em>, in seconds, rather than three packets
 /// later inside a page nobody has written yet.
 /// </summary>
@@ -53,7 +53,18 @@ namespace MartenStudio.Tests.Marten;
 /// The comments record what the plan's Appendix A got wrong, verified against the real assemblies on
 /// 2026-09-14 (Marten 9.35.0, JasperFx / JasperFx.Events 2.69.3, Weasel.Core 9.32.0, Npgsql 9.0.4).
 /// Where the plan named a type or member that does not exist, the real one is asserted and the
-/// difference is called out - those comments are as much the deliverable as the assertions.
+/// difference is called out - those comments are as much the deliverable as the assertions. Those
+/// version numbers are a record of what was read, not the contract: a "Marten 9.35" in a comment below
+/// means "this is how 9.35 spelled it", and every such member still has to exist at the
+/// <c>Directory.Packages.props</c> floor for this file to compile at all.
+/// </para>
+/// <para>
+/// <b>The floor is <c>Marten</c> 9.31.0</b> (AGENTS.md, <em>Package budget changes</em>, 2026-09-19), and
+/// this file is half of why it is where it is: below 9.22.4 it does not compile, because
+/// <c>ShardName.HighWaterMarkFor</c> - the member <see cref="ShardName_identities_tell_a_bookkeeping_row_from_a_real_shard" />
+/// uses to tell a bookkeeping progression row from a real shard - does not exist. <c>Marten</c> is a
+/// floor rather than an exact pin, so this test really is the contract; when the floor moves, it moves
+/// because something asserted here (or in the live suite) is absent below the new value.
 /// </para>
 /// </remarks>
 public class MartenApiSurfaceTest

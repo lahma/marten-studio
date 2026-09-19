@@ -175,7 +175,7 @@ left to the default, because Blazor sets component `[Parameter]` properties by n
 deserializes into types discovered from `IDocumentType.DocumentType` at run time — a trimmer told it may
 cut has no way to see either.
 
-**D3 — Two `PackageReference`s (`Marten`, floor `9.35.0`, and
+**D3 — Two `PackageReference`s (`Marten`, floor `9.31.0`, and
 `Microsoft.AspNetCore.App.Internal.Assets`, floor `10.0.12`, neither with an upper bound) plus
 `FrameworkReference Microsoft.AspNetCore.App`.** Everything else the RCL needs — Blazor, SignalR,
 authorization, endpoint routing — is in the shared framework, so the package pins no ASP.NET Core patch
@@ -341,6 +341,30 @@ studio's circuit. It fixes nothing — the fetch, the redirect and the console e
 of its code runs. `NoJsInitializerTests` is the regression, on both halves: no `*.lib.module.js` under
 `wwwroot`, and a shell that still asks for the script it replaced it with.
 
+**D25 — Every data table sits in its own labelled scroll region, and the shell never scrolls sideways.**
+`.ms-main` hides horizontal overflow on purpose, so the studio never grows a page-level scrollbar inside
+a host page; the cost was that a table wider than the content column was simply cut off with no cue and
+no way to reach the columns on the right — measured in the 0.2.0 UX pass at 1 691 px of table in a
+1 200 px column on Event types, and every table on a phone. So a `<table class="ms-table">` is always
+inside `<TableScroll Label="…">` (`Components/Shared/TableScroll.razor`: `role="region"`, an accessible
+name, `tabindex="0"`, `overflow-x: auto`) or, for the documents list, its own `.ms-table-wrap` carrying
+the same three attributes. A document-wide observer in `js/marten-studio.js` stamps
+`data-scroll-start`/`data-scroll-end` on a region that can scroll further and the stylesheet fades that
+edge with a `mask-image`; the mask is lifted while the region has `:focus-visible`, because a mask clips
+the element's painted output to its border box and the focus ring is painted outside it — with both on,
+the ~20 tab stops the regions add were invisible. `TablesAreScrollableTests` walks every `.razor` in
+`src/` with a tag stack and fails on a bare table, with an anti-vacuity theory of its own. Where a table
+is wide because of what a column *prints* (an assembly-qualified type name, three constant scope
+columns, a wrapped timestamp), fix the column first — the region is the floor, not the answer.
+
+**D26 — The stylesheet's UX sections are appended in cascade order, and later wins on purpose.** The
+0.2.0 pass landed five parallel packets in one file. Each put its new rules in a titled section at the
+end (`UX-2`, `UX-3`, `UX-1`, `UX-4`, `UX-5`, in that order) and edited an existing rule in place only
+where its report says so; several sections deliberately re-declare an earlier selector (`.ms-event-card`,
+`.ms-projection-note`, `.ms-overview-list-stream`, `.ms-doc-detail-actions`) and win by source order.
+Keep that when touching those selectors: a rule added *before* the section that overrides it is a rule
+that does nothing, and `StylesheetTests` (plus its `.Shell` part) pins the ones that were measured.
+
 ## Package budget
 
 Complete, as of the bootstrap commit. Versions are centrally pinned in `Directory.Packages.props`, with
@@ -348,7 +372,7 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 
 | Where | Package | Version | Why it is here |
 |---|---|---|---|
-| `src/MartenStudio` | `Marten` | `9.35.0` | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. Npgsql 9.0.4 arrives transitively through Weasel.Postgresql 9.32.0. |
+| `src/MartenStudio` | `Marten` | `9.31.0` | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back, and 9.31.0 is the **lowest** 9.x the whole repository compiles and passes both suites on (bisected 2026-09-19; see *Package budget changes*). JasperFx / JasperFx.Events 2.60.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.29.0 and Npgsql 9.0.4 all arrive transitively through it. |
 | `src/MartenStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. |
 | `samples/`, `tests/…Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres, and the container the integration suite runs against. |
 | both test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
@@ -415,6 +439,49 @@ fight xunit.v3's own resolution and was not done. Verified the same day that `do
 lands in `artifacts/test-results`. **Exit condition:** revisit when xunit.v3 and Fallout's `ITest` both
 speak Microsoft.Testing.Platform v2.
 
+**2026-09-19 — the `Marten` floor moved *down*, from `9.35.0` to `9.31.0`.** A floor should be the oldest
+version that works, not the newest one that happened to be current when the row was written: a host on
+Marten 9.31 must not be forced to upgrade to take this package, and NuGet takes the higher of the two
+anyway, so nothing on a newer Marten is affected. Bisected over every stable 9.x on nuget.org, all four
+gates run at each candidate (`dotnet restore marten-studio.slnx` with `TreatWarningsAsErrors`,
+`dotnet build marten-studio.slnx`, `dotnet test tests/MartenStudio.Tests`, and
+`MARTENSTUDIO_PG_REUSE=false dotnet test tests/MartenStudio.Integration.Tests` against a real
+`postgres:17-alpine`). 9.31.0 is clean on all four; **9.30.0 is not** — three
+`ExtendedProgressionLiveTests` fail in their fixture with
+`Npgsql.PostgresException : 42703: column "heartbeat" of relation "mt_event_progression" does not exist`,
+because Marten only stopped gating `EventProgressionTable`'s extended columns on
+`Events.EnableExtendedProgressionTracking` in 9.31.0 (#5309, commit `d26169ff`, whose lowest containing
+tag is `V9.31.0`), and every pre-9.31 store with the flag off therefore migrates a table those three
+tests cannot write their row into — probed live at 9.24.0 and 9.30.0, which fail identically, and the
+commit is what says the whole 9.24–9.30 span does. Four other walls were found on the way down, and each
+one is a reason no lower floor is reachable:
+
+- **Everything up to and including 9.12.0 carries a critical advisory** and never reaches the compiler:
+  restore fails with `NU1904` for GHSA-rfx3-98h7-v3xp, "Marten's LINQ provider has SQL injection via
+  unescaped string literals", whose range is `>= 7.0.0, <= 9.12.0` and whose first patched version is
+  9.13.0. Probed at 9.0.0.
+- **Below 9.20.0 there is no `JasperFx.Events.Daemon.ShardFailure`**, which `ProjectionDataService`
+  builds out of `mt_event_progression`'s four nullable failure columns: `CS0246`, twice, in `src/`.
+  Probed at 9.13.0 and 9.19.0; present from 9.20.0.
+- **9.20.0 through 9.22.3 have no `ShardName.HighWaterMarkFor`**, which `MartenApiSurfaceTest` uses to
+  tell a bookkeeping progression row from a real shard: `CS0117`, three times. Probed at 9.20.0, 9.21.0,
+  9.22.0, 9.22.2 and 9.22.3; it appears in 9.22.4.
+- **9.22.4 through 9.23.0 compile clean but fail three `AggregateStreamInvokerTests`** with
+  `InvalidProjectionException: No source-generated dispatcher found for …TimeTravelSummaryProjection`,
+  because the `JasperFx.Events.SourceGenerator` shipped in those packages emits no dispatcher for a
+  non-`partial` `SingleStreamProjection<T, TId>` subclass and the runtime fallback is gone. Probed at
+  9.22.4, 9.22.6 and 9.23.0; fixed by 9.24.0.
+
+None of those tests were touched to make an older version pass; a behavioural difference in an older
+Marten is what a floor is *for*. At the floor the transitive graph is JasperFx / JasperFx.Events
+**2.60.0**, Weasel.Core / Weasel.Postgresql / Weasel.Storage **9.29.0** and Npgsql /
+Npgsql.NetTopologySuite **9.0.4** — behind what 9.35.0 brought on the first two (2.69.3 and 9.32.0) and
+the same Npgsql, and restore is still free of NU warnings. The "verified against Marten 9.35" notes
+elsewhere in this file and throughout `src/` are deliberately left alone: they record what was read on
+2026-09-14 and are still true of 9.35, and a floor is a minimum rather than a statement about what a
+host resolves. **Exit condition:** raise the floor only when a member the studio needs is genuinely
+absent below the new value, and say here which one.
+
 **Held deliberately, and not stale.**
 
 - `xunit.v3` / `xunit.runner.visualstudio` stay at **3.2.2 / 3.1.5** because xunit.v3 4.0.0 drops
@@ -461,7 +528,8 @@ src/                                     The shipped library, and nothing else
 src/MartenStudio/                        The Razor Class Library: public API, Internal/ (guard, SQL
                                          builders), Components/, Services/, wwwroot/
 src/MartenStudio/Components/             route table, links, shell — pages come later
-src/MartenStudio/Components/Shared/      small building-block components
+src/MartenStudio/Components/Shared/      small building-block components: TableScroll (D25), CopyButton,
+                                         dialogs, chips, the empty and error states
 src/MartenStudio/Internal/               startup authorization guard, endpoint marker,
                                          mapped-endpoint tracking; later SQL builders
 src/MartenStudio/Services/               toast service; scoped state and data services come later
@@ -480,7 +548,8 @@ tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to lea
 tests/MartenStudio.Tests/Marten/         MartenApiSurfaceTest - the Marten 9.35 contract, pinned
 tests/MartenStudio.Integration.Tests/    Testcontainers Postgres + Playwright. Needs Docker
 src/MartenStudio/Internal/Sql/           The only place a Postgres identifier becomes SQL text (hard rule 4)
-src/MartenStudio/Components/Layout/      Shell chrome: layout, nav, scope selector, capability chip
+src/MartenStudio/Components/Layout/      Shell chrome: layout, nav, scope selector, capability chip, the
+                                         preferences popover (theme and time zone, behind the gear)
 src/MartenStudio/Components/Pages/       The routed pages; each @page must be rooted at /marten
 samples/MartenStudio.SampleDomain/Documents/  The demo document types
 samples/MartenStudio.Sample/Auth/        Cookie auth, the three demo users, the two policies
@@ -600,9 +669,11 @@ There are seven kinds of test, in two projects:
 5. **Conventions** (`tests/MartenStudio.Tests/Conventions/`) — rules too easy to break silently to leave to
    review: the workflows are the generated ones and still carry the permissions they need; the AGENTS.md
    layout tree matches disk; no `async void` in `src/`; README snippets equal the `#region` bodies in the
-   sample's `Program.cs`. `NoAsyncVoidTests` strips comments and string literals before scanning, which is
-   exactly what makes it capable of being silently vacuous, so it carries an anti-vacuity theory that
-   proves the scanner still catches a synthetic `async void` and still ignores one in prose.
+   sample's `Program.cs`; every `.ms-table` in `src/` is inside a scroll region (D25); the stylesheet
+   still carries the shell rules the 0.2.0 UX pass measured (`StylesheetTests` and its `.Shell` part).
+   `NoAsyncVoidTests` and `TablesAreScrollableTests` both strip comments before scanning, which is
+   exactly what makes them capable of being silently vacuous, so each carries an anti-vacuity theory that
+   proves the scanner still catches a synthetic offender and still ignores one in prose.
 6. **Marten API surface** (`tests/MartenStudio.Tests/Marten/MartenApiSurfaceTest.cs`) — the contract with
    Marten 9.35, pinned two ways at once. A `CompileOnlyAsync` method that is never executed puts every
    member the design depends on into real C#, so the *compiler* checks signatures, generic constraints and

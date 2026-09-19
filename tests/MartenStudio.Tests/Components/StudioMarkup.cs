@@ -79,4 +79,79 @@ public static class StudioMarkup
     public static string ThemeAttribute<TComponent>(this IRenderedComponent<TComponent> component)
         where TComponent : IComponent =>
         component.Find(".ms-studio").GetAttribute("data-theme") ?? string.Empty;
+
+    /// <summary>
+    /// Every data table on the page is inside a scrollable region that a keyboard can reach and a
+    /// screen reader can name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>.ms-table</c> is <c>width: 100%</c> and <c>.ms-main</c> hides horizontal overflow, so a
+    /// table wider than the content column is not scrolled - it is <em>cut off</em>, with no scrollbar
+    /// and no way at all to reach the columns on the right. That was true of every table in the studio
+    /// but the documents list, and on the event-types screen it hid four of six columns at 1440px.
+    /// </para>
+    /// <para>
+    /// The region is the fix, and it is asserted here rather than in one test per page because the
+    /// rule is "every table", and a rule that is only checked where somebody remembered to check it is
+    /// the rule that comes back. <c>.ms-table-wrap</c> counts: it is the documents list's own scroll
+    /// container and shares the same stylesheet rules.
+    /// </para>
+    /// </remarks>
+    public static void ShouldPutEveryTableInALabelledScrollRegion<TComponent>(this IRenderedComponent<TComponent> component)
+        where TComponent : IComponent
+    {
+        IReadOnlyList<IElement> tables = component.FindAll("table.ms-table");
+
+        tables.Should().NotBeEmpty(
+            "a page test that asserts the scroll regions has to have rendered a table for there to be one");
+
+        foreach (IElement table in tables)
+        {
+            table.ShouldBeInsideALabelledScrollRegion();
+        }
+    }
+
+    /// <summary>
+    /// This one table is inside a scrollable region that a keyboard can reach and a screen reader can
+    /// name.
+    /// </summary>
+    /// <remarks>
+    /// The single-table form, for a page that also renders a table another packet owns and this one may
+    /// not touch.
+    /// </remarks>
+    public static void ShouldBeInsideALabelledScrollRegion(this IElement table)
+    {
+        IElement region = ScrollRegionAround(table)
+            ?? throw new InvalidOperationException(
+                "This table is in no scroll region, so a viewport narrower than it simply clips it: "
+                + Describe(table));
+
+        region.GetAttribute("role").Should().Be("region", "a scrollable box has to be announced as one");
+        region.GetAttribute("tabindex").Should().Be("0", "a region only a mouse can scroll is content a keyboard cannot reach");
+        region.GetAttribute("aria-label").Should().NotBeNullOrWhiteSpace(
+            "an unnamed region is one a screen reader drops the visitor into with nothing to say about it");
+    }
+
+    /// <summary>The nearest scrollable ancestor of <paramref name="table" />, or <see langword="null" />.</summary>
+    private static IElement? ScrollRegionAround(IElement table)
+    {
+        for (IElement? ancestor = table.ParentElement; ancestor is not null; ancestor = ancestor.ParentElement)
+        {
+            if (ancestor.ClassList.Contains("ms-table-scroll") || ancestor.ClassList.Contains("ms-table-wrap"))
+            {
+                return ancestor;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Enough of a table to find it in the markup when the assertion above fails.</summary>
+    private static string Describe(IElement table)
+    {
+        string classes = table.GetAttribute("class") ?? string.Empty;
+        string headers = string.Join(", ", table.QuerySelectorAll("thead th").Select(x => x.TextContent.Trim()));
+        return $"<table class=\"{classes}\"> with the columns {headers}";
+    }
 }

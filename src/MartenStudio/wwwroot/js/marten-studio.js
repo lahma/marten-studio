@@ -579,4 +579,170 @@
             return false;
         }
     };
+
+    // The edge cue on a table that scrolls sideways (UX-1).
+    //
+    // The scrolling itself is `overflow-x: auto` in marten-studio.css and needs nothing from here. What
+    // does need a script is knowing *whether* a given region can still be scrolled, which is the only
+    // thing CSS cannot answer today: `animation-timeline: scroll()` would, and it is Chromium-only. So
+    // this writes `data-scroll-start` / `data-scroll-end` on each region and the stylesheet fades the
+    // matching edge. With no script at all the tables still scroll; only the cue is missing.
+    //
+    // It is one document-wide observer rather than one interop registration per table, for two reasons.
+    // The first is `.ms-table-wrap`, the documents list's own scroll container, which lives in a
+    // component this packet does not own and therefore cannot be asked to register itself - a selector
+    // is the only way to reach it. The second is cost: the studio renders up to four scrollable tables
+    // on one screen, and a registration each would be four round trips over the circuit per render to
+    // learn something the browser already knows. Nothing here talks to .NET, so nothing here can hold a
+    // DotNetObjectReference open after a circuit closes.
+    window.martenStudio.tableScroll = window.martenStudio.tableScroll || (function () {
+        const selector = ".ms-table-scroll, .ms-table-wrap";
+
+        // region -> the child element observed with it (a table's own width is what changes when rows
+        // arrive, and the region's box does not move when it does).
+        const tracked = new Map();
+
+        let resizeObserver = null;
+        let mutationObserver = null;
+        let scanQueued = false;
+
+        function flag(element, name, on) {
+            if (on) {
+                if (element.getAttribute(name) !== "true") {
+                    element.setAttribute(name, "true");
+                }
+            }
+            else if (element.hasAttribute(name)) {
+                element.removeAttribute(name);
+            }
+        }
+
+        function update(region) {
+            let slack;
+            let offset;
+            try {
+                slack = region.scrollWidth - region.clientWidth;
+                offset = region.scrollLeft;
+            }
+            catch {
+                return;
+            }
+
+            // A pixel of tolerance: sub-pixel layout widths make a region that cannot scroll at all
+            // report a fraction of slack, and a fraction is not "there is more to see".
+            const scrollable = slack > 1;
+            flag(region, "data-scroll-start", scrollable && offset > 1);
+            flag(region, "data-scroll-end", scrollable && offset < slack - 1);
+        }
+
+        function observeChild(region, child) {
+            const previous = tracked.get(region);
+            if (previous === child) {
+                return;
+            }
+
+            if (previous && resizeObserver) {
+                resizeObserver.unobserve(previous);
+            }
+
+            if (child && resizeObserver) {
+                resizeObserver.observe(child);
+            }
+
+            tracked.set(region, child);
+        }
+
+        function scan() {
+            scanQueued = false;
+
+            const seen = new Set();
+            for (const region of document.querySelectorAll(selector)) {
+                seen.add(region);
+
+                if (!tracked.has(region)) {
+                    tracked.set(region, null);
+                    if (resizeObserver) {
+                        resizeObserver.observe(region);
+                    }
+                }
+
+                observeChild(region, region.firstElementChild || null);
+                update(region);
+            }
+
+            for (const region of Array.from(tracked.keys())) {
+                if (seen.has(region)) {
+                    continue;
+                }
+
+                const child = tracked.get(region);
+                if (resizeObserver) {
+                    resizeObserver.unobserve(region);
+                    if (child) {
+                        resizeObserver.unobserve(child);
+                    }
+                }
+
+                tracked.delete(region);
+            }
+        }
+
+        function schedule() {
+            if (scanQueued) {
+                return;
+            }
+
+            scanQueued = true;
+            if (typeof window.requestAnimationFrame === "function") {
+                window.requestAnimationFrame(scan);
+            }
+            else {
+                window.setTimeout(scan, 0);
+            }
+        }
+
+        function updateAll() {
+            for (const region of tracked.keys()) {
+                update(region);
+            }
+        }
+
+        function onScroll(event) {
+            // `scroll` does not bubble, so this listens in the capture phase: one listener for every
+            // scrollable region on the page, however many appear and disappear.
+            const target = event.target;
+            if (target && target.nodeType === 1 && typeof target.matches === "function" && target.matches(selector)) {
+                update(target);
+            }
+        }
+
+        function start() {
+            if (typeof window.ResizeObserver === "function") {
+                resizeObserver = new window.ResizeObserver(updateAll);
+            }
+
+            if (typeof window.MutationObserver === "function") {
+                // Blazor applies a render batch as one set of DOM mutations, so this fires once per
+                // render rather than once per row. The scan is deferred to the next frame so a batch
+                // that adds a table and then fills it is measured once, after the layout it produced.
+                mutationObserver = new window.MutationObserver(schedule);
+                mutationObserver.observe(document.documentElement, { childList: true, subtree: true });
+            }
+
+            document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+            window.addEventListener("resize", schedule, { passive: true });
+        }
+
+        start();
+        schedule();
+
+        return {
+            /*
+             * Re-measures every scrollable region, for a caller that changed one in a way the observers
+             * above cannot see. Nothing needs it today; it is here so that something can ask rather than
+             * reaching into the module.
+             */
+            refresh: schedule
+        };
+    })();
 })();

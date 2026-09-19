@@ -54,19 +54,25 @@ internal sealed record DocumentRow
     /// <summary>The cells, parallel to <see cref="DocumentPage.Columns"/> minus the id column.</summary>
     public IReadOnlyList<string?> Cells { get; init; } = [];
 
-    /// <summary>When Marten last wrote the row, when the store keeps that column.</summary>
+    /// <summary>
+    /// When Marten last wrote the row: <see langword="null"/> unless <c>mt_last_modified</c> is one of
+    /// the selected columns, which it is by default and is not under a <c>?cols=</c> that leaves it out.
+    /// </summary>
     public DateTimeOffset? LastModified { get; init; }
 
-    /// <summary>The version, when the store keeps it.</summary>
-    public string? Version { get; init; }
-
-    /// <summary>Whether the row is soft-deleted.</summary>
+    /// <summary>
+    /// Whether the row is soft-deleted. Always answered where the table has <c>mt_deleted</c>, because
+    /// the three badge columns are selected whether or not a header shows them — see
+    /// <c>DocumentDataService.BadgeColumns</c>.
+    /// </summary>
     public bool IsDeleted { get; init; }
 
-    /// <summary>The tenant, on a conjoined collection.</summary>
+    /// <summary>The tenant, on a conjoined collection. A badge column, so always answered.</summary>
     public string? TenantId { get; init; }
 
-    /// <summary>The subclass alias from <c>mt_doc_type</c>, on a hierarchy.</summary>
+    /// <summary>
+    /// The subclass alias from <c>mt_doc_type</c>, on a hierarchy. A badge column, so always answered.
+    /// </summary>
     public string? DocumentTypeAlias { get; init; }
 
     /// <summary>The sort column's value as text, which together with the id is the keyset cursor.</summary>

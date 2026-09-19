@@ -41,36 +41,15 @@
                 </div>
                 <div class="ms-header-right">
                     <CapabilityBanner />
-                    @* Every picker carries its own `aria-label` as well as the `<label for>`. Below 900 px
-                       the label is visually hidden so the header fits one row on a phone (and stops
-                       wrapping TIME ZONE onto a line of its own at 390 px); the accessible name has to be
-                       the same whether it is painted or not, and an `aria-label` is the half of that
-                       which no stylesheet can take away. *@
-                    <div class="ms-header-control">
-                        <label class="ms-header-control-label" for="ms-timezone-select">Time zone</label>
-                        <select id="ms-timezone-select"
-                                class="ms-select ms-header-select"
-                                aria-label="Time zone"
-                                value="@State.SelectedTimeZoneId"
-                                @onchange="OnTimeZoneChangedAsync">
-                            @foreach (TimeZoneInfo timeZone in timeZones)
-                            {
-                                <option value="@timeZone.Id" selected="@(timeZone.Id == State.SelectedTimeZoneId)">@TimeZoneLabel(timeZone)</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="ms-header-control">
-                        <label class="ms-header-control-label" for="ms-theme-select">Theme</label>
-                        <select id="ms-theme-select"
-                                class="ms-select ms-header-select"
-                                aria-label="Theme"
-                                value="@State.SelectedTheme"
-                                @onchange="OnThemeChangedAsync">
-                            <option value="system" selected="@(State.SelectedTheme == "system")">System</option>
-                            <option value="light" selected="@(State.SelectedTheme == "light")">Light</option>
-                            <option value="dark" selected="@(State.SelectedTheme == "dark")">Dark</option>
-                        </select>
-                    </div>
+                    @* The scope selector on the left is the context of every screen in the studio, so it
+                       keeps the header row at every width. Theme and time zone are set once and then left
+                       alone, so they are behind the gear - which is what turns a four-row header on a
+                       390 px phone into one row of 56 px. The two pickers keep their ids, their labels
+                       and their `aria-label`s inside it; see PreferencesMenu. *@
+                    <PreferencesMenu SelectedTheme="@State.SelectedTheme"
+                                     SelectedTimeZoneId="@State.SelectedTimeZoneId"
+                                     ThemeChanged="OnThemeChangedAsync"
+                                     TimeZoneChanged="OnTimeZoneChangedAsync" />
                 </div>
             </header>
 
@@ -119,11 +98,6 @@
     private sealed record PersistedPreferences(string Theme, string TimeZoneId);
 
     private const string PreferencesStateKey = "MartenStudio.Preferences";
-
-    private readonly IReadOnlyList<TimeZoneInfo> timeZones = TimeZoneInfo
-        .GetSystemTimeZones()
-        .OrderBy(static tz => tz.Id, StringComparer.Ordinal)
-        .ToList();
 
     private ScopeAccess access = ScopeAccess.Unknown;
     private bool preferencesLoaded;
@@ -363,13 +337,6 @@
         catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {
         }
-    }
-
-    private static string TimeZoneLabel(TimeZoneInfo timeZone)
-    {
-        return string.Equals(timeZone.Id, TimeZoneInfo.Local.Id, StringComparison.Ordinal)
-            ? timeZone.Id + " (local)"
-            : timeZone.Id;
     }
 
     public void Dispose()

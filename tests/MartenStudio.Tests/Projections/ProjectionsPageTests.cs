@@ -587,6 +587,48 @@ public class ProjectionsPageTests
     }
 
     // --------------------------------------------------------------------------------------------
+    // The width of it
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Nine columns of shard progress measured 1120px inside a 1040px laptop column and 1024px inside a
+    /// 334px phone one, and the columns past LAG were simply cut off.
+    /// </summary>
+    [Fact]
+    public async Task The_table_is_in_a_scroll_region_rather_than_being_clipped()
+    {
+        await using var context = new StudioComponentContext();
+        context.ProjectionData.WithProjection("DailySales");
+        await context.ReadyAsync();
+
+        context.Render<Page>().ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
+    /// <summary>
+    /// "the async daemon does not run this" is a note, not part of the projection's name. It sits in a
+    /// <c>&lt;th&gt;</c>, and the header styling uppercased and letter-spaced it, so the row read
+    /// <c>ORDERSUMMARY INLINE THE ASYNC DAEMON DOES NOT RUN THIS</c> as one shouted phrase. It is its own
+    /// element so the stylesheet can put it on its own line in its own case; the lifecycle badge stays
+    /// beside the name, because that one is a label.
+    /// </summary>
+    [Fact]
+    public async Task The_lifecycle_note_is_its_own_element_beneath_the_name()
+    {
+        await using var context = new StudioComponentContext();
+        context.ProjectionData.WithProjection("OrderSummary", lifecycle: ProjectionLifecycle.Inline);
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        IElement name = page.Find("[data-projection='OrderSummary'] .ms-projection-name");
+        IElement note = name.QuerySelector(".ms-projection-note")!;
+
+        note.Should().NotBeNull("the note has to be addressable for the stylesheet to un-shout it");
+        note.TextContent.Trim().Should().Be("the async daemon does not run this");
+        name.QuerySelector(".ms-lifecycle").Should().NotBeNull("the lifecycle badge stays beside the name");
+    }
+
+    // --------------------------------------------------------------------------------------------
     // Failure
     // --------------------------------------------------------------------------------------------
 

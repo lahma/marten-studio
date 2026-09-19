@@ -44,7 +44,56 @@ public class ActivityTests
         cells.Should().Contain("succeeded");
         cells.Should().Contain(nameof(StudioCapability.DeleteDocuments));
         cells.Should().Contain("deleted");
-        cells.Should().Contain("all", "a view that is not filtered to one tenant says so");
+
+        // Store, database and tenant used to be three columns of the same three values repeated on every
+        // row; they are one cell now, and the tenant half of it still says "all" when the view is not
+        // filtered to one.
+        page.Find("tbody tr .ms-activity-scope").TextContent.Trim()
+            .Should().EndWith("· all", "a view that is not filtered to one tenant says so");
+    }
+
+    /// <summary>
+    /// The three scope columns are one. On a single-store host they carried "default", the same database
+    /// identity and "all" on every row, which was 300px of the table's width to repeat one fact - and the
+    /// table was 1212px wide inside a 1200px column because of it.
+    /// </summary>
+    [Fact]
+    public void The_scope_is_one_cell_and_still_carries_all_three_values()
+    {
+        using var context = new StudioComponentContext();
+        context.AuthenticationState.SignIn("ops");
+        context.ActionLog.Record(
+            "DeleteDocument",
+            "customer/42",
+            succeeded: true,
+            "deleted",
+            capability: null,
+            new StudioScope("orders", "localhost.marten", "acme"));
+
+        var page = context.Render<Activity>();
+
+        page.TextOfAll("thead th").Should().Equal(
+            "When", "User", "Scope", "Action", "Target", "Outcome", "Capability", "Message");
+
+        var scope = page.Find("tbody tr .ms-activity-scope");
+        scope.TextContent.Trim().Should().Be("orders · localhost.marten · acme");
+        scope.GetAttribute("title").Should().Be("Store orders, database localhost.marten, tenant acme");
+    }
+
+    /// <summary>
+    /// The timestamp is one line. Squeezed between nine other columns it wrapped
+    /// <c>2026-09-19 10:13:47 +03:00</c> onto four of them and made every row of the log 80px tall.
+    /// </summary>
+    [Fact]
+    public void The_when_cell_never_wraps_and_the_table_scrolls_rather_than_being_clipped()
+    {
+        using var context = new StudioComponentContext();
+        Record(context, "ops", "DeleteDocument", succeeded: true);
+
+        var page = context.Render<Activity>();
+
+        page.Find("tbody tr td").ClassList.Should().Contain("ms-activity-when");
+        page.ShouldPutEveryTableInALabelledScrollRegion();
     }
 
     [Fact]

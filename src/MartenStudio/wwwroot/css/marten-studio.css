@@ -417,33 +417,46 @@ body {
 /*
    The header on a phone.
 
-   At 390 px the five uppercase labels - STORE, DATABASE, TENANT, TIME ZONE, THEME - are wider than the
-   controls they name, so each one broke onto a line of its own and the header became a ragged block
-   four rows deep. Below 900 px they become visually hidden and the controls sit on one row.
+   At 390 px the uppercase labels - STORE, DATABASE, TENANT - are wider than the controls they name, so
+   each one broke onto a line of its own. Below 900 px they become visually hidden and the pickers sit
+   on one row. (TIME ZONE and THEME were two more of them; those two pickers are behind the gear now,
+   because a header whose first four rows are preferences shows the page title below the fold.)
 
-   Hidden labels rather than an overflow menu, deliberately. The scope *is* the context of every screen
-   in the studio - which store, which database, which tenant this page is about - and a context you have
-   to open a menu to read is a context people stop checking, which is exactly how somebody deletes a
-   document in the wrong tenant. A menu would also be a new popover, new keyboard handling and a new
-   component; this is a media query over markup that already exists.
+   Hidden labels rather than an overflow menu, deliberately - for the *scope*. The scope is the context
+   of every screen in the studio - which store, which database, which tenant this page is about - and a
+   context you have to open a menu to read is a context people stop checking, which is exactly how
+   somebody deletes a document in the wrong tenant. Theme and time zone are not context: they are set
+   once and then left alone, which is why they are the two that moved (UX-5).
 
    Nothing is lost to a screen reader: every control carries an `aria-label` of its own, so its
    accessible name is the same whether the label is painted or not, and the `<label for>` stays in the
    accessibility tree either way.
+
+   `nowrap`, not `wrap`, on the *header*: with the preferences behind one 32 px button, the two regions
+   fit a 390 px row, and letting them wrap is what put the chip and the pickers on lines of their own
+   and took the header to 190 px. The scope selector inside the left region still wraps - a store, a
+   database and a tenant picker squeezed onto one 390 px row have no readable text left in them; see
+   section 26, which sets the floor.
 */
 @media (max-width: 900px) {
     .ms-header {
-        flex-wrap: wrap;
-        row-gap: var(--ms-space-sm);
+        flex-wrap: nowrap;
+        gap: var(--ms-space-sm);
         padding-inline: var(--ms-space-md);
     }
 
-    .ms-header-left,
-    .ms-header-right {
-        flex: 1 1 auto;
+    .ms-header-left {
+        flex: 0 1 auto;
         min-width: 0;
         gap: var(--ms-space-sm);
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+    }
+
+    .ms-header-right {
+        flex: 0 0 auto;
+        min-width: 0;
+        gap: var(--ms-space-sm);
+        flex-wrap: nowrap;
     }
 
     .ms-header-control {
@@ -583,10 +596,15 @@ body {
     margin: 0;
 }
 
+/* The actions drop below the title when there is no room for both, rather than being drawn over it:
+   at 390 px the projections screen painted "live + polling" and a Refresh button across the word
+   "Projections" (UX-5). The title takes the space that is left and gives it up first. */
 .ms-page-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm) var(--ms-space-md);
     margin-bottom: var(--ms-space-lg);
 }
 
@@ -595,15 +613,21 @@ body {
     font-weight: var(--ms-font-weight-bold);
     color: var(--ms-color-text);
     margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 /* ==========================================================================
    7. STAT CARDS
    ========================================================================== */
 
+/* 160px, not 200px: the Overview's six tiles are one thought, and at 1200px of content a 200px track
+   fitted five of them and left the sixth alone on a second row. Six 160px tracks and five 16px gaps
+   are 1040px, so they hold one line from about 1100px of content down (UX-5). `auto-fit` rather than
+   `auto-fill` so a row that is short of items still fills its line rather than leaving empty tracks. */
 .ms-stat-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: var(--ms-space-md);
     margin-bottom: var(--ms-space-lg);
 }
@@ -1051,10 +1075,13 @@ body {
     white-space: nowrap;
 }
 
+/* 40ch, not 28: a GUID is 36 characters, and 28 cut every one of them in the middle - which for the
+   sequential ids Marten's own id generation produces is exactly the half that differs, so a page of
+   documents was twenty-five copies of the same visible prefix. Anything longer still clips. */
 .ms-id-text,
 .ms-id-cell > a {
     display: inline-block;
-    max-width: 28ch;
+    max-width: 40ch;
     overflow: hidden;
     text-overflow: ellipsis;
     vertical-align: bottom;
@@ -2010,15 +2037,45 @@ body {
         width: var(--ms-sidebar-collapsed-width);
     }
 
-    .ms-sidebar-brand-text,
-    .ms-nav-link-text,
+    /* A section heading is a caption for the group below it and names no control, so it is the one
+       thing here that really does go away on a 56 px rail. */
     .ms-sidebar-section {
         display: none;
+    }
+
+    /*
+       The rail's names are hidden the sr-only way, never with `display: none`.
+
+       `display: none` takes an element out of the accessibility tree as well as out of the layout, and
+       these spans *are* the links' accessible names: a screen-reader user at 1000 px heard ten links
+       called nothing at all (UX-5). Clipped to a 1px box, the name survives and the icon still centres,
+       because the span is out of flow. The `title` that NavMenu renders is the other half - the
+       tooltip - for somebody who can see the icons and cannot tell them apart.
+    */
+    .ms-sidebar-brand-text,
+    .ms-nav-link-text {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border-width: 0;
     }
 
     .ms-nav-link {
         justify-content: center;
         padding: var(--ms-space-sm);
+        /* So the clipped name above is positioned against the link it names rather than against the
+           page, which would put a 1px box at the top of the document on every rail entry. */
+        position: relative;
+    }
+
+    .ms-sidebar-brand {
+        justify-content: center;
+        position: relative;
     }
 
     .ms-stat-grid {
@@ -2058,12 +2115,38 @@ body {
     align-self: center;
 }
 
-/* The phone header: the labels are hidden by the rule in section 5, so the pickers are all one height
-   and there is no baseline left to align to. */
+/*
+   The phone header: the labels are hidden by the rule in section 5, so the pickers are all one height
+   and there is no baseline left to align to.
+
+   The scope wraps, and its pickers have a floor. `.ms-header` itself does not wrap (section 5), which
+   is what keeps the chip and the gear out of a row of their own; but holding the *scope* to one row as
+   well was measured and was wrong. On a store with more than one store and more than one database
+   there are three pickers in here, and at 390 px they were squeezed to 44, 52 and 35 px - about ten,
+   eighteen and one pixel of text once a select's own arrow and padding are paid for, which reads
+   "In v", "loc v" and "v". A scope you cannot read is the failure the comment in section 5 argues
+   against, in a different shape: the point of keeping the scope in the header rather than behind a
+   menu is that people check it without being asked, and they cannot check what is not legible.
+
+   So `min-width: 6rem` is the floor - about eight characters and the arrow - and the selector wraps
+   when three of them will not fit. That costs a row or two on a multi-store phone and nothing at all
+   on the single-store, single-database host most people have, where there is one picker and the
+   header stays one 56 px row (UX-5).
+*/
 @media (max-width: 900px) {
     .ms-scope-selector {
         gap: var(--ms-space-sm);
         align-items: center;
+        flex-wrap: wrap;
+        min-width: 0;
+    }
+
+    .ms-scope-selector .ms-header-control {
+        min-width: 0;
+    }
+
+    .ms-scope-selector .ms-header-select {
+        min-width: 6rem;
     }
 }
 
@@ -4777,19 +4860,6 @@ a.ms-event-chip:focus-visible {
     font-size: var(--ms-font-size-sm);
 }
 
-.ms-doc-search-help summary {
-    cursor: pointer;
-    font-size: var(--ms-font-size-xs);
-    color: var(--ms-color-text-secondary);
-}
-
-.ms-doc-search-help-list {
-    margin: var(--ms-space-xs) 0 0;
-    padding-left: var(--ms-space-md);
-    font-size: var(--ms-font-size-xs);
-    color: var(--ms-color-text-secondary);
-}
-
 .ms-doc-toolbar-controls {
     display: flex;
     flex-wrap: wrap;
@@ -6589,4 +6659,732 @@ a.ms-event-chip:focus-visible {
 .ms-referenced-column {
   color: var(--ms-color-text-muted);
   font-size: var(--ms-font-size-xs);
+}
+
+/* ==========================================================================
+   UX-2. Streams list: one id per row, on one line
+   ========================================================================== */
+
+/*
+   Every row of the streams list drew its id twice - once as a 28-character link and again as a whole
+   <CopyBadge>, a bordered box 330 px wide holding the same string and a Copy button. The STREAM column
+   took 60 % of the row, the table overflowed the content box at 1280 (1134 against 1040), and CREATED
+   wrapped its timestamp, so twenty-five streams needed 1 726 px of page. The id is one element now, the
+   copy is an icon beside it, and a row is one line.
+*/
+
+/*
+   40ch rather than the 28 that `.ms-id-cell > a` gives every other id cell: a GUID is 36 characters, so
+   at 28 the normal case was the clipped case and the ellipsis said nothing. At 40 only an unusually long
+   string key is truncated, and the whole value is the element's `title` either way. The cell keeps
+   `ms-id-cell` - that is what holds the link and the copy on one line - so this is written specific
+   enough to win against it rather than by editing a rule four other screens share.
+*/
+.ms-id-cell > a.ms-stream-id {
+  max-width: 40ch;
+  vertical-align: middle;
+}
+
+/*
+   `yyyy-MM-dd HH:mm:ss zzz` has three spaces in it, and a column narrow enough to break at one of them
+   turned every row into three lines. A timestamp is one line or it is nothing.
+*/
+.ms-stream-created {
+  white-space: nowrap;
+}
+
+/*
+   The compact copy, for <CopyButton>. `.ms-btn-icon` is 32 px square with a 32 px min-height, which is
+   a control in its own right; this one sits beside a value inside a table row, where 32 px plus the
+   cell's padding is already past the 44 px a one-line row is allowed. 24 px is the WCAG 2.2 minimum
+   target size and fits. It carries no border, background or lift until it is hovered, so a list of
+   fifty of them reads as fifty ids rather than fifty buttons; the colour, the hover and the focus then
+   follow `.ms-copy-badge-copy`, because the two controls do the same thing.
+
+   `--ms-color-text-secondary` and not `--ms-color-text-muted`: an icon is the whole control here, so it
+   is a meaningful graphic and owes 3:1 against its background (WCAG 1.4.11). Muted measures 2.55:1 on
+   the light surface and 2.94:1 on the dark one - under it in both themes, and a copy button nobody can
+   see is a copy button nobody presses. Secondary measures 7.6:1 and 5.7:1.
+*/
+.ms-copy-button {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin-inline-start: var(--ms-space-xs);
+  padding: 0;
+  border-color: transparent;
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--ms-color-text-secondary);
+  vertical-align: middle;
+}
+
+.ms-copy-button:hover {
+  background-color: var(--ms-color-primary-light);
+  border-color: transparent;
+  color: var(--ms-color-primary);
+  transform: none;
+  box-shadow: none;
+}
+
+.ms-copy-button:focus-visible {
+  outline: 2px solid var(--ms-color-primary);
+  outline-offset: 1px;
+}
+
+.ms-copy-button-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+/* ==========================================================================
+   UX-3. Documents: the search-syntax popover, wider ids, the detail action bar
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   A. The search grammar hint, in the top layer rather than in the flex row.
+
+   The help used to be a <details> inside the search form, so opening it took a
+   170-px column out of that row: the input collapsed to about 150 px and the
+   whole toolbar reflowed around six ragged bullets. A popover is in the top
+   layer, which is outside the flex row and outside layout entirely, so the
+   input keeps 100 % of its width open or closed. Anchoring is CSS anchor
+   positioning - the same mechanism .ms-popover already uses - with its own
+   anchor name; browsers without it get the platform default, a popover
+   centred in the viewport, which is a worse place but not a broken one.
+   -------------------------------------------------------------------------- */
+
+.ms-doc-search {
+    anchor-name: --ms-doc-search-anchor;
+}
+
+.ms-doc-syntax-button {
+    flex: none;
+}
+
+.ms-doc-syntax-popover {
+    width: min(36rem, calc(100vw - 2rem));
+    max-width: none;
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-lg);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    box-shadow: var(--ms-shadow-lg);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-doc-syntax-popover::backdrop {
+    background-color: transparent;
+}
+
+.ms-doc-syntax-title {
+    margin: 0 0 var(--ms-space-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-doc-syntax-list {
+    margin: 0;
+}
+
+.ms-doc-syntax-list dt {
+    margin: var(--ms-space-xs) 0 0;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text);
+}
+
+.ms-doc-syntax-list dd {
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-doc-syntax-list code {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* Two columns once there is room for them: the syntax on the left, what it means on the right. */
+@media (min-width: 640px) {
+    .ms-doc-syntax-list {
+        display: grid;
+        grid-template-columns: max-content minmax(0, 1fr);
+        column-gap: var(--ms-space-lg);
+        row-gap: var(--ms-space-xs);
+        align-items: baseline;
+    }
+
+    .ms-doc-syntax-list dt {
+        margin: 0;
+    }
+}
+
+@supports (anchor-name: --ms-supported) {
+    .ms-doc-syntax-popover:popover-open {
+        position: fixed;
+        inset: auto;
+        margin: 0;
+        position-anchor: --ms-doc-search-anchor;
+        top: anchor(bottom);
+        left: anchor(left);
+        margin-top: var(--ms-space-xs);
+        position-try-fallbacks: flip-block;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   C. The document detail action bar: two groups, one job per control.
+   -------------------------------------------------------------------------- */
+
+.ms-doc-detail-actions {
+    justify-content: flex-end;
+    gap: var(--ms-space-sm);
+}
+
+.ms-doc-detail-actions-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+/* The pair that changes the document, and the pair that leaves it, hard against the right edge. */
+.ms-doc-detail-actions-primary {
+    margin-left: auto;
+}
+
+/* A glyph inside a button: sized in pixels rather than ems so it does not inherit ms-btn-sm's
+   font-size and come out smaller than the chevron beside it on another button. */
+.ms-btn-glyph {
+    width: 14px;
+    height: 14px;
+    flex: none;
+}
+
+.ms-doc-copy-menu {
+    display: inline-flex;
+}
+
+.ms-doc-copy-menu-button {
+    anchor-name: --ms-doc-copy-anchor;
+}
+
+.ms-doc-copy-popover {
+    min-width: 16rem;
+    max-width: min(24rem, calc(100vw - 2rem));
+    padding: var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-lg);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    box-shadow: var(--ms-shadow-lg);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-doc-copy-popover::backdrop {
+    background-color: transparent;
+}
+
+@supports (anchor-name: --ms-supported) {
+    .ms-doc-copy-popover:popover-open {
+        position: fixed;
+        inset: auto;
+        margin: 0;
+        position-anchor: --ms-doc-copy-anchor;
+        top: anchor(bottom);
+        right: anchor(right);
+        margin-top: var(--ms-space-xs);
+        position-try-fallbacks: flip-block;
+    }
+}
+
+/* On a phone the bar is two rows and never three: one row of places this document goes, one row of
+   things that happen to it, with Edit and Delete together at the end of the last one. */
+@media (max-width: 640px) {
+    .ms-doc-detail-actions {
+        width: 100%;
+    }
+
+    .ms-doc-detail-actions-group {
+        flex: 1 1 100%;
+        flex-wrap: nowrap;
+        min-width: 0;
+    }
+
+    .ms-doc-detail-actions-secondary {
+        justify-content: flex-start;
+    }
+
+    .ms-doc-detail-actions-primary {
+        justify-content: flex-end;
+        margin-left: 0;
+    }
+
+    .ms-doc-detail-actions-group .ms-btn {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+}
+
+/* ==========================================================================
+   UX-1. Wide tables scroll instead of being clipped
+   ========================================================================== */
+
+/*
+   `.ms-main { overflow-x: hidden }` is right and stays: the shell must never grow a page-wide scrollbar
+   because one table has twelve columns. What was wrong is that every `<table class="ms-table">` was
+   `width: 100%` inside no scroll container at all, so a table wider than the content column was simply
+   cut off - no scrollbar, no cue, and no way to reach the columns on the right. Measured before this
+   section existed: the event-types table was 1691px inside a 1200px column, and four of its six columns
+   were unreachable at any viewport.
+
+   `<TableScroll>` wraps each one in a labelled, focusable region. `.ms-table-wrap` - the documents
+   list's own container, which has always scrolled but never said so - shares every rule here, which is
+   why the selector lists below name both.
+*/
+.ms-table-scroll,
+.ms-table-wrap {
+    overflow-x: auto;
+    max-width: 100%;
+
+    /* A trackpad flick that runs off the end of a table must scroll the table and not navigate the
+       browser back a page. */
+    overscroll-behavior-x: contain;
+}
+
+/*
+   A region only a mouse can scroll is content a keyboard cannot reach, which is what the `tabindex="0"`
+   on `<TableScroll>` answers. This is the ring that says where the focus went; `:focus-visible` rather
+   than `:focus`, so clicking a cell inside one does not draw a box round the whole table.
+*/
+.ms-table-scroll:focus-visible,
+.ms-table-wrap:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+}
+
+/*
+   The edge cue.
+
+   `data-scroll-start` / `data-scroll-end` are written by `martenStudio.tableScroll` in
+   marten-studio.js, and only while there is content hidden on that side - so a table that fits its
+   column shows nothing at all, and a table scrolled to its right-hand end shows the cue on the left
+   instead. With no script the attributes never appear, the region still scrolls, and this is inert.
+
+   It is a mask and not a gradient painted in `--ms-color-surface` for two reasons. A mask needs no
+   colour at all, so it is correct in both themes by construction rather than by remembering to use the
+   token - and a painted gradient would have to sit in a second wrapper element on top of the table,
+   which `.ms-table-wrap` has not got and cannot be given from here. The `#000` below is an opacity
+   stencil, not a colour: only its alpha channel is read.
+*/
+.ms-table-scroll[data-scroll-end="true"],
+.ms-table-wrap[data-scroll-end="true"] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+}
+
+.ms-table-scroll[data-scroll-start="true"],
+.ms-table-wrap[data-scroll-start="true"] {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 2.5rem);
+    mask-image: linear-gradient(to right, transparent 0, #000 2.5rem);
+}
+
+.ms-table-scroll[data-scroll-start="true"][data-scroll-end="true"],
+.ms-table-wrap[data-scroll-start="true"][data-scroll-end="true"] {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
+}
+
+/*
+   And the cue gives way to the focus ring, because the two cannot coexist.
+
+   A mask clips everything the element paints to its own border box, and the ring above is drawn
+   *outside* that box - `outline-offset: 2px`. So on any region that could actually scroll, which on a
+   phone is every one of them, the mask clipped the ring away entirely: about twenty tab stops that
+   took focus and showed nothing, in both themes. That is WCAG 2.4.7 failed by the very rule that made
+   the regions reachable from the keyboard in the first place, which is worse than the clipping this
+   section exists to fix - a keyboard user who cannot see where they are cannot use the page at all,
+   whereas the cue only tells a sighted user something the scrollbar is also telling them.
+
+   Nothing else will do. `outline-offset: -2px` would draw the ring inside the box and survive the
+   mask, but an inset ring on a scroll container sits on top of the first row's text and moves with the
+   scroll. A second element to carry the ring is the wrapper `.ms-table-wrap` has not got. So the mask
+   is switched off for exactly as long as the region has focus: the cue returns the moment focus
+   leaves, and it is never the only indication that a region scrolls - the scrollbar is there, and a
+   keyboard user who has focus can simply press the arrow keys.
+
+   These rules must stay *after* the three above: same specificity, so order is what decides.
+*/
+.ms-table-scroll:focus-visible,
+.ms-table-wrap:focus-visible {
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+/* --------------------------------------------------------------------------
+   UX-1. The columns that made the tables wide
+   -------------------------------------------------------------------------- */
+
+/*
+   Event types, `.NET type`. The cell holds `DisplayValueHelper.PrettyTypeName` of the assembly-qualified
+   name and carries the raw value in its `title`; the cap is what makes the `.ms-truncate` beside it do
+   anything, because `overflow: hidden` on a table cell needs a width to be hidden against and a `<td>`
+   has none of its own.
+*/
+.ms-type-name {
+    max-width: 40ch;
+}
+
+/*
+   Activity.
+
+   WHEN is one timestamp and must never be four lines of one: it wrapped `2026-09-19 10:13:47 +03:00`
+   onto four rows and made every row of the log 80px tall. MESSAGE and TARGET are the two cells that
+   carry a sentence, and squeezed to 90px they wrapped one word per line, so each gets a floor; they are
+   the cells allowed to wrap, which is why the region scrolls rather than the page.
+*/
+.ms-activity-when {
+    white-space: nowrap;
+}
+
+.ms-activity-message,
+.ms-activity-target {
+    min-width: 16rem;
+}
+
+/*
+   Store, database and tenant are the same three values on every row of a single-store host, which is
+   most of them, so they are one cell. The separators are dots rather than slashes because a database
+   identity frequently contains a slash already.
+*/
+.ms-activity-scope {
+    white-space: nowrap;
+}
+
+.ms-activity-scope-separator {
+    color: var(--ms-color-text-muted);
+}
+
+/*
+   Projections: the lifecycle note.
+
+   It sits in a `<th>`, and `.ms-table tbody th` uppercases and letter-spaces its contents, so the row
+   read `ORDERSUMMARY INLINE THE ASYNC DAEMON DOES NOT RUN THIS` as though the sentence were part of the
+   projection's name. It is a note: normal case, normal weight, and on its own line under the name. The
+   lifecycle badge stays beside the name, because that one *is* a label.
+*/
+.ms-projection-note {
+    display: block;
+    margin-left: 0;
+    margin-top: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+/*
+   Document detail, the metadata panel. A 40-character e-mail in a value cell has no break point, so the
+   cell asked for its own width and the panel grew past its column - 1235px inside 1200px on a desktop,
+   534px inside 334px on a phone. The value cells may break anywhere; the column names beside them still
+   may not.
+*/
+.ms-doc-meta-value {
+    overflow-wrap: anywhere;
+}
+
+/*
+   Overview: the event, activity and stream lists.
+
+   Each row is a flex line ending in a timestamp that must not wrap, and the id in the middle is a
+   36-character GUID with no break point in it. `.ms-truncate` was already on the id, and did nothing:
+   `overflow: hidden` needs a width to hide against and `flex: 1 1 auto` does not give it one when every
+   sibling is `flex: 0 0 auto`. `min-width: 0` lets the line shrink; the cap is what makes the ellipsis
+   appear rather than the page growing to 1230px inside a 334px column.
+*/
+.ms-overview-list-stream {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+   And the half of that the truncation cannot reach on its own.
+
+   `.ms-overview-columns` is a grid, and a grid item's `min-width` defaults to `auto`, which means "never
+   narrower than my own min-content". The recent-activity list holds whole SQL statements with no break
+   point in them, so that minimum was 1206px - the section refused to be 334px wide however much its
+   contents were willing to shrink, and the Overview was the one page whose phone layout still had a
+   horizontal overflow after every table on it was in a scroll region. `min-width: 0` lets the section be
+   the width of its track; the ellipsis above is then what the id and the statement do about it.
+*/
+.ms-overview-region {
+    min-width: 0;
+}
+
+/*
+   Query: the pane the editor sits in, once the two panes stack.
+
+   `.ms-query-layout` is `align-items: flex-start`, which below 1024px is the *cross* axis, so a stacked
+   pane is sized to fit its own content rather than to the column it is in. `.ms-query-side` already says
+   `width: 100%` there; `.ms-query-main` did not, so it took the textarea's intrinsic preferred width -
+   about 400px from the `cols` default - and `/query` was the last page still 426px wide inside a 334px
+   column on a phone. The textarea below it is already `width: 100%` and already shrinkable; it was only
+   ever the pane that refused.
+*/
+@media (max-width: 1024px) {
+    .ms-query-main {
+        width: 100%;
+    }
+}
+
+/* ==========================================================================
+   UX-4. Event cards carry one toolbar's worth of controls, not one toolbar each
+   ========================================================================== */
+
+/* A feed is fifty of these. Everything here is about the card being a glance rather than a document:
+   the identity on one line, the metadata on one line, the body compact, and the viewer's own toolbar
+   only on the card someone has asked for it on. Nothing overrides a rule outside the event card except
+   the two noted at the bottom. */
+
+.ms-event-card {
+    padding: var(--ms-space-xs) var(--ms-space-md);
+
+    /* A card body is a summary, not a document: one step tighter than the standalone viewer, which
+       still reads as code at 13px. */
+    --ms-json-row-height: 18px;
+}
+
+/* The identity line now carries the stream and two actions as well, so it wraps on a smaller gap. */
+.ms-event-card-header {
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+}
+
+/* The stream is part of "which event is this", not a paragraph of its own. */
+.ms-event-card-stream {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-event-card-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+/* Sized like .ms-json-icon-button, because it is the same kind of control in the same places. */
+.ms-event-card-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text-secondary);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.ms-event-card-action:hover:not(:disabled) {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-event-card-action:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+.ms-event-card-action:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* The one card whose toolbar is open says so without relying on the toolbar being in view. */
+.ms-event-card-action[aria-expanded="true"] {
+    border-color: var(--ms-color-primary);
+    background-color: var(--ms-color-primary-light);
+    color: var(--ms-color-primary);
+}
+
+.ms-event-card-action-copied {
+    border-color: var(--ms-color-success);
+    color: var(--ms-color-success);
+}
+
+.ms-event-card-action-icon {
+    width: 14px;
+    height: 14px;
+}
+
+/* A chip is a hint; the whole value is in its title. The assembly-qualified mt_dotnet_type used to be
+   the widest thing on the page and pushed the row to two lines on every card. */
+.ms-event-card .ms-event-meta .ms-event-meta-value {
+    max-width: 24ch;
+}
+
+/* Re-stated so this section, which is appended after the small-screen block, cannot undo it. */
+@media (max-width: 720px) {
+    .ms-event-card .ms-event-meta .ms-event-meta-value {
+        max-width: 20ch;
+    }
+}
+
+/* Without the toolbar the tree is the top of the body, so it wears the border and the corners the
+   toolbar was carrying; with it, the existing rules stand. */
+.ms-event-json-bare .ms-json-tree {
+    border-top: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+}
+
+.ms-event-json-bare .ms-code-body {
+    border-radius: var(--ms-radius-md);
+}
+
+/* The tree sits directly under the card's own padding; it does not need a second inset of its own. */
+.ms-event-card .ms-json-tree {
+    padding: 0;
+}
+
+/* ---------------------------------------------------------------------------------------------
+   Two rules outside .ms-event-card*, both about the column a card lives in.
+   --------------------------------------------------------------------------------------------- */
+
+/* Cards sit closer now that each one is a third shorter; the rail and the borders do the separating. */
+.ms-timeline {
+    gap: var(--ms-space-sm);
+}
+
+/* Stacked at 720px the timeline pane kept sizing to its widest JSON row, because .ms-stream-panes
+   aligns to flex-start and the pane - unlike .ms-time-travel - never said how wide it is. That is why
+   a stream's cards were 436px wide in a 286px column. */
+@media (max-width: 720px) {
+    .ms-stream-timeline-pane {
+        width: 100%;
+    }
+}
+
+/* ==========================================================================
+   UX-5. The shell on narrow screens
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The preferences popover
+
+   Theme and time zone, behind one gear in the header, at every width. The
+   popover itself is `.ms-popover` - the same native mechanism and the same
+   box as the capability list - so what is here is only what differs: its own
+   anchor, a column of labelled pickers rather than a list, and the labels
+   put back, because a popover has the room a 390 px header did not.
+   -------------------------------------------------------------------------- */
+
+.ms-preferences-button {
+    anchor-name: --ms-preferences-anchor;
+    flex-shrink: 0;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-preferences-button:hover {
+    color: var(--ms-color-text);
+}
+
+.ms-preferences-icon {
+    width: 18px;
+    height: 18px;
+}
+
+/* Higher specificity than `.ms-popover:popover-open`, which names the capability chip's anchor. */
+.ms-popover.ms-preferences-popover:popover-open {
+    position-anchor: --ms-preferences-anchor;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-preferences-popover {
+    width: min(22rem, calc(100vw - 2 * var(--ms-space-md)));
+}
+
+.ms-preferences-control {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+/*
+   Section 5 hides `.ms-header-control-label` below 900 px, which is right for the pickers that are
+   still in the header row and wrong for these two: they are in a box of their own now, where the
+   label is the only thing that says which select is which. Undone here rather than by narrowing the
+   rule up there, so the phone-header rule stays the one thing it is about.
+*/
+.ms-preferences-popover .ms-header-control-label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+}
+
+.ms-preferences-popover .ms-header-select {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.ms-preferences-popover .ms-popover-footnote {
+    margin-top: 0;
+}
+
+/* --------------------------------------------------------------------------
+   The Overview's lists on a phone
+
+   Four parts in a row - a sequence number, a type, an id and a time - where
+   the id is a 36-character GUID or a whole SQL statement. Below 640 px the id
+   takes a line of its own with the timestamp beside it, so the row is two
+   readable lines instead of one that is clipped by `.ms-main`'s own
+   `overflow-x: hidden` and says nothing about what it cut off.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+    /*
+       Nearly the whole line, less room for the timestamp that shares it.
+
+       The two numbers are measured rather than guessed, and both conditions are independent of how
+       wide the list is - which is why one basis covers 390 px and 640 px alike. A break happens where
+       it is meant to when the basis is wider than what is left of line one, which is
+       `reserve < sequence + type + gaps`: the narrowest of those measured at 390 px is 106 px. The
+       timestamp still fits beside the id when `reserve >= timestamp + gap`, which is 52 px. 4.5rem is
+       72 px, in the middle of that window. At 7rem the events list broke both ways in one panel -
+       "#59 order_shipped" over its id for the longer type names, and the timestamp alone on a line of
+       its own for the shorter ones.
+    */
+    .ms-overview-list-stream {
+        flex: 1 1 calc(100% - 4.5rem);
+        min-width: 0;
+        /* Inert while the markup also says `ms-truncate`, and the belt for the day it does not: the
+           activity list's target is a whole SQL statement, which has no break opportunity of its own
+           and would otherwise leave the panel. */
+        overflow-wrap: anywhere;
+    }
+
+    .ms-overview-list-seq,
+    .ms-overview-list-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
 }
