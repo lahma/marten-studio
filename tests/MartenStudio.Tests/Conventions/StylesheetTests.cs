@@ -126,7 +126,8 @@ public partial class StylesheetTests
 
         block.Should().Contain(
             ".ms-header {",
-            "the header itself has to be allowed to wrap, or hiding the labels only makes the rows narrower");
+            "hiding the labels is only half of it - the header's own rule belongs in this block too, "
+            + "and it is what decides whether the row it saved is a row at all");
     }
 
     /// <summary>

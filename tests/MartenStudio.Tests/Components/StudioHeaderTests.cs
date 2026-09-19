@@ -155,33 +155,50 @@ public class StudioHeaderTests
             "Preferences: theme, time zone",
             "a gear on its own says nothing about which preferences");
         button.GetAttribute("popovertarget").Should().Be("ms-preferences-popover");
-        button.GetAttribute("aria-controls").Should().Be("ms-preferences-popover");
-        button.GetAttribute("aria-expanded").Should().Be("false", "it starts closed");
         button.QuerySelectorAll("svg").Should().ContainSingle("the icon is inline SVG, never a font or a library");
         button.TextContent.Trim().Should().BeEmpty("the label is the aria-label; the button is the glyph");
     }
 
     /// <summary>
-    /// <c>aria-expanded</c> follows the platform's own <c>toggle</c> event, which is the one signal that
-    /// covers all four ways a popover closes — the button again, Escape, a click outside it, and another
-    /// popover opening. A click handler would say "expanded" long after Escape had dismissed the menu.
+    /// The button is wired to the popover the one way the platform understands, and states nothing about
+    /// it that the platform is already responsible for.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>popovertarget</c> is the whole wiring: the user agent opens the menu, reports the invoker's
+    /// expanded state and the controls relationship, and does all of it with no script at all.
+    /// </para>
+    /// <para>
+    /// This used to carry a hand-written <c>aria-expanded</c> driven by an <c>@ontoggle</c> handler, and
+    /// the failure is worth the test. <c>popovertarget</c> works during <em>prerendering</em> — before
+    /// the circuit exists and before Blazor has attached any listener — while the attribute could only
+    /// move when a <c>toggle</c> event arrived over that circuit. A tap in the window between the two
+    /// opened the menu without moving the attribute, and because the only way to track a state Blazor
+    /// surfaces as a bare <see cref="EventArgs" /> is to invert a flag per event, it stayed inverted for
+    /// the rest of the session: a screen reader was told the opposite of the truth on every open from
+    /// then on. So the assertion is that these attributes are <em>absent</em>, not that they are right.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void Opening_and_closing_the_popover_moves_aria_expanded()
+    public void The_button_points_at_the_popover_and_leaves_its_state_to_the_platform()
     {
         using var context = HeaderWithEveryControl();
 
         var layout = RenderLayout(context);
 
-        layout.Find("#ms-preferences-popover").Toggle();
+        IElement button = layout.Find(".ms-preferences-button");
+        IElement popover = layout.Find("#ms-preferences-popover");
 
-        layout.WaitForAssertion(() =>
-            layout.Find(".ms-preferences-button").GetAttribute("aria-expanded").Should().Be("true"));
+        button.GetAttribute("popovertarget").Should().Be(
+            popover.Id,
+            "the invoker names the popover it opens, and that is the whole wiring");
 
-        layout.Find("#ms-preferences-popover").Toggle();
-
-        layout.WaitForAssertion(() =>
-            layout.Find(".ms-preferences-button").GetAttribute("aria-expanded").Should().Be("false"));
+        button.HasAttribute("aria-expanded").Should().BeFalse(
+            "a popover invoker's expanded state is the user agent's to report; one written here goes "
+            + "stale the first time the menu is opened before the circuit attaches");
+        button.HasAttribute("aria-controls").Should().BeFalse(
+            "the controls relationship comes from popovertarget too, the same as CapabilityBanner's "
+            + "chip and JsonViewRow's key button");
     }
 
     /// <summary>
@@ -206,9 +223,9 @@ public class StudioHeaderTests
         popover.GetAttribute("popover").Should().Be("auto");
         popover.ClassList.Should().Contain("ms-popover", "it is the same box the capability list uses");
 
-        // Nothing has been clicked: this is the closed state.
-        layout.Find(".ms-preferences-button").GetAttribute("aria-expanded").Should().Be("false");
-
+        // Nothing has opened it, and the selects are in the document all the same — which is the half
+        // of this that matters, because `popover` hides them with the user agent's own `display: none`
+        // and the browser suite drives them through it.
         popover.QuerySelector("#ms-timezone-select").Should().NotBeNull();
         popover.QuerySelector("#ms-theme-select").Should().NotBeNull();
         popover.QuerySelectorAll("label[for='ms-timezone-select']").Should().ContainSingle();

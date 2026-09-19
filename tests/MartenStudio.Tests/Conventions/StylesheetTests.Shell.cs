@@ -57,9 +57,17 @@ public partial class StylesheetTests
     }
 
     /// <summary>
-    /// The phone header is one row. Wrapping is what made it four: the two regions each took a line, and
-    /// a long time-zone option took two more.
+    /// The header's own two regions never take a line each. Wrapping <em>here</em> is what made the
+    /// phone header four rows deep: the left region took one, the chip another, and a long time-zone
+    /// option two more.
     /// </summary>
+    /// <remarks>
+    /// This is about <c>.ms-header</c> and not about everything inside it. The scope selector within the
+    /// left region does still wrap, deliberately — see
+    /// <see cref="The_scope_pickers_keep_enough_width_to_be_read_on_a_phone" /> for the measurement that
+    /// settled it. On the single-store, single-database host most people have there is one picker in
+    /// there and the whole header is one 56 px row.
+    /// </remarks>
     [Fact]
     public void The_phone_header_does_not_wrap()
     {
@@ -73,17 +81,32 @@ public partial class StylesheetTests
     }
 
     /// <summary>
-    /// The scope pickers shrink rather than stack: the store, the database and the tenant stay readable
-    /// at a glance on a phone, which is the whole reason they were not the ones put behind a menu.
+    /// The scope pickers keep enough width to be read, and take a second row when three of them will
+    /// not fit one — which is the whole reason they are not the ones that went behind a menu.
     /// </summary>
+    /// <remarks>
+    /// Measured, and it is why the header and the scope selector wrap differently. With
+    /// <c>flex-wrap: nowrap</c> here as well, a host with more than one store and more than one database
+    /// draws three pickers at 390 px and they came out 44, 52 and 35 px wide — about ten, eighteen and
+    /// one pixel of text once a <c>select</c>'s own arrow and padding are paid for, which reads "In v",
+    /// "loc v" and "v". The header did not overflow and the scope was unreadable, which is the same
+    /// failure as hiding it behind a menu with extra steps. The floor puts them back at 120, 140 and
+    /// 96 px on three rows.
+    /// </remarks>
     [Fact]
-    public void The_scope_pickers_shrink_rather_than_stacking_on_a_phone()
+    public void The_scope_pickers_keep_enough_width_to_be_read_on_a_phone()
     {
         string block = MediaBlock("max-width: 900px", ".ms-scope-selector");
 
-        Declaration(".ms-scope-selector", "flex-wrap", block).Should().Be("nowrap");
+        Declaration(".ms-scope-selector", "flex-wrap", block).Should().Be(
+            "wrap",
+            "three pickers squeezed onto one 390 px row have no readable text left in them");
         Declaration(".ms-scope-selector", "min-width", block).Should().Be("0");
         Declaration(".ms-scope-selector .ms-header-control", "min-width", block).Should().Be("0");
+
+        Declaration(".ms-scope-selector .ms-header-select", "min-width", block).Should().Be(
+            "6rem",
+            "the floor is what makes the wrap happen rather than the pickers collapsing to their arrows");
     }
 
     /// <summary>
@@ -154,9 +177,18 @@ public partial class StylesheetTests
     /// The Overview's list rows are two lines on a phone: a sequence and a type, then an id that can be a
     /// 36-character GUID or a whole SQL statement, with the timestamp beside it.
     /// </summary>
+    /// <remarks>
+    /// Both halves are asserted, in the two <c>640px</c> blocks that hold them, because the basis below
+    /// is worthless on its own: a flex line only breaks in a container that is allowed to wrap, and a
+    /// merge that dropped <c>.ms-overview-list-item { flex-wrap: wrap }</c> would leave the id squeezed
+    /// onto one clipped line with every assertion about its basis still passing.
+    /// </remarks>
     [Fact]
     public void An_overview_lists_id_takes_its_own_line_on_a_phone()
     {
+        Declaration(".ms-overview-list-item", "flex-wrap", MediaBlock("max-width: 640px", ".ms-overview-list-item"))
+            .Should().Be("wrap", "the basis below can only break a line in a container that wraps");
+
         string block = MediaBlock("max-width: 640px", ".ms-overview-list-stream");
 
         Declaration(".ms-overview-list-stream", "flex", block).Should().Be(
@@ -179,6 +211,7 @@ public partial class StylesheetTests
     [InlineData("max-width: 1024px", ".ms-nav-link-text")]
     [InlineData("max-width: 900px", ".ms-header-control-label")]
     [InlineData("max-width: 900px", ".ms-scope-selector")]
+    [InlineData("max-width: 640px", ".ms-overview-list-item")]
     [InlineData("max-width: 640px", ".ms-overview-list-stream")]
     public void The_shell_still_has_the_media_block_each_assertion_above_reads(string condition, string marker)
     {

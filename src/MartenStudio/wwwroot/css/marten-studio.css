@@ -432,10 +432,11 @@ body {
    accessible name is the same whether the label is painted or not, and the `<label for>` stays in the
    accessibility tree either way.
 
-   `nowrap`, not `wrap`: with the preferences behind one 32 px button, the header's two regions fit a
-   390 px row, and letting them wrap is what let one long option text push the header to 190 px again.
-   The pickers shrink instead - `min-width: 0` below - and a `select` clips its own text rather than
-   the header gaining a row.
+   `nowrap`, not `wrap`, on the *header*: with the preferences behind one 32 px button, the two regions
+   fit a 390 px row, and letting them wrap is what put the chip and the pickers on lines of their own
+   and took the header to 190 px. The scope selector inside the left region still wraps - a store, a
+   database and a tenant picker squeezed onto one 390 px row have no readable text left in them; see
+   section 26, which sets the floor.
 */
 @media (max-width: 900px) {
     .ms-header {
@@ -2114,20 +2115,38 @@ body {
     align-self: center;
 }
 
-/* The phone header: the labels are hidden by the rule in section 5, so the pickers are all one height
-   and there is no baseline left to align to. `nowrap` and `min-width: 0` are what hold the header to
-   one row - a store, a database and a tenant picker shrink and ellipsise rather than stacking, so the
-   scope stays readable at a glance instead of costing three rows above the page title (UX-5). */
+/*
+   The phone header: the labels are hidden by the rule in section 5, so the pickers are all one height
+   and there is no baseline left to align to.
+
+   The scope wraps, and its pickers have a floor. `.ms-header` itself does not wrap (section 5), which
+   is what keeps the chip and the gear out of a row of their own; but holding the *scope* to one row as
+   well was measured and was wrong. On a store with more than one store and more than one database
+   there are three pickers in here, and at 390 px they were squeezed to 44, 52 and 35 px - about ten,
+   eighteen and one pixel of text once a select's own arrow and padding are paid for, which reads
+   "In v", "loc v" and "v". A scope you cannot read is the failure the comment in section 5 argues
+   against, in a different shape: the point of keeping the scope in the header rather than behind a
+   menu is that people check it without being asked, and they cannot check what is not legible.
+
+   So `min-width: 6rem` is the floor - about eight characters and the arrow - and the selector wraps
+   when three of them will not fit. That costs a row or two on a multi-store phone and nothing at all
+   on the single-store, single-database host most people have, where there is one picker and the
+   header stays one 56 px row (UX-5).
+*/
 @media (max-width: 900px) {
     .ms-scope-selector {
         gap: var(--ms-space-sm);
         align-items: center;
-        flex-wrap: nowrap;
+        flex-wrap: wrap;
         min-width: 0;
     }
 
     .ms-scope-selector .ms-header-control {
         min-width: 0;
+    }
+
+    .ms-scope-selector .ms-header-select {
+        min-width: 6rem;
     }
 }
 

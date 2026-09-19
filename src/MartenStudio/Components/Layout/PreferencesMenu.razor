@@ -16,11 +16,20 @@
    rendering them only while open would mean the selects do not exist until something has clicked the
    button, and would rebuild them over the circuit on every open. *@
 
+@* `popovertarget` and nothing else - no `aria-expanded`, no `aria-controls`, the same as
+   CapabilityBanner's chip and JsonViewRow's key button.
+
+   The invoker relationship and the expanded state are the user agent's to report, and a hand-written
+   `aria-expanded` here was wrong in a way that only bites once: `popovertarget` is declarative, so it
+   opens the menu during prerendering - before the circuit exists and before Blazor has attached any
+   listener - while the attribute could only be moved by a `toggle` event arriving over that circuit.
+   A tap in the window between the two flipped the popover without flipping the attribute, and since
+   the only honest way to track it is to invert a flag per event, it stayed inverted for the rest of
+   the session: a screen reader told every visitor the opposite of the truth. An attribute that can
+   disagree with the platform is worse than no attribute at all. *@
 <button type="button"
         class="ms-button ms-btn-icon ms-preferences-button"
         popovertarget="ms-preferences-popover"
-        aria-controls="ms-preferences-popover"
-        aria-expanded="@(open ? "true" : "false")"
         aria-label="Preferences"
         title="Preferences: theme, time zone">
     @* Hand-drawn, like every other icon here: no icon library, ever (AGENTS.md hard rule 3).
@@ -42,8 +51,7 @@
    component, the same mechanism CapabilityBanner already uses. *@
 <div id="ms-preferences-popover"
      popover="auto"
-     class="ms-popover ms-preferences-popover"
-     @ontoggle="OnToggled">
+     class="ms-popover ms-preferences-popover">
     <p class="ms-popover-title">Preferences</p>
 
     @* Every picker carries its own `aria-label` as well as its `<label for>`. The label is painted
@@ -89,8 +97,6 @@
         .OrderBy(static tz => tz.Id, StringComparer.Ordinal)
         .ToList();
 
-    private bool open;
-
     /// <summary><c>system</c>, <c>light</c> or <c>dark</c>, as the shell currently has it.</summary>
     [Parameter]
     public string SelectedTheme { get; set; } = "system";
@@ -113,29 +119,6 @@
     /// <summary>Raised with the picked time zone id.</summary>
     [Parameter]
     public EventCallback<ChangeEventArgs> TimeZoneChanged { get; set; }
-
-    /// <summary>
-    /// Keeps <c>aria-expanded</c> honest.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A popover closes four ways - the button again, Escape, a click outside it, and another popover
-    /// opening - and only one of them is a click on anything this component renders. The platform's
-    /// own <c>toggle</c> event is the single signal that covers all four, so it is what the attribute
-    /// is driven from; a button-click handler would say "expanded" to a screen reader long after the
-    /// menu had been dismissed with Escape.
-    /// </para>
-    /// <para>
-    /// It flips rather than reads a state, because Blazor surfaces <c>ontoggle</c> as a plain
-    /// <see cref="EventArgs" /> with no <c>newState</c> on it. That is exact: the event fires once per
-    /// state change and the popover starts closed.
-    /// </para>
-    /// <para>
-    /// Synchronous, and deliberately not <c>async void</c> under another name (AGENTS.md hard rule 6):
-    /// there is nothing here to await.
-    /// </para>
-    /// </remarks>
-    private void OnToggled() => open = !open;
 
     private static string TimeZoneLabel(TimeZoneInfo timeZone)
     {
