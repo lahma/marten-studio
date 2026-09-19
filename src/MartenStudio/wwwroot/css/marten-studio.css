@@ -6730,7 +6730,9 @@ a.ms-event-chip:focus-visible {
   width: 14px;
   height: 14px;
   flex: none;
+}
 
+/* ==========================================================================
    UX-3. Documents: the search-syntax popover, wider ids, the detail action bar
    ========================================================================== */
 
@@ -6838,83 +6840,6 @@ a.ms-event-chip:focus-visible {
 .ms-doc-detail-actions-group {
     display: flex;
     flex-wrap: wrap;
-
-   UX-4. Event cards carry one toolbar's worth of controls, not one toolbar each
-   ========================================================================== */
-
-/* A feed is fifty of these. Everything here is about the card being a glance rather than a document:
-   the identity on one line, the metadata on one line, the body compact, and the viewer's own toolbar
-   only on the card someone has asked for it on. Nothing overrides a rule outside the event card except
-   the two noted at the bottom. */
-
-.ms-event-card {
-    padding: var(--ms-space-xs) var(--ms-space-md);
-
-    /* A card body is a summary, not a document: one step tighter than the standalone viewer, which
-       still reads as code at 13px. */
-    --ms-json-row-height: 18px;
-}
-
-/* The identity line now carries the stream and two actions as well, so it wraps on a smaller gap. */
-.ms-event-card-header {
-    gap: var(--ms-space-xs) var(--ms-space-sm);
-}
-
-/* The stream is part of "which event is this", not a paragraph of its own. */
-.ms-event-card-stream {
-    display: inline-flex;
-    align-items: baseline;
-
-   UX-5. The shell on narrow screens
-   ========================================================================== */
-
-/* --------------------------------------------------------------------------
-   The preferences popover
-
-   Theme and time zone, behind one gear in the header, at every width. The
-   popover itself is `.ms-popover` - the same native mechanism and the same
-   box as the capability list - so what is here is only what differs: its own
-   anchor, a column of labelled pickers rather than a list, and the labels
-   put back, because a popover has the room a 390 px header did not.
-   -------------------------------------------------------------------------- */
-
-.ms-preferences-button {
-    anchor-name: --ms-preferences-anchor;
-    flex-shrink: 0;
-    color: var(--ms-color-text-secondary);
-}
-
-.ms-preferences-button:hover {
-    color: var(--ms-color-text);
-}
-
-.ms-preferences-icon {
-    width: 18px;
-    height: 18px;
-}
-
-/* Higher specificity than `.ms-popover:popover-open`, which names the capability chip's anchor. */
-.ms-popover.ms-preferences-popover:popover-open {
-    position-anchor: --ms-preferences-anchor;
-    display: flex;
-    flex-direction: column;
-    gap: var(--ms-space-sm);
-}
-
-.ms-preferences-popover {
-    width: min(22rem, calc(100vw - 2 * var(--ms-space-md)));
-}
-
-.ms-preferences-control {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--ms-space-xs);
-    min-width: 0;
-}
-
-.ms-event-card-actions {
-    display: inline-flex;
     align-items: center;
     gap: var(--ms-space-xs);
 }
@@ -6993,72 +6918,13 @@ a.ms-event-chip:focus-visible {
     }
 
     .ms-doc-detail-actions-group .ms-btn {
-
-/*
-   Section 5 hides `.ms-header-control-label` below 900 px, which is right for the pickers that are
-   still in the header row and wrong for these two: they are in a box of their own now, where the
-   label is the only thing that says which select is which. Undone here rather than by narrowing the
-   rule up there, so the phone-header rule stays the one thing it is about.
-*/
-.ms-preferences-popover .ms-header-control-label {
-    position: static;
-    width: auto;
-    height: auto;
-    margin: 0;
-    overflow: visible;
-    clip: auto;
-    white-space: normal;
-}
-
-.ms-preferences-popover .ms-header-select {
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-}
-
-.ms-preferences-popover .ms-popover-footnote {
-    margin-top: 0;
-}
-
-/* --------------------------------------------------------------------------
-   The Overview's lists on a phone
-
-   Four parts in a row - a sequence number, a type, an id and a time - where
-   the id is a 36-character GUID or a whole SQL statement. Below 640 px the id
-   takes a line of its own with the timestamp beside it, so the row is two
-   readable lines instead of one that is clipped by `.ms-main`'s own
-   `overflow-x: hidden` and says nothing about what it cut off.
-   -------------------------------------------------------------------------- */
-
-@media (max-width: 640px) {
-    /*
-       Nearly the whole line, less room for the timestamp that shares it.
-
-       The two numbers are measured rather than guessed, and both conditions are independent of how
-       wide the list is - which is why one basis covers 390 px and 640 px alike. A break happens where
-       it is meant to when the basis is wider than what is left of line one, which is
-       `reserve < sequence + type + gaps`: the narrowest of those measured at 390 px is 106 px. The
-       timestamp still fits beside the id when `reserve >= timestamp + gap`, which is 52 px. 4.5rem is
-       72 px, in the middle of that window. At 7rem the events list broke both ways in one panel -
-       "#59 order_shipped" over its id for the longer type names, and the timestamp alone on a line of
-       its own for the shorter ones.
-    */
-    .ms-overview-list-stream {
-        flex: 1 1 calc(100% - 4.5rem);
-        min-width: 0;
-        /* Inert while the markup also says `ms-truncate`, and the belt for the day it does not: the
-           activity list's target is a whole SQL statement, which has no break opportunity of its own
-           and would otherwise leave the panel. */
-        overflow-wrap: anywhere;
-    }
-
-    .ms-overview-list-seq,
-    .ms-overview-list-name {
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
     }
+}
 
+/* ==========================================================================
    UX-1. Wide tables scroll instead of being clipped
    ========================================================================== */
 
@@ -7227,6 +7093,43 @@ a.ms-event-chip:focus-visible {
 */
 .ms-overview-region {
     min-width: 0;
+}
+
+/* ==========================================================================
+   UX-4. Event cards carry one toolbar's worth of controls, not one toolbar each
+   ========================================================================== */
+
+/* A feed is fifty of these. Everything here is about the card being a glance rather than a document:
+   the identity on one line, the metadata on one line, the body compact, and the viewer's own toolbar
+   only on the card someone has asked for it on. Nothing overrides a rule outside the event card except
+   the two noted at the bottom. */
+
+.ms-event-card {
+    padding: var(--ms-space-xs) var(--ms-space-md);
+
+    /* A card body is a summary, not a document: one step tighter than the standalone viewer, which
+       still reads as code at 13px. */
+    --ms-json-row-height: 18px;
+}
+
+/* The identity line now carries the stream and two actions as well, so it wraps on a smaller gap. */
+.ms-event-card-header {
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+}
+
+/* The stream is part of "which event is this", not a paragraph of its own. */
+.ms-event-card-stream {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-event-card-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
 
 /* Sized like .ms-json-icon-button, because it is the same kind of control in the same places. */
 .ms-event-card-action {
@@ -7320,5 +7223,120 @@ a.ms-event-chip:focus-visible {
 @media (max-width: 720px) {
     .ms-stream-timeline-pane {
         width: 100%;
+    }
+}
+
+/* ==========================================================================
+   UX-5. The shell on narrow screens
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The preferences popover
+
+   Theme and time zone, behind one gear in the header, at every width. The
+   popover itself is `.ms-popover` - the same native mechanism and the same
+   box as the capability list - so what is here is only what differs: its own
+   anchor, a column of labelled pickers rather than a list, and the labels
+   put back, because a popover has the room a 390 px header did not.
+   -------------------------------------------------------------------------- */
+
+.ms-preferences-button {
+    anchor-name: --ms-preferences-anchor;
+    flex-shrink: 0;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-preferences-button:hover {
+    color: var(--ms-color-text);
+}
+
+.ms-preferences-icon {
+    width: 18px;
+    height: 18px;
+}
+
+/* Higher specificity than `.ms-popover:popover-open`, which names the capability chip's anchor. */
+.ms-popover.ms-preferences-popover:popover-open {
+    position-anchor: --ms-preferences-anchor;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-preferences-popover {
+    width: min(22rem, calc(100vw - 2 * var(--ms-space-md)));
+}
+
+.ms-preferences-control {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+/*
+   Section 5 hides `.ms-header-control-label` below 900 px, which is right for the pickers that are
+   still in the header row and wrong for these two: they are in a box of their own now, where the
+   label is the only thing that says which select is which. Undone here rather than by narrowing the
+   rule up there, so the phone-header rule stays the one thing it is about.
+*/
+.ms-preferences-popover .ms-header-control-label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+}
+
+.ms-preferences-popover .ms-header-select {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.ms-preferences-popover .ms-popover-footnote {
+    margin-top: 0;
+}
+
+/* --------------------------------------------------------------------------
+   The Overview's lists on a phone
+
+   Four parts in a row - a sequence number, a type, an id and a time - where
+   the id is a 36-character GUID or a whole SQL statement. Below 640 px the id
+   takes a line of its own with the timestamp beside it, so the row is two
+   readable lines instead of one that is clipped by `.ms-main`'s own
+   `overflow-x: hidden` and says nothing about what it cut off.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+    /*
+       Nearly the whole line, less room for the timestamp that shares it.
+
+       The two numbers are measured rather than guessed, and both conditions are independent of how
+       wide the list is - which is why one basis covers 390 px and 640 px alike. A break happens where
+       it is meant to when the basis is wider than what is left of line one, which is
+       `reserve < sequence + type + gaps`: the narrowest of those measured at 390 px is 106 px. The
+       timestamp still fits beside the id when `reserve >= timestamp + gap`, which is 52 px. 4.5rem is
+       72 px, in the middle of that window. At 7rem the events list broke both ways in one panel -
+       "#59 order_shipped" over its id for the longer type names, and the timestamp alone on a line of
+       its own for the shorter ones.
+    */
+    .ms-overview-list-stream {
+        flex: 1 1 calc(100% - 4.5rem);
+        min-width: 0;
+        /* Inert while the markup also says `ms-truncate`, and the belt for the day it does not: the
+           activity list's target is a whole SQL statement, which has no break opportunity of its own
+           and would otherwise leave the panel. */
+        overflow-wrap: anywhere;
+    }
+
+    .ms-overview-list-seq,
+    .ms-overview-list-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 }
