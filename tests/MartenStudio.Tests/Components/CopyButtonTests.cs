@@ -68,6 +68,26 @@ public class CopyButtonTests
         button.Find("[aria-live='polite']").TextContent.Trim().Should().Be("Copied");
     }
 
+    /// <summary>
+    /// The confirmation takes itself away again, so a list of fifty of these does not end up a list of
+    /// fifty ticks. Waited for rather than slept through: the clear runs on a one-shot timer and is
+    /// dispatched back onto the renderer, so the only honest question is whether it has happened yet.
+    /// </summary>
+    [Fact]
+    public void The_confirmation_clears_itself()
+    {
+        using StudioComponentContext context = NewContext();
+        context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true).SetResult(true);
+
+        IRenderedComponent<CopyButton> button = Render(context, "Copy stream id");
+        button.Find("button").Click();
+        button.Find("[aria-live='polite']").TextContent.Trim().Should().Be("Copied");
+
+        button.WaitForAssertion(
+            () => button.Find("[aria-live='polite']").TextContent.Trim().Should().BeEmpty(),
+            TimeSpan.FromSeconds(5));
+    }
+
     /// <summary>A copy the browser refused says nothing, because nothing was copied.</summary>
     [Fact]
     public void A_copy_the_browser_refused_does_not_claim_to_have_worked()

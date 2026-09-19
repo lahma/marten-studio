@@ -6642,7 +6642,6 @@ a.ms-event-chip:focus-visible {
   min-height: 24px;
   margin-inline-start: var(--ms-space-xs);
   padding: 0;
-  flex: none;
   border-color: transparent;
   background-color: transparent;
   box-shadow: none;

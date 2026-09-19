@@ -74,6 +74,16 @@
             worked = false;
         }
 
+        // The await above is a round trip to the browser, and the component can be disposed while it is
+        // in flight - copy, then navigate away before the clipboard answers. Everything below this line
+        // would then run on a component that no longer exists, and the timer in particular would be a
+        // one-shot that `Dispose` has already been and gone past: nothing would ever dispose it, and it
+        // would fire into a dead renderer a second and a half later.
+        if (disposed)
+        {
+            return;
+        }
+
         if (!worked)
         {
             return;
