@@ -104,16 +104,19 @@
                     {
                         <th>Tenant</th>
                     }
-                    <th></th>
                 </tr>
             </thead>
             <tbody>
                 @foreach (StreamRow row in page.Rows)
                 {
                     <tr class="ms-table-row" @key="row.Id">
-                        <td class="ms-table-cell ms-table-cell-mono ms-id-cell" title="@row.Id">
-                            <a href="@StreamHref(row.Id)">@row.Id</a>
-                            <CopyBadge Value="@row.Id" />
+                        @* The id once, as the link, with an icon-only copy beside it. It used to be
+                           drawn a second time as a whole <CopyBadge>, which is the right control where
+                           a value is presented rather than listed: here the link already is the value,
+                           so the badge was 330 px of the same string again in every row. *@
+                        <td class="ms-table-cell ms-table-cell-mono ms-id-cell">
+                            <a class="ms-stream-id" href="@StreamHref(row.Id)" title="@row.Id">@row.Id</a>
+                            <CopyButton Value="@row.Id" Label="Copy stream id" />
                         </td>
                         <td class="ms-table-cell">
                             @if (!string.IsNullOrEmpty(row.AggregateType))
@@ -130,15 +133,12 @@
                             }
                         </td>
                         <td class="ms-table-cell ms-table-cell-mono">@row.Version.ToString(CultureInfo.InvariantCulture)</td>
-                        <td class="ms-table-cell">@State.FormatInSelectedTimeZone(row.Created)</td>
+                        <td class="ms-table-cell ms-stream-created">@State.FormatInSelectedTimeZone(row.Created)</td>
                         <td class="ms-table-cell"><TimeAgo Timestamp="row.LastEvent" /></td>
                         @if (ShowTenant)
                         {
                             <td class="ms-table-cell ms-table-cell-mono">@(row.TenantId ?? "-")</td>
                         }
-                        <td class="ms-table-cell ms-table-cell-actions">
-                            <a class="ms-button ms-btn-sm" href="@FeedHref(row.Id)">Open in feed</a>
-                        </td>
                     </tr>
                 }
             </tbody>
@@ -356,11 +356,11 @@
             Cursor,
             OffsetValue.ToString(CultureInfo.InvariantCulture));
 
+    // The stream page - which this link opens - carries "Open in feed" in its header, so the row does
+    // not: a list whose every row has a link and a button beside it makes the reader choose between two
+    // calls to action where there is only one thing to do.
     private string StreamHref(string streamId) =>
         EventLinks.ToStream(Options.Value, State.ActiveScope, streamId);
-
-    private string FeedHref(string streamId) =>
-        EventLinks.ToFeedForStream(Options.Value, State.ActiveScope, streamId);
 
     private string CursorHref(string? cursor) => Href(cursor, offset: null);
 

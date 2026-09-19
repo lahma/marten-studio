@@ -6590,3 +6590,81 @@ a.ms-event-chip:focus-visible {
   color: var(--ms-color-text-muted);
   font-size: var(--ms-font-size-xs);
 }
+
+/* ==========================================================================
+   UX-2. Streams list: one id per row, on one line
+   ========================================================================== */
+
+/*
+   Every row of the streams list drew its id twice - once as a 28-character link and again as a whole
+   <CopyBadge>, a bordered box 330 px wide holding the same string and a Copy button. The STREAM column
+   took 60 % of the row, the table overflowed the content box at 1280 (1134 against 1040), and CREATED
+   wrapped its timestamp, so twenty-five streams needed 1 726 px of page. The id is one element now, the
+   copy is an icon beside it, and a row is one line.
+*/
+
+/*
+   40ch rather than the 28 that `.ms-id-cell > a` gives every other id cell: a GUID is 36 characters, so
+   at 28 the normal case was the clipped case and the ellipsis said nothing. At 40 only an unusually long
+   string key is truncated, and the whole value is the element's `title` either way. The cell keeps
+   `ms-id-cell` - that is what holds the link and the copy on one line - so this is written specific
+   enough to win against it rather than by editing a rule four other screens share.
+*/
+.ms-id-cell > a.ms-stream-id {
+  max-width: 40ch;
+  vertical-align: middle;
+}
+
+/*
+   `yyyy-MM-dd HH:mm:ss zzz` has three spaces in it, and a column narrow enough to break at one of them
+   turned every row into three lines. A timestamp is one line or it is nothing.
+*/
+.ms-stream-created {
+  white-space: nowrap;
+}
+
+/*
+   The compact copy, for <CopyButton>. `.ms-btn-icon` is 32 px square with a 32 px min-height, which is
+   a control in its own right; this one sits beside a value inside a table row, where 32 px plus the
+   cell's padding is already past the 44 px a one-line row is allowed. 24 px is the WCAG 2.2 minimum
+   target size and fits. It carries no border, background or lift until it is hovered, so a list of
+   fifty of them reads as fifty ids rather than fifty buttons; the colour, the hover and the focus then
+   follow `.ms-copy-badge-copy`, because the two controls do the same thing.
+
+   `--ms-color-text-secondary` and not `--ms-color-text-muted`: an icon is the whole control here, so it
+   is a meaningful graphic and owes 3:1 against its background (WCAG 1.4.11). Muted measures 2.55:1 on
+   the light surface and 2.94:1 on the dark one - under it in both themes, and a copy button nobody can
+   see is a copy button nobody presses. Secondary measures 7.6:1 and 5.7:1.
+*/
+.ms-copy-button {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  margin-inline-start: var(--ms-space-xs);
+  padding: 0;
+  flex: none;
+  border-color: transparent;
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--ms-color-text-secondary);
+  vertical-align: middle;
+}
+
+.ms-copy-button:hover {
+  background-color: var(--ms-color-primary-light);
+  border-color: transparent;
+  color: var(--ms-color-primary);
+  transform: none;
+  box-shadow: none;
+}
+
+.ms-copy-button:focus-visible {
+  outline: 2px solid var(--ms-color-primary);
+  outline-offset: 1px;
+}
+
+.ms-copy-button-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}

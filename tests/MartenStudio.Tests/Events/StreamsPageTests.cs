@@ -1,3 +1,5 @@
+using AngleSharp.Dom;
+
 using Bunit;
 
 using JasperFx.Events;
@@ -14,7 +16,7 @@ public class StreamsPageTests
     private static readonly string StreamId = "11111111-1111-1111-1111-111111111111";
 
     [Fact]
-    public async Task Each_row_carries_the_id_the_type_the_version_and_the_two_links()
+    public async Task Each_row_carries_the_id_the_type_the_version_and_the_link_to_the_stream()
     {
         using StudioComponentContext context = await NewContextAsync();
         context.EventData.Streams = new StreamPage([FakeEventDataService.Stream(StreamId)], null, false);
@@ -24,9 +26,85 @@ public class StreamsPageTests
         page.Find("tbody tr a").GetAttribute("href").Should()
             .StartWith("events/streams/s?id=" + StreamId);
         page.TextOfAll(".ms-event-chip").Should().Contain("Order");
-        page.Markup.Should().Contain("Open in feed");
-        page.FindAll("a").Select(x => x.GetAttribute("href")).Should()
-            .Contain(x => x!.StartsWith("events/feed?stream=", StringComparison.Ordinal));
+        page.Find("tbody tr td:nth-of-type(3)").TextContent.Trim().Should().Be("3");
+    }
+
+    /// <summary>
+    /// The id used to be drawn twice in every row - as a truncated link and again as a whole
+    /// <c>CopyBadge</c> - which is what took 60 % of the row's width and pushed the table off the
+    /// content box at 1280. It is one element now, not truncated, with the whole value in its title.
+    /// </summary>
+    [Fact]
+    public async Task The_id_is_in_the_row_once_and_whole()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Streams = new StreamPage([FakeEventDataService.Stream(StreamId)], null, false);
+
+        IRenderedComponent<Streams> page = context.Render<Streams>();
+
+        IElement row = page.Find("tbody tr.ms-table-row");
+        Occurrences(row.TextContent, StreamId).Should().Be(1);
+
+        IElement link = row.QuerySelector("a.ms-stream-id")!;
+        link.TextContent.Trim().Should().Be(StreamId);
+        link.GetAttribute("title").Should().Be(StreamId);
+
+        row.QuerySelectorAll(".ms-copy-badge").Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The row's only call to action is the link on the id. "Open in feed" lives in the stream page's
+    /// own header, which is one click away, rather than as a second button in every row.
+    /// </summary>
+    [Fact]
+    public async Task The_row_carries_one_link_and_an_icon_only_copy_rather_than_two_buttons()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Streams = new StreamPage([FakeEventDataService.Stream(StreamId)], null, false);
+
+        IRenderedComponent<Streams> page = context.Render<Streams>();
+
+        IElement row = page.Find("tbody tr.ms-table-row");
+
+        row.QuerySelectorAll("a").Should().ContainSingle()
+            .Which.GetAttribute("href").Should().StartWith("events/streams/s?id=");
+        row.TextContent.Should().NotContain("Open in feed");
+
+        IElement copy = row.QuerySelectorAll("button").Should().ContainSingle().Subject;
+        copy.GetAttribute("aria-label").Should().Be("Copy stream id");
+        copy.TextContent.Trim().Should().BeEmpty("an icon-only button is named by its aria-label");
+    }
+
+    /// <summary>The copy beside the id copies the id, whole, rather than what the link shows.</summary>
+    [Fact]
+    public async Task The_copy_beside_the_id_copies_the_whole_id()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Streams = new StreamPage([FakeEventDataService.Stream(StreamId)], null, false);
+        context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true).SetResult(true);
+
+        IRenderedComponent<Streams> page = context.Render<Streams>();
+        page.Find("tbody tr.ms-table-row button").Click();
+
+        context.JSInterop.Invocations["martenStudio.clipboard.copyText"].Should().ContainSingle()
+            .Which.Arguments[0].Should().Be(StreamId);
+    }
+
+    /// <summary>
+    /// The header used to carry an empty cell for the per-row button. Dropping the button without
+    /// dropping the column would have left every row one cell short of its header.
+    /// </summary>
+    [Fact]
+    public async Task The_header_names_every_column_the_rows_fill_and_no_others()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Streams = new StreamPage([FakeEventDataService.Stream(StreamId)], null, false);
+
+        IRenderedComponent<Streams> page = context.Render<Streams>();
+
+        page.TextOfAll("thead th").Should()
+            .Equal("Stream", "Type", "Version", "Created", "Last event");
+        page.Find("tbody tr.ms-table-row").QuerySelectorAll("td").Should().HaveCount(5);
     }
 
     [Fact]
@@ -137,5 +215,22 @@ public class StreamsPageTests
         var context = new StudioComponentContext();
         await context.ReadyAsync();
         return context;
+    }
+
+    /// <summary>How many times <paramref name="value" /> appears in <paramref name="text" />.</summary>
+    /// <remarks>
+    /// Counting rather than asserting "contains" is the point of the test it serves: the old row
+    /// contained the id too, twice.
+    /// </remarks>
+    private static int Occurrences(string text, string value)
+    {
+        int count = 0;
+        for (int at = text.IndexOf(value, StringComparison.Ordinal); at >= 0;
+             at = text.IndexOf(value, at + value.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
     }
 }

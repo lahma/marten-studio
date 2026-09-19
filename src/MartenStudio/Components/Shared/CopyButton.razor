@@ -1,0 +1,123 @@
+@using MartenStudio.Services.Live
+@implements IDisposable
+@inject Microsoft.JSInterop.IJSRuntime JsRuntime
+
+@* An icon-only copy, for beside a value that is already on screen.
+
+   <CopyBadge> is the right control where the value is being *presented* with its copy - the stream
+   detail header, where the id is the headline. In a list the value is already the row, so a badge
+   repeating it is the same string drawn twice: on the streams page that was 330 px of duplicate per
+   row, 60 % of the row's width, and it pushed the table past the content box at 1280.
+
+   The confirmation is a tick on the button and the word "Copied" in a polite live region, because an
+   icon that changes says nothing to a screen reader. The live region is always in the DOM and changes
+   its text, which is what makes it announce; one that is added with its text already in it is not
+   reliably read. *@
+
+<button type="button"
+        class="ms-btn ms-btn-icon ms-copy-button"
+        aria-label="@Label"
+        title="@Label"
+        @onclick="CopyAsync"
+        @onclick:stopPropagation="true"
+        @onclick:preventDefault="true">
+    @if (copied)
+    {
+        <svg class="ms-copy-button-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+            <path d="m2.75 8.5 3.25 3.25 7.25-7.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+    }
+    else
+    {
+        <svg class="ms-copy-button-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+            <rect x="6.25" y="6.25" width="8" height="8.5" rx="1.5" stroke="currentColor" stroke-width="1.4" />
+            <path d="M11.25 3.75v-1.5a1 1 0 0 0-1-1h-7a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+    }
+</button>
+<span class="ms-sr-only" aria-live="polite">@(copied ? "Copied" : string.Empty)</span>
+
+@code {
+    /// <summary>How long the tick and the announcement stay after a copy that worked.</summary>
+    private static readonly TimeSpan ConfirmationDuration = TimeSpan.FromMilliseconds(1500);
+
+    private Timer? confirmation;
+    private bool copied;
+    private bool disposed;
+
+    /// <summary>The exact text put on the clipboard.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string Value { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The button's accessible name, and its tooltip: the whole label, naming what is copied, as in
+    /// "Copy stream id". An icon-only control has no text of its own, so this is the only name it has.
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    private async Task CopyAsync()
+    {
+        bool worked;
+
+        try
+        {
+            worked = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { Value });
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // Prerendering, or a tab that has already gone. There is no clipboard to have written to,
+            // and a copy button is not worth ending a circuit over. A filter, not a catch ladder:
+            // JSDisconnectedException does not derive from JSException (AGENTS.md hard rule 15).
+            worked = false;
+        }
+
+        if (!worked)
+        {
+            return;
+        }
+
+        copied = true;
+
+        // The confirmation is cleared by a timer rather than by awaiting a delay here, so the click's
+        // handler completes at once: a handler that stays pending for a second and a half is a handler
+        // whose component cannot be disposed cleanly, and it would hold every caller that waits on the
+        // click - a test included - long enough to never see the tick at all.
+        confirmation?.Dispose();
+        confirmation = new Timer(OnConfirmationElapsed, state: null, ConfirmationDuration, Timeout.InfiniteTimeSpan);
+    }
+
+    /// <summary>
+    /// Runs on a thread-pool thread, so the clear is dispatched back onto the renderer.
+    /// </summary>
+    /// <remarks>
+    /// Nothing inside the dispatched work may throw - there is nobody to observe it - which is why
+    /// <see cref="ClearConfirmation" /> only reads two fields and asks for a render, and why
+    /// <c>disposed</c> is checked there rather than here: both it and <c>Dispose</c> run on the
+    /// renderer's synchronization context, so the check and the teardown cannot interleave.
+    /// </remarks>
+    private void OnConfirmationElapsed(object? state)
+    {
+        _ = InvokeAsync(ClearConfirmation);
+    }
+
+    private void ClearConfirmation()
+    {
+        if (disposed || !copied)
+        {
+            return;
+        }
+
+        copied = false;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        confirmation?.Dispose();
+        confirmation = null;
+    }
+}
