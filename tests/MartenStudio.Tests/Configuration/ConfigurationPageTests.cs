@@ -144,6 +144,32 @@ public class ConfigurationPageTests
         page.Find(".ms-error-alert").TextContent.Should().Contain("the store would not build");
     }
 
+    /// <summary>
+    /// Four tables on one screen - the databases, and one document type's duplicated fields, indexes and
+    /// foreign keys - each of which can be wider than the card it is in.
+    /// </summary>
+    /// <remarks>
+    /// The three inside a card are named after the document type as well as after the table. Two cards
+    /// open at once would otherwise announce two landmarks both called "Indexes table", which tells a
+    /// screen-reader user less than no label at all would.
+    /// </remarks>
+    [Fact]
+    public void Every_table_scrolls_and_the_ones_inside_a_card_are_named_after_their_document_type()
+    {
+        using var context = NewContext(out _);
+
+        var page = context.Render<ConfigurationPage>();
+        CardHeader(page, "customer").Click();
+
+        page.ShouldPutEveryTableInALabelledScrollRegion();
+
+        page.FindAll(".ms-table-scroll").Select(x => x.GetAttribute("aria-label")).Should().Equal(
+            "Databases table",
+            "customer duplicated fields table",
+            "customer indexes table",
+            "customer foreign keys table");
+    }
+
     private static AngleSharp.Dom.IElement CardHeader(IRenderedComponent<ConfigurationPage> page, string title)
     {
         foreach (var header in page.FindAll(".ms-config-card-header"))

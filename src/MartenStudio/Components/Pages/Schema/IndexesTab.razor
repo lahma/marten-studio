@@ -55,27 +55,29 @@ else
             The store's configuration asks for these and the database does not have them. The Drift tab
             will show the same thing as pending changes.
         </p>
-        <table class="ms-table">
-            <thead>
-                <tr>
-                    <th>Index</th>
-                    <th>Table</th>
-                    <th>Collection</th>
-                    <th>Would be created as</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (MissingIndex missing in indexes.Missing)
-                {
-                    <tr class="ms-table-row" @key="missing.Schema + missing.Table + missing.Name">
-                        <td class="ms-table-cell ms-table-cell-mono">@missing.Name</td>
-                        <td class="ms-table-cell ms-table-cell-mono">@(missing.Schema + "." + missing.Table)</td>
-                        <td class="ms-table-cell ms-table-cell-mono">@missing.CollectionAlias</td>
-                        <td class="ms-table-cell ms-index-definition">@missing.Definition</td>
+        <TableScroll Label="Declared but missing indexes table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Index</th>
+                        <th>Table</th>
+                        <th>Collection</th>
+                        <th>Would be created as</th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (MissingIndex missing in indexes.Missing)
+                    {
+                        <tr class="ms-table-row" @key="missing.Schema + missing.Table + missing.Name">
+                            <td class="ms-table-cell ms-table-cell-mono">@missing.Name</td>
+                            <td class="ms-table-cell ms-table-cell-mono">@(missing.Schema + "." + missing.Table)</td>
+                            <td class="ms-table-cell ms-table-cell-mono">@missing.CollectionAlias</td>
+                            <td class="ms-table-cell ms-index-definition">@missing.Definition</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
     }
 
     @if (indexes.Unindexed.Count > 0)
@@ -119,70 +121,72 @@ else
     }
     else
     {
-        <table class="ms-table">
-            <thead>
-                <tr>
-                    <th>Index</th>
-                    <th>Table</th>
-                    <th>Flags</th>
-                    <th class="ms-num">Size</th>
-                    <th class="ms-num">Scans</th>
-                    <th class="ms-num">Tuples read</th>
-                    <th>Definition</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (IndexInfo index in indexes.Indexes)
-                {
-                    <tr class="ms-table-row" @key="index.Schema + index.Table + index.Name">
-                        <td class="ms-table-cell ms-table-cell-mono">@index.Name</td>
-                        <td class="ms-table-cell ms-table-cell-mono">
-                            @(index.Schema + "." + index.Table)
-                            @if (index.CollectionAlias is { Length: > 0 } alias)
-                            {
-                                <span class="ms-index-flag">@alias</span>
-                            }
-                        </td>
-                        <td class="ms-table-cell">
-                            @if (index.IsPrimaryKey)
-                            {
-                                <span class="ms-index-flag">primary key</span>
-                            }
-                            @if (index.IsUnique && !index.IsPrimaryKey)
-                            {
-                                <span class="ms-index-flag">unique</span>
-                            }
-                            @if (index.WouldBeDropped)
-                            {
-                                <span class="ms-index-flag ms-index-flag-danger">would be dropped</span>
-                            }
-                            else if (index.IgnoredByConfiguration)
-                            {
-                                <span class="ms-index-flag ms-index-flag-info">ignored by config</span>
-                            }
-                            else if (!index.DeclaredByMarten && !index.OnMartenTable)
-                            {
-                                <span class="ms-index-flag ms-index-flag-info">not a Marten table</span>
-                            }
-                            @if (index.NeverUsed && !index.IsConstraint)
-                            {
-                                <span class="ms-index-flag ms-index-flag-warn">never used</span>
-                            }
-                        </td>
-                        <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(index.Bytes)</td>
-                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.Scans)</td>
-                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.TuplesRead)</td>
-                        <td class="ms-table-cell">
-                            <div class="ms-index-definition">@index.Definition</div>
-                            @if (index.Suggestion is { Length: > 0 } suggestion)
-                            {
-                                <p class="ms-suggestion">@suggestion</p>
-                            }
-                        </td>
+        <TableScroll Label="Indexes table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Index</th>
+                        <th>Table</th>
+                        <th>Flags</th>
+                        <th class="ms-num">Size</th>
+                        <th class="ms-num">Scans</th>
+                        <th class="ms-num">Tuples read</th>
+                        <th>Definition</th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (IndexInfo index in indexes.Indexes)
+                    {
+                        <tr class="ms-table-row" @key="index.Schema + index.Table + index.Name">
+                            <td class="ms-table-cell ms-table-cell-mono">@index.Name</td>
+                            <td class="ms-table-cell ms-table-cell-mono">
+                                @(index.Schema + "." + index.Table)
+                                @if (index.CollectionAlias is { Length: > 0 } alias)
+                                {
+                                    <span class="ms-index-flag">@alias</span>
+                                }
+                            </td>
+                            <td class="ms-table-cell">
+                                @if (index.IsPrimaryKey)
+                                {
+                                    <span class="ms-index-flag">primary key</span>
+                                }
+                                @if (index.IsUnique && !index.IsPrimaryKey)
+                                {
+                                    <span class="ms-index-flag">unique</span>
+                                }
+                                @if (index.WouldBeDropped)
+                                {
+                                    <span class="ms-index-flag ms-index-flag-danger">would be dropped</span>
+                                }
+                                else if (index.IgnoredByConfiguration)
+                                {
+                                    <span class="ms-index-flag ms-index-flag-info">ignored by config</span>
+                                }
+                                else if (!index.DeclaredByMarten && !index.OnMartenTable)
+                                {
+                                    <span class="ms-index-flag ms-index-flag-info">not a Marten table</span>
+                                }
+                                @if (index.NeverUsed && !index.IsConstraint)
+                                {
+                                    <span class="ms-index-flag ms-index-flag-warn">never used</span>
+                                }
+                            </td>
+                            <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(index.Bytes)</td>
+                            <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.Scans)</td>
+                            <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.TuplesRead)</td>
+                            <td class="ms-table-cell">
+                                <div class="ms-index-definition">@index.Definition</div>
+                                @if (index.Suggestion is { Length: > 0 } suggestion)
+                                {
+                                    <p class="ms-suggestion">@suggestion</p>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
     }
 }
 

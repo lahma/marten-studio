@@ -135,6 +135,58 @@ public class EventTypesTests
         context.Render<EventTypes>().Find(".ms-empty-title").TextContent.Should().Be("No event types");
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // The width of it
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The .NET type column is the reason this table was 1691px wide inside a 1200px column with four of
+    /// its six columns beyond the edge: a closed generic's assembly-qualified name is 170 characters of
+    /// nested qualification. The cell shows the C# name and keeps the recorded one in its
+    /// <c>title</c> - the raw value is what somebody pasting it into a search box needs, and it is one
+    /// hover away rather than one column of table width away.
+    /// </summary>
+    [Fact]
+    public async Task The_dot_net_type_cell_reads_as_C_sharp_and_keeps_the_recorded_name_in_its_title()
+    {
+        const string Recorded =
+            "JasperFx.Events.Compacted`1[[MartenStudio.SampleDomain.Events.DailySales, "
+            + "MartenStudio.SampleDomain, Version=0.1.0.0, Culture=neutral, PublicKeyToken=null]], "
+            + "JasperFx.Events";
+
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithoutCounts = new EventTypeList(
+            [new EventTypeInfo("Compacted<DailySales>", Recorded, true)], false);
+
+        IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+        var cell = page.Find(".ms-type-name");
+        cell.TextContent.Trim().Should().Be("JasperFx.Events.Compacted<MartenStudio.SampleDomain.Events.DailySales>");
+        cell.GetAttribute("title").Should().Be(Recorded);
+    }
+
+    [Fact]
+    public async Task A_type_the_store_recorded_no_dot_net_name_for_is_a_dash()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithoutCounts = new EventTypeList(
+            [new EventTypeInfo("legacy_thing", null, false)], false);
+
+        IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+        page.Find(".ms-type-name").TextContent.Trim().Should().Be("-");
+    }
+
+    [Fact]
+    public async Task The_table_is_in_a_scroll_region_rather_than_being_clipped()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithoutCounts = new EventTypeList(
+            [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true)], false);
+
+        context.Render<EventTypes>().ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
     private static async Task<StudioComponentContext> NewContextAsync()
     {
         var context = new StudioComponentContext();

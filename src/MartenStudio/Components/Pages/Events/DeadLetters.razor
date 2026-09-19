@@ -98,138 +98,140 @@
     }
     else
     {
-        <table class="ms-table">
-            <thead>
-                <tr>
-                    <th>Projection</th>
-                    <th>Shard</th>
-                    <th>Event</th>
-                    <th>Exception</th>
-                    <th>When</th>
-                    <th>Tenant</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (DeadLetterRow row in page.Rows)
-                {
-                    <tr class="ms-table-row" @key="row.Id">
-                        <td class="ms-table-cell ms-table-cell-mono">@row.ProjectionName</td>
-                        <td class="ms-table-cell ms-table-cell-mono">@row.ShardName</td>
-                        <td class="ms-table-cell ms-table-cell-mono">#@row.EventSequence.ToString(CultureInfo.InvariantCulture)</td>
-                        <td class="ms-table-cell ms-truncate" title="@row.ExceptionMessage">@row.ExceptionType</td>
-                        <td class="ms-table-cell"><TimeAgo Timestamp="row.Timestamp" /></td>
-                        <td class="ms-table-cell ms-table-cell-mono">@row.TenantId</td>
-                        <td class="ms-table-cell ms-table-cell-actions">
-                            <button type="button" class="ms-button ms-btn-sm" @onclick="() => ToggleAsync(row.Id, row.EventSequence)">
-                                @(expanded == row.Id ? "Hide" : "Details")
-                            </button>
-                        </td>
+        <TableScroll Label="Dead letters table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Projection</th>
+                        <th>Shard</th>
+                        <th>Event</th>
+                        <th>Exception</th>
+                        <th>When</th>
+                        <th>Tenant</th>
+                        <th></th>
                     </tr>
-
-                    @if (expanded == row.Id)
+                </thead>
+                <tbody>
+                    @foreach (DeadLetterRow row in page.Rows)
                     {
-                        <tr class="ms-table-row ms-dead-letter-detail" @key="@(row.Id.ToString() + "-detail")">
-                            <td class="ms-table-cell" colspan="@DetailColumnSpan">
-                                <div class="ms-dead-letter-panel">
-                                    <pre class="ms-dead-letter-exception">@row.ExceptionType: @row.ExceptionMessage</pre>
-
-                                    <div>
-                                        <h3 class="ms-section-title">The event that failed</h3>
-                                        @if (loadingEvent)
-                                        {
-                                            <LoadingSpinner />
-                                        }
-                                        else if (offending is null)
-                                        {
-                                            <p class="ms-muted">
-                                                Event #@row.EventSequence.ToString(CultureInfo.InvariantCulture) is no
-                                                longer in <code>mt_events</code>, or this tenant cannot see it.
-                                            </p>
-                                        }
-                                        else
-                                        {
-                                            <EventCard Sequence="offending.Sequence"
-                                                       Version="offending.Version"
-                                                       EventType="@offending.EventType"
-                                                       DotNetType="@offending.DotNetType"
-                                                       Timestamp="offending.Timestamp"
-                                                       StreamId="@offending.StreamId"
-                                                       StreamHref="@StreamHref(offending.StreamId)"
-                                                       ShowStream="true"
-                                                       IsArchived="offending.IsArchived"
-                                                       IsSkipped="offending.IsSkipped"
-                                                       HasBinary="offending.HasBinary"
-                                                       BinaryLength="offending.BinaryLength"
-                                                       Json="@offending.Json"
-                                                       Metadata="offending.Metadata" />
-                                        }
-                                    </div>
-
-                                    <div class="ms-dead-letter-actions">
-                                        @if (!Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
-                                        {
-                                            <span class="ms-muted">
-                                                Discard and Skip need
-                                                <code>MartenStudioOptions.Capabilities.ManageDeadLetters</code>.
-                                            </span>
-                                        }
-                                        else
-                                        {
-                                            @* Disabled, never hidden, for a visitor the write policy
-                                               refuses: "this studio can manage dead letters and your
-                                               account may not" is a different fact from "this studio
-                                               cannot manage dead letters". The service refuses regardless
-                                               (AGENTS.md hard rule 5). *@
-                                            <button type="button"
-                                                    class="ms-button ms-button-danger ms-dead-letter-discard"
-                                                    disabled="@(working || !mayManage)"
-                                                    title="@DiscardTitle"
-                                                    @onclick="() => OpenDiscardAsync(row.Id)">
-                                                Discard
-                                            </button>
-
-                                            <button type="button"
-                                                    class="ms-button ms-dead-letter-skip"
-                                                    disabled="@(working || !SupportsSkipping || !mayManage)"
-                                                    title="@SkipTitle"
-                                                    @onclick="() => OpenSkipAsync(row.EventSequence)">
-                                                Skip event
-                                            </button>
-                                        }
-
-                                        @* The third action the design names, and the only one that needs
-                                           a running daemon. It is offered when there is one to ask and
-                                           says why when there is not - "the daemon runs somewhere else"
-                                           is a supported deployment, not a fault (hard rule 11). *@
-                                        @if (Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
-                                        {
-                                            <button type="button"
-                                                    class="ms-button ms-dead-letter-rewind @(CanRewind(row.ProjectionName) ? string.Empty : "ms-btn-disabled")"
-                                                    disabled="@(working || !CanRewind(row.ProjectionName))"
-                                                    title="@RewindTitle(row.ProjectionName)"
-                                                    @onclick="() => OpenRewindAsync(row)">
-                                                Rewind subscription to this event
-                                            </button>
-                                        }
-
-                                        @* Once under the three buttons rather than three times: one
-                                           sentence is what the whole row of controls is refused by. *@
-                                        <WriteRefusal Refused="@(Capabilities.IsEnabled(StudioCapability.ManageDeadLetters) && !mayManage)"
-                                                      Capability="@nameof(StudioCapability.ManageDeadLetters)" />
-                                    </div>
-
-                                    @if (!string.IsNullOrWhiteSpace(actionError))
-                                    {
-                                        <ErrorAlert Message="@actionError" />
-                                    }
-                                </div>
+                        <tr class="ms-table-row" @key="row.Id">
+                            <td class="ms-table-cell ms-table-cell-mono">@row.ProjectionName</td>
+                            <td class="ms-table-cell ms-table-cell-mono">@row.ShardName</td>
+                            <td class="ms-table-cell ms-table-cell-mono">#@row.EventSequence.ToString(CultureInfo.InvariantCulture)</td>
+                            <td class="ms-table-cell ms-truncate" title="@row.ExceptionMessage">@row.ExceptionType</td>
+                            <td class="ms-table-cell"><TimeAgo Timestamp="row.Timestamp" /></td>
+                            <td class="ms-table-cell ms-table-cell-mono">@row.TenantId</td>
+                            <td class="ms-table-cell ms-table-cell-actions">
+                                <button type="button" class="ms-button ms-btn-sm" @onclick="() => ToggleAsync(row.Id, row.EventSequence)">
+                                    @(expanded == row.Id ? "Hide" : "Details")
+                                </button>
                             </td>
                         </tr>
+
+                        @if (expanded == row.Id)
+                        {
+                            <tr class="ms-table-row ms-dead-letter-detail" @key="@(row.Id.ToString() + "-detail")">
+                                <td class="ms-table-cell" colspan="@DetailColumnSpan">
+                                    <div class="ms-dead-letter-panel">
+                                        <pre class="ms-dead-letter-exception">@row.ExceptionType: @row.ExceptionMessage</pre>
+
+                                        <div>
+                                            <h3 class="ms-section-title">The event that failed</h3>
+                                            @if (loadingEvent)
+                                            {
+                                                <LoadingSpinner />
+                                            }
+                                            else if (offending is null)
+                                            {
+                                                <p class="ms-muted">
+                                                    Event #@row.EventSequence.ToString(CultureInfo.InvariantCulture) is no
+                                                    longer in <code>mt_events</code>, or this tenant cannot see it.
+                                                </p>
+                                            }
+                                            else
+                                            {
+                                                <EventCard Sequence="offending.Sequence"
+                                                           Version="offending.Version"
+                                                           EventType="@offending.EventType"
+                                                           DotNetType="@offending.DotNetType"
+                                                           Timestamp="offending.Timestamp"
+                                                           StreamId="@offending.StreamId"
+                                                           StreamHref="@StreamHref(offending.StreamId)"
+                                                           ShowStream="true"
+                                                           IsArchived="offending.IsArchived"
+                                                           IsSkipped="offending.IsSkipped"
+                                                           HasBinary="offending.HasBinary"
+                                                           BinaryLength="offending.BinaryLength"
+                                                           Json="@offending.Json"
+                                                           Metadata="offending.Metadata" />
+                                            }
+                                        </div>
+
+                                        <div class="ms-dead-letter-actions">
+                                            @if (!Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
+                                            {
+                                                <span class="ms-muted">
+                                                    Discard and Skip need
+                                                    <code>MartenStudioOptions.Capabilities.ManageDeadLetters</code>.
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                @* Disabled, never hidden, for a visitor the write policy
+                                                   refuses: "this studio can manage dead letters and your
+                                                   account may not" is a different fact from "this studio
+                                                   cannot manage dead letters". The service refuses regardless
+                                                   (AGENTS.md hard rule 5). *@
+                                                <button type="button"
+                                                        class="ms-button ms-button-danger ms-dead-letter-discard"
+                                                        disabled="@(working || !mayManage)"
+                                                        title="@DiscardTitle"
+                                                        @onclick="() => OpenDiscardAsync(row.Id)">
+                                                    Discard
+                                                </button>
+
+                                                <button type="button"
+                                                        class="ms-button ms-dead-letter-skip"
+                                                        disabled="@(working || !SupportsSkipping || !mayManage)"
+                                                        title="@SkipTitle"
+                                                        @onclick="() => OpenSkipAsync(row.EventSequence)">
+                                                    Skip event
+                                                </button>
+                                            }
+
+                                            @* The third action the design names, and the only one that needs
+                                               a running daemon. It is offered when there is one to ask and
+                                               says why when there is not - "the daemon runs somewhere else"
+                                               is a supported deployment, not a fault (hard rule 11). *@
+                                            @if (Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
+                                            {
+                                                <button type="button"
+                                                        class="ms-button ms-dead-letter-rewind @(CanRewind(row.ProjectionName) ? string.Empty : "ms-btn-disabled")"
+                                                        disabled="@(working || !CanRewind(row.ProjectionName))"
+                                                        title="@RewindTitle(row.ProjectionName)"
+                                                        @onclick="() => OpenRewindAsync(row)">
+                                                    Rewind subscription to this event
+                                                </button>
+                                            }
+
+                                            @* Once under the three buttons rather than three times: one
+                                               sentence is what the whole row of controls is refused by. *@
+                                            <WriteRefusal Refused="@(Capabilities.IsEnabled(StudioCapability.ManageDeadLetters) && !mayManage)"
+                                                          Capability="@nameof(StudioCapability.ManageDeadLetters)" />
+                                        </div>
+
+                                        @if (!string.IsNullOrWhiteSpace(actionError))
+                                        {
+                                            <ErrorAlert Message="@actionError" />
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
                     }
-                }
-            </tbody>
-        </table>
+                </tbody>
+            </table>
+        </TableScroll>
 
         <nav class="ms-pagination">
             @if (OffsetValue > 0)

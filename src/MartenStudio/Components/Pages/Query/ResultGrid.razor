@@ -22,7 +22,11 @@
 }
 else
 {
-    <div class="ms-query-grid-scroll">
+    @* Already a scroll container of its own, so it is not wrapped in a <TableScroll> - that would be two
+       nested scrollers, and the outer one would never scroll. It takes the shared class instead, which
+       is what carries the edge cue, the focus ring and the keyboard reachability every other data table
+       on the studio now has. *@
+    <div class="ms-query-grid-scroll ms-table-scroll" role="region" aria-label="Query results table" tabindex="0">
         <table class="ms-table ms-query-grid">
             <thead>
                 <tr>

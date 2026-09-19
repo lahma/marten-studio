@@ -309,6 +309,19 @@ public class OverviewTests
         page.FindAll(".ms-overview-health tbody tr")[2].ClassList.Should().NotContain("ms-row-warning");
     }
 
+    /// <summary>
+    /// The health table is four columns of shard names and numbers, and on a phone it was clipped at the
+    /// second with nothing to say so.
+    /// </summary>
+    [Fact]
+    public async Task The_health_table_is_in_a_scroll_region_rather_than_being_clipped()
+    {
+        using StudioComponentContext context = await ScopedAsync();
+        context.ProjectionData.WithProjection("DailySales");
+
+        context.Render<Overview>().ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
     [Fact]
     public async Task A_store_with_no_async_projection_says_so_rather_than_drawing_an_empty_table()
     {

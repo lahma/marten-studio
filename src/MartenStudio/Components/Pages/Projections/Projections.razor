@@ -214,123 +214,125 @@
         }
         else
         {
-            <table class="ms-table ms-projections-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Projection / shard</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Version</th>
-                        <th scope="col">Shards</th>
-                        <th scope="col">Progress</th>
-                        <th scope="col">Lag</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">Last advanced</th>
-                        <th scope="col">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (ProjectionInfo projection in OrderedProjections)
-                    {
-                        <ProjectionRow @key="projection.Name"
-                                       Name="@projection.Name"
-                                       Lifecycle="@projection.Lifecycle.ToString()"
-                                       IsAsync="projection.IsAsync"
-                                       SubscriptionType="@projection.SubscriptionType"
-                                       Version="projection.Version"
-                                       ImplementationType="@projection.ImplementationTypeName"
-                                       ShardCount="projection.ShardNames.Count">
-                            <Actions>
-                                @if (!Capabilities.ReadOnly)
-                                {
-                                    <button type="button"
-                                            class="ms-button ms-button-danger ms-btn-sm ms-projection-rebuild"
-                                            disabled="@(!RebuildEnabledFor(projection.Name))"
-                                            title="@RebuildTitleFor(projection.Name)"
-                                            @onclick="() => OpenRebuildAsync(projection.Name)">
-                                        Rebuild
-                                    </button>
-                                }
-                            </Actions>
-                        </ProjectionRow>
-
-                        @foreach (ShardProgress shard in ShardsOf(projection))
+            <TableScroll Label="Projections and shards table">
+                <table class="ms-table ms-projections-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Projection / shard</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">Version</th>
+                            <th scope="col">Shards</th>
+                            <th scope="col">Progress</th>
+                            <th scope="col">Lag</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Last advanced</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (ProjectionInfo projection in OrderedProjections)
                         {
-                            <tr class="ms-table-row ms-shard-row ms-shard-row-@shard.Severity.ToString().ToLowerInvariant()"
-                                @key="shard.ShardName"
-                                data-shard="@shard.ShardName">
-                                <td class="ms-table-cell ms-table-cell-mono ms-shard-name">
-                                    @shard.ShardName
-                                    @if (shard.IsLive)
-                                    {
-                                        <span class="ms-badge ms-shard-live" title="Pushed by the in-process daemon's tracker">live</span>
-                                    }
-                                    @if (shard.TenantId is { Length: > 0 })
-                                    {
-                                        <span class="ms-badge ms-shard-tenant">@shard.TenantId</span>
-                                    }
-                                </td>
-                                <td class="ms-table-cell" colspan="3">
-                                    @if (!shard.HasProgressRow)
-                                    {
-                                        <span class="ms-muted">never started</span>
-                                    }
-                                </td>
-                                <td class="ms-table-cell ms-shard-progress-cell">
-                                    <ShardProgressBar ShardName="@shard.ShardName"
-                                                      Sequence="shard.Sequence"
-                                                      HighWater="shard.HighWater"
-                                                      Severity="@shard.Severity.ToString().ToLowerInvariant()" />
-                                </td>
-                                <td class="ms-table-cell ms-table-cell-mono ms-shard-lag ms-lag-@shard.Severity.ToString().ToLowerInvariant()">
-                                    @shard.Lag.ToString("N0", CultureInfo.InvariantCulture)
-                                </td>
-                                <td class="ms-table-cell ms-shard-status">
-                                    <StateIndicator State="@(shard.AgentStatus ?? "Unknown")" />
-                                    @if (shard.PauseReason is { Length: > 0 })
-                                    {
-                                        <span class="ms-badge ms-chip-warning ms-shard-pause">@shard.PauseReason</span>
-                                    }
-                                    @if (shard.Failure is { Length: > 0 })
-                                    {
-                                        <span class="ms-text-danger ms-shard-failure" title="@shard.Failure">@shard.Failure</span>
-                                    }
-                                    @if (shard.SkippedCount is > 0)
-                                    {
-                                        <span class="ms-badge ms-shard-skipped" title="Skipped events become dead letters">
-                                            @shard.SkippedCount skipped
-                                        </span>
-                                    }
-                                </td>
-                                <td class="ms-table-cell ms-table-cell-mono ms-shard-last-advanced">
-                                    @(shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never")
-                                </td>
-                                <td class="ms-table-cell ms-table-cell-actions">
+                            <ProjectionRow @key="projection.Name"
+                                           Name="@projection.Name"
+                                           Lifecycle="@projection.Lifecycle.ToString()"
+                                           IsAsync="projection.IsAsync"
+                                           SubscriptionType="@projection.SubscriptionType"
+                                           Version="projection.Version"
+                                           ImplementationType="@projection.ImplementationTypeName"
+                                           ShardCount="projection.ShardNames.Count">
+                                <Actions>
                                     @if (!Capabilities.ReadOnly)
                                     {
-                                        @* Disabled, never hidden, while the coordinator is running: the
-                                           option has to stay discoverable, and the hover text - like the
-                                           hint on the card - says exactly what would make it work. *@
                                         <button type="button"
-                                                class="ms-btn ms-btn-sm ms-shard-start"
-                                                disabled="@(!AgentControlEnabled)"
-                                                title="@AgentControlTitle"
-                                                @onclick="() => StartAgentAsync(shard.ShardName)">
-                                            Start
-                                        </button>
-                                        <button type="button"
-                                                class="ms-btn ms-btn-sm ms-shard-stop"
-                                                disabled="@(!AgentControlEnabled)"
-                                                title="@AgentControlTitle"
-                                                @onclick="() => StopAgentAsync(shard.ShardName)">
-                                            Stop
+                                                class="ms-button ms-button-danger ms-btn-sm ms-projection-rebuild"
+                                                disabled="@(!RebuildEnabledFor(projection.Name))"
+                                                title="@RebuildTitleFor(projection.Name)"
+                                                @onclick="() => OpenRebuildAsync(projection.Name)">
+                                            Rebuild
                                         </button>
                                     }
-                                </td>
-                            </tr>
+                                </Actions>
+                            </ProjectionRow>
+
+                            @foreach (ShardProgress shard in ShardsOf(projection))
+                            {
+                                <tr class="ms-table-row ms-shard-row ms-shard-row-@shard.Severity.ToString().ToLowerInvariant()"
+                                    @key="shard.ShardName"
+                                    data-shard="@shard.ShardName">
+                                    <td class="ms-table-cell ms-table-cell-mono ms-shard-name">
+                                        @shard.ShardName
+                                        @if (shard.IsLive)
+                                        {
+                                            <span class="ms-badge ms-shard-live" title="Pushed by the in-process daemon's tracker">live</span>
+                                        }
+                                        @if (shard.TenantId is { Length: > 0 })
+                                        {
+                                            <span class="ms-badge ms-shard-tenant">@shard.TenantId</span>
+                                        }
+                                    </td>
+                                    <td class="ms-table-cell" colspan="3">
+                                        @if (!shard.HasProgressRow)
+                                        {
+                                            <span class="ms-muted">never started</span>
+                                        }
+                                    </td>
+                                    <td class="ms-table-cell ms-shard-progress-cell">
+                                        <ShardProgressBar ShardName="@shard.ShardName"
+                                                          Sequence="shard.Sequence"
+                                                          HighWater="shard.HighWater"
+                                                          Severity="@shard.Severity.ToString().ToLowerInvariant()" />
+                                    </td>
+                                    <td class="ms-table-cell ms-table-cell-mono ms-shard-lag ms-lag-@shard.Severity.ToString().ToLowerInvariant()">
+                                        @shard.Lag.ToString("N0", CultureInfo.InvariantCulture)
+                                    </td>
+                                    <td class="ms-table-cell ms-shard-status">
+                                        <StateIndicator State="@(shard.AgentStatus ?? "Unknown")" />
+                                        @if (shard.PauseReason is { Length: > 0 })
+                                        {
+                                            <span class="ms-badge ms-chip-warning ms-shard-pause">@shard.PauseReason</span>
+                                        }
+                                        @if (shard.Failure is { Length: > 0 })
+                                        {
+                                            <span class="ms-text-danger ms-shard-failure" title="@shard.Failure">@shard.Failure</span>
+                                        }
+                                        @if (shard.SkippedCount is > 0)
+                                        {
+                                            <span class="ms-badge ms-shard-skipped" title="Skipped events become dead letters">
+                                                @shard.SkippedCount skipped
+                                            </span>
+                                        }
+                                    </td>
+                                    <td class="ms-table-cell ms-table-cell-mono ms-shard-last-advanced">
+                                        @(shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never")
+                                    </td>
+                                    <td class="ms-table-cell ms-table-cell-actions">
+                                        @if (!Capabilities.ReadOnly)
+                                        {
+                                            @* Disabled, never hidden, while the coordinator is running: the
+                                               option has to stay discoverable, and the hover text - like the
+                                               hint on the card - says exactly what would make it work. *@
+                                            <button type="button"
+                                                    class="ms-btn ms-btn-sm ms-shard-start"
+                                                    disabled="@(!AgentControlEnabled)"
+                                                    title="@AgentControlTitle"
+                                                    @onclick="() => StartAgentAsync(shard.ShardName)">
+                                                Start
+                                            </button>
+                                            <button type="button"
+                                                    class="ms-btn ms-btn-sm ms-shard-stop"
+                                                    disabled="@(!AgentControlEnabled)"
+                                                    title="@AgentControlTitle"
+                                                    @onclick="() => StopAgentAsync(shard.ShardName)">
+                                                Stop
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
                         }
-                    }
-                </tbody>
-            </table>
+                    </tbody>
+                </table>
+            </TableScroll>
 
             <p class="ms-muted ms-projections-footnote">
                 Lag is the high water mark minus the shard's own sequence. Amber above
@@ -353,41 +355,43 @@
                     from here.
                 </p>
 
-                <table class="ms-table ms-unregistered-shards-table">
-                    <thead>
-                        <tr>
-                            <th scope="col">Shard</th>
-                            <th scope="col">Sequence</th>
-                            <th scope="col">Lag</th>
-                            <th scope="col">Last advanced</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (ShardProgress shard in view.UnregisteredShards)
-                        {
-                            <tr class="ms-table-row ms-unregistered-shard-row"
-                                @key="shard.ShardName"
-                                data-unregistered-shard="@shard.ShardName">
-                                <td class="ms-table-cell ms-table-cell-mono">
-                                    @shard.ShardName
-                                    @if (shard.TenantId is { Length: > 0 })
-                                    {
-                                        <span class="ms-badge ms-shard-tenant">@shard.TenantId</span>
-                                    }
-                                </td>
-                                <td class="ms-table-cell ms-table-cell-mono">
-                                    @shard.Sequence.ToString("N0", CultureInfo.InvariantCulture)
-                                </td>
-                                <td class="ms-table-cell ms-table-cell-mono ms-lag-@shard.Severity.ToString().ToLowerInvariant()">
-                                    @shard.Lag.ToString("N0", CultureInfo.InvariantCulture)
-                                </td>
-                                <td class="ms-table-cell ms-table-cell-mono">
-                                    @(shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never")
-                                </td>
+                <TableScroll Label="Unregistered shards table">
+                    <table class="ms-table ms-unregistered-shards-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Shard</th>
+                                <th scope="col">Sequence</th>
+                                <th scope="col">Lag</th>
+                                <th scope="col">Last advanced</th>
                             </tr>
-                        }
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            @foreach (ShardProgress shard in view.UnregisteredShards)
+                            {
+                                <tr class="ms-table-row ms-unregistered-shard-row"
+                                    @key="shard.ShardName"
+                                    data-unregistered-shard="@shard.ShardName">
+                                    <td class="ms-table-cell ms-table-cell-mono">
+                                        @shard.ShardName
+                                        @if (shard.TenantId is { Length: > 0 })
+                                        {
+                                            <span class="ms-badge ms-shard-tenant">@shard.TenantId</span>
+                                        }
+                                    </td>
+                                    <td class="ms-table-cell ms-table-cell-mono">
+                                        @shard.Sequence.ToString("N0", CultureInfo.InvariantCulture)
+                                    </td>
+                                    <td class="ms-table-cell ms-table-cell-mono ms-lag-@shard.Severity.ToString().ToLowerInvariant()">
+                                        @shard.Lag.ToString("N0", CultureInfo.InvariantCulture)
+                                    </td>
+                                    <td class="ms-table-cell ms-table-cell-mono">
+                                        @(shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never")
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
             </section>
         }
     }

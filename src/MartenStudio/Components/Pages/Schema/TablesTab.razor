@@ -41,58 +41,60 @@ else
         <code>pg_stat_user_tables</code>, which <code>pg_stat_reset()</code> and a crash both zero.
     </p>
 
-    <table class="ms-table">
-        <thead>
-            <tr>
-                <th>Table</th>
-                <th>Collection</th>
-                <th class="ms-num">Total</th>
-                <th class="ms-num">Heap</th>
-                <th class="ms-num">Indexes</th>
-                <th class="ms-num">Rows</th>
-                <th class="ms-num">Live</th>
-                <th class="ms-num">Dead</th>
-                <th class="ms-num">Seq scans</th>
-                <th class="ms-num">Index scans</th>
-                <th>Last vacuum</th>
-                <th>Last analyze</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (TableStats table in tables.Tables)
-            {
-                <tr class="ms-table-row" @key="table.QualifiedName">
-                    <td class="ms-table-cell ms-table-cell-mono">@table.QualifiedName</td>
-                    <td class="ms-table-cell">
-                        @if (table.CollectionAlias is { Length: > 0 } alias)
-                        {
-                            @* The Documents page arrives with packet P2; the link is written now so the
-                               scope travels with it when it does (plan D9). *@
-                            <a class="ms-collection-link" href="@CollectionLink(alias)" title="@table.DocumentTypeName">@alias</a>
-                        }
-                        else if (table.IsEventTable)
-                        {
-                            <span class="ms-index-flag ms-index-flag-info">event store</span>
-                        }
-                        else
-                        {
-                            <span class="ms-text-muted">-</span>
-                        }
-                    </td>
-                    <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.TotalBytes)</td>
-                    <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.HeapBytes)</td>
-                    <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.IndexBytes)</td>
-                    <td class="ms-table-cell ms-num ms-schema-estimate">@SchemaFormat.Estimate(table.EstimatedRows)</td>
-                    <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.LiveRows)</td>
-                    <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.DeadRows)</td>
-                    <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.SequentialScans)</td>
-                    <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.IndexScans)</td>
-                    <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastVacuum)</td>
-                    <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastAnalyze)</td>
+    <TableScroll Label="Schema tables table">
+        <table class="ms-table">
+            <thead>
+                <tr>
+                    <th>Table</th>
+                    <th>Collection</th>
+                    <th class="ms-num">Total</th>
+                    <th class="ms-num">Heap</th>
+                    <th class="ms-num">Indexes</th>
+                    <th class="ms-num">Rows</th>
+                    <th class="ms-num">Live</th>
+                    <th class="ms-num">Dead</th>
+                    <th class="ms-num">Seq scans</th>
+                    <th class="ms-num">Index scans</th>
+                    <th>Last vacuum</th>
+                    <th>Last analyze</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (TableStats table in tables.Tables)
+                {
+                    <tr class="ms-table-row" @key="table.QualifiedName">
+                        <td class="ms-table-cell ms-table-cell-mono">@table.QualifiedName</td>
+                        <td class="ms-table-cell">
+                            @if (table.CollectionAlias is { Length: > 0 } alias)
+                            {
+                                @* The Documents page arrives with packet P2; the link is written now so the
+                                   scope travels with it when it does (plan D9). *@
+                                <a class="ms-collection-link" href="@CollectionLink(alias)" title="@table.DocumentTypeName">@alias</a>
+                            }
+                            else if (table.IsEventTable)
+                            {
+                                <span class="ms-index-flag ms-index-flag-info">event store</span>
+                            }
+                            else
+                            {
+                                <span class="ms-text-muted">-</span>
+                            }
+                        </td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.TotalBytes)</td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.HeapBytes)</td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.IndexBytes)</td>
+                        <td class="ms-table-cell ms-num ms-schema-estimate">@SchemaFormat.Estimate(table.EstimatedRows)</td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.LiveRows)</td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.DeadRows)</td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.SequentialScans)</td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.IndexScans)</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastVacuum)</td>
+                        <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastAnalyze)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </TableScroll>
 }
 
 @code {

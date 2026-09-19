@@ -197,6 +197,28 @@ public class DocumentDetailPageTests
         Render(context).Find(".ms-doc-meta .ms-alert-info").TextContent.Should().Contain("read-only");
     }
 
+    /// <summary>
+    /// Both metadata tables scroll, and their value cells may break anywhere.
+    /// </summary>
+    /// <remarks>
+    /// A 40-character e-mail in a value cell has no break point of its own, so the cell asked for its own
+    /// width and the panel grew past its column - 1235px inside 1200px on a desktop and 534px inside
+    /// 334px on a phone, which gave the whole detail page a horizontal overflow it could not scroll.
+    /// </remarks>
+    [Fact]
+    public void The_metadata_tables_scroll_and_their_value_cells_may_break_anywhere()
+    {
+        using var context = new DocumentsComponentContext();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        var page = Render(context);
+
+        page.FindAll(".ms-doc-meta-table").Should().HaveCount(2, "the columns and the duplicated fields");
+        page.ShouldPutEveryTableInALabelledScrollRegion();
+        page.FindAll(".ms-doc-meta-table .ms-doc-meta-value").Should().NotBeEmpty(
+            "the value cells are the ones that carry an e-mail or an id and the ones allowed to wrap");
+    }
+
     [Fact]
     public void A_soft_deleted_document_says_so_without_hiding_itself()
     {

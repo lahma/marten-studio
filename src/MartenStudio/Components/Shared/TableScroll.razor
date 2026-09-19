@@ -1,0 +1,53 @@
+@*
+    One data table, in a scrollable region of its own.
+
+    `.ms-main` hides horizontal overflow, and that is right: the shell must never grow a page-wide
+    scrollbar because one table has twelve columns. What was wrong is that `.ms-table` is `width: 100%`
+    with no scroll container, so a table wider than the content column was simply *cut off* - no
+    scrollbar, no affordance, and no way at all to reach the columns on the right. The event-types table
+    measured 1691px inside a 1200px column; four of its six columns were unreachable.
+
+    So every data table goes in one of these. Three things make it a region rather than a `div` with
+    `overflow-x: auto` on it:
+
+      - `role="region"` with an `aria-label`, so a screen reader announces what is being scrolled rather
+        than dropping the visitor into an unnamed box. `Label` is required for that reason.
+      - `tabindex="0"`, because a region that only a mouse can scroll is content a keyboard cannot reach.
+        Browsers do not make a scroll container focusable on their own.
+      - The edge affordance in `marten-studio.css`, driven by the `data-scroll-start` / `data-scroll-end`
+        attributes `martenStudio.tableScroll` writes. It appears only while there is something hidden on
+        that side, so a table that fits shows nothing.
+
+    The component itself calls no JavaScript. The scrolling is the browser's own `overflow-x: auto` and
+    works with no script at all - the cue is the only part that needs one, and it is driven by a single
+    document-wide observer in marten-studio.js rather than by one interop registration per table. That
+    observer also adopts `.ms-table-wrap`, the documents list's own long-standing scroll container,
+    which lives in a component this packet does not own; a per-component registration could never have
+    reached it. Nothing here holds a `DotNetObjectReference`, so nothing here can leak one.
+
+    The wrapper deliberately draws no border of its own: `.ms-table` already has one, with its own
+    radius, and a second would read as a frame round a frame.
+*@
+
+<div class="ms-table-scroll" role="region" aria-label="@Label" tabindex="0">
+    @ChildContent
+</div>
+
+@code {
+    /// <summary>
+    /// What this region is, for the accessibility tree - "Event types table", "Activity table".
+    /// </summary>
+    /// <remarks>
+    /// Required, and not defaulted to something generic: a page with four scrollable regions on it
+    /// (Configuration has exactly that) announces four identical landmarks if they are all called
+    /// "Table", which is worse than useless. <see cref="Microsoft.AspNetCore.Components.EditorRequiredAttribute" />
+    /// makes leaving it out a build error in this repository, where warnings are errors.
+    /// </remarks>
+    [Parameter]
+    [EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>The table.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

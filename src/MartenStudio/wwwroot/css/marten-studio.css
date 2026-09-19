@@ -6859,4 +6859,173 @@ a.ms-event-chip:focus-visible {
         overflow: hidden;
         text-overflow: ellipsis;
     }
+
+   UX-1. Wide tables scroll instead of being clipped
+   ========================================================================== */
+
+/*
+   `.ms-main { overflow-x: hidden }` is right and stays: the shell must never grow a page-wide scrollbar
+   because one table has twelve columns. What was wrong is that every `<table class="ms-table">` was
+   `width: 100%` inside no scroll container at all, so a table wider than the content column was simply
+   cut off - no scrollbar, no cue, and no way to reach the columns on the right. Measured before this
+   section existed: the event-types table was 1691px inside a 1200px column, and four of its six columns
+   were unreachable at any viewport.
+
+   `<TableScroll>` wraps each one in a labelled, focusable region. `.ms-table-wrap` - the documents
+   list's own container, which has always scrolled but never said so - shares every rule here, which is
+   why the selector lists below name both.
+*/
+.ms-table-scroll,
+.ms-table-wrap {
+    overflow-x: auto;
+    max-width: 100%;
+
+    /* A trackpad flick that runs off the end of a table must scroll the table and not navigate the
+       browser back a page. */
+    overscroll-behavior-x: contain;
+}
+
+/*
+   A region only a mouse can scroll is content a keyboard cannot reach, which is what the `tabindex="0"`
+   on `<TableScroll>` answers. This is the ring that says where the focus went; `:focus-visible` rather
+   than `:focus`, so clicking a cell inside one does not draw a box round the whole table.
+*/
+.ms-table-scroll:focus-visible,
+.ms-table-wrap:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+}
+
+/*
+   The edge cue.
+
+   `data-scroll-start` / `data-scroll-end` are written by `martenStudio.tableScroll` in
+   marten-studio.js, and only while there is content hidden on that side - so a table that fits its
+   column shows nothing at all, and a table scrolled to its right-hand end shows the cue on the left
+   instead. With no script the attributes never appear, the region still scrolls, and this is inert.
+
+   It is a mask and not a gradient painted in `--ms-color-surface` for two reasons. A mask needs no
+   colour at all, so it is correct in both themes by construction rather than by remembering to use the
+   token - and a painted gradient would have to sit in a second wrapper element on top of the table,
+   which `.ms-table-wrap` has not got and cannot be given from here. The `#000` below is an opacity
+   stencil, not a colour: only its alpha channel is read.
+*/
+.ms-table-scroll[data-scroll-end="true"],
+.ms-table-wrap[data-scroll-end="true"] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+}
+
+.ms-table-scroll[data-scroll-start="true"],
+.ms-table-wrap[data-scroll-start="true"] {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 2.5rem);
+    mask-image: linear-gradient(to right, transparent 0, #000 2.5rem);
+}
+
+.ms-table-scroll[data-scroll-start="true"][data-scroll-end="true"],
+.ms-table-wrap[data-scroll-start="true"][data-scroll-end="true"] {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
+}
+
+/* --------------------------------------------------------------------------
+   UX-1. The columns that made the tables wide
+   -------------------------------------------------------------------------- */
+
+/*
+   Event types, `.NET type`. The cell holds `DisplayValueHelper.PrettyTypeName` of the assembly-qualified
+   name and carries the raw value in its `title`; the cap is what makes the `.ms-truncate` beside it do
+   anything, because `overflow: hidden` on a table cell needs a width to be hidden against and a `<td>`
+   has none of its own.
+*/
+.ms-type-name {
+    max-width: 40ch;
+}
+
+/*
+   Activity.
+
+   WHEN is one timestamp and must never be four lines of one: it wrapped `2026-09-19 10:13:47 +03:00`
+   onto four rows and made every row of the log 80px tall. MESSAGE and TARGET are the two cells that
+   carry a sentence, and squeezed to 90px they wrapped one word per line, so each gets a floor; they are
+   the cells allowed to wrap, which is why the region scrolls rather than the page.
+*/
+.ms-activity-when {
+    white-space: nowrap;
+}
+
+.ms-activity-message,
+.ms-activity-target {
+    min-width: 16rem;
+}
+
+/*
+   Store, database and tenant are the same three values on every row of a single-store host, which is
+   most of them, so they are one cell. The separators are dots rather than slashes because a database
+   identity frequently contains a slash already.
+*/
+.ms-activity-scope {
+    white-space: nowrap;
+}
+
+.ms-activity-scope-separator {
+    color: var(--ms-color-text-muted);
+}
+
+/*
+   Projections: the lifecycle note.
+
+   It sits in a `<th>`, and `.ms-table tbody th` uppercases and letter-spaces its contents, so the row
+   read `ORDERSUMMARY INLINE THE ASYNC DAEMON DOES NOT RUN THIS` as though the sentence were part of the
+   projection's name. It is a note: normal case, normal weight, and on its own line under the name. The
+   lifecycle badge stays beside the name, because that one *is* a label.
+*/
+.ms-projection-note {
+    display: block;
+    margin-left: 0;
+    margin-top: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+/*
+   Document detail, the metadata panel. A 40-character e-mail in a value cell has no break point, so the
+   cell asked for its own width and the panel grew past its column - 1235px inside 1200px on a desktop,
+   534px inside 334px on a phone. The value cells may break anywhere; the column names beside them still
+   may not.
+*/
+.ms-doc-meta-value {
+    overflow-wrap: anywhere;
+}
+
+/*
+   Overview: the event, activity and stream lists.
+
+   Each row is a flex line ending in a timestamp that must not wrap, and the id in the middle is a
+   36-character GUID with no break point in it. `.ms-truncate` was already on the id, and did nothing:
+   `overflow: hidden` needs a width to hide against and `flex: 1 1 auto` does not give it one when every
+   sibling is `flex: 0 0 auto`. `min-width: 0` lets the line shrink; the cap is what makes the ellipsis
+   appear rather than the page growing to 1230px inside a 334px column.
+*/
+.ms-overview-list-stream {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+   And the half of that the truncation cannot reach on its own.
+
+   `.ms-overview-columns` is a grid, and a grid item's `min-width` defaults to `auto`, which means "never
+   narrower than my own min-content". The recent-activity list holds whole SQL statements with no break
+   point in them, so that minimum was 1206px - the section refused to be 334px wide however much its
+   contents were willing to shrink, and the Overview was the one page whose phone layout still had a
+   horizontal overflow after every table on it was in a scroll region. `min-width: 0` lets the section be
+   the width of its track; the ellipsis above is then what the id and the statement do about it.
+*/
+.ms-overview-region {
+    min-width: 0;
 }

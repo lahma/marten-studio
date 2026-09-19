@@ -32,47 +32,54 @@
     }
     else
     {
-        <table class="ms-table">
-            <thead>
-                <tr>
-                    <th>When</th>
-                    <th>User</th>
-                    <th>Store</th>
-                    <th>Database</th>
-                    <th>Tenant</th>
-                    <th>Action</th>
-                    <th>Target</th>
-                    <th>Outcome</th>
-                    <th>Capability</th>
-                    <th>Message</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (StudioActionLogEntry entry in visible)
-                {
-                    @* Keyed by the ring's own sequence number, not by the entry: the record has value
-                       equality, and two identical actions a second apart would collide on one key and
-                       make the diff reuse the wrong row. *@
-                    <tr class="ms-table-row" @key="entry.Sequence">
-                        <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(entry.Timestamp)</td>
-                        <td class="ms-table-cell">@entry.User</td>
-                        <td class="ms-table-cell ms-table-cell-mono">@entry.StoreKey</td>
-                        <td class="ms-table-cell ms-table-cell-mono">@entry.DatabaseId</td>
-                        <td class="ms-table-cell ms-table-cell-mono">@(entry.TenantId ?? "all")</td>
-                        <td class="ms-table-cell">@entry.Action</td>
-                        <td class="ms-table-cell ms-table-cell-mono">@entry.Target</td>
-                        <td class="ms-table-cell">
-                            <span class="ms-state-indicator">
-                                <span class="ms-state-dot @(entry.Succeeded ? "ms-state-success" : "ms-state-error")" aria-hidden="true"></span>
-                                <span class="ms-state-label">@Outcome(entry)</span>
-                            </span>
-                        </td>
-                        <td class="ms-table-cell">@(entry.Capability ?? "-")</td>
-                        <td class="ms-table-cell">@entry.Message</td>
+        <TableScroll Label="Activity table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>When</th>
+                        <th>User</th>
+                        @* Store, database and tenant were three columns, and on a single-store host they
+                           carry the same three values on every row - 300px of the width of this table to
+                           say "default" a hundred times. One Scope cell says it in a third of the space
+                           and still says all of it. *@
+                        <th>Scope</th>
+                        <th>Action</th>
+                        <th>Target</th>
+                        <th>Outcome</th>
+                        <th>Capability</th>
+                        <th>Message</th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (StudioActionLogEntry entry in visible)
+                    {
+                        @* Keyed by the ring's own sequence number, not by the entry: the record has value
+                           equality, and two identical actions a second apart would collide on one key and
+                           make the diff reuse the wrong row. *@
+                        <tr class="ms-table-row" @key="entry.Sequence">
+                            <td class="ms-table-cell ms-table-cell-mono ms-activity-when">@State.FormatInSelectedTimeZone(entry.Timestamp)</td>
+                            <td class="ms-table-cell">@entry.User</td>
+                            <td class="ms-table-cell ms-table-cell-mono ms-activity-scope" title="@ScopeTitle(entry)">
+                                @* The separators are text and not `aria-hidden` decoration: hiding them
+                                   would leave a screen reader reading the three values run together as
+                                   one word, and a dot between them is how the cell reads out loud too. *@
+                                @entry.StoreKey<span class="ms-activity-scope-separator"> · </span>@entry.DatabaseId<span class="ms-activity-scope-separator"> · </span>@(entry.TenantId ?? "all")
+                            </td>
+                            <td class="ms-table-cell">@entry.Action</td>
+                            <td class="ms-table-cell ms-table-cell-mono ms-activity-target">@entry.Target</td>
+                            <td class="ms-table-cell">
+                                <span class="ms-state-indicator">
+                                    <span class="ms-state-dot @(entry.Succeeded ? "ms-state-success" : "ms-state-error")" aria-hidden="true"></span>
+                                    <span class="ms-state-label">@Outcome(entry)</span>
+                                </span>
+                            </td>
+                            <td class="ms-table-cell">@(entry.Capability ?? "-")</td>
+                            <td class="ms-table-cell ms-activity-message">@entry.Message</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
     }
 </div>
 
@@ -82,6 +89,16 @@
 
     /// <summary>Failures are recorded too, which is the point - so the outcome is a column, not a filter.</summary>
     private static string Outcome(StudioActionLogEntry entry) => entry.Succeeded ? "succeeded" : "failed";
+
+    /// <summary>
+    /// The three values behind the Scope cell, spelled out, for its <c>title</c>.
+    /// </summary>
+    /// <remarks>
+    /// The cell reads <c>default · localhost.marten · all</c>, which is short enough for the column and
+    /// ambiguous on its own about which dot-separated part is which. The title says.
+    /// </remarks>
+    private static string ScopeTitle(StudioActionLogEntry entry) =>
+        "Store " + entry.StoreKey + ", database " + entry.DatabaseId + ", tenant " + (entry.TenantId ?? "all");
 
     protected override async Task OnInitializedAsync()
     {

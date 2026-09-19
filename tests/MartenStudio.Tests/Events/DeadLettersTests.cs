@@ -389,6 +389,19 @@ public class DeadLettersTests
         context.EventData.DeadLetterQueries.Should().ContainSingle();
     }
 
+    /// <summary>
+    /// Seven columns, one of them an exception type, inside a 334px phone column: the list measured
+    /// 737px and was clipped at the fourth. It scrolls now.
+    /// </summary>
+    [Fact]
+    public async Task The_list_is_in_a_scroll_region_rather_than_being_clipped()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId)], false);
+
+        context.Render<DeadLetters>().ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
     private static AngleSharp.Dom.IElement SkipButton(IRenderedComponent<DeadLetters> page) =>
         page.FindAll(".ms-dead-letter-actions button")
             .Single(x => x.TextContent.Contains("Skip event", StringComparison.Ordinal));

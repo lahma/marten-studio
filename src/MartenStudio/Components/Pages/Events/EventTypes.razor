@@ -43,53 +43,60 @@
     }
     else
     {
-        <table class="ms-table">
-            <thead>
-                <tr>
-                    <th>Type</th>
-                    <th>.NET type</th>
-                    <th>Events</th>
-                    <th>First</th>
-                    <th>Last</th>
-                    <th>Notes</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (EventTypeInfo type in list.Types)
-                {
-                    <tr class="ms-table-row" @key="type.Name">
-                        <td class="ms-table-cell">
-                            <EventTypeChip Name="@type.Name"
-                                           DotNetTypeName="@type.DotNetTypeName"
-                                           IsRegistered="type.IsRegistered"
-                                           Href="@FeedHref(type.Name)" />
-                        </td>
-                        <td class="ms-table-cell ms-table-cell-mono ms-truncate">@(type.DotNetTypeName ?? "-")</td>
-                        <td class="ms-table-cell ms-table-cell-mono">
-                            @(type.Count is { } count ? count.ToString("N0", CultureInfo.InvariantCulture) : "not counted")
-                        </td>
-                        <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.FirstSequence)</td>
-                        <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.LastSequence)</td>
-                        <td class="ms-table-cell">
-                            @if (type.IsUnregistered)
-                            {
-                                <span class="ms-event-flag ms-event-flag-skipped"
-                                      title="Present in mt_events, absent from this store's configuration">
-                                    not registered
-                                </span>
-                            }
-                            @if (list.CountsLoaded && type.IsRegisteredButEmpty)
-                            {
-                                <span class="ms-event-flag ms-event-flag-archived"
-                                      title="Registered with the store, but no event of this type has ever been appended">
-                                    no events
-                                </span>
-                            }
-                        </td>
+        <TableScroll Label="Event types table">
+            <table class="ms-table">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>.NET type</th>
+                        <th>Events</th>
+                        <th>First</th>
+                        <th>Last</th>
+                        <th>Notes</th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (EventTypeInfo type in list.Types)
+                    {
+                        <tr class="ms-table-row" @key="type.Name">
+                            <td class="ms-table-cell">
+                                <EventTypeChip Name="@type.Name"
+                                               DotNetTypeName="@type.DotNetTypeName"
+                                               IsRegistered="type.IsRegistered"
+                                               Href="@FeedHref(type.Name)" />
+                            </td>
+                            @* The readable name in the cell, the assembly-qualified one Marten recorded in
+                               the title. A closed generic's real name is 170 characters of nested
+                               qualification and made this column 1691px wide on its own, which pushed four
+                               of the other five off the screen. *@
+                            <td class="ms-table-cell ms-table-cell-mono ms-truncate ms-type-name"
+                                title="@(type.DotNetTypeName ?? "-")">@(DisplayValueHelper.PrettyTypeName(type.DotNetTypeName) ?? "-")</td>
+                            <td class="ms-table-cell ms-table-cell-mono">
+                                @(type.Count is { } count ? count.ToString("N0", CultureInfo.InvariantCulture) : "not counted")
+                            </td>
+                            <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.FirstSequence)</td>
+                            <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.LastSequence)</td>
+                            <td class="ms-table-cell">
+                                @if (type.IsUnregistered)
+                                {
+                                    <span class="ms-event-flag ms-event-flag-skipped"
+                                          title="Present in mt_events, absent from this store's configuration">
+                                        not registered
+                                    </span>
+                                }
+                                @if (list.CountsLoaded && type.IsRegisteredButEmpty)
+                                {
+                                    <span class="ms-event-flag ms-event-flag-archived"
+                                          title="Registered with the store, but no event of this type has ever been appended">
+                                        no events
+                                    </span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
 
         @if (list.IsTruncated)
         {

@@ -236,6 +236,24 @@ public class RelationshipsPageTests
         relationships.LastScope!.StoreKey.Should().Be("second");
     }
 
+    /// <summary>
+    /// The relationships table is six columns wide and is the only form of the picture below 900px, so
+    /// it is the one that must not be clipped.
+    /// </summary>
+    /// <remarks>
+    /// Asserted against this one table rather than against every table on the page: the "Not on the
+    /// diagram" table lives in <c>Relationships.razor</c>, which this packet does not own.
+    /// </remarks>
+    [Fact]
+    public void The_relationships_table_is_in_a_scroll_region_rather_than_being_clipped()
+    {
+        using var context = NewContext(out _);
+
+        var page = context.Render<RelationshipsPage>();
+
+        page.Find("table.ms-graph-table").ShouldBeInsideALabelledScrollRegion();
+    }
+
     /// <summary>The "from → to" pair a title on the picture describes.</summary>
     private static string Pair(IElement title)
     {
