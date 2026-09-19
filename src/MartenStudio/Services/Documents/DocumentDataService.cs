@@ -575,6 +575,28 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             }
         }
 
+        // The three columns behind the badges the table draws beside an id - deleted, tenant, subclass -
+        // are selected whether or not a header shows them, for the same reason the sort column is: the
+        // page needs the value, not the column. They are deliberately not in the default column set any
+        // more (see DefaultColumns), and before this a collection whose chooser hid `mt_deleted` drew no
+        // `deleted` badge on a row that was deleted - the list quietly stopped saying the one thing about
+        // a row that it is not safe to leave out. Each is a physical column on the row already being
+        // read: no join, no JSON traversal, and nothing appended before `sortOrdinal` is settled above.
+        foreach (DocumentMetadataColumn badge in BadgeColumns)
+        {
+            if (!table.HasMetadata(badge))
+            {
+                continue;
+            }
+
+            var column = new DocumentColumn.Metadata(badge);
+
+            if (!queryColumns.Contains(column))
+            {
+                queryColumns.Add(column);
+            }
+        }
+
         IndexAdvice advice = IndexAdvisor.Evaluate(table, indexes, predicates, sort);
         SearchVerdict verdict = BuildVerdict(parse, advice, predicates);
 
@@ -1158,6 +1180,17 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     /// <summary>Descending, for the reason <see cref="DefaultSort"/> gives.</summary>
     internal static SortDirection DefaultDirection => SortDirection.Descending;
 
+    /// <summary>
+    /// The metadata columns a row's badges are read from. Selected on every list read, shown as a column
+    /// only if the chooser asks for one.
+    /// </summary>
+    internal static readonly DocumentMetadataColumn[] BadgeColumns =
+    [
+        DocumentMetadataColumn.IsSoftDeleted,
+        DocumentMetadataColumn.TenantId,
+        DocumentMetadataColumn.DocumentType,
+    ];
+
     /// <summary>Every column the chooser may offer for this table.</summary>
     internal static IReadOnlyList<DocumentColumnHeader> AvailableColumns(DocumentTableInfo table, bool registered)
     {
@@ -1190,18 +1223,61 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             return DocumentColumnKeys.ResolveAll(table, keys);
         }
 
-        // An unregistered table gets id, data and its metadata and nothing else: the other columns are
-        // only guesses about what somebody else's schema means (plan §3.2, "read-only always").
+        return DefaultColumns(available, context.IsRegistered);
+    }
+
+    /// <summary>
+    /// The columns a collection opens with, out of everything <see cref="AvailableColumns" /> offers:
+    /// the id, <c>mt_last_modified</c> where the store keeps it, and every physical duplicated field.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It used to be <em>every</em> column there is, and two of those earned their place on nobody's
+    /// screen. <c>mt_dotnet_type</c> is the same string on every row of a non-hierarchy collection —
+    /// 300 px of <c>MartenStudio.SampleDomain.Documents.Customer</c> repeated twenty-five times — and a
+    /// hierarchy already says which subclass a row is in the badge beside its id, so it is not the
+    /// default there either. <c>mt_version</c> is a GUID nobody reads at a glance. Between them they
+    /// pushed the id column down to a width that truncated a GUID in the middle, which for sequential
+    /// ids cut off exactly the part that differs.
+    /// </para>
+    /// <para>
+    /// Neither is gone: both are still in the chooser, both are still honoured by a pasted
+    /// <c>?cols=</c>, and a collection whose author wants them back gets a URL that says so. What
+    /// changed is what a collection looks like before anyone has chosen anything.
+    /// </para>
+    /// <para>
+    /// The row badges — deleted, tenant, subclass — do not come from this list. They are read off
+    /// <c>mt_deleted</c>, <c>tenant_id</c> and <c>mt_doc_type</c>, which are selected whether or not a
+    /// header shows them; see the badge columns in <c>ListCollectionAsync</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="available">Every column the chooser may offer, in chooser order.</param>
+    /// <param name="registered">
+    /// Whether a mapping claims this table. An unregistered one gets no duplicated columns: they are only
+    /// guesses about what somebody else's schema means (plan §3.2, "read-only always").
+    /// </param>
+    internal static List<DocumentColumnHeader> DefaultColumns(
+        IReadOnlyList<DocumentColumnHeader> available,
+        bool registered)
+    {
+        ArgumentNullException.ThrowIfNull(available);
+
         List<DocumentColumnHeader> defaults = [];
 
         foreach (DocumentColumnHeader header in available)
         {
-            if (header.Kind == DocumentColumnKind.Duplicated && !context.IsRegistered)
+            var wanted = header.Column switch
             {
-                continue;
-            }
+                DocumentColumn.Id => true,
+                DocumentColumn.Metadata metadata => metadata.Column == DocumentMetadataColumn.LastModified,
+                DocumentColumn.Duplicated => registered,
+                _ => false,
+            };
 
-            defaults.Add(header);
+            if (wanted)
+            {
+                defaults.Add(header);
+            }
         }
 
         return defaults;

@@ -58,40 +58,60 @@
                 <span class="ms-mono ms-doc-detail-id">@detail.Id</span>
             </h1>
 
+            @* Two groups rather than nine equal-weight buttons. The secondary group is where this
+               document goes next - a query, its stream, a file, the clipboard - and the primary group,
+               pushed to the right, is the pair that changes it and the pair that leaves it. Download
+               stays in the header although the JSON viewer below offers one too, because the viewer's
+               whole toolbar disappears while the editor is open; the three copies do not, because the
+               menu is where they belong. Nine buttons, six controls. *@
             <div class="ms-doc-detail-actions">
-                <button type="button" class="ms-btn ms-btn-sm" @onclick='() => CopyAsync(detail.Json, "JSON")'>Copy JSON</button>
-                <button type="button" class="ms-btn ms-btn-sm" @onclick='() => CopyAsync(detail.Id, "id")'>Copy id</button>
-                <button type="button" class="ms-btn ms-btn-sm" title="A C# record that would deserialize this document" @onclick="() => CopyRecordAsync(detail)">Copy as C# record</button>
-                <button type="button" class="ms-btn ms-btn-sm" @onclick="() => DownloadAsync(detail)">Download</button>
-                <a class="ms-btn ms-btn-sm" href="@QueryHref(detail)">Open in Query</a>
+                <div class="ms-doc-detail-actions-group ms-doc-detail-actions-secondary">
+                    <a class="ms-btn ms-btn-sm" href="@QueryHref(detail)">Open in Query</a>
 
-                @if (streamExists)
-                {
-                    <a class="ms-btn ms-btn-sm" href="@DocumentLinks.ToStream(Options.Value, State.ActiveScope, detail.Id)" title="An event stream with this id exists">View stream</a>
-                }
+                    @if (streamExists)
+                    {
+                        <a class="ms-btn ms-btn-sm" href="@DocumentLinks.ToStream(Options.Value, State.ActiveScope, detail.Id)" title="An event stream with this id exists">View stream</a>
+                    }
 
-                <span class="ms-doc-detail-nav">
-                    <a class="ms-btn ms-btn-sm @(previousId is null ? "ms-btn-disabled" : null)"
-                       href="@(previousId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, previousId, SafeFrom))"
-                       aria-disabled="@(previousId is null ? "true" : "false")"
-                       title="The previous document on the list you came from">◀</a>
-                    <a class="ms-btn ms-btn-sm @(nextId is null ? "ms-btn-disabled" : null)"
-                       href="@(nextId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, nextId, SafeFrom))"
-                       aria-disabled="@(nextId is null ? "true" : "false")"
-                       title="The next document on the list you came from">▶</a>
-                </span>
+                    <button type="button" class="ms-btn ms-btn-sm" @onclick="() => DownloadAsync(detail)">Download</button>
 
-                <DocumentWriteActions Writable="@IsWritable(detail)"
-                                      SoftDeleteType="@IsSoftDeleteType(detail)"
-                                      IsDeleted="detail.IsDeleted"
-                                      Editing="editing"
-                                      Busy="writing"
-                                      EditRefusal="@editRefusal"
-                                      MayEdit="mayEdit"
-                                      MayDelete="mayDelete"
-                                      OnEdit="StartEditAsync"
-                                      OnDelete="OpenDeleteDialog"
-                                      OnUndelete="UndeleteAsync" />
+                    <DocumentCopyMenu Label="@detail.Id"
+                                      Id="@detail.Id"
+                                      OnCopyJson='() => CopyAsync(detail.Json, "JSON")'
+                                      OnCopyId='() => CopyAsync(detail.Id, "id")'
+                                      OnCopyRecord="() => CopyRecordAsync(detail)" />
+                </div>
+
+                <div class="ms-doc-detail-actions-group ms-doc-detail-actions-primary">
+                    @* Chevrons rather than the ◀ ▶ glyphs. Those are text, so they inherited the
+                       button's font and rendered at a different weight in every browser, and a screen
+                       reader read them out as "black left-pointing triangle". The SVG is decorative and
+                       the aria-label is the accessible name. *@
+                    <span class="ms-doc-detail-nav">
+                        <a class="ms-btn ms-btn-sm ms-btn-icon @(previousId is null ? "ms-btn-disabled" : null)"
+                           href="@(previousId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, previousId, SafeFrom))"
+                           aria-disabled="@(previousId is null ? "true" : "false")"
+                           aria-label="Previous document"
+                           title="The previous document on the list you came from">@ChevronLeft</a>
+                        <a class="ms-btn ms-btn-sm ms-btn-icon @(nextId is null ? "ms-btn-disabled" : null)"
+                           href="@(nextId is null ? "#" : DocumentLinks.ToDocument(Options.Value, State.ActiveScope, Alias, nextId, SafeFrom))"
+                           aria-disabled="@(nextId is null ? "true" : "false")"
+                           aria-label="Next document"
+                           title="The next document on the list you came from">@ChevronRight</a>
+                    </span>
+
+                    <DocumentWriteActions Writable="@IsWritable(detail)"
+                                          SoftDeleteType="@IsSoftDeleteType(detail)"
+                                          IsDeleted="detail.IsDeleted"
+                                          Editing="editing"
+                                          Busy="writing"
+                                          EditRefusal="@editRefusal"
+                                          MayEdit="mayEdit"
+                                          MayDelete="mayDelete"
+                                          OnEdit="StartEditAsync"
+                                          OnDelete="OpenDeleteDialog"
+                                          OnUndelete="UndeleteAsync" />
+                </div>
             </div>
         </div>
 
@@ -148,6 +168,14 @@
 </div>
 
 @code {
+    /// <summary>The previous-document glyph. Constant markup only — no icon library, ever (hard rule 3).</summary>
+    private static readonly MarkupString ChevronLeft = new(
+        """<svg class="ms-btn-glyph" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="11,3 5,9 11,15" /></svg>""");
+
+    /// <summary>The next-document glyph.</summary>
+    private static readonly MarkupString ChevronRight = new(
+        """<svg class="ms-btn-glyph" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="7,3 13,9 7,15" /></svg>""");
+
     private CancellationTokenSource? cts;
     private DocumentDetailResult? result;
     private RelatedModel related = RelatedModel.None;

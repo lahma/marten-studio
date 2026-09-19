@@ -8,6 +8,14 @@
     The tri-state is deliberately three states and not a checkbox. "Live only", "live and deleted" and
     "deleted only" are three different questions, and a collection where rows exist but are hidden is
     exactly the state somebody is trying to see when they look for a document that is not there.
+
+    The grammar hint is a popover rather than a <details>. A <details> here was a flex sibling of the
+    search box, so opening it took a 170-px column out of the row: the input shrank to about 150 px, the
+    help wrapped into six ragged bullets and the whole toolbar reflowed - the help got in the way of the
+    thing it was helping with. A popover opens in the top layer, which is outside the flex row and
+    outside the page's layout entirely, so the input keeps 100 % of its width whether the help is open or
+    not. It is the same native mechanism CapabilityBanner and JsonCopyMenu use: no positioning library,
+    no third-party menu component (AGENTS.md hard rule 3), and Escape and light dismiss for free.
 *@
 
 <div class="ms-doc-toolbar">
@@ -24,17 +32,44 @@
         {
             <button type="button" class="ms-btn ms-btn-sm" @onclick="ClearAsync">Clear</button>
         }
-        <details class="ms-doc-search-help">
-            <summary>Syntax</summary>
-            <ul class="ms-doc-search-help-list">
-                <li><code>id:&lt;value&gt;</code> — the primary key</li>
-                <li><code>field = value</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>!=</code> — dotted paths allowed</li>
-                <li><code>field ~ text</code> — contains, case-insensitive</li>
-                <li><code>@("@>") {"status":"open"}</code> — jsonb containment, the one filter a GIN index serves</li>
-                <li><code>is:deleted</code>, <code>is:not-deleted</code>, <code>tenant:acme</code></li>
-                <li>anything else — a substring of the whole document</li>
-            </ul>
-        </details>
+        <button type="button"
+                class="ms-btn ms-btn-sm ms-doc-syntax-button"
+                popovertarget="@HelpId"
+                aria-controls="@HelpId"
+                aria-expanded="@(helpOpen ? "true" : "false")"
+                title="What this search box understands">Syntax</button>
+
+        @* `ontoggle` is how the button's aria-expanded stays true: a popover can be closed by Escape or
+           by a click anywhere else, neither of which this component would otherwise hear about. The
+           event fires once per transition and the transitions strictly alternate, so flipping the flag
+           is exact rather than a guess. *@
+        <div id="@HelpId"
+             popover="auto"
+             class="ms-doc-syntax-popover"
+             role="note"
+             aria-label="Search syntax"
+             @ontoggle="ToggleHelp">
+            <p class="ms-doc-syntax-title">Search syntax</p>
+            <dl class="ms-doc-syntax-list">
+                <dt><code>id:&lt;value&gt;</code></dt>
+                <dd>the primary key</dd>
+
+                <dt><code>field = value</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>!=</code></dt>
+                <dd>a comparison; dotted paths allowed</dd>
+
+                <dt><code>field ~ text</code></dt>
+                <dd>contains, case-insensitive</dd>
+
+                <dt><code>@("@>") {"status":"open"}</code></dt>
+                <dd>jsonb containment, the one filter a GIN index serves</dd>
+
+                <dt><code>is:deleted</code>, <code>is:not-deleted</code>, <code>tenant:acme</code></dt>
+                <dd>the row's own state rather than its contents</dd>
+
+                <dt>anything else</dt>
+                <dd>a substring of the whole document</dd>
+            </dl>
+        </div>
     </form>
 
     <div class="ms-doc-toolbar-controls">
@@ -89,8 +124,15 @@
     private static readonly DeletedFilter[] DeletedOptions =
         [DeletedFilter.Exclude, DeletedFilter.Include, DeletedFilter.Only];
 
+    /// <summary>
+    /// The DOM id the Syntax button's <c>popovertarget</c> points at. A constant rather than a generated
+    /// id: there is exactly one toolbar on the page.
+    /// </summary>
+    internal const string HelpId = "ms-doc-search-help-popover";
+
     private string draft = string.Empty;
     private string? lastSearch;
+    private bool helpOpen;
 
     /// <summary>The collection being browsed, for labels.</summary>
     [Parameter]
@@ -212,6 +254,13 @@
        a value the server then re-renders, so a fast typist loses characters to the race between the two -
        and a search box is exactly where people type fast. The form submits on Enter, and the browser fires
        `change` before `submit`, so the term that is searched for is still the term on screen. *@
+
+    /// <summary>
+    /// Keeps the Syntax button's <c>aria-expanded</c> in step with the popover the browser is opening and
+    /// closing on its own. Synchronous and void-returning, which is a Blazor handler and not an
+    /// <c>async void</c> (AGENTS.md hard rule 6).
+    /// </summary>
+    private void ToggleHelp() => helpOpen = !helpOpen;
 
     private async Task SubmitAsync() => await OnSearch.InvokeAsync(draft);
 
