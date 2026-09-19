@@ -1,0 +1,146 @@
+@using MartenStudio.Services
+
+@* The two pickers a person sets once and then leaves alone.
+
+   They are behind a gear rather than in the header row because at 390 px the header was four rows
+   deep before the page title appeared: the tenant picker, the capability chip, a time-zone select
+   wide enough to hold "FLE Standard Time (local)", and a theme select. Only the first of those is
+   context somebody needs while they read the page - which store, which database, which tenant this
+   screen is about - so that is the one that stays, and these two move.
+
+   One behaviour at every width, deliberately. A control that is in the header on a laptop and behind
+   a gear on a phone is two things to learn and two shapes to test; this is one.
+
+   The popover's contents are rendered whatever its state. The `popover` attribute hides them with the
+   user agent's own `display: none`, which is what a browser - and Playwright - operates against, and
+   rendering them only while open would mean the selects do not exist until something has clicked the
+   button, and would rebuild them over the circuit on every open. *@
+
+<button type="button"
+        class="ms-button ms-btn-icon ms-preferences-button"
+        popovertarget="ms-preferences-popover"
+        aria-controls="ms-preferences-popover"
+        aria-expanded="@(open ? "true" : "false")"
+        aria-label="Preferences"
+        title="Preferences: theme, time zone">
+    @* Hand-drawn, like every other icon here: no icon library, ever (AGENTS.md hard rule 3).
+
+       A toothed cog, and deliberately not the circle-and-spokes glyph NavMenu draws for
+       Configuration: that one reads as a *sun* at 18 px - which is the worst thing to put on the
+       button that opens the theme picker, since it looks like it says "light" - and it is already
+       taken, by a nav entry three centimetres away. Six square teeth about (9, 9), outer radius 8,
+       root 5.4, each tooth 32 degrees wide with a radial drop into a 28 degree gap. Six and not
+       eight: at this size eight teeth close up into a ring. *@
+    <svg class="ms-preferences-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor"
+         stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M16.69 6.79 16.69 11.21 14.19 10.49 12.88 12.75 14.75 14.56 10.94 16.76 10.31 14.24 7.69 14.24 7.06 16.76 3.25 14.56 5.12 12.75 3.81 10.49 1.31 11.21 1.31 6.79 3.81 7.51 5.12 5.25 3.25 3.44 7.06 1.24 7.69 3.76 10.31 3.76 10.94 1.24 14.75 3.44 12.88 5.25 14.19 7.51 Z" />
+        <circle cx="9" cy="9" r="2.5" />
+    </svg>
+</button>
+
+@* Native popover, anchored to the button above: no positioning library and no third-party menu
+   component, the same mechanism CapabilityBanner already uses. *@
+<div id="ms-preferences-popover"
+     popover="auto"
+     class="ms-popover ms-preferences-popover"
+     @ontoggle="OnToggled">
+    <p class="ms-popover-title">Preferences</p>
+
+    @* Every picker carries its own `aria-label` as well as its `<label for>`. The label is painted
+       here - a popover has room the header did not - but the `aria-label` stays, because it is the
+       accessible name no stylesheet can take away and these two ids are what the browser suite and
+       the component tests drive. *@
+    <div class="ms-header-control ms-preferences-control">
+        <label class="ms-header-control-label" for="ms-timezone-select">Time zone</label>
+        <select id="ms-timezone-select"
+                class="ms-select ms-header-select"
+                aria-label="Time zone"
+                value="@SelectedTimeZoneId"
+                @onchange="TimeZoneChanged">
+            @foreach (TimeZoneInfo timeZone in timeZones)
+            {
+                <option value="@timeZone.Id" selected="@(timeZone.Id == SelectedTimeZoneId)">@TimeZoneLabel(timeZone)</option>
+            }
+        </select>
+    </div>
+
+    <div class="ms-header-control ms-preferences-control">
+        <label class="ms-header-control-label" for="ms-theme-select">Theme</label>
+        <select id="ms-theme-select"
+                class="ms-select ms-header-select"
+                aria-label="Theme"
+                value="@SelectedTheme"
+                @onchange="ThemeChanged">
+            <option value="system" selected="@(SelectedTheme == "system")">System</option>
+            <option value="light" selected="@(SelectedTheme == "light")">Light</option>
+            <option value="dark" selected="@(SelectedTheme == "dark")">Dark</option>
+        </select>
+    </div>
+
+    <p class="ms-popover-footnote">
+        Both are remembered by this browser alone. Neither changes what the studio reads, only how it
+        is drawn and which zone its timestamps are rendered in.
+    </p>
+</div>
+
+@code {
+    private readonly IReadOnlyList<TimeZoneInfo> timeZones = TimeZoneInfo
+        .GetSystemTimeZones()
+        .OrderBy(static tz => tz.Id, StringComparer.Ordinal)
+        .ToList();
+
+    private bool open;
+
+    /// <summary><c>system</c>, <c>light</c> or <c>dark</c>, as the shell currently has it.</summary>
+    [Parameter]
+    public string SelectedTheme { get; set; } = "system";
+
+    /// <summary>The time zone every timestamp in the studio is rendered in.</summary>
+    [Parameter]
+    public string SelectedTimeZoneId { get; set; } = TimeZoneInfo.Utc.Id;
+
+    /// <summary>Raised with the picked theme.</summary>
+    /// <remarks>
+    /// The handlers stay in <c>StudioLayout</c> rather than moving here with the markup. They write
+    /// the browser's stored preference and they are one half of the race that
+    /// <c>StudioState.PreferenceVersion</c> exists to settle - a visitor who moves a picker while the
+    /// first-render read of <c>localStorage</c> is still in flight - and that logic belongs with the
+    /// read it is racing, which is the layout's.
+    /// </remarks>
+    [Parameter]
+    public EventCallback<ChangeEventArgs> ThemeChanged { get; set; }
+
+    /// <summary>Raised with the picked time zone id.</summary>
+    [Parameter]
+    public EventCallback<ChangeEventArgs> TimeZoneChanged { get; set; }
+
+    /// <summary>
+    /// Keeps <c>aria-expanded</c> honest.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A popover closes four ways - the button again, Escape, a click outside it, and another popover
+    /// opening - and only one of them is a click on anything this component renders. The platform's
+    /// own <c>toggle</c> event is the single signal that covers all four, so it is what the attribute
+    /// is driven from; a button-click handler would say "expanded" to a screen reader long after the
+    /// menu had been dismissed with Escape.
+    /// </para>
+    /// <para>
+    /// It flips rather than reads a state, because Blazor surfaces <c>ontoggle</c> as a plain
+    /// <see cref="EventArgs" /> with no <c>newState</c> on it. That is exact: the event fires once per
+    /// state change and the popover starts closed.
+    /// </para>
+    /// <para>
+    /// Synchronous, and deliberately not <c>async void</c> under another name (AGENTS.md hard rule 6):
+    /// there is nothing here to await.
+    /// </para>
+    /// </remarks>
+    private void OnToggled() => open = !open;
+
+    private static string TimeZoneLabel(TimeZoneInfo timeZone)
+    {
+        return string.Equals(timeZone.Id, TimeZoneInfo.Local.Id, StringComparison.Ordinal)
+            ? timeZone.Id + " (local)"
+            : timeZone.Id;
+    }
+}

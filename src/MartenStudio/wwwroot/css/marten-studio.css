@@ -417,33 +417,45 @@ body {
 /*
    The header on a phone.
 
-   At 390 px the five uppercase labels - STORE, DATABASE, TENANT, TIME ZONE, THEME - are wider than the
-   controls they name, so each one broke onto a line of its own and the header became a ragged block
-   four rows deep. Below 900 px they become visually hidden and the controls sit on one row.
+   At 390 px the uppercase labels - STORE, DATABASE, TENANT - are wider than the controls they name, so
+   each one broke onto a line of its own. Below 900 px they become visually hidden and the pickers sit
+   on one row. (TIME ZONE and THEME were two more of them; those two pickers are behind the gear now,
+   because a header whose first four rows are preferences shows the page title below the fold.)
 
-   Hidden labels rather than an overflow menu, deliberately. The scope *is* the context of every screen
-   in the studio - which store, which database, which tenant this page is about - and a context you have
-   to open a menu to read is a context people stop checking, which is exactly how somebody deletes a
-   document in the wrong tenant. A menu would also be a new popover, new keyboard handling and a new
-   component; this is a media query over markup that already exists.
+   Hidden labels rather than an overflow menu, deliberately - for the *scope*. The scope is the context
+   of every screen in the studio - which store, which database, which tenant this page is about - and a
+   context you have to open a menu to read is a context people stop checking, which is exactly how
+   somebody deletes a document in the wrong tenant. Theme and time zone are not context: they are set
+   once and then left alone, which is why they are the two that moved (UX-5).
 
    Nothing is lost to a screen reader: every control carries an `aria-label` of its own, so its
    accessible name is the same whether the label is painted or not, and the `<label for>` stays in the
    accessibility tree either way.
+
+   `nowrap`, not `wrap`: with the preferences behind one 32 px button, the header's two regions fit a
+   390 px row, and letting them wrap is what let one long option text push the header to 190 px again.
+   The pickers shrink instead - `min-width: 0` below - and a `select` clips its own text rather than
+   the header gaining a row.
 */
 @media (max-width: 900px) {
     .ms-header {
-        flex-wrap: wrap;
-        row-gap: var(--ms-space-sm);
+        flex-wrap: nowrap;
+        gap: var(--ms-space-sm);
         padding-inline: var(--ms-space-md);
     }
 
-    .ms-header-left,
-    .ms-header-right {
-        flex: 1 1 auto;
+    .ms-header-left {
+        flex: 0 1 auto;
         min-width: 0;
         gap: var(--ms-space-sm);
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+    }
+
+    .ms-header-right {
+        flex: 0 0 auto;
+        min-width: 0;
+        gap: var(--ms-space-sm);
+        flex-wrap: nowrap;
     }
 
     .ms-header-control {
@@ -583,10 +595,15 @@ body {
     margin: 0;
 }
 
+/* The actions drop below the title when there is no room for both, rather than being drawn over it:
+   at 390 px the projections screen painted "live + polling" and a Refresh button across the word
+   "Projections" (UX-5). The title takes the space that is left and gives it up first. */
 .ms-page-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm) var(--ms-space-md);
     margin-bottom: var(--ms-space-lg);
 }
 
@@ -595,15 +612,21 @@ body {
     font-weight: var(--ms-font-weight-bold);
     color: var(--ms-color-text);
     margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 /* ==========================================================================
    7. STAT CARDS
    ========================================================================== */
 
+/* 160px, not 200px: the Overview's six tiles are one thought, and at 1200px of content a 200px track
+   fitted five of them and left the sixth alone on a second row. Six 160px tracks and five 16px gaps
+   are 1040px, so they hold one line from about 1100px of content down (UX-5). `auto-fit` rather than
+   `auto-fill` so a row that is short of items still fills its line rather than leaving empty tracks. */
 .ms-stat-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: var(--ms-space-md);
     margin-bottom: var(--ms-space-lg);
 }
@@ -2013,15 +2036,45 @@ body {
         width: var(--ms-sidebar-collapsed-width);
     }
 
-    .ms-sidebar-brand-text,
-    .ms-nav-link-text,
+    /* A section heading is a caption for the group below it and names no control, so it is the one
+       thing here that really does go away on a 56 px rail. */
     .ms-sidebar-section {
         display: none;
+    }
+
+    /*
+       The rail's names are hidden the sr-only way, never with `display: none`.
+
+       `display: none` takes an element out of the accessibility tree as well as out of the layout, and
+       these spans *are* the links' accessible names: a screen-reader user at 1000 px heard ten links
+       called nothing at all (UX-5). Clipped to a 1px box, the name survives and the icon still centres,
+       because the span is out of flow. The `title` that NavMenu renders is the other half - the
+       tooltip - for somebody who can see the icons and cannot tell them apart.
+    */
+    .ms-sidebar-brand-text,
+    .ms-nav-link-text {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border-width: 0;
     }
 
     .ms-nav-link {
         justify-content: center;
         padding: var(--ms-space-sm);
+        /* So the clipped name above is positioned against the link it names rather than against the
+           page, which would put a 1px box at the top of the document on every rail entry. */
+        position: relative;
+    }
+
+    .ms-sidebar-brand {
+        justify-content: center;
+        position: relative;
     }
 
     .ms-stat-grid {
@@ -2062,11 +2115,19 @@ body {
 }
 
 /* The phone header: the labels are hidden by the rule in section 5, so the pickers are all one height
-   and there is no baseline left to align to. */
+   and there is no baseline left to align to. `nowrap` and `min-width: 0` are what hold the header to
+   one row - a store, a database and a tenant picker shrink and ellipsise rather than stacking, so the
+   scope stays readable at a glance instead of costing three rows above the page title (UX-5). */
 @media (max-width: 900px) {
     .ms-scope-selector {
         gap: var(--ms-space-sm);
         align-items: center;
+        flex-wrap: nowrap;
+        min-width: 0;
+    }
+
+    .ms-scope-selector .ms-header-control {
+        min-width: 0;
     }
 }
 
@@ -6803,6 +6864,51 @@ a.ms-event-chip:focus-visible {
 .ms-event-card-stream {
     display: inline-flex;
     align-items: baseline;
+
+   UX-5. The shell on narrow screens
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The preferences popover
+
+   Theme and time zone, behind one gear in the header, at every width. The
+   popover itself is `.ms-popover` - the same native mechanism and the same
+   box as the capability list - so what is here is only what differs: its own
+   anchor, a column of labelled pickers rather than a list, and the labels
+   put back, because a popover has the room a 390 px header did not.
+   -------------------------------------------------------------------------- */
+
+.ms-preferences-button {
+    anchor-name: --ms-preferences-anchor;
+    flex-shrink: 0;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-preferences-button:hover {
+    color: var(--ms-color-text);
+}
+
+.ms-preferences-icon {
+    width: 18px;
+    height: 18px;
+}
+
+/* Higher specificity than `.ms-popover:popover-open`, which names the capability chip's anchor. */
+.ms-popover.ms-preferences-popover:popover-open {
+    position-anchor: --ms-preferences-anchor;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-preferences-popover {
+    width: min(22rem, calc(100vw - 2 * var(--ms-space-md)));
+}
+
+.ms-preferences-control {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     gap: var(--ms-space-xs);
     min-width: 0;
 }
@@ -6887,6 +6993,67 @@ a.ms-event-chip:focus-visible {
     }
 
     .ms-doc-detail-actions-group .ms-btn {
+
+/*
+   Section 5 hides `.ms-header-control-label` below 900 px, which is right for the pickers that are
+   still in the header row and wrong for these two: they are in a box of their own now, where the
+   label is the only thing that says which select is which. Undone here rather than by narrowing the
+   rule up there, so the phone-header rule stays the one thing it is about.
+*/
+.ms-preferences-popover .ms-header-control-label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+}
+
+.ms-preferences-popover .ms-header-select {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.ms-preferences-popover .ms-popover-footnote {
+    margin-top: 0;
+}
+
+/* --------------------------------------------------------------------------
+   The Overview's lists on a phone
+
+   Four parts in a row - a sequence number, a type, an id and a time - where
+   the id is a 36-character GUID or a whole SQL statement. Below 640 px the id
+   takes a line of its own with the timestamp beside it, so the row is two
+   readable lines instead of one that is clipped by `.ms-main`'s own
+   `overflow-x: hidden` and says nothing about what it cut off.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+    /*
+       Nearly the whole line, less room for the timestamp that shares it.
+
+       The two numbers are measured rather than guessed, and both conditions are independent of how
+       wide the list is - which is why one basis covers 390 px and 640 px alike. A break happens where
+       it is meant to when the basis is wider than what is left of line one, which is
+       `reserve < sequence + type + gaps`: the narrowest of those measured at 390 px is 106 px. The
+       timestamp still fits beside the id when `reserve >= timestamp + gap`, which is 52 px. 4.5rem is
+       72 px, in the middle of that window. At 7rem the events list broke both ways in one panel -
+       "#59 order_shipped" over its id for the longer type names, and the timestamp alone on a line of
+       its own for the shorter ones.
+    */
+    .ms-overview-list-stream {
+        flex: 1 1 calc(100% - 4.5rem);
+        min-width: 0;
+        /* Inert while the markup also says `ms-truncate`, and the belt for the day it does not: the
+           activity list's target is a whole SQL statement, which has no break opportunity of its own
+           and would otherwise leave the panel. */
+        overflow-wrap: anywhere;
+    }
+
+    .ms-overview-list-seq,
+    .ms-overview-list-name {
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;

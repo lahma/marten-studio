@@ -38,7 +38,11 @@
                     }
                     else
                     {
-                        <a class="ms-nav-link @NavClass(item.Route)" href="@Link(item.Route)">
+                        @* `title` as well as the label: below 1024 px the rail is 56 px wide and the
+                           label is visually hidden (the sr-only technique, so the link keeps its
+                           accessible name), which leaves a sighted mouse user with ten icons and no
+                           way to read what they are. The tooltip is that way. *@
+                        <a class="ms-nav-link @NavClass(item.Route)" href="@Link(item.Route)" title="@item.Label">
                             @Icon(item.Icon)
                             <span class="ms-nav-link-text">@item.Label</span>
                             @if (BadgeFor(item.Badge) is { } badge)

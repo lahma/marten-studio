@@ -241,17 +241,71 @@ internal sealed class StudioPage : IAsyncDisposable
     /// Proves the circuit is live by making the server re-render, and puts the page in a known theme.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The theme picker is the cheapest universal interactivity probe the studio has: it is in the layout
     /// so it is on every page, its <c>@onchange</c> runs on the server, and the result is an attribute on
     /// an element the browser can read back. A prerendered page has the picker and does nothing when it
     /// is moved.
+    /// </para>
+    /// <para>
+    /// It lives inside the preferences popover now (UX-5), so this opens the popover first and dismisses
+    /// it afterwards. That is not politeness: a closed <c>popover</c> is <c>display: none</c> by the user
+    /// agent's own stylesheet, and Playwright's actionability check for <c>SelectOptionAsync</c> waits for
+    /// a visible element — against the closed menu it does not fail, it hangs for the full timeout. And
+    /// the dismissal is what keeps the menu out of every screenshot the capture run takes afterwards.
+    /// </para>
     /// </remarks>
     /// <param name="theme"><c>system</c>, <c>light</c> or <c>dark</c>.</param>
     public async Task SetThemeAsync(string theme)
     {
+        await OpenPreferencesAsync();
+
         await Page.SelectOptionAsync("#ms-theme-select", theme);
         await Page.Locator(".ms-studio[data-theme='" + theme + "']").WaitForAsync(
             new LocatorWaitForOptions { Timeout = 15_000 });
+
+        await ClosePreferencesAsync();
+    }
+
+    /// <summary>Opens the preferences popover, or leaves it open if it already is.</summary>
+    public async Task OpenPreferencesAsync()
+    {
+        ILocator popover = Page.Locator("#ms-preferences-popover");
+
+        if (!await popover.IsVisibleAsync())
+        {
+            await Page.ClickAsync(".ms-preferences-button");
+        }
+
+        await popover.WaitForAsync(new LocatorWaitForOptions
+        {
+            State = WaitForSelectorState.Visible,
+            Timeout = 15_000,
+        });
+    }
+
+    /// <summary>
+    /// Dismisses the preferences popover with the key a person would use.
+    /// </summary>
+    /// <remarks>
+    /// Escape rather than <c>hidePopover()</c>, because light dismissal is the path that has to keep
+    /// working: it is the one the component's <c>aria-expanded</c> is driven from, and the one a scripted
+    /// close would never exercise.
+    /// </remarks>
+    public async Task ClosePreferencesAsync()
+    {
+        ILocator popover = Page.Locator("#ms-preferences-popover");
+
+        if (await popover.IsVisibleAsync())
+        {
+            await Page.Keyboard.PressAsync("Escape");
+        }
+
+        await popover.WaitForAsync(new LocatorWaitForOptions
+        {
+            State = WaitForSelectorState.Hidden,
+            Timeout = 15_000,
+        });
     }
 
     /// <summary>Writes a screenshot of the whole page to <paramref name="path" />.</summary>
