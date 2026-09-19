@@ -44,6 +44,32 @@ public class DeadLettersTests
         page.TextOfAll(".ms-event-chip").Should().Contain("OrderShipped");
     }
 
+    /// <summary>
+    /// One event, and its toolbar used to be taller than its body. The controls are behind the card's
+    /// own "Event actions", where the reader who wants Raw or Download can still reach them without the
+    /// screen's real actions - Discard, Skip, Rewind - competing with seven of the viewer's.
+    /// </summary>
+    [Fact]
+    public async Task The_offending_event_is_shown_compact_with_its_controls_one_press_away()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId)], false);
+        context.EventData.EventBySequence = FakeEventDataService.Event(42, type: "OrderShipped");
+
+        IRenderedComponent<DeadLetters> page = context.Render<DeadLetters>();
+
+        await page.Find("tbody tr td.ms-table-cell-actions button").ClickAsync(new());
+
+        page.FindAll(".ms-event-card").Should().ContainSingle();
+        page.FindAll(".ms-json-toolbar").Should().BeEmpty();
+        page.Find(".ms-event-card-body .ms-json-tree").TextContent.Should().Contain("total");
+
+        await page.Find(".ms-event-card-more").ClickAsync(new());
+
+        page.FindAll(".ms-json-toolbar").Should().ContainSingle();
+        page.Find(".ms-event-card-more").GetAttribute("aria-expanded").Should().Be("true");
+    }
+
     [Fact]
     public async Task An_event_that_is_no_longer_there_says_so_rather_than_showing_nothing()
     {

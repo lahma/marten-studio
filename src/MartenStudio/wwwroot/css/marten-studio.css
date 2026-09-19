@@ -6777,6 +6777,38 @@ a.ms-event-chip:focus-visible {
 .ms-doc-detail-actions-group {
     display: flex;
     flex-wrap: wrap;
+
+   UX-4. Event cards carry one toolbar's worth of controls, not one toolbar each
+   ========================================================================== */
+
+/* A feed is fifty of these. Everything here is about the card being a glance rather than a document:
+   the identity on one line, the metadata on one line, the body compact, and the viewer's own toolbar
+   only on the card someone has asked for it on. Nothing overrides a rule outside the event card except
+   the two noted at the bottom. */
+
+.ms-event-card {
+    padding: var(--ms-space-xs) var(--ms-space-md);
+
+    /* A card body is a summary, not a document: one step tighter than the standalone viewer, which
+       still reads as code at 13px. */
+    --ms-json-row-height: 18px;
+}
+
+/* The identity line now carries the stream and two actions as well, so it wraps on a smaller gap. */
+.ms-event-card-header {
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+}
+
+/* The stream is part of "which event is this", not a paragraph of its own. */
+.ms-event-card-stream {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-event-card-actions {
+    display: inline-flex;
     align-items: center;
     gap: var(--ms-space-xs);
 }
@@ -7028,4 +7060,98 @@ a.ms-event-chip:focus-visible {
 */
 .ms-overview-region {
     min-width: 0;
+
+/* Sized like .ms-json-icon-button, because it is the same kind of control in the same places. */
+.ms-event-card-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text-secondary);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.ms-event-card-action:hover:not(:disabled) {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-event-card-action:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+.ms-event-card-action:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* The one card whose toolbar is open says so without relying on the toolbar being in view. */
+.ms-event-card-action[aria-expanded="true"] {
+    border-color: var(--ms-color-primary);
+    background-color: var(--ms-color-primary-light);
+    color: var(--ms-color-primary);
+}
+
+.ms-event-card-action-copied {
+    border-color: var(--ms-color-success);
+    color: var(--ms-color-success);
+}
+
+.ms-event-card-action-icon {
+    width: 14px;
+    height: 14px;
+}
+
+/* A chip is a hint; the whole value is in its title. The assembly-qualified mt_dotnet_type used to be
+   the widest thing on the page and pushed the row to two lines on every card. */
+.ms-event-card .ms-event-meta .ms-event-meta-value {
+    max-width: 24ch;
+}
+
+/* Re-stated so this section, which is appended after the small-screen block, cannot undo it. */
+@media (max-width: 720px) {
+    .ms-event-card .ms-event-meta .ms-event-meta-value {
+        max-width: 20ch;
+    }
+}
+
+/* Without the toolbar the tree is the top of the body, so it wears the border and the corners the
+   toolbar was carrying; with it, the existing rules stand. */
+.ms-event-json-bare .ms-json-tree {
+    border-top: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+}
+
+.ms-event-json-bare .ms-code-body {
+    border-radius: var(--ms-radius-md);
+}
+
+/* The tree sits directly under the card's own padding; it does not need a second inset of its own. */
+.ms-event-card .ms-json-tree {
+    padding: 0;
+}
+
+/* ---------------------------------------------------------------------------------------------
+   Two rules outside .ms-event-card*, both about the column a card lives in.
+   --------------------------------------------------------------------------------------------- */
+
+/* Cards sit closer now that each one is a third shorter; the rail and the borders do the separating. */
+.ms-timeline {
+    gap: var(--ms-space-sm);
+}
+
+/* Stacked at 720px the timeline pane kept sizing to its widest JSON row, because .ms-stream-panes
+   aligns to flex-start and the pane - unlike .ms-time-travel - never said how wide it is. That is why
+   a stream's cards were 436px wide in a 286px column. */
+@media (max-width: 720px) {
+    .ms-stream-timeline-pane {
+        width: 100%;
+    }
 }

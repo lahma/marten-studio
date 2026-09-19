@@ -58,6 +58,54 @@ public class FeedTests
             .And.Contain(x => x!.StartsWith("events/feed?types=OrderPlaced", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The feed is fifty cards, and a card used to embed the JSON viewer's whole toolbar - Tree/Raw,
+    /// Expand all, Collapse all, the depth stepper, Copy JSON and Download - so the page carried seven
+    /// controls per event and stood 14 919px tall. The controls arrive on the one card somebody presses
+    /// "Event actions" on, and nowhere else.
+    /// </summary>
+    [Fact]
+    public async Task The_feed_renders_no_viewer_toolbar_until_a_card_is_asked_for_one()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Feed = new EventPage(
+            [FakeEventDataService.Event(9), FakeEventDataService.Event(8), FakeEventDataService.Event(7)],
+            7,
+            false);
+
+        IRenderedComponent<Feed> page = context.Render<Feed>();
+
+        page.FindAll(".ms-event-card").Should().HaveCount(3);
+        page.FindAll(".ms-json-toolbar").Should().BeEmpty();
+
+        // Two icon buttons per card, and the bodies are still on the page.
+        page.FindAll(".ms-event-card-copy").Should().HaveCount(3);
+        page.FindAll(".ms-event-card-more").Should().HaveCount(3);
+        page.FindAll(".ms-event-card-body .ms-json-tree").Should().HaveCount(3);
+
+        await page.FindAll(".ms-event-card-more")[1].ClickAsync(new());
+
+        page.FindAll(".ms-json-toolbar").Should().ContainSingle("only the card that was asked opens one");
+        page.FindAll(".ms-event-card-more[aria-expanded='true']").Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// The stream used to own a row of its own under the identity line, which cost a line on every card.
+    /// It is still a link to the stream, and it is still not a click on the card.
+    /// </summary>
+    [Fact]
+    public async Task A_feed_card_names_its_stream_on_the_identity_line()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Feed = new EventPage([FakeEventDataService.Event(7, streamId: "order-17")], 7, false);
+
+        IRenderedComponent<Feed> page = context.Render<Feed>();
+
+        page.FindAll(".ms-event-card .ms-event-card-header").Should().ContainSingle();
+        page.Find(".ms-event-card-header .ms-event-card-stream a").GetAttribute("href").Should()
+            .StartWith("events/streams/s?id=order-17");
+    }
+
     [Fact]
     public async Task A_binary_payload_is_reported_in_the_feed_too()
     {

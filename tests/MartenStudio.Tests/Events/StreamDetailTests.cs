@@ -98,6 +98,70 @@ public class StreamDetailTests
         page.TextOfAll(".ms-event-meta-key").Should().NotContain("headers");
     }
 
+    /// <summary>
+    /// Selecting a version is a selection, not a request for the viewer's controls. The timeline
+    /// repeated the whole JSON toolbar on every version, and auto-opening the selected card's would only
+    /// move it around: the toolbar is per card and arrives when "Event actions" is pressed on that card.
+    /// </summary>
+    [Fact]
+    public async Task Selecting_a_card_does_not_open_its_viewer_toolbar()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.StreamWindows.Enqueue(new EventPage(
+            [FakeEventDataService.Event(1, version: 1), FakeEventDataService.Event(2, version: 2)], 2, false));
+
+        IRenderedComponent<StreamDetail> page = Render(context);
+
+        page.FindAll(".ms-event-card").Should().HaveCount(2);
+        page.FindAll(".ms-json-toolbar").Should().BeEmpty();
+
+        await page.FindAll(".ms-event-card")[0].ClickAsync(new());
+
+        page.FindAll(".ms-timeline-item-selected").Should().ContainSingle();
+        page.FindAll(".ms-json-toolbar").Should().BeEmpty("selecting a version is not asking for Raw and Download");
+
+        await page.FindAll(".ms-event-card-more")[0].ClickAsync(new());
+
+        page.FindAll(".ms-json-toolbar").Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// The card's own buttons are not the card: in a timeline the card is the version selector, so
+    /// copying a body or opening its controls must not move the selection.
+    /// </summary>
+    [Fact]
+    public async Task A_cards_own_buttons_do_not_select_the_version_under_them()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.StreamWindows.Enqueue(new EventPage(
+            [FakeEventDataService.Event(1, version: 1), FakeEventDataService.Event(2, version: 2)], 2, false));
+
+        IRenderedComponent<StreamDetail> page = Render(context);
+
+        await page.FindAll(".ms-event-card-copy")[0].ClickAsync(new());
+        await page.FindAll(".ms-event-card-more")[0].ClickAsync(new());
+
+        page.FindAll(".ms-timeline-item-selected").Should().BeEmpty();
+        context.CurrentUri.Should().NotContain("&v=", "nothing was selected, so nothing went into the URL");
+    }
+
+    /// <summary>A stream's own timeline says nothing about the stream on every card in it.</summary>
+    [Fact]
+    public async Task A_timeline_card_does_not_repeat_the_stream_id()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.StreamWindows.Enqueue(new EventPage(
+            [FakeEventDataService.Event(1, version: 1)], 1, false));
+
+        IRenderedComponent<StreamDetail> page = Render(context);
+
+        page.FindAll(".ms-event-card .ms-event-card-stream").Should().BeEmpty();
+        page.FindAll(".ms-event-card .ms-event-card-header").Should().ContainSingle();
+    }
+
     [Fact]
     public async Task A_skipped_event_wears_the_flag()
     {
