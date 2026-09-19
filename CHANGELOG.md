@@ -1,3 +1,48 @@
+# 0.2.0
+
+- A user-interface pass, measured in a real browser at 1440×900, 1280×720 and 390×844 in both themes.
+  Every screen was captured before and after, and every table, header and card below was found by
+  measuring the content column rather than by looking at it.
+- Wide tables scroll instead of being cut off. The shell hides horizontal overflow so it never grows a
+  scrollbar of its own, and no table had a scroll container of its own, so anything wider than the
+  content column was simply clipped with no cue: Event types lost four of its six columns at 1440
+  because the .NET type column printed the assembly-qualified generic name, Schema → Tables lost its
+  scan counters, Activity wrapped a timestamp onto four lines, and on a phone every table was cut.
+  Every data table now sits in a labelled, keyboard-reachable scroll region (`role="region"`, a name,
+  a tab stop) with an edge fade that appears only on the side that hides content and never over the
+  focus ring. The .NET type column shows the C# name (`Compacted<DailySales>`) with the recorded name
+  in its tooltip; Activity's store, database and tenant became one Scope column and its timestamp no
+  longer wraps; the inline-projection note is no longer shouted in capitals by the header cell it sits
+  in. A convention test fails the build if a table is ever added outside a region again.
+- The streams list says each id once, on one line. A row used to render the stream id as a truncated
+  link and again as a full-width copy box, then wrap its timestamp, so 25 streams took 1 726 px and the
+  table overflowed a laptop. The id is one untruncated link with an icon-only copy button beside it
+  (`CopyButton`, which announces "Copied" to a screen reader), the per-row feed shortcut is gone (the
+  stream page has it), and rows are one line.
+- Event cards carry one toolbar's worth of controls, not one toolbar each. Every card in the feed, the
+  stream timeline and the dead-letter detail embedded a full JSON toolbar — seven controls per event,
+  59 events, a 14 919 px page. A card is compact by default, with a copy button and a "more" toggle
+  that reveals the full viewer toolbar for the one event being investigated; the stream moved onto the
+  identity line and the `mt_dotnet_type` chip shows the short type name. The feed is 8 499 px, a card
+  is 165 px instead of 287, and a phone card no longer overflows its column. Closing that toolbar also
+  clears a search it can no longer show.
+- The documents browser. The search-syntax help was a flex sibling of the search box and opening it
+  shrank the input to 150 px while everything reflowed; it is a popover under the search row now and
+  moves nothing. The default list columns are the id, last modified, every duplicated field and the
+  size: `mt_version` and `mt_dotnet_type` (the same value on every row of a non-hierarchy collection)
+  stay in the column chooser and in `?cols=` but are off by default, and a GUID id is never
+  truncated. The list query always reads the badge columns, so a pasted `?cols=id` shows a soft-deleted
+  row as deleted rather than live. The detail header went from nine same-weight buttons to six
+  controls: Open in Query, Download, a Copy menu (JSON, id, C# record), chevron previous/next with real
+  names, Edit and Delete.
+- The shell on narrow screens. The phone header stacked tenant, capability chip, time zone and theme
+  on four rows; time zone and theme are preferences and live behind one gear button in a Preferences
+  popover at every width, so the header is one 56 px row on a phone with the scope pickers still in it.
+  The collapsed rail hid its link labels with `display: none`, which also removed their accessible
+  names; they are visually hidden now and every link carries a tooltip. Page-header actions wrap under
+  a long title instead of over it, the six Overview tiles fit one row, and the Overview's lists wrap
+  on a phone.
+
 # 0.1.1
 
 - The detail view of a document whose type has a `[Version]` property no longer answers 500 and

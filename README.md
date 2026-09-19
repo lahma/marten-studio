@@ -28,7 +28,7 @@ byte-for-byte the application it was.
 | | |
 |---|---|
 | [![Overview, light](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/overview-light.png)](docs/screenshots/overview-light.png) | [![Overview, dark](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/overview-dark.png)](docs/screenshots/overview-dark.png) |
-| Overview — one card per store, with tenancy, stream identity and the databases behind it | The same page in the dark theme, which follows the picker in the header |
+| Overview — one card per store, with tenancy, stream identity and the databases behind it | The same page in the dark theme, which follows the theme picker behind the header's gear button |
 | [![Document list](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/documents-list.png)](docs/screenshots/documents-list.png) | [![Document detail](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/document-detail.png)](docs/screenshots/document-detail.png) |
 | Documents — the collections rail, the search grammar and its index verdict | One document: JSON on the left, everything the row's metadata columns say on the right |
 | [![Stream detail](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/stream-detail.png)](docs/screenshots/stream-detail.png) | [![Dead letters](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/dead-letters.png)](docs/screenshots/dead-letters.png) |
