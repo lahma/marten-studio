@@ -30,6 +30,21 @@ public class StreamsPageTests
     }
 
     /// <summary>
+    /// Six columns of ids and timestamps: on a phone the table is wider than the page, and a table with
+    /// no scroll region of its own is simply cut off at the content box's edge (UX-1).
+    /// </summary>
+    [Fact]
+    public async Task The_table_is_in_a_labelled_scroll_region_rather_than_being_clipped()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.Streams = new StreamPage([FakeEventDataService.Stream(StreamId)], null, false);
+
+        IRenderedComponent<Streams> page = context.Render<Streams>();
+
+        page.ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
+    /// <summary>
     /// The id used to be drawn twice in every row - as a truncated link and again as a whole
     /// <c>CopyBadge</c> - which is what took 60 % of the row's width and pushed the table off the
     /// content box at 1280. It is one element now, not truncated, with the whole value in its title.

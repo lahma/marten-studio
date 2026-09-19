@@ -4841,19 +4841,6 @@ a.ms-event-chip:focus-visible {
     font-size: var(--ms-font-size-sm);
 }
 
-.ms-doc-search-help summary {
-    cursor: pointer;
-    font-size: var(--ms-font-size-xs);
-    color: var(--ms-color-text-secondary);
-}
-
-.ms-doc-search-help-list {
-    margin: var(--ms-space-xs) 0 0;
-    padding-left: var(--ms-space-md);
-    font-size: var(--ms-font-size-xs);
-    color: var(--ms-color-text-secondary);
-}
-
 .ms-doc-toolbar-controls {
     display: flex;
     flex-wrap: wrap;

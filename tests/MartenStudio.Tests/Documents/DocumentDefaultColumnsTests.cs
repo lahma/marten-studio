@@ -309,4 +309,30 @@ public class DocumentDefaultColumnsTests
         page.TextOfAll(".ms-column-chooser-label")
             .Should().Contain(["id", "version", "last modified", ".NET type", "email"]);
     }
+
+    /// <summary>
+    /// The list's own scroll container (<c>.ms-table-wrap</c>) predates the shared region every other
+    /// table sits in; it has to be announced and keyboard-reachable the same way (UX-1).
+    /// </summary>
+    [Fact]
+    public void The_customer_list_sits_in_a_labelled_scroll_region()
+    {
+        DocumentTableInfo table = Customer();
+        IReadOnlyList<DocumentColumnHeader> available = Available(table);
+        List<DocumentColumnHeader> defaults = DocumentDataService.DefaultColumns(available, registered: true);
+
+        using var context = new DocumentsComponentContext();
+        context.Data.Rail = FakeDocuments.Rail();
+        context.Data.Page = FakeDocuments.Page(
+            rows: [FakeDocuments.Row("74737563-6d6f-7265-0000-000000000001")],
+            columns: defaults) with
+        {
+            AvailableColumns = available,
+            SortKey = string.Empty,
+        };
+
+        var page = context.Render<ListPage>(parameters => parameters.Add(x => x.Alias, "customer"));
+
+        page.ShouldPutEveryTableInALabelledScrollRegion();
+    }
 }
