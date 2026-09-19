@@ -44,7 +44,7 @@ byte-for-byte the application it was.
 dotnet add package MartenStudio
 ```
 
-One package reference. The studio brings `Marten` (floor `9.35.0`) and
+One package reference. The studio brings `Marten` (floor `9.31.0`) and
 `Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`, three `.js` files and an MSBuild target, no
 runtime assembly) and takes everything else — Blazor, SignalR, authorization, endpoint routing — from
 the shared framework, so it pins no ASP.NET Core patch onto your application. Target framework:

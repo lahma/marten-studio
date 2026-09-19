@@ -42,6 +42,13 @@
   names; they are visually hidden now and every link carries a tooltip. Page-header actions wrap under
   a long title instead of over it, the six Overview tiles fit one row, and the Overview's lists wrap
   on a phone.
+- The `Marten` floor is `9.31.0` rather than `9.35.0`, so a host already on 9.31 takes the package
+  without moving forward; NuGet resolves the higher of the two, so a newer host is unaffected. Every
+  stable 9.x was probed downward through restore, build and both test suites: 9.30 and below create
+  the extended progression columns only when the flag is on (Marten #5309 ungates them in 9.31, and
+  the studio reads them), 9.22.4 to 9.23 have no source-generated dispatcher for the aggregate time
+  travel, 9.22.3 and below lack `ShardName.HighWaterMarkFor`, 9.19 and below lack `ShardFailure`, and
+  9.0.0 restores with a critical advisory. The walls are recorded in the package budget.
 
 # 0.1.1
 
