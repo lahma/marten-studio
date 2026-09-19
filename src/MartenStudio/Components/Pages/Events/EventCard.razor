@@ -155,14 +155,31 @@
                       DownloadFileName="@($"{EventType}-{Sequence.ToString(CultureInfo.InvariantCulture)}.json")" />
         }
     </div>
+
+    @* What the copy did, said out loud. The icon swap is invisible to a screen reader and the title is
+       not announced on activation; the button's aria-label is deliberately constant, because a control
+       whose accessible name changes under the reader is a different control to them. So the outcome
+       goes in a live region instead - the same shape JsonView's own announcer has. *@
+    <span class="ms-event-card-live ms-sr-only" role="status" aria-live="polite">@_announcement</span>
 </div>
 
 @code {
     /// <summary>The <c>mt_events</c> column whose value is an assembly-qualified .NET type name.</summary>
     private const string DotNetTypeColumn = "mt_dotnet_type";
 
+    /// <summary>How deep <see cref="Shorten" /> will walk a nested generic before it gives up.</summary>
+    /// <remarks>
+    /// This walks a string that came out of a database column, not a <see cref="Type" />. Marten writes
+    /// it, but nothing stops a hand-written or corrupted <c>mt_dotnet_type</c> from nesting
+    /// <c>[[ ]]</c> as far as the column allows, and a recursive walk over attacker-shaped text with no
+    /// bound is a stack overflow that takes the process down - not the circuit, the process. Sixteen is
+    /// past anything a real event type reaches and past anything a reader could still make sense of.
+    /// </remarks>
+    private const int MaxTypeNameDepth = 16;
+
     private bool _expanded;
     private bool _copied;
+    private string _announcement = string.Empty;
 
     /// <summary>The global event sequence.</summary>
     [Parameter]
@@ -314,36 +331,34 @@
     /// <c>DailySales</c> for a <c>Compacted&lt;DailySales&gt;</c>, which names the wrong type.
     /// </remarks>
     private static string ShortDotNetTypeName(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? string.Empty : Shorten(value.Trim());
+        string.IsNullOrWhiteSpace(value) ? string.Empty : Shorten(value.Trim(), 0);
 
-    private static string Shorten(string name)
+    private static string Shorten(string name, int depth)
     {
-        // The assembly qualification is everything after the first comma outside a [ ] group.
-        int depth = 0;
-        int end = name.Length;
-        for (int i = 0; i < name.Length; i++)
+        string type = TypePartOf(name);
+
+        if (depth >= MaxTypeNameDepth)
         {
-            char c = name[i];
-            if (c == '[')
-            {
-                depth++;
-            }
-            else if (c == ']')
-            {
-                depth--;
-            }
-            else if (c == ',' && depth == 0)
-            {
-                end = i;
-                break;
-            }
+            // Past the bound the name is not readable anyway, so answer the outermost segment and stop
+            // walking: it is the one thing in there that still tells a reader what they are looking at.
+            int cut = type.IndexOf('[', StringComparison.Ordinal);
+            return LastSegment(cut < 0 ? type : type[..cut]);
         }
 
-        string type = name[..end].Trim();
+        // An array's rank specifiers are part of its name - Foo[] is not Foo, and Foo[][,] is neither -
+        // so they come off first and go back on at the end. They are the only trailing [ ] group whose
+        // contents are commas, which is what tells them apart from a generic argument list.
+        string suffix = string.Empty;
+        while (TryTakeRankSpecifier(type, out string trimmed, out string rank))
+        {
+            type = trimmed;
+            suffix = rank + suffix;
+        }
+
         int bracket = type.IndexOf('[', StringComparison.Ordinal);
         if (bracket < 0)
         {
-            return LastSegment(type);
+            return LastSegment(type) + suffix;
         }
 
         string open = LastSegment(type[..bracket]);
@@ -367,22 +382,105 @@
                 argumentDepth--;
                 if (argumentDepth == 1 && start >= 0)
                 {
-                    arguments.Add(Shorten(type[start..i]));
+                    arguments.Add(Shorten(type[start..i], depth + 1));
                     start = -1;
                 }
             }
         }
 
-        return arguments.Count == 0 ? open : open + "<" + string.Join(", ", arguments) + ">";
+        return arguments.Count == 0
+            ? open + suffix
+            : open + "<" + string.Join(", ", arguments) + ">" + suffix;
+    }
+
+    /// <summary>The type name alone: everything before the first comma outside a <c>[ ]</c> group.</summary>
+    private static string TypePartOf(string name)
+    {
+        int depth = 0;
+        int end = name.Length;
+        for (int i = 0; i < name.Length; i++)
+        {
+            char c = name[i];
+            if (c == '[')
+            {
+                depth++;
+            }
+            else if (c == ']')
+            {
+                depth--;
+            }
+            else if (c == ',' && depth == 0)
+            {
+                end = i;
+                break;
+            }
+        }
+
+        return name[..end].Trim();
+    }
+
+    /// <summary>
+    /// Takes one trailing array rank specifier - <c>[]</c>, <c>[,]</c>, <c>[,,]</c> - off
+    /// <paramref name="type" />.
+    /// </summary>
+    private static bool TryTakeRankSpecifier(string type, out string trimmed, out string rank)
+    {
+        trimmed = type;
+        rank = string.Empty;
+
+        if (type.Length < 2 || type[^1] != ']')
+        {
+            return false;
+        }
+
+        int depth = 0;
+        for (int i = type.Length - 1; i >= 0; i--)
+        {
+            char c = type[i];
+            if (c == ']')
+            {
+                depth++;
+            }
+            else if (c == '[')
+            {
+                depth--;
+                if (depth > 0)
+                {
+                    continue;
+                }
+
+                // Only commas inside, or it is a generic argument list rather than a rank.
+                string inside = type[(i + 1)..^1];
+                if (inside.Length > 0 && inside.Any(static x => x != ','))
+                {
+                    return false;
+                }
+
+                trimmed = type[..i];
+                rank = type[i..];
+                return trimmed.Length > 0;
+            }
+            else if (depth == 0)
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The name after the last namespace or nesting separator, with the generic arity dropped.</summary>
+    /// <remarks>
+    /// The separator is found before the arity tick is dropped, not after: a nested generic's
+    /// <see cref="Type.FullName" /> is <c>A.Outer`1+Inner</c>, and cutting at the first tick first would
+    /// answer <c>Outer</c> - the type that <em>contains</em> the one this event is.
+    /// </remarks>
     private static string LastSegment(string type)
     {
-        int tick = type.IndexOf('`', StringComparison.Ordinal);
-        string bare = tick >= 0 ? type[..tick] : type;
-        int separator = bare.LastIndexOfAny(['.', '+']);
-        return separator >= 0 && separator < bare.Length - 1 ? bare[(separator + 1)..] : bare;
+        int separator = type.LastIndexOfAny(['.', '+']);
+        string segment = separator >= 0 && separator < type.Length - 1 ? type[(separator + 1)..] : type;
+        int tick = segment.IndexOf('`', StringComparison.Ordinal);
+        return tick > 0 ? segment[..tick] : segment;
     }
 
     protected override void OnParametersSet()
@@ -393,6 +491,7 @@
         // that collapsed it under them would be the same page moving while it is read that follow mode
         // exists to avoid. It goes when the card does, because @key is per event.
         _copied = false;
+        _announcement = string.Empty;
     }
 
     private void ToggleExpanded() => _expanded = !_expanded;
@@ -428,6 +527,7 @@
         }
 
         _copied = copied;
+        _announcement = copied ? "Copied the event JSON" : "Could not copy";
     }
 
     private async Task SelectAsync()

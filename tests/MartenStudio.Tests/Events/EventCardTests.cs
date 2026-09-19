@@ -108,6 +108,39 @@ public class EventCardTests
         card.Find(".ms-event-card-copy").ClassList.Should().Contain("ms-event-card-action-copied");
         card.Find(".ms-event-card-copy").GetAttribute("aria-label").Should().Be("Copy event JSON");
         card.Find(".ms-event-card-copy").GetAttribute("title").Should().Be("Copied");
+
+        // The icon swap is invisible to a screen reader and a title is not announced on activation, so
+        // the outcome is said out loud in a live region instead.
+        IElement live = card.Find(".ms-event-card-live");
+        live.GetAttribute("role").Should().Be("status");
+        live.GetAttribute("aria-live").Should().Be("polite");
+        live.ClassList.Should().Contain("ms-sr-only", "it is for the announcement, not for the eye");
+        live.TextContent.Trim().Should().Be("Copied the event JSON");
+    }
+
+    /// <summary>
+    /// The announcement belongs to the click, like the icon: a parent that re-renders the card has
+    /// handed it a new state to report on, and a live region still holding the last outcome would
+    /// announce it again.
+    /// </summary>
+    [Fact]
+    public async Task The_announcement_is_empty_until_something_is_copied_and_clears_with_the_icon()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", _ => true).SetResult(true);
+
+        IRenderedComponent<EventCard> card = Render(context);
+
+        card.Find(".ms-event-card-live").TextContent.Should().BeEmpty();
+
+        await card.Find(".ms-event-card-copy").ClickAsync(new());
+
+        card.Find(".ms-event-card-live").TextContent.Trim().Should().Be("Copied the event JSON");
+
+        card.Render(parameters => parameters.Add(c => c.Sequence, 8));
+
+        card.Find(".ms-event-card-live").TextContent.Should().BeEmpty();
+        card.Find(".ms-event-card-copy").ClassList.Should().NotContain("ms-event-card-action-copied");
     }
 
     /// <summary>
@@ -124,6 +157,8 @@ public class EventCardTests
         await card.Find(".ms-event-card-copy").ClickAsync(new());
 
         card.Find(".ms-event-card-copy").ClassList.Should().NotContain("ms-event-card-action-copied");
+        card.Find(".ms-event-card-live").TextContent.Trim().Should()
+            .Be("Could not copy", "a refusal is a fact a screen reader needs as much as a success");
     }
 
     /// <summary>
@@ -228,6 +263,14 @@ public class EventCardTests
     [InlineData(
         "X.Pair`2[[A.First, A],[B.Second, B]], X",
         "Pair<First, Second>")]
+    // An array is not its element type: Foo[] and Foo are two different things to store and to read.
+    [InlineData("MyNs.Foo[], MyNs", "Foo[]")]
+    [InlineData("MyNs.Foo[][,], MyNs", "Foo[][,]")]
+    [InlineData("X.Box`1[[MyNs.Foo, MyNs]][], X", "Box<Foo>[]")]
+    // A nested generic's FullName puts the arity tick before the nesting separator, so cutting at the
+    // tick first answers Outer - the type that contains the one this event is.
+    [InlineData("A.Outer`1+Inner, A", "Inner")]
+    [InlineData("A.Outer`1+Inner`2, A", "Inner")]
     public async Task A_dotnet_type_name_shortens_to_something_a_reader_recognises(string stored, string expected)
     {
         using StudioComponentContext context = await NewContextAsync();
@@ -237,6 +280,36 @@ public class EventCardTests
             parameters => parameters.Add(c => c.Metadata, Meta(("mt_dotnet_type", stored))));
 
         card.Find(".ms-event-meta-chip .ms-event-meta-value").TextContent.Trim().Should().Be(expected);
+    }
+
+    /// <summary>
+    /// The walk is over a database column, not over a <see cref="Type" />. Nothing stops a hand-written
+    /// or corrupted <c>mt_dotnet_type</c> from nesting <c>[[ ]]</c> as far as the column allows, and an
+    /// unbounded recursion over that is a stack overflow - which ends the process, not the circuit.
+    /// </summary>
+    [Fact]
+    public async Task A_type_name_nested_past_the_bound_stops_walking_rather_than_the_process()
+    {
+        string stored = "X.Leaf, X";
+        for (int level = 0; level < 24; level++)
+        {
+            stored = "X.Wrapper`1[[" + stored + "]], X";
+        }
+
+        using StudioComponentContext context = await NewContextAsync();
+
+        IRenderedComponent<EventCard> card = Render(
+            context,
+            parameters => parameters.Add(c => c.Metadata, Meta(("mt_dotnet_type", stored))));
+
+        string text = card.Find(".ms-event-meta-chip .ms-event-meta-value").TextContent.Trim();
+
+        text.Should().StartWith("Wrapper<Wrapper<");
+        text.Count(c => c == '<').Should().Be(16, "sixteen levels is the bound, and it is the bound that ran");
+        text.Should().NotContain("Leaf", "the walk stopped before it reached the innermost argument");
+
+        // The whole of it is still one keyboard shortcut away, however deep it goes.
+        card.Find(".ms-event-meta-chip .ms-event-meta-value").GetAttribute("title").Should().Be(stored);
     }
 
     /// <summary>Only that one column is rewritten; every other chip still reads as the column holds it.</summary>
