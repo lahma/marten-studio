@@ -175,7 +175,7 @@ left to the default, because Blazor sets component `[Parameter]` properties by n
 deserializes into types discovered from `IDocumentType.DocumentType` at run time — a trimmer told it may
 cut has no way to see either.
 
-**D3 — Two `PackageReference`s (`Marten`, floor `9.35.0`, and
+**D3 — Two `PackageReference`s (`Marten`, floor `9.31.0`, and
 `Microsoft.AspNetCore.App.Internal.Assets`, floor `10.0.12`, neither with an upper bound) plus
 `FrameworkReference Microsoft.AspNetCore.App`.** Everything else the RCL needs — Blazor, SignalR,
 authorization, endpoint routing — is in the shared framework, so the package pins no ASP.NET Core patch
@@ -372,7 +372,7 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 
 | Where | Package | Version | Why it is here |
 |---|---|---|---|
-| `src/MartenStudio` | `Marten` | `9.35.0` | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. Npgsql 9.0.4 arrives transitively through Weasel.Postgresql 9.32.0. |
+| `src/MartenStudio` | `Marten` | `9.31.0` | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back, and 9.31.0 is the **lowest** 9.x the whole repository compiles and passes both suites on (bisected 2026-09-19; see *Package budget changes*). JasperFx / JasperFx.Events 2.60.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.29.0 and Npgsql 9.0.4 all arrive transitively through it. |
 | `src/MartenStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. |
 | `samples/`, `tests/…Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres, and the container the integration suite runs against. |
 | both test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
@@ -438,6 +438,49 @@ fight xunit.v3's own resolution and was not done. Verified the same day that `do
 `GITHUB_ACTIONS=true` loads the logger and emits its GitHub Actions annotations, and that the TRX still
 lands in `artifacts/test-results`. **Exit condition:** revisit when xunit.v3 and Fallout's `ITest` both
 speak Microsoft.Testing.Platform v2.
+
+**2026-09-19 — the `Marten` floor moved *down*, from `9.35.0` to `9.31.0`.** A floor should be the oldest
+version that works, not the newest one that happened to be current when the row was written: a host on
+Marten 9.31 must not be forced to upgrade to take this package, and NuGet takes the higher of the two
+anyway, so nothing on a newer Marten is affected. Bisected over every stable 9.x on nuget.org, all four
+gates run at each candidate (`dotnet restore marten-studio.slnx` with `TreatWarningsAsErrors`,
+`dotnet build marten-studio.slnx`, `dotnet test tests/MartenStudio.Tests`, and
+`MARTENSTUDIO_PG_REUSE=false dotnet test tests/MartenStudio.Integration.Tests` against a real
+`postgres:17-alpine`). 9.31.0 is clean on all four; **9.30.0 is not** — three
+`ExtendedProgressionLiveTests` fail in their fixture with
+`Npgsql.PostgresException : 42703: column "heartbeat" of relation "mt_event_progression" does not exist`,
+because Marten only stopped gating `EventProgressionTable`'s extended columns on
+`Events.EnableExtendedProgressionTracking` in 9.31.0 (#5309, commit `d26169ff`, whose lowest containing
+tag is `V9.31.0`), and every pre-9.31 store with the flag off therefore migrates a table those three
+tests cannot write their row into — probed live at 9.24.0 and 9.30.0, which fail identically, and the
+commit is what says the whole 9.24–9.30 span does. Four other walls were found on the way down, and each
+one is a reason no lower floor is reachable:
+
+- **Everything up to and including 9.12.0 carries a critical advisory** and never reaches the compiler:
+  restore fails with `NU1904` for GHSA-rfx3-98h7-v3xp, "Marten's LINQ provider has SQL injection via
+  unescaped string literals", whose range is `>= 7.0.0, <= 9.12.0` and whose first patched version is
+  9.13.0. Probed at 9.0.0.
+- **Below 9.20.0 there is no `JasperFx.Events.Daemon.ShardFailure`**, which `ProjectionDataService`
+  builds out of `mt_event_progression`'s four nullable failure columns: `CS0246`, twice, in `src/`.
+  Probed at 9.13.0 and 9.19.0; present from 9.20.0.
+- **9.20.0 through 9.22.3 have no `ShardName.HighWaterMarkFor`**, which `MartenApiSurfaceTest` uses to
+  tell a bookkeeping progression row from a real shard: `CS0117`, three times. Probed at 9.20.0, 9.21.0,
+  9.22.0, 9.22.2 and 9.22.3; it appears in 9.22.4.
+- **9.22.4 through 9.23.0 compile clean but fail three `AggregateStreamInvokerTests`** with
+  `InvalidProjectionException: No source-generated dispatcher found for …TimeTravelSummaryProjection`,
+  because the `JasperFx.Events.SourceGenerator` shipped in those packages emits no dispatcher for a
+  non-`partial` `SingleStreamProjection<T, TId>` subclass and the runtime fallback is gone. Probed at
+  9.22.4, 9.22.6 and 9.23.0; fixed by 9.24.0.
+
+None of those tests were touched to make an older version pass; a behavioural difference in an older
+Marten is what a floor is *for*. At the floor the transitive graph is JasperFx / JasperFx.Events
+**2.60.0**, Weasel.Core / Weasel.Postgresql / Weasel.Storage **9.29.0** and Npgsql /
+Npgsql.NetTopologySuite **9.0.4** — behind what 9.35.0 brought on the first two (2.69.3 and 9.32.0) and
+the same Npgsql, and restore is still free of NU warnings. The "verified against Marten 9.35" notes
+elsewhere in this file and throughout `src/` are deliberately left alone: they record what was read on
+2026-09-14 and are still true of 9.35, and a floor is a minimum rather than a statement about what a
+host resolves. **Exit condition:** raise the floor only when a member the studio needs is genuinely
+absent below the new value, and say here which one.
 
 **Held deliberately, and not stale.**
 

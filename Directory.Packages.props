@@ -11,8 +11,17 @@
     <!-- The only PackageReference the shipped RCL makes. Everything else it needs is in the
          Microsoft.AspNetCore.App shared framework (FrameworkReference), which is what keeps the
          package from pinning an ASP.NET Core patch on its host. Floor, not exact pin: a consumer
-         on a newer Marten 9.x must not be forced down. Npgsql arrives transitively via Weasel.Postgresql. -->
-    <PackageVersion Include="Marten" Version="9.35.0" />
+         on a newer Marten 9.x must not be forced down. Npgsql arrives transitively via Weasel.Postgresql.
+
+         9.31.0 is the LOWEST stable 9.x this repository restores, compiles and passes both suites on -
+         bisected over every published stable 9.x, 2026-09-19. 9.30.0 fails: Marten gated
+         EventProgressionTable's extended columns on Events.EnableExtendedProgressionTracking until
+         9.31.0 (#5309), so ExtendedProgressionLiveTests cannot even write its row
+         ("42703: column heartbeat of relation mt_event_progression does not exist"). Below that,
+         9.22.4 is the first with ShardName.HighWaterMarkFor, 9.20.0 the first with
+         JasperFx.Events.Daemon.ShardFailure, and everything <= 9.12.0 fails restore outright with
+         NU1904 for GHSA-rfx3-98h7-v3xp. Full record in AGENTS.md, *Package budget changes*. -->
+    <PackageVersion Include="Marten" Version="9.31.0" />
     <!--
       blazor.web.js. As of .NET 10 it is not in the shared framework and not embedded in any ASP.NET
       Core assembly: it lives in this pack, which the SDK resolves only for a project whose
