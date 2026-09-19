@@ -898,7 +898,6 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             SizeBytes = bytes,
             Cells = cells,
             LastModified = Timestamp(Find(table, queryColumns, values, DocumentMetadataColumn.LastModified)),
-            Version = DisplayValue(Find(table, queryColumns, values, DocumentMetadataColumn.Version)),
             IsDeleted = Find(table, queryColumns, values, DocumentMetadataColumn.IsSoftDeleted) is true,
             TenantId = DisplayValue(Find(table, queryColumns, values, DocumentMetadataColumn.TenantId)),
             DocumentTypeAlias = DisplayValue(Find(table, queryColumns, values, DocumentMetadataColumn.DocumentType)),
@@ -1248,7 +1247,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     /// <para>
     /// The row badges — deleted, tenant, subclass — do not come from this list. They are read off
     /// <c>mt_deleted</c>, <c>tenant_id</c> and <c>mt_doc_type</c>, which are selected whether or not a
-    /// header shows them; see the badge columns in <c>ListCollectionAsync</c>.
+    /// header shows them; see <see cref="BadgeColumns" /> and its use in <c>ListCoreAsync</c>.
     /// </para>
     /// </remarks>
     /// <param name="available">Every column the chooser may offer, in chooser order.</param>

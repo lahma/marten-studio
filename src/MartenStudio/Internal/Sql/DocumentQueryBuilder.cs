@@ -718,12 +718,16 @@ internal static class DocumentQueryBuilder
 
     private static IEnumerable<DocumentColumn> SelectedColumns(DocumentTableInfo table, DocumentListQuery query)
     {
-        if (query.Columns.Count > 0)
+        // `null`, not "empty". An empty list is a caller saying "the id and nothing else", which is a
+        // real answer for a table whose every other column the page chose not to show; the two were the
+        // same value until it became reachable, and the select list then carried columns the grid never
+        // rendered. See DocumentListQuery.Columns.
+        if (query.Columns is { } chosen)
         {
-            return query.Columns;
+            return chosen;
         }
 
-        // The default view: every metadata column the store kept, and every duplicated field.
+        // No preference: every metadata column the store kept, and every duplicated field.
         List<DocumentColumn> columns = [];
 
         foreach (var metadata in table.MetadataColumns)

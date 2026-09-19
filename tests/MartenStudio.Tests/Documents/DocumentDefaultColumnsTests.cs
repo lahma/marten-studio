@@ -7,6 +7,8 @@ using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Sql;
 using MartenStudio.Tests.Support;
 
+using Npgsql;
+
 using ListPage = MartenStudio.Components.Pages.Documents.Documents;
 
 namespace MartenStudio.Tests.Documents;
@@ -150,6 +152,120 @@ public class DocumentDefaultColumnsTests
         SqlTestTables.FullyFeatured().HasMetadata(DocumentMetadataColumn.IsSoftDeleted).Should().BeTrue();
         SqlTestTables.FullyFeatured().HasMetadata(DocumentMetadataColumn.TenantId).Should().BeTrue();
         SqlTestTables.Hierarchy().HasMetadata(DocumentMetadataColumn.DocumentType).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// A collection whose default set is the id and nothing else selects the id and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This pair of tables is what made <c>DocumentListQuery.Columns</c> need a third state. The builder
+    /// used to read an <em>empty</em> column list as "no preference — select every metadata column and
+    /// every duplicated field", which was unreachable while the default set was that same list. It is
+    /// reachable now: a type with <c>LastModified</c> disabled and no duplicated field, and a discovered
+    /// <c>mt_doc_*</c> table whose only metadata column is <c>mt_version</c>, both default to the id
+    /// alone. Left as it was, the read would have selected <c>mt_version</c> and <c>mt_dotnet_type</c>
+    /// that no header shows and that "Show SQL" would then have contradicted (D14).
+    /// </para>
+    /// <para>
+    /// The select list is composed here the way <c>ListCoreAsync</c> composes it — the visible headers
+    /// minus the id, plus the sort column, plus the badge columns — so this asserts the seam between the
+    /// default set and the SQL rather than either half on its own.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_mapping_with_no_last_modified_and_no_duplicated_field_selects_the_id_alone() =>
+        SelectsTheIdAlone(DocumentTableInfo.FromDocumentType(SqlTestStore.DocumentType<SqlTestNote>(options =>
+            options.Schema.For<SqlTestNote>().Metadata(m => m.LastModified.Enabled = false))));
+
+    /// <summary>
+    /// The same, for a table no mapping claims. Its one metadata column is <c>mt_version</c>, which is
+    /// exactly the column the old branch would have selected behind the grid's back.
+    /// </summary>
+    [Fact]
+    public void A_discovered_table_whose_only_metadata_column_is_mt_version_selects_the_id_alone() =>
+        SelectsTheIdAlone(DocumentTableInfo.FromDiscoveredTable("studio_sql", "mt_doc_orphan",
+        [
+            new PostgresColumn("id", "uuid", "uuid", false),
+            new PostgresColumn("data", "jsonb", "jsonb", false),
+            new PostgresColumn("mt_version", "uuid", "uuid", false),
+        ]));
+
+    private static void SelectsTheIdAlone(DocumentTableInfo table)
+    {
+        List<DocumentColumnHeader> visible = DocumentDataService.DefaultColumns(Available(table), registered: true);
+
+        visible.Select(x => x.Key).Should().Equal(["id"], "this case is the whole point of the test");
+
+        using NpgsqlCommand command = DocumentQueryBuilder.BuildList(table, new DocumentListQuery
+        {
+            Columns = QueryColumns(table, visible),
+        });
+
+        command.CommandText.Should().Be(
+            $"""
+            select d."id",
+                   case when octet_length(d."data"::text) <= @maxInline then d."data"::text end as data,
+                   octet_length(d."data"::text) as data_bytes
+            from "{table.Schema}"."{table.Table}" as d
+            where 1 = 1
+            order by d."id"
+            limit @limit offset @offset
+            """.ReplaceLineEndings("\n"),
+            "the select list is exactly the headers, and the headers are the id");
+
+        foreach (DocumentMetadataColumnInfo metadata in table.MetadataColumns)
+        {
+            command.CommandText.Should().NotContain(
+                metadata.ColumnName,
+                "a column no header shows is a column Show SQL would contradict");
+        }
+    }
+
+    /// <summary>
+    /// The other side of the same distinction: <see langword="null"/> still means "whatever this table
+    /// has", which is what every ad-hoc read and every builder test relies on.
+    /// </summary>
+    [Fact]
+    public void No_column_preference_at_all_still_selects_everything_the_table_has()
+    {
+        DocumentTableInfo table = Customer();
+
+        using NpgsqlCommand command = DocumentQueryBuilder.BuildList(table, new DocumentListQuery());
+
+        command.CommandText.Should().Contain("d.\"mt_version\"");
+        command.CommandText.Should().Contain("d.\"mt_last_modified\"");
+        command.CommandText.Should().Contain("d.\"email\"");
+    }
+
+    /// <summary>
+    /// The select list <c>ListCoreAsync</c> builds from a set of visible headers: the headers minus the
+    /// id, then the sort column if it is not already there, then the badge columns.
+    /// </summary>
+    private static List<DocumentColumn> QueryColumns(DocumentTableInfo table, List<DocumentColumnHeader> visible)
+    {
+        List<DocumentColumn> columns = [];
+
+        foreach (DocumentColumnHeader header in visible)
+        {
+            if (header.Column is not DocumentColumn.Id)
+            {
+                columns.Add(header.Column);
+            }
+        }
+
+        // DocumentDataService.DefaultSort is the id, so nothing is added for the sort here.
+        DocumentDataService.DefaultSort.Should().Be(DocumentColumn.ById);
+
+        foreach (DocumentMetadataColumn badge in DocumentDataService.BadgeColumns)
+        {
+            if (table.HasMetadata(badge) && !columns.Contains(new DocumentColumn.Metadata(badge)))
+            {
+                columns.Add(new DocumentColumn.Metadata(badge));
+            }
+        }
+
+        return columns;
     }
 
     /// <summary>A pasted <c>?cols=</c> still reaches both of the columns the default no longer shows.</summary>
