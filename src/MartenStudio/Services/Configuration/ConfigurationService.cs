@@ -149,7 +149,7 @@ internal sealed class ConfigurationService : IConfigurationService
         catch (Exception exception)
         {
             // The same event the Overview's store card logs (9214), under the same throttle key.
-            LogLevel level = throttle.WarningOrDebug("Store.PostgresVersion", storeKey, null, exception.GetType());
+            LogLevel level = throttle.WarningOrDebug("Store.PostgresVersion", storeKey, null, StudioLogThrottle.KindOf(exception));
             logger.PostgresVersionUnreadable(level, exception, storeKey);
 
             return null;

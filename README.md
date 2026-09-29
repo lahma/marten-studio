@@ -595,7 +595,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
 
   | Id | Event | Logged when |
   |---|---|---|
-  | 9202, 9203 | `CapabilityDenied`, `ScopeAuthorizationDenied` | Always `Warning`: a client drove a control the page did not offer |
+  | 9202, 9203 | `CapabilityDenied`, `ScopeAuthorizationDenied` | Always `Warning`: a capability or policy refused an action |
   | 9210 | `StoreUnavailable` | A registered store will not build |
   | 9211 | `DocumentWriteRoundTripDropped` | Always `Warning`: an edit was saved and the round trip dropped properties |
   | 9212 | `DaemonUnreachable` | A registered coordinator answered with something other than a daemon |

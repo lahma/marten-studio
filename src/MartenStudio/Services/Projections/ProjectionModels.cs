@@ -429,12 +429,23 @@ internal sealed record ProjectionsView(
     /// Whether to warn that nothing anywhere appears to be running these projections.
     /// </summary>
     /// <remarks>
-    /// Three things have to be true at once: the store has async projections, no daemon is hosted in this
-    /// process, and no shard has ever advanced. Any one of them alone is ordinary - a host that runs its
-    /// daemon in another process is a supported deployment, and the studio must not call it broken.
+    /// <para>
+    /// Four things have to be true at once: the store has async projections, no daemon is hosted in this
+    /// process, no shard has ever advanced - and there is something to have advanced over. Any one of
+    /// them alone is ordinary - a host that runs its daemon in another process is a supported deployment,
+    /// and the studio must not call it broken.
+    /// </para>
+    /// <para>
+    /// The last one is <see cref="HighWaterMark" /> above zero. A store that has never appended an event
+    /// has projections that have never advanced because there has been nothing to project, and a banner
+    /// with <c>role="alert"</c> saying nothing appears to be running them - or, for an externally managed
+    /// store, that the external system "has not processed anything yet" - was an alarm about a fresh
+    /// install. The page has the progress rows and the high-water tile to say the rest.
+    /// </para>
     /// </remarks>
     public bool NoDaemonAnywhere =>
         !Daemon.IsHostedHere
+        && HighWaterMark > 0
         && Projections.Any(static x => x.IsAsync)
         && !Progress.Any(static x => x.HasProgressRow && x.Sequence > 0);
 

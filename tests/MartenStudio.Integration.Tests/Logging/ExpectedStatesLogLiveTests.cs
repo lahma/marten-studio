@@ -253,6 +253,72 @@ public class ExternallyManagedHostLogLiveTests(PostgresFixture postgres) : Proje
     }
 }
 
+/// <summary>
+/// DB-0-fix, item 1, live: a Wolverine release from before it set <c>ExternallyManaged</c> - the mode stays
+/// <c>Solo</c>, and only the coordinator's <c>NotSupportedException</c> says who runs the projections.
+/// </summary>
+/// <remarks>
+/// The page hid the controls for this host, and the service let a client that drove them anyway through
+/// to <c>PauseAsync</c> and <c>ResumeAsync</c>, because the pause path read <c>AsyncMode</c> for itself.
+/// On Wolverine those are <c>StopAllAsync</c> and <c>StartAllAsync</c> on this node.
+/// </remarks>
+public class PreExternallyManagedWolverineHostLogLiveTests(PostgresFixture postgres) : ProjectionsTestBase(postgres)
+{
+    private readonly LogCapture logs = new();
+    private readonly WolverineShapedCoordinator coordinator = new();
+
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    protected override bool WithDaemon => false;
+
+    private protected override ILoggerProvider? Logs => logs;
+
+    private protected override void ConfigureStore(StoreOptions options) =>
+        options.Projections.AsyncMode = DaemonMode.Solo;
+
+    private protected override void ConfigureServices(IServiceCollection services) =>
+        services.AddSingleton<MartenCoordinator>(coordinator);
+
+    [PostgresFact]
+    public async Task Polling_reads_the_store_as_external_and_logs_nothing_at_Warning()
+    {
+        await StudioPolling.PollOverviewAndProjectionsAsync(Fixture, StudioPolling.Ticks, Token);
+
+        ProjectionsView view = await Fixture.UseAsync(service => service.GetProjectionsAsync(Fixture.Scope, Token));
+        view.Daemon.Hosting.Should().Be(DaemonHostingState.ExternallyManaged, "the coordinator's own NotSupportedException says so");
+        view.Daemon.Mode.Should().Be("Solo", "this is the release that did not set the mode");
+
+        coordinator.PauseCalls.Should().Be(0);
+        coordinator.ResumeCalls.Should().Be(0);
+
+        logs.WarningsOrWorse.Should().BeEmpty(string.Join(" | ", logs.WarningsOrWorse));
+    }
+
+    [PostgresFact]
+    public async Task Pause_and_resume_are_refused_and_never_reach_the_coordinator()
+    {
+        Func<Task>[] throwing =
+        [
+            () => Fixture.UseAsync(service => service.PauseDaemonAsync(Fixture.Scope, Token)),
+            () => Fixture.UseAsync(service => service.ResumeDaemonAsync(Fixture.Scope, Token)),
+            () => Fixture.UseAsync(service => service.RestartHighWaterAgentAsync(Fixture.Scope, Token)),
+            () => Fixture.UseAsync(service => service.RebuildAsync(Fixture.Scope, "DailySales", Token)),
+        ];
+
+        foreach (Func<Task> control in throwing)
+        {
+            (await control.Should().ThrowAsync<StudioDaemonNotHostedException>())
+                .WithMessage(DaemonAccessor.ExternallyManagedExplanation);
+        }
+
+        coordinator.PauseCalls.Should().Be(0, "a pause here is StopAllAsync behind Wolverine's back");
+        coordinator.ResumeCalls.Should().Be(0, "and a resume is StartAllAsync");
+        Fixture.Operations.All().Should().BeEmpty("nothing was started");
+
+        logs.WarningsOrWorse.Should().BeEmpty(string.Join(" | ", logs.WarningsOrWorse));
+    }
+}
+
 /// <summary>A document whose only job is to have its table locked while the rail counts it.</summary>
 public sealed class LoggingRailThing
 {

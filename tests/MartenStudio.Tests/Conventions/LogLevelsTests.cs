@@ -28,10 +28,19 @@ namespace MartenStudio.Tests.Conventions;
 /// lists to each other.
 /// </para>
 /// <para>
+/// <b>And a throttled declaration is only as good as its calls.</b> A <c>[LoggerMessage]</c> whose level
+/// is a parameter can still be called with <c>LogLevel.Warning</c>, which puts it back on every poll - and
+/// nothing about the declaration would say so.
+/// <see cref="Every_call_of_a_throttled_event_takes_its_level_from_the_throttle" /> reads every call of
+/// one, and of <c>Log(level, …)</c>, and follows the level argument back to where it was computed: it must
+/// come from <c>StudioLogThrottle.WarningOrDebug</c> or from a helper on
+/// <see cref="ThrottleLessHelpers" />, with no literal level above Debug on the way.
+/// </para>
+/// <para>
 /// The scanner strips comments and string literals first (<see cref="SourceScanner" />), which is what lets
 /// the prose in this codebase quote a log call without failing, and is also what could make it silently
-/// vacuous - so <see cref="The_scanner_finds_a_real_site_and_ignores_one_in_prose" /> proves it can still
-/// fail.
+/// vacuous - so <see cref="The_scanner_finds_a_real_site_and_ignores_one_in_prose" /> and
+/// <see cref="The_call_site_scanner_follows_the_level_and_ignores_prose" /> prove they can still fail.
 /// </para>
 /// </remarks>
 public class LogLevelsTests
@@ -52,18 +61,41 @@ public class LogLevelsTests
 
     private static readonly Regex MethodName = new(@"\G\s*(?:public|internal|private|static|partial|\s)*void\s+(?<name>\w+)", RegexOptions.None, RegexTimeout);
 
+    private static readonly Regex LiteralLevelAboveDebug = new(
+        @"LogLevel\s*\.\s*(?:Information|Warning|Error|Critical)\b", RegexOptions.None, RegexTimeout);
+
+    private static readonly Regex ThrottleCall = new(@"\.\s*WarningOrDebug\s*\(", RegexOptions.None, RegexTimeout);
+
+    private static readonly Regex Identifier = new(@"^[A-Za-z_]\w*$", RegexOptions.None, RegexTimeout);
+
+    /// <summary>
+    /// The only helpers besides <c>StudioLogThrottle.WarningOrDebug</c> a throttled event may take its level
+    /// from, spelled as they are called, and why each is allowed.
+    /// </summary>
+    /// <remarks>
+    /// A helper that routes a throttled event through a fixed level is the whole thing this rule exists to
+    /// catch, so a new one fails until somebody writes down here why it does not.
+    /// </remarks>
+    private static readonly Dictionary<string, string> ThrottleLessHelpers = new(StringComparer.Ordinal)
+    {
+        ["StudioLogThrottle.LevelOrWarning"] =
+            "The throttle's own answer, or Warning for an owner a test built without one (StudioScopeCatalog, MartenStoreRegistry, StudioLiveUpdates); the container always supplies a throttle.",
+    };
+
     /// <summary>Why a site is allowed to be above Debug.</summary>
     public enum Verdict
     {
         /// <summary>
-        /// A security-relevant refusal. Always a Warning: only a client driving a control the page did not
-        /// offer produces one, and an operator wants to see that.
+        /// A security-relevant refusal. Always a Warning: a capability or a policy refused an action. A
+        /// client driving a control the page did not offer is one way; a per-database policy refusing a
+        /// pause or a store-wide correction the page did offer - because it reaches a database the visitor
+        /// may not - is the other. An operator wants to see either.
         /// </summary>
         Refusal,
 
         /// <summary>
         /// A real anomaly on a path the studio polls or repeats. The level is a parameter, Warning once
-        /// per store, database and exception type per ten minutes, Debug in between.
+        /// per store, database and kind of failure per ten minutes, Debug in between.
         /// </summary>
         Throttled,
 
@@ -99,7 +131,7 @@ public class LogLevelsTests
         ["src/MartenStudio/Services/StudioLog.cs : 9202 CapabilityDenied"] = (Verdict.Refusal,
             "A capability refusal reaches the service only when a client drives a control the page disabled or hid."),
         ["src/MartenStudio/Services/StudioLog.cs : 9203 ScopeAuthorizationDenied"] = (Verdict.Refusal,
-            "A policy refusal on a write or a query run; listings are filtered (FilterAsync logs nothing) and a refused scope's page body is never rendered."),
+            "A policy refusal on a write or a query run, including an offered pause or correction that reaches a database the visitor may not; listings are filtered (FilterAsync logs nothing)."),
         ["src/MartenStudio/Services/StudioLog.cs : 9211 DocumentWriteRoundTripDropped"] = (Verdict.DataLoss,
             "A save the visitor confirmed dropped properties the CLR type does not have; the only durable record of the loss."),
         ["src/MartenStudio/Services/StudioLog.cs : 9230 DatabaseBrowserOpenToEverySchemaWithoutRole"] = (Verdict.Configuration,
@@ -109,7 +141,7 @@ public class LogLevelsTests
         ["src/MartenStudio/Services/StudioLog.cs : 9210 StoreUnavailable"] = (Verdict.Throttled,
             "A registered store will not build; the registry's ten-second cache expires under every polling page."),
         ["src/MartenStudio/Services/StudioLog.cs : 9212 DaemonUnreachable"] = (Verdict.Throttled,
-            "A registered coordinator answered with neither a daemon nor NotSupported; polled by the Overview, projections and nav."),
+            "A registered coordinator answered with neither a daemon nor NotSupported, or would not build other than by Wolverine's unknown-store shape; polled."),
         ["src/MartenStudio/Services/StudioLog.cs : 9213 StoreDatabasesUnreadable"] = (Verdict.Throttled,
             "A store's databases could not be listed; asked by every Overview load and every scope listing in every circuit."),
         ["src/MartenStudio/Services/StudioLog.cs : 9214 PostgresVersionUnreadable"] = (Verdict.Throttled,
@@ -119,7 +151,7 @@ public class LogLevelsTests
         ["src/MartenStudio/Services/StudioLog.cs : 9216 ProjectionSummaryUnreadable"] = (Verdict.Throttled,
             "The projection summary failed for a reason that is not a refusal or a stale link; polled by the Overview and nav."),
         ["src/MartenStudio/Services/StudioLog.cs : 9217 EventReadFailed"] = (Verdict.Throttled,
-            "An event-store read failed other than by timeout or a missing table; the Overview, feed and nav poll these."),
+            "An event-store read failed other than by a statement timeout (a missing table is here: every read asks the catalog first); polled."),
         ["src/MartenStudio/Services/StudioLog.cs : 9218 StreamTimestampMissing"] = (Verdict.Throttled,
             "A hand-migrated mt_streams no Marten schema can have; once is enough, not once per page of streams."),
         ["src/MartenStudio/Services/StudioLog.cs : 9219 TenantDiscoveryFailed"] = (Verdict.Throttled,
@@ -130,8 +162,8 @@ public class LogLevelsTests
         // ---- Visitor-started reads and writes, one line per action ------------------------------------
         ["src/MartenStudio/Services/Configuration/ConfigurationService.cs : Marten Studio could not describe the databases of store {StoreKey}"] = (Verdict.VisitorAction,
             "The configuration screen's own load; not polled, and the page shows the failure."),
-        ["src/MartenStudio/Services/Projections/ProjectionDataService.cs : Marten Studio could not enumerate the databases of store {StoreKey} before a coordinator control"] = (Verdict.VisitorAction,
-            "A pause or resume the visitor pressed is refused because the store's databases cannot be enumerated."),
+        ["src/MartenStudio/Services/Projections/ProjectionDataService.cs : Marten Studio could not enumerate the databases of store {StoreKey} before {Action}, so it refused it"] = (Verdict.VisitorAction,
+            "A pause, resume or store-wide correction the visitor pressed is refused because the store's databases cannot be enumerated."),
         ["src/MartenStudio/Services/Relationships/RelationshipDataService.cs : Marten Studio could not read the relationships of {StoreKey}"] = (Verdict.VisitorAction,
             "The relationships screen's load failed on a catalog read; not polled."),
         ["src/MartenStudio/Services/Relationships/RelationshipDataService.cs : Marten Studio could not read what references '{Id}' of '{Alias}'"] = (Verdict.VisitorAction,
@@ -292,6 +324,119 @@ public class LogLevelsTests
     }
 
     // ------------------------------------------------------------------------------------------------
+    // The calls of the throttled events (DB-0-fix, item 6)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Every call of a throttled <c>StudioLog</c> event - and of <c>Log(level, …)</c> - takes its level from
+    /// the throttle, never from a literal.
+    /// </summary>
+    [Fact]
+    public void Every_call_of_a_throttled_event_takes_its_level_from_the_throttle()
+    {
+        HashSet<string> throttled = ThrottledEventMethods();
+
+        string[] files = SourceScanner.ShippedSourceFiles();
+        List<ThrottledCall> calls = [.. files.SelectMany(file => ThrottledCalls(SourceScanner.Relative(file), File.ReadAllText(file), throttled))];
+
+        calls.Should().HaveCountGreaterThanOrEqualTo(
+            throttled.Count, "every throttled event has at least one caller, and a scan that finds fewer has stopped seeing them");
+
+        calls.Select(static x => x.Method).Where(static x => x != "Log").Distinct().Should().BeEquivalentTo(
+            throttled, "an event nobody calls is dead, and a caller the scan cannot see is a caller it cannot check");
+
+        List<string> problems = [.. calls.Where(static x => x.Problem is not null).Select(static x => $"{x.Location}: {x.Problem}")];
+
+        problems.Should().BeEmpty(string.Join(Environment.NewLine, problems));
+    }
+
+    /// <summary>
+    /// The events the rule is about are exactly the ones the roster files as throttled in
+    /// <c>StudioLog.cs</c> - 9210 and 9212-9220 - so neither list can drift from the other.
+    /// </summary>
+    [Fact]
+    public void The_throttled_events_are_the_ones_the_roster_files_as_throttled()
+    {
+        IEnumerable<string> fromRoster = Roster
+            .Where(static x => x.Value.Verdict == Verdict.Throttled && x.Key.StartsWith(StudioLogFile + " : ", StringComparison.Ordinal))
+            .Select(static x => x.Key[(x.Key.LastIndexOf(' ') + 1)..]);
+
+        ThrottledEventMethods().Should().BeEquivalentTo(fromRoster);
+        ThrottledEventMethods().Should().Contain(["StoreUnavailable", "DaemonUnreachable", "LiveUpdateHandlerFailed"]);
+    }
+
+    /// <summary>Every listed throttle-less helper exists, as a static method of that name on that type.</summary>
+    [Fact]
+    public void Every_throttle_less_helper_is_real_and_says_why()
+    {
+        string[] files = SourceScanner.ShippedSourceFiles();
+
+        foreach ((string helper, string why) in ThrottleLessHelpers)
+        {
+            why.Length.Should().BeGreaterThan(20, "a reason, for {0}", helper);
+
+            string type = helper[..helper.IndexOf('.', StringComparison.Ordinal)];
+            string method = helper[(helper.IndexOf('.', StringComparison.Ordinal) + 1)..];
+
+            files.Should().Contain(
+                file => Path.GetFileName(file) == type + ".cs"
+                    && Regex.IsMatch(
+                        SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)),
+                        $@"\bstatic\s+LogLevel\s+{method}\s*\(",
+                        RegexOptions.None,
+                        RegexTimeout),
+                "{0} is listed as a helper and has to exist", helper);
+        }
+    }
+
+    /// <summary>
+    /// The anti-vacuity check for the call rule: it has to catch a literal Warning however it is spelled
+    /// and wherever it hides, accept the shapes <c>src/</c> really uses, and ignore a call in prose.
+    /// </summary>
+    [Theory]
+    // Accepted: the throttle, directly or through a local, and the one listed helper.
+    [InlineData("LogLevel level = throttle.WarningOrDebug(\"s\", a, b, StudioLogThrottle.KindOf(e)); logger.DaemonUnreachable(level, e, a, b);", null)]
+    [InlineData("logger.DaemonUnreachable(throttle.WarningOrDebug(\"s\", a, b, null), e, a, b);", null)]
+    [InlineData("LogLevel level = StudioLogThrottle.LevelOrWarning(throttle, \"s\", a, null, k); logger.StoreUnavailable(level, a, b, c);", null)]
+    [InlineData("LogLevel level = expected\n    ? LogLevel.Debug\n    : throttle.WarningOrDebug(\"s\", a, b, k);\nlogger.DaemonUnreachable(level, e, a, b);", null)]
+    [InlineData("LogLevel level = throttle.WarningOrDebug(\"s\", a, b, k); logger.Log(level, e, \"dynamic\");", null)]
+    // Refused: a literal, however it arrives.
+    [InlineData("logger.DaemonUnreachable(LogLevel.Warning, e, a, b);", "literal")]
+    [InlineData("LogLevel level = LogLevel.Warning; logger.DaemonUnreachable(level, e, a, b);", "literal")]
+    [InlineData("LogLevel level = throttle?.WarningOrDebug(\"s\", a, b, k) ?? LogLevel.Warning; logger.DaemonUnreachable(level, e, a, b);", "literal")]
+    [InlineData("LogLevel level = throttle.WarningOrDebug(\"s\", a, b, k); level = LogLevel.Error; logger.DaemonUnreachable(level, e, a, b);", "literal")]
+    [InlineData("logger.Log(LogLevel.Warning, e, \"dynamic\");", "literal")]
+    // Refused: a level the throttle did not decide.
+    [InlineData("LogLevel level = LevelFor(\"s\", a, e); logger.TenantDiscoveryFailed(level, e, a);", "throttle")]
+    [InlineData("void M(LogLevel level) { logger.DaemonUnreachable(level, e, a, b); }", "follow")]
+    [InlineData("logger.DaemonUnreachable(options.Level, e, a, b);", "throttle")]
+    // Ignored: prose.
+    [InlineData("// logger.DaemonUnreachable(LogLevel.Warning, e, a, b);\nclass C { }", "none")]
+    [InlineData("/// <c>logger.DaemonUnreachable(LogLevel.Warning, e, a, b)</c>\nclass C { }", "none")]
+    [InlineData("class C { string s = \"logger.DaemonUnreachable(LogLevel.Warning, e, a, b)\"; }", "none")]
+    public void The_call_site_scanner_follows_the_level_and_ignores_prose(string source, string? expected)
+    {
+        List<ThrottledCall> calls = [.. ThrottledCalls("f.cs", source, ThrottledEventMethods())];
+
+        if (expected == "none")
+        {
+            calls.Should().BeEmpty();
+            return;
+        }
+
+        ThrottledCall call = calls.Should().ContainSingle().Subject;
+
+        if (expected is null)
+        {
+            call.Problem.Should().BeNull();
+        }
+        else
+        {
+            call.Problem.Should().NotBeNull().And.Contain(expected);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
     // The scanner
     // ------------------------------------------------------------------------------------------------
 
@@ -315,6 +460,176 @@ public class LogLevelsTests
     /// <param name="Key">The roster key: the file, then the message template or the event id and method.</param>
     /// <param name="Level">What the text says it writes at.</param>
     public sealed record LogSite(string Key, SiteLevel Level);
+
+    /// <summary>One call of a throttled event, and what is wrong with where its level came from.</summary>
+    /// <param name="Location">File and line, for the failure message.</param>
+    /// <param name="Method">The event method called, or <c>Log</c>.</param>
+    /// <param name="Problem">What is wrong, or <see langword="null" /> when the level is the throttle's.</param>
+    public sealed record ThrottledCall(string Location, string Method, string? Problem);
+
+    private const string StudioLogFile = "src/MartenStudio/Services/StudioLog.cs";
+
+    /// <summary>
+    /// The <c>StudioLog</c> methods whose level is a parameter - read out of <c>StudioLog.cs</c> by the
+    /// same scanner the roster uses, so a new throttled event is covered the moment it is declared.
+    /// </summary>
+    private static HashSet<string> ThrottledEventMethods() =>
+        Sites(StudioLogFile, File.ReadAllText(RepositoryRoot.Combine(StudioLogFile)))
+            .Where(static x => x.Level == SiteLevel.Dynamic)
+            .Select(static x => x.Key[(x.Key.LastIndexOf(' ') + 1)..])
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Every call of one of <paramref name="methods" />, or of <c>Log(level, …)</c>, with its level argument
+    /// followed back to where it was computed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The level argument is the call's first. When it is an expression, it is judged as it stands; when it
+    /// is a local, the nearest assignment to that name before the call <em>that is still in scope at the
+    /// call</em> is judged instead - "in scope" meaning no brace between the two closes the assignment's
+    /// block, which is what keeps another method's <c>LogLevel level = …</c> from vouching for this one.
+    /// </para>
+    /// <para>
+    /// Judged means: no literal level above Debug anywhere in it (a <c>LogLevel.Debug</c> branch for an
+    /// expected state is fine), and a call of <c>WarningOrDebug</c> or of a helper on
+    /// <see cref="ThrottleLessHelpers" />. It does not reason about branches - an <c>if</c> that assigns a
+    /// literal on one arm and the throttle on the other is judged by whichever assignment comes last - which
+    /// is a limit, not a licence: the rule is for the shape every site here has, one computed level per
+    /// call.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<ThrottledCall> ThrottledCalls(string relativePath, string source, IReadOnlySet<string> methods)
+    {
+        string code = SourceScanner.StripCommentsAndStrings(source);
+
+        var call = new Regex(
+            @"\.\s*(?<name>" + string.Join("|", methods.Append("Log").Select(Regex.Escape)) + @")\s*\(",
+            RegexOptions.None,
+            RegexTimeout);
+
+        foreach (Match match in call.Matches(code))
+        {
+            string argument = FirstArgument(code, match.Index + match.Length).Trim();
+            string location = relativePath + ":" + (code.AsSpan(0, match.Index).Count('\n') + 1).ToString(CultureInfo.InvariantCulture);
+
+            yield return new ThrottledCall(location, match.Groups["name"].Value, ProblemWith(code, match.Index, argument));
+        }
+    }
+
+    private static string? ProblemWith(string code, int callIndex, string argument)
+    {
+        if (LiteralLevelAboveDebug.IsMatch(argument))
+        {
+            return $"passes a literal level above Debug ({argument}); take it from StudioLogThrottle.WarningOrDebug";
+        }
+
+        if (ComesFromTheThrottle(argument))
+        {
+            return null;
+        }
+
+        if (!Identifier.IsMatch(argument))
+        {
+            return $"takes its level from '{argument}', which is not the throttle";
+        }
+
+        string? assigned = LastAssignmentInScope(code, callIndex, argument);
+
+        if (assigned is null)
+        {
+            return $"takes its level from '{argument}', and the scanner cannot follow it to an assignment in scope - compute it from the throttle next to the call";
+        }
+
+        if (LiteralLevelAboveDebug.IsMatch(assigned))
+        {
+            return $"computes its level with a literal level above Debug ({assigned.Trim()}); a throttled event must not be pinned to Warning";
+        }
+
+        return ComesFromTheThrottle(assigned)
+            ? null
+            : $"computes its level without the throttle ({assigned.Trim()}); use StudioLogThrottle.WarningOrDebug or one of {string.Join(", ", ThrottleLessHelpers.Keys)}";
+    }
+
+    private static bool ComesFromTheThrottle(string expression) =>
+        ThrottleCall.IsMatch(expression)
+        || ThrottleLessHelpers.Keys.Any(helper => Regex.IsMatch(
+            expression,
+            Regex.Escape(helper).Replace(@"\.", @"\s*\.\s*", StringComparison.Ordinal) + @"\s*\(",
+            RegexOptions.None,
+            RegexTimeout));
+
+    /// <summary>The text of the first argument of the call whose argument list starts at <paramref name="start" />.</summary>
+    private static string FirstArgument(string code, int start)
+    {
+        int depth = 0;
+
+        for (int index = start; index < code.Length; index++)
+        {
+            switch (code[index])
+            {
+                case '(' or '[' or '{':
+                    depth++;
+                    break;
+
+                case ')' or ']' or '}' when depth == 0:
+                    return code[start..index];
+
+                case ')' or ']' or '}':
+                    depth--;
+                    break;
+
+                case ',' when depth == 0:
+                    return code[start..index];
+            }
+        }
+
+        return code[start..];
+    }
+
+    /// <summary>
+    /// The right-hand side of the last assignment to <paramref name="name" /> before
+    /// <paramref name="callIndex" /> whose block has not closed by the call, or <see langword="null" />.
+    /// </summary>
+    private static string? LastAssignmentInScope(string code, int callIndex, string name)
+    {
+        var assignment = new Regex(
+            @"(?<![\w.])" + Regex.Escape(name) + @"\s*=(?![=>])", RegexOptions.None, RegexTimeout);
+
+        foreach (Match match in assignment.Matches(code[..callIndex]).Reverse())
+        {
+            if (!StaysInScope(code, match.Index, callIndex))
+            {
+                continue;
+            }
+
+            int start = match.Index + match.Length;
+            int end = code.IndexOf(';', start);
+
+            return code[start..(end < 0 || end > callIndex ? callIndex : end)];
+        }
+
+        return null;
+    }
+
+    private static bool StaysInScope(string code, int from, int to)
+    {
+        int depth = 0;
+
+        for (int index = from; index < to; index++)
+        {
+            if (code[index] == '{')
+            {
+                depth++;
+            }
+            else if (code[index] == '}' && --depth < 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>Every site in one file, in the order they appear, with repeated keys numbered.</summary>
     private static IEnumerable<LogSite> Sites(string relativePath, string source)

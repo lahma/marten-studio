@@ -181,10 +181,14 @@ internal sealed class MartenStoreRegistry
             }
 
             // The failure cache above expires every ten seconds and every polling page asks again, so
-            // the Warning is throttled across them: once per store and exception type per window, Debug
+            // the Warning is throttled across them: once per store and kind of failure per window, Debug
             // in between. A provider without the studio's throttle (a test's) always says Warning.
-            LogLevel level = provider.GetService<StudioLogThrottle>()?
-                .WarningOrDebug("Store.Resolve", registration.Key, null, exception.GetType()) ?? LogLevel.Warning;
+            LogLevel level = StudioLogThrottle.LevelOrWarning(
+                provider.GetService<StudioLogThrottle>(),
+                "Store.Resolve",
+                registration.Key,
+                null,
+                StudioLogThrottle.KindOf(exception));
 
             provider.GetService<ILoggerFactory>()?
                 .CreateLogger<MartenStoreRegistry>()

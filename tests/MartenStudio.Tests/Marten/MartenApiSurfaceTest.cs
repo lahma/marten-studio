@@ -659,6 +659,55 @@ public class MartenApiSurfaceTest
             "Marten 9.35 has only the async form; the plan's DeleteDocumentsByType(Type) does not exist");
     }
 
+    /// <summary>
+    /// DB-0-fix, item 9: the two progression corrections have no per-database form at the floor, so the
+    /// studio authorizes every database they reach instead - and this is what says so, member by member.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read at tag <c>V9.31.0</c> (<c>git -C D:\Work\marten show V9.31.0:src/Marten/AdvancedOperations.cs</c>,
+    /// 2026-09-29): <c>AdvanceHighWaterMarkToLatestAsync(CancellationToken)</c> and
+    /// <c>TryCorrectProgressInDatabaseAsync(CancellationToken)</c> loop over <c>Tenancy.BuildDatabases()</c>
+    /// and run a <c>HighWaterDetector</c> against <em>every</em> database; the <c>(string tenantId,
+    /// CancellationToken)</c> overloads run one against
+    /// <c>Tenancy.GetTenantAsync(TenantIdStyle.MaybeCorrectTenantId(tenantId)).Database</c>. The detector,
+    /// <c>Marten.Events.Daemon.HighWater.HighWaterDetector</c>, is internal. <c>IMartenStorage.AllDatabases()</c>
+    /// is <c>Tenancy.BuildDatabases().OfType&lt;IMartenDatabase&gt;()</c> in <c>DocumentStore.IMartenStorage.cs</c>,
+    /// which is why the studio's every-database check enumerates exactly the set the correction walks.
+    /// </para>
+    /// <para>
+    /// The overload lists are asserted <em>whole</em>. A Marten that grows a per-database overload - one
+    /// taking an <c>IMartenDatabase</c> or a <c>DatabaseId</c> - fails here, and that is the moment for
+    /// <c>ProjectionDataService.AdvancedAsync</c> to call it and stop asking about databases the visitor
+    /// did not select.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_progression_corrections_reach_every_database_and_have_no_per_database_form()
+    {
+        var advanced = typeof(AdvancedOperations);
+
+        foreach (string name in new[] { "AdvanceHighWaterMarkToLatestAsync", "TryCorrectProgressInDatabaseAsync" })
+        {
+            advanced.GetMethods(MemberFlags).Where(x => x.Name == name).Select(Describe).Should().BeEquivalentTo(
+                ["(CancellationToken)", "(String, CancellationToken)"],
+                "{0} has a store-wide and a tenant form and nothing narrower; a per-database overload is the signal to use it",
+                name);
+        }
+
+        Type? detector = advanced.Assembly.GetType("Marten.Events.Daemon.HighWater.HighWaterDetector");
+        detector.Should().NotBeNull("the per-database type the corrections are built on");
+        detector!.IsPublic.Should().BeFalse("if it became public, the studio could run it against the one database it authorized");
+
+        // What the tenant form reaches, spelled the way the studio asks it.
+        RequireProperty(typeof(IReadOnlyStoreOptions), "TenantIdStyle").PropertyType.Should().Be<TenantIdStyle>();
+        RequireProperty(typeof(IReadOnlyStoreOptions), "Tenancy").PropertyType.Should().Be<ITenancy>();
+        RequireMethod(typeof(ITenancy), "GetTenantAsync", typeof(string)).ReturnType.Should().Be<ValueTask<Tenant>>();
+        RequireProperty(typeof(Tenant), "Database").PropertyType.Should().Be<IMartenDatabase>();
+        RequireMethod(typeof(TenantIdStyleExtensions), "MaybeCorrectTenantId", typeof(TenantIdStyle), typeof(string))
+            .ReturnType.Should().Be<string>();
+    }
+
     // --------------------------------------------------------------------------------------------
     // The async daemon
     // --------------------------------------------------------------------------------------------
@@ -1652,6 +1701,13 @@ public class MartenApiSurfaceTest
         _ = advanced.AllAsyncProjectionShardNames();
         await advanced.AdvanceHighWaterMarkToLatestAsync(token);
         await advanced.TryCorrectProgressInDatabaseAsync(token);
+        await advanced.AdvanceHighWaterMarkToLatestAsync("tenant", token);
+        await advanced.TryCorrectProgressInDatabaseAsync("tenant", token);
+
+        // DB-0-fix: the database the tenant forms reach, asked the way AdvancedOperations asks it.
+        Tenant correctedTenant = await tenancy.GetTenantAsync(options.TenantIdStyle.MaybeCorrectTenantId("tenant"));
+        IMartenDatabase correctedDatabase = correctedTenant.Database;
+        _ = correctedDatabase.Id.Identity;
 
         MartenCoordinator coordinator = null!;
         IProjectionDaemon daemon = coordinator.DaemonForMainDatabase();

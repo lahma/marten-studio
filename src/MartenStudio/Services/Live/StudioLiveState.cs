@@ -97,9 +97,10 @@ internal sealed class StudioLiveState : IDisposable
                 {
                     // A tracker that will not be observed costs the page nothing: it falls back to the
                     // database rows it was already reading. Asked again by every visit to the page, so
-                    // event 9215 is a Warning once per store, database and exception type per window.
+                    // event 9215 is a Warning once per store, database and kind of failure per window.
                     string databaseId = database.Id.Identity;
-                    LogLevel level = throttle.WarningOrDebug("LiveState.Tracker", storeKey, databaseId, exception.GetType());
+                    LogLevel level = throttle.WarningOrDebug(
+                        "LiveState.Tracker", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
                     logger.ShardTrackerUnobservable(level, exception, storeKey, databaseId);
                 }
             }

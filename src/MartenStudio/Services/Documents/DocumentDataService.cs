@@ -322,7 +322,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
                     cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (Exception exception) when (IsTimeout(exception))
+        catch (Exception exception) when (PostgresFailure.IsTimeout(exception))
         {
             // The collection is certainly there and measuring it costs more than the host allows a
             // statement to take: "unknown", not "unreachable".
@@ -363,7 +363,10 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         try
         {
             await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            // Through PostgresFailure, so that the timeout catch below never reads a pool that ran dry or
+            // a connect that timed out - spelled exactly like a statement timeout - as "too large to scan".
+            await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             List<DocumentTableInfo> tables = [];
 
@@ -396,15 +399,17 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
             return await ReadRecentAsync(connection, command, cancellationToken).ConfigureAwait(false);
         }
-        catch (PostgresException postgres) when (string.Equals(postgres.SqlState, "57014", StringComparison.Ordinal))
+        catch (Exception exception) when (PostgresFailure.IsTimeout(exception))
         {
             // The union ran past its statement_timeout. That is a fact about the store - some collection
             // in it sorts millions of rows to answer this, because Marten declares no index on
             // mt_last_modified - and saying so is more use than an empty region that looks like calm.
             // Debug: that is a fact about a large store that the region already says, not a fault.
+            // Either spelling: the server's 57014, or - when the backend is too busy to answer the cancel
+            // in time - Npgsql's own client-side timeout, which is the same budget expiring.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(postgres, "Marten Studio's recent-documents read of {StoreKey} timed out", scope.StoreKey);
+                logger.LogDebug(exception, "Marten Studio's recent-documents read of {StoreKey} timed out", scope.StoreKey);
             }
 
             return RecentDocuments.TooLarge();
@@ -852,7 +857,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
                 ? DocumentCount.RefusedExact(DocumentCount.Unknown, 0, CrossTenantEstimateNote)
                 : counted;
         }
-        catch (Exception exception) when (IsTimeout(exception))
+        catch (Exception exception) when (PostgresFailure.IsTimeout(exception))
         {
             // The table is certainly there and its size is simply not worth what it would cost to find
             // out: "unknown" rather than "could not be reached". The header draws nothing and the page
@@ -1532,7 +1537,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
                     cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (Exception exception) when (IsTimeout(exception))
+        catch (Exception exception) when (PostgresFailure.IsTimeout(exception))
         {
             // The rail's own short patience ran out. The table is certainly there and nobody has measured
             // it, which is "unknown" - and a rail that failed because one collection is slow would be a
@@ -1551,34 +1556,6 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             return DocumentCount.Unavailable;
         }
     }
-
-    /// <summary>
-    /// Whether a failed count is a timeout rather than a fault — Postgres' own, or Npgsql's.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Both spellings, because which one arrives is a race.</b> A
-    /// <see cref="NpgsqlCommand.CommandTimeout"/> that expires makes Npgsql send a cancellation request:
-    /// when the backend answers it in time the client sees <c>57014</c>, and when it does not the client
-    /// sees an <see cref="NpgsqlException"/> wrapping a <see cref="TimeoutException"/>. A host that sets
-    /// <c>statement_timeout</c> on the role, the database or the connection string produces the first
-    /// directly. Catching only one of them works until the day the database is busy, which is the day this
-    /// matters.
-    /// </para>
-    /// <para>
-    /// <b>Why the distinction is worth a method.</b> Every caller maps a timeout to
-    /// <see cref="DocumentCount.Unknown"/> and a fault to <see cref="DocumentCount.Unavailable"/>, and
-    /// those two draw differently on purpose: unknown is "there, and nobody has measured it" and keeps the
-    /// "=" button on offer, while unavailable is "could not read this table" and takes the badge away
-    /// entirely. Reporting a slow count as unavailable turns a button that was too slow into a screen the
-    /// visitor cannot get back from without reloading.
-    /// </para>
-    /// </remarks>
-    /// <param name="exception">The failure.</param>
-    internal static bool IsTimeout(Exception exception) =>
-        (exception is PostgresException postgres && string.Equals(postgres.SqlState, "57014", StringComparison.Ordinal))
-        || exception is TimeoutException
-        || (exception is NpgsqlException npgsql && npgsql.InnerException is TimeoutException);
 
     private IEnumerable<IDocumentType> VisibleDocumentTypes(IDocumentStore store)
     {

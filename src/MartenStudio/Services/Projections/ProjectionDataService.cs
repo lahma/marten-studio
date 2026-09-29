@@ -1,6 +1,7 @@
 using JasperFx.Events.Daemon;
 using JasperFx.Events.Projections;
 using JasperFx.Events.Subscriptions;
+using JasperFx.MultiTenancy;
 
 using Marten;
 using Marten.Schema;
@@ -188,7 +189,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
     /// <para>
     /// Anything else - a connection that failed, a statement that timed out on a read that is normally
     /// instant, an SQLSTATE nobody expected - is an anomaly: event 9216, at Warning once per store,
-    /// database and exception type per <see cref="StudioLogThrottle.Window" />, and at Debug between.
+    /// database and kind of failure per <see cref="StudioLogThrottle.Window" />, and at Debug between.
     /// </para>
     /// </remarks>
     private void LogSummaryFailure(StudioScope? scope, Exception exception)
@@ -210,7 +211,8 @@ internal sealed class ProjectionDataService : IProjectionDataService
             return;
         }
 
-        LogLevel level = throttle.WarningOrDebug("ProjectionDataService.Summary", storeKey, databaseId, exception.GetType());
+        LogLevel level = throttle.WarningOrDebug(
+            "ProjectionDataService.Summary", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
         logger.ProjectionSummaryUnreadable(level, exception, storeKey, databaseId);
     }
 
@@ -340,6 +342,8 @@ internal sealed class ProjectionDataService : IProjectionDataService
                 .ResolveAsync(scope, nameof(StudioCapability.RebuildProjections), cancellationToken)
                 .ConfigureAwait(false);
 
+            // As in ControlAsync: an externally managed store - however the accessor learned it - has no
+            // daemon here to rebuild with, and is refused with that explanation.
             DaemonHosting hosting = await daemons.ForScopeAsync(resolved, cancellationToken).ConfigureAwait(false);
             if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
             {
@@ -866,13 +870,13 @@ internal sealed class ProjectionDataService : IProjectionDataService
     /// <para>
     /// The same question <see cref="StudioScopeResolver" /> asks when a scope is resolved, asked once per
     /// database rather than once for the one in the URL - because a coordinator pause is not scoped to
-    /// the database the selector is on. It is used twice: to filter what the confirm dialog lists, and -
-    /// in <see cref="RequireEveryCoordinatedDatabaseAsync" /> - to decide whether the pause may happen at
-    /// all.
+    /// the database the selector is on. The same per-database question, with the write form added, is
+    /// what <see cref="RequireEveryDatabaseOfTheStoreAsync" /> asks to decide whether the pause may happen
+    /// at all.
     /// </para>
     /// <para>
     /// The read form of the policy (a <see langword="null" /> capability), because listing a database is
-    /// a read. The write form is what the control itself checks.
+    /// a read. The control itself asks both forms.
     /// </para>
     /// </remarks>
     private async Task<IReadOnlyList<string>> VisibleDatabasesAsync(
@@ -1001,6 +1005,9 @@ internal sealed class ProjectionDataService : IProjectionDataService
                 .ResolveAsync(scope, capability.ToString(), cancellationToken)
                 .ConfigureAwait(false);
 
+            // Only a Hosted answer carries a daemon: ExternallyManaged - by AsyncMode, or by a coordinator
+            // whose lookup said NotSupported - is refused here with its own explanation, exactly as the
+            // coordinator controls refuse it.
             DaemonHosting hosting = await daemons.ForScopeAsync(resolved, cancellationToken).ConfigureAwait(false);
             if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
             {
@@ -1146,9 +1153,9 @@ internal sealed class ProjectionDataService : IProjectionDataService
     /// <see cref="MartenStudioOptions.StoreAuthorizationPolicy" /> scopes by database - which the scope
     /// selector honours, so it is a shape hosts are expected to have - would otherwise let a visitor
     /// allowed only database A stop the projections of database B, and the confirm dialog would name B
-    /// while doing it. So the write policy is asked for every coordinated database before the coordinator
-    /// is touched, and the first refusal is a scope denial: the same exception, the same 9203 audit
-    /// entry, and nothing paused.
+    /// while doing it. So the policies are asked for every coordinated database before the coordinator
+    /// is touched (<see cref="RequireEveryDatabaseOfTheStoreAsync" />), and the first refusal is a scope
+    /// denial: the same exception, the same 9203 audit entry, and nothing paused.
     /// </para>
     /// </remarks>
     private async Task CoordinatorControlAsync(
@@ -1171,17 +1178,22 @@ internal sealed class ProjectionDataService : IProjectionDataService
                 .ResolveAsync(scope, capability.ToString(), cancellationToken)
                 .ConfigureAwait(false);
 
-            // Before the databases are enumerated and before any coordinator is resolved: an externally
-            // managed store's pause and resume belong to the system that runs its projections, and that
-            // system's coordinator is never asked anything (DaemonAccessor's remarks).
-            if (DaemonAccessor.IsExternallyManaged(resolved.Store))
+            // The accessor's answer, and not a second opinion formed here: before the databases are
+            // enumerated and before the coordinator is handed out, an externally managed store is refused.
+            // Its pause and resume belong to the system that runs its projections - and on Wolverine,
+            // PauseAsync and ResumeAsync are StopAllAsync and StartAllAsync on this node, behind the back
+            // of the distribution that assigned those agents. Reading AsyncMode alone missed a Wolverine
+            // release that leaves it at Solo; ForScopeAsync also reads the NotSupportedException its
+            // lookup answers with, and does so the same way for one database or several.
+            DaemonHosting hosting = await daemons.ForScopeAsync(resolved, cancellationToken).ConfigureAwait(false);
+            if (hosting.State == DaemonHostingState.ExternallyManaged)
             {
-                throw new StudioDaemonNotHostedException(DaemonAccessor.ExternallyManagedExplanation);
+                throw new StudioDaemonNotHostedException(hosting.Explanation);
             }
 
-            await RequireEveryCoordinatedDatabaseAsync(resolved, capability, cancellationToken).ConfigureAwait(false);
+            await RequireEveryDatabaseOfTheStoreAsync(resolved, capability, action, cancellationToken).ConfigureAwait(false);
 
-            MartenCoordinator coordinator = daemons.CoordinatorForScope(resolved, out string missing)
+            MartenCoordinator coordinator = daemons.CoordinatorForScope(resolved, hosting, out string missing)
                 ?? throw new StudioDaemonNotHostedException(missing);
 
             string user = await authorization.UserNameAsync().ConfigureAwait(false);
@@ -1201,7 +1213,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
         {
             // The scope the refusal names, and not the one that was asked for. They are the same thing
             // when the scope resolver refused, and they are deliberately different when
-            // RequireEveryCoordinatedDatabaseAsync did: the entry then says which database the visitor
+            // RequireEveryDatabaseOfTheStoreAsync did: the entry then says which database the visitor
             // could not reach, which is the one fact this refusal knows and the requested scope does not.
             audit.RecordScopeDenied(denied.Scope, PolicyName(capability), action, target);
             throw;
@@ -1214,25 +1226,34 @@ internal sealed class ProjectionDataService : IProjectionDataService
     }
 
     /// <summary>
-    /// Refuses a coordinator control unless the visitor may address <em>every</em> database it would
-    /// reach.
+    /// Refuses an operation that reaches every database of the store unless the visitor may address
+    /// <em>every</em> one of them.
     /// </summary>
     /// <remarks>
-    /// The databases come from <c>IMartenStorage.AllDatabases()</c>, which is what the coordinator's own
-    /// distributor enumerates and what <see cref="DaemonAccessor" /> reports on the card - never
-    /// <c>AllSchemaNames()</c> or <c>AllObjects()</c>, which apply migrations (hard rule 14). A store
-    /// that cannot enumerate its databases is refused rather than allowed: the whole point of the check
-    /// is that the operation is wider than the scope, so not knowing how wide is not a reason to proceed.
+    /// <para>
+    /// Two operations are that wide: a coordinator pause or resume, and a progression correction asked
+    /// for without a tenant, which Marten 9.31 runs over <c>Tenancy.BuildDatabases()</c> - see
+    /// <see cref="AdvancedAsync" />.
+    /// </para>
+    /// <para>
+    /// The databases come from <c>IMartenStorage.AllDatabases()</c> - verified in Marten 9.31 to be
+    /// <c>Tenancy.BuildDatabases()</c>, the same set both of those operations walk, and what
+    /// <see cref="DaemonAccessor" /> reports on the card - never <c>AllSchemaNames()</c> or
+    /// <c>AllObjects()</c>, which apply migrations (hard rule 14). A store that cannot enumerate its
+    /// databases is refused rather than allowed: the whole point of the check is that the operation is
+    /// wider than the scope, so not knowing how wide is not a reason to proceed.
+    /// </para>
     /// </remarks>
     /// <exception cref="StudioNotAuthorizedException">
-    /// The store policy refuses one of them, which the caller records as a scope denial.
+    /// A policy refuses one of them, which the caller records as a scope denial.
     /// </exception>
-    private async Task RequireEveryCoordinatedDatabaseAsync(
+    private async Task RequireEveryDatabaseOfTheStoreAsync(
         ResolvedScope resolved,
         StudioCapability capability,
+        string action,
         CancellationToken cancellationToken)
     {
-        if (!authorization.IsEnabled)
+        if (!AnyPolicyAnswersFor(capability))
         {
             return;
         }
@@ -1247,39 +1268,98 @@ internal sealed class ProjectionDataService : IProjectionDataService
         {
             logger.LogWarning(
                 exception,
-                "Marten Studio could not enumerate the databases of store {StoreKey} before a coordinator control",
-                resolved.Registration.Key);
+                "Marten Studio could not enumerate the databases of store {StoreKey} before {Action}, so it refused it",
+                resolved.Registration.Key,
+                action);
 
             throw new StudioNotAuthorizedException(resolved.Scope);
         }
 
         foreach (IMartenDatabase database in databases)
         {
-            string databaseId = database.Id.Identity;
-
-            bool allowed = await authorization
-                .IsAuthorizedAsync(
-                    new StudioScope(resolved.Registration.Key, databaseId, null),
-                    capability.ToString(),
-                    cancellationToken)
+            await RequireDatabaseAsync(resolved, database.Id.Identity, tenantId: null, capability, cancellationToken)
                 .ConfigureAwait(false);
-
-            if (!allowed)
-            {
-                // The refused scope, not the one that was asked for, so that the audit entry says which
-                // database the visitor was not allowed to reach. That only happens because the catch in
-                // CoordinatorControlAsync records `denied.Scope` rather than the requested `scope` - the
-                // two are one fact, and this throw is worth nothing on its own.
-                throw new StudioNotAuthorizedException(new StudioScope(resolved.Registration.Key, databaseId, null));
-            }
         }
     }
 
     /// <summary>
-    /// One progression correction. These do not need a daemon - they are writes against the progression
-    /// table - which is why they are gated on <c>CorrectProgression</c> and offered even when the daemon
-    /// runs somewhere else.
+    /// Refuses unless the visitor may address <paramref name="databaseId" /> - with the same two questions
+    /// <see cref="StudioScopeResolver" /> asks for the scope in the URL.
     /// </summary>
+    /// <remarks>
+    /// The store policy with no capability, then the write policy with it: a database the visitor may
+    /// not even read is not one they may change, and asking only the write policy - which is what the
+    /// coordinator check once did - let a host that configured a write policy and no store policy skip
+    /// the per-database question entirely, because the old guard short-circuited on the store policy
+    /// alone.
+    /// </remarks>
+    /// <exception cref="StudioNotAuthorizedException">
+    /// Either policy refuses, carrying the refused scope - which the caller's catch records as
+    /// <c>denied.Scope</c>, so that the audit entry says which database the visitor was not allowed to
+    /// reach rather than the one they asked about. The two are one fact, and this throw is worth nothing
+    /// on its own.
+    /// </exception>
+    private async Task RequireDatabaseAsync(
+        ResolvedScope resolved,
+        string databaseId,
+        string? tenantId,
+        StudioCapability capability,
+        CancellationToken cancellationToken)
+    {
+        var reached = new StudioScope(resolved.Registration.Key, databaseId, tenantId);
+
+        bool allowed =
+            await authorization.IsAuthorizedAsync(reached, null, cancellationToken).ConfigureAwait(false)
+            && await authorization.IsAuthorizedAsync(reached, capability.ToString(), cancellationToken).ConfigureAwait(false);
+
+        if (!allowed)
+        {
+            throw new StudioNotAuthorizedException(reached);
+        }
+    }
+
+    /// <summary>Whether any policy would be asked about <paramref name="capability" /> at all.</summary>
+    /// <remarks>
+    /// The store policy answers reads, and the write policy - or the store policy when there is no write
+    /// policy - answers the capability. Only when neither is configured is every question a yes, and only
+    /// then is enumerating the store's databases (a query, on a master-table tenancy) not worth doing.
+    /// </remarks>
+    private bool AnyPolicyAnswersFor(StudioCapability capability) =>
+        !string.IsNullOrWhiteSpace(authorization.PolicyFor(null))
+        || !string.IsNullOrWhiteSpace(authorization.PolicyFor(capability.ToString()));
+
+    /// <summary>
+    /// One progression correction: advance the high-water mark, or pull progression back to the highest
+    /// real sequence. These do not need a daemon - they are writes against the progression table - which
+    /// is why they are gated on <c>CorrectProgression</c> and offered even when the daemon runs somewhere
+    /// else.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Neither reaches only the database in the URL, and Marten 9.31 has no call that would.</b>
+    /// <c>AdvancedOperations.AdvanceHighWaterMarkToLatestAsync(token)</c> and
+    /// <c>TryCorrectProgressInDatabaseAsync(token)</c> - the overloads without a tenant - loop over
+    /// <c>Tenancy.BuildDatabases()</c> and run a <c>HighWaterDetector</c> against <em>every</em> database
+    /// of the store (read at tag <c>V9.31.0</c>, <c>src/Marten/AdvancedOperations.cs</c>). The overloads
+    /// with a tenant run one against <c>Tenancy.GetTenantAsync(tenantId).Database</c>. The per-database
+    /// type underneath, <c>Marten.Events.Daemon.HighWater.HighWaterDetector</c>, is internal, and
+    /// re-implementing what it does - the committed-sequence reading, the allocation fence and the
+    /// stuck-gap rows - in the studio's own SQL would be the one way to make these corrections wrong.
+    /// <c>MartenApiSurfaceTest</c> pins all of that, so a Marten that grows a per-database overload fails
+    /// there and says to use it.
+    /// </para>
+    /// <para>
+    /// So the studio authorizes what the call reaches rather than what the URL names. Without a tenant,
+    /// that is every database of the store (<see cref="RequireEveryDatabaseOfTheStoreAsync" />, the same
+    /// check a coordinator pause gets), and the confirm dialog says the correction reaches all of them.
+    /// With a tenant, it is the tenant's database, which Marten finds through the tenancy and which is
+    /// asked about with that tenant - normally the database the scope resolved, but not provably so: a
+    /// host's <c>KnownTenantIds</c> are one list for every database, and the resolver accepts any of them
+    /// for any database. Before this, a visitor whose store policy allowed database A could advance
+    /// database B's high-water mark, which makes every async projection in B treat the events it has not
+    /// processed as already gone.
+    /// </para>
+    /// </remarks>
     private async Task AdvancedAsync(
         StudioScope scope,
         string action,
@@ -1298,6 +1378,17 @@ internal sealed class ProjectionDataService : IProjectionDataService
             ResolvedScope resolved = await resolver
                 .ResolveAsync(scope, capability.ToString(), cancellationToken)
                 .ConfigureAwait(false);
+
+            if (resolved.TenantId is not { Length: > 0 } tenantId)
+            {
+                await RequireEveryDatabaseOfTheStoreAsync(resolved, capability, action, cancellationToken).ConfigureAwait(false);
+            }
+            else if (AnyPolicyAnswersFor(capability))
+            {
+                IMartenDatabase tenantDatabase = await TenantDatabaseAsync(resolved.Store, tenantId).ConfigureAwait(false);
+                await RequireDatabaseAsync(resolved, tenantDatabase.Id.Identity, tenantId, capability, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             string user = await authorization.UserNameAsync().ConfigureAwait(false);
             logger.DaemonControlRequested(user, action, target, resolved.Registration.Key, resolved.Database.Id.Identity);
@@ -1323,6 +1414,24 @@ internal sealed class ProjectionDataService : IProjectionDataService
             audit.Record(action, target, false, exception.Message, capability, scope);
             throw;
         }
+    }
+
+    /// <summary>
+    /// The database Marten's tenant overloads of the progression corrections reach for
+    /// <paramref name="tenantId" />.
+    /// </summary>
+    /// <remarks>
+    /// The same two calls <c>AdvancedOperations</c> makes in Marten 9.31 -
+    /// <c>TenantIdStyle.MaybeCorrectTenantId</c>, then <c>Tenancy.GetTenantAsync</c> - so the database
+    /// authorized here is the database the correction then writes to, and not one the studio inferred.
+    /// Pinned by <c>MartenApiSurfaceTest</c>.
+    /// </remarks>
+    private static async Task<IMartenDatabase> TenantDatabaseAsync(IDocumentStore store, string tenantId)
+    {
+        string corrected = store.Options.TenantIdStyle.MaybeCorrectTenantId(tenantId);
+        Tenant tenant = await store.Options.Tenancy.GetTenantAsync(corrected).ConfigureAwait(false);
+
+        return tenant.Database;
     }
 
     // ------------------------------------------------------------------------------------------------

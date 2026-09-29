@@ -16,11 +16,17 @@ namespace MartenStudio.Services;
 /// <b>9212-9229 are the operational anomalies</b>, and every one of them takes its level as a parameter.
 /// They are the failures that happen on a path the studio polls - the Overview, the projections screen,
 /// the navigation badges, each re-read every <c>RefreshInterval</c> in every open circuit - so each is
-/// logged at Warning the first time <see cref="StudioLogThrottle" /> sees its store, database and
-/// exception type in ten minutes, and at Debug after that. A host that wants them gone filters on the id;
-/// a host that wants every occurrence turns Debug on. Expected states - no daemon here, a daemon run by
-/// an external system, event tables that do not exist yet - are not anomalies and have no id: they are
+/// logged at Warning the first time <see cref="StudioLogThrottle" /> sees its store, database and kind of
+/// failure in ten minutes, and at Debug after that. A host that wants them gone filters on the id; a host
+/// that wants every occurrence turns Debug on. Expected states - no daemon here, a daemon run by an
+/// external system, event tables that do not exist yet - are not anomalies and have no id: they are
 /// Debug lines, because they are values the page already shows (AGENTS.md hard rule 11).
+/// </para>
+/// <para>
+/// <b>Every call of one of these takes its level from the throttle</b> -
+/// <see cref="StudioLogThrottle.WarningOrDebug" />, or <see cref="StudioLogThrottle.LevelOrWarning" /> for
+/// an owner a test builds without one - and never from a literal <c>LogLevel.Warning</c>, which would put
+/// the site back on every poll. <c>LogLevelsTests</c> reads every call site and enforces it.
 /// </para>
 /// <para>
 /// The in-memory Activity ring is bounded at 500 entries in one process and is gone at the next restart.
@@ -89,8 +95,11 @@ internal static partial class StudioLog
 
     /// <remarks>
     /// A coordinator <em>is</em> registered and answered with something other than the two expected
-    /// shapes - Wolverine's managed distribution throws <c>NotSupportedException</c> by design, and a
-    /// coordinator that would not even be constructed is "not hosted here" - neither of which comes here.
+    /// shapes, or could not be constructed for a reason other than the expected one. Wolverine's managed
+    /// distribution throws <c>NotSupportedException</c> from the per-database lookup by design, and its
+    /// constructor throws <c>ArgumentOutOfRangeException</c> for a store its agent family does not know;
+    /// neither comes here. Two throttle sites share this event - the lookup and the construction - so
+    /// one does not silence the other.
     /// </remarks>
     [LoggerMessage(EventId = 9212, Message = "Marten Studio could not reach the async daemon of store {StoreKey}, database {DatabaseId}")]
     public static partial void DaemonUnreachable(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
@@ -116,8 +125,12 @@ internal static partial class StudioLog
 
     /// <remarks>
     /// Every event-store read renders its failure as a value through one describer, and this is its log
-    /// line. A statement timeout (57014) or a table that is not there yet (42P01, 3F000) is the page's
-    /// business and is Debug; a connection failure or any other SQLSTATE is an anomaly and comes here.
+    /// line. A timeout - 57014, or the <c>NpgsqlException</c> wrapping a <c>TimeoutException</c> that the
+    /// same expiry produces when the backend is slow to answer the cancel - is the page's business and is
+    /// Debug. A table or schema that is not there (42P01, 3F000) comes here: every read asks the column
+    /// catalog, or <c>DeadLetterTableExistsAsync</c>, before it touches a table, so an event store that
+    /// has not been created yet is an empty answer and never this, and one of those SQLSTATEs means the
+    /// catalog and the database disagree. So does a connection failure and any other SQLSTATE.
     /// </remarks>
     [LoggerMessage(EventId = 9217, Message = "Marten Studio could not {What} in store {StoreKey}, database {DatabaseId}: {SqlState}")]
     public static partial void EventReadFailed(this ILogger logger, LogLevel level, Exception exception, string what, string storeKey, string databaseId, string? sqlState);

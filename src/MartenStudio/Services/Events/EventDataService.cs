@@ -224,7 +224,7 @@ internal sealed class EventDataService : IEventDataService
                     hasMore = false;
 
                     string schema = table.Schema;
-                    LogLevel level = throttle.WarningOrDebug("EventDataService.StreamTimestamp", scope.StoreKey, scope.DatabaseId, null);
+                    LogLevel level = throttle.WarningOrDebug("EventDataService.StreamTimestamp", scope.StoreKey, scope.DatabaseId, kind: null);
                     logger.StreamTimestampMissing(level, schema);
                 }
             }
@@ -1434,7 +1434,9 @@ internal sealed class EventDataService : IEventDataService
 
         try
         {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            // Through PostgresFailure, so that a pool that ran dry or a connect that timed out - which
+            // Npgsql spells exactly like a statement timeout - is never logged as one (LogReadFailure).
+            await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
             return connection;
         }
         catch
@@ -1632,32 +1634,53 @@ internal sealed class EventDataService : IEventDataService
     /// rather than assumed.
     /// </para>
     /// <para>
-    /// <b>Debug:</b> a statement that ran past <c>QueryTimeout</c> or was cancelled (57014) - the budget the
-    /// studio set doing its job, on a read the page is already showing as "timed out, retry"; a table or
-    /// schema that is not there (42P01, 3F000) - an event store that has not been created yet, which
-    /// Marten does on the first append; and a store or database the URL named that does not exist
-    /// (<see cref="KeyNotFoundException" />), which is a stale link rather than a fault.
+    /// <b>Debug:</b> a statement that ran past <c>QueryTimeout</c> or was cancelled - the budget the studio
+    /// set doing its job, on a read the page is already showing as "timed out, retry" - in either of the
+    /// spellings it arrives in (<see cref="PostgresFailure.IsTimeout" />: <c>57014</c>, or Npgsql's own
+    /// client-side timeout when the backend was too busy to answer the cancel); and a store or database
+    /// the URL named that does not exist (<see cref="KeyNotFoundException" />), which is a stale link
+    /// rather than a fault.
     /// </para>
     /// <para>
     /// <b>Warning, throttled:</b> everything else - a connection that failed, a permission the role lacks,
-    /// an SQLSTATE nobody expected. Event 9217, once per read, store, database and exception type per
+    /// an SQLSTATE nobody expected. Event 9217, once per read, store, database and kind of failure
+    /// (<see cref="StudioLogThrottle.KindOf" />, so a 42501 does not silence a 53300) per
     /// <see cref="StudioLogThrottle.Window" />, and Debug in between.
+    /// </para>
+    /// <para>
+    /// <b>A missing table or schema (42P01, 3F000) is on this side too.</b> It is not how an event store
+    /// that has not been created yet shows up: every read here asks the column catalog first
+    /// (<c>DescribeTablesAsync</c>), and the dead-letter reads <c>DeadLetterTableExistsAsync</c>, and
+    /// answers "empty" when the tables are not there - so the expected state never reaches Postgres at
+    /// all. One of those SQLSTATEs therefore means the catalog said a table exists and the statement found
+    /// none: a table dropped from under a running studio, a search path that changed, a schema a role
+    /// cannot see. That is worth one line, and being Debug hid it.
     /// </para>
     /// </remarks>
     private void LogReadFailure(StudioScope scope, Exception exception, string what, string? sqlState)
     {
-        bool expected = sqlState is PostgresErrorCodes.QueryCanceled or PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.InvalidSchemaName
-            || exception is KeyNotFoundException;
-
         string storeKey = scope.StoreKey;
         string databaseId = scope.DatabaseId;
 
-        LogLevel level = expected
+        LogLevel level = IsExpectedReadFailure(exception)
             ? LogLevel.Debug
-            : throttle.WarningOrDebug("EventDataService." + what, storeKey, databaseId, exception.GetType());
+            : throttle.WarningOrDebug("EventDataService." + what, storeKey, databaseId, StudioLogThrottle.KindOf(exception));
 
         logger.EventReadFailed(level, exception, what, storeKey, databaseId, sqlState);
     }
+
+    /// <summary>
+    /// Whether a failed event-store read is one of the expected answers <see cref="LogReadFailure" />
+    /// writes at Debug: a statement timeout in either spelling, or a stale link.
+    /// </summary>
+    /// <remarks>
+    /// Separate so the classification can be tested without a database. A connection that could not be
+    /// opened is never expected here, however Npgsql spells it: <see cref="OpenAsync" /> opens through
+    /// <see cref="PostgresFailure.OpenAsync" />, which is what keeps a pool that ran dry off this list.
+    /// </remarks>
+    /// <param name="exception">What the read threw.</param>
+    internal static bool IsExpectedReadFailure(Exception exception) =>
+        PostgresFailure.IsTimeout(exception) || exception is KeyNotFoundException;
 
     /// <summary>
     /// The reader's columns by name, so a select list that changes with the store's column set can still

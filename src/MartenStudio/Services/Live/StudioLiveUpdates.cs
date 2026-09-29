@@ -255,9 +255,9 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
                 catch (Exception handlerFailure) when (handlerFailure is not OperationCanceledException)
                 {
                     // A bug in a page, on a loop that runs every RefreshInterval while the read keeps
-                    // failing: event 9220, a Warning once per exception type per window.
-                    LogLevel level = throttle?.WarningOrDebug("LiveUpdates.FailedHandler", null, null, handlerFailure.GetType())
-                        ?? LogLevel.Warning;
+                    // failing: event 9220, a Warning once per kind of failure per window.
+                    LogLevel level = StudioLogThrottle.LevelOrWarning(
+                        throttle, "LiveUpdates.FailedHandler", null, null, StudioLogThrottle.KindOf(handlerFailure));
                     logger.LiveUpdateHandlerFailed(level, handlerFailure);
                 }
             }

@@ -171,9 +171,9 @@ internal sealed class StoreInfoService : IStoreInfoService
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // Every Overview load in every circuit, and the scope selector asks the same question: one
-            // Warning per store and exception type per window, Debug in between (event 9213).
+            // Warning per store and kind of failure per window, Debug in between (event 9213).
             string storeKey = registration.Key;
-            LogLevel level = throttle.WarningOrDebug("Store.Databases", storeKey, null, exception.GetType());
+            LogLevel level = throttle.WarningOrDebug("Store.Databases", storeKey, null, StudioLogThrottle.KindOf(exception));
             logger.StoreDatabasesUnreadable(level, exception, storeKey);
             databases.Add(new DatabaseOverview(
                 resolved.Database.Id.Identity,
@@ -316,7 +316,7 @@ internal sealed class StoreInfoService : IStoreInfoService
         if (version is null)
         {
             // Once per circuit per store, and every circuit asks: event 9214, throttled across them.
-            LogLevel level = throttle.WarningOrDebug("Store.PostgresVersion", storeKey, null, null);
+            LogLevel level = throttle.WarningOrDebug("Store.PostgresVersion", storeKey, null, kind: null);
             logger.PostgresVersionUnreadable(level, null, storeKey);
         }
 
