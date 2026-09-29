@@ -180,9 +180,15 @@ internal sealed class MartenStoreRegistry
                 failures[registration.Key] = unavailable;
             }
 
+            // The failure cache above expires every ten seconds and every polling page asks again, so
+            // the Warning is throttled across them: once per store and exception type per window, Debug
+            // in between. A provider without the studio's throttle (a test's) always says Warning.
+            LogLevel level = provider.GetService<StudioLogThrottle>()?
+                .WarningOrDebug("Store.Resolve", registration.Key, null, exception.GetType()) ?? LogLevel.Warning;
+
             provider.GetService<ILoggerFactory>()?
                 .CreateLogger<MartenStoreRegistry>()
-                .StoreUnavailable(registration.Key, registration.ServiceType.FullName ?? registration.ServiceType.Name, exception.Message);
+                .StoreUnavailable(level, registration.Key, registration.ServiceType.FullName ?? registration.ServiceType.Name, exception.Message);
 
             return unavailable;
         }

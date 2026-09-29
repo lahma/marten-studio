@@ -121,11 +121,16 @@ internal sealed class SampleHost : IAsyncDisposable
     /// <param name="connectionString">The Postgres the sample store is pointed at.</param>
     /// <param name="studioPath"><c>--path</c>, or <see langword="null" /> for the default <c>/marten</c>.</param>
     /// <param name="allowDataGeneration">Whether to map the demo-data endpoints outside Development.</param>
+    /// <param name="noDaemon">
+    /// <c>--no-daemon</c>: host no async daemon, the shape of a production host whose projections run
+    /// elsewhere - the configuration whose log a UI validation run reads for warnings.
+    /// </param>
     /// <param name="cancellationToken">Cancels the wait.</param>
     public static async Task<SampleHost> StartAsync(
         string connectionString,
         string? studioPath = null,
         bool allowDataGeneration = false,
+        bool noDaemon = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -156,6 +161,11 @@ internal sealed class SampleHost : IAsyncDisposable
         if (allowDataGeneration)
         {
             startInfo.ArgumentList.Add("--allow-data-generation");
+        }
+
+        if (noDaemon)
+        {
+            startInfo.ArgumentList.Add("--no-daemon");
         }
 
         // Explicit rather than inherited: a suite whose behaviour depends on what was exported in the

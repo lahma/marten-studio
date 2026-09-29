@@ -73,14 +73,20 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
     private readonly TenantDiscovery tenantDiscovery;
     private readonly IServiceProvider provider;
     private readonly ILogger<StudioScopeCatalog> logger;
+    private readonly StudioLogThrottle? throttle;
 
+    /// <remarks>
+    /// <paramref name="throttle" /> is optional so that a test can build a catalog by hand; the container
+    /// always supplies it, and without one every failure is simply a Warning.
+    /// </remarks>
     public StudioScopeCatalog(
         IOptions<MartenStudioOptions> options,
         MartenStoreRegistry registry,
         StudioAuthorization authorization,
         TenantDiscovery tenantDiscovery,
         IServiceProvider provider,
-        ILogger<StudioScopeCatalog> logger)
+        ILogger<StudioScopeCatalog> logger,
+        StudioLogThrottle? throttle = null)
     {
         this.options = options;
         this.registry = registry;
@@ -88,7 +94,15 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         this.tenantDiscovery = tenantDiscovery;
         this.provider = provider;
         this.logger = logger;
+        this.throttle = throttle;
     }
+
+    /// <summary>
+    /// Warning the first time in a window, Debug after: the header asks these questions on every scope
+    /// change in every circuit, so one unreachable database would otherwise be a Warning per click.
+    /// </summary>
+    private LogLevel LevelFor(string site, string storeKey, Exception exception) =>
+        throttle?.WarningOrDebug(site, storeKey, null, exception.GetType()) ?? LogLevel.Warning;
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<StoreListing>> ListStoresAsync(CancellationToken cancellationToken = default)
@@ -174,7 +188,8 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not discover the tenants of store {StoreKey}", storeKey);
+            LogLevel level = LevelFor("Store.Tenants", storeKey, exception);
+            logger.TenantDiscoveryFailed(level, exception, storeKey);
         }
 
         return new StoreScopeFacts(cardinality, showTenants, TenantList.Unavailable, null);
@@ -198,7 +213,9 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not list the databases of store {StoreKey}", storeKey);
+            // The same event, and the same throttle key, as the Overview's store card (9213).
+            LogLevel level = LevelFor("Store.Databases", storeKey, exception);
+            logger.StoreDatabasesUnreadable(level, exception, storeKey);
             return [];
         }
 

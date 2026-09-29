@@ -807,6 +807,77 @@ public class MartenApiSurfaceTest
     }
 
     /// <summary>
+    /// DB-0: the two facts the daemon card's log hygiene reads off a store without asking a coordinator -
+    /// whether an external system runs its projections, and whether it has any async work at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>DaemonMode.ExternallyManaged</c> is in the JasperFx.Events Marten 9.31 brings (2.60.0), reached
+    /// from a store through <c>IReadOnlyDaemonSettings.AsyncMode</c>. Wolverine's managed event-subscription
+    /// distribution sets it and registers a coordinator whose <c>DaemonForMainDatabase()</c> and
+    /// <c>DaemonForDatabase()</c> always throw <c>NotSupportedException</c> - so the studio reads the mode
+    /// first and never asks. <c>AddAsyncDaemon(ExternallyManaged)</c> registers no coordinator of Marten's
+    /// own (verified in <c>MartenServiceCollectionExtensions</c> at <c>V9.31.0</c>: only Solo and HotCold
+    /// do), which is the second half of why the mode, and not a registration, is what decides.
+    /// </para>
+    /// <para>
+    /// <c>ProjectionGraph.HasAnyAsyncProjections()</c> rather than <c>IReadOnlyEventStoreOptions.Projections()</c>:
+    /// the latter is <c>Projections.All.OfType&lt;ISubscriptionSource&gt;()</c>, and a subscription added
+    /// with <c>Events.Subscribe(...)</c> lives in a separate list it never reads. A store with a subscription
+    /// and nothing else is a store with a daemon to host, and the card must not tell it otherwise.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ExternallyManaged_and_HasAnyAsyncProjections_are_readable_from_the_store()
+    {
+        Enum.GetNames<DaemonMode>().Should().Contain(
+            ["Disabled", "Solo", "HotCold", "ExternallyManaged"],
+            "the studio's DaemonHostingState.ExternallyManaged is keyed on the last one");
+
+        RequireProperty(typeof(IReadOnlyDaemonSettings), "AsyncMode").PropertyType.Should().Be<DaemonMode>();
+        RequireMethod(typeof(ProjectionOptions), "HasAnyAsyncProjections").ReturnType.Should().Be<bool>();
+
+        // Marten registers its coordinator only for the two modes that host a daemon here.
+        var external = new ServiceCollection();
+        external.AddMarten(x => x.Connection(DummyConnectionString)).AddAsyncDaemon(DaemonMode.ExternallyManaged);
+        external.Should().NotContain(x => x.ServiceType == typeof(MartenCoordinator),
+            "an externally managed store's coordinator, when there is one, is the external system's");
+
+        using (IDocumentStore store = DocumentStore.For(x =>
+               {
+                   x.Connection(DummyConnectionString);
+                   x.Projections.AsyncMode = DaemonMode.ExternallyManaged;
+               }))
+        {
+            store.Options.Events.Daemon.AsyncMode.Should().Be(DaemonMode.ExternallyManaged);
+            ((ProjectionOptions) store.Options.Events.Daemon).HasAnyAsyncProjections().Should().BeFalse();
+        }
+
+        using (IDocumentStore store = DocumentStore.For(x =>
+               {
+                   x.Connection(DummyConnectionString);
+                   x.Events.Subscribe(new SurfaceSubscription());
+               }))
+        {
+            store.Options.Events.Projections().Should().BeEmpty(
+                "Projections() never lists a subscription, which is why the studio does not ask it");
+            ((ProjectionOptions) store.Options.Events.Daemon).HasAnyAsyncProjections().Should().BeTrue(
+                "a subscription is async work, and HasAnyAsyncProjections() counts it");
+        }
+    }
+
+    /// <summary>A subscription that does nothing, so a store can have one and nothing else.</summary>
+    private sealed class SurfaceSubscription : global::Marten.Subscriptions.SubscriptionBase
+    {
+        public override Task<IChangeListener> ProcessEventsAsync(
+            EventRange page,
+            ISubscriptionController controller,
+            IDocumentOperations operations,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(NullChangeListener.Instance);
+    }
+
+    /// <summary>
     /// P5-fix-2: which progression names are Marten's bookkeeping rather than a projection's shard.
     /// </summary>
     /// <remarks>
@@ -1410,6 +1481,11 @@ public class MartenApiSurfaceTest
         IReadOnlyList<ISubscriptionSource> projections = events.Projections();
         IReadOnlyList<IEventType> eventTypes = events.AllKnownEventTypes();
         _ = (events.StreamIdentity, events.TenancyStyle, events.DatabaseSchemaName, events.AppendMode, events.Daemon);
+
+        // DB-0: the daemon card's two questions, answered without a coordinator.
+        bool externallyManaged = events.Daemon.AsyncMode == DaemonMode.ExternallyManaged;
+        bool hasAsyncWork = events.Daemon is ProjectionOptions projectionOptions && projectionOptions.HasAnyAsyncProjections();
+        _ = (externallyManaged, hasAsyncWork);
 
         MartenMetadataConfig metadataConfig = events.MetadataConfig;
         _ = (metadataConfig.CausationIdEnabled, metadataConfig.CorrelationIdEnabled,

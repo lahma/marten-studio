@@ -122,6 +122,13 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddSingleton<StudioCapabilityGuard>();
         services.TryAddSingleton<StudioActionLogService>();
 
+        // DB-0: log hygiene
+        // One process-wide memory of which anomalies have already been reported, so a failure on a path
+        // every open page polls is a Warning once per store, database and exception type per ten minutes
+        // and Debug in between. The host's TimeProvider when it registered one, the system clock when not.
+        services.TryAddSingleton(static provider =>
+            new StudioLogThrottle(provider.GetService<TimeProvider>() ?? TimeProvider.System));
+
         // Both read the database's catalog and cache what it said, keyed by database identity.
         // Singletons because what they cache - a table's physical columns, a table's indexes - changes
         // only with a schema migration and is the same answer for every circuit; a per-circuit cache

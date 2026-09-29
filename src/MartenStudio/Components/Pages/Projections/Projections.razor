@@ -69,6 +69,20 @@
                 </p>
             </div>
         }
+        else if (view.NoDaemonAnywhere && view.Daemon.IsExternallyManaged)
+        {
+            @* The same three facts, about a store whose projections another system runs: worth saying,
+               because nothing has advanced, and wrong to blame on a daemon this process was never meant
+               to host. *@
+            <div class="ms-alert ms-alert-warning ms-no-daemon-banner" role="alert">
+                <div class="ms-alert-content">
+                    <p>
+                        This store's asynchronous projections are run by an external system, and no shard has
+                        ever advanced. If that system is running, it has not processed anything yet.
+                    </p>
+                </div>
+            </div>
+        }
         else if (view.NoDaemonAnywhere)
         {
             <div class="ms-alert ms-alert-warning ms-no-daemon-banner" role="alert">
@@ -86,6 +100,7 @@
         }
 
         <DaemonStatusCard IsHostedHere="view.Daemon.IsHostedHere"
+                          IsExternallyManaged="view.Daemon.IsExternallyManaged"
                           IsRunning="view.Daemon.IsRunning"
                           Mode="@view.Daemon.Mode"
                           AgentCount="view.Daemon.Agents.Count"
@@ -100,27 +115,34 @@
             @if (!Capabilities.ReadOnly)
             {
                 <div class="ms-daemon-actions ms-actions">
-                    <button type="button"
-                            class="ms-button ms-daemon-pause"
-                            disabled="@(!ControlEnabled)"
-                            title="@ControlTitle"
-                            @onclick="() => AskAsync(PendingAction.PauseDaemon)">
-                        Pause daemon
-                    </button>
-                    <button type="button"
-                            class="ms-button ms-daemon-resume"
-                            disabled="@(!ControlEnabled)"
-                            title="@ControlTitle"
-                            @onclick="() => AskAsync(PendingAction.ResumeDaemon)">
-                        Resume daemon
-                    </button>
-                    <button type="button"
-                            class="ms-button ms-daemon-restart-high-water"
-                            disabled="@(!ControlEnabled)"
-                            title="@ControlTitle"
-                            @onclick="RestartHighWaterAsync">
-                        Restart high water
-                    </button>
+                    @* Hidden rather than disabled for an externally managed store: there is no option a
+                       host could set to make them work here - they belong to the system that runs the
+                       projections - and the card has already said so. The progression corrections stay:
+                       they are writes against the progression table and need no daemon. *@
+                    @if (!ExternallyManaged)
+                    {
+                        <button type="button"
+                                class="ms-button ms-daemon-pause"
+                                disabled="@(!ControlEnabled)"
+                                title="@ControlTitle"
+                                @onclick="() => AskAsync(PendingAction.PauseDaemon)">
+                            Pause daemon
+                        </button>
+                        <button type="button"
+                                class="ms-button ms-daemon-resume"
+                                disabled="@(!ControlEnabled)"
+                                title="@ControlTitle"
+                                @onclick="() => AskAsync(PendingAction.ResumeDaemon)">
+                            Resume daemon
+                        </button>
+                        <button type="button"
+                                class="ms-button ms-daemon-restart-high-water"
+                                disabled="@(!ControlEnabled)"
+                                title="@ControlTitle"
+                                @onclick="RestartHighWaterAsync">
+                            Restart high water
+                        </button>
+                    }
                     <button type="button"
                             class="ms-button ms-daemon-advance-high-water"
                             disabled="@(!CorrectEnabled)"
@@ -151,7 +173,7 @@
                     <p class="ms-muted ms-daemon-explanation ms-agent-refusal" role="status">@agentRefusal</p>
                 }
 
-                @if (!Capabilities.IsEnabled(StudioCapability.ControlDaemon))
+                @if (!ExternallyManaged && !Capabilities.IsEnabled(StudioCapability.ControlDaemon))
                 {
                     <CapabilityDisabled Capability="@nameof(StudioCapability.ControlDaemon)"
                                         Action="Pausing and resuming the projection daemon" />
@@ -166,14 +188,14 @@
                 @* One sentence per capability the policy refused this visitor, under the controls it
                    disabled. Each is its own line because a policy is free to allow a pause and refuse a
                    rebuild, and a reader has to be able to tell which button the sentence is about. *@
-                <WriteRefusal Refused="RefusedByPolicy(StudioCapability.ControlDaemon)"
+                <WriteRefusal Refused="@(!ExternallyManaged && RefusedByPolicy(StudioCapability.ControlDaemon))"
                               Capability="@nameof(StudioCapability.ControlDaemon)" />
                 <WriteRefusal Refused="RefusedByPolicy(StudioCapability.CorrectProgression)"
                               Capability="@nameof(StudioCapability.CorrectProgression)" />
-                <WriteRefusal Refused="RefusedByPolicy(StudioCapability.RebuildProjections)"
+                <WriteRefusal Refused="@(!ExternallyManaged && RefusedByPolicy(StudioCapability.RebuildProjections))"
                               Capability="@nameof(StudioCapability.RebuildProjections)" />
 
-                @if (!view.Daemon.IsHostedHere)
+                @if (!view.Daemon.IsHostedHere && !view.Daemon.IsExternallyManaged)
                 {
                     <p class="ms-muted ms-daemon-unavailable">
                         Start, stop and rebuild are unavailable because no async daemon is hosted in this
@@ -241,7 +263,7 @@
                                            ImplementationType="@projection.ImplementationTypeName"
                                            ShardCount="projection.ShardNames.Count">
                                 <Actions>
-                                    @if (!Capabilities.ReadOnly)
+                                    @if (!Capabilities.ReadOnly && !ExternallyManaged)
                                     {
                                         <button type="button"
                                                 class="ms-button ms-button-danger ms-btn-sm ms-projection-rebuild"
@@ -306,7 +328,7 @@
                                         @(shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never")
                                     </td>
                                     <td class="ms-table-cell ms-table-cell-actions">
-                                        @if (!Capabilities.ReadOnly)
+                                        @if (!Capabilities.ReadOnly && !ExternallyManaged)
                                         {
                                             @* Disabled, never hidden, while the coordinator is running: the
                                                option has to stay discoverable, and the hover text - like the
@@ -641,6 +663,12 @@
     // ------------------------------------------------------------------------------------------------
 
     private bool DaemonHostedHere => view?.Daemon.IsHostedHere == true;
+
+    /// <summary>
+    /// Whether an external system runs this store's async projections, so that the daemon controls are
+    /// not offered here at all. The service refuses them regardless (AGENTS.md hard rule 5).
+    /// </summary>
+    private bool ExternallyManaged => view?.Daemon.IsExternallyManaged == true;
 
     private bool ControlEnabled =>
         Capabilities.IsEnabled(StudioCapability.ControlDaemon) && DaemonHostedHere && mayControl;

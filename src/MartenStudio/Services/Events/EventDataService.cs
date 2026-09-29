@@ -83,6 +83,7 @@ internal sealed class EventDataService : IEventDataService
     private readonly DaemonAccessor daemons;
     private readonly ColumnCatalog catalog;
     private readonly IOptions<MartenStudioOptions> options;
+    private readonly StudioLogThrottle throttle;
     private readonly ILogger<EventDataService> logger;
 
     public EventDataService(
@@ -93,6 +94,7 @@ internal sealed class EventDataService : IEventDataService
         DaemonAccessor daemons,
         ColumnCatalog catalog,
         IOptions<MartenStudioOptions> options,
+        StudioLogThrottle throttle,
         ILogger<EventDataService> logger)
     {
         this.resolver = resolver;
@@ -102,6 +104,7 @@ internal sealed class EventDataService : IEventDataService
         this.daemons = daemons;
         this.catalog = catalog;
         this.options = options;
+        this.throttle = throttle;
         this.logger = logger;
     }
 
@@ -134,7 +137,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return EventStoreShape.Unavailable(Describe(exception, "describe the event store"));
+            return EventStoreShape.Unavailable(Describe(scope, exception, "describe the event store"));
         }
     }
 
@@ -220,10 +223,9 @@ internal sealed class EventDataService : IEventDataService
                     // "Next" link that goes nowhere, which is worse than stopping one page early.
                     hasMore = false;
 
-                    logger.LogWarning(
-                        "Marten Studio stopped paging the stream list: {Schema}.mt_streams has a row with a null "
-                        + "timestamp, which no Marten-created schema has and which a keyset cannot page past.",
-                        table.Schema);
+                    string schema = table.Schema;
+                    LogLevel level = throttle.WarningOrDebug("EventDataService.StreamTimestamp", scope.StoreKey, scope.DatabaseId, null);
+                    logger.StreamTimestampMissing(level, schema);
                 }
             }
 
@@ -231,7 +233,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return StreamPage.Failed(Describe(exception, "list the streams"));
+            return StreamPage.Failed(Describe(scope, exception, "list the streams"));
         }
     }
 
@@ -324,7 +326,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return EventPage.Failed(Describe(exception, "read the stream's events"));
+            return EventPage.Failed(Describe(scope, exception, "read the stream's events"));
         }
     }
 
@@ -388,7 +390,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return EventPage.Failed(Describe(exception, "read the event feed"));
+            return EventPage.Failed(Describe(scope, exception, "read the event feed"));
         }
     }
 
@@ -485,7 +487,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return EventStoreCounts.Failed(Describe(exception, "count the event store"));
+            return EventStoreCounts.Failed(Describe(scope, exception, "count the event store"));
         }
 
         // The last arm is the never-analysed store that was small enough to count: an exact number, drawn
@@ -548,7 +550,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return RecentStreams.Failed(Describe(exception, "read the newest streams"));
+            return RecentStreams.Failed(Describe(scope, exception, "read the newest streams"));
         }
     }
 
@@ -643,7 +645,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return EventTypeList.Failed(Describe(exception, "list the event types"));
+            return EventTypeList.Failed(Describe(scope, exception, "list the event types"));
         }
     }
 
@@ -742,7 +744,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return AggregateSnapshot.Failed(typeName, version, Describe(exception, "replay the stream"));
+            return AggregateSnapshot.Failed(typeName, version, Describe(scope, exception, "replay the stream"));
         }
     }
 
@@ -900,7 +902,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return DeadLetterPage.Failed(Describe(exception, "list the dead letters"));
+            return DeadLetterPage.Failed(Describe(scope, exception, "list the dead letters"));
         }
     }
 
@@ -1591,11 +1593,11 @@ internal sealed class EventDataService : IEventDataService
     private static bool IsReadFailure(Exception exception) => exception is not OperationCanceledException;
 
     /// <summary>Renders a failure the way plan §4.8 asks: SQLSTATE, message, and whether to offer Retry.</summary>
-    private EventDataError Describe(Exception exception, string what)
+    private EventDataError Describe(StudioScope scope, Exception exception, string what)
     {
         if (exception is PostgresException postgres)
         {
-            logger.LogWarning(exception, "Marten Studio could not {What}: {SqlState}", what, postgres.SqlState);
+            LogReadFailure(scope, exception, what, postgres.SqlState);
             return new EventDataError(postgres.MessageText, postgres.SqlState, EventDataError.IsRetryable(postgres.SqlState));
         }
 
@@ -1612,12 +1614,49 @@ internal sealed class EventDataService : IEventDataService
 
         if (exception is NpgsqlException)
         {
-            logger.LogWarning(exception, "Marten Studio could not {What}", what);
+            LogReadFailure(scope, exception, what, sqlState: null);
             return new EventDataError(exception.Message, null, true);
         }
 
-        logger.LogWarning(exception, "Marten Studio could not {What}", what);
+        LogReadFailure(scope, exception, what, sqlState: null);
         return new EventDataError(exception.Message, null, false);
+    }
+
+    /// <summary>
+    /// The log line for one failed event-store read, at the level the failure deserves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every read here renders its failure as a value, and several of them are polled - the Overview's
+    /// counts, feed and newest streams, the feed page, the navigation badges - so the level is decided
+    /// rather than assumed.
+    /// </para>
+    /// <para>
+    /// <b>Debug:</b> a statement that ran past <c>QueryTimeout</c> or was cancelled (57014) - the budget the
+    /// studio set doing its job, on a read the page is already showing as "timed out, retry"; a table or
+    /// schema that is not there (42P01, 3F000) - an event store that has not been created yet, which
+    /// Marten does on the first append; and a store or database the URL named that does not exist
+    /// (<see cref="KeyNotFoundException" />), which is a stale link rather than a fault.
+    /// </para>
+    /// <para>
+    /// <b>Warning, throttled:</b> everything else - a connection that failed, a permission the role lacks,
+    /// an SQLSTATE nobody expected. Event 9217, once per read, store, database and exception type per
+    /// <see cref="StudioLogThrottle.Window" />, and Debug in between.
+    /// </para>
+    /// </remarks>
+    private void LogReadFailure(StudioScope scope, Exception exception, string what, string? sqlState)
+    {
+        bool expected = sqlState is PostgresErrorCodes.QueryCanceled or PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.InvalidSchemaName
+            || exception is KeyNotFoundException;
+
+        string storeKey = scope.StoreKey;
+        string databaseId = scope.DatabaseId;
+
+        LogLevel level = expected
+            ? LogLevel.Debug
+            : throttle.WarningOrDebug("EventDataService." + what, storeKey, databaseId, exception.GetType());
+
+        logger.EventReadFailed(level, exception, what, storeKey, databaseId, sqlState);
     }
 
     /// <summary>

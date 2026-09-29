@@ -48,6 +48,7 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
 {
     private readonly IJSRuntime jsRuntime;
     private readonly ILogger<StudioLiveUpdates> logger;
+    private readonly StudioLogThrottle? throttle;
 
     /// <summary>
     /// What the browser-side watcher list is keyed on for this instance.
@@ -68,10 +69,15 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     private volatile bool hidden;
     private bool disposed;
 
-    public StudioLiveUpdates(IJSRuntime jsRuntime, ILogger<StudioLiveUpdates> logger)
+    /// <remarks>
+    /// <paramref name="throttle" /> is optional so that a test can build a loop by hand; the factory
+    /// always hands the container's over, and without one a failing handler is simply a Warning.
+    /// </remarks>
+    public StudioLiveUpdates(IJSRuntime jsRuntime, ILogger<StudioLiveUpdates> logger, StudioLogThrottle? throttle = null)
     {
         this.jsRuntime = jsRuntime;
         this.logger = logger;
+        this.throttle = throttle;
     }
 
     /// <summary>
@@ -248,7 +254,11 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
                 }
                 catch (Exception handlerFailure) when (handlerFailure is not OperationCanceledException)
                 {
-                    logger.LogWarning(handlerFailure, "A Marten Studio page failed to handle a live update failure");
+                    // A bug in a page, on a loop that runs every RefreshInterval while the read keeps
+                    // failing: event 9220, a Warning once per exception type per window.
+                    LogLevel level = throttle?.WarningOrDebug("LiveUpdates.FailedHandler", null, null, handlerFailure.GetType())
+                        ?? LogLevel.Warning;
+                    logger.LiveUpdateHandlerFailed(level, handlerFailure);
                 }
             }
         }

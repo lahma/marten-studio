@@ -7,10 +7,20 @@ namespace MartenStudio.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Event ids <c>9200-9299</c> belong to Marten Studio. All twelve are declared here from the first
-/// packet that logs any of them, so the numbers are reserved rather than assigned in the order features
-/// happened to land - an operator's log query is written against the number, and renumbering one later
-/// would silently change what a saved query matches.
+/// Event ids <c>9200-9299</c> belong to Marten Studio. The first twelve (9200-9211) are the audit events
+/// and were declared together from the first packet that logs any of them, so the numbers are reserved
+/// rather than assigned in the order features happened to land - an operator's log query is written
+/// against the number, and renumbering one later would silently change what a saved query matches.
+/// </para>
+/// <para>
+/// <b>9212-9229 are the operational anomalies</b>, and every one of them takes its level as a parameter.
+/// They are the failures that happen on a path the studio polls - the Overview, the projections screen,
+/// the navigation badges, each re-read every <c>RefreshInterval</c> in every open circuit - so each is
+/// logged at Warning the first time <see cref="StudioLogThrottle" /> sees its store, database and
+/// exception type in ten minutes, and at Debug after that. A host that wants them gone filters on the id;
+/// a host that wants every occurrence turns Debug on. Expected states - no daemon here, a daemon run by
+/// an external system, event tables that do not exist yet - are not anomalies and have no id: they are
+/// Debug lines, because they are values the page already shows (AGENTS.md hard rule 11).
 /// </para>
 /// <para>
 /// The in-memory Activity ring is bounded at 500 entries in one process and is gone at the next restart.
@@ -57,10 +67,13 @@ internal static partial class StudioLog
     /// <remarks>
     /// Warning rather than Error: a store that will not build is the application's own configuration
     /// answering, and the studio goes on serving every other store. It is logged because the studio
-    /// renders it as one disabled row in a picker, which nobody is watching.
+    /// renders it as one disabled row in a picker, which nobody is watching. The level is the caller's:
+    /// the registry caches a failure for ten seconds, and every polling page asks again after that, so
+    /// the same broken store is a Warning once per <see cref="StudioLogThrottle.Window" /> and Debug in
+    /// between.
     /// </remarks>
-    [LoggerMessage(EventId = 9210, Level = LogLevel.Warning, Message = "Marten Studio could not resolve store {StoreKey} ({ServiceType}): {Reason}")]
-    public static partial void StoreUnavailable(this ILogger logger, string storeKey, string serviceType, string reason);
+    [LoggerMessage(EventId = 9210, Message = "Marten Studio could not resolve store {StoreKey} ({ServiceType}): {Reason}")]
+    public static partial void StoreUnavailable(this ILogger logger, LogLevel level, string storeKey, string serviceType, string reason);
 
     /// <remarks>
     /// Warning, and it counts the properties: Marten has no untyped write path, so saving an edited
@@ -69,4 +82,61 @@ internal static partial class StudioLog
     /// </remarks>
     [LoggerMessage(EventId = 9211, Level = LogLevel.Warning, Message = "Marten Studio user {User} saved {DocumentType} {Id} and the round trip dropped {DroppedCount} properties: {Dropped}")]
     public static partial void DocumentWriteRoundTripDropped(this ILogger logger, string user, string documentType, string id, int droppedCount, string dropped);
+
+    // --------------------------------------------------------------------------------------------------
+    // 9212-9229: operational anomalies, each at the level StudioLogThrottle chose (see the remarks above)
+    // --------------------------------------------------------------------------------------------------
+
+    /// <remarks>
+    /// A coordinator <em>is</em> registered and answered with something other than the two expected
+    /// shapes - Wolverine's managed distribution throws <c>NotSupportedException</c> by design, and a
+    /// coordinator that would not even be constructed is "not hosted here" - neither of which comes here.
+    /// </remarks>
+    [LoggerMessage(EventId = 9212, Message = "Marten Studio could not reach the async daemon of store {StoreKey}, database {DatabaseId}")]
+    public static partial void DaemonUnreachable(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
+
+    /// <remarks>Logged by the Overview's store cards and by the scope selector's database listing.</remarks>
+    [LoggerMessage(EventId = 9213, Message = "Marten Studio could not list the databases of store {StoreKey}")]
+    public static partial void StoreDatabasesUnreadable(this ILogger logger, LogLevel level, Exception exception, string storeKey);
+
+    /// <remarks>Logged by the Overview's store cards and by the configuration screen.</remarks>
+    [LoggerMessage(EventId = 9214, Message = "Marten Studio could not read the Postgres version of store {StoreKey}")]
+    public static partial void PostgresVersionUnreadable(this ILogger logger, LogLevel level, Exception? exception, string storeKey);
+
+    /// <remarks>
+    /// The page falls back to the database rows it was reading anyway, so nothing on screen is wrong -
+    /// only less fresh between polls.
+    /// </remarks>
+    [LoggerMessage(EventId = 9215, Message = "Marten Studio could not observe the shard state tracker of store {StoreKey}, database {DatabaseId}")]
+    public static partial void ShardTrackerUnobservable(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
+
+    /// <remarks>Polled by the Overview's projection tiles and by the navigation badges.</remarks>
+    [LoggerMessage(EventId = 9216, Message = "Marten Studio could not summarise the projections of store {StoreKey}, database {DatabaseId}")]
+    public static partial void ProjectionSummaryUnreadable(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
+
+    /// <remarks>
+    /// Every event-store read renders its failure as a value through one describer, and this is its log
+    /// line. A statement timeout (57014) or a table that is not there yet (42P01, 3F000) is the page's
+    /// business and is Debug; a connection failure or any other SQLSTATE is an anomaly and comes here.
+    /// </remarks>
+    [LoggerMessage(EventId = 9217, Message = "Marten Studio could not {What} in store {StoreKey}, database {DatabaseId}: {SqlState}")]
+    public static partial void EventReadFailed(this ILogger logger, LogLevel level, Exception exception, string what, string storeKey, string databaseId, string? sqlState);
+
+    /// <remarks>
+    /// <c>mt_streams."timestamp"</c> is <c>NOT NULL</c> in every schema Marten creates, so this is a table
+    /// somebody migrated by hand - worth one line, and not one per page of the stream list.
+    /// </remarks>
+    [LoggerMessage(EventId = 9218, Message = "Marten Studio stopped paging the stream list: {Schema}.mt_streams has a row with a null timestamp, which no Marten-created schema has and which a keyset cannot page past")]
+    public static partial void StreamTimestampMissing(this ILogger logger, LogLevel level, string schema);
+
+    /// <remarks>Asked whenever the header describes a scope, which is every scope change in every circuit.</remarks>
+    [LoggerMessage(EventId = 9219, Message = "Marten Studio could not discover the tenants of store {StoreKey}")]
+    public static partial void TenantDiscoveryFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey);
+
+    /// <remarks>
+    /// A page's own failure handler threw while a refresh was already failing - a bug in the studio, and
+    /// on a polling loop, which is why it is throttled rather than written once per tick.
+    /// </remarks>
+    [LoggerMessage(EventId = 9220, Message = "A Marten Studio page failed to handle a live update failure")]
+    public static partial void LiveUpdateHandlerFailed(this ILogger logger, LogLevel level, Exception exception);
 }

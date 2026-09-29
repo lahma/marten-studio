@@ -1,6 +1,8 @@
 using System.Net;
 using System.Security.Claims;
 
+using JasperFx.Events.Daemon;
+
 using Marten;
 
 using MartenStudio;
@@ -50,7 +52,8 @@ builder.Services.AddHostedService(static services => services.GetRequiredService
 builder.Services
     .AddMarten(options => SampleStore.Configure(options, connectionString))
     .UseLightweightSessions()
-    .AddAsyncDaemon(JasperFx.Events.Daemon.DaemonMode.Solo)
+    // --no-daemon: Disabled registers no coordinator, which is a host whose projections run elsewhere.
+    .AddAsyncDaemon(sample.NoDaemon ? DaemonMode.Disabled : DaemonMode.Solo)
     .InitializeWith(new SampleDataSeeder());
 
 builder.Services.AddMartenStudio(options =>
@@ -177,7 +180,7 @@ app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthoriza
             <button type="submit">Sign out</button>
           </form>
           <p>Switches: <code>--anonymous</code>, <code>--readonly</code>, <code>--path /ops/marten</code>,
-            <code>--allow-data-generation</code>.</p>
+            <code>--allow-data-generation</code>, <code>--no-daemon</code>.</p>
           {{demoData}}
         </body>
         </html>

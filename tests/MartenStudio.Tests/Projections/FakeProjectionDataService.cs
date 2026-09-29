@@ -110,6 +110,17 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
         return this;
     }
 
+    /// <summary>
+    /// Says an external system - Wolverine's managed distribution, say - runs this store's projections.
+    /// </summary>
+    public FakeProjectionDataService WithExternallyManagedDaemon()
+    {
+        Daemon = new DaemonStatus(
+            DaemonHostingState.ExternallyManaged, false, "ExternallyManaged", [], false, null,
+            DaemonAccessor.ExternallyManagedExplanation);
+        return this;
+    }
+
     /// <summary>Says the daemon is hosted here but stopped.</summary>
     public FakeProjectionDataService WithStoppedDaemon()
     {

@@ -145,7 +145,20 @@ internal enum DaemonHostingState
     /// <c>store.BuildProjectionDaemonAsync()</c>, which starts a second daemon beside the host's own and
     /// the two then fight over the same advisory locks until one hangs.
     /// </remarks>
-    NotHostedInThisProcess
+    NotHostedInThisProcess,
+
+    /// <summary>
+    /// The store's <c>Projections.AsyncMode</c> is <c>DaemonMode.ExternallyManaged</c>: an external
+    /// system - Wolverine's managed event-subscription distribution, typically - runs its async
+    /// projections, and the studio never asks that system's coordinator anything.
+    /// </summary>
+    /// <remarks>
+    /// Its own state rather than a flavour of <see cref="NotHostedInThisProcess" />, because the card says
+    /// something different - "External", and that starting, stopping and rebuilding belong to that
+    /// system - and because the projections page hides the daemon controls outright instead of disabling
+    /// them: there is no option a host could set to make them work here.
+    /// </remarks>
+    ExternallyManaged
 }
 
 /// <summary>One running agent, as the daemon reports it.</summary>
@@ -269,7 +282,7 @@ internal static class DaemonControlMessages
 /// </summary>
 /// <param name="Hosting">Whether a daemon is reachable from this process.</param>
 /// <param name="IsRunning">Whether that daemon is running. Meaningless when it is not hosted here.</param>
-/// <param name="Mode">The configured <c>DaemonMode</c> - Disabled, Solo or HotCold.</param>
+/// <param name="Mode">The configured <c>DaemonMode</c> - Disabled, Solo, HotCold or ExternallyManaged.</param>
 /// <param name="Agents">The agents the daemon currently has, when it could be asked.</param>
 /// <param name="HasAnyPaused">Whether the daemon reports any paused shard.</param>
 /// <param name="HighWaterLastPolledAt">When the high-water agent last polled, when the daemon says.</param>
@@ -310,6 +323,12 @@ internal sealed record DaemonStatus(
 {
     /// <summary>Whether this process can be asked to start, stop or rebuild anything.</summary>
     public bool IsHostedHere => Hosting == DaemonHostingState.Hosted;
+
+    /// <summary>
+    /// Whether an external system runs this store's async projections, so that starting, stopping and
+    /// rebuilding belong to it and are not offered here at all.
+    /// </summary>
+    public bool IsExternallyManaged => Hosting == DaemonHostingState.ExternallyManaged;
 
     /// <summary>Whether Marten Studio is the reason this store's agents are not running.</summary>
     public bool IsPausedByStudio => PausedByStudio is not null;

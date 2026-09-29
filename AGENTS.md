@@ -575,6 +575,7 @@ src/MartenStudio/Components/Pages/Projections/  The projections screen and its p
 samples/MartenStudio.SampleDomain/Events/ The demo events and the three projections
 tests/MartenStudio.Tests/Projections/     Daemon accessor, snapshot cache, live updates, operation tracker, page
 tests/MartenStudio.Integration.Tests/Projections/  Live Postgres + a real Solo daemon
+tests/MartenStudio.Integration.Tests/Logging/  Live hosts with no daemon and an externally managed one: no Warning from polling
 src/MartenStudio/Services/Events/         Event data service, aggregate invoker, event DTOs and links
 src/MartenStudio/Components/Pages/Events/ Streams, stream detail, feed, event types, dead letters
 tests/MartenStudio.Tests/Events/          Event builder cases, links, and the five page tests - no database

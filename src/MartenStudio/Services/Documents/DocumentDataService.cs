@@ -333,7 +333,14 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             // read this table": the badge and the button both go, and the only way out is a reload. The
             // general catch below used to swallow this case, so the button that started a count(*) too
             // slow to finish was a button that removed itself.
-            logger.LogWarning(exception, "Marten Studio's exact count of '{Alias}' timed out", alias);
+            //
+            // Debug: the visitor asked for this count, the badge already says it timed out, and the budget
+            // is the one the host configured (QueryTimeout) doing its job.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "Marten Studio's exact count of '{Alias}' timed out", alias);
+            }
+
             return DocumentCount.Unknown;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -394,7 +401,12 @@ internal sealed partial class DocumentDataService : IDocumentDataService
             // The union ran past its statement_timeout. That is a fact about the store - some collection
             // in it sorts millions of rows to answer this, because Marten declares no index on
             // mt_last_modified - and saying so is more use than an empty region that looks like calm.
-            logger.LogWarning(postgres, "Marten Studio's recent-documents read of {StoreKey} timed out", scope.StoreKey);
+            // Debug: that is a fact about a large store that the region already says, not a fault.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(postgres, "Marten Studio's recent-documents read of {StoreKey} timed out", scope.StoreKey);
+            }
+
             return RecentDocuments.TooLarge();
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -844,8 +856,13 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         {
             // The table is certainly there and its size is simply not worth what it would cost to find
             // out: "unknown" rather than "could not be reached". The header draws nothing and the page
-            // goes on working, rather than claiming the collection could not be read.
-            logger.LogWarning(exception, "Marten Studio's count of '{Alias}' timed out", table.Alias);
+            // goes on working, rather than claiming the collection could not be read. Debug, because
+            // that is the whole of it: a large table, and a header that says "?" about it.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "Marten Studio's count of '{Alias}' timed out", table.Alias);
+            }
+
             return DocumentCount.Unknown;
         }
         catch (PostgresException exception)
@@ -1519,8 +1536,13 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         {
             // The rail's own short patience ran out. The table is certainly there and nobody has measured
             // it, which is "unknown" - and a rail that failed because one collection is slow would be a
-            // rail that fails on exactly the store this budget exists for.
-            logger.LogWarning(exception, "Marten Studio's rail count of '{Alias}' timed out", table.Alias);
+            // rail that fails on exactly the store this budget exists for. A speculative count running out
+            // of a two-second budget is the budget working, so it is Debug.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "Marten Studio's rail count of '{Alias}' timed out", table.Alias);
+            }
+
             return DocumentCount.Unknown;
         }
         catch (PostgresException exception)

@@ -84,6 +84,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
     private readonly DaemonControlState controlState;
     private readonly ColumnCatalog catalog;
     private readonly IOptions<MartenStudioOptions> options;
+    private readonly StudioLogThrottle throttle;
     private readonly ILogger<ProjectionDataService> logger;
 
     public ProjectionDataService(
@@ -98,6 +99,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
         DaemonControlState controlState,
         ColumnCatalog catalog,
         IOptions<MartenStudioOptions> options,
+        StudioLogThrottle throttle,
         ILogger<ProjectionDataService> logger)
     {
         this.resolver = resolver;
@@ -111,6 +113,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
         this.controlState = controlState;
         this.catalog = catalog;
         this.options = options;
+        this.throttle = throttle;
         this.logger = logger;
     }
 
@@ -162,13 +165,53 @@ internal sealed class ProjectionDataService : IProjectionDataService
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // "Cannot report" is a value the Overview draws differently from zero (plan section 4.8).
-            logger.LogWarning(exception, "Marten Studio could not summarise projections for store {StoreKey}", scope?.StoreKey);
+            LogSummaryFailure(scope, exception);
 
             return new ProjectionSummary(
                 0, 0, 0, null, 0, 0,
                 new DaemonStatus(DaemonHostingState.NotHostedInThisProcess, false, "Unknown", [], false, null, exception.Message),
                 exception.Message);
         }
+    }
+
+    /// <summary>
+    /// The log line for a summary that could not be read, at the level the failure deserves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The summary is polled - by the Overview's tiles and by the navigation badges, every
+    /// <c>RefreshInterval</c>, in every open circuit - so its failures are sorted rather than all written
+    /// at Warning. A refused scope, a store that will not build and a store or database the URL named
+    /// that does not exist are values the page already renders, and each has its own record elsewhere
+    /// (the audit, or event 9210, which the registry throttles); they are Debug here.
+    /// </para>
+    /// <para>
+    /// Anything else - a connection that failed, a statement that timed out on a read that is normally
+    /// instant, an SQLSTATE nobody expected - is an anomaly: event 9216, at Warning once per store,
+    /// database and exception type per <see cref="StudioLogThrottle.Window" />, and at Debug between.
+    /// </para>
+    /// </remarks>
+    private void LogSummaryFailure(StudioScope? scope, Exception exception)
+    {
+        string storeKey = scope?.StoreKey ?? string.Empty;
+        string databaseId = scope?.DatabaseId ?? string.Empty;
+
+        if (exception is StudioNotAuthorizedException or StudioStoreUnavailableException or KeyNotFoundException)
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    exception,
+                    "Marten Studio has no projection summary for store {StoreKey}, database {DatabaseId}",
+                    storeKey,
+                    databaseId);
+            }
+
+            return;
+        }
+
+        LogLevel level = throttle.WarningOrDebug("ProjectionDataService.Summary", storeKey, databaseId, exception.GetType());
+        logger.ProjectionSummaryUnreadable(level, exception, storeKey, databaseId);
     }
 
     /// <inheritdoc />
@@ -773,8 +816,10 @@ internal sealed class ProjectionDataService : IProjectionDataService
 
         if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
         {
+            // Not hosted here, or run by an external system: the state the accessor settled on, carried
+            // through as it is, so the card can tell the two apart.
             return new DaemonStatus(
-                DaemonHostingState.NotHostedInThisProcess, false, mode, [], false, null, hosting.Explanation,
+                hosting.State, false, mode, [], false, null, hosting.Explanation,
                 PausedByStudio: null,
                 LeadershipPollingMilliseconds: pollingMilliseconds,
                 CoordinatedDatabases: databases,
@@ -1028,6 +1073,17 @@ internal sealed class ProjectionDataService : IProjectionDataService
                 .ConfigureAwait(false);
 
             DaemonHosting hosting = await daemons.ForScopeAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+            if (hosting.State == DaemonHostingState.ExternallyManaged)
+            {
+                // Refused as a value, like the coordinator refusal below and for the same reason: nothing
+                // failed, nothing was changed, and there is nothing here the visitor could do about it.
+                // The system that runs these projections is the one that starts and stops them.
+                audit.Record(action, target, false, hosting.Explanation, capability, scope);
+
+                return DaemonControlResult.Refused(hosting.Explanation);
+            }
+
             if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
             {
                 throw new StudioDaemonNotHostedException(hosting.Explanation);
@@ -1115,10 +1171,18 @@ internal sealed class ProjectionDataService : IProjectionDataService
                 .ResolveAsync(scope, capability.ToString(), cancellationToken)
                 .ConfigureAwait(false);
 
+            // Before the databases are enumerated and before any coordinator is resolved: an externally
+            // managed store's pause and resume belong to the system that runs its projections, and that
+            // system's coordinator is never asked anything (DaemonAccessor's remarks).
+            if (DaemonAccessor.IsExternallyManaged(resolved.Store))
+            {
+                throw new StudioDaemonNotHostedException(DaemonAccessor.ExternallyManagedExplanation);
+            }
+
             await RequireEveryCoordinatedDatabaseAsync(resolved, capability, cancellationToken).ConfigureAwait(false);
 
-            MartenCoordinator coordinator = daemons.CoordinatorForScope(resolved)
-                ?? throw new StudioDaemonNotHostedException(DaemonAccessor.NotRegisteredExplanation);
+            MartenCoordinator coordinator = daemons.CoordinatorForScope(resolved, out string missing)
+                ?? throw new StudioDaemonNotHostedException(missing);
 
             string user = await authorization.UserNameAsync().ConfigureAwait(false);
             logger.DaemonControlRequested(user, action, target, resolved.Registration.Key, resolved.Database.Id.Identity);

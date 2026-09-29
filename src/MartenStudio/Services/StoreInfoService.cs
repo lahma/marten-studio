@@ -81,6 +81,7 @@ internal sealed class StoreInfoService : IStoreInfoService
     private readonly IOptions<MartenStudioOptions> options;
     private readonly MartenStoreRegistry registry;
     private readonly StudioScopeResolver resolver;
+    private readonly StudioLogThrottle throttle;
     private readonly ILogger<StoreInfoService> logger;
     private readonly Dictionary<string, string?> postgresVersions = new(StringComparer.OrdinalIgnoreCase);
 
@@ -88,11 +89,13 @@ internal sealed class StoreInfoService : IStoreInfoService
         IOptions<MartenStudioOptions> options,
         MartenStoreRegistry registry,
         StudioScopeResolver resolver,
+        StudioLogThrottle throttle,
         ILogger<StoreInfoService> logger)
     {
         this.options = options;
         this.registry = registry;
         this.resolver = resolver;
+        this.throttle = throttle;
         this.logger = logger;
     }
 
@@ -167,7 +170,11 @@ internal sealed class StoreInfoService : IStoreInfoService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not list the databases of store {StoreKey}", registration.Key);
+            // Every Overview load in every circuit, and the scope selector asks the same question: one
+            // Warning per store and exception type per window, Debug in between (event 9213).
+            string storeKey = registration.Key;
+            LogLevel level = throttle.WarningOrDebug("Store.Databases", storeKey, null, exception.GetType());
+            logger.StoreDatabasesUnreadable(level, exception, storeKey);
             databases.Add(new DatabaseOverview(
                 resolved.Database.Id.Identity,
                 resolved.Database.Id.Name,
@@ -308,7 +315,9 @@ internal sealed class StoreInfoService : IStoreInfoService
 
         if (version is null)
         {
-            logger.LogWarning("Marten Studio could not read the Postgres version of store {StoreKey}", storeKey);
+            // Once per circuit per store, and every circuit asks: event 9214, throttled across them.
+            LogLevel level = throttle.WarningOrDebug("Store.PostgresVersion", storeKey, null, null);
+            logger.PostgresVersionUnreadable(level, null, storeKey);
         }
 
         postgresVersions[storeKey] = version;

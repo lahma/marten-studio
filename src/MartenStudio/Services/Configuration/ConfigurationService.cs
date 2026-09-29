@@ -27,17 +27,20 @@ internal sealed class ConfigurationService : IConfigurationService
     private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioScopeResolver resolver;
     private readonly IStoreInfoService storeInfo;
+    private readonly StudioLogThrottle throttle;
     private readonly ILogger<ConfigurationService> logger;
 
     public ConfigurationService(
         IOptions<MartenStudioOptions> options,
         StudioScopeResolver resolver,
         IStoreInfoService storeInfo,
+        StudioLogThrottle throttle,
         ILogger<ConfigurationService> logger)
     {
         this.options = options;
         this.resolver = resolver;
         this.storeInfo = storeInfo;
+        this.throttle = throttle;
         this.logger = logger;
     }
 
@@ -145,7 +148,10 @@ internal sealed class ConfigurationService : IConfigurationService
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not read the Postgres version of store {StoreKey}", storeKey);
+            // The same event the Overview's store card logs (9214), under the same throttle key.
+            LogLevel level = throttle.WarningOrDebug("Store.PostgresVersion", storeKey, null, exception.GetType());
+            logger.PostgresVersionUnreadable(level, exception, storeKey);
+
             return null;
         }
     }

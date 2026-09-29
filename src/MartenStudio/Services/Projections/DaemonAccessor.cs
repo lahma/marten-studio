@@ -1,6 +1,8 @@
 using JasperFx.Events.Daemon;
+using JasperFx.Events.Projections;
 
 using Marten;
+using Marten.Events.Projections;
 using Marten.Storage;
 
 using Microsoft.Extensions.Logging;
@@ -34,6 +36,13 @@ internal sealed record DaemonHosting(
     public static DaemonHosting NotHosted(string explanation) =>
         new(DaemonHostingState.NotHostedInThisProcess, null, explanation);
 
+    /// <summary>
+    /// An external system runs this store's async projections, and the studio does not ask its
+    /// coordinator anything.
+    /// </summary>
+    public static DaemonHosting ExternallyManaged() =>
+        new(DaemonHostingState.ExternallyManaged, null, DaemonAccessor.ExternallyManagedExplanation);
+
     /// <summary>The daemon, or <see langword="null" />.</summary>
     public bool TryGetDaemon(out IProjectionDaemon daemon)
     {
@@ -59,6 +68,20 @@ internal sealed record DaemonHosting(
 /// progress row out of the database. Only the buttons go away.
 /// </para>
 /// <para>
+/// <b>Three answers that are not failures, and are never logged above Debug.</b> A store whose
+/// <c>Projections.AsyncMode</c> is <c>DaemonMode.ExternallyManaged</c> has its async projections run by
+/// something else - Wolverine's managed event-subscription distribution sets exactly that - and its
+/// coordinator is never asked: Wolverine's <c>DaemonForMainDatabase()</c> and <c>DaemonForDatabase()</c>
+/// throw <c>NotSupportedException</c> by design, so asking would turn a supported deployment into a
+/// warning every <c>RefreshInterval</c> in every open tab, which is the production report this was
+/// written for. A coordinator that throws <c>NotSupportedException</c> anyway (an integration that did
+/// not set the mode) is read the same way. And a coordinator whose <em>construction</em> throws -
+/// Wolverine's does, with <c>ArgumentOutOfRangeException</c>, for a store its agent family does not
+/// know - is "not hosted here", which is what it is. Only a coordinator that exists, answers and then
+/// fails is an anomaly, and that is a Warning once per <see cref="StudioLogThrottle.Window" /> (event
+/// 9212) rather than once per poll.
+/// </para>
+/// <para>
 /// Which service to ask for depends on how the store was registered, and the two are not
 /// interchangeable. <c>AddMarten().AddAsyncDaemon()</c> registers the non-generic
 /// <c>Marten.Events.Daemon.Coordination.IProjectionCoordinator</c>;
@@ -70,21 +93,115 @@ internal sealed record DaemonHosting(
 /// </remarks>
 internal sealed class DaemonAccessor
 {
-    /// <summary>What the card says when no coordinator is registered for this store.</summary>
+    /// <summary>
+    /// What the card says when no coordinator is registered for a store that does have async work.
+    /// </summary>
+    /// <remarks>
+    /// A statement of fact and not a to-do. A host that runs its daemon in another process - or runs none
+    /// here on purpose - is a supported deployment, and a card that told it to add
+    /// <c>AddAsyncDaemon</c> was advice nobody asked for, repeated on every page.
+    /// </remarks>
     public const string NotRegisteredExplanation =
-        "No async daemon is hosted in this process. Marten Studio reads projection progress straight from " +
-        "the database, but it cannot start, stop or rebuild anything from here. Add " +
-        "AddAsyncDaemon(DaemonMode.Solo) (or HotCold) to this application's AddMarten chain to host one, " +
-        "or drive the daemon from the process that already runs it.";
+        "No async daemon is hosted in this process for this store; hosting one takes " +
+        "AddAsyncDaemon(DaemonMode.Solo) or HotCold. Projection progress is read from the database, and " +
+        "starting, stopping and rebuilding happen in whichever process runs the daemon.";
+
+    /// <summary>What the card says when the store has nothing for a daemon to run.</summary>
+    public const string NoAsyncProjectionsExplanation =
+        "This store has no asynchronous projections, so there is no daemon to host.";
+
+    /// <summary>
+    /// What the card says when an external system - Wolverine's managed distribution, typically - runs
+    /// this store's async projections.
+    /// </summary>
+    public const string ExternallyManagedExplanation =
+        "Async projections are run by an external system (for example Wolverine's managed distribution). " +
+        "Progress is read from the database. Starting, stopping and rebuilding belong to that system.";
+
+    /// <summary>
+    /// What the card says when a coordinator is registered and could not be constructed here.
+    /// </summary>
+    /// <remarks>
+    /// The exception's message is deliberately not repeated: Wolverine's, for one, names every event store
+    /// its agent family knows, and a visitor authorized for this store is not owed the names of the
+    /// others (D5). It is in the Debug log for whoever administers the process.
+    /// </remarks>
+    public const string CoordinatorUnavailableExplanation =
+        "A projection coordinator is registered for this store, but it could not be created in this " +
+        "process, so there is no daemon here to show. Projection progress is read from the database.";
+
+    /// <summary>The throttle key of the one anomaly this class logs at Warning.</summary>
+    private const string ForScopeSite = "DaemonAccessor.ForScope";
 
     private readonly IServiceProvider provider;
+    private readonly StudioLogThrottle throttle;
     private readonly ILogger<DaemonAccessor> logger;
 
-    public DaemonAccessor(IServiceProvider provider, ILogger<DaemonAccessor> logger)
+    public DaemonAccessor(IServiceProvider provider, StudioLogThrottle throttle, ILogger<DaemonAccessor> logger)
     {
         this.provider = provider;
+        this.throttle = throttle;
         this.logger = logger;
     }
+
+    /// <summary>
+    /// Whether an external system runs this store's async projections
+    /// (<c>Projections.AsyncMode == DaemonMode.ExternallyManaged</c>).
+    /// </summary>
+    /// <remarks>
+    /// Read through <c>IReadOnlyEventStoreOptions.Daemon</c>, which is the store's own
+    /// <c>ProjectionOptions</c> - <c>IReadOnlyStoreOptions</c> has no <c>Projections</c> member.
+    /// <c>DaemonMode.ExternallyManaged</c> exists in the JasperFx.Events that Marten 9.31 brings; both
+    /// are pinned by <c>MartenApiSurfaceTest</c>. A store whose settings cannot be read is not claimed to
+    /// be externally managed: the coordinator path below is the conservative one.
+    /// </remarks>
+    internal static bool IsExternallyManaged(IDocumentStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        try
+        {
+            return store.Options.Events.Daemon.AsyncMode == DaemonMode.ExternallyManaged;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the store has anything a daemon would run: an async projection or a subscription.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ProjectionGraph.HasAnyAsyncProjections()</c> and not <c>IReadOnlyEventStoreOptions.Projections()</c>:
+    /// the latter is <c>Options.Projections.All.OfType&lt;ISubscriptionSource&gt;()</c> and never lists a
+    /// subscription registered with <c>Events.Subscribe(...)</c>, which lives in a separate list - verified
+    /// against Marten 9.31 and JasperFx.Events 2.60, and pinned by <c>MartenApiSurfaceTest</c>. The
+    /// fallback for a settings object of another shape is the projection list, and a store that cannot
+    /// be read at all is assumed to have async work, so the card says the informative sentence rather
+    /// than claiming there is nothing to host.
+    /// </para>
+    /// </remarks>
+    internal static bool HasAsyncWork(IDocumentStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        try
+        {
+            return store.Options.Events.Daemon is ProjectionOptions projections
+                ? projections.HasAnyAsyncProjections()
+                : store.Options.Events.Projections().Any(static x => x.Lifecycle == ProjectionLifecycle.Async);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>Why there is no daemon to show, when nothing is registered for this store.</summary>
+    internal static string NotRegisteredExplanationFor(IDocumentStore store) =>
+        HasAsyncWork(store) ? NotRegisteredExplanation : NoAsyncProjectionsExplanation;
 
     /// <summary>
     /// The service type whose registration means "this process hosts a daemon for that store".
@@ -126,10 +243,36 @@ internal sealed class DaemonAccessor
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        MartenCoordinator? coordinator = ResolveCoordinator(scope.Registration);
+        string storeKey = scope.Registration.Key;
+        string databaseId = scope.Database.Id.Identity;
+
+        // First, and before the coordinator is so much as resolved: an externally managed store's
+        // coordinator (Wolverine's) throws from the very calls below, by design.
+        if (IsExternallyManaged(scope.Store))
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    "Marten Studio is not asking the projection coordinator of store {StoreKey}: its AsyncMode is ExternallyManaged",
+                    storeKey);
+            }
+
+            return DaemonHosting.ExternallyManaged();
+        }
+
+        MartenCoordinator? coordinator = ResolveCoordinator(scope.Registration, out bool constructionFailed);
         if (coordinator is null)
         {
-            return DaemonHosting.NotHosted(NotRegisteredExplanation);
+            // A value on the card, polled every RefreshInterval: Debug, and never more.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    "Marten Studio found no projection coordinator for store {StoreKey} in this process",
+                    storeKey);
+            }
+
+            return DaemonHosting.NotHosted(
+                constructionFailed ? CoordinatorUnavailableExplanation : NotRegisteredExplanationFor(scope.Store));
         }
 
         try
@@ -145,13 +288,27 @@ internal sealed class DaemonAccessor
 
             return DaemonHosting.Hosted(daemon, [.. databases.Select(static x => x.Id.Identity)]);
         }
+        catch (NotSupportedException exception)
+        {
+            // Wolverine's managed distribution, on an integration that did not set ExternallyManaged: its
+            // coordinator hands out no daemons, and says so with exactly this exception type. That is the
+            // deployment answering, not a fault.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    exception,
+                    "The projection coordinator of store {StoreKey} does not hand out daemons; Marten Studio treats the store as externally managed",
+                    storeKey);
+            }
+
+            return DaemonHosting.ExternallyManaged();
+        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(
-                exception,
-                "Marten Studio could not reach the async daemon of store {StoreKey}, database {DatabaseId}",
-                scope.Registration.Key,
-                scope.Scope.DatabaseId);
+            // A real anomaly, on a path every open Overview, projections screen and navigation badge polls:
+            // once per store, database and exception type per window at Warning, and at Debug in between.
+            LogLevel level = throttle.WarningOrDebug(ForScopeSite, storeKey, databaseId, exception.GetType());
+            logger.DaemonUnreachable(level, exception, storeKey, databaseId);
 
             return DaemonHosting.NotHosted(
                 $"A daemon coordinator is registered, but it could not answer for this database: {exception.Message}");
@@ -165,7 +322,7 @@ internal sealed class DaemonAccessor
     /// <remarks>
     /// <para>
     /// The same single resolution path as <see cref="ForScopeAsync" /> - both go through
-    /// <see cref="ResolveCoordinator" />, so an ancillary store's generic
+    /// <see cref="ResolveCoordinator(MartenStoreRegistration, out bool)" />, so an ancillary store's generic
     /// <c>IProjectionCoordinator&lt;T&gt;</c> is found here exactly as it is there and there is never a
     /// second answer to "which coordinator is this store's".
     /// </para>
@@ -178,13 +335,33 @@ internal sealed class DaemonAccessor
     /// the supported daemon is the coordinator's, so the supported way to stop it is the coordinator's
     /// too).
     /// </para>
+    /// <para>
+    /// An externally managed store has no coordinator as far as the studio is concerned, whatever is
+    /// registered: pausing or resuming it belongs to the system that runs its projections, and that
+    /// system's coordinator is exactly the one whose members throw.
+    /// </para>
     /// </remarks>
     /// <param name="scope">An already-resolved scope: the authorization has happened before this is called.</param>
-    public MartenCoordinator? CoordinatorForScope(ResolvedScope scope)
+    /// <param name="explanation">
+    /// Why there is none, in the words the card uses, when the answer is <see langword="null" />.
+    /// </param>
+    public MartenCoordinator? CoordinatorForScope(ResolvedScope scope, out string explanation)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        return ResolveCoordinator(scope.Registration);
+        if (IsExternallyManaged(scope.Store))
+        {
+            explanation = ExternallyManagedExplanation;
+            return null;
+        }
+
+        MartenCoordinator? coordinator = ResolveCoordinator(scope.Registration, out bool constructionFailed);
+
+        explanation = coordinator is not null
+            ? string.Empty
+            : constructionFailed ? CoordinatorUnavailableExplanation : NotRegisteredExplanationFor(scope.Store);
+
+        return coordinator;
     }
 
     /// <summary>
@@ -266,11 +443,26 @@ internal sealed class DaemonAccessor
     /// </summary>
     /// <remarks>
     /// <c>GetService</c> and not <c>GetRequiredService</c>: the missing registration <em>is</em> the
-    /// answer. A construction failure is treated the same way and logged, because a daemon that will not
-    /// build is still a daemon this process cannot drive.
+    /// answer.
     /// </remarks>
-    internal MartenCoordinator? ResolveCoordinator(MartenStoreRegistration registration)
+    internal MartenCoordinator? ResolveCoordinator(MartenStoreRegistration registration) =>
+        ResolveCoordinator(registration, out _);
+
+    /// <summary>
+    /// The coordinator registered for this store, or <see langword="null" /> and whether one was
+    /// registered but would not be constructed.
+    /// </summary>
+    /// <remarks>
+    /// A construction failure is "not hosted here" and is logged at Debug, because it is an expected
+    /// shape rather than a fault: Wolverine's coordinator calls <c>FindStore</c> in its constructor and
+    /// throws <c>ArgumentOutOfRangeException("Unknown identity …")</c> for a store its agent family does
+    /// not know, and this is resolved on every poll of every open page. A daemon that will not build is
+    /// still a daemon this process cannot drive, and the card says so.
+    /// </remarks>
+    private MartenCoordinator? ResolveCoordinator(MartenStoreRegistration registration, out bool constructionFailed)
     {
+        constructionFailed = false;
+
         Type? serviceType = CoordinatorServiceType(registration);
         if (serviceType is null)
         {
@@ -283,11 +475,16 @@ internal sealed class DaemonAccessor
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(
-                exception,
-                "Marten Studio could not resolve the projection coordinator {ServiceType} for store {StoreKey}",
-                serviceType,
-                registration.Key);
+            constructionFailed = true;
+
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    exception,
+                    "Marten Studio could not construct the projection coordinator {ServiceType} for store {StoreKey}; it treats the store as having no daemon here",
+                    serviceType,
+                    registration.Key);
+            }
 
             return null;
         }

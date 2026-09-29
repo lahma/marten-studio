@@ -72,7 +72,8 @@ drift:
 builder.Services
     .AddMarten(options => SampleStore.Configure(options, connectionString))
     .UseLightweightSessions()
-    .AddAsyncDaemon(JasperFx.Events.Daemon.DaemonMode.Solo)
+    // --no-daemon: Disabled registers no coordinator, which is a host whose projections run elsewhere.
+    .AddAsyncDaemon(sample.NoDaemon ? DaemonMode.Disabled : DaemonMode.Solo)
     .InitializeWith(new SampleDataSeeder());
 
 builder.Services.AddMartenStudio(options =>
@@ -567,6 +568,29 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   `ScopeAuthorizationDenied`, 9204 `SqlExecuted`, 9205 `SqlRejected`, 9206 `SchemaChangeApplied`, 9207
   `ProjectionRebuildStarted`, 9208 `ProjectionRebuildFinished`, 9209 `DaemonControlRequested`, 9210
   `StoreUnavailable`, 9211 `DocumentWriteRoundTripDropped`. The range 9200–9299 is reserved.
+- **Log levels.** A state the host configured is not a warning. No async daemon in this process, a
+  daemon run by an external system (`AsyncMode = ExternallyManaged`, which Wolverine's managed
+  distribution sets), event tables that do not exist yet, a speculative count or a query of your own
+  running out of its budget — each is a value the page already shows, logged at `Debug` at most. A real
+  anomaly on a path the studio polls every `RefreshInterval` is logged at `Warning` **once per store,
+  database and exception type per ten minutes**, and at `Debug` in between, so filter on the event id
+  rather than muting the category:
+
+  | Id | Event | Logged when |
+  |---|---|---|
+  | 9202, 9203 | `CapabilityDenied`, `ScopeAuthorizationDenied` | Always `Warning`: a client drove a control the page did not offer |
+  | 9210 | `StoreUnavailable` | A registered store will not build |
+  | 9211 | `DocumentWriteRoundTripDropped` | Always `Warning`: an edit was saved and the round trip dropped properties |
+  | 9212 | `DaemonUnreachable` | A registered coordinator answered with something other than a daemon |
+  | 9213 | `StoreDatabasesUnreadable` | A store's databases could not be listed |
+  | 9214 | `PostgresVersionUnreadable` | The server version could not be read |
+  | 9215 | `ShardTrackerUnobservable` | The in-process shard tracker could not be observed |
+  | 9216 | `ProjectionSummaryUnreadable` | The Overview's or the navigation's projection summary failed |
+  | 9217 | `EventReadFailed` | An event-store read failed for a reason other than a timeout or a missing table |
+  | 9218 | `StreamTimestampMissing` | A hand-migrated `mt_streams` has a row with a null timestamp |
+  | 9219 | `TenantDiscoveryFailed` | The scope selector could not discover a store's tenants |
+  | 9220 | `LiveUpdateHandlerFailed` | A page's own refresh-failure handler threw |
+
 - **What the studio never does:** start a second projection daemon, execute DDL on a read or navigation
   path, write document DML of its own, replace your `StoreOptions.Logger`, or show a connection string
   or a credential anywhere.
