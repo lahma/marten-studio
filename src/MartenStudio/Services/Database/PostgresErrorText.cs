@@ -14,11 +14,19 @@ namespace MartenStudio.Services.Database;
 /// Postgres said") or folded into a reason, so each passes through here with the visitor's withheld set.
 /// </para>
 /// <para>
-/// <b>Qualified names, and the schema a message names outright.</b> A <c>schema.</c> qualifier is masked as
-/// free text is (<see cref="WithheldNames.RedactText" />): outside the double quotes Postgres puts round a
-/// name, and inside them. A schema a message names on its own - after the word <c>schema</c>, quoted or not -
-/// has no dot after it, so it is looked for there too. An unqualified object name is left alone: a name
-/// Postgres printed without its schema names no schema.
+/// <b>Qualified names first, then every whole token.</b> A <c>schema.</c> qualifier is masked as free text is
+/// (<see cref="WithheldNames.RedactText" />): outside the double quotes Postgres puts round a name, and inside
+/// them. Then every whole token that spells a withheld schema's name is masked wherever it stands, whether or
+/// not the word <c>schema</c> comes before it - because that word is only English: a server whose
+/// <c>lc_messages</c> is French says <c>droit refusé pour le schéma hr</c>, and a message may print a name with
+/// a space or a hyphen in it unquoted (<c>relation "HR Data.salaries" does not exist</c>), which no lexer
+/// reads as one identifier. A token is the withheld name as a whole, bounded on both sides by something that
+/// cannot continue an identifier - so <c>hr</c> is masked in <c>schema hr</c> and in <c>"hr.x"</c>, and not in
+/// <c>hr_public</c>, <c>thr</c> or <c>hr-data</c>, whose hyphen joins it to the next word as a name's own
+/// hyphen would. A name with a space or a hyphen in it is matched whole, spaces and hyphens included. This is
+/// error text only: it errs towards masking - a word in a message that happens to spell a withheld schema's
+/// name is masked as well, which costs a little readability and leaks nothing - and definitions keep the
+/// qualifier rule, where a word is a word.
 /// </para>
 /// <para>
 /// <b>Not by pinning the <c>search_path</c>.</b> The catalog reads pin it to <c>pg_catalog</c> so that every
@@ -40,9 +48,6 @@ namespace MartenStudio.Services.Database;
 /// </remarks>
 internal static class PostgresErrorText
 {
-    /// <summary>The word a message names a schema after, on its own.</summary>
-    private const string SchemaWord = "schema";
-
     /// <summary>
     /// <paramref name="message" /> with every withheld schema's name masked, except inside the echo of a value
     /// the read itself bound. <see langword="null" /> stays <see langword="null" />.
@@ -80,9 +85,9 @@ internal static class PostgresErrorText
         return output.ToString();
     }
 
-    /// <summary>Postgres' own words: qualifiers, then a schema named after the word <c>schema</c>.</summary>
+    /// <summary>Postgres' own words: qualifiers, then every whole token that spells a withheld schema.</summary>
     private static string Mask(string text, IReadOnlySet<string> withheld) =>
-        text.Length == 0 ? text : MaskNamedSchemas(WithheldNames.RedactText(text, withheld) ?? text, withheld);
+        text.Length == 0 ? text : MaskTokens(WithheldNames.RedactText(text, withheld) ?? text, withheld);
 
     /// <summary>
     /// Every <c>"value"</c> in <paramref name="message" /> whose value is one the read bound, as sorted,
@@ -139,90 +144,121 @@ internal static class PostgresErrorText
     }
 
     /// <summary>
-    /// A withheld schema a message names on its own - <c>permission denied for schema hr</c>,
-    /// <c>schema "hr" does not exist</c> - masked. The name follows the word <c>schema</c> and whitespace,
-    /// bare or double-quoted, and ends at the end of the text, whitespace, a quote or punctuation.
+    /// Every whole token of <paramref name="text" /> that spells a withheld schema's name, masked - after the
+    /// word <c>schema</c>, in another language's word for it, in double quotes or bare. Compared ignoring case,
+    /// as a folded bare name would be; a name with a double quote in it is also looked for as Postgres prints it
+    /// inside double quotes, with that quote doubled. The mask Redact has already written is passed over whole.
     /// </summary>
-    private static string MaskNamedSchemas(string text, IReadOnlySet<string> withheld)
+    private static string MaskTokens(string text, IReadOnlySet<string> withheld)
     {
-        if (text.IndexOf(SchemaWord, StringComparison.OrdinalIgnoreCase) < 0)
+        // Longest first, so a schema whose name begins with another's - "hr_archive" and "hr", "HR Data" and
+        // "HR" - is masked whole rather than cut in two.
+        string[] names =
+        [
+            .. withheld
+                .Where(static x => x.Length > 0)
+                .SelectMany(static x => x.Contains('"', StringComparison.Ordinal)
+                    ? new[] { x, x.Replace("\"", "\"\"", StringComparison.Ordinal) }
+                    : new[] { x })
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(static x => x.Length),
+        ];
+
+        if (names.Length == 0 || !names.Any(x => text.Contains(x, StringComparison.OrdinalIgnoreCase)))
         {
             return text;
         }
 
-        // Longest first, so a schema whose name begins with another's is never cut in two.
-        string[] names = [.. withheld.Where(static x => x.Length > 0).OrderByDescending(static x => x.Length)];
         System.Text.StringBuilder output = new(text.Length);
-        int position = 0;
+        int copied = 0;
+        int i = 0;
 
-        while (position < text.Length)
+        while (i < text.Length)
         {
-            int word = text.IndexOf(SchemaWord, position, StringComparison.OrdinalIgnoreCase);
-            if (word < 0)
+            if (string.CompareOrdinal(text, i, WithheldNames.Token, 0, WithheldNames.Token.Length) == 0)
             {
-                break;
-            }
-
-            int after = word + SchemaWord.Length;
-            bool wholeWord = (word == 0 || !char.IsLetterOrDigit(text[word - 1]) && text[word - 1] != '_')
-                && after < text.Length && char.IsWhiteSpace(text[after]);
-
-            if (!wholeWord)
-            {
-                output.Append(text, position, after - position);
-                position = after;
+                i += WithheldNames.Token.Length;
                 continue;
             }
 
-            int nameStart = after;
-            while (nameStart < text.Length && char.IsWhiteSpace(text[nameStart]))
-            {
-                nameStart++;
-            }
-
-            bool quoted = nameStart < text.Length && text[nameStart] == '"';
-            int candidate = quoted ? nameStart + 1 : nameStart;
-            string? matched = null;
-
-            foreach (string name in names)
-            {
-                string spelled = quoted ? name.Replace("\"", "\"\"", StringComparison.Ordinal) : name;
-
-                if (string.Compare(text, candidate, spelled, 0, spelled.Length, StringComparison.OrdinalIgnoreCase) == 0
-                    && candidate + spelled.Length <= text.Length
-                    && EndsName(text, candidate + spelled.Length, quoted))
-                {
-                    matched = spelled;
-                    break;
-                }
-            }
-
-            output.Append(text, position, candidate - position);
+            string? matched = StartsToken(text, i) ? MatchAt(text, i, names) : null;
 
             if (matched is null)
             {
-                position = candidate;
+                i++;
                 continue;
             }
 
+            output.Append(text, copied, i - copied);
             output.Append(WithheldNames.Token);
-            position = candidate + matched.Length;
+            i += matched.Length;
+            copied = i;
         }
 
-        output.Append(text, position, text.Length - position);
+        if (copied == 0)
+        {
+            return text;
+        }
+
+        output.Append(text, copied, text.Length - copied);
         return output.ToString();
     }
 
-    /// <summary>Whether a name ends at <paramref name="index" />: the closing quote, or a boundary after a bare name.</summary>
-    private static bool EndsName(string text, int index, bool quoted)
+    /// <summary>The longest of <paramref name="names" /> that stands whole at <paramref name="index" />, or <see langword="null" />.</summary>
+    private static string? MatchAt(string text, int index, string[] names)
     {
-        if (quoted)
+        foreach (string name in names)
         {
-            return index < text.Length && text[index] == '"';
+            if (index + name.Length <= text.Length
+                && string.Compare(text, index, name, 0, name.Length, StringComparison.OrdinalIgnoreCase) == 0
+                && EndsToken(text, index + name.Length))
+            {
+                return name;
+            }
         }
 
-        return index == text.Length
-            || char.IsWhiteSpace(text[index])
-            || text[index] is '"' or '\'' or '.' or ',' or ':' or ';' or ')' or '(';
+        return null;
     }
+
+    /// <summary>
+    /// Whether a token may start at <paramref name="index" />: nothing before it that would make it the tail of a
+    /// longer name - a letter, a digit, <c>_</c>, <c>$</c>, or a hyphen joined to one.
+    /// </summary>
+    private static bool StartsToken(string text, int index)
+    {
+        if (index == 0)
+        {
+            return true;
+        }
+
+        char before = text[index - 1];
+
+        if (before == '-')
+        {
+            return index < 2 || !IsNameCharacter(text[index - 2]);
+        }
+
+        return !IsNameCharacter(before);
+    }
+
+    /// <summary>Whether a token may end at <paramref name="index" />: the end, or nothing that continues a name.</summary>
+    private static bool EndsToken(string text, int index)
+    {
+        if (index >= text.Length)
+        {
+            return true;
+        }
+
+        char after = text[index];
+
+        if (after == '-')
+        {
+            return index + 1 >= text.Length || !IsNameCharacter(text[index + 1]);
+        }
+
+        return !IsNameCharacter(after);
+    }
+
+    /// <summary>A character that continues a name as Postgres spells one bare: a letter, a digit, <c>_</c> or <c>$</c>.</summary>
+    private static bool IsNameCharacter(char c) => char.IsLetterOrDigit(c) || c is '_' or '$';
 }

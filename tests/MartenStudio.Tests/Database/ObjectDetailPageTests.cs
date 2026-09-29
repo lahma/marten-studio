@@ -562,6 +562,41 @@ public class ObjectDetailPageTests
         back.GetAttribute("href").Should().StartWith("database").And.Contain("store=default");
     }
 
+    /// <summary>
+    /// UX-7: under a policy's refusal the neutral panel adds that the store's own structure is still shown - so a
+    /// visitor just told their account may not browse the database knows why some tables are listed at all -
+    /// and under nothing else: a capability or <c>ReadOnly</c> refusal is the whole studio's, and a missing or
+    /// withheld object gets no hint that anything is there.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(DatabaseRefusal.WritePolicy), true)]
+    [InlineData(nameof(DatabaseRefusal.StorePolicy), true)]
+    [InlineData(nameof(DatabaseRefusal.CapabilityOff), false)]
+    [InlineData(nameof(DatabaseRefusal.SchemaNotBrowsable), false)]
+    [InlineData(nameof(DatabaseRefusal.NotFound), false)]
+    public void A_policy_refusal_says_the_stores_own_structure_is_still_shown(string refusalName, bool said)
+    {
+        DatabaseRefusal refusal = Enum.Parse<DatabaseRefusal>(refusalName);
+
+        using var context = DatabasePageData.Context();
+        context.DatabaseObjects.Detail = DatabaseObjectDetail.Unavailable(refusal, "The service's own sentence.");
+
+        var page = DatabasePageData.RenderObject(context, "quartz", "qrtz_triggers");
+
+        IElement panel = page.Find(".ms-db-not-found");
+        panel.TextContent.Should().Contain("The service's own sentence.");
+
+        if (said)
+        {
+            panel.QuerySelector(".ms-db-still-shown")!.TextContent.Should()
+                .Contain("structure of this store's own schemas").And.Contain("still shown");
+        }
+        else
+        {
+            panel.QuerySelectorAll(".ms-db-still-shown").Should().BeEmpty();
+        }
+    }
+
     [Fact]
     public void The_breadcrumb_names_a_schema_the_visitor_may_see_even_when_the_object_is_not_there()
     {

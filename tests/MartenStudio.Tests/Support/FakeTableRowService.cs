@@ -39,6 +39,9 @@ internal sealed class FakeTableRowService : ITableRowService
     /// <summary>The scope the last call was made with.</summary>
     public StudioScope? LastScope { get; private set; }
 
+    /// <summary>The scope of every call, in order.</summary>
+    public List<StudioScope> Scopes { get; } = [];
+
     /// <summary>Every page asked for, with the relation it was asked of.</summary>
     public List<(string Schema, string Name, TableRowRequest Request)> Requests { get; } = [];
 
@@ -126,5 +129,6 @@ internal sealed class FakeTableRowService : ITableRowService
     {
         Reads++;
         LastScope = scope;
+        Scopes.Add(scope);
     }
 }

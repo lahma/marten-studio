@@ -519,8 +519,13 @@ internal sealed class QueryService : IQueryService
     /// and <c>@limit</c>, so the explain has to bind them too - otherwise Postgres answers "there is no
     /// parameter $1" and the page would be showing a plan for something other than what ran.
     /// </para>
+    /// <para>
+    /// Internal rather than private for <c>SqlConsoleReachTests</c> alone: the page reaches it only after a
+    /// Mode A read has run, which takes a database, and the gate it asks is the one thing about it a test
+    /// with none can prove.
+    /// </para>
     /// </remarks>
-    private async Task<ExplainResult> TryExplainAsync(
+    internal async Task<ExplainResult> TryExplainAsync(
         StudioScope scope,
         ComposedQuery composed,
         CancellationToken cancellationToken)

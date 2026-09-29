@@ -61,10 +61,70 @@ public class PostgresErrorTextTests
         PostgresErrorText.Redact("permission denied for schema hr_archive", Withheld)
             .Should().Be("permission denied for schema " + Mask);
 
+    /// <summary>
+    /// POLISH P3: a withheld name is masked as a whole token wherever it stands - the word <c>schema</c> before it
+    /// is English, and the server's messages need not be.
+    /// </summary>
+    [Theory]
+    [InlineData("droit refusé pour le schéma hr", "droit refusé pour le schéma " + Mask)]
+    [InlineData("keine Berechtigung für Schema hr", "keine Berechtigung für Schema " + Mask)]
+    [InlineData("la relation « hr.salaries » n'existe pas", "la relation « " + Mask + ".salaries » n'existe pas")]
+    [InlineData("subschema hr is fine, schemas hr too", "subschema " + Mask + " is fine, schemas " + Mask + " too")]
+    [InlineData("permission denied for schema HR", "permission denied for schema " + Mask)]
+    public void A_withheld_name_is_masked_as_a_whole_token_in_any_language(string message, string expected) =>
+        PostgresErrorText.Redact(message, Withheld).Should().Be(expected);
+
+    /// <summary>
+    /// POLISH P3: a name with a space or a hyphen in it, printed unquoted - which no lexer reads as one
+    /// identifier - is matched whole, space or hyphen included.
+    /// </summary>
+    [Theory]
+    [InlineData("relation \"HR Data.salaries\" does not exist", "relation \"" + Mask + ".salaries\" does not exist")]
+    [InlineData("permission denied for schema HR Data", "permission denied for schema " + Mask)]
+    [InlineData("relation \"hr-data.salaries\" does not exist", "relation \"" + Mask + ".salaries\" does not exist")]
+    [InlineData("droit refusé pour le schéma hr-data", "droit refusé pour le schéma " + Mask)]
+    public void A_name_with_a_space_or_a_hyphen_is_masked_whole(string message, string expected)
+    {
+        IReadOnlySet<string> withheld = new HashSet<string>(["HR Data", "hr-data", "HR"], StringComparer.Ordinal);
+
+        PostgresErrorText.Redact(message, withheld).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// POLISH P3: the token rule is a whole-token rule - a visible schema whose name merely begins or ends with a
+    /// withheld one, or joins it with a hyphen, is left as it is.
+    /// </summary>
+    [Theory]
+    [InlineData("permission denied for schema hr_public")]
+    [InlineData("relation \"hr_public.salaries\" does not exist")]
+    [InlineData("function thr.norm(integer) does not exist")]
+    [InlineData("relation \"hr2.x\" does not exist")]
+    [InlineData("relation \"hr-public.x\" does not exist")]
+    [InlineData("permission denied for schema public-hr")]
+    public void A_visible_name_that_contains_a_withheld_one_is_untouched(string message)
+    {
+        IReadOnlySet<string> withheld = new HashSet<string>(["hr"], StringComparer.Ordinal);
+
+        PostgresErrorText.Redact(message, withheld).Should().Be(message);
+    }
+
+    /// <summary>
+    /// The echo rule holds for the token rule too: a value the read bound is left as it was typed, and the same
+    /// name in Postgres' own words around it is masked.
+    /// </summary>
     [Fact]
-    public void The_word_schema_inside_another_word_is_not_a_schema() =>
-        PostgresErrorText.Redact("subschema hr is fine, schemas hr too", Withheld)
-            .Should().Be("subschema hr is fine, schemas hr too", "only the word schema names one bare");
+    public void A_bound_value_is_still_echoed_as_typed_under_the_token_rule() =>
+        PostgresErrorText.Redact("droit refusé pour le schéma hr : \"hr\"", Withheld, ["hr"])
+            .Should().Be("droit refusé pour le schéma " + Mask + " : \"hr\"");
+
+    [Fact]
+    public void The_mask_itself_is_never_masked_again()
+    {
+        IReadOnlySet<string> withheld = new HashSet<string>(["withheld", "hr"], StringComparer.Ordinal);
+
+        PostgresErrorText.Redact("relation \"hr.x\" does not exist in schema withheld", withheld)
+            .Should().Be("relation \"" + Mask + ".x\" does not exist in schema " + Mask);
+    }
 
     /// <summary>
     /// The row service's own step: a failure is masked through the gate the grant carries, and every value the

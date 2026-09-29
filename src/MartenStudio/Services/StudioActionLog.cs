@@ -110,8 +110,9 @@ internal sealed class StudioActionLog
     /// databases and tenants exist.
     /// </para>
     /// <para>
-    /// <paramref name="capability" /> is the capability the write policy refused, when that is what refused:
-    /// it puts the entry under the same rule as a read of that capability on the Activity screen
+    /// <paramref name="capability" /> is the capability the refused read needed - the one the write policy
+    /// refused, or, for a database-browser read the store policy refused first, <c>BrowseDatabase</c>: it puts
+    /// the entry under the same rule as a read of that capability on the Activity screen
     /// (<see cref="GetVisibleAsync" />), so the name somebody was refused is shown only to a visitor who may
     /// make that read.
     /// </para>
@@ -150,9 +151,13 @@ internal sealed class StudioActionLog
     /// visitor - the question the service asked before the read could run (<see cref="StudioCapabilityGuard.ReadsBeyondTheStore" />).
     /// </para>
     /// <para>
-    /// <b>Bounded.</b> <paramref name="take" /> stops the sweep at the last entry a panel draws, and the
-    /// principal is fetched once - and only when a policy is configured at all - because a panel refreshed
-    /// every interval must not pay five hundred authentication-state reads to draw fifteen rows.
+    /// <b>Bounded.</b> <paramref name="take" /> stops the sweep at the last entry a panel draws, the principal
+    /// is fetched once - and only when a policy is configured at all - and each question is asked once per
+    /// sweep: the answers are remembered for the sweep by store, database, tenant and capability, because the
+    /// ring is five hundred entries that are nearly always about a handful of scopes, and a panel refreshed
+    /// every interval must not pay a thousand policy evaluations to draw fifteen rows. Only for the sweep:
+    /// the next one asks again, as a policy's answer may have changed, and the answers are this visitor's and
+    /// are never kept where another circuit could read them.
     /// </para>
     /// </remarks>
     /// <param name="authorization">The circuit's policy evaluator.</param>
@@ -173,6 +178,7 @@ internal sealed class StudioActionLog
 
         bool storePolicy = !string.IsNullOrWhiteSpace(authorization.PolicyFor(null));
         System.Security.Claims.ClaimsPrincipal? user = null;
+        Dictionary<SweepQuestion, bool> answers = [];
 
         List<StudioActionLogEntry> visible = new(Math.Min(entries.Count, limit));
 
@@ -187,14 +193,9 @@ internal sealed class StudioActionLog
 
             StudioScope scope = new(entry.StoreKey, entry.DatabaseId, entry.TenantId);
 
-            if (storePolicy)
+            if (storePolicy && !await AskAsync(scope, capability: null).ConfigureAwait(false))
             {
-                user ??= await PrincipalAsync().ConfigureAwait(false);
-
-                if (!await authorization.IsAuthorizedAsync(user, scope, capability: null, cancellationToken).ConfigureAwait(false))
-                {
-                    continue;
-                }
+                continue;
             }
 
             if (ReadBeyondTheStore(entry) is { } capability)
@@ -204,14 +205,10 @@ internal sealed class StudioActionLog
                     continue;
                 }
 
-                if (!string.IsNullOrWhiteSpace(authorization.PolicyFor(capability.ToString())))
+                if (!string.IsNullOrWhiteSpace(authorization.PolicyFor(capability.ToString()))
+                    && !await AskAsync(scope, capability.ToString()).ConfigureAwait(false))
                 {
-                    user ??= await PrincipalAsync().ConfigureAwait(false);
-
-                    if (!await authorization.IsAuthorizedAsync(user, scope, capability.ToString(), cancellationToken).ConfigureAwait(false))
-                    {
-                        continue;
-                    }
+                    continue;
                 }
             }
 
@@ -219,7 +216,29 @@ internal sealed class StudioActionLog
         }
 
         return visible;
+
+        async ValueTask<bool> AskAsync(StudioScope scope, string? capability)
+        {
+            SweepQuestion question = new(scope.StoreKey, scope.DatabaseId, scope.TenantId, capability);
+
+            if (answers.TryGetValue(question, out bool known))
+            {
+                return known;
+            }
+
+            user ??= await PrincipalAsync().ConfigureAwait(false);
+
+            bool answer = await authorization.IsAuthorizedAsync(user, scope, capability, cancellationToken).ConfigureAwait(false);
+            answers[question] = answer;
+            return answer;
+        }
     }
+
+    /// <summary>
+    /// One policy question of a <see cref="GetVisibleAsync" /> sweep: compared ordinally on every part, so two
+    /// entries share an answer only when the policy would have been shown the very same resource.
+    /// </summary>
+    private readonly record struct SweepQuestion(string StoreKey, string DatabaseId, string? TenantId, string? Capability);
 
     /// <summary>The read beyond the store an entry was recorded under, or <see langword="null" />.</summary>
     private static StudioCapability? ReadBeyondTheStore(StudioActionLogEntry entry)

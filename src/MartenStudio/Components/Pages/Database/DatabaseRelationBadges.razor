@@ -5,7 +5,10 @@
     title says what. Drawn beside the name in the grid and in the object header, so the two never disagree.
 *@
 
-@if (Relation is { } relation)
+@* Nothing at all when there is no badge to draw: an empty inline-flex wrapper still takes its margin and a
+   line box, and beside a name that fills its cell it wrapped onto a line of its own and made the row taller
+   with nothing on it (UX-7). *@
+@if (Relation is { } relation && HasBadges(relation))
 {
     <span class="ms-db-badges">
         @switch (relation.Kind)
@@ -92,6 +95,15 @@
     public object? Model { get; set; }
 
     private DatabaseRelationSummary? Relation => Model as DatabaseRelationSummary;
+
+    /// <summary>Whether any badge below applies - the same conditions, in the same order.</summary>
+    private static bool HasBadges(DatabaseRelationSummary relation) =>
+        relation.Kind is DatabaseObjectKind.PartitionedTable or DatabaseObjectKind.ForeignTable or DatabaseObjectKind.MaterializedView
+        || relation.Unlogged
+        || relation.RowSecurity
+        || !relation.Readable
+        || !relation.Quotable
+        || relation.Rows.Refusal is DatabaseRefusal.HiddenDependency or DatabaseRefusal.WithheldDependency;
 
     private static string ForeignTitle(DatabaseRelationSummary relation) =>
         "A foreign table" + (relation.ForeignServer is { Length: > 0 } server ? " on server '" + server + "'" : string.Empty) +

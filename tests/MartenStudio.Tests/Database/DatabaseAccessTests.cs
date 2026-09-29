@@ -435,10 +435,11 @@ public class DatabaseAccessTests
 
     /// <summary>
     /// Every failure is a value: a scope the visitor may not have comes back as a result the page draws,
-    /// never as an exception - and a read that was refused its scope is not a <c>BrowseDatabase</c> read.
-    /// The store policy's refusal of a list, an object or a definition is audited as what it is - a scope
-    /// refusal, with no capability named - because its sentence is the one a missing store gets, and the
-    /// trail is where the difference is kept.
+    /// never as an exception. The store policy's refusal of a list, an object or a definition is audited - its
+    /// sentence is the one a missing store gets, and the trail is where the difference is kept - and, POLISH
+    /// P2, under <c>BrowseDatabase</c>: its target is the name somebody asked the browser for, and Activity
+    /// shows such a name only to a visitor who may browse (<see cref="StudioActionLog.GetVisibleAsync" />).
+    /// Recorded with no capability, the refused <c>schema.relation</c> was shown to every store-policy reader.
     /// </summary>
     [Fact]
     public async Task A_scope_the_visitor_may_not_have_is_a_value_and_not_an_exception()
@@ -466,7 +467,30 @@ public class DatabaseAccessTests
         audited.Select(static x => x.Action).Should().BeEquivalentTo(
             [DatabaseAccess.ListAction, DatabaseAccess.ObjectAction, DatabaseAccess.DefinitionAction],
             "each by-name read the store policy refused is in the trail");
-        audited.Should().OnlyContain(static x => !x.Succeeded && x.Capability == null && x.Message == "Not authorized for this store, database or tenant.");
+        audited.Should().OnlyContain(static x =>
+            !x.Succeeded
+            && x.Capability == nameof(StudioCapability.BrowseDatabase)
+            && x.Message == "Not authorized for this store, database or tenant.");
+    }
+
+    /// <summary>
+    /// POLISH P2: the enforcement's own store-policy refusal - <see cref="DatabaseAccess.RequireBrowseAsync" />,
+    /// asked before the write policy - is recorded under <c>BrowseDatabase</c> too, as the write policy's
+    /// refusal always was.
+    /// </summary>
+    [Fact]
+    public async Task The_gates_store_policy_refusal_is_recorded_under_the_capability()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities.BrowseDatabase = true);
+        harness.Policies.Allow(static resource => resource.TenantId == "acme");
+
+        DatabaseBrowseGrant grant = await harness.Access.RequireBrowseAsync(TenantScope, "Test", "hr.salaries", Token);
+
+        grant.Refusal.Should().Be(DatabaseRefusal.StorePolicy, "the premise: the store policy is the one that said no");
+
+        StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
+        entry.Target.Should().Be("hr.salaries");
+        entry.Capability.Should().Be(nameof(StudioCapability.BrowseDatabase));
     }
 
     /// <summary>

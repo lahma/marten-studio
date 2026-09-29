@@ -133,4 +133,25 @@ public class CapabilityBannerTests
         banner.Find(".ms-chip").GetAttribute("popovertarget").Should().Be("ms-capability-popover");
         banner.Find("#ms-capability-popover").GetAttribute("popover").Should().Be("auto");
     }
+
+    /// <summary>
+    /// UX-7: an option's name may wrap after each of its dots - and only there, before the stylesheet's last
+    /// resort - so a popover narrower than the name shows it whole on two lines rather than cutting it off.
+    /// The break is a <c>&lt;wbr&gt;</c>, which adds no character: the name reads and copies as written.
+    /// </summary>
+    [Fact]
+    public void An_option_name_may_wrap_after_its_dots_and_still_reads_whole()
+    {
+        using var context = new StudioComponentContext();
+
+        var banner = context.Render<CapabilityBanner>();
+
+        banner.Find("#ms-capability-popover").ClassList.Should().Contain("ms-capability-popover");
+
+        IElement option = banner.FindAll(".ms-capability-option").Single(static x =>
+            x.TextContent.EndsWith(nameof(StudioCapability.ApplySchemaChanges), StringComparison.Ordinal));
+
+        option.TextContent.Should().Be("MartenStudioOptions.Capabilities.ApplySchemaChanges");
+        option.InnerHtml.Should().Be("MartenStudioOptions.<wbr>Capabilities.<wbr>ApplySchemaChanges");
+    }
 }

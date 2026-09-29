@@ -11,10 +11,13 @@
       Name    - the relation's name, likewise
       Detail  - the DatabaseObjectDetail the page already read (columns, row key, keys both ways), typed
                 object for the reason DocumentComponentModel gives; its foreign keys are what a cell follows
+      Ready   - whether the tab may read: false while the page is still applying the scope its address
+                names, or reading the next object, so rows are never read for an address and a scope that
+                are not the object's on screen
 *@
 
 <div class="ms-db-rows-slot" data-schema="@Schema" data-name="@Name">
-    <TableRowsTab Schema="@Schema" Name="@Name" Detail="Detail" />
+    <TableRowsTab Schema="@Schema" Name="@Name" Detail="Detail" Ready="Ready" />
 </div>
 
 @code {
@@ -29,4 +32,8 @@
     /// <summary>The relation's <c>DatabaseObjectDetail</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
     [Parameter]
     public object? Detail { get; set; }
+
+    /// <summary>Whether the tab may read now; see <c>TableRowsTab.Ready</c>.</summary>
+    [Parameter]
+    public bool Ready { get; set; } = true;
 }

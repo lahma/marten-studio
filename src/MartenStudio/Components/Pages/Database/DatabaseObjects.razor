@@ -111,6 +111,10 @@
                     <div class="ms-empty ms-db-refused" role="status">
                         <p class="ms-empty-title">Nothing to list here</p>
                         <p class="ms-empty-description">@(list.Reason ?? "This list could not be read.")</p>
+                        @if (DatabasePresentation.StructureStillShown(list.Refusal) is { } stillShown)
+                        {
+                            <p class="ms-empty-description ms-db-still-shown">@stillShown</p>
+                        }
                         <p class="ms-empty-description">
                             <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, null, Category)">Show every schema you can see</a>
                         </p>
@@ -233,18 +237,44 @@
     /// </summary>
     private bool interactive;
 
+    /// <summary>
+    /// Whether the scope the address names has been applied - set at the end of <see cref="OnParametersSetAsync" />,
+    /// cleared at its start. The first interactive render reads only when it is.
+    /// </summary>
+    private bool scopeSettled;
+
+    /// <summary>Which <see cref="OnParametersSetAsync" /> is the latest, so an overtaken one does not read.</summary>
+    private int parameterPass;
+
     protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
 
     /// <remarks>
+    /// <para>
     /// Nothing is read while prerendering, nor in any other static render: a <c>?schema=</c> the visitor's gate
     /// refuses is one refusal per page view, and a read in each of the prerender, the circuit and the static
     /// re-render the layout's scope navigation costs recorded it three times (the object page's rule, for the
     /// same reason).
+    /// </para>
+    /// <para>
+    /// Nor before the address's scope is the studio's: applying it can query the database, the first
+    /// interactive render happens while it is awaited, and a Back or Forward to an entry of another database
+    /// read - and audited - the previous one's list first (the object page's rule again).
+    /// </para>
     /// </remarks>
     protected override async Task OnParametersSetAsync()
     {
+        int pass = ++parameterPass;
+        scopeSettled = false;
+
         await State.EnsureInitializedAsync();
         await ApplyScopeFromUrlAsync();
+
+        if (pass != parameterPass)
+        {
+            return;
+        }
+
+        scopeSettled = true;
 
         if (!interactive)
         {
@@ -262,7 +292,12 @@
         }
 
         interactive = true;
-        await LoadIfChangedAsync();
+
+        // Otherwise the pass still applying the address's scope reads, once it has.
+        if (scopeSettled)
+        {
+            await LoadIfChangedAsync();
+        }
     }
 
     private async Task LoadIfChangedAsync()

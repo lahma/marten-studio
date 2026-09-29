@@ -449,6 +449,13 @@ internal sealed class DatabaseAccess
     /// to the audit ring (and event 9203) under <paramref name="action" /> and <paramref name="target" /> -
     /// the refusal is the same sentence a missing store gets, and the trail is where the difference is kept.
     /// </summary>
+    /// <remarks>
+    /// The entry is recorded under <c>BrowseDatabase</c>, as every other refusal of a browser read is: its
+    /// target is the <c>schema.relation</c> somebody asked the browser for, and the Activity screen and the
+    /// Overview show such a name only to a visitor who may browse the database themselves
+    /// (<see cref="StudioActionLog.GetVisibleAsync" />). Recorded with no capability it was shown to every
+    /// reader the store policy passes - the one audience the refusal says was not allowed to see it.
+    /// </remarks>
     /// <param name="scope">The visitor's scope.</param>
     /// <param name="action">What the audit ring calls the read; <see langword="null" /> to audit nothing.</param>
     /// <param name="target">What it was aimed at.</param>
@@ -465,7 +472,7 @@ internal sealed class DatabaseAccess
         {
             if (action is not null)
             {
-                audit.RecordScopeDenied(scope, StorePolicyName(options.Value), action, target ?? string.Empty);
+                audit.RecordScopeDenied(scope, StorePolicyName(options.Value), action, target ?? string.Empty, StudioCapability.BrowseDatabase);
             }
 
             return new DatabaseStoreLookup(null, null, null, new StudioNotAuthorizedException(scope).Message);
@@ -751,7 +758,9 @@ internal sealed class DatabaseAccess
 
         if (!await authorization.IsAuthorizedAsync(tenantless, capability: null, cancellationToken).ConfigureAwait(false))
         {
-            audit.RecordScopeDenied(tenantless, StorePolicyName(value), action, target);
+            // Named BrowseDatabase in the ring, as the write policy's refusal below is: the store policy saying
+            // no is no reason to show the name somebody asked the browser for to everybody it says yes to.
+            audit.RecordScopeDenied(tenantless, StorePolicyName(value), action, target, StudioCapability.BrowseDatabase);
             return new DatabaseBrowseGrant(null, DatabaseRefusal.StorePolicy, DatabaseGate.StorePolicyDenial);
         }
 

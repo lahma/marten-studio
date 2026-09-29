@@ -254,6 +254,21 @@ public class RowDetailPageTests
             "the heading fits a refusal as well as an absence, so neither is said to be the other");
         panel.TextContent.Should().NotContain("deleted", "a gate that refused is not a row that went away");
         panel.QuerySelector("a.ms-db-back-link")!.TextContent.Should().Be("Back to the database browser");
+        panel.QuerySelectorAll(".ms-db-still-shown").Should().BeEmpty("the capability is the whole studio's, and says what the host would change");
+    }
+
+    /// <summary>UX-7: a policy's refusal of a row link says, as the object page does, that the store's own structure is still shown.</summary>
+    [Fact]
+    public async Task A_policy_refusal_of_a_row_link_says_the_stores_own_structure_is_still_shown()
+    {
+        await using var context = await RowUiData.ContextAsync();
+        context.TableRows.Detail = TableRowDetail.Refused(DatabaseRefusal.WritePolicy, DatabaseGate.WritePolicyDenial);
+
+        var page = Render(context, TriggerRow);
+
+        IElement panel = page.Find(".ms-row-not-found");
+        panel.TextContent.Should().Contain("WriteAuthorizationPolicy");
+        panel.QuerySelector(".ms-db-still-shown")!.TextContent.Should().Contain("structure of this store's own schemas");
     }
 
     [Fact]

@@ -51,6 +51,9 @@ internal sealed class FakeDatabaseObjectService : IDatabaseObjectService
     /// <summary>The scope the last call was made with.</summary>
     public StudioScope? LastScope { get; private set; }
 
+    /// <summary>The scope of every call, in order.</summary>
+    public List<StudioScope> Scopes { get; } = [];
+
     /// <summary>Every query <see cref="ListAsync" /> was asked, in order.</summary>
     public List<DatabaseObjectQuery> Queries { get; } = [];
 
@@ -129,5 +132,6 @@ internal sealed class FakeDatabaseObjectService : IDatabaseObjectService
     {
         Reads++;
         LastScope = scope;
+        Scopes.Add(scope);
     }
 }

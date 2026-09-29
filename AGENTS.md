@@ -429,8 +429,9 @@ while any schema the reading role may read is withheld (for `SECURITY DEFINER`, 
 withheld) — which is why the sample writes `legacy.format_employee_name` with a `RETURN` body. Residual:
 under `"*"` with `SqlConsoleRole` narrowed, such a view is read, and what its function reads is bounded by
 that role alone; a definition naming a hidden type's table only through dynamic SQL is not detected; a
-foreign partition attached less than a minute ago may not yet be seen. Schemas an extension owns are
-neither browsable nor withheld for dependency purposes. Every first read of a relation's rows is audited
+foreign partition attached less than a minute ago may not yet be seen. A schema an extension owns is never
+admitted by `"*"` — only an exact `BrowsableSchemas` entry admits one — and one not admitted is masked like
+any withheld schema but does not count as withheld for dependency purposes. Every first read of a relation's rows is audited
 by signature (filter, sort, paging mode — never the cursor), per store, database and relation, and never
 from a static render: the browser's pages read only once interactive, so an explicit request the gate
 refuses is one 9202/9203 per page view and using a page whose gate is closed refuses nothing. On Activity

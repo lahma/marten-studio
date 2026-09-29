@@ -9656,3 +9656,63 @@ a.ms-row-ref-key:hover {
     margin: 0 0 var(--ms-space-sm);
     color: var(--ms-color-text-secondary);
 }
+
+/* ==========================================================================
+   UX-7. Final polish
+
+   The last real-browser pass before 0.3.0. Appended after UX-6 on purpose
+   (D26): the capability popover's width re-declares .ms-popover's
+   max-width for that one popover, and wins by source order at the same
+   specificity as the preferences popover's own override.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The capability chip's popover
+
+   Each option's full name - "MartenStudioOptions.Capabilities.ApplySchemaChanges"
+   - is the thing a host has to type, and at 420 px it was cut off at the
+   popover's edge in both themes. The popover is as wide as its longest line
+   up to 40rem, and never wider than the viewport; a name that still does not
+   fit wraps after one of its dots (the markup puts a <wbr> there), and only
+   then anywhere, so a phone reads it whole on two lines. On a phone the
+   popover is as wide as the space left of the chip it hangs from, and it sat
+   flush against the screen's left edge; the margin keeps the 16 px gutter
+   there, and on a wider screen, where the popover is narrower than that
+   space, it changes nothing.
+   -------------------------------------------------------------------------- */
+
+.ms-popover.ms-capability-popover {
+    max-width: min(40rem, calc(100vw - 2 * var(--ms-space-md)));
+}
+
+.ms-popover.ms-capability-popover:popover-open {
+    margin-left: var(--ms-space-md);
+}
+
+.ms-capability-popover .ms-capability-option {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   Relationships: the description belongs to the title
+
+   The page header's own margin and the page's flex gap added up to 40 px
+   between "Relationships" and the sentence that says what the screen is,
+   which read as two unrelated blocks. The gap alone is what separates them now.
+   -------------------------------------------------------------------------- */
+
+.ms-rel-page > .ms-page-header {
+    margin-bottom: 0;
+}
+
+/* --------------------------------------------------------------------------
+   The neutral panel's second note
+
+   "The structure of this store's own schemas is still shown" - under a
+   policy's refusal - is an aside to the refusal, not a second refusal.
+   -------------------------------------------------------------------------- */
+
+.ms-db-still-shown {
+    font-size: var(--ms-font-size-sm);
+}

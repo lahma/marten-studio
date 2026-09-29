@@ -3,6 +3,8 @@ using Bunit;
 using MartenStudio.Components.Pages;
 using MartenStudio.Services;
 
+using Microsoft.Extensions.DependencyInjection;
+
 namespace MartenStudio.Tests.Components;
 
 /// <summary>
@@ -199,12 +201,15 @@ public class ActivityTests
         if (listed)
         {
             cells.Should().Contain("quartz.qrtz_triggers").And.Contain("select * from legacy.payroll");
+            cells.Should().Contain("hr.salaries", "a store-policy refusal of a browser read is shown to a visitor who may browse");
         }
         else
         {
             cells.Should().NotContain("quartz.qrtz_triggers", "a browser read names a table the visitor may not browse")
                 .And.NotContain("select * from legacy.payroll", "a console run carries the statement");
             cells.Should().NotContain(static x => x.Contains("grade", StringComparison.Ordinal), "nor the column the filter was on");
+            cells.Should().NotContain("hr.salaries",
+                "POLISH P2: a browser read the store policy refused names what was asked for, so it is under the capability too");
         }
     }
 
@@ -248,11 +253,96 @@ public class ActivityTests
         context.ActionLog.Record(
             "DeleteDocument", "customer/42", succeeded: true, "deleted", StudioCapability.DeleteDocuments, wholeDatabase);
 
+        // POLISH P2: what DatabaseAccess records when the store policy refuses a browser read - the refused
+        // name as the target, under BrowseDatabase (DatabaseAccessTests pins that it is recorded so).
+        context.ActionLog.RecordScopeDenied(
+            wholeDatabase, StudioComponentContext.StorePolicyName, "Open database object", "hr.salaries", StudioCapability.BrowseDatabase);
+
         context.AuthenticationState.SignIn("viewer");
         context.AuthorizationService.Allow(resource => resource.Capability is null || writePolicyAllows);
 
         return context;
     }
+
+    // -------------------------------------------------------------------------------------------
+    // POLISH P5 - one policy question per scope and capability per sweep, not two per entry
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A full ring of browser reads about one database, read by a visitor behind both policies: the store
+    /// policy and the write policy are each asked once for the sweep - two evaluations, where it was a
+    /// thousand - and every entry is still kept.
+    /// </summary>
+    [Fact]
+    public async Task A_full_ring_of_one_scope_costs_one_question_per_policy()
+    {
+        using var context = ReadsOfOneScope(entries: StudioActionLogService.MaxEntries, scopes: 1);
+        context.AuthorizationService.Calls.Clear();
+
+        List<StudioActionLogEntry> visible = await VisibleAsync(context);
+
+        visible.Should().HaveCount(StudioActionLogService.MaxEntries);
+        context.AuthorizationService.Calls.Should().HaveCount(2, "one store-policy question and one write-policy question");
+        context.AuthorizationService.Calls.Select(static x => x.Resource.Capability).Should()
+            .BeEquivalentTo([null, nameof(StudioCapability.BrowseDatabase)]);
+    }
+
+    /// <summary>
+    /// The memory is per question, never per sweep alone: entries about three databases cost three questions of
+    /// each policy, and a database the write policy refuses is still refused on every one of its entries.
+    /// </summary>
+    [Fact]
+    public async Task Each_scope_is_asked_once_and_answered_for_itself()
+    {
+        using var context = ReadsOfOneScope(entries: 300, scopes: 3);
+        context.AuthorizationService.Allow(static resource => resource.Capability is null || resource.DatabaseIdentifier != "db-1");
+        context.AuthorizationService.Calls.Clear();
+
+        List<StudioActionLogEntry> visible = await VisibleAsync(context);
+
+        context.AuthorizationService.Calls.Should().HaveCount(6, "three scopes, two policies each");
+        visible.Should().HaveCount(200).And.OnlyContain(static x => x.DatabaseId != "db-1");
+    }
+
+    /// <summary>And the next sweep asks again: a policy's answer may have changed, and nothing outlives the sweep.</summary>
+    [Fact]
+    public async Task A_second_sweep_asks_again()
+    {
+        using var context = ReadsOfOneScope(entries: 50, scopes: 1);
+        context.AuthorizationService.Calls.Clear();
+
+        (await VisibleAsync(context)).Should().HaveCount(50);
+
+        context.AuthorizationService.DenyEverything();
+
+        (await VisibleAsync(context)).Should().BeEmpty("the refusal is read on the next sweep, not remembered past the last one");
+        context.AuthorizationService.Calls.Should().HaveCount(3, "two questions for the first sweep, then the store policy's no");
+    }
+
+    private static StudioComponentContext ReadsOfOneScope(int entries, int scopes)
+    {
+        var context = new StudioComponentContext();
+        context.Options.StoreAuthorizationPolicy = StudioComponentContext.StorePolicyName;
+        context.Options.WriteAuthorizationPolicy = "MartenStudioWrite";
+        context.Options.Capabilities.BrowseDatabase = true;
+        context.AuthenticationState.SignIn("ops");
+
+        for (int i = 0; i < entries; i++)
+        {
+            context.ActionLog.Record(
+                "Browse database rows", "quartz.qrtz_triggers", succeeded: true, "Rows read.", StudioCapability.BrowseDatabase,
+                new StudioScope("default", "db-" + (i % scopes), null));
+        }
+
+        context.AuthenticationState.SignIn("viewer");
+        return context;
+    }
+
+    private static ValueTask<List<StudioActionLogEntry>> VisibleAsync(StudioComponentContext context) =>
+        context.ActionLog.GetVisibleAsync(
+            context.Services.GetRequiredService<StudioAuthorization>(),
+            context.Services.GetRequiredService<StudioCapabilityGuard>(),
+            cancellationToken: Xunit.TestContext.Current.CancellationToken);
 
     [Fact]
     public void With_no_store_policy_configured_nothing_is_filtered_out()

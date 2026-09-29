@@ -359,11 +359,14 @@ internal sealed class SchemaDataService : ISchemaDataService
             audit.Record(ApplyAction, target, succeeded: false, exception.Message + " SQL: " + ringSql, StudioCapability.ApplySchemaChanges, wholeDatabase);
             logger.SchemaChangeApplied(user, scope.StoreKey, identity, "FAILED: " + exception.Message + " SQL: " + auditedSql);
 
+            // What the page shows is Postgres' own words about the database, masked like every other failure on
+            // this screen: an apply's error can name a table, an index or a constraint in a schema this visitor
+            // is not shown. On the migration's own token, as everything past the confirmation is.
             return new SchemaApplyResult(
                 Succeeded: false,
                 "Invalid",
                 preview.ObjectCount,
-                exception.Message,
+                await MaskAsync(scope, resolved, exception.Message, applying.Token).ConfigureAwait(false) ?? exception.Message,
                 sqlState);
         }
         finally
@@ -1141,11 +1144,35 @@ internal sealed class SchemaDataService : ISchemaDataService
     private const string MatchesAssertion = "Marten reports that this database matches its configuration.";
 
     /// <summary>
+    /// What a free text about the database says in its place when the schema list it would be masked against
+    /// cannot be read (<see cref="MaskAsync" />).
+    /// </summary>
+    internal const string DetailsWithheld =
+        "Details withheld: the schema list could not be read, so what the database said could not be checked " +
+        "for the names of schemas you are not shown.";
+
+    /// <summary>
     /// Free text about the database - an exception's message, Marten's assertion - with every schema this visitor
     /// is not shown masked (<see cref="PostgresErrorText" />): the browser gate's withheld set, or every schema but
-    /// the store's own while the gate cannot be read. When not even the schema list can be read, the text is
-    /// returned as it is: what failed then is the connection, whose messages name no schema.
+    /// the store's own while the gate cannot be read.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Fails closed. When neither the gate nor the schema list can be read, which schemas the text may not name
+    /// is not known, and the text is replaced with <see cref="DetailsWithheld" /> rather than shown as it is: a
+    /// failure that reaches this far is not always the connection's - a lock timeout, a role that may read the
+    /// tables but not <c>pg_namespace</c>, a statement cancelled half way - and its message can name any object
+    /// the failed read touched. A failed read's whole message is in the application's log, where its caller
+    /// wrote it before asking for the mask.
+    /// </para>
+    /// <para>
+    /// And it never throws but for cancellation. Every caller is a failure handler with an answer to give - a
+    /// tab's failure frame, a preview's notice, an apply that did not go through - and a mask that could not be
+    /// settled must not replace that answer with an exception of its own: a host that does not resolve fails
+    /// the schema list with a <see cref="System.Net.Sockets.SocketException" />, which is no Npgsql exception at
+    /// all, and the tab used to go blank on it.
+    /// </para>
+    /// </remarks>
     private async Task<string?> MaskAsync(StudioScope scope, ResolvedScope resolved, string? text, CancellationToken cancellationToken)
     {
         if (string.IsNullOrEmpty(text))
@@ -1163,9 +1190,16 @@ internal sealed class SchemaDataService : ISchemaDataService
 
             return PostgresErrorText.Redact(text, withheld);
         }
-        catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return text;
+            // Debug: the failure being masked is the event, and its caller logged it whole; this is only why the
+            // page shows less of it.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "Marten Studio could not read the schema list to mask a failure's text for database {DatabaseId}", resolved.Database.Id.Identity);
+            }
+
+            return DetailsWithheld;
         }
     }
 

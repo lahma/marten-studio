@@ -295,6 +295,22 @@ public class DatabaseObjectsPageTests
         Row(page, "qrtz_triggers").QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("~1,204", "an estimate always wears its tilde (D8)");
     }
 
+    /// <summary>
+    /// UX-7: a relation with no badge renders no badge wrapper. The empty inline-flex span still took its
+    /// margin and a line box, and beside a name that filled its cell - <c>mt_doc_deadletterevent</c> - it
+    /// wrapped onto a line of its own and made that one row taller than the rest, with nothing on the line.
+    /// </summary>
+    [Fact]
+    public void A_relation_with_no_badge_has_no_empty_badge_wrapper()
+    {
+        using var context = DatabasePageData.Context();
+
+        var page = DatabasePageData.RenderBrowser(context);
+
+        Row(page, "orders").QuerySelectorAll(".ms-db-badges").Should().BeEmpty("a plain table has nothing to say beside its name");
+        Row(page, "measurements").QuerySelectorAll(".ms-db-badges").Should().ContainSingle("the anti-vacuity half: a badge still has its wrapper");
+    }
+
     [Fact]
     public void Unlogged_row_level_security_an_unanalysed_estimate_and_a_long_comment_are_all_said()
     {

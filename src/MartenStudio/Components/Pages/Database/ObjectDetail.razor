@@ -210,19 +210,52 @@
     /// </summary>
     private bool interactive;
 
+    /// <summary>
+    /// Whether the scope the address names has been applied - set at the end of <see cref="OnParametersSetAsync" />,
+    /// cleared at its start. Nothing is read while it is not, see <see cref="OnAfterRenderAsync" />.
+    /// </summary>
+    private bool scopeSettled;
+
+    /// <summary>Which <see cref="OnParametersSetAsync" /> is the latest, so an overtaken one does not read.</summary>
+    private int parameterPass;
+
+    /// <summary>The <see cref="Signature" /> <see cref="detail" /> was read for.</summary>
+    private string? detailSignature;
+
     protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
 
     /// <remarks>
+    /// <para>
     /// Nothing is read while prerendering, nor in any other static render of this page. A link to an object
     /// the visitor's gate refuses is a refusal worth one audit entry and one event 9202/9203 per page view -
     /// and it was three: the prerender, the circuit, and the static re-render the layout's scope-in-the-URL
     /// navigation costs, each in a DI scope of its own (measured on the sample, 2026-09-29). The static renders
     /// draw the loading state; the circuit's first render reads, once.
+    /// </para>
+    /// <para>
+    /// <b>And nothing is read before the address's scope is the studio's.</b> Applying it can query the database
+    /// (<see cref="StudioState.SetScopeAsync" /> lists databases and tenants), and the framework renders - and
+    /// calls <see cref="OnAfterRenderAsync" /> - while that is still awaited. So an in-circuit Back or Forward to
+    /// an entry whose <c>?db=</c> differs read, and audited, the object against the previous scope first and
+    /// then again: a stray "not found" or 9203, and a Rows read that could land on the previous database. The
+    /// pass that applies the scope reads when it has; a pass another one overtook - a newer navigation, or the
+    /// scope change this one raised, which re-enters here - leaves the reading to that one.
+    /// </para>
     /// </remarks>
     protected override async Task OnParametersSetAsync()
     {
+        int pass = ++parameterPass;
+        scopeSettled = false;
+
         await State.EnsureInitializedAsync();
         await ApplyScopeFromUrlAsync();
+
+        if (pass != parameterPass)
+        {
+            return;
+        }
+
+        scopeSettled = true;
 
         if (!interactive)
         {
@@ -232,6 +265,10 @@
         await LoadIfChangedAsync();
     }
 
+    /// <remarks>
+    /// The first interactive render reads only when the scope has settled; otherwise the pass still applying it
+    /// reads once it has, now that <see cref="interactive" /> says the circuit may.
+    /// </remarks>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender)
@@ -240,8 +277,20 @@
         }
 
         interactive = true;
-        await LoadIfChangedAsync();
+
+        if (scopeSettled)
+        {
+            await LoadIfChangedAsync();
+        }
     }
+
+    /// <summary>
+    /// Whether the Rows tab may read: the scope the address names is applied, and the object on screen is the
+    /// one read for it and for the address. While either is not - a scope still being applied, the next object
+    /// being read - the tab would read the object that is on screen with the address and the scope that are
+    /// not its own.
+    /// </summary>
+    private bool RowsReady => scopeSettled && string.Equals(detailSignature, Signature(), StringComparison.Ordinal);
 
     private async Task LoadIfChangedAsync()
     {
@@ -298,6 +347,7 @@
         }
 
         CancellationToken token = ResetCancellation();
+        string requested = Signature();
 
         loading = true;
         loadError = null;
@@ -310,7 +360,11 @@
         {
             // The object first: it is the page. The rail's reads follow, one after the other for the reason
             // the browser gives; the catalog behind them is cached.
-            detail = await Data.GetObjectAsync(scope, Schema, Name, token);
+            DatabaseObjectDetail read = await Data.GetObjectAsync(scope, Schema, Name, token);
+            token.ThrowIfCancellationRequested();
+
+            detail = read;
+            detailSignature = requested;
 
             // Per visitor, and so not something the process-wide capability guard can answer alone: the
             // console link is drawn only for somebody whose Run would be allowed.
@@ -492,7 +546,7 @@
         @<div class="ms-db-rows-tab">
             @if (relation.Rows.Allowed)
             {
-                <DatabaseRowsSlot Schema="@relation.Schema" Name="@relation.Name" Detail="found" />
+                <DatabaseRowsSlot Schema="@relation.Schema" Name="@relation.Name" Detail="found" Ready="RowsReady" />
             }
             else
             {
@@ -617,6 +671,10 @@
         @<div class="ms-empty ms-db-not-found" role="status">
             <p class="ms-empty-title">Not available here</p>
             <p class="ms-empty-description">@(missing.Reason ?? "There is nothing here that this studio shows you.")</p>
+            @if (DatabasePresentation.StructureStillShown(missing.Refusal) is { } stillShown)
+            {
+                <p class="ms-empty-description ms-db-still-shown">@stillShown</p>
+            }
             <p class="ms-empty-description">
                 <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Back to the database browser</a>
             </p>

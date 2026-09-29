@@ -588,6 +588,11 @@
      * `scrollIntoView` is not used because it scrolls every scrolling ancestor too, the page among them. A
      * container that does not scroll (a phone's rail, which is a plain block), an element that is not drawn
      * (inside a closed <details>), or one already in view is left alone, so a second call changes nothing.
+     *
+     * As far as is needed and no further - `block: 'nearest'` - with a few pixels to spare, so the entry is
+     * not flush with the edge. It used to centre the entry, which scrolled the rail's own top - the SCHEMAS
+     * header and "All schemas" - out of view for any table low in the list, even one that would have fitted
+     * with the header still showing (UX-7).
      */
     if (typeof window.martenStudio.scroll.revealWithin !== "function") {
         window.martenStudio.scroll.revealWithin = function (container, selector) {
@@ -601,14 +606,23 @@
                     return false;
                 }
 
+                // The scroll box's own visible area: inside the border, above a horizontal scrollbar.
                 const box = container.getBoundingClientRect();
+                const top = box.top + container.clientTop;
+                const bottom = top + container.clientHeight;
                 const item = element.getBoundingClientRect();
-                if (item.top >= box.top && item.bottom <= box.bottom) {
+                const spare = 8;
+
+                if (item.top >= top && item.bottom <= bottom) {
                     return true;
                 }
 
-                // Centred, so the tables either side of the open one are in view too.
-                container.scrollTop += (item.top - box.top) - (container.clientHeight - item.height) / 2;
+                if (item.top < top) {
+                    container.scrollTop -= (top - item.top) + spare;
+                } else {
+                    container.scrollTop += (item.bottom - bottom) + spare;
+                }
+
                 return true;
             } catch (e) {
                 return false;

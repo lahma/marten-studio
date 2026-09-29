@@ -31,6 +31,23 @@ internal static class DatabasePresentation
         _ => "table",
     };
 
+    /// <summary>
+    /// What a policy's refusal of a link adds under the service's own sentence: that the store's own schemas'
+    /// structure is still shown - so a visitor the policy refuses knows why some tables are listed at all - or
+    /// <see langword="null" /> for any other refusal.
+    /// </summary>
+    /// <remarks>
+    /// Only for the two policies. Either of them refusing <c>BrowseDatabase</c> leaves the store's own structure
+    /// in view (D27), which a visitor who has just been told their account may not browse the database cannot be
+    /// expected to guess; a capability or <c>ReadOnly</c> refusal is the whole studio's, and already says what
+    /// the host would change. It says nothing about the object asked for, so it is as neutral as the panel.
+    /// </remarks>
+    public static string? StructureStillShown(DatabaseRefusal refusal) =>
+        refusal is DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy
+            ? "The structure of this store's own schemas - their tables, columns, keys and indexes - is still shown " +
+              "in the database browser, as on the Schema screen; rows, definitions and other schemas are not."
+            : null;
+
     /// <summary>A routine's kind, short enough for a narrow column.</summary>
     public static string RoutineKindShort(DatabaseObjectKind kind) => kind switch
     {

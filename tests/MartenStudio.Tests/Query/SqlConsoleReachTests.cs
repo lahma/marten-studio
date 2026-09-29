@@ -3,6 +3,7 @@ using JasperFx.MultiTenancy;
 using Marten;
 using Marten.Storage;
 
+using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Support;
@@ -157,6 +158,69 @@ public class SqlConsoleReachTests
             .Which.Should().NotBeOfType<StudioNotAuthorizedException>();
     }
 
+    /// <summary>
+    /// POLISH P6: the <c>EXPLAIN</c> behind a Mode A result is fetched through the console's gate, directly. From
+    /// the <c>acme</c> scope, a policy that allows only <c>(db, acme)</c> refuses it - a clause's rows, and no plan
+    /// - and nothing about the plan is ever asked with the tenant.
+    /// </summary>
+    [Fact]
+    public async Task A_mode_A_plan_is_refused_to_a_visitor_allowed_one_tenant_and_not_the_database()
+    {
+        await using Harness harness = await Harness.CreateAsync();
+        harness.Policies.Allow(static resource => resource.TenantId == Acme);
+
+        ExplainResult plan = await harness.Explain(Acme);
+
+        plan.HasPlan.Should().BeFalse();
+        plan.Error.Should().BeNull("nothing was sent");
+        plan.UnavailableReason.Should().Contain(QueryService.SqlRefusedMessage);
+
+        harness.Policies.Calls.Should().NotBeEmpty().And.OnlyContain(static x => x.Resource.TenantId == null,
+            "the plan is the console's, asked about the database as a whole");
+
+        StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Subject;
+        entry.Action.Should().Be(QueryService.ExplainAction);
+        entry.Succeeded.Should().BeFalse();
+        entry.TenantId.Should().BeNull();
+        entry.Capability.Should().Be(nameof(StudioCapability.RunSql));
+    }
+
+    /// <summary>
+    /// With the store policy passing everything, the write policy is the one asked - with <c>RunSql</c> and no
+    /// tenant - and a write policy that allows <c>RunSql</c> only for <c>acme</c> still refuses the plan.
+    /// </summary>
+    [Fact]
+    public async Task A_mode_A_plan_asks_the_write_policy_for_RunSql_with_no_tenant()
+    {
+        await using Harness harness = await Harness.CreateAsync();
+        harness.Policies.Allow(static resource => resource.Capability is null || resource.TenantId == Acme);
+
+        ExplainResult plan = await harness.Explain(Acme);
+
+        plan.HasPlan.Should().BeFalse();
+        plan.UnavailableReason.Should().Contain(QueryService.SqlRefusedMessage);
+
+        harness.Policies.Calls.Should().Contain(x =>
+            x.Resource.DatabaseIdentifier == harness.Database
+            && x.Resource.TenantId == null
+            && x.Resource.Capability == nameof(StudioCapability.RunSql));
+        harness.Policies.Calls.Should().NotContain(
+            static x => x.Resource.Capability == nameof(StudioCapability.RunSql) && x.Resource.TenantId != null);
+    }
+
+    /// <summary>The positive control: the database as a whole allowed, the plan passes the gate and fails at the connection.</summary>
+    [Fact]
+    public async Task With_the_whole_database_allowed_the_plan_passes_the_gate()
+    {
+        await using Harness harness = await Harness.CreateAsync();
+
+        ExplainResult plan = await harness.Explain(Acme);
+
+        plan.UnavailableReason.Should().BeNull("the gate let it through");
+        plan.Error.Should().NotBeNull("nothing is listening at this connection string");
+        harness.Ring.GetLatest().Should().ContainSingle().Which.TenantId.Should().BeNull();
+    }
+
     [Theory]
     [InlineData(Acme)]
     [InlineData(null)]
@@ -196,6 +260,26 @@ public class SqlConsoleReachTests
         public StudioActionLogService Ring => provider.GetRequiredService<StudioActionLogService>();
 
         public StudioScope Scope(string? tenantId) => new(MartenStoreRegistry.DefaultStoreKey, Database, tenantId);
+
+        /// <summary>
+        /// The plan for a Mode A clause over the conjoined type, composed for <paramref name="tenantId" /> as the
+        /// page would have composed it, fetched the way the page's result fetches it.
+        /// </summary>
+        public Task<ExplainResult> Explain(string? tenantId)
+        {
+            var table = new DocumentTableInfo
+            {
+                Schema = "public",
+                Table = "mt_doc_reachticket",
+                Alias = Alias,
+                TenancyStyle = TenancyStyle.Conjoined,
+                MetadataColumns = [new DocumentMetadataColumnInfo(DocumentMetadataColumn.TenantId, "tenant_id")],
+            };
+
+            ComposedQuery composed = QuerySqlComposer.Compose(table, "where data ->> 'Subject' = 'x'", 10, tenantId);
+
+            return ((QueryService) Queries).TryExplainAsync(Scope(tenantId), composed, TestContext.Current.CancellationToken);
+        }
 
         public static async Task<Harness> CreateAsync()
         {
