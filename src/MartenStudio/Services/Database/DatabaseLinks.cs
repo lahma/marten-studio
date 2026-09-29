@@ -4,6 +4,9 @@ using MartenStudio.Components;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Relationships;
+
+using Microsoft.AspNetCore.WebUtilities;
 
 namespace MartenStudio.Services.Database;
 
@@ -90,8 +93,35 @@ internal static class DatabaseLinks
     /// <summary>What every key-column parameter of a row link starts with.</summary>
     public const string KeyParameterPrefix = "key.";
 
+    /// <summary>The query-string key the Rows tab's sort column travels under.</summary>
+    public const string SortParameter = "sort";
+
+    /// <summary>The query-string key the Rows tab's sort direction travels under: <c>asc</c> or <c>desc</c>.</summary>
+    public const string DirectionParameter = "dir";
+
+    /// <summary>The query-string key the Rows tab's keyset cursor travels under.</summary>
+    public const string CursorParameter = "cursor";
+
+    /// <summary>The query-string key the Rows tab's page size travels under.</summary>
+    public const string SizeParameter = "size";
+
+    /// <summary>The query-string key the Rows tab's chosen columns travel under.</summary>
+    public const string ColumnsParameter = "cols";
+
+    /// <summary>The query-string key the Rows tab's paging mode travels under: <c>offset</c> or nothing.</summary>
+    public const string PagingParameter = "paging";
+
+    /// <summary>The query-string key the Rows tab's one-based page number travels under, in offset mode.</summary>
+    public const string PageParameter = "page";
+
+    /// <summary>The query-string key a row link carries the list it was opened from under.</summary>
+    public const string FromParameter = "from";
+
+    /// <summary>The Relationships screen's route below the studio root.</summary>
+    public const string RelationshipsRoute = "relationships";
+
     /// <summary>How many rows the <c>SELECT</c> that "Open in Query" writes into the console asks for.</summary>
-    public const int ConsoleRowLimit = 100;
+    public const int ConsoleRowLimit = SqlLiteralText.ConsoleRowLimit;
 
     /// <summary>The browser, on one kind tab, optionally narrowed to one schema, an owner and a name.</summary>
     /// <param name="options">The studio's options.</param>
@@ -157,6 +187,107 @@ internal static class DatabaseLinks
         link.AddScope(scope);
 
         return link.ToString();
+    }
+
+    /// <summary>
+    /// A relation's Rows tab, optionally filtered - where "filter by this value", a reference's parent and
+    /// child rows, and "referenced by" all land.
+    /// </summary>
+    /// <param name="options">The studio's options.</param>
+    /// <param name="scope">The scope to carry.</param>
+    /// <param name="schema">The relation's schema.</param>
+    /// <param name="name">The relation's name.</param>
+    /// <param name="filter">A filter in <see cref="RowFilterGrammar" />'s syntax, or <see langword="null" /> for every row.</param>
+    public static string ToRows(MartenStudioOptions options, StudioScope? scope, string schema, string name, string? filter = null) =>
+        ToObject(
+            options,
+            scope,
+            schema,
+            name,
+            DatabaseObjectTab.Rows,
+            string.IsNullOrWhiteSpace(filter) ? null : [new KeyValuePair<string, string?>(FilterParameter, filter)]);
+
+    /// <summary>The link to the Relationships screen with a view and a schema chip.</summary>
+    /// <remarks>
+    /// Folded in from DB-6's own link builder unchanged, the scope first and the view and schema after it, so
+    /// that no href the screen already drew moves.
+    /// </remarks>
+    /// <param name="options">The studio's options.</param>
+    /// <param name="scope">The scope to carry.</param>
+    /// <param name="view">Documents, tables or both.</param>
+    /// <param name="schema">One schema chip, or <see langword="null" /> for all of them.</param>
+    public static string ToRelationships(
+        MartenStudioOptions options,
+        StudioScope? scope,
+        RelationshipViewMode view,
+        string? schema)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        string url = DocumentLinks.WithScope(StudioLink.To(options, RelationshipsRoute), scope);
+
+        if (RelationshipViews.Token(view) is { } token)
+        {
+            url = QueryHelpers.AddQueryString(url, "view", token);
+        }
+
+        return string.IsNullOrEmpty(schema)
+            ? url
+            : QueryHelpers.AddQueryString(url, SchemaParameter, schema);
+    }
+
+    /// <summary>
+    /// Writes <c>?cols=</c>: the names comma-separated, with a comma or a backslash inside a name escaped by a
+    /// backslash - a Postgres column may be called anything, and one called <c>a,b</c> must not come back as two.
+    /// </summary>
+    public static string FormatColumns(IEnumerable<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+
+        return string.Join(',', columns.Select(static x => x.Replace("\\", "\\\\", StringComparison.Ordinal).Replace(",", "\\,", StringComparison.Ordinal)));
+    }
+
+    /// <summary>Reads <c>?cols=</c> back, the escapes undone; blank names are dropped.</summary>
+    public static IReadOnlyList<string> ParseColumns(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return [];
+        }
+
+        List<string> columns = [];
+        StringBuilder current = new();
+
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+
+            if (c == '\\' && i + 1 < value.Length)
+            {
+                current.Append(value[++i]);
+            }
+            else if (c == ',')
+            {
+                Flush();
+            }
+            else
+            {
+                current.Append(c);
+            }
+        }
+
+        Flush();
+        return columns;
+
+        void Flush()
+        {
+            if (current.Length > 0 && !string.IsNullOrWhiteSpace(current.ToString()))
+            {
+                columns.Add(current.ToString());
+            }
+
+            current.Clear();
+        }
     }
 
     /// <summary>One row's detail page, with one readable parameter per key column.</summary>
@@ -327,11 +458,25 @@ internal static class DatabaseLinks
     /// described on the Schema screen and read nowhere. A flat-table projection or an extended schema object
     /// is relational data Marten manages on the host's behalf, and its rows are browsed right here - as is
     /// everything Marten does not own.
+    /// <para>
+    /// <b>Another store's object links to that store.</b> The classifier unions the declarations of every
+    /// registered store that shares the database, so a document table here may be another store's - and its
+    /// alias means nothing in this one's Documents, where the link would open the wrong collection or none.
+    /// When <see cref="DatabaseObjectOwnership.StoreKey" /> names a store other than the scope's, the link
+    /// carries that store alone, with no database and no tenant: those were this store's, and the page it
+    /// lands on settles its own and authorizes the visitor for it again.
+    /// </para>
     /// </remarks>
     public static string? ToWhereItLives(MartenStudioOptions options, StudioScope? scope, DatabaseObjectOwnership ownership)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(ownership);
+
+        if (ownership.StoreKey is { Length: > 0 } owner
+            && !string.Equals(owner, scope?.StoreKey, StringComparison.OrdinalIgnoreCase))
+        {
+            scope = new StudioScope(owner, string.Empty, null);
+        }
 
         return ownership.Owner switch
         {
@@ -372,7 +517,9 @@ internal static class DatabaseLinks
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (SelectStatement(schema, name) is not { } statement)
+        // The statement itself is written in Internal/Sql (AGENTS.md hard rule 4): text that reaches an
+        // editor is text somebody may press Run on.
+        if (SqlLiteralText.SelectStatement(schema, name) is not { } statement)
         {
             return null;
         }
@@ -387,25 +534,24 @@ internal static class DatabaseLinks
     }
 
     /// <summary>
-    /// <c>select * from "schema"."name" limit 100</c> - text for the console's editor and the clipboard, never
-    /// a statement the studio runs on its own - or <see langword="null" /> when a name cannot be quoted.
+    /// The SQL console with a statement of the studio's own composing written into it - never run until the
+    /// visitor presses Run, through the console's own gate (D13).
     /// </summary>
-    /// <remarks>
-    /// The identifiers go through <see cref="SqlIdentifier.Qualify" />, the builder every generated
-    /// statement uses (AGENTS.md hard rule 4), and only after <see cref="DatabaseCatalogQueries.IsQuotable" />
-    /// said they can: a name the builder refuses is one the browser lists as "cannot be browsed safely", and
-    /// there is no statement to write for it.
-    /// </remarks>
-    public static string? SelectStatement(string schema, string name, int limit = ConsoleRowLimit)
+    /// <param name="options">The studio's options.</param>
+    /// <param name="scope">The scope to carry.</param>
+    /// <param name="statement">The text for the editor, from <see cref="SqlLiteralText" />.</param>
+    public static string ToQueryConsole(MartenStudioOptions options, StudioScope? scope, string statement)
     {
-        if (string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(name)
-            || !DatabaseCatalogQueries.IsQuotable(schema) || !DatabaseCatalogQueries.IsQuotable(name))
-        {
-            return null;
-        }
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(statement);
 
-        return "select * from " + SqlIdentifier.Qualify(schema, name) + " limit "
-            + limit.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        LinkBuilder link = new(StudioLink.To(options, "query"));
+
+        link.AddAlways("mode", "sql");
+        link.AddAlways("sql", statement);
+        link.AddScope(scope);
+
+        return link.ToString();
     }
 
     /// <summary>The name as a person reads it: <c>schema.name</c>, unquoted.</summary>

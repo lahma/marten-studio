@@ -322,14 +322,14 @@
     {
         view = mode;
         Recompute();
-        Navigation.NavigateTo(RelationshipLinks.ToRelationships(Options.Value, State.ActiveScope, view, schema));
+        Navigation.NavigateTo(MartenStudio.Services.Database.DatabaseLinks.ToRelationships(Options.Value, State.ActiveScope, view, schema));
     }
 
     private void SelectSchema(string? chip)
     {
         schema = chip;
         Recompute();
-        Navigation.NavigateTo(RelationshipLinks.ToRelationships(Options.Value, State.ActiveScope, view, schema));
+        Navigation.NavigateTo(MartenStudio.Services.Database.DatabaseLinks.ToRelationships(Options.Value, State.ActiveScope, view, schema));
     }
 
     private RenderFragment ViewButton(RelationshipViewMode mode, string label, int count) => __builder =>
@@ -381,7 +381,7 @@
 
     /// <summary>The link to a table's object detail, scope and all.</summary>
     private string TableHref(string tableSchema, string name) =>
-        RelationshipLinks.ToObject(Options.Value, State.ActiveScope, tableSchema, name);
+        MartenStudio.Services.Database.DatabaseLinks.ToObject(Options.Value, State.ActiveScope, tableSchema, name);
 
     private async Task OnScopeChangedAsync() => await LoadAsync();
 

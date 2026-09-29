@@ -229,9 +229,9 @@ public class DatabaseLinksTests
     [Fact]
     public void A_name_that_cannot_be_quoted_gets_no_statement_at_all()
     {
-        DatabaseLinks.SelectStatement("legacy", "bad\"name").Should().BeNull();
+        MartenStudio.Internal.Sql.SqlLiteralText.SelectStatement("legacy", "bad\"name").Should().BeNull();
         DatabaseLinks.ToQueryConsole(Options, Scope, "legacy", "bad\"name").Should().BeNull();
-        DatabaseLinks.SelectStatement("my schema", "Mixed Case").Should().Be("select * from \"my schema\".\"Mixed Case\" limit 100");
+        MartenStudio.Internal.Sql.SqlLiteralText.SelectStatement("my schema", "Mixed Case").Should().Be("select * from \"my schema\".\"Mixed Case\" limit 100");
     }
 
     /// <summary>A key as a list of pairs, which compares in order - a dictionary assertion would not.</summary>

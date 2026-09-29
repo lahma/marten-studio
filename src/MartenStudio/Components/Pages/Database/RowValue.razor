@@ -1,0 +1,299 @@
+@using System.Text
+@using MartenStudio.Services.Database
+@inject ITableRowService Rows
+@inject StudioState State
+
+@*
+    One value of one row, read by a person: row detail's left pane, and the grid's inline expansion.
+
+    A scalar is SqlCellView's, rich - a timestamptz in the chosen zone, a timestamp marked "no tz", a bigint of
+    ticks with its "≈ date". What this adds is room: JSON opens in the viewer in place, a bytea is sniffed and
+    - when it is JSON or text and every byte is here - shown as what it is, and a long text is clamped to a
+    few lines behind "Show all".
+
+    "Show all" reads the value again whole, through GetCellAsync, only when what is here was cut on the server
+    (a grid cell at a kilobyte, a detail cell at 256 KB); a value that is merely long is unclamped in place. A
+    relation with no key is read back by the row's ctid, which the caller passes as the key; a view with
+    neither cannot be read back at all, and says so rather than offering a button that fails.
+*@
+
+@if (IsKind(SqlCellView.NullKind))
+{
+    <span class="ms-query-null" title="SQL NULL">NULL</span>
+}
+else if (IsKind(SqlCellView.JsonKind))
+{
+    @if (whole is not null || !IsTruncated)
+    {
+        <JsonView Json="@(whole ?? Text)"
+                  Label="@Column"
+                  Class="ms-row-json"
+                  ShowToolbar="!Compact"
+                  ShowSearch="false"
+                  AutoExpandDepth="1"
+                  MaxVisibleRows="400"
+                  DownloadFileName="@(Column + ".json")" />
+        @WholeNote()
+    }
+    else
+    {
+        <div class="ms-row-value-text ms-row-value-clamped ms-mono">@Text</div>
+        @ShowAllButton("Show all of it")
+    }
+}
+else if (IsKind(SqlCellView.BinaryKind))
+{
+    @RenderBinary()
+}
+else if (IsLong)
+{
+    <div class="@(unclamped || whole is not null ? "ms-row-value-text" : "ms-row-value-text ms-row-value-clamped")">@(whole ?? Text)</div>
+    @WholeNote()
+    @if (whole is null)
+    {
+        @if (IsTruncated)
+        {
+            @ShowAllButton("Show all")
+        }
+        else
+        {
+            <button type="button" class="ms-btn ms-btn-sm ms-row-show-all" aria-expanded="@(unclamped ? "true" : "false")" @onclick="ToggleClamp" @onkeydown:stopPropagation="true">@(unclamped ? "Show less" : "Show all")</button>
+        }
+    }
+}
+else
+{
+    <SqlCellView Text="@Text"
+                 Kind="@Kind"
+                 Type="@Type"
+                 FullLength="FullLength"
+                 IsTruncated="IsTruncated"
+                 Rich="true"
+                 DateHint="@DateHint"
+                 DateHintTitle="@DateHintTitle" />
+}
+
+@if (error is { Length: > 0 } problem)
+{
+    <p class="ms-row-value-error" role="alert">@problem</p>
+}
+
+@code {
+    /// <summary>Above this many characters, or this many lines, a text value is clamped behind "Show all".</summary>
+    private const int LongText = 240;
+
+    private const int LongLines = 4;
+
+    private string? whole;
+    private string? wholeNote;
+    private string? error;
+    private bool unclamped;
+    private bool loading;
+    private string? shownFor;
+
+    /// <summary>The relation's schema.</summary>
+    [Parameter]
+    public string Schema { get; set; } = string.Empty;
+
+    /// <summary>The relation's name.</summary>
+    [Parameter]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What reads the row again: its key, or <c>ctid</c> for a relation with no key; <see langword="null" />
+    /// when neither exists (a view), which leaves a cut value cut.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyDictionary<string, string>? CellKey { get; set; }
+
+    /// <summary>The column.</summary>
+    [Parameter]
+    public string Column { get; set; } = string.Empty;
+
+    /// <summary>Its type, as <c>format_type</c> spells it.</summary>
+    [Parameter]
+    public string? Type { get; set; }
+
+    /// <summary>The cell's kind, lower-cased.</summary>
+    [Parameter]
+    public string Kind { get; set; } = "text";
+
+    /// <summary>The cell's text, as the server cut it.</summary>
+    [Parameter]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>Whether the server cut it.</summary>
+    [Parameter]
+    public bool IsTruncated { get; set; }
+
+    /// <summary>The value's full size in bytes.</summary>
+    [Parameter]
+    public long FullLength { get; set; }
+
+    /// <summary>Whether this is the grid's expansion - a JSON value without the viewer's toolbar.</summary>
+    [Parameter]
+    public bool Compact { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        // The same component instance can be handed another row's value (a page turn under an open expansion,
+        // prev/next on row detail): what was fetched for the last one is not this one's.
+        string key = Schema + "\u001f" + Name + "\u001f" + Column + "\u001f" + Text + "\u001f" +
+                     (CellKey is null ? string.Empty : string.Join('\u001e', CellKey.Select(static x => x.Key + "=" + x.Value)));
+
+        if (!string.Equals(key, shownFor, StringComparison.Ordinal))
+        {
+            shownFor = key;
+            whole = null;
+            wholeNote = null;
+            error = null;
+            unclamped = false;
+        }
+    }
+
+    private bool IsKind(string kind) => string.Equals(Kind, kind, StringComparison.OrdinalIgnoreCase);
+
+    private bool IsLong =>
+        !IsKind(SqlCellView.TimestampKind)
+        && (IsTruncated || Text.Length > LongText || Text.Count(static c => c == '\n') >= LongLines);
+
+    /// <summary>A lone bigint that looks like a time, read on its own: the page-wide rule has one value to go on.</summary>
+    private string? DateHint =>
+        SqlCellFormat.DateHintFor(Column, Type, [Text]) is var unit and not DateHintUnit.None
+        && SqlCellFormat.Instant(Text, unit) is { } instant
+            ? State.FormatInSelectedTimeZone(instant, SqlCellFormat.HintFormat)
+            : null;
+
+    private string DateHintTitle =>
+        "Read as " + SqlCellFormat.UnitLabel(SqlCellFormat.DateHintFor(Column, Type, [Text])) +
+        " because of the column's name and the size of the value - a guess, shown in " + State.SelectedTimeZoneId + ".";
+
+    private bool CanFetch => CellKey is { Count: > 0 };
+
+    private void ToggleClamp() => unclamped = !unclamped;
+
+    private RenderFragment ShowAllButton(string label) => __builder =>
+    {
+        if (CanFetch)
+        {
+            <button type="button" class="ms-btn ms-btn-sm ms-row-show-all" disabled="@loading" @onclick="FetchAsync" @onkeydown:stopPropagation="true">
+                @(loading ? "Reading…" : label + " (" + SqlCellFormat.Bytes(FullLength) + ")")
+            </button>
+        }
+        else
+        {
+            <p class="ms-row-value-note">Cut to fit at @SqlCellFormat.Bytes(Encoding.UTF8.GetByteCount(Text)) of @SqlCellFormat.Bytes(FullLength): a row with no key cannot be read again whole here.</p>
+        }
+    };
+
+    private RenderFragment WholeNote() => __builder =>
+    {
+        if (wholeNote is { Length: > 0 } note)
+        {
+            <p class="ms-row-value-note">@note</p>
+        }
+    };
+
+    private RenderFragment RenderBinary() => __builder =>
+    {
+        byte[]? bytes = SqlCellFormat.HexPrefix(Text);
+
+        if (bytes is null)
+        {
+            <span class="ms-query-cell-text ms-mono">@Text</span>
+            return;
+        }
+
+        BinarySniff sniff = SqlCellFormat.Sniff(bytes, FullLength);
+        bool complete = !IsTruncated && bytes.Length >= FullLength;
+
+        switch (sniff.Shape)
+        {
+            case BinaryShape.Json when whole is not null || complete:
+                <span class="ms-row-bytes" title="A bytea holding UTF-8 JSON">@sniff.Label</span>
+                <JsonView Json="@(whole ?? Encoding.UTF8.GetString(bytes))"
+                          Label="@Column"
+                          Class="ms-row-json"
+                          ShowToolbar="!Compact"
+                          ShowSearch="false"
+                          AutoExpandDepth="1"
+                          MaxVisibleRows="400"
+                          DownloadFileName="@(Column + ".json")" />
+                @WholeNote()
+                break;
+
+            case BinaryShape.Json:
+                <span class="ms-row-bytes" title="A bytea holding UTF-8 JSON">@sniff.Label</span>
+                @ShowAllButton("Open the JSON")
+                break;
+
+            case BinaryShape.Text:
+                <span class="ms-row-bytes" title="A bytea holding UTF-8 text">@sniff.Label</span>
+                <div class="@(unclamped || whole is not null ? "ms-row-value-text" : "ms-row-value-text ms-row-value-clamped")">@(whole ?? SqlCellFormat.DecodeText(bytes, !complete))</div>
+                @WholeNote()
+                @if (whole is null && !complete)
+                {
+                    @ShowAllButton("Show all")
+                }
+                break;
+
+            default:
+                <span class="ms-row-bytes">@sniff.Label</span>
+                <div class="ms-row-value-text ms-row-value-clamped ms-mono">@Text</div>
+                break;
+        }
+    };
+
+    /// <summary>Reads the value whole. A failure is put on screen, never thrown out of the handler (hard rule 6).</summary>
+    private async Task FetchAsync()
+    {
+        if (State.ActiveScope is not { } scope || CellKey is not { Count: > 0 } key || loading)
+        {
+            return;
+        }
+
+        loading = true;
+        error = null;
+
+        try
+        {
+            TableCellValue value = await Rows.GetCellAsync(scope, Schema, Name, key, Column);
+
+            if (value.Refusal != DatabaseRefusal.None)
+            {
+                error = value.Reason ?? "This value may not be read here.";
+            }
+            else if (value.Error is { } failure)
+            {
+                error = failure.Sentence;
+            }
+            else if (!value.Found)
+            {
+                error = value.Reason ?? "The row is not there any more - it may have been deleted or changed.";
+            }
+            else if (value.IsNull)
+            {
+                whole = "NULL";
+            }
+            else
+            {
+                whole = value.Text ?? (value.Bytes is { } read ? Encoding.UTF8.GetString(read) : string.Empty);
+                wholeNote = value.Truncated
+                    ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
+                      " (MartenStudioOptions.MaxInlineDocumentBytes); the SQL console reads the rest."
+                    : null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+}

@@ -79,18 +79,8 @@
         </div>
     }
 
-    @if (Sql is { Length: > 0 })
-    {
-        @* D14: there is no live SQL tail, and this is what answers the question people actually have. *@
-        <details class="ms-sql-disclosure">
-            <summary>Show SQL</summary>
-            <pre class="ms-code ms-code-sql"><code>@Sql</code></pre>
-            @if (ParameterNames.Count > 0)
-            {
-                <p class="ms-sql-parameters">Parameters: @string.Join(", ", ParameterNames)</p>
-            }
-        </details>
-    }
+    @* D14: there is no live SQL tail, and this is what answers the question people actually have. *@
+    <SqlDisclosure Sql="@Sql" ParameterNames="ParameterNames" />
 </div>
 
 @code {

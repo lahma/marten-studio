@@ -745,4 +745,25 @@
             refresh: schedule
         };
     })();
+
+    // The database browser's row grid (DB-5): a focused row opens in place on Space, which the circuit
+    // hears through the row's own @onkeydown. What it cannot do is stop the browser's own Space - scrolling
+    // the page by a screen - because Razor decides `@onkeydown:preventDefault` when the component renders,
+    // not per key, and preventing every key would take Tab away from the row. So this stops Space and
+    // nothing else, and only when the row itself has the focus: a link, a button or a field inside a row
+    // keeps every key it had. One capture-free listener on the document, idempotent like everything here.
+    window.martenStudio.rowKeys = window.martenStudio.rowKeys || (function () {
+        document.addEventListener("keydown", function (event) {
+            if (event.key !== " " && event.key !== "Spacebar") {
+                return;
+            }
+
+            const target = event.target;
+            if (target && target.nodeType === 1 && typeof target.matches === "function" && target.matches("tr[data-ms-row]")) {
+                event.preventDefault();
+            }
+        });
+
+        return {};
+    })();
 })();

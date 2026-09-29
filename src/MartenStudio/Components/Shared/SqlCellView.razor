@@ -1,0 +1,154 @@
+@inject StudioState State
+
+@*
+    One cell of a SQL result: what the SQL console's grid draws, and what the database browser's row grid
+    draws with more to say. Extracted from ResultGrid so the two grids spell NULL, JSON and binary the same way.
+
+    Everything it is given is already formatted and capped on the server: this component only says what a
+    cell *is*. NULL is drawn as its own thing rather than as an empty string, because on a results grid the
+    difference is frequently the answer to the question being asked; a JSON cell is a chip that opens the
+    viewer rather than four kilobytes of text in a table cell.
+
+    `Rich` is the row grid's mode, and it is off by default so the console's grid draws exactly what it
+    always has. With it on:
+
+      - a `timestamptz` is shown in the time zone the header picked, with the stored value in the tooltip;
+        a `timestamp` is shown as stored, never converted - it has no zone to convert from - and says
+        "no tz" so nobody reads it as the one or the other;
+      - a `bytea` is sniffed from its first bytes: JSON (a chip that opens the viewer - the caller fetches the
+        whole value), gzip, PNG or UTF-8 text, each with its size, and hex for anything else;
+      - a `DateHint` from the grid - "≈ 2026-09-29 14:03" under a bigint of ticks - is drawn under the number,
+        which stays.
+
+    The parameters are strings rather than the studio's own cell type because a Razor component is a public
+    class, and a public parameter cannot have an internal type (D12).
+*@
+
+@if (IsKind(NullKind))
+{
+    <span class="ms-query-null" title="SQL NULL">NULL</span>
+}
+else if (IsKind(JsonKind))
+{
+    <button type="button"
+            class="ms-chip ms-query-json-chip"
+            title="Open in the JSON viewer"
+            @onclick="OpenAsync"
+            @onkeydown:stopPropagation="Rich">
+        @(Rich ? "{ … } " + SqlCellFormat.Bytes(FullLength) : "{ … } " + Text.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + " chars")
+    </button>
+}
+else if (Rich && IsKind(BinaryKind))
+{
+    @RenderBinary()
+}
+else if (Rich && IsKind(TimestampKind) && SqlCellFormat.IsTimestampWithZone(Type) && SqlCellFormat.ParseInstant(Text) is { } instant)
+{
+    <span class="ms-query-cell-text ms-row-time" title="@($"{Text} - shown in {State.SelectedTimeZoneId}")">@State.FormatInSelectedTimeZone(instant, SqlCellFormat.TimeFormat)</span>
+}
+else if (Rich && IsKind(TimestampKind) && SqlCellFormat.IsTimestampWithoutZone(Type) && SqlCellFormat.FormatWithoutZone(Text) is { } local)
+{
+    <span class="ms-query-cell-text ms-row-time" title="@($"{Text} - a timestamp without time zone: shown exactly as stored, never converted")">@local</span>
+    <span class="ms-row-notz" title="timestamp without time zone: Postgres keeps no zone for it, so the studio converts nothing">no tz</span>
+}
+else
+{
+    <span class="ms-query-cell-text">@Text</span>
+
+    @if (Rich && DateHint is { Length: > 0 } hint)
+    {
+        <span class="ms-row-date-hint" title="@DateHintTitle">≈ @hint</span>
+    }
+}
+
+@code {
+    /// <summary>The cell kind <c>SqlCellKind.Null</c> is passed as.</summary>
+    public const string NullKind = "null";
+
+    /// <summary>The cell kind <c>SqlCellKind.Json</c> is passed as.</summary>
+    public const string JsonKind = "json";
+
+    /// <summary>The cell kind <c>SqlCellKind.Binary</c> is passed as.</summary>
+    public const string BinaryKind = "binary";
+
+    /// <summary>The cell kind <c>SqlCellKind.Timestamp</c> is passed as.</summary>
+    public const string TimestampKind = "timestamp";
+
+    /// <summary>The cell's text, as the server formatted and cut it.</summary>
+    [Parameter]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>The cell's kind, lower-cased: <c>null</c>, <c>text</c>, <c>number</c>, <c>json</c>, <c>binary</c> ...</summary>
+    [Parameter]
+    public string Kind { get; set; } = "text";
+
+    /// <summary>The column's type as <c>format_type</c> spells it, which is what tells a timestamp's zone apart. Rich mode only.</summary>
+    [Parameter]
+    public string? Type { get; set; }
+
+    /// <summary>The value's full size in bytes (its text form's, for anything but <c>bytea</c>). Rich mode only.</summary>
+    [Parameter]
+    public long FullLength { get; set; }
+
+    /// <summary>Whether the text is shorter than the value.</summary>
+    [Parameter]
+    public bool IsTruncated { get; set; }
+
+    /// <summary>Whether to draw the row grid's hints; off, the cell is exactly the SQL console's.</summary>
+    [Parameter]
+    public bool Rich { get; set; }
+
+    /// <summary>The "≈ date" under a bigint, already in the chosen time zone, or <see langword="null" />.</summary>
+    [Parameter]
+    public string? DateHint { get; set; }
+
+    /// <summary>What the date hint is, for its tooltip.</summary>
+    [Parameter]
+    public string? DateHintTitle { get; set; }
+
+    /// <summary>Opens the value: a JSON chip, or a <c>bytea</c> that holds JSON.</summary>
+    [Parameter]
+    public EventCallback OnOpen { get; set; }
+
+    private bool IsKind(string kind) => string.Equals(Kind, kind, StringComparison.OrdinalIgnoreCase);
+
+    private async Task OpenAsync() => await OnOpen.InvokeAsync();
+
+    private RenderFragment RenderBinary() => __builder =>
+    {
+        byte[]? prefix = SqlCellFormat.HexPrefix(Text);
+
+        if (prefix is null)
+        {
+            <span class="ms-query-cell-text">@Text</span>
+            return;
+        }
+
+        BinarySniff sniff = SqlCellFormat.Sniff(prefix, FullLength);
+
+        switch (sniff.Shape)
+        {
+            case BinaryShape.Json:
+                <button type="button"
+                        class="ms-chip ms-query-json-chip ms-row-bytes-json"
+                        title="A bytea holding UTF-8 JSON - open it in the JSON viewer"
+                        @onclick="OpenAsync"
+                        @onkeydown:stopPropagation="true">{ … } @sniff.Label</button>
+                break;
+
+            case BinaryShape.Text:
+                <span class="ms-row-bytes" title="@Text">@sniff.Label</span>
+                <span class="ms-row-bytes-preview">“@sniff.Preview”</span>
+                break;
+
+            case BinaryShape.Gzip:
+            case BinaryShape.Png:
+                <span class="ms-row-bytes" title="@Text">@sniff.Label</span>
+                break;
+
+            default:
+                <span class="ms-query-cell-text ms-row-hex" title="@(SqlCellFormat.Bytes(FullLength) + " of binary")">@Text</span>
+                break;
+        }
+    };
+}

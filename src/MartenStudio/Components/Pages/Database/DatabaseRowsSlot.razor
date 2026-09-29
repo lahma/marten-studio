@@ -1,32 +1,20 @@
-@using MartenStudio.Services.Database
-
 @*
     The Rows tab's slot. ObjectDetail renders this only when the service said the relation's rows may be
     read (DatabaseRelationSummary.Rows.Allowed); every refusal - Marten's own tables, a foreign table, a view
-    over a hidden type, a gate that is shut - is drawn by the page before it gets here.
+    over a hidden type, a gate that is shut - is drawn by the page before it gets here, and the row service
+    refuses again on its own if anything changed in between.
 
-    A placeholder until the row grid lands, and deliberately a component with a fixed signature rather than
-    markup inline in the page: the grid replaces this file, the page does not change, and the parameters
-    below are the whole contract between the two.
+    A component with a fixed signature rather than markup inline in the page, so the page does not change
+    when what is behind it does. The parameters below are the whole contract between the two:
 
       Schema  - the relation's schema, as the catalog spells it
       Name    - the relation's name, likewise
       Detail  - the DatabaseObjectDetail the page already read (columns, row key, keys both ways), typed
-                object for the reason DocumentComponentModel gives
+                object for the reason DocumentComponentModel gives; its foreign keys are what a cell follows
 *@
 
-<div class="ms-empty ms-db-rows-slot" data-schema="@Schema" data-name="@Name">
-    <p class="ms-empty-title">Rows</p>
-    <p class="ms-empty-description">
-        @if (DetailModel?.Relation is { } relation)
-        {
-            <text>
-                @(relation.EstimatedRows is { } rows ? "About " + DatabasePresentation.Number(rows) + " rows" : "An unknown number of rows")
-                can be read here@(DetailModel.RowKey is { } key ? ", one at a time by (" + string.Join(", ", key.Columns) + ")" : string.Empty).
-            </text>
-        }
-        The row grid is not part of this build yet; the structure tabs beside this one are.
-    </p>
+<div class="ms-db-rows-slot" data-schema="@Schema" data-name="@Name">
+    <TableRowsTab Schema="@Schema" Name="@Name" Detail="Detail" />
 </div>
 
 @code {
@@ -41,6 +29,4 @@
     /// <summary>The relation's <c>DatabaseObjectDetail</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
     [Parameter]
     public object? Detail { get; set; }
-
-    private DatabaseObjectDetail? DetailModel => Detail as DatabaseObjectDetail;
 }

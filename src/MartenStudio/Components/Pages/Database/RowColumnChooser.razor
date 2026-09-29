@@ -1,0 +1,94 @@
+@using MartenStudio.Components.Pages.Documents
+@using MartenStudio.Services.Database
+
+@*
+    Which of a relation's columns the grid reads - the documents list's chooser, for a table.
+
+    The row key's columns are always shown and cannot be unticked: they are the link to a row's detail and the
+    tiebreak of every keyset page, and a grid without them is a grid whose rows cannot be told apart. A column
+    whose name the studio cannot quote is listed, so nobody wonders where it went, and cannot be chosen.
+
+    The choice is remembered per relation in this browser's local storage by the tab that owns this, and it
+    travels in the URL (?cols=), so a link somebody pastes shows the same columns.
+*@
+
+<details class="ms-column-chooser ms-row-column-chooser">
+    <summary class="ms-column-chooser-summary">Columns (@SelectedCount/@Available.Count)</summary>
+
+    <div class="ms-column-chooser-body">
+        <fieldset class="ms-column-chooser-group">
+            <legend>Columns</legend>
+            @for (int index = 0; index < Available.Count; index++)
+            {
+                TableRowColumn column = Available[index];
+                bool key = column.KeyPosition is not null;
+
+                <label class="ms-column-chooser-option" @key="index">
+                    <input type="checkbox"
+                           checked="@(key || IsSelected(column.Name))"
+                           disabled="@(key || !column.Shown)"
+                           @onchange="args => ToggleAsync(column.Name, args)" />
+                    <span class="ms-column-chooser-label" title="@column.Name">@column.Name</span>
+                    <span class="ms-column-chooser-kind">@KindLabel(column)</span>
+                </label>
+            }
+        </fieldset>
+
+        <div class="ms-column-chooser-actions">
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="ResetAsync">Every column</button>
+        </div>
+    </div>
+</details>
+
+@code {
+    /// <summary>Every column, as an <c>IReadOnlyList&lt;TableRowColumn&gt;</c>; typed <see cref="object" /> for the reason <c>DocumentComponentModel</c> gives.</summary>
+    [Parameter]
+    public object? AvailableModel { get; set; }
+
+    /// <summary>The columns on screen, in the same shape.</summary>
+    [Parameter]
+    public object? SelectedModel { get; set; }
+
+    /// <summary>The new selection, by name, in the relation's order; empty means every column.</summary>
+    [Parameter]
+    public EventCallback<IReadOnlyList<string>> OnChanged { get; set; }
+
+    private IReadOnlyList<TableRowColumn> Available => DocumentComponentModel.ReadList<TableRowColumn>(AvailableModel);
+
+    private IReadOnlyList<TableRowColumn> Selected => DocumentComponentModel.ReadList<TableRowColumn>(SelectedModel);
+
+    private int SelectedCount => Selected.Count;
+
+    private bool IsSelected(string name) => Selected.Any(x => string.Equals(x.Name, name, StringComparison.Ordinal));
+
+    private static string KindLabel(TableRowColumn column) =>
+        column.KeyPosition is not null ? "key"
+        : !column.Shown ? "cannot be read"
+        : column.References.Count > 0 ? "→ " + (column.References[0].Table ?? "…")
+        : column.Type;
+
+    private async Task ToggleAsync(string name, ChangeEventArgs args)
+    {
+        bool wanted = args.Value is bool value && value;
+
+        HashSet<string> chosen = new(Selected.Select(static x => x.Name), StringComparer.Ordinal);
+
+        if (wanted)
+        {
+            chosen.Add(name);
+        }
+        else
+        {
+            chosen.Remove(name);
+        }
+
+        // The relation's own order, with the key always in it: the chooser decides which columns, never where.
+        List<string> names = [.. Available
+            .Where(x => x.KeyPosition is not null || (x.Shown && chosen.Contains(x.Name)))
+            .Select(static x => x.Name)];
+
+        await OnChanged.InvokeAsync(names);
+    }
+
+    private async Task ResetAsync() => await OnChanged.InvokeAsync([]);
+}

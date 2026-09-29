@@ -709,7 +709,12 @@ internal sealed class RelationshipDataService : IRelationshipDataService
                     target.Alias);
             }
 
-            return Entry(capped ? RelationshipQueries.DefaultInboundCap - 1 : count, capped);
+            // The same columns and values the count used, in the row grammar, so the Rows tab it links to
+            // shows exactly the rows counted (DB-5).
+            string childFilter = RowFilterGrammar.Format(
+                columns.Select((column, index) => (column, RowFilterOperator.Equal, (string?) values[index])));
+
+            return Entry(capped ? RelationshipQueries.DefaultInboundCap - 1 : count, capped) with { ChildFilter = childFilter };
         }
         catch (PostgresException exception)
         {

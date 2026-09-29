@@ -32,9 +32,19 @@ internal static class SafeReturnLink
     /// </summary>
     /// <param name="from">The <c>?from=</c> value, as the query string delivered it.</param>
     /// <param name="options">The studio's options, for the mount path.</param>
-    public static string? Sanitize(string? from, MartenStudioOptions options)
+    public static string? Sanitize(string? from, MartenStudioOptions options) => Sanitize(from, options, DocumentsRoot);
+
+    /// <summary>
+    /// The value if it is a return link into <paramref name="root" /> - the same allow-list, for another
+    /// area: the database browser's row detail returns to <c>database/object</c>.
+    /// </summary>
+    /// <param name="from">The <c>?from=</c> value, as the query string delivered it.</param>
+    /// <param name="options">The studio's options, for the mount path.</param>
+    /// <param name="root">The one studio-relative area the link may point into, with no leading or trailing slash.</param>
+    public static string? Sanitize(string? from, MartenStudioOptions options, string root)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
         if (string.IsNullOrWhiteSpace(from))
         {
@@ -86,10 +96,10 @@ internal static class SafeReturnLink
             path = stripped;
         }
 
-        bool insideDocuments =
-            path.Equals(DocumentsRoot, StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWith(DocumentsRoot + "/", StringComparison.OrdinalIgnoreCase);
+        bool inside =
+            path.Equals(root, StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase);
 
-        return insideDocuments ? value : null;
+        return inside ? value : null;
     }
 }

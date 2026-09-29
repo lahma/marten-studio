@@ -1,0 +1,38 @@
+@*
+    "Show SQL": the exact statement a studio-generated read sent, and the names of its parameters - never
+    their values. Extracted from the documents list's search strip so the row grid's is the same control.
+
+    D14: there is no live SQL tail, and this is what answers the question people actually have - what did the
+    studio just run against my database. The values stay out because a filter value is somebody's data, and
+    the statement is something people paste into a ticket.
+*@
+
+@if (Sql is { Length: > 0 })
+{
+    <details class="@("ms-sql-disclosure" + (string.IsNullOrWhiteSpace(Class) ? string.Empty : " " + Class))">
+        <summary>@Summary</summary>
+        <pre class="ms-code ms-code-sql"><code>@Sql</code></pre>
+        @if (ParameterNames.Count > 0)
+        {
+            <p class="ms-sql-parameters">Parameters: @string.Join(", ", ParameterNames)</p>
+        }
+    </details>
+}
+
+@code {
+    /// <summary>The statement that ran, or would have run. Nothing is drawn without one.</summary>
+    [Parameter]
+    public string? Sql { get; set; }
+
+    /// <summary>The parameter names in it, as the statement spells them (<c>@f1</c>), never their values.</summary>
+    [Parameter]
+    public IReadOnlyList<string> ParameterNames { get; set; } = [];
+
+    /// <summary>What the disclosure's summary says.</summary>
+    [Parameter]
+    public string Summary { get; set; } = "Show SQL";
+
+    /// <summary>Extra classes for the disclosure.</summary>
+    [Parameter]
+    public string? Class { get; set; }
+}

@@ -115,7 +115,7 @@ public class RelationshipViewTests
     public void The_default_view_is_left_out_of_the_url()
     {
         RelationshipViews.Token(RelationshipViewMode.Both).Should().BeNull();
-        RelationshipLinks.ToRelationships(new MartenStudioOptions(), new StudioScope("default", "db1", null), RelationshipViewMode.Tables, "quartz")
+        MartenStudio.Services.Database.DatabaseLinks.ToRelationships(new MartenStudioOptions(), new StudioScope("default", "db1", null), RelationshipViewMode.Tables, "quartz")
             .Should().Be("relationships?store=default&db=db1&view=tables&schema=quartz");
     }
 

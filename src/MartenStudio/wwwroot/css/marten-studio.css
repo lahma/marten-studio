@@ -8528,3 +8528,888 @@ a.ms-index-flag:hover {
     font-size: var(--ms-font-size-xs);
     white-space: nowrap;
 }
+
+/* ==========================================================================
+   DB-5. Rows
+
+   The object page's Rows tab (TableRowsTab: the toolbar, the filter strip,
+   the paging note, the grid and its pager) and row detail
+   (/marten/database/row). Appended after DB-7 on purpose (D26). The
+   toolbar, the syntax popover, the strip, the verdict chips, the column
+   chooser, the pager and the JSON panel are the documents list's and the
+   SQL console's own rules, reused by class; what is below is only what is
+   new, prefixed ms-row-, plus the one re-declaration the grid needs - the
+   D25 edge mask on its region, which must fade only the right-hand edge
+   because the key column on the left is sticky and a left-hand fade would
+   fade the one column that never scrolls away.
+
+   Identifiers are never uppercased (a column called "Order" is not a
+   column called "ORDER"), secondary text is --ms-color-text-secondary
+   rather than muted wherever it carries meaning (muted is under 4.5:1 on
+   the dark surface), and nothing here sets a width that can widen the page:
+   the grid scrolls in its region and the page never scrolls sideways.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The tab: notes, states and the paging note
+   -------------------------------------------------------------------------- */
+
+.ms-row-tab {
+    min-width: 0;
+}
+
+.ms-row-note {
+    margin: 0 0 var(--ms-space-sm);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-left: 3px solid var(--ms-color-info);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-info-bg);
+    color: var(--ms-color-text);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-row-paging-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+/* One phrase that may break between its parts but never inside a column name. */
+.ms-row-paging-parts {
+    min-width: 0;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+
+.ms-row-count-button {
+    min-width: 2rem;
+    font-family: var(--ms-font-mono);
+}
+
+.ms-row-count {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--ms-color-text);
+}
+
+.ms-row-count-refused {
+    font-family: var(--ms-font-family);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-paging-why {
+    flex-basis: 100%;
+    font-size: var(--ms-font-size-xs);
+}
+
+/* What the service said instead of rows: a note with a way on, not an error box. */
+.ms-row-state {
+    margin: 0 0 var(--ms-space-sm);
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left: 3px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+}
+
+.ms-row-state-failed {
+    border-left-color: var(--ms-color-danger);
+}
+
+.ms-row-state-refused,
+.ms-row-state-invalid {
+    border-left-color: var(--ms-color-warning);
+}
+
+.ms-row-state p {
+    margin: 0 0 var(--ms-space-sm);
+}
+
+.ms-row-state-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text);
+}
+
+.ms-row-state-code {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-state-text {
+    max-width: 72ch;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-state-detail {
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-state-detail summary {
+    cursor: pointer;
+}
+
+.ms-row-state-detail p {
+    margin: var(--ms-space-xs) 0 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-row-empty .ms-code-inline {
+    overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   The filter strip: removable chips and the caret under an error
+   -------------------------------------------------------------------------- */
+
+.ms-row-chip {
+    gap: 2px;
+    max-width: 100%;
+    padding-right: 2px;
+}
+
+.ms-row-chip-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-row-chip-remove {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    min-height: 1.25rem;
+    padding: 0;
+    border: 0;
+    border-radius: var(--ms-radius-full);
+    background: transparent;
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.ms-row-chip-remove:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-row-chip-remove:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+.ms-row-filter-clear {
+    margin-left: auto;
+}
+
+.ms-row-filter-errors {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+}
+
+.ms-row-filter-error {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-danger-bg);
+}
+
+/* The filter and a caret under the place it is about: the same monospaced line, so the two line up. It
+   scrolls on its own when the filter is wider than the strip, rather than widening the page. */
+.ms-row-filter-caret {
+    max-width: 100%;
+    margin: 0;
+    overflow-x: auto;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    line-height: 1.4;
+    white-space: pre;
+    color: var(--ms-color-text);
+}
+
+.ms-row-filter-error-text {
+    margin: 2px 0 0;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text);
+}
+
+.ms-row-filter-error-at {
+    margin-left: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   The grid
+   -------------------------------------------------------------------------- */
+
+/* A container, so an opened row's content can be exactly as wide as the visible region (cqi, below). */
+.ms-row-grid-scroll {
+    container-type: inline-size;
+    transition: opacity var(--ms-transition-base);
+
+    /* A cell or header that takes the focus is scrolled clear of the sticky key column, not under it. The
+       column's width is the data's, so this is a generous guess rather than a measurement. */
+    scroll-padding-left: min(40%, 16rem);
+}
+
+/* The page being replaced: still there, still readable, visibly not current. */
+.ms-row-grid-busy {
+    opacity: 0.55;
+    cursor: progress;
+}
+
+/*
+   D25, the one re-declaration. The region fades whichever edge has more to scroll to - but this grid's
+   left edge is the sticky key column, which never scrolls away, so a fade there would only dim the row's
+   name. The right-hand fade stays; the left one is never drawn. Specificity above the UX-1 rules on
+   purpose, and the focus rule after these so the mask still gives way to the focus ring.
+*/
+.ms-row-grid-scroll.ms-table-scroll[data-scroll-start="true"] {
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+.ms-row-grid-scroll.ms-table-scroll[data-scroll-start="true"][data-scroll-end="true"] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+}
+
+.ms-row-grid-scroll.ms-table-scroll[data-scroll-start="true"][data-scroll-end="true"]:focus-visible,
+.ms-row-grid-scroll.ms-table-scroll:focus-visible {
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+/*
+   `clip` rather than the base table's `hidden`: `hidden` makes the table a scroll container of its own,
+   and a sticky cell sticks to its nearest scroll container - so the key column would have stuck to a
+   table that never scrolls, and scrolled away with it. `clip` still rounds the corners.
+*/
+.ms-table.ms-row-grid {
+    /* Positioned so it is the containing block of the visually hidden text in its headers (the sort
+       verdict's sentence is .ms-sr-only, which is absolute): without it that text is placed against the
+       initial containing block, escapes the region, and widened the whole document - measured at 357 px
+       on a sorted grid, 759 px on a phone. */
+    position: relative;
+    width: auto;
+    min-width: 100%;
+    overflow: clip;
+}
+
+/* A header's marks may go onto a second line (its name never breaks): a column is only as wide as its
+   widest cell, rather than as wide as "text PK 1 → qrtz_job_details" on one line. */
+.ms-row-grid thead th {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    vertical-align: bottom;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: normal;
+}
+
+.ms-row-grid td {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    vertical-align: top;
+}
+
+.ms-row-head {
+    display: flex;
+    align-items: baseline;
+    gap: 2px;
+    white-space: nowrap;
+}
+
+.ms-row-sort {
+    appearance: none;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 2px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.ms-row-sort:hover .ms-row-col-name {
+    text-decoration: underline;
+}
+
+.ms-row-sort:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+    border-radius: var(--ms-radius-sm);
+}
+
+.ms-row-col-name {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text);
+}
+
+.ms-row-sort-on .ms-row-col-name {
+    color: var(--ms-color-primary);
+}
+
+.ms-row-sort-arrow {
+    font-size: 9px;
+    color: var(--ms-color-primary);
+}
+
+.ms-row-col-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px var(--ms-space-xs);
+    margin-top: 2px;
+}
+
+.ms-row-col-type {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-secondary);
+    white-space: nowrap;
+}
+
+.ms-row-pk {
+    padding: 0 4px;
+    border: 1px solid var(--ms-color-info);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-info-bg);
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-family);
+    font-size: 10px;
+    font-weight: var(--ms-font-weight-bold);
+    line-height: 1.4;
+    white-space: nowrap;
+    cursor: help;
+}
+
+.ms-row-fk-marker {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-primary);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+a.ms-row-fk-marker:hover {
+    text-decoration: underline;
+}
+
+.ms-row-date-toggle {
+    appearance: none;
+    padding: 0 6px;
+    border: 1px dashed var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-full);
+    background: transparent;
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-family);
+    font-size: 10px;
+    font-weight: var(--ms-font-weight-medium);
+    line-height: 1.5;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.ms-row-date-toggle-on {
+    border-style: solid;
+    border-color: var(--ms-color-primary);
+    color: var(--ms-color-primary);
+}
+
+.ms-row-date-toggle:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+/* The expander and the key's first column stay put while the rest scrolls under them. Opaque, so what
+   scrolls under is hidden rather than drawn through; the hairline on the key column's right is the edge. */
+.ms-row-grid .ms-row-col-expand,
+.ms-row-grid .ms-row-cell-expand {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    box-sizing: border-box;
+    width: 2rem;
+    min-width: 2rem;
+    max-width: 2rem;
+    padding-right: 0;
+    padding-left: var(--ms-space-xs);
+}
+
+.ms-row-grid .ms-row-sticky {
+    position: sticky;
+    left: 2rem;
+    z-index: 1;
+    box-shadow: inset -1px 0 0 var(--ms-color-border);
+}
+
+.ms-row-grid thead .ms-row-col-expand,
+.ms-row-grid thead .ms-row-sticky {
+    background-color: var(--ms-color-surface-alt);
+}
+
+.ms-row-grid tbody .ms-row-cell-expand,
+.ms-row-grid tbody .ms-row-sticky {
+    background-color: var(--ms-color-surface);
+}
+
+.ms-row-grid tbody .ms-row-item:hover > td,
+.ms-row-grid tbody .ms-row-item:focus-visible > td {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-row-grid tbody .ms-row-item:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+.ms-row-grid tbody .ms-row-open > td {
+    border-bottom-color: transparent;
+}
+
+.ms-row-expander {
+    appearance: none;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border: 0;
+    border-radius: var(--ms-radius-sm);
+    background: transparent;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.ms-row-expander:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-row-expander:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+/* A cell is one line, cut with an ellipsis; the whole value is a Space away. */
+.ms-row-cell {
+    max-width: 24rem;
+    white-space: nowrap;
+}
+
+.ms-row-cell .ms-query-cell-text {
+    max-width: 24rem;
+}
+
+/* What a cell is, by its kind: numbers line up on the right, in figures of one width; the other scalars
+   that are read digit by digit are monospaced. */
+.ms-row-kind-number {
+    text-align: right;
+}
+
+.ms-row-kind-number .ms-query-cell-text,
+.ms-row-kind-timestamp .ms-query-cell-text,
+.ms-row-kind-uuid .ms-query-cell-text,
+.ms-row-kind-binary .ms-query-cell-text {
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-row-open-link,
+.ms-row-fk-link {
+    display: inline-block;
+    max-width: 20rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-primary);
+    text-decoration: none;
+}
+
+.ms-row-open-link {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-row-open-link:hover,
+.ms-row-fk-link:hover {
+    text-decoration: underline;
+}
+
+.ms-row-time {
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-row-notz {
+    margin-left: var(--ms-space-xs);
+    padding: 0 4px;
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-sm);
+    color: var(--ms-color-text-secondary);
+    font-size: 10px;
+    white-space: nowrap;
+    cursor: help;
+}
+
+/* The "≈ date" under a bigint: the number above stays the value, this is the reading of it. */
+.ms-row-date-hint {
+    display: block;
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    cursor: help;
+}
+
+.ms-row-bytes {
+    display: inline-block;
+    padding: 0 6px;
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-full);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+.ms-row-bytes-preview {
+    display: inline-block;
+    max-width: 16rem;
+    margin-left: var(--ms-space-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-hex {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-json-panel {
+    margin-bottom: var(--ms-space-sm);
+}
+
+/* The row opened in place: every column, name above value, as many side by side as fit. */
+.ms-row-preview {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    margin: 0;
+    white-space: normal;
+}
+
+.ms-row-preview-item {
+    min-width: 0;
+}
+
+.ms-row-preview-name {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+    margin: 0 0 2px;
+}
+
+.ms-row-preview-value {
+    min-width: 0;
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+.ms-row-preview-foot {
+    margin: var(--ms-space-sm) 0 0;
+    font-size: var(--ms-font-size-xs);
+}
+
+/*
+   The opened row spans every column, so its cell is as wide as the whole grid - on a phone, many screens
+   wide. Its content is not: it sticks to the region's left edge and is as wide as the region, measured in
+   container units (the region is the container, see .ms-row-grid-scroll), so it reads without scrolling
+   sideways however wide the table behind it is.
+*/
+.ms-row-preview,
+.ms-row-preview-foot {
+    position: sticky;
+    left: var(--ms-space-sm);
+    box-sizing: border-box;
+    max-width: calc(100cqi - 2 * var(--ms-space-sm));
+}
+
+/* --------------------------------------------------------------------------
+   One value, whole: row detail and the grid's expansion
+   -------------------------------------------------------------------------- */
+
+.ms-row-kv-name {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text);
+    overflow-wrap: anywhere;
+}
+
+/* In row detail the name is a line of its own, and the type and the key marker share the one under it. */
+.ms-row-kv-key .ms-row-kv-name {
+    display: block;
+}
+
+.ms-row-kv-type {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-kv-key .ms-row-pk,
+.ms-row-preview-name .ms-row-pk {
+    margin-left: var(--ms-space-xs);
+}
+
+/* A value read whole wraps: the grid's one-line ellipsis is for a cell, not for the place the whole
+   value is shown. */
+.ms-row-kv-value .ms-query-cell-text,
+.ms-row-preview-value .ms-query-cell-text {
+    display: inline;
+    max-width: none;
+    overflow: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-row-value-text {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* Long text: six lines and a way to the rest. */
+.ms-row-value-clamped {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 6;
+    line-clamp: 6;
+    overflow: hidden;
+}
+
+.ms-row-show-all {
+    margin-top: var(--ms-space-xs);
+}
+
+.ms-row-value-note,
+.ms-row-value-error {
+    margin: var(--ms-space-xs) 0 0;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-value-error {
+    color: var(--ms-color-danger);
+}
+
+.ms-row-json {
+    max-height: 24rem;
+    overflow: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Row detail
+   -------------------------------------------------------------------------- */
+
+.ms-row-breadcrumb-key {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-detail-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-row-detail-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-row-detail-key {
+    font-size: var(--ms-font-size-base);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.ms-row-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-row-detail-meta {
+    margin-bottom: var(--ms-space-md);
+}
+
+/* The key's description may be long - five column names - and breaks between them on a phone. */
+.ms-row-detail-meta .ms-db-object-fact {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.ms-row-copy-menu {
+    display: inline-flex;
+}
+
+.ms-row-detail-split {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: var(--ms-space-lg);
+    align-items: start;
+}
+
+.ms-row-kv .ms-kv-row {
+    grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
+    gap: var(--ms-space-sm) var(--ms-space-md);
+}
+
+.ms-row-kv-value {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-row-kv-cell {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* "Filter by this value": quiet until it is wanted. */
+.ms-row-filter-by {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: var(--ms-radius-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-filter-by:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-primary);
+}
+
+.ms-row-filter-by:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+.ms-row-filter-glyph {
+    width: 14px;
+    height: 14px;
+}
+
+.ms-row-refs + .ms-row-refs {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-row-refs-none {
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-row-ref-list > li {
+    align-items: center;
+}
+
+.ms-row-ref-table,
+.ms-row-ref-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+}
+
+.ms-row-ref-link:hover .ms-referenced-count,
+a.ms-row-ref-key:hover {
+    text-decoration: underline;
+}
+
+.ms-row-ref-key {
+    min-width: 0;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-primary);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+
+/* Below the split breakpoint the panes stack; on a phone a value goes under its name. */
+@media (max-width: 1024px) {
+    .ms-row-detail-split {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 640px) {
+    .ms-row-kv .ms-kv-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--ms-space-xs);
+    }
+
+    .ms-row-filter-clear {
+        margin-left: 0;
+    }
+
+    .ms-row-cell,
+    .ms-row-cell .ms-query-cell-text {
+        max-width: 14rem;
+    }
+
+    .ms-row-open-link,
+    .ms-row-fk-link {
+        max-width: 10rem;
+    }
+}

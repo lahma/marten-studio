@@ -195,6 +195,10 @@ public static partial class MartenStudioServiceCollectionExtensions
         // which first page of a relation it has already audited, so a refresh is not a second opening.
         services.TryAddScoped<ITableRowService, TableRowService>();
 
+        // DB-5: the Rows tab's per-circuit memory - "Run anyway" answers, keyset history and the page a row
+        // was opened from. Scoped, like DocumentBrowserState, so it is one browser tab's and nobody else's.
+        services.TryAddScoped<DatabaseBrowserState>();
+
         return services;
     }
 

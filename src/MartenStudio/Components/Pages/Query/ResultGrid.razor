@@ -55,25 +55,11 @@ else
                                 ? cells[columnIndex]
                                 : (string.Empty, NullKind);
                             <td class="ms-table-cell ms-query-cell ms-query-cell-@cell.Kind" @key="columnIndex">
-                                @if (string.Equals(cell.Kind, NullKind, StringComparison.Ordinal))
-                                {
-                                    @* NULL is not an empty string, and on a results grid the difference is
-                                       frequently the answer to the question being asked. *@
-                                    <span class="ms-query-null" title="SQL NULL">NULL</span>
-                                }
-                                else if (string.Equals(cell.Kind, JsonKind, StringComparison.Ordinal))
-                                {
-                                    <button type="button"
-                                            class="ms-chip ms-query-json-chip"
-                                            title="Open in the JSON viewer"
-                                            @onclick="() => OpenJsonAsync(rowIndex, columnIndex)">
-                                        { … } @cell.Text.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) chars
-                                    </button>
-                                }
-                                else
-                                {
-                                    <span class="ms-query-cell-text">@cell.Text</span>
-                                }
+                                @* NULL, the JSON chip and plain text are SqlCellView's, shared with the database
+                                   browser's row grid so the two grids never spell a cell two ways. *@
+                                <SqlCellView Text="@cell.Text"
+                                             Kind="@cell.Kind"
+                                             OnOpen="() => OpenJsonAsync(rowIndex, columnIndex)" />
                             </td>
                         }
                     </tr>
@@ -114,10 +100,10 @@ else
 
 @code {
     /// <summary>The cell kind <c>SqlCellKind.Null</c> is passed as.</summary>
-    public const string NullKind = "null";
+    public const string NullKind = SqlCellView.NullKind;
 
     /// <summary>The cell kind <c>SqlCellKind.Json</c> is passed as.</summary>
-    public const string JsonKind = "json";
+    public const string JsonKind = SqlCellView.JsonKind;
 
     private string? openJson;
     private string openTitle = string.Empty;

@@ -610,7 +610,7 @@
             ("Copy qualified name", qualified, () => CopyAsync(qualified, "name")),
         ];
 
-        if (DatabaseLinks.SelectStatement(relation.Schema, relation.Name) is { } select)
+        if (MartenStudio.Internal.Sql.SqlLiteralText.SelectStatement(relation.Schema, relation.Name) is { } select)
         {
             items.Add(("Copy SELECT statement", select, () => CopyAsync(select, "SELECT statement")));
         }

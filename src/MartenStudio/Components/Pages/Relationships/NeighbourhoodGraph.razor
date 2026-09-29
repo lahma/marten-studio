@@ -222,7 +222,7 @@
         DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias);
 
     private string TableHref(string tableSchema, string name) =>
-        RelationshipLinks.ToObject(Options.Value, State.ActiveScope, tableSchema, name);
+        MartenStudio.Services.Database.DatabaseLinks.ToObject(Options.Value, State.ActiveScope, tableSchema, name, MartenStudio.Services.Database.DatabaseObjectTab.Relationships);
 
     private Task OnScopeChangedAsync() => InvokeAsync(async () =>
     {

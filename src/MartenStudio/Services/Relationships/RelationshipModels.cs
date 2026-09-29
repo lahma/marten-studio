@@ -406,6 +406,13 @@ internal sealed record ReferencedByEntry(
     /// </summary>
     public string? NotCounted { get; init; }
 
+    /// <summary>
+    /// For a pointing table, the database browser's row filter that selects exactly the rows counted - the
+    /// key's columns equal to this document's id (and tenant, where the key has one and a tenant is chosen) -
+    /// or <see langword="null" /> when the key could not be bound to the document. What the row links to.
+    /// </summary>
+    public string? ChildFilter { get; init; }
+
     /// <summary>Whether the pointing end is a table rather than a collection.</summary>
     public bool IsTable => Table is not null;
 

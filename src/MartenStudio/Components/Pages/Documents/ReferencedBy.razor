@@ -1,5 +1,6 @@
 @using Microsoft.Extensions.Options
 @using MartenStudio.Components.Pages.Relationships
+@using MartenStudio.Services.Database
 @using MartenStudio.Services.Relationships
 @using ReferencedByModel = MartenStudio.Services.Relationships.ReferencedBy
 @inject StudioState State
@@ -22,8 +23,9 @@
     physical-only key on a column with no DuplicatedField behind it resolves under neither name, so such a
     row links to the *unfiltered* collection rather than to a link that answers "nothing found".
 
-    A table row is a table the studio does not map - legacy.customer_credit, say - and links to its object
-    detail. Its count is a read of that table's rows, so it is made only for a visitor the database
+    A table row is a table the studio does not map - legacy.customer_credit, say - and links to its rows on the
+    object page's Rows tab, filtered to exactly the rows counted (or, when they were not counted, to its object
+    detail). Its count is a read of that table's rows, so it is made only for a visitor the database
     browser's gate lets read them (D27); anybody else sees the key, its columns and its ON DELETE action,
     and "not counted" with the reason. A key from a schema the visitor is not shown is counted and never
     named. Every row says what a delete does - a cascade into a table nobody on this page mapped is exactly
@@ -131,9 +133,15 @@ else if (Referenced.Entries.Count > 0 || Referenced.Withheld > 0)
 
     private string Href(ReferencedByEntry entry) => HrefFor(entry.FromAlias, Filter(entry));
 
-    /// <summary>A pointing table's object detail, scope and all.</summary>
+    /// <summary>
+    /// A pointing table's rows, filtered to exactly the ones counted, on the object page's Rows tab - or its
+    /// object detail, when they were not counted (the gate said no, or the key could not be bound to this
+    /// document) and a Rows tab would only repeat the refusal.
+    /// </summary>
     private string TableHref(ReferencedByEntry entry) =>
-        RelationshipLinks.ToObject(Options.Value, State.ActiveScope, entry.Schema ?? string.Empty, entry.Table ?? string.Empty);
+        entry is { IsCounted: true, ChildFilter: { Length: > 0 } filter }
+            ? DatabaseLinks.ToRows(Options.Value, State.ActiveScope, entry.Schema ?? string.Empty, entry.Table ?? string.Empty, filter)
+            : DatabaseLinks.ToObject(Options.Value, State.ActiveScope, entry.Schema ?? string.Empty, entry.Table ?? string.Empty);
 
     /// <summary>
     /// The search expression that shows exactly the rows this count counted, or <see langword="null" />.

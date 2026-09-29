@@ -1,0 +1,674 @@
+@using System.Text
+@using Microsoft.Extensions.Options
+@using MartenStudio.Components.Pages.Documents
+@using MartenStudio.Internal.Sql
+@using MartenStudio.Services.Database
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Query
+@inject ITableRowService Rows
+@inject StudioState State
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    One page of a non-Marten relation's rows: ResultGrid's sibling, drawing its cells through the same
+    SqlCellView, with what a browser of a real table needs on top.
+
+    The header says what each column is - its type under its name, "PK" on the row key, "→ parent" on a
+    foreign key - and sorts where Postgres can sort (a default btree opclass), with the sort's index verdict
+    beside the header it is about. The row key comes first and its first column is sticky, so the row a person
+    is reading stays named however far right they scroll, and its cell is the link to the row's detail. A
+    foreign-key cell links to the row it points at when the key references the parent's row key, and to the
+    parent's rows filtered on the value otherwise.
+
+    Rows are focusable. Space opens a row in place - every column, top to bottom, each value whole where a
+    click can make it whole - which is the only detail a row of a relation with no key has; Enter opens a keyed
+    row's detail page. Both are the row's own keys: a link or button inside a row keeps its own Space and
+    Enter, and the page has no shortcut of its own. (The browser's own Space - scrolling the page - is stopped
+    on the row by marten-studio.js, which is the one thing a Blazor handler cannot decide per key.)
+
+    A JSON cell, and a bytea that holds JSON, open the viewer under the grid. What the grid has of a cell is
+    cut on the server at a kilobyte (JSON at four, bytes at sixty-four), so a cell that was cut is read again
+    whole through GetCellAsync - by its key, or by ctid for a heap relation with no key - once, and kept for
+    as long as the page is on screen.
+*@
+
+@{
+    TableRowPage page = Page;
+    IReadOnlyList<int> order = DisplayOrder(page.Columns);
+    int linkColumn = LinkColumn(page, order);
+    Dictionary<int, DateHintUnit> hints = DateHints(page);
+    int keyCount = page.RowKey?.Columns.Count ?? 0;
+}
+
+<div class="ms-table-scroll ms-row-grid-scroll @(Busy ? "ms-row-grid-busy" : null)"
+     role="region"
+     aria-label="@($"Rows of {Schema}.{Name}")"
+     aria-busy="@(Busy ? "true" : "false")"
+     tabindex="0">
+    <table class="ms-table ms-row-grid">
+        <thead>
+            <tr>
+                <th class="ms-row-col-expand" scope="col"><span class="ms-sr-only">Expand</span></th>
+                @for (int position = 0; position < order.Count; position++)
+                {
+                    int columnIndex = order[position];
+                    TableRowColumn column = page.Columns[columnIndex];
+                    bool sorted = IsSorted(page, column);
+
+                    <th scope="col"
+                        class="@HeaderClass(column, columnIndex == linkColumn)"
+                        aria-sort="@DatabasePresentation.AriaSort(sorted, Descending(page))"
+                        @key="columnIndex">
+                        <span class="ms-row-head">
+                            @if (column.Sortable && column.Shown)
+                            {
+                                <button type="button"
+                                        class="ms-row-sort @(sorted ? "ms-row-sort-on" : null)"
+                                        title="@SortTitle(page, column, sorted)"
+                                        @onclick="() => SortAsync(column.Name)">
+                                    <span class="ms-row-col-name">@column.Name</span>
+                                    @if (sorted)
+                                    {
+                                        <span class="ms-row-sort-arrow" aria-hidden="true">@(Descending(page) ? "▼" : "▲")</span>
+                                    }
+                                </button>
+                            }
+                            else
+                            {
+                                <span class="ms-row-col-name" title="@(column.Shown ? column.Type + " has no ordering Postgres can sort by" : "Its name cannot be put into SQL safely, so it is never read")">@column.Name</span>
+                            }
+
+                            @if (ShowsSortHint(page, order, position) && SortHint(page) is { } hint)
+                            {
+                                <span class="ms-doc-sort-hint ms-doc-sort-hint-@hint.Level.ToString().ToLowerInvariant()"
+                                      title="@hint.Reason">@(hint.Level == IndexVerdictLevel.Red ? "!" : "?")</span>
+                                <span class="ms-sr-only">@hint.Reason</span>
+                            }
+                        </span>
+                        <span class="ms-row-col-meta">
+                            <span class="ms-row-col-type">@column.Type</span>
+                            @if (column.KeyPosition is { } keyPosition)
+                            {
+                                <span class="ms-row-pk" title="@KeyTitle(page, keyPosition)">@(keyCount > 1 ? "PK " + keyPosition.ToString(System.Globalization.CultureInfo.InvariantCulture) : "PK")</span>
+                            }
+                            @foreach (TableRowColumnReference reference in column.References)
+                            {
+                                @if (reference is { Schema: { } parentSchema, Table: { } parentTable })
+                                {
+                                    <a class="ms-row-fk-marker"
+                                       href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, parentSchema, parentTable)"
+                                       title="@($"Foreign key {reference.ForeignKey}: points at {parentSchema}.{parentTable}")">→ @parentTable</a>
+                                }
+                                else
+                                {
+                                    <span class="ms-row-fk-marker ms-db-none" title="@($"Foreign key {reference.ForeignKey} points at a table you cannot see")">→ …</span>
+                                }
+                            }
+                            @if (hints.TryGetValue(columnIndex, out DateHintUnit unit))
+                            {
+                                <button type="button"
+                                        class="ms-row-date-toggle @(ShowDateHints ? "ms-row-date-toggle-on" : null)"
+                                        aria-pressed="@(ShowDateHints ? "true" : "false")"
+                                        title="@(ShowDateHints
+                                            ? $"Showing what these values would be read as {SqlCellFormat.UnitLabel(unit)} - a guess from the name and the values. Turn the hint off for this table."
+                                            : $"These look like {SqlCellFormat.UnitLabel(unit)}. Show them as dates for this table.")"
+                                        @onclick="ToggleDateHintsAsync">≈ date</button>
+                            }
+                        </span>
+                    </th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @for (int r = 0; r < page.Rows.Count; r++)
+            {
+                int rowIndex = r;
+                TableRow row = page.Rows[rowIndex];
+                bool open = expanded.Contains(rowIndex);
+                string? href = RowHref(page, row);
+
+                @* Keyed on the position: a relation with no key can hold two identical rows, and a duplicate
+                   @key ends the circuit rather than the render. The page is rebuilt whole on every read. *@
+                @* ms-row-item, never ms-row: that is the stylesheet's flex utility, and a flex <tr> is not a
+                   table row. *@
+                <tr class="@(open ? "ms-row-item ms-row-open" : "ms-row-item")"
+                    tabindex="0"
+                    data-ms-row=""
+                    aria-expanded="@(open ? "true" : "false")"
+                    aria-label="@RowLabel(page, row, rowIndex)"
+                    @key="rowIndex"
+                    @onkeydown="args => OnRowKeyAsync(args, rowIndex, href)">
+                    <td class="ms-row-cell-expand">
+                        <button type="button"
+                                class="ms-row-expander"
+                                aria-expanded="@(open ? "true" : "false")"
+                                aria-label="@(open ? "Collapse this row" : "Show every column of this row")"
+                                title="@(open ? "Collapse (Space)" : "Every column, in place (Space)")"
+                                @onclick="() => ToggleAsync(rowIndex)"
+                                @onkeydown:stopPropagation="true">@(open ? "▾" : "▸")</button>
+                    </td>
+
+                    @foreach (int columnIndex in order)
+                    {
+                        TableRowColumn column = page.Columns[columnIndex];
+                        SqlCell cell = columnIndex < row.Cells.Count ? row.Cells[columnIndex] : SqlCell.Null;
+                        string kind = RowPresentation.KindToken(cell.Kind);
+
+                        <td class="@CellClass(kind, columnIndex == linkColumn)" @key="columnIndex">
+                            @if (columnIndex == linkColumn && href is not null)
+                            {
+                                <a class="ms-row-open-link" href="@href" title="Open this row" @onkeydown:stopPropagation="true">@cell.Text</a>
+                            }
+                            else if (ForeignKeyLink(page, row, column, cell) is { } link)
+                            {
+                                <a class="ms-row-fk-link" href="@link.Href" title="@link.Title" @onkeydown:stopPropagation="true">@cell.Text</a>
+                            }
+                            else
+                            {
+                                <SqlCellView Text="@cell.Text"
+                                             Kind="@kind"
+                                             Type="@column.Type"
+                                             FullLength="cell.FullLength"
+                                             IsTruncated="cell.IsTruncated"
+                                             Rich="true"
+                                             DateHint="@DateHintFor(hints, columnIndex, cell)"
+                                             DateHintTitle="@DateHintTitle(hints, columnIndex)"
+                                             OnOpen="() => OpenCellAsync(rowIndex, columnIndex)" />
+                            }
+                        </td>
+                    }
+                </tr>
+
+                @if (open)
+                {
+                    <tr class="ms-doc-preview-row ms-row-preview-row" @key="@(rowIndex + "/preview")">
+                        <td class="ms-doc-preview-cell" colspan="@(order.Count + 1)">
+                            <dl class="ms-row-preview" aria-label="@($"Every column of {RowLabel(page, row, rowIndex)}")">
+                                @foreach (int columnIndex in order)
+                                {
+                                    TableRowColumn column = page.Columns[columnIndex];
+                                    SqlCell cell = columnIndex < row.Cells.Count ? row.Cells[columnIndex] : SqlCell.Null;
+
+                                    <div class="ms-row-preview-item" @key="columnIndex">
+                                        <dt class="ms-row-preview-name">
+                                            <span class="ms-row-kv-name">@column.Name</span>
+                                            <span class="ms-row-col-type">@column.Type</span>
+                                        </dt>
+                                        <dd class="ms-row-preview-value">
+                                            <RowValue Schema="@Schema"
+                                                      Name="@Name"
+                                                      CellKey="CellKey(row)"
+                                                      Column="@column.Name"
+                                                      Type="@column.Type"
+                                                      Kind="@RowPresentation.KindToken(cell.Kind)"
+                                                      Text="@cell.Text"
+                                                      IsTruncated="cell.IsTruncated"
+                                                      FullLength="cell.FullLength"
+                                                      Compact="true" />
+                                        </dd>
+                                    </div>
+                                }
+                            </dl>
+                            @if (href is not null)
+                            {
+                                <p class="ms-row-preview-foot"><a class="ms-btn ms-btn-sm" href="@href">Open this row</a></p>
+                            }
+                            else if (row.Locator is null)
+                            {
+                                <p class="ms-row-preview-foot ms-muted">This relation has no key and no physical row position, so a value cut to fit the page cannot be read again whole.</p>
+                            }
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (panel is { } shownPanel)
+{
+    <div class="ms-query-json-panel ms-row-json-panel">
+        <div class="ms-query-json-panel-header">
+            <span class="ms-query-json-panel-title">@shownPanel.Title</span>
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="ClosePanel">Close</button>
+        </div>
+        @if (shownPanel.Loading)
+        {
+            <LoadingSpinner />
+        }
+        else if (shownPanel.Error is { Length: > 0 } problem)
+        {
+            <p class="ms-db-refusal" role="alert">@problem</p>
+        }
+        else if (shownPanel.Json is { } json)
+        {
+            @if (shownPanel.Note is { Length: > 0 } note)
+            {
+                <p class="ms-row-value-note">@note</p>
+            }
+            <JsonView Json="@json"
+                      Label="@shownPanel.Title"
+                      AutoExpandDepth="1"
+                      ShowSearch="false"
+                      DownloadFileName="@(shownPanel.Column + ".json")" />
+        }
+    </div>
+}
+
+@code {
+    private readonly HashSet<int> expanded = [];
+    private readonly Dictionary<string, CellPanel> fetched = new(StringComparer.Ordinal);
+    private CellPanel? panel;
+    private object? shownPage;
+
+    /// <summary>The page to draw, as a <c>TableRowPage</c>; typed <see cref="object" /> for the reason <c>DocumentComponentModel</c> gives.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>The foreign keys a cell can be followed through, as an <c>IReadOnlyList&lt;RowForeignKey&gt;</c>.</summary>
+    [Parameter]
+    public object? ForeignKeys { get; set; }
+
+    /// <summary>The relation's schema.</summary>
+    [Parameter]
+    public string Schema { get; set; } = string.Empty;
+
+    /// <summary>The relation's name.</summary>
+    [Parameter]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Whether the next page is being read: the rows on screen stay, dimmed, until it is.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Whether the "≈ date" hints are on for this table.</summary>
+    [Parameter]
+    public bool ShowDateHints { get; set; } = true;
+
+    /// <summary>The Rows tab's own URL, which a row link carries so its detail page can come back to it.</summary>
+    [Parameter]
+    public string? From { get; set; }
+
+    /// <summary>Sorts by a column, by name; the tab decides the direction.</summary>
+    [Parameter]
+    public EventCallback<string> OnSort { get; set; }
+
+    /// <summary>Turns the "≈ date" hints off, or back on, for this table.</summary>
+    [Parameter]
+    public EventCallback OnToggleDateHints { get; set; }
+
+    private TableRowPage Page => DocumentComponentModel.Read(Model, EmptyPage);
+
+    private static readonly TableRowPage EmptyPage = new();
+
+    private IReadOnlyList<RowForeignKey> Keys => DocumentComponentModel.ReadList<RowForeignKey>(ForeignKeys);
+
+    protected override void OnParametersSet()
+    {
+        // A new page is new rows: what was open or read whole belonged to the last one.
+        if (!ReferenceEquals(shownPage, Model))
+        {
+            shownPage = Model;
+            expanded.Clear();
+            fetched.Clear();
+            panel = null;
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Columns
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>The row key first, in key order, then every other column as the relation has it.</summary>
+    private static IReadOnlyList<int> DisplayOrder(IReadOnlyList<TableRowColumn> columns)
+    {
+        List<int> order = [];
+
+        order.AddRange(Enumerable.Range(0, columns.Count)
+            .Where(i => columns[i].KeyPosition is not null)
+            .OrderBy(i => columns[i].KeyPosition));
+
+        order.AddRange(Enumerable.Range(0, columns.Count).Where(i => columns[i].KeyPosition is null));
+
+        return order;
+    }
+
+    /// <summary>The column whose cell links to row detail: the key's first, when the relation has a key.</summary>
+    private static int LinkColumn(TableRowPage page, IReadOnlyList<int> order) =>
+        page.RowKey is not null && order.Count > 0 && page.Columns[order[0]].KeyPosition is not null ? order[0] : -1;
+
+    private static string HeaderClass(TableRowColumn column, bool sticky) =>
+        "ms-row-col"
+        + (column.KeyPosition is not null ? " ms-row-col-key" : string.Empty)
+        + (sticky ? " ms-row-sticky" : string.Empty);
+
+    /// <remarks>
+    /// <c>ms-row-kind-</c>, never the console grid's <c>ms-query-cell-</c> + kind: for a text cell that spells
+    /// <c>ms-query-cell-text</c>, which is also the class of the span inside a cell - an inline-block - and a
+    /// cell that is an inline-block is not a table cell. Measured: the row's cells wrapped under its first
+    /// column.
+    /// </remarks>
+    private static string CellClass(string kind, bool sticky) =>
+        "ms-table-cell ms-row-cell ms-row-kind-" + kind + (sticky ? " ms-row-sticky" : string.Empty);
+
+    private static string KeyTitle(TableRowPage page, int position) =>
+        page.RowKey is { } key
+            ? $"Column {position} of the row key ({(key.Source == DatabaseRowKeySource.PrimaryKey ? "primary key" : "unique index")} {key.IndexName})"
+            : "Part of the row key";
+
+    // ------------------------------------------------------------------------------------------------
+    // Sorting
+    // ------------------------------------------------------------------------------------------------
+
+    private static bool Descending(TableRowPage page) => page.Paging?.Direction == SortDirection.Descending;
+
+    /// <summary>
+    /// Whether this is the column the page is in order of: the sort column, or - with none - the row key's
+    /// first column, which is what the key order is led by.
+    /// </summary>
+    private static bool IsSorted(TableRowPage page, TableRowColumn column) =>
+        page.Paging?.SortColumn is { } sort
+            ? string.Equals(sort, column.Name, StringComparison.Ordinal)
+            : page.RowKey is { Columns.Count: > 0 } key && string.Equals(key.Columns[0], column.Name, StringComparison.Ordinal);
+
+    private static string SortTitle(TableRowPage page, TableRowColumn column, bool sorted)
+    {
+        string next = sorted && !Descending(page) ? "descending" : "ascending";
+        string index = column.Index == IndexVerdictLevel.Green ? string.Empty : " " + column.IndexReason;
+
+        return "Sort by " + column.Name + ", " + next + "." + index;
+    }
+
+    /// <summary>The sort's own verdict, when it is not green - "this order reads every row" belongs on the header.</summary>
+    private static SearchChip? SortHint(TableRowPage page) =>
+        page.Verdict.Chips.FirstOrDefault(static x => x.Kind == SearchChipKind.Sort && x.Level != IndexVerdictLevel.Green);
+
+    /// <summary>On the sorted header, or on the first when the sort column is not on screen - the scan happens either way.</summary>
+    private static bool ShowsSortHint(TableRowPage page, IReadOnlyList<int> order, int position)
+    {
+        int sortedAt = -1;
+
+        for (int i = 0; i < order.Count; i++)
+        {
+            if (IsSorted(page, page.Columns[order[i]]))
+            {
+                sortedAt = i;
+                break;
+            }
+        }
+
+        return sortedAt >= 0 ? position == sortedAt : position == 0;
+    }
+
+    private async Task SortAsync(string column) => await OnSort.InvokeAsync(column);
+
+    // ------------------------------------------------------------------------------------------------
+    // Date hints
+    // ------------------------------------------------------------------------------------------------
+
+    private static Dictionary<int, DateHintUnit> DateHints(TableRowPage page)
+    {
+        Dictionary<int, DateHintUnit> hints = [];
+
+        for (int i = 0; i < page.Columns.Count; i++)
+        {
+            int index = i;
+            DateHintUnit unit = SqlCellFormat.DateHintFor(
+                page.Columns[i].Name,
+                page.Columns[i].Type,
+                page.Rows.Select(row => index < row.Cells.Count && row.Cells[index].Kind != SqlCellKind.Null ? row.Cells[index].Text : null));
+
+            if (unit != DateHintUnit.None)
+            {
+                hints[i] = unit;
+            }
+        }
+
+        return hints;
+    }
+
+    private string? DateHintFor(Dictionary<int, DateHintUnit> hints, int column, SqlCell cell) =>
+        ShowDateHints && hints.TryGetValue(column, out DateHintUnit unit) && SqlCellFormat.Instant(cell.Text, unit) is { } instant
+            ? State.FormatInSelectedTimeZone(instant, SqlCellFormat.HintFormat)
+            : null;
+
+    private string? DateHintTitle(Dictionary<int, DateHintUnit> hints, int column) =>
+        hints.TryGetValue(column, out DateHintUnit unit)
+            ? "Read as " + SqlCellFormat.UnitLabel(unit) + " because of the column's name and every value on this page - a guess, shown in " +
+              State.SelectedTimeZoneId + ". The number is the stored value."
+            : null;
+
+    private async Task ToggleDateHintsAsync() => await OnToggleDateHints.InvokeAsync();
+
+    // ------------------------------------------------------------------------------------------------
+    // Links
+    // ------------------------------------------------------------------------------------------------
+
+    private string? RowHref(TableRowPage page, TableRow row) =>
+        row.Key is { Count: > 0 } key && page.RowKey is not null
+            ? DatabaseLinks.ToRow(
+                Options.Value,
+                State.ActiveScope,
+                Schema,
+                Name,
+                RowPresentation.KeyPairs(key, page.RowKey),
+                string.IsNullOrEmpty(From) ? null : [new KeyValuePair<string, string?>(DatabaseLinks.FromParameter, From)])
+            : null;
+
+    private static string RowLabel(TableRowPage page, TableRow row, int index) =>
+        row.Key is { Count: > 0 } key
+            ? "Row " + RowPresentation.KeyTuple(RowPresentation.KeyPairs(key, page.RowKey))
+            : "Row " + (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>What reads this row's cells again: its key, its ctid, or nothing for a keyless view.</summary>
+    private static IReadOnlyDictionary<string, string>? CellKey(TableRow row) =>
+        row.Key is { Count: > 0 } key
+            ? key
+            : row.Locator is { } locator ? new Dictionary<string, string>(StringComparer.Ordinal) { ["ctid"] = locator } : null;
+
+    /// <summary>
+    /// Where an FK cell leads: the parent row when the key references the parent's row key and every value is
+    /// on this page; otherwise the parent's rows filtered on the values that are. Nothing for a NULL, which
+    /// references nothing, or a cell cut on the server, which is not the value.
+    /// </summary>
+    private (string Href, string Title)? ForeignKeyLink(TableRowPage page, TableRow row, TableRowColumn column, SqlCell cell)
+    {
+        if (column.References.Count == 0 || cell.Kind == SqlCellKind.Null || cell.IsTruncated)
+        {
+            return null;
+        }
+
+        RowForeignKey? key = Keys.FirstOrDefault(x => x.Columns.Contains(column.Name, StringComparer.Ordinal));
+
+        if (key is null)
+        {
+            return null;
+        }
+
+        List<KeyValuePair<string, string>> values = [];
+
+        for (int i = 0; i < key.Columns.Count && i < key.LinkedColumns.Count; i++)
+        {
+            if (ValueOf(page, row, key.Columns[i]) is { } value)
+            {
+                values.Add(new KeyValuePair<string, string>(key.LinkedColumns[i], value));
+            }
+        }
+
+        if (values.Count == key.Columns.Count && key.TargetsParentKey)
+        {
+            List<KeyValuePair<string, string>> parentKey = [.. key.ParentKey!
+                .Select(parent => values.First(x => string.Equals(x.Key, parent, StringComparison.Ordinal)))];
+
+            return (DatabaseLinks.ToRow(Options.Value, State.ActiveScope, key.Schema, key.Table, parentKey),
+                "Open the " + key.Table + " row this points at " + RowPresentation.KeyTuple(parentKey));
+        }
+
+        if (values.Count == 0)
+        {
+            return null;
+        }
+
+        string filter = RowFilterGrammar.Format(values.Select(static x => (x.Key, RowFilterOperator.Equal, (string?) x.Value)));
+
+        return (DatabaseLinks.ToRows(Options.Value, State.ActiveScope, key.Schema, key.Table, filter),
+            "Show the rows of " + key.Table + " where " + filter);
+    }
+
+    /// <summary>A column's raw value on this row: the key's untouched text, or a cell that was neither NULL nor cut.</summary>
+    private static string? ValueOf(TableRowPage page, TableRow row, string column)
+    {
+        if (row.Key is { } key && key.TryGetValue(column, out string? raw))
+        {
+            return raw;
+        }
+
+        for (int i = 0; i < page.Columns.Count && i < row.Cells.Count; i++)
+        {
+            if (string.Equals(page.Columns[i].Name, column, StringComparison.Ordinal))
+            {
+                SqlCell cell = row.Cells[i];
+                return cell.Kind == SqlCellKind.Null || cell.IsTruncated ? null : cell.Text;
+            }
+        }
+
+        return null;
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Rows
+    // ------------------------------------------------------------------------------------------------
+
+    private Task ToggleAsync(int row)
+    {
+        if (!expanded.Remove(row))
+        {
+            expanded.Add(row);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Space opens the row in place and Enter opens its detail. Only the row's own keys: a link or a button
+    /// inside it stops its keydown from reaching here, so its own Space and Enter are left alone.
+    /// </summary>
+    private async Task OnRowKeyAsync(KeyboardEventArgs args, int row, string? href)
+    {
+        if (args.CtrlKey || args.AltKey || args.MetaKey || args.ShiftKey)
+        {
+            return;
+        }
+
+        if (args.Key is " " or "Spacebar")
+        {
+            await ToggleAsync(row);
+        }
+        else if (args.Key == "Enter" && href is not null)
+        {
+            Navigation.NavigateTo(href);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The JSON panel
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Opens a JSON cell, or a bytea that holds JSON, in the viewer under the grid: straight from the page when
+    /// it was read whole, through GetCellAsync when it was cut. A failure is drawn in the panel (hard rule 6).
+    /// </summary>
+    private async Task OpenCellAsync(int rowIndex, int columnIndex)
+    {
+        TableRowPage page = Page;
+
+        if (rowIndex >= page.Rows.Count || columnIndex >= page.Columns.Count)
+        {
+            return;
+        }
+
+        TableRow row = page.Rows[rowIndex];
+        TableRowColumn column = page.Columns[columnIndex];
+        SqlCell cell = columnIndex < row.Cells.Count ? row.Cells[columnIndex] : SqlCell.Null;
+        string title = column.Name + " of r" + RowLabel(page, row, rowIndex)[1..];
+        string cacheKey = rowIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\u001f" + column.Name;
+
+        if (fetched.TryGetValue(cacheKey, out CellPanel? known))
+        {
+            panel = known;
+            return;
+        }
+
+        if (cell.Kind == SqlCellKind.Json && !cell.IsTruncated)
+        {
+            panel = new CellPanel(title, column.Name) { Json = cell.Text };
+            return;
+        }
+
+        if (CellKey(row) is not { } key || State.ActiveScope is not { } scope)
+        {
+            panel = new CellPanel(title, column.Name)
+            {
+                Error = "This value was cut to fit the grid, and a row of a relation with neither a key nor a physical position cannot be read again whole.",
+            };
+            return;
+        }
+
+        panel = new CellPanel(title, column.Name) { Loading = true };
+        StateHasChanged();
+
+        CellPanel result;
+
+        try
+        {
+            TableCellValue value = await Rows.GetCellAsync(scope, Schema, Name, key, column.Name);
+
+            result = value switch
+            {
+                { Refusal: not DatabaseRefusal.None } => new CellPanel(title, column.Name) { Error = value.Reason ?? "This value may not be read here." },
+                { Error: { } failure } => new CellPanel(title, column.Name) { Error = failure.Sentence },
+                { Found: false } => new CellPanel(title, column.Name) { Error = value.Reason ?? "The row is not there any more - it may have been deleted or changed." },
+                { IsNull: true } => new CellPanel(title, column.Name) { Json = "null" },
+                _ => new CellPanel(title, column.Name)
+                {
+                    Json = value.Text ?? (value.Bytes is { } bytes ? Encoding.UTF8.GetString(bytes) : string.Empty),
+                    Note = value.Truncated
+                        ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
+                          " (MartenStudioOptions.MaxInlineDocumentBytes), so the viewer may not be able to read it as JSON."
+                        : null,
+                },
+            };
+
+            fetched[cacheKey] = result;
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            result = new CellPanel(title, column.Name) { Error = exception.Message };
+        }
+
+        // Only if the panel is still this one: Close, or another cell, may have been clicked meanwhile.
+        if (panel is { Loading: true } waiting && string.Equals(waiting.Title, title, StringComparison.Ordinal))
+        {
+            panel = result;
+        }
+    }
+
+    private void ClosePanel() => panel = null;
+
+    /// <summary>What the panel under the grid shows.</summary>
+    private sealed record CellPanel(string Title, string Column)
+    {
+        public bool Loading { get; init; }
+
+        public string? Json { get; init; }
+
+        public string? Error { get; init; }
+
+        public string? Note { get; init; }
+    }
+}
