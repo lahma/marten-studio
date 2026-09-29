@@ -85,13 +85,16 @@ application is being built.
 
 ## The capability model
 
-Nine flags on `MartenStudioCapabilities`, every one `false` by default:
+Ten flags on `MartenStudioCapabilities`, every one `false` by default:
 
 `EditDocuments`, `DeleteDocuments`, `ArchiveStreams`, `ManageDeadLetters`, `ControlDaemon`,
-`RebuildProjections`, `CorrectProgression`, `ApplySchemaChanges`, `RunSql`.
+`RebuildProjections`, `CorrectProgression`, `ApplySchemaChanges`, `RunSql`, `BrowseDatabase`.
+
+Two of them are reads rather than writes — `RunSql` and `BrowseDatabase` read beyond what Marten declares —
+and they are treated as writes for authorization, because they are the dangerous reads.
 
 `MartenStudioCapabilities.All()` is the one-line, greppable opt-in. `MartenStudioOptions.ReadOnly`
-overrides all nine whatever they say.
+overrides all ten whatever they say.
 
 This is Hangfire's [GHSA-7rq6-7gv8-c37h](https://github.com/advisories/GHSA-7rq6-7gv8-c37h) applied to
 the write axis: the dashboard that is dangerous by default is the one somebody maps without reading the

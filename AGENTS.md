@@ -139,6 +139,11 @@ model, the phased delivery plan — lives in the approved plan at
     same mode so what is read is what is run, `MigrationRisk` lists the destructive statements in the
     dialog before the typed confirmation, and the typed string travels to the service rather than being
     re-supplied by the page.
+    **The database browser reads the catalog, never Weasel.** Every list and description of a non-Marten
+    object comes from `pg_catalog` (never `information_schema`, which hides what the role cannot touch),
+    filtered by `nspname = any(@schemas)`, and runs inside `ReadOnlySqlSession` — so `lock_timeout` keeps
+    it off a migration's lock queue and `has_*_privilege` answers for `SqlConsoleRole`. What Marten owns is
+    read from `SchemaDeclarationReader`'s kind map, which touches no connection either (D27).
 15. **Open Marten sessions only with `SessionOptions.ForDatabase(resolved.TenantId, resolved.Database)`**
     (or `ForDatabase(resolved.Database)` where the scope has no tenant), never
     `Store.QuerySession(tenantId)` / `LightweightSession(tenantId)` — those ignore the selected database
@@ -159,7 +164,7 @@ model, the phased delivery plan — lives in the approved plan at
     that disposal with it, leaving the `DotNetObjectReference` that pins the component undisposed and the
     page's `CancellationTokenSource` uncancelled. A filter still rethrows anything that is a real bug.
 
-## Design decisions (D1–D24)
+## Design decisions (D1–D27)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the
 rationale is not.
@@ -364,6 +369,27 @@ where its report says so; several sections deliberately re-declare an earlier se
 `.ms-projection-note`, `.ms-overview-list-stream`, `.ms-doc-detail-actions`) and win by source order.
 Keep that when touching those selectors: a rule added *before* the section that overrides it is a rule
 that does nothing, and `StylesheetTests` (plus its `.Shell` part) pins the ones that were measured.
+
+**D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
+0.3.0 lets the studio show what else lives in the store's Postgres database — a Quartz.NET job store, a
+legacy schema, another library's tables — as tables, views, functions, triggers, sequences and types.
+Reading them is gated like `RunSql`, because it is the same power: `Capabilities.BrowseDatabase` (off by
+default, off under `ReadOnly`) and `BrowsableSchemas` (exact names, or `"*"` for every schema the role has
+`USAGE` on except Postgres' own and extensions'). Structure — names, columns, keys, indexes, trigger
+names, estimates — is visible without either for the store's *own* schemas, because the Schema screen
+already showed it; everything else, every non-Marten definition and every row needs both, plus the write
+policy asked **with `TenantId = null`**, since nothing filters a non-Marten table by tenant. Marten's own
+document and event tables and every `mt_`-prefixed object are never read raw — the browser links to
+Documents and Events, where tenancy, soft delete and the serializer apply — while flat-table projections
+and `ExtendedSchemaObjects` are Marten-managed *relational* data and their rows are browsable. A hidden
+document type (`IsDocumentTypeVisible`) is absent from every list together with its indexes, keys,
+triggers and partitions, and a view over its table is refused; per-tenant partitions and sequences roll
+up, because their names are the tenant list. Classification fails closed: if a registered store's
+declarations cannot be read, nothing is called "Other". Known limit: features added with
+`Storage.Add(IFeatureSchema)` are reachable only through Marten's internal `AllActiveFeatures`, which hard
+rule 14 forbids, so they are classified by the `mt_` prefix alone. `BrowsableSchemas` limits what the
+screens show, not what `RunSql` can read: `SqlConsoleRole` is the real boundary, and `"*"` without it is
+event 9230 at startup.
 
 ## Package budget
 
@@ -604,13 +630,12 @@ src/MartenStudio/Services/Relationships/      The relationship graph service, it
 src/MartenStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
 tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, page and panel - no database
 tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both ways, visibility, bounded counts
-tests/MartenStudio.Integration.Tests/Database/  Live Postgres, a database per fixture: the relational demo
-                                         schemas, their idempotency and the demo-data flows beside them
 tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: six scenarios, the D19 gate, the large-data pass
 src/MartenStudio/Services/Database/       The database browser: the per-visitor gate, the schema matcher, the
                                          ownership classifier, the catalog cache and the object service
 tests/MartenStudio.Tests/Database/        Gate, matcher, classifier, catalog SQL shape, options - no database
-tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, the gate and its audit, no DDL
+tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, the gate and its audit, no DDL,
+                                         and the relational demo schemas' idempotency and demo-data flows
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),

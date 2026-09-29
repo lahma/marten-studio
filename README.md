@@ -260,7 +260,7 @@ application that never set the option exactly as it was.
 
 ## Capabilities
 
-Nine booleans, **all `false` by default**. A freshly mapped studio is a read-only browser.
+Ten booleans, **all `false` by default**. A freshly mapped studio is a read-only browser of Marten's own data.
 
 | Capability | What it allows |
 |---|---|
@@ -273,6 +273,7 @@ Nine booleans, **all `false` by default**. A freshly mapped studio is a read-onl
 | `CorrectProgression` | Advance the high-water mark, or correct projection progression in the database |
 | `ApplySchemaChanges` | Apply pending schema migrations |
 | `RunSql` | Run read-only SQL from the Query page's console |
+| `BrowseDatabase` | Browse the rows and definitions of non-Marten tables, views, functions, triggers, sequences and types in the schemas `BrowsableSchemas` names. A read, authorized like `RunSql` as a write, and always with `TenantId = null` |
 
 ```csharp
 options.Capabilities = MartenStudioCapabilities.All();   // everything: the one-line, greppable opt-in
@@ -287,7 +288,8 @@ Every disabled control says the exact property you would set, spelled the way yo
 
 and with the master switch on:
 
-> `MartenStudioOptions.ReadOnly` is `true`, which turns every mutating operation off.
+> `MartenStudioOptions.ReadOnly` is `true`, which turns every capability off: the mutating operations,
+> and the reads beyond the store (`RunSql` and `BrowseDatabase`).
 
 Hiding a button is a convenience. The refusal itself lives in the service layer, where the operation
 does, because a Blazor circuit is a long-lived object a client can drive — and every refusal is written
@@ -306,7 +308,7 @@ fails the host with a message that names the option.
 | `StoreAuthorizationPolicy` | `null` | Policy evaluated against `MartenStoreResource` before a store, database or tenant is listed, framed or read. |
 | `WriteAuthorizationPolicy` | `null` | Policy evaluated against `MartenStoreResource` with the capability named, before every mutation. Falls back to `StoreAuthorizationPolicy`. |
 | `ReadOnly` | `false` | Master switch: every capability off, mutating controls not rendered, services refuse. |
-| `Capabilities` | all off | Which mutating operations are enabled. |
+| `Capabilities` | all off | Which mutating operations, and which reads beyond the store (`RunSql`, `BrowseDatabase`), are enabled. |
 | `DefaultPageSize` | `50` | Rows per page when a list is first shown. 1 … `MaxPageSize`. |
 | `MaxPageSize` | `500` | The largest page a user may pick. 1 … 5000. |
 | `QueryTimeout` | 30 seconds | How long a studio query may run. It is a server-side `statement_timeout` where the studio owns a transaction — the SQL console, the Marten `where` clause, the recent-documents scan — and Npgsql's client-side `CommandTimeout` everywhere else. 1 second … 10 minutes. |
@@ -320,6 +322,7 @@ fails the host with a message that names the option.
 | `IncludeAncillaryStores` | `true` | Whether stores registered with `AddMartenStore<T>()` appear beside the default `IDocumentStore`. |
 | `KnownTenantIds` | empty | Tenant ids to offer in the selector. When non-empty, discovery is skipped. |
 | `DiscoverTenantIds` | `true` | When `KnownTenantIds` is empty, whether to discover tenants from Marten's descriptors and then from a bounded query. |
+| `BrowsableSchemas` | empty | Schemas beyond the store's own that the database browser may show, and whose non-Marten rows and definitions it may read (with `Capabilities.BrowseDatabase`). Exact schema names, or `"*"` for every schema the studio's role has `USAGE` on except Postgres' own and extensions'. It limits what the screens show, not what `RunSql` can read — `SqlConsoleRole` is the real boundary. |
 
 > **`RebuildShardTimeout` is not a nicety.** A rebuild tears the projection's tables down *before* the
 > timeout starts applying to the replay, so a rebuild that exceeds it stops with the tables already

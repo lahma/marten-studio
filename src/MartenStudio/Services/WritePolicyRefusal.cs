@@ -54,6 +54,7 @@ internal static class WritePolicyRefusal
         nameof(StudioCapability.CorrectProgression) => "Your account may not correct projection progress here.",
         nameof(StudioCapability.ApplySchemaChanges) => "Your account may not apply schema changes here.",
         nameof(StudioCapability.RunSql) => "Your account may not run SQL here.",
+        nameof(StudioCapability.BrowseDatabase) => "Your account may not browse the database here.",
         _ => "Your account may not do this here.",
     };
 }

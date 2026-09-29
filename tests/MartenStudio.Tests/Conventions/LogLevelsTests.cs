@@ -78,6 +78,12 @@ public class LogLevelsTests
 
         /// <summary>A record that data was lost on the visitor's say-so. Always a Warning.</summary>
         DataLoss,
+
+        /// <summary>
+        /// A risky configuration the operator chose, said once per host start where the startup log is
+        /// read - never on a page, never polled. Always a Warning.
+        /// </summary>
+        Configuration,
     }
 
     /// <summary>
@@ -96,6 +102,8 @@ public class LogLevelsTests
             "A policy refusal on a write or a query run; listings are filtered (FilterAsync logs nothing) and a refused scope's page body is never rendered."),
         ["src/MartenStudio/Services/StudioLog.cs : 9211 DocumentWriteRoundTripDropped"] = (Verdict.DataLoss,
             "A save the visitor confirmed dropped properties the CLR type does not have; the only durable record of the loss."),
+        ["src/MartenStudio/Services/StudioLog.cs : 9230 DatabaseBrowserOpenToEverySchemaWithoutRole"] = (Verdict.Configuration,
+            "BrowsableSchemas contains \"*\" and SqlConsoleRole is unset: every table the store's role can read is browsable. Once per host start."),
 
         // ---- StudioLog: the throttled anomalies (level is a parameter) --------------------------------
         ["src/MartenStudio/Services/StudioLog.cs : 9210 StoreUnavailable"] = (Verdict.Throttled,
@@ -216,7 +224,7 @@ public class LogLevelsTests
                 (not Verdict.Throttled, SiteLevel.Dynamic) =>
                     "takes its level as a parameter but is not filed as throttled",
                 (Verdict.Fault, not (SiteLevel.Error or SiteLevel.Critical)) => "is filed as a fault but is not an Error",
-                (Verdict.Refusal or Verdict.VisitorAction or Verdict.DataLoss, not SiteLevel.Warning) =>
+                (Verdict.Refusal or Verdict.VisitorAction or Verdict.DataLoss or Verdict.Configuration, not SiteLevel.Warning) =>
                     "is filed as a Warning-level site but writes " + site.Level,
                 _ => null,
             };
