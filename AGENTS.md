@@ -138,7 +138,11 @@ model, the phased delivery plan — lives in the approved plan at
     alone. Apply runs under `CreateOrUpdate` and never `AutoCreate.All`, the preview is rendered under the
     same mode so what is read is what is run, `MigrationRisk` lists the destructive statements in the
     dialog before the typed confirmation, and the typed string travels to the service rather than being
-    re-supplied by the page.
+    re-supplied by the page. `Check`, `Preview` and `DDL` print the whole database — every tenant's
+    partition by name, every document type's table — so they answer only a visitor the store policy
+    allows for the database with `TenantId = null`, and, while any document type is hidden, one past the
+    database browser's gate too; an apply is authorized as `(db, null, ApplySchemaChanges)` whatever tenant
+    is selected, because `CreateOrUpdate` reaches every tenant.
     **The database browser reads the catalog, never Weasel.** Every list and description of a non-Marten
     object comes from `pg_catalog` (never `information_schema`, which hides what the role cannot touch),
     filtered by `nspname = any(@schemas)`, and runs inside `ReadOnlySqlSession` — so `lock_timeout` keeps

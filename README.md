@@ -410,11 +410,20 @@ the page says so — that is a value, not an error, and the studio never starts 
 
 **Schema** — five tabs: *Drift* (what Marten would change), *Tables*, *Indexes*, *Functions* and *DDL*.
 Nothing here executes DDL on a read path: schema names, declared indexes, managed tables and installed
-functions come from `StoreOptions` and Marten's own feature schemas, and `Check`, `Preview` and `DDL`
-sit behind buttons that say on the button what they may create. *Tables* says whose each table is by the
-database browser's rules, rolls partitions into their parent without listing them, and leaves hidden
-document types out. *Functions* reads a body when you open its row: Marten's own for everybody, the
-application's own only with `Capabilities.BrowseDatabase` and a schema `BrowsableSchemas` admits.
+functions come from `StoreOptions` and Marten's own feature schemas, and `Check`, `Preview` and `DDL` sit
+behind buttons that say on the button what they may create. What those three show spans the whole
+database — every tenant's partition by name, every document type's table — so they answer only a visitor
+the store policy allows for the database with no tenant selected, and, while `IsDocumentTypeVisible`
+hides a document type, one past the database browser's gate (`Capabilities.BrowseDatabase` and the write
+policy). An apply migrates the whole database, every tenant, whichever tenant is selected, so both
+policies are asked about the database as a whole. *Tables* says whose each table is by the database
+browser's rules, rolls partitions into their parent without listing them, leaves hidden document types
+out, and shows a partition count or a Marten tenancy table's row count only past that gate, because
+either is the number of tenants. *Functions* reads a body when you open its row: Marten's own for
+everybody, the application's own only with `Capabilities.BrowseDatabase` and a schema `BrowsableSchemas`
+admits. A name in a schema you may not see reads `‹withheld›`, as in the browser. If a registered store
+cannot be built, the tabs keep what the other stores declare and withhold, and say, what that store could
+own. The reads give up after three seconds behind a migration's lock rather than wait for it.
 
 > **An apply runs under `AutoCreate.CreateOrUpdate`, and `CreateOrUpdate` is not additive.** Weasel's
 > update path emits `drop index` for every physical index your configuration does not declare,
