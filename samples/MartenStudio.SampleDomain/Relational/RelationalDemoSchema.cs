@@ -268,7 +268,60 @@ public static class RelationalDemoSchema
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
+        if (rows > 0)
+        {
+            await AnalyzeAsync(connection, quartz, legacy, cancellationToken).ConfigureAwait(false);
+        }
+
         return result with { QuartzApplied = quartz, LegacyApplied = legacy };
+    }
+
+    /// <summary>
+    /// Gives the freshly seeded tables planner statistics, so the database browser shows row estimates
+    /// rather than "not analyzed" on a demo nobody has let autovacuum reach yet.
+    /// </summary>
+    /// <remarks>
+    /// Only the tables the demo just wrote, and never a materialized view: the one created
+    /// <c>WITH NO DATA</c> must stay unpopulated, which is the point of it. Identifiers go through
+    /// <c>format('%I')</c>, and the schema names are the demo's own constants, passed as parameters.
+    /// </remarks>
+    private static async Task AnalyzeAsync(
+        NpgsqlConnection connection,
+        bool quartz,
+        bool legacy,
+        CancellationToken cancellationToken)
+    {
+        List<string> schemas = [];
+        if (quartz)
+        {
+            schemas.Add(QuartzSchemaName);
+        }
+
+        if (legacy)
+        {
+            schemas.Add(LegacySchemaName);
+        }
+
+        var tables = new List<string>();
+        await using (var list = new NpgsqlCommand(
+            "select pg_catalog.format('analyze %I.%I', n.nspname, c.relname) " +
+            "from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid = c.relnamespace " +
+            "where n.nspname = any(@schemas) and c.relkind in ('r', 'p') order by 1",
+            connection))
+        {
+            list.Parameters.Add(new NpgsqlParameter("schemas", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = schemas.ToArray() });
+            await using NpgsqlDataReader reader = await list.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                tables.Add(reader.GetString(0));
+            }
+        }
+
+        foreach (string statement in tables)
+        {
+            await using var analyze = new NpgsqlCommand(statement, connection);
+            await analyze.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
