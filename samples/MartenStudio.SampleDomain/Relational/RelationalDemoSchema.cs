@@ -1,33 +1,48 @@
 using System.Data;
 using System.Text;
 
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Npgsql;
 
 using NpgsqlTypes;
 
 namespace MartenStudio.SampleDomain.Relational;
 
-/// <summary>What one <see cref="RelationalDemoSchema.ApplyAsync" /> did and found.</summary>
+/// <summary>What one <see cref="RelationalDemoSchema.ApplyAsync(NpgsqlConnection, ILogger, CancellationToken)" /> did and found.</summary>
 /// <param name="RowsWritten">
 /// Rows the seeding inserted or updated, as Postgres counted them. Zero when every table already had its
 /// rows, which is what a second run against the same database reports.
 /// </param>
 /// <param name="HasCitextColumn">
 /// Whether <c>legacy.integration_messages</c> has its <c>citext</c> column. It is only added when the
-/// <c>citext</c> extension was already installed; the demo never installs an extension itself.
+/// <c>citext</c> extension was already installed; the demo never installs an extension itself. False
+/// when the legacy half was skipped.
 /// </param>
 /// <param name="HasCustomerForeignKey">
 /// Whether <c>legacy.customer_credit</c> has its foreign key into <c>studio_sample.mt_doc_customer</c>,
-/// which needs Marten to have created that table first.
+/// which needs Marten to have created that table first. False when the legacy half was skipped.
 /// </param>
 /// <param name="HasAppSettings">
 /// Whether <c>studio_sample.app_settings</c> exists, which needs Marten to have created its schema first.
+/// False when the legacy half, which creates it, was skipped.
+/// </param>
+/// <param name="QuartzApplied">
+/// Whether the <c>quartz</c> half ran. False when a <c>quartz</c> schema the demo did not create was
+/// already there, in which case nothing was created in it or written to it.
+/// </param>
+/// <param name="LegacyApplied">
+/// Whether the <c>legacy</c> half - which includes <c>studio_sample.app_settings</c> - ran. False when a
+/// <c>legacy</c> schema the demo did not create was already there.
 /// </param>
 public readonly record struct RelationalDemoResult(
     int RowsWritten,
     bool HasCitextColumn,
     bool HasCustomerForeignKey,
-    bool HasAppSettings);
+    bool HasAppSettings,
+    bool QuartzApplied,
+    bool LegacyApplied);
 
 /// <summary>
 /// Two non-Marten schemas that live beside the demo store: Quartz.NET's real PostgreSQL job store in
@@ -50,7 +65,8 @@ public readonly record struct RelationalDemoResult(
 /// reference MartenStudio (D17).
 /// </para>
 /// <para>
-/// <b>Idempotent, and in one transaction.</b> <see cref="ApplyAsync" /> takes a transaction-scoped
+/// <b>Idempotent, and in one transaction.</b>
+/// <see cref="ApplyAsync(NpgsqlConnection, ILogger, CancellationToken)" /> takes a transaction-scoped
 /// advisory lock, runs <c>QuartzSchema.sql</c> and <c>LegacySchema.sql</c> (both written to be run any
 /// number of times and never to drop anything), then fills each table that is empty and leaves every
 /// table that is not alone. So a second start of the sample on a reused database changes nothing, and a
@@ -64,9 +80,44 @@ public readonly record struct RelationalDemoResult(
 /// Against a database with no Marten store the Marten-anchored half is skipped rather than failed, and
 /// <see cref="RelationalDemoResult" /> says which parts are present.
 /// </para>
+/// <para>
+/// <b>Never into a schema it did not create.</b> <c>quartz</c> and <c>legacy</c> are ordinary names, and a
+/// sample store may share its database with something that is not a demo - a real Quartz.NET job store is
+/// exactly what lives in a schema called <c>quartz</c>, and "fill every empty table" would write two fake
+/// schedulers' jobs into it. So each script stamps its schema with a comment that begins with
+/// <see cref="QuartzSchemaMarker" /> or <see cref="LegacySchemaMarker" />, and before either half runs,
+/// under the advisory lock, the schema is looked up: absent, it is the demo's to create; present with the
+/// marker, it is the demo's own; present without it, that half is skipped entirely - no
+/// <c>CREATE … IF NOT EXISTS</c>, no <c>CREATE OR REPLACE</c>, no row - and the skip is logged at
+/// Information, because a database that already has its own <c>legacy</c> schema is not a fault.
+/// </para>
 /// </remarks>
 public static class RelationalDemoSchema
 {
+    /// <summary>
+    /// What the comment on a <c>quartz</c> schema the demo created begins with. The demo writes into a
+    /// <c>quartz</c> schema only when it is absent or its comment begins with this.
+    /// </summary>
+    public const string QuartzSchemaMarker = "marten-studio-sample:quartz";
+
+    /// <summary>
+    /// What the comment on a <c>legacy</c> schema the demo created begins with. The demo writes into a
+    /// <c>legacy</c> schema only when it is absent or its comment begins with this.
+    /// </summary>
+    public const string LegacySchemaMarker = "marten-studio-sample:legacy";
+
+    /// <summary>
+    /// The comment the first version of the demo (DB-2, before there was a marker) put on <c>quartz</c>,
+    /// exactly. A schema carrying it was created by the demo too, and is re-stamped with the marker the
+    /// next time the demo applies, so a developer's reused container is not mistaken for a stranger's.
+    /// </summary>
+    private const string UnmarkedQuartzComment =
+        "Quartz.NET job store (database/tables/tables_postgres.sql, Apache-2.0), vendored by the Marten Studio sample. Not a Marten schema.";
+
+    /// <summary>The comment the first version of the demo put on <c>legacy</c>, exactly. See <see cref="UnmarkedQuartzComment" />.</summary>
+    private const string UnmarkedLegacyComment =
+        "A hand-made relational schema beside the Marten store, covering every catalog edge case the database browser has to handle.";
+
     /// <summary>The schema Quartz.NET's tables are vendored into.</summary>
     public const string QuartzSchemaName = "quartz";
 
@@ -137,7 +188,8 @@ public static class RelationalDemoSchema
     public static string LegacyScript => ReadScript(LegacyScriptName);
 
     /// <summary>
-    /// Creates both schemas if they are missing, then fills every demo table that is empty.
+    /// Creates both schemas if they are missing, then fills every demo table that is empty - logging
+    /// nowhere.
     /// </summary>
     /// <param name="connection">
     /// A connection to the database the Marten store uses. Opened if it is not open yet; never closed or
@@ -145,11 +197,29 @@ public static class RelationalDemoSchema
     /// </param>
     /// <param name="cancellationToken">Cancels the apply, which then rolls back as a whole.</param>
     /// <returns>What was written, and which of the optional parts are present.</returns>
+    public static Task<RelationalDemoResult> ApplyAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken = default) =>
+        ApplyAsync(connection, NullLogger.Instance, cancellationToken);
+
+    /// <summary>
+    /// Creates both schemas if they are missing, then fills every demo table that is empty - skipping a
+    /// half whose schema exists and was not created by the demo.
+    /// </summary>
+    /// <param name="connection">
+    /// A connection to the database the Marten store uses. Opened if it is not open yet; never closed or
+    /// disposed here, because the caller owns it.
+    /// </param>
+    /// <param name="logger">Where a skipped half is reported, at Information.</param>
+    /// <param name="cancellationToken">Cancels the apply, which then rolls back as a whole.</param>
+    /// <returns>What was written, and which of the optional parts are present.</returns>
     public static async Task<RelationalDemoResult> ApplyAsync(
         NpgsqlConnection connection,
+        ILogger logger,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(logger);
 
         if (connection.State != ConnectionState.Open)
         {
@@ -165,22 +235,89 @@ public static class RelationalDemoSchema
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        await ExecuteScriptAsync(connection, transaction, QuartzScript, cancellationToken).ConfigureAwait(false);
-        await ExecuteScriptAsync(connection, transaction, LegacyScript, cancellationToken).ConfigureAwait(false);
-
-        // Quartz stores every instant as UTC ticks and every duration as whole milliseconds; "now" is read
-        // once so that a trigger's next fire time and the check-in times it is compared with agree.
-        int rows = await QuartzDemoData.SeedAsync(connection, transaction, DateTime.UtcNow.Ticks, cancellationToken)
+        // Asked under the lock, so that the answer cannot change between the question and the writes.
+        bool quartz = await IsTheDemosAsync(
+                connection, transaction, QuartzSchemaName, QuartzSchemaMarker, UnmarkedQuartzComment, logger, cancellationToken)
+            .ConfigureAwait(false);
+        bool legacy = await IsTheDemosAsync(
+                connection, transaction, LegacySchemaName, LegacySchemaMarker, UnmarkedLegacyComment, logger, cancellationToken)
             .ConfigureAwait(false);
 
-        rows += await LegacyDemoData.SeedAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        int rows = 0;
 
-        RelationalDemoResult result = await ReadFactsAsync(connection, transaction, rows, cancellationToken)
-            .ConfigureAwait(false);
+        if (quartz)
+        {
+            await ExecuteScriptAsync(connection, transaction, QuartzScript, cancellationToken).ConfigureAwait(false);
+
+            // Quartz stores every instant as UTC ticks and every duration as whole milliseconds; "now" is
+            // read once so that a trigger's next fire time and the check-in times it is compared with agree.
+            rows += await QuartzDemoData.SeedAsync(connection, transaction, DateTime.UtcNow.Ticks, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (legacy)
+        {
+            await ExecuteScriptAsync(connection, transaction, LegacyScript, cancellationToken).ConfigureAwait(false);
+
+            rows += await LegacyDemoData.SeedAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        }
+
+        RelationalDemoResult result = legacy
+            ? await ReadLegacyFactsAsync(connection, transaction, rows, cancellationToken).ConfigureAwait(false)
+            : new RelationalDemoResult(rows, false, false, false, QuartzApplied: false, LegacyApplied: false);
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
-        return result;
+        return result with { QuartzApplied = quartz, LegacyApplied = legacy };
+    }
+
+    /// <summary>
+    /// Whether the demo may write into <paramref name="schema" />: it does not exist yet, or its comment
+    /// says the demo created it.
+    /// </summary>
+    private static async Task<bool> IsTheDemosAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string schema,
+        string marker,
+        string unmarkedComment,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            "select pg_catalog.obj_description(n.oid, 'pg_namespace') from pg_catalog.pg_namespace n where n.nspname = @name",
+            connection,
+            transaction);
+
+        command.Parameters.Add(new NpgsqlParameter("name", NpgsqlDbType.Text) { Value = schema });
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        string? comment = await reader.IsDBNullAsync(0, cancellationToken).ConfigureAwait(false) ? null : reader.GetString(0);
+
+        if (comment is not null
+            && (comment.StartsWith(marker, StringComparison.Ordinal) || string.Equals(comment, unmarkedComment, StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            logger.LogInformation(
+                "The Marten Studio sample left the existing '{Schema}' schema alone: it was not created by the sample - its "
+                + "comment does not begin with '{Marker}' - so none of the demo's objects or rows were written to it. "
+                + "Comment found: {Comment}",
+                schema,
+                marker,
+                comment ?? "(none)");
+        }
+
+        return false;
     }
 
     private static async Task ExecuteScriptAsync(
@@ -194,7 +331,8 @@ public static class RelationalDemoSchema
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<RelationalDemoResult> ReadFactsAsync(
+    /// <summary>The optional parts of the legacy half, read once that half has run.</summary>
+    private static async Task<RelationalDemoResult> ReadLegacyFactsAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         int rows,
@@ -216,7 +354,13 @@ public static class RelationalDemoSchema
 
         await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
 
-        return new RelationalDemoResult(rows, reader.GetBoolean(0), reader.GetBoolean(1), reader.GetBoolean(2));
+        return new RelationalDemoResult(
+            rows,
+            reader.GetBoolean(0),
+            reader.GetBoolean(1),
+            reader.GetBoolean(2),
+            QuartzApplied: false,
+            LegacyApplied: true);
     }
 
     private static string ReadScript(string fileName)

@@ -7,6 +7,9 @@ using MartenStudio.SampleDomain.Documents;
 using MartenStudio.SampleDomain.Events;
 using MartenStudio.SampleDomain.Relational;
 
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Npgsql;
 
 namespace MartenStudio.SampleDomain;
@@ -48,6 +51,20 @@ public sealed class SampleDataSeeder : IInitialData
     /// <summary>Bumped when the data below changes, so an existing database is re-seeded.</summary>
     private const int SeedVersion = 3;
 
+    private readonly ILogger logger;
+
+    /// <summary>A seeder that reports what it skipped to <paramref name="logger" />.</summary>
+    /// <param name="logger">
+    /// Where the relational demo says it left a <c>quartz</c> or <c>legacy</c> schema alone because the
+    /// sample did not create it. Optional: <c>new SampleDataSeeder()</c> logs nowhere, and a host that
+    /// wants the line registers the seeder with <c>InitializeWith&lt;SampleDataSeeder&gt;()</c> so the
+    /// container supplies one.
+    /// </param>
+    public SampleDataSeeder(ILogger<SampleDataSeeder>? logger = null)
+    {
+        this.logger = logger ?? (ILogger) NullLogger.Instance;
+    }
+
     /// <summary>How big <see cref="MediaAsset" />'s decoded payload is: base64 makes it about 2 MB.</summary>
     private const int MediaAssetBytes = 1_500_000;
 
@@ -64,7 +81,7 @@ public sealed class SampleDataSeeder : IInitialData
 
         await SeedDocumentsAsync(store, cancellation);
 
-        await ApplyRelationalDemoAsync(store, cancellation);
+        await ApplyRelationalDemoAsync(store, logger, cancellation);
     }
 
     /// <summary>
@@ -89,7 +106,7 @@ public sealed class SampleDataSeeder : IInitialData
     /// <c>legacy.customer_credit</c> through its foreign key. Running afterwards is what refills it.
     /// </para>
     /// </remarks>
-    private static async Task ApplyRelationalDemoAsync(IDocumentStore store, CancellationToken cancellation)
+    private static async Task ApplyRelationalDemoAsync(IDocumentStore store, ILogger logger, CancellationToken cancellation)
     {
         if (!string.Equals(store.Options.DatabaseSchemaName, SampleStore.DocumentSchema, StringComparison.Ordinal))
         {
@@ -99,7 +116,7 @@ public sealed class SampleDataSeeder : IInitialData
         await using NpgsqlConnection connection = store.Storage.Database.CreateConnection();
         await connection.OpenAsync(cancellation);
 
-        await RelationalDemoSchema.ApplyAsync(connection, cancellation);
+        await RelationalDemoSchema.ApplyAsync(connection, logger, cancellation);
     }
 
     /// <summary>The seeded documents, behind <see cref="SeedMarker" />.</summary>

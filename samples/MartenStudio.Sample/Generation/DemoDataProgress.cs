@@ -63,7 +63,7 @@ internal sealed record DemoDataProgress
     /// <summary>What the job is doing right now.</summary>
     public string Phase { get; init; } = string.Empty;
 
-    /// <summary>Documents written so far.</summary>
+    /// <summary>Documents written so far, or for a truncation, generated documents deleted so far.</summary>
     public long Documents { get; init; }
 
     /// <summary>Documents the plan asks for.</summary>

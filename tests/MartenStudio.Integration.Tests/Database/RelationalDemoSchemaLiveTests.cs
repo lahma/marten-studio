@@ -11,6 +11,8 @@ using MartenStudio.SampleDomain.Documents;
 using MartenStudio.SampleDomain.Generation;
 using MartenStudio.SampleDomain.Relational;
 
+using Microsoft.Extensions.Logging;
+
 using Npgsql;
 
 namespace MartenStudio.Integration.Tests.Database;
@@ -606,8 +608,12 @@ public class RelationalDemoSchemaLiveTests(RelationalDemoSchemaFixture fixture) 
     /// <summary>
     /// An ordinary table sits in <c>studio_sample</c> next to Marten's own, and Marten - applying every
     /// configured change under <c>AutoCreate.All</c>, from this store and from a brand-new one - neither
-    /// drops it nor empties it, nor the foreign key another schema holds into its customer table.
+    /// drops it nor empties it: Marten's migrations diff only the tables Marten declares.
     /// </summary>
+    /// <remarks>
+    /// What Marten does <em>not</em> leave alone is the foreign key another schema holds into one of its
+    /// tables; that is the next test.
+    /// </remarks>
     [PostgresFact]
     public async Task An_ordinary_table_lives_in_the_marten_schema_and_marten_leaves_it_alone()
     {
@@ -632,10 +638,281 @@ public class RelationalDemoSchemaLiveTests(RelationalDemoSchemaFixture fixture) 
         }
 
         (await ScalarAsync(connection, "select count(*) from studio_sample.app_settings")).Should().Be(settings);
-        (await ScalarAsync(
+        (await StringsAsync(
             connection,
-            "select count(*) from pg_catalog.pg_constraint where conname = 'customer_credit_customer_id_fkey' and confrelid = 'studio_sample.mt_doc_customer'::regclass"))
-            .Should().Be(1);
+            "select relname::text from pg_catalog.pg_class where relnamespace = 'studio_sample'::regnamespace and relkind = 'r' order by 1"))
+            .Should().Equal(tables);
+    }
+
+    /// <summary>
+    /// The foreign key from <c>legacy.customer_credit</c> into <c>mt_doc_customer</c> does not survive a
+    /// Marten migration that rebuilds the customer table's primary key - and the next apply puts it back,
+    /// validated and still cascading.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The real contract, not the hoped-for one.</b> When the key of <c>mt_doc_customer</c> changes,
+    /// Weasel's <c>TableDelta</c> writes <c>alter table … drop constraint &lt;pk&gt; CASCADE</c>, adds the
+    /// new key, and re-creates the foreign keys that point at the table - but only the ones Marten
+    /// declared, from its own table deltas. A partition rebuild is <c>drop table … cascade</c> with the
+    /// same result. Either way the demo's key is gone, and Marten will never bring it back; what does is
+    /// <c>LegacySchema.sql</c>'s guarded <c>DO</c> block, which runs on every start of the sample.
+    /// </para>
+    /// <para>
+    /// The rebuild is reproduced with Weasel's own two statements for a changed key - drop it with
+    /// <c>CASCADE</c>, add it back - and Marten is then left to put back the foreign keys it owns, which
+    /// is the part Weasel's <c>ReferencingForeignKeys</c> does inside the same migration. Not the drop
+    /// alone and then Marten: a customer table with no key at all is a state the Weasel this repository
+    /// resolves cannot migrate out of - it emitted <c>drop constraint pkey_mt_doc_customer_ CASCADE</c>
+    /// and failed on 42704, measured. Its own database, because what it takes apart would otherwise be
+    /// shared by every other test in the class.
+    /// </para>
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_rebuild_of_the_customer_key_drops_the_foreign_key_and_the_next_start_restores_it()
+    {
+        string connectionString = await BrowserSuiteFixture.CreateDatabaseAsync(fixture.Postgres, "relational_demo_rebuild");
+
+        await using MartenFixture marten = await MartenFixture.CreateAsync(connectionString, SampleStore.DocumentSchema);
+        await marten.SeedSampleDataAsync(Token);
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(Token);
+
+        long credit = await ScalarAsync(connection, "select count(*) from legacy.customer_credit");
+        credit.Should().BeGreaterThan(0);
+
+        (await ForeignKeysIntoCustomerAsync(connection)).Should().Equal(
+            "legacy.customer_credit:customer_credit_customer_id_fkey:c:valid",
+            "studio_sample.mt_doc_invoice:mt_doc_invoice_customer_id_fkey:a:valid",
+            "studio_sample.mt_doc_order:mt_doc_order_customer_id_fkey:a:valid");
+
+        string primaryKey = SqlIdentifier.Quote((await ScalarTextAsync(
+            connection,
+            "select conname::text from pg_catalog.pg_constraint where conrelid = 'studio_sample.mt_doc_customer'::regclass and contype = 'p'"))!);
+
+        // TableDelta.writePrimaryKeyChanges, for a key whose columns changed.
+        await ExecuteAsync(connection, "alter table studio_sample.mt_doc_customer drop constraint " + primaryKey + " cascade");
+        await ExecuteAsync(connection, "alter table studio_sample.mt_doc_customer add constraint " + primaryKey + " primary key (id)");
+
+        (await ForeignKeysIntoCustomerAsync(connection)).Should().BeEmpty("CASCADE takes every foreign key that depends on the key");
+
+        // Marten puts back what it declares - its own two foreign keys - and nothing else.
+        await using (DocumentStore fresh = DocumentStore.For(options => SampleStore.Configure(options, connectionString)))
+        {
+            await fresh.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
+        }
+
+        (await ForeignKeysIntoCustomerAsync(connection)).Should().Equal(
+            ["studio_sample.mt_doc_invoice:mt_doc_invoice_customer_id_fkey:a:valid",
+             "studio_sample.mt_doc_order:mt_doc_order_customer_id_fkey:a:valid"],
+            "Marten re-creates only the foreign keys it declared");
+
+        // The next start of the sample host: its seeder, which applies the relational demo last.
+        await marten.SeedSampleDataAsync(Token);
+
+        (await ForeignKeysIntoCustomerAsync(connection)).Should().Equal(
+            "legacy.customer_credit:customer_credit_customer_id_fkey:c:valid",
+            "studio_sample.mt_doc_invoice:mt_doc_invoice_customer_id_fkey:a:valid",
+            "studio_sample.mt_doc_order:mt_doc_order_customer_id_fkey:a:valid");
+        (await ScalarAsync(connection, "select count(*) from legacy.customer_credit"))
+            .Should().Be(credit, "no credit row lost its customer, so none was removed");
+        (await RelationalDemoSchema.ApplyAsync(connection, Token)).HasCustomerForeignKey.Should().BeTrue();
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // Only the demo's own schemas
+    // -------------------------------------------------------------------------------------------------
+
+    /// <summary>The two schemas the demo created carry the marker that lets a later start recognise them.</summary>
+    [PostgresFact]
+    public async Task The_schemas_the_demo_created_carry_its_marker()
+    {
+        await using NpgsqlConnection connection = await fixture.OpenAsync();
+
+        (await SchemaCommentAsync(connection, RelationalDemoSchema.QuartzSchemaName))
+            .Should().StartWith(RelationalDemoSchema.QuartzSchemaMarker + " ");
+        (await SchemaCommentAsync(connection, RelationalDemoSchema.LegacySchemaName))
+            .Should().StartWith(RelationalDemoSchema.LegacySchemaMarker + " ");
+
+        RelationalDemoResult again = await RelationalDemoSchema.ApplyAsync(connection, Token);
+
+        again.QuartzApplied.Should().BeTrue("the marker is what makes the schema the demo's own");
+        again.LegacyApplied.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// A <c>legacy</c> schema somebody else made, with a function of the same name as one of the demo's,
+    /// and a real, empty Quartz.NET job store in <c>quartz</c>: the sample host starts, seeds its Marten
+    /// store, and touches neither - not a function replaced, not a table created, not a row inserted -
+    /// and says so at Information.
+    /// </summary>
+    /// <remarks>
+    /// An empty Quartz job store is the dangerous case, not a contrived one: "fill every empty table" is
+    /// exactly the rule the demo seeds by, and it would have written two fake schedulers' jobs and
+    /// triggers into a real scheduler's tables. Its own database, because the schemas are fixed names.
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_quartz_or_legacy_schema_the_demo_did_not_create_is_left_untouched()
+    {
+        string connectionString = await BrowserSuiteFixture.CreateDatabaseAsync(fixture.Postgres, "relational_demo_foreign");
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(Token);
+
+        // The payroll team's schema, with its own format_employee_name(text, text).
+        await ExecuteAsync(
+            connection,
+            """
+            create schema legacy;
+            comment on schema legacy is 'Payroll. Owned by the payroll team.';
+            create function legacy.format_employee_name(first_name text, last_name text) returns text
+              language sql immutable as $$ select upper(last_name) || ', ' || first_name || ' (payroll)' $$;
+            """);
+
+        // A scheduler's job store, made with Quartz.NET's own script: every table, no rows, no comment.
+        await ExecuteAsync(connection, RelationalDemoSchema.QuartzScript);
+        await ExecuteAsync(connection, "comment on schema quartz is null");
+
+        Dictionary<string, long> objectsBefore = await ForeignSchemaObjectsAsync(connection);
+        List<string> functionsBefore = await StringsAsync(
+            connection,
+            "select p.oid::regprocedure::text || ' = ' || p.prosrc from pg_catalog.pg_proc p where p.pronamespace = 'legacy'::regnamespace");
+
+        functionsBefore.Should().ContainSingle();
+        objectsBefore["quartz tables"].Should().Be(RelationalDemoSchema.QuartzTableCount);
+
+        // The whole host path: a sample store in this database, seeded by the sample's own seeder.
+        var log = new ListLogger<SampleDataSeeder>();
+
+        await using (MartenFixture marten = await MartenFixture.CreateAsync(connectionString, SampleStore.DocumentSchema))
+        {
+            await new SampleDataSeeder(log).Populate(marten.Store, Token);
+        }
+
+        (await ForeignSchemaObjectsAsync(connection)).Should().BeEquivalentTo(objectsBefore, "no object was created, replaced or dropped");
+        (await StringsAsync(
+            connection,
+            "select p.oid::regprocedure::text || ' = ' || p.prosrc from pg_catalog.pg_proc p where p.pronamespace = 'legacy'::regnamespace"))
+            .Should().Equal(functionsBefore, "CREATE OR REPLACE never ran against the payroll team's function");
+        (await ScalarAsync(connection, "select count(*) from quartz.qrtz_job_details")).Should().Be(0);
+        (await ScalarAsync(connection, "select count(*) from quartz.qrtz_locks")).Should().Be(0);
+        (await ScalarTextAsync(connection, "select pg_catalog.to_regclass('studio_sample.app_settings')::text"))
+            .Should().BeNull("app_settings belongs to the legacy half, which was skipped entirely");
+        (await SchemaCommentAsync(connection, RelationalDemoSchema.LegacySchemaName)).Should().Be("Payroll. Owned by the payroll team.");
+        (await SchemaCommentAsync(connection, RelationalDemoSchema.QuartzSchemaName)).Should().BeNull();
+
+        // Said once per schema, at Information: a database with its own `legacy` schema is not a fault.
+        log.Entries.Should().HaveCount(2);
+        log.Entries.Should().AllSatisfy(x => x.Level.Should().Be(LogLevel.Information));
+        log.Entries.Select(x => x.Message).Should().Satisfy(
+            x => x.Contains("'quartz'", StringComparison.Ordinal) && x.Contains(RelationalDemoSchema.QuartzSchemaMarker, StringComparison.Ordinal),
+            x => x.Contains("'legacy'", StringComparison.Ordinal) && x.Contains("Payroll. Owned by the payroll team.", StringComparison.Ordinal));
+
+        // And directly, which is also what reports the two halves as not applied.
+        RelationalDemoResult direct = await RelationalDemoSchema.ApplyAsync(connection, Token);
+
+        direct.Should().Be(new RelationalDemoResult(0, false, false, false, QuartzApplied: false, LegacyApplied: false));
+        (await ForeignSchemaObjectsAsync(connection)).Should().BeEquivalentTo(objectsBefore);
+    }
+
+    /// <summary>
+    /// A schema the first version of the demo created - before there was a marker, so carrying that
+    /// version's exact comment - is still the demo's: it is applied to and stamped with the marker, rather
+    /// than left alone forever on a developer's reused container.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_schema_the_unmarked_first_version_created_is_recognised_and_marked()
+    {
+        string connectionString = await BrowserSuiteFixture.CreateDatabaseAsync(fixture.Postgres, "relational_demo_unmarked");
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(Token);
+
+        // Verbatim from DB-2's QuartzSchema.sql and LegacySchema.sql.
+        await ExecuteAsync(
+            connection,
+            """
+            create schema quartz;
+            comment on schema quartz is 'Quartz.NET job store (database/tables/tables_postgres.sql, Apache-2.0), vendored by the Marten Studio sample. Not a Marten schema.';
+            create schema legacy;
+            comment on schema legacy is 'A hand-made relational schema beside the Marten store, covering every catalog edge case the database browser has to handle.';
+            """);
+
+        RelationalDemoResult applied = await RelationalDemoSchema.ApplyAsync(connection, Token);
+
+        applied.QuartzApplied.Should().BeTrue();
+        applied.LegacyApplied.Should().BeTrue();
+        applied.RowsWritten.Should().BeGreaterThan(0);
+
+        (await SchemaCommentAsync(connection, RelationalDemoSchema.QuartzSchemaName)).Should().StartWith(RelationalDemoSchema.QuartzSchemaMarker);
+        (await SchemaCommentAsync(connection, RelationalDemoSchema.LegacySchemaName)).Should().StartWith(RelationalDemoSchema.LegacySchemaMarker);
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // Quartz, re-applied
+    // -------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Emptying the jobs - and with them, by foreign key, the triggers - leaves the locks, calendars,
+    /// scheduler state, fired triggers and history behind. The next apply puts the jobs and triggers back
+    /// and keeps the rest, rather than failing on the first leftover's primary key and taking the host's
+    /// start down with it.
+    /// </summary>
+    [PostgresFact]
+    public async Task Quartz_leftovers_without_their_jobs_do_not_stop_the_next_apply()
+    {
+        await using NpgsqlConnection connection = await fixture.OpenAsync();
+
+        IReadOnlyDictionary<string, long> before = await QuartzRowCountsAsync(connection);
+
+        (string Table, bool Emptied)[] expected =
+        [
+            ("qrtz_job_details", true), ("qrtz_triggers", true), ("qrtz_cron_triggers", true),
+            ("qrtz_simple_triggers", true), ("qrtz_simprop_triggers", true),
+            ("qrtz_calendars", false), ("qrtz_locks", false), ("qrtz_scheduler_state", false),
+            ("qrtz_fired_triggers", false), ("qrtz_execution_history", false), ("qrtz_misfire_history", false),
+        ];
+
+        expected.Should().AllSatisfy(x => before[x.Table].Should().BeGreaterThan(0, x.Table + " is seeded"));
+
+        // Everything that hangs off the jobs by foreign key goes with them; nothing else does.
+        await ExecuteAsync(connection, "truncate quartz.qrtz_job_details cascade");
+
+        IReadOnlyDictionary<string, long> partial = await QuartzRowCountsAsync(connection);
+        expected.Should().AllSatisfy(x => (partial[x.Table] == 0).Should().Be(x.Emptied, x.Table));
+
+        RelationalDemoResult applied = await RelationalDemoSchema.ApplyAsync(connection, Token);
+
+        applied.RowsWritten.Should().Be(
+            (int) expected.Where(x => x.Emptied).Sum(x => before[x.Table]),
+            "exactly the rows that were missing were written, and every leftover was recognised as already there");
+
+        (await QuartzRowCountsAsync(connection)).Should().BeEquivalentTo(before);
+        (await RelationalDemoSchema.ApplyAsync(connection, Token)).RowsWritten.Should().Be(0);
+    }
+
+    /// <summary>
+    /// The two daily-time-interval triggers run on weekdays as Quartz.NET reads them back: each number in
+    /// <c>str_prop_2</c> is cast straight to <see cref="DayOfWeek" />, where Sunday is zero.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_daily_interval_triggers_run_monday_to_friday()
+    {
+        await using NpgsqlConnection connection = await fixture.OpenAsync();
+
+        List<string> days = await StringsAsync(
+            connection,
+            """
+            select distinct s.str_prop_2 from quartz.qrtz_simprop_triggers s
+            join quartz.qrtz_triggers t using (sched_name, trigger_name, trigger_group)
+            where t.trigger_type = 'DAILY_I'
+            """);
+
+        // DailyTimeIntervalTriggerPersistenceDelegate.GetTriggerPropertyBundle: (DayOfWeek) int.Parse(num).
+        days.Should().ContainSingle().Which.Split(',')
+            .Select(x => (DayOfWeek) int.Parse(x, CultureInfo.InvariantCulture))
+            .Should().Equal(DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday);
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -690,6 +967,68 @@ public class RelationalDemoSchemaLiveTests(RelationalDemoSchemaFixture fixture) 
         return counts;
     }
 
+    /// <summary>Row counts of the Quartz tables, keyed by bare table name.</summary>
+    private static async Task<IReadOnlyDictionary<string, long>> QuartzRowCountsAsync(NpgsqlConnection connection) =>
+        (await RowCountsAsync(connection))
+            .Where(static x => x.Key.StartsWith("quartz.", StringComparison.Ordinal))
+            .ToDictionary(static x => x.Key["quartz.".Length..], static x => x.Value, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Every foreign key into <c>mt_doc_customer</c>, as <c>table:name:on-delete:validity</c> - where
+    /// on-delete is <c>pg_constraint.confdeltype</c>, <c>a</c> for NO ACTION and <c>c</c> for CASCADE.
+    /// </summary>
+    private static Task<List<string>> ForeignKeysIntoCustomerAsync(NpgsqlConnection connection) =>
+        StringsAsync(
+            connection,
+            """
+            select con.conrelid::regclass::text || ':' || con.conname::text || ':' || con.confdeltype::text || ':'
+                   || case when con.convalidated then 'valid' else 'not valid' end
+            from pg_catalog.pg_constraint con
+            where con.contype = 'f' and con.confrelid = 'studio_sample.mt_doc_customer'::regclass
+            order by 1
+            """);
+
+    /// <summary>What a schema the demo must not touch holds, so that "untouched" can be asserted as a whole.</summary>
+    private static Task<Dictionary<string, long>> ForeignSchemaObjectsAsync(NpgsqlConnection connection) =>
+        PairsAsync(
+            connection,
+            """
+            select 'quartz tables', count(*) from pg_catalog.pg_class where relnamespace = 'quartz'::regnamespace and relkind = 'r'
+            union all
+            select 'quartz relations', count(*) from pg_catalog.pg_class where relnamespace = 'quartz'::regnamespace
+            union all
+            select 'quartz constraints', count(*) from pg_catalog.pg_constraint where connamespace = 'quartz'::regnamespace
+            union all
+            select 'quartz rows', (select count(*) from quartz.qrtz_job_details) + (select count(*) from quartz.qrtz_triggers)
+                                  + (select count(*) from quartz.qrtz_locks) + (select count(*) from quartz.qrtz_calendars)
+                                  + (select count(*) from quartz.qrtz_scheduler_state) + (select count(*) from quartz.qrtz_fired_triggers)
+            union all
+            select 'legacy relations', count(*) from pg_catalog.pg_class where relnamespace = 'legacy'::regnamespace
+            union all
+            select 'legacy types', count(*) from pg_catalog.pg_type where typnamespace = 'legacy'::regnamespace
+            union all
+            select 'legacy routines', count(*) from pg_catalog.pg_proc where pronamespace = 'legacy'::regnamespace
+            """);
+
+    /// <summary>A schema's comment, or <see langword="null" /> when it has none.</summary>
+    private static async Task<string?> SchemaCommentAsync(NpgsqlConnection connection, string schema)
+    {
+        await using var command = new NpgsqlCommand(
+            "select pg_catalog.obj_description(n.oid, 'pg_namespace') from pg_catalog.pg_namespace n where n.nspname = @p",
+            connection);
+
+        command.Parameters.AddWithValue("p", schema);
+
+        return await command.ExecuteScalarAsync(Token) as string;
+    }
+
+    private static async Task ExecuteAsync(NpgsqlConnection connection, string sql)
+    {
+        await using var command = new NpgsqlCommand(sql, connection);
+
+        await command.ExecuteNonQueryAsync(Token);
+    }
+
     /// <summary>How many of each catalog object the demo's schemas hold, so a re-apply can be shown to add none.</summary>
     private static async Task<IReadOnlyDictionary<string, long>> ObjectCountsAsync(NpgsqlConnection connection) =>
         await PairsAsync(
@@ -729,7 +1068,8 @@ public class RelationalDemoSchemaLiveTests(RelationalDemoSchemaFixture fixture) 
     {
         await using var command = new NpgsqlCommand(sql, connection);
 
-        return (string?) await command.ExecuteScalarAsync(Token);
+        // `as`, not a cast: a SQL null comes back as DBNull, and that is an answer here, not an error.
+        return await command.ExecuteScalarAsync(Token) as string;
     }
 
     private static async Task<List<string>> StringsAsync(NpgsqlConnection connection, string sql)
@@ -796,7 +1136,7 @@ public class RelationalDemoSchemaLiveTests(RelationalDemoSchemaFixture fixture) 
 /// <remarks>
 /// <para>
 /// <b>Why this is the risky part.</b> Three things delete customers. The generator's truncation deletes
-/// the generated ones with a plain <c>DELETE</c>, which an inbound foreign key could refuse; the
+/// the generated ones with plain, batched <c>DELETE</c>s, which an inbound foreign key could refuse; the
 /// credit rows point only at seeded customers and cascade anyway, so it must not. Marten's
 /// <c>DeleteDocumentsByTypeAsync</c> - the seeder's re-seed path - runs <c>truncate … cascade</c>, which
 /// empties every table holding a foreign key into <c>mt_doc_customer</c>, <c>legacy.customer_credit</c>
@@ -834,6 +1174,7 @@ public class RelationalDemoFlowsLiveTests(RelationalDemoFlowsFixture fixture) : 
 
         DemoDataTruncation archived = await new DemoDataTruncator(store).TruncateAsync(deleteAllEventData: false, progress: null, Token);
         archived.Runs.Should().Be(1);
+        archived.DocumentsDeleted.Should().Be(plan.DocumentTarget);
 
         // Generate again, and truncate the destructive way: every event in the store goes.
         await new DemoDataGenerator(store, plan).GenerateAsync(progress: null, Token);
@@ -900,5 +1241,50 @@ public class RelationalDemoFlowsLiveTests(RelationalDemoFlowsFixture fixture) : 
             connection);
 
         return (string) (await command.ExecuteScalarAsync(Token))!;
+    }
+}
+
+/// <summary>One line a <see cref="ListLogger{T}" /> was given.</summary>
+/// <param name="Level">The level it was written at.</param>
+/// <param name="Message">The rendered message.</param>
+internal sealed record LoggedLine(LogLevel Level, string Message);
+
+/// <summary>
+/// A logger that keeps what it is given, for the one test that has to see what the sample's seeder says.
+/// Hand-written: the package budget has no mocking library (AGENTS.md hard rule 1).
+/// </summary>
+/// <typeparam name="T">The category.</typeparam>
+internal sealed class ListLogger<T> : ILogger<T>
+{
+    private readonly List<LoggedLine> entries = [];
+    private readonly Lock gate = new();
+
+    /// <summary>Everything logged so far, in order.</summary>
+    public IReadOnlyList<LoggedLine> Entries
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. entries];
+            }
+        }
+    }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
+
+    public void Log<TState>(
+        LogLevel logLevel,
+        EventId eventId,
+        TState state,
+        Exception? exception,
+        Func<TState, Exception?, string> formatter)
+    {
+        lock (gate)
+        {
+            entries.Add(new LoggedLine(logLevel, formatter(state, exception)));
+        }
     }
 }

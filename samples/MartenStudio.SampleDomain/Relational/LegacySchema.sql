@@ -6,13 +6,21 @@
 -- its documents. Nothing here is ever dropped. Objects Postgres has no IF NOT EXISTS for (types, domains,
 -- triggers, constraints added after the fact) are created inside DO blocks that look in pg_catalog first.
 --
+-- Only ever against a `legacy` schema the sample created: the COMMENT ON SCHEMA at the bottom begins with
+-- the marker RelationalDemoSchema.LegacySchemaMarker, and RelationalDemoSchema runs this script only when
+-- the schema does not exist yet or carries that marker. A `legacy` schema anybody else made is not
+-- touched, and neither is studio_sample.app_settings, which this script also creates.
+--
 -- Two objects reach into the Marten document schema, `studio_sample`, and both are guarded so that the
 -- script still runs against a database where Marten has not created it:
 --   * legacy.customer_credit gets its foreign key to studio_sample.mt_doc_customer only once that table
---     exists;
+--     exists - and gets it back on the next start whenever it is missing. Marten does not keep it: a
+--     Weasel migration that rebuilds mt_doc_customer's primary key or the table itself does so with
+--     CASCADE, which drops every foreign key that points at it, and re-creates only the ones Marten
+--     declared. This one is not Marten's, so this script is what re-creates it;
 --   * studio_sample.app_settings - an ordinary table inside a Marten schema - is created only once that
---     schema exists. Marten's AutoCreate.All only ever touches the objects Marten itself declares, so it
---     neither drops nor alters this one.
+--     schema exists. Marten's migrations diff only the tables Marten declares, so they neither drop nor
+--     alter this one.
 -- The rows are written by RelationalDemoSchema.cs, not here - with one exception, the dangling order
 -- line below, which has to exist before the NOT VALID foreign key it violates.
 
@@ -410,7 +418,7 @@ WITH NO DATA;
 -- Comments
 -- ---------------------------------------------------------------------------------------------------
 
-COMMENT ON SCHEMA legacy IS 'A hand-made relational schema beside the Marten store, covering every catalog edge case the database browser has to handle.';
+COMMENT ON SCHEMA legacy IS 'marten-studio-sample:legacy - A hand-made relational schema beside the Marten store, covering every catalog edge case the database browser has to handle.';
 COMMENT ON TABLE legacy.employees IS 'Staff, with a self-referencing manager key and a domain-typed e-mail address.';
 COMMENT ON COLUMN legacy.employees.manager_id IS 'The employee this one reports to; NULL for the managing director.';
 COMMENT ON COLUMN legacy.employees.email IS 'legacy.email_address, a domain with a CHECK.';

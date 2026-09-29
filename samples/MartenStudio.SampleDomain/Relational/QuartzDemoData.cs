@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 
 using Npgsql;
@@ -22,9 +23,20 @@ namespace MartenStudio.SampleDomain.Relational;
 /// </para>
 /// <para>
 /// <b>Relative to now.</b> Next and previous fire times are computed from the tick count
-/// <see cref="RelationalDemoSchema.ApplyAsync" /> reads once, so a freshly seeded demo has triggers that
-/// are about to fire rather than ones that fired in 2026. They are written once, when
-/// <c>qrtz_job_details</c> is empty, and then left alone like everything else here.
+/// <see cref="RelationalDemoSchema.ApplyAsync(NpgsqlConnection, Microsoft.Extensions.Logging.ILogger, CancellationToken)" />
+/// reads once, so a freshly seeded demo has triggers that are about to fire rather than ones that fired
+/// in 2026. They are written once, when <c>qrtz_job_details</c> is empty, and then left alone like
+/// everything else here.
+/// </para>
+/// <para>
+/// <b>Every insert is <c>on conflict do nothing</c>, and every key is deterministic.</b> The guard is
+/// <c>qrtz_job_details</c> alone, and nothing keeps the other tables in step with it: a developer who
+/// empties the jobs - through the database browser, or with a <c>truncate … cascade</c> that reaches only
+/// the triggers - leaves the locks, calendars, scheduler state, fired triggers and history behind.
+/// Written plainly, the next start would hit a primary-key violation on the first of those, roll the
+/// whole apply back, and fail the host's start on every start after it. With the conflict clause the jobs
+/// and triggers come back and the leftovers are kept; with deterministic entry ids (no clock in any key)
+/// the leftovers are recognised as the same rows rather than joined by a second copy.
 /// </para>
 /// </remarks>
 internal static class QuartzDemoData
@@ -70,6 +82,7 @@ internal static class QuartzDemoData
                   (sched_name, job_name, job_group, description, job_class_name,
                    is_durable, is_nonconcurrent, is_update_data, requests_recovery, job_data)
                 values (@sched, @name, @group, @description, @class, @durable, @nonconcurrent, @update, @recovery, @data)
+                on conflict do nothing
                 """,
                 Text("sched", scheduler.Name),
                 Text("name", job.Name),
@@ -91,7 +104,7 @@ internal static class QuartzDemoData
         foreach (Calendar calendar in scheduler.Calendars)
         {
             Add(batch,
-                "insert into quartz.qrtz_calendars (sched_name, calendar_name, calendar) values (@sched, @name, @calendar)",
+                "insert into quartz.qrtz_calendars (sched_name, calendar_name, calendar) values (@sched, @name, @calendar) on conflict do nothing",
                 Text("sched", scheduler.Name),
                 Text("name", calendar.Name),
                 Bytes("calendar", Utf8(calendar.Json)));
@@ -104,6 +117,7 @@ internal static class QuartzDemoData
                 """
                 insert into quartz.qrtz_scheduler_state (sched_name, instance_name, last_checkin_time, checkin_interval)
                 values (@sched, @instance, @checkin, @interval)
+                on conflict do nothing
                 """,
                 Text("sched", scheduler.Name),
                 Text("instance", scheduler.Nodes[i]),
@@ -114,7 +128,7 @@ internal static class QuartzDemoData
         foreach (string lockName in (string[]) ["TRIGGER_ACCESS", "STATE_ACCESS"])
         {
             Add(batch,
-                "insert into quartz.qrtz_locks (sched_name, lock_name) values (@sched, @lock)",
+                "insert into quartz.qrtz_locks (sched_name, lock_name) values (@sched, @lock) on conflict do nothing",
                 Text("sched", scheduler.Name),
                 Text("lock", lockName));
         }
@@ -141,6 +155,7 @@ internal static class QuartzDemoData
             values (@sched, @name, @group, @job, @jobGroup, @description,
                     @next, @previous, @priority, @state, @type,
                     @start, @end, @calendar, @misfire, @data)
+            on conflict do nothing
             """,
             Text("sched", scheduler.Name),
             Text("name", trigger.Name),
@@ -168,6 +183,7 @@ internal static class QuartzDemoData
                     """
                     insert into quartz.qrtz_cron_triggers (sched_name, trigger_name, trigger_group, cron_expression, time_zone_id)
                     values (@sched, @name, @group, @expression, @zone)
+                    on conflict do nothing
                     """,
                     [.. key, Text("expression", cron.Expression), Text("zone", cron.TimeZone)]);
                 break;
@@ -178,6 +194,7 @@ internal static class QuartzDemoData
                     insert into quartz.qrtz_simple_triggers
                       (sched_name, trigger_name, trigger_group, repeat_count, repeat_interval, times_triggered)
                     values (@sched, @name, @group, @count, @interval, @triggered)
+                    on conflict do nothing
                     """,
                     [.. key,
                         Long("count", simple.RepeatCount),
@@ -194,6 +211,7 @@ internal static class QuartzDemoData
                       (sched_name, trigger_name, trigger_group, str_prop_1, int_prop_1, int_prop_2,
                        bool_prop_1, bool_prop_2, time_zone_id)
                     values (@sched, @name, @group, @unit, @interval, @triggered, @preserve, false, @zone)
+                    on conflict do nothing
                     """,
                     [.. key,
                         Text("unit", calendar.Unit),
@@ -213,6 +231,7 @@ internal static class QuartzDemoData
                       (sched_name, trigger_name, trigger_group, str_prop_1, str_prop_2, str_prop_3,
                        int_prop_1, int_prop_2, long_prop_1, time_zone_id)
                     values (@sched, @name, @group, @unit, @days, @hours, @interval, @triggered, -1, @zone)
+                    on conflict do nothing
                     """,
                     [.. key,
                         Text("unit", daily.Unit),
@@ -249,9 +268,10 @@ internal static class QuartzDemoData
                    priority, state, job_name, job_group, is_nonconcurrent, requests_recovery)
                 values (@sched, @entry, @name, @group, @instance, @fired, @scheduled,
                         @priority, @state, @job, @jobGroup, @nonconcurrent, @recovery)
+                on conflict do nothing
                 """,
                 Text("sched", scheduler.Name),
-                Text("entry", instance + (now / TimeSpan.TicksPerMillisecond + sequence).ToString(CultureInfo.InvariantCulture)),
+                Text("entry", FireInstanceId(instance, sequence)),
                 Text("name", trigger.Name),
                 Text("group", job.Group),
                 Text("instance", instance),
@@ -288,9 +308,10 @@ internal static class QuartzDemoData
                    fired_time, run_time, succeeded, error_message, retry_attempt, retry_scheduled, execution_log)
                 values (@sched, @entry, @instance, @job, @group, @trigger, @group,
                         @fired, @run, @succeeded, @error, @attempt, @retry, @log)
+                on conflict do nothing
                 """,
                 Text("sched", scheduler.Name),
-                Text("entry", instance + "-h" + (now / TimeSpan.TicksPerSecond - (i * 1_800)).ToString(CultureInfo.InvariantCulture)),
+                Text("entry", HistoryEntryId(scheduler.Name, "execution", i)),
                 Text("instance", instance),
                 Text("job", job.Name),
                 Text("group", job.Group),
@@ -315,9 +336,10 @@ internal static class QuartzDemoData
                   (sched_name, entry_id, instance_name, trigger_name, trigger_group, job_name, job_group,
                    misfire_time, sched_time, reason)
                 values (@sched, @entry, @instance, @trigger, @group, @job, @group, @misfire, @scheduled, @reason)
+                on conflict do nothing
                 """,
                 Text("sched", scheduler.Name),
-                Text("entry", scheduler.Nodes[0] + "-m" + i.ToString(CultureInfo.InvariantCulture)),
+                Text("entry", HistoryEntryId(scheduler.Name, "misfire", i)),
                 Text("instance", scheduler.Nodes[0]),
                 Text("trigger", trigger.Name),
                 Text("group", job.Group),
@@ -326,6 +348,33 @@ internal static class QuartzDemoData
                 Long("scheduled", now - TimeSpan.FromHours(20 - i).Ticks - TimeSpan.FromMinutes(2).Ticks),
                 new NpgsqlParameter("reason", NpgsqlDbType.Integer) { Value = i + 1 });
         }
+    }
+
+    /// <summary>
+    /// A <c>qrtz_fired_triggers.entry_id</c> in Quartz's own shape - the instance id followed by a
+    /// counter (<c>AdoJobStoreBase.GetFiredTriggerRecordId</c>) - from a fixed counter base rather than the
+    /// clock, so that writing the row again is a key conflict rather than a second copy.
+    /// </summary>
+    private static string FireInstanceId(string instance, int sequence) =>
+        instance + (FiredTriggerCounterBase + sequence).ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Where the fired-trigger counter starts. Quartz starts it at the process's
+    /// <c>TimeProvider.System.GetTimestamp()</c>; this is one such value, fixed.
+    /// </summary>
+    private const long FiredTriggerCounterBase = 7_412_039_586_117;
+
+    /// <summary>
+    /// A history <c>entry_id</c> in Quartz 4's shape - <c>Guid.NewGuid().ToString("N")</c> in
+    /// <c>AdoExecutionHistoryStore</c> - derived from the scheduler, the table and the row number, so
+    /// that the same row always gets the same key.
+    /// </summary>
+    private static string HistoryEntryId(string scheduler, string kind, int index)
+    {
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(
+            scheduler + "/" + kind + "/" + index.ToString(CultureInfo.InvariantCulture)));
+
+        return new Guid(hash.AsSpan(0, 16)).ToString("N");
     }
 
     private static void Add(NpgsqlBatch batch, string sql, params NpgsqlParameter[] parameters)
@@ -352,6 +401,14 @@ internal static class QuartzDemoData
     // ---------------------------------------------------------------------------------------------
     // The two schedulers
     // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Monday to Friday, as a daily-time-interval trigger's <c>str_prop_2</c>. Quartz.NET reads each
+    /// number back as <c>(System.DayOfWeek) int.Parse(num)</c>
+    /// (<c>DailyTimeIntervalTriggerPersistenceDelegate.GetTriggerPropertyBundle</c>), so Sunday is 0 -
+    /// not Java Quartz's Sunday-is-1 - and "2,3,4,5,6" would be Tuesday to Saturday.
+    /// </summary>
+    private const string Weekdays = "1,2,3,4,5";
 
     private static readonly Scheduler Billing = new(
         "BillingScheduler",
@@ -399,7 +456,7 @@ internal static class QuartzDemoData
                 new Simple(-1, TimeSpan.FromHours(1), 8_760), "WAITING", TimeSpan.FromMinutes(41), TimeSpan.FromMinutes(19), 365)
             { MisfireInstruction = -1 },
             new("reconcile-bank-statements", "ReconcileBankStatements", "Every two hours in office hours, weekdays.",
-                new DailyInterval(2, "Hour", 1_204, "2,3,4,5,6", "8,0,0,18,0,0", "Europe/Helsinki"), "WAITING",
+                new DailyInterval(2, "Hour", 1_204, Weekdays, "8,0,0,18,0,0", "Europe/Helsinki"), "WAITING",
                 TimeSpan.FromMinutes(73), TimeSpan.FromMinutes(47), 180),
             new("export-ledger-to-erp", "ExportLedgerToErp", "Nightly at 23:15. Paused while the ERP is migrated.",
                 new Cron("0 15 23 * * ?", "Europe/Helsinki"), "PAUSED", TimeSpan.FromHours(9), TimeSpan.FromDays(6), 300)
@@ -463,7 +520,7 @@ internal static class QuartzDemoData
             new("quarterly-board-pack", "QuarterlyBoardPack", "Every three months.",
                 new CalendarInterval(3, "Month", 3, "Europe/Helsinki", true), "WAITING", TimeSpan.FromDays(2), TimeSpan.FromDays(91), 280),
             new("business-hours-heartbeat", "BusinessHoursHeartbeat", "Every fifteen minutes, nine to five, weekdays.",
-                new DailyInterval(15, "Minute", 6_210, "2,3,4,5,6", "9,0,0,17,0,0", "Europe/Helsinki"), "WAITING",
+                new DailyInterval(15, "Minute", 6_210, Weekdays, "9,0,0,17,0,0", "Europe/Helsinki"), "WAITING",
                 TimeSpan.FromMinutes(12), TimeSpan.FromMinutes(3), 200),
             new("cleanup-temp-files", "CleanupTempFiles", "04:00 nightly.",
                 new Cron("0 0 4 * * ?", "UTC"), "WAITING", TimeSpan.FromHours(15), TimeSpan.FromHours(9), 200),

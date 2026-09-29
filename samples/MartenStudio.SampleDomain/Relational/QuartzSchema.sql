@@ -2,25 +2,29 @@
 -- sample, so that the database browser has a real third-party schema to show next to the Marten store.
 --
 -- Source:  Quartz.NET, https://github.com/quartznet/quartznet
---          database/tables/tables_postgres.sql as released in v4.3.0 (the fourteen-table schema; the 4.4
---          line adds qrtz_job_status and one more history index, and is not what this file carries)
--- Licence: Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0),
---          as Quartz.NET distributes it (license.txt in that repository). Distributed on an "AS IS"
---          BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.
+--          database/tables/tables_postgres.sql as released in v4.3.0 (the fourteen-table schema)
+-- Licence: Quartz.NET, all content copyright Marko Lahma unless otherwise indicated, as its sources
+--          state. Licensed under the Apache License, Version 2.0; you may not use this file except in
+--          compliance with the License. Distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+--          CONDITIONS OF ANY KIND. The attribution and the full text of the License are in
+--          THIRD-PARTY-NOTICES.md, next to this file.
 --
 -- Changes from the original, and nothing else:
 --   * every table and index is qualified with the `quartz` schema, which this script creates;
 --   * the leading DROP block is gone - this runs on every start of the sample and must never drop
 --     anything;
 --   * CREATE TABLE / CREATE INDEX are IF NOT EXISTS, so running it again is a no-op;
---   * the schema carries a COMMENT saying where it came from.
+--   * the schema carries a COMMENT saying where it came from, which begins with the marker
+--     RelationalDemoSchema.QuartzSchemaMarker. The sample runs this script only against a `quartz`
+--     schema that does not exist yet or carries that marker: a `quartz` schema anybody else made - a
+--     real Quartz.NET job store, most likely - is never touched.
 -- Column names, types, keys, foreign keys, ON DELETE actions and index definitions are Quartz.NET's own,
 -- byte for byte where the qualification allows. Keep it that way: the point of this file is that it is
 -- the real thing.
 
 CREATE SCHEMA IF NOT EXISTS quartz;
 
-COMMENT ON SCHEMA quartz IS 'Quartz.NET job store (database/tables/tables_postgres.sql, Apache-2.0), vendored by the Marten Studio sample. Not a Marten schema.';
+COMMENT ON SCHEMA quartz IS 'marten-studio-sample:quartz - Quartz.NET job store (database/tables/tables_postgres.sql, Apache-2.0), vendored by the Marten Studio sample. Not a Marten schema.';
 
 CREATE TABLE IF NOT EXISTS quartz.qrtz_job_details
   (
