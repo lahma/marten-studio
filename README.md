@@ -241,8 +241,9 @@ public sealed class MartenStudioHandler
 ```
 
 A `null` tenant is not "no tenant to check" but every tenant at once — the all-tenants view, and every
-`BrowseDatabase` read, which is always asked with `TenantId = null` because nothing filters a non-Marten
-table by tenant — so a handler that let it through for everybody would hand a user scoped to one tenant
+`BrowseDatabase` read, every SQL console run and every operation that reaches a whole shared database (a
+dead-letter rewind, a progression correction, a rebuild, a schema apply), which are always asked with
+`TenantId = null` because nothing narrows them to a tenant — so a handler that let it through for everybody would hand a user scoped to one tenant
 all of them.
 
 Register it the usual way and name the policy:
@@ -273,12 +274,12 @@ Ten booleans, **all `false` by default**. A freshly mapped studio is a read-only
 | `EditDocuments` | Edit a document's JSON and save it through the store's own serializer and session |
 | `DeleteDocuments` | Delete, soft-delete and undelete documents, one at a time or a selection |
 | `ArchiveStreams` | Archive an event stream |
-| `ManageDeadLetters` | Discard dead-letter records, mark events as skipped, and rewind a subscription to the event that failed |
+| `ManageDeadLetters` | Discard dead-letter records, mark events as skipped, and rewind a subscription to the event that failed (a rewind reaches every tenant in the database, so it is asked with `TenantId = null` unless the database holds only the selected tenant) |
 | `ControlDaemon` | Pause and resume the async daemon hosted in this process, start and stop individual projection agents while it is paused, and restart the high-water agent |
 | `RebuildProjections` | Rebuild a projection |
 | `CorrectProgression` | Advance the high-water mark, or correct projection progression in the database |
 | `ApplySchemaChanges` | Apply pending schema migrations |
-| `RunSql` | Run read-only SQL from the Query page's console |
+| `RunSql` | Run read-only SQL from the Query page's console. Authorized like a write and always with `TenantId = null` — the console is not limited to a tenant — which also governs the Mode A `EXPLAIN` and the subquery lift |
 | `BrowseDatabase` | Browse the rows and definitions of non-Marten tables, views, functions, triggers, sequences and types in the schemas `BrowsableSchemas` names. A read, authorized like `RunSql` as a write, and always with `TenantId = null` |
 
 ```csharp

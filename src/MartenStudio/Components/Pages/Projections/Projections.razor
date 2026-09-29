@@ -1031,7 +1031,7 @@
     /// the progression rows it rewrites are the database's, and every tenant stored there is read against
     /// them. The dialog says so, because "that tenant's database only" read as "that tenant only", and the
     /// service refuses it unless the visitor may change the database as a whole - or the database holds
-    /// no one else (<c>ProjectionDataService.RequireWholeDatabaseAsync</c>).
+    /// no one else (<c>DatabaseReachAuthorization.RequireWholeDatabaseAsync</c>).
     /// </para>
     /// </remarks>
     private string CorrectionReach

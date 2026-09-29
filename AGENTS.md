@@ -424,6 +424,15 @@ that role alone; a definition naming a hidden type's table only through dynamic 
 foreign partition attached less than a minute ago may not yet be seen. Schemas an extension owns are
 neither browsable nor withheld for dependency purposes. Every first read of a relation's rows is audited
 by signature (filter, sort, paging mode — never the cursor), per store, database and relation.
+**Reach, not scope.** An operation Marten runs over a whole database — a progression correction, a
+rebuild, a high-water restart, a store-global agent, cancelling a rebuild, the dead-letter "Rewind
+subscription", a schema apply — is authorized as `(store, database, null)` unless the database is
+exclusively the selected tenant's (never on a sharded tenancy, which pools tenants by design); the SQL
+console, the Mode A subquery lift and `EXPLAIN` are always asked with `TenantId = null`, because nothing
+narrows a typed statement to a tenant. A tenant's database is found without asking a dynamic tenancy for a
+tenant it does not have (`DatabaseReach.FindTenantDatabaseAsync`). Master-table and sharded tenancies run
+their pool or master-table `CreateOrUpdate` once per process on the first `AllDatabases()`, under the
+host's own `AutoCreate`, and the studio can be that first caller — a known limit, not a per-poll cost.
 
 ## Package budget
 

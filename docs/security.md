@@ -59,6 +59,9 @@ it rather than let it through. Anything that is not tenant-scoped is asked that 
 visitor has selected: `BrowseDatabase` is always authorized against `TenantId = null` (with
 `Capability = "BrowseDatabase"`), because no tenant filters a Quartz or legacy table, and a handler that
 confines people to their own tenant therefore refuses them the database browser — which is the point.
+`RunSql`, the dead-letter rewind, the progression corrections, rebuilds and a schema apply are asked the
+same way, because each of them reaches every tenant in the database (the operations are narrowed to the
+tenant only when the database holds that tenant alone).
 
 `BrowsableSchemas` limits what the database browser's screens show, not what can be read: the SQL console
 reads whatever the connection's role can, in any schema. `SqlConsoleRole` is the real boundary for both,
@@ -289,8 +292,8 @@ Six rules, all structural rather than semantic:
 6. **Without `RunSql`:** no word that reaches another relation (`select`, `from`, `union`, `intersect`,
    `except`, `join`, `into`, `with`, `lateral`, `returning`, `copy`, `do`, `call`, `execute`).
 
-A visitor who *may* run SQL — `RunSql` enabled **and** allowed by the write policy against this very
-scope — gets rule 6 lifted, and only rule 6, because everything it refuses they could type into the
+A visitor who *may* run SQL — `RunSql` enabled **and** allowed by the store policy and the write policy
+against this scope's database as a whole (`TenantId = null`) — gets rule 6 lifted, and only rule 6, because everything it refuses they could type into the
 console instead. Asking only the capability and not the policy would hand subqueries to somebody the
 write policy refuses the console to, which is the hole the policy exists to close.
 
