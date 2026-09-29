@@ -228,6 +228,12 @@ internal sealed class SampleHost : IAsyncDisposable
     /// table's physical columns per database for the life of the process, so a page opened before the
     /// event store existed can keep answering "no event storage" long after it does.
     /// </para>
+    /// <para>
+    /// <b>And the relational demo.</b> The seeder applies the <c>quartz</c> and <c>legacy</c> schemas
+    /// last, in one transaction, after the documents; <c>quartz.qrtz_triggers</c> having rows is the
+    /// sign that transaction committed, so a scenario that browses those schemas never meets them half
+    /// made - or, before the commit, not there at all.
+    /// </para>
     /// </remarks>
     /// <param name="connectionString">The Postgres the sample store is pointed at.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
@@ -236,7 +242,7 @@ internal sealed class SampleHost : IAsyncDisposable
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(StartTimeout);
 
-        string[] tables = ["studio_sample.mt_doc_customer", "studio_sample_events.mt_events"];
+        string[] tables = ["studio_sample.mt_doc_customer", "studio_sample_events.mt_events", "quartz.qrtz_triggers"];
 
         foreach (string table in tables)
         {

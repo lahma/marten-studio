@@ -592,6 +592,9 @@ tests/MartenStudio.Tests/Query/            Composer, guard, export, saved querie
 tests/MartenStudio.Integration.Tests/Query/  Live Postgres: Marten where-clause mode and the SQL console
 samples/MartenStudio.SampleDomain/Generation/  The demo data generator: size presets, the generator,
                                          truncation, the word lists and the run marker
+samples/MartenStudio.SampleDomain/Relational/  Non-Marten demo schemas beside the store: Quartz.NET's job
+                                         store (vendored, Apache-2.0), the "legacy" catalog edge-case
+                                         schema, studio_sample.app_settings, and their idempotent seeding
 samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpoints, progress, daemon lag
 tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in
 docs/                                    Long-form documentation linked from README.md; never packed
@@ -600,6 +603,8 @@ src/MartenStudio/Services/Relationships/      The relationship graph service, it
 src/MartenStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
 tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, page and panel - no database
 tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both ways, visibility, bounded counts
+tests/MartenStudio.Integration.Tests/Database/  Live Postgres, a database per fixture: the relational demo
+                                         schemas, their idempotency and the demo-data flows beside them
 tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: six scenarios, the D19 gate, the large-data pass
 ```
 

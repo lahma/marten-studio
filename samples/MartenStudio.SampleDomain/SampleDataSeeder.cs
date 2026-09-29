@@ -5,6 +5,9 @@ using Marten.Schema;
 
 using MartenStudio.SampleDomain.Documents;
 using MartenStudio.SampleDomain.Events;
+using MartenStudio.SampleDomain.Relational;
+
+using Npgsql;
 
 namespace MartenStudio.SampleDomain;
 
@@ -27,9 +30,18 @@ public sealed class SeedMarker
 /// Writes the demo data on host start, once.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Idempotent through <see cref="SeedMarker" />: the sample host is expected to be started and stopped
 /// repeatedly against a reused container, and a seeder that appended another twenty-five customers every
 /// time would make every screen in the studio a lie about what the demo contains.
+/// </para>
+/// <para>
+/// Three parts, in this order: the event streams, the documents, and then the relational demo schemas
+/// (<see cref="RelationalDemoSchema" />) - last, because one of their tables holds a foreign key into
+/// <c>mt_doc_customer</c>, which has to exist and hold the seeded customers first. Each half has its
+/// own idempotency guard, and the relational part runs on every start rather than behind the seed
+/// marker, so a database an older build already marked as seeded still gets it.
+/// </para>
 /// </remarks>
 public sealed class SampleDataSeeder : IInitialData
 {
@@ -39,6 +51,9 @@ public sealed class SampleDataSeeder : IInitialData
     /// <summary>How big <see cref="MediaAsset" />'s decoded payload is: base64 makes it about 2 MB.</summary>
     private const int MediaAssetBytes = 1_500_000;
 
+    /// <summary>How many customers the seeder writes, numbered from one.</summary>
+    public const int CustomerCount = 25;
+
     public async Task Populate(IDocumentStore store, CancellationToken cancellation)
     {
         ArgumentNullException.ThrowIfNull(store);
@@ -47,6 +62,49 @@ public sealed class SampleDataSeeder : IInitialData
         // database that an older build already marked as seeded would otherwise never get them.
         await SeedEventsAsync(store, cancellation);
 
+        await SeedDocumentsAsync(store, cancellation);
+
+        await ApplyRelationalDemoAsync(store, cancellation);
+    }
+
+    /// <summary>
+    /// Creates and fills the <c>quartz</c> and <c>legacy</c> schemas and <c>studio_sample.app_settings</c>,
+    /// for the sample host's own store and nobody else's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only when the store is the sample's own</b>, meaning its documents live in
+    /// <see cref="SampleStore.DocumentSchema" />. The relational demo is anchored there - its foreign key
+    /// points at <c>studio_sample.mt_doc_customer</c> and its in-schema table is
+    /// <c>studio_sample.app_settings</c> - and the schema names it creates, <c>quartz</c> and
+    /// <c>legacy</c>, are fixed. Every integration fixture re-points this same domain at a schema of its
+    /// own on one shared database and runs this seeder; if they applied the demo too, a dozen classes
+    /// running in parallel would all be creating and filling the same two schemas in a database other
+    /// tests read the whole catalog of.
+    /// </para>
+    /// <para>
+    /// <b>On every start</b>, not behind <see cref="SeedMarker" />: the scripts and the seeding are
+    /// idempotent on their own terms, and <see cref="SeedDocumentsAsync" />'s re-seed path truncates
+    /// <c>mt_doc_customer</c> with <c>CASCADE</c> - Marten's cleaner does - which empties
+    /// <c>legacy.customer_credit</c> through its foreign key. Running afterwards is what refills it.
+    /// </para>
+    /// </remarks>
+    private static async Task ApplyRelationalDemoAsync(IDocumentStore store, CancellationToken cancellation)
+    {
+        if (!string.Equals(store.Options.DatabaseSchemaName, SampleStore.DocumentSchema, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await using NpgsqlConnection connection = store.Storage.Database.CreateConnection();
+        await connection.OpenAsync(cancellation);
+
+        await RelationalDemoSchema.ApplyAsync(connection, cancellation);
+    }
+
+    /// <summary>The seeded documents, behind <see cref="SeedMarker" />.</summary>
+    private static async Task SeedDocumentsAsync(IDocumentStore store, CancellationToken cancellation)
+    {
         await using IDocumentSession session = store.LightweightSession();
 
         SeedMarker? marker = await session.LoadAsync<SeedMarker>(SeedMarker.WellKnownId, cancellation);
@@ -68,11 +126,11 @@ public sealed class SampleDataSeeder : IInitialData
         Random random = new(20260914);
 
         List<Customer> customers = [];
-        for (int i = 1; i <= 25; i++)
+        for (int i = 1; i <= CustomerCount; i++)
         {
             customers.Add(new Customer
             {
-                Id = DeterministicGuid("customer", i),
+                Id = CustomerId(i),
                 Name = $"Customer {i:00}",
                 Email = $"customer{i:00}@example.com",
                 Address = new Address($"{i} Example Street", Cities[i % Cities.Length], $"{10000 + i}", "FI"),
@@ -325,9 +383,21 @@ public sealed class SampleDataSeeder : IInitialData
     public static Guid OrderStreamId(int index) => DeterministicGuid("order-stream", index);
 
     /// <summary>
+    /// The id of seeded customer <paramref name="index" />, one to <see cref="CustomerCount" />, stable
+    /// across runs - which is what lets <c>legacy.customer_credit</c> point at the same customers every
+    /// time it is filled.
+    /// </summary>
+    public static Guid CustomerId(int index) => DeterministicGuid("customer", index);
+
+    /// <summary>
     /// Empties the demo's own collections, and only those: a sample store may be sharing a database with
     /// something that is not a demo.
     /// </summary>
+    /// <remarks>
+    /// "Only those" is Marten's <c>truncate … cascade</c> talking, so it also empties every table that
+    /// holds a foreign key into one of them - in this demo, <c>legacy.customer_credit</c>, which
+    /// <see cref="ApplyRelationalDemoAsync" /> refills straight afterwards.
+    /// </remarks>
     private static async Task ClearAsync(IDocumentStore store, CancellationToken cancellation)
     {
         Type[] seeded =
