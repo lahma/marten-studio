@@ -656,7 +656,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         string qualified = DatabaseAccess.Target(table.Schema, table.Name);
 
         DatabaseRowAccessResult grant = await access
-            .RequireRowAccessAsync(scope, table.Schema, table.Name, ReferencesAction, cancellationToken, record: false)
+            .RequireRowAccessAsync(scope, table.Schema, table.Name, ReferencesAction, record: false, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         if (!grant.Allowed)

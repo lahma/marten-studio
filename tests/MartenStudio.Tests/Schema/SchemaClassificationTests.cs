@@ -65,11 +65,11 @@ public class SchemaClassificationTests
     {
         SchemaClassification degraded = Degraded();
 
-        degraded.WithholdsRoutine(degraded.Classifier.ClassifyRoutine(DocumentSchema, "mt_jsonb_patch")).Should().BeFalse();
-        degraded.WithholdsRoutine(degraded.Classifier.ClassifyRoutine(EventSchema, "mt_quick_append_events")).Should().BeFalse();
-        degraded.WithholdsRoutine(degraded.Classifier.ClassifyRoutine(ReportingSchema, "ext_touch")).Should().BeFalse(
+        degraded.WithholdsRoutine(degraded.Classifier.ClassifyRoutine(DocumentSchema, "mt_jsonb_patch")!).Should().BeFalse();
+        degraded.WithholdsRoutine(degraded.Classifier.ClassifyRoutine(EventSchema, "mt_quick_append_events")!).Should().BeFalse();
+        degraded.WithholdsRoutine(degraded.Classifier.ClassifyRoutine(ReportingSchema, "ext_touch")!).Should().BeFalse(
             "the readable store hands it to ExtendedSchemaObjects");
-        degraded.WithholdsRoutine(degraded.Classifier.ClassifyRoutine(DocumentSchema, "host_touch")).Should().BeTrue();
+        degraded.WithholdsRoutine(degraded.Classifier.ClassifyRoutine(DocumentSchema, "host_touch")!).Should().BeTrue();
     }
 
     [Fact]

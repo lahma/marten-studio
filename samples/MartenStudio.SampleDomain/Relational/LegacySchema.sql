@@ -312,13 +312,14 @@ END $$;
 -- Routines: an overloaded function, a procedure, an aggregate and a trigger function
 -- ---------------------------------------------------------------------------------------------------
 
+-- A SQL-standard body (PostgreSQL 14+): Postgres records what it depends on, so the database browser can
+-- follow it and read legacy.active_employees, which calls it. A body written as a string cannot be
+-- followed, and a view calling one is refused its rows while any schema the role can read is withheld.
 CREATE OR REPLACE FUNCTION legacy.format_employee_name(first_name TEXT, last_name TEXT)
 RETURNS TEXT
 LANGUAGE sql
 IMMUTABLE
-AS $$
-  SELECT last_name || ', ' || first_name
-$$;
+RETURN last_name || ', ' || first_name;
 
 CREATE OR REPLACE FUNCTION legacy.format_employee_name(employee_id INTEGER)
 RETURNS TEXT

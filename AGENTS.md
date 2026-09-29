@@ -410,6 +410,20 @@ with `Schema.For`, is unknown to `AllKnownDocumentTypes()` and is listed by its 
 until Marten learns it (its rows are never read, views over it are refused); a domain CHECK that calls a
 function is not followed; a schema created after the 60-second schema-list cache is masked only once the
 list is read again.
+Rows are never read from a foreign table — nor from a partitioned table with a foreign partition, a table
+with a foreign inheritance child, or a view reading any of them (a materialized view's rows are local and
+are read). A view over Marten's own tables, or over another store's whose policies refuse the visitor, is
+refused its rows, and so is a table or view whose partitions or children sit in a withheld schema. A view
+is judged on what it reaches through other views and through functions with SQL-standard bodies (Postgres
+records their dependencies), and on the schemas it names as values, its collations and its text search
+objects. A function whose body is source text cannot be followed: a view calling one is refused its rows
+while any schema the reading role may read is withheld (for `SECURITY DEFINER`, while any schema is
+withheld) — which is why the sample writes `legacy.format_employee_name` with a `RETURN` body. Residual:
+under `"*"` with `SqlConsoleRole` narrowed, such a view is read, and what its function reads is bounded by
+that role alone; a definition naming a hidden type's table only through dynamic SQL is not detected; a
+foreign partition attached less than a minute ago may not yet be seen. Schemas an extension owns are
+neither browsable nor withheld for dependency purposes. Every first read of a relation's rows is audited
+by signature (filter, sort, paging mode — never the cursor), per store, database and relation.
 
 ## Package budget
 

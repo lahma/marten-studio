@@ -667,7 +667,7 @@ internal sealed class SchemaDataService : ISchemaDataService
                             .. read
                                 .Where(x => x.Kind != "a"
                                     && !degraded.HidesRoutine(x.Schema, x.Name)
-                                    && degraded.Classifier.ClassifyRoutine(x.Schema, x.Name).IsMarten)
+                                    && degraded.Classifier.ClassifyRoutine(x.Schema, x.Name)?.IsMarten == true)
                                 .Select(static x => x.Name)
                                 .Distinct(StringComparer.Ordinal),
                         ];

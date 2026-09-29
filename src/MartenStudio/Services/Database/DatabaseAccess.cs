@@ -706,27 +706,22 @@ internal sealed class DatabaseAccess
     /// the role's privilege. The capability and the two policies are still recorded by
     /// <see cref="RequireBrowseAsync" /> whatever it says, because they are security events: a caller passing
     /// <see langword="false" /> asks the page's own gate first, unaudited, so those can only refuse here when
-    /// the answer changed in between. It is the last parameter, after the token, so that every existing call
-    /// that passes the token by position keeps its meaning.
+    /// the answer changed in between.
     /// </para>
     /// </remarks>
     /// <param name="scope">The visitor's scope.</param>
     /// <param name="schema">The schema, as the URL had it. Only compared, never quoted.</param>
     /// <param name="name">The relation, as the URL had it. Only compared, never quoted.</param>
     /// <param name="action">What the audit ring calls the read.</param>
-    /// <param name="cancellationToken">Cancels the read.</param>
     /// <param name="record">Whether a refusal of the relation itself is audited; <see langword="true" /> unless the read is passive.</param>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage(
-        "Design",
-        "CA1068:CancellationToken parameters must come last",
-        Justification = "Callers already pass the token by position, so record before it would change what they mean; an overload would make every cref to this method ambiguous (CS0419).")]
+    /// <param name="cancellationToken">Cancels the read.</param>
     public async Task<DatabaseRowAccessResult> RequireRowAccessAsync(
         StudioScope scope,
         string schema,
         string name,
         string action = RowsAction,
-        CancellationToken cancellationToken = default,
-        bool record = true)
+        bool record = true,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
 

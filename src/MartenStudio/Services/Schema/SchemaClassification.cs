@@ -105,8 +105,10 @@ internal sealed class SchemaClassification
     /// same rule the browser applies to a view over an undeclared document table.
     /// </para>
     /// <para>
-    /// TODO(DB-3-fix, consolidate): DB-3-fix makes <c>DatabaseObjectClassifier.ClassifyRoutine</c> answer
-    /// <see langword="null" /> for exactly these. Once it has landed, this becomes that null.
+    /// The hidden type's own routines are the classifier's answer
+    /// (<see cref="DatabaseObjectClassifier.IsHiddenRoutine" />, for which <c>ClassifyRoutine</c> also
+    /// answers <see langword="null" />); this adds the Schema screen's wider rule for a routine beside a
+    /// document table no store declares, while any hiding is configured.
     /// </para>
     /// </remarks>
     /// <param name="schema">The routine's schema.</param>
@@ -123,17 +125,22 @@ internal sealed class SchemaClassification
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(name);
 
+        if (classifier.IsHiddenRoutine(schema, name))
+        {
+            return true;
+        }
+
+        if (!classifier.MayHideDocumentTypes)
+        {
+            return false;
+        }
+
         foreach (string prefix in PerTypeRoutinePrefixes)
         {
-            if (name.Length <= prefix.Length || !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            if (name.Length > prefix.Length && name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
-                continue;
+                return classifier.IsUndeclaredDocumentTable(schema, DatabaseObjectClassifier.DocumentTablePrefix + name[prefix.Length..]);
             }
-
-            string table = DatabaseObjectClassifier.DocumentTablePrefix + name[prefix.Length..];
-
-            return classifier.IsHiddenTable(schema, table)
-                || (classifier.MayHideDocumentTypes && classifier.IsUndeclaredDocumentTable(schema, table));
         }
 
         return false;
