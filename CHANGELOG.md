@@ -114,6 +114,20 @@
   table cells again; and the capability chip counts ten, lists "Reads beyond the store" (`RunSql`,
   `BrowseDatabase`) apart from "Mutating operations", and says it describes the studio's configuration
   rather than what the visitor's account may do. `ReadOnly` turns both groups off.
+- The database browser waits for the scope a link names before it reads: an in-circuit Back or Forward to
+  another database's page no longer reads — and audits — the previous database first, and a Rows tab column
+  set remembered in the browser is part of the first read rather than a second one.
+- Security: a database-browser read the store policy refuses is recorded under `BrowseDatabase`, so
+  Activity and the Overview show the refused name only to a visitor who may browse. Postgres' error text
+  masks a withheld schema wherever it stands as a whole word — a localized message, or a name with a space
+  or a hyphen. The Schema screen withholds a failure's text instead of showing it unmasked when the schema
+  list cannot be read, and a failed apply's Activity entry carries its SQLSTATE rather than Postgres'
+  words, which stay in the application's log (event 9206). Activity and the Overview ask each policy once
+  per scope per refresh instead of once per entry.
+- The capability popover shows every option's full name (wrapping on a phone), the database rail scrolls
+  only as far as the open table and keeps its header in view, a policy's refusal of a direct link says the
+  store's own structure is still shown, the Relationships description sits under its title, and a table row
+  with no badges is one line.
 
 # 0.2.0
 

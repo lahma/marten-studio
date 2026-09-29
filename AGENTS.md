@@ -378,9 +378,9 @@ where its report says so; several sections deliberately re-declare an earlier se
 `.ms-projection-note`, `.ms-overview-list-stream`, `.ms-doc-detail-actions`) and win by source order.
 Keep that when touching those selectors: a rule added *before* the section that overrides it is a rule
 that does nothing, and `StylesheetTests` (plus its `.Shell` part) pins the ones that were measured.
-0.3.0 appended `DB-4`, `DB-6`, `DB-7`, `DB-5` and `UX-6` in that order under the same rule; `UX-6` re-declares a
-few earlier selectors on purpose (the notices' contrast, the heading's focus ring) and
-`StylesheetTests.DatabasePolish` pins them.
+0.3.0 appended `DB-4`, `DB-6`, `DB-7`, `DB-5`, `UX-6` and `UX-7` in that order under the same rule; `UX-6`
+re-declares a few earlier selectors on purpose (the notices' contrast, the heading's focus ring) and
+`StylesheetTests.DatabasePolish` pins them, as `StylesheetTests.FinalPolish` pins `UX-7`.
 
 **D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
 0.3.0 lets the studio show what else lives in the store's Postgres database — a Quartz.NET job store, a
@@ -429,19 +429,26 @@ while any schema the reading role may read is withheld (for `SECURITY DEFINER`, 
 withheld) — which is why the sample writes `legacy.format_employee_name` with a `RETURN` body. Residual:
 under `"*"` with `SqlConsoleRole` narrowed, such a view is read, and what its function reads is bounded by
 that role alone; a definition naming a hidden type's table only through dynamic SQL is not detected; a
-foreign partition attached less than a minute ago may not yet be seen. A schema an extension owns is never
-admitted by `"*"` — only an exact `BrowsableSchemas` entry admits one — and one not admitted is masked like
-any withheld schema but does not count as withheld for dependency purposes. Every first read of a relation's rows is audited
-by signature (filter, sort, paging mode — never the cursor), per store, database and relation, and never
-from a static render: the browser's pages read only once interactive, so an explicit request the gate
-refuses is one 9202/9203 per page view and using a page whose gate is closed refuses nothing. On Activity
-and the Overview an entry under `BrowseDatabase` or `RunSql` is shown only while the capability is on and
-the write policy passes the reader for its scope. Postgres' own error text about a browser read is masked
-like everything else (qualifiers, and a schema named after the word *schema*), except a value the read
-bound, which is echoed as typed; row reads do not pin `search_path`, because a bare `=` must find
-`citext`'s own operator, and a name printed unqualified names no schema. The "could not be built" notice
-names another store only to a visitor that store's policy passes, and other stores' databases are
-enumerated only when a store policy — or a write policy, while `BrowseDatabase` is on — will be asked.
+foreign partition attached less than a minute ago may not yet be seen. A schema an extension owns is
+never admitted by `"*"` — only an exact `BrowsableSchemas` entry admits one — and one not admitted is
+masked like any withheld schema but does not count as withheld for dependency purposes. Every first read
+of a relation's rows is audited by signature (filter, sort, paging mode — never the cursor), per store,
+database and relation, and never from a static render: the browser's pages read only once interactive and
+once the scope their address names has been applied (an in-circuit Back or Forward to another database
+reads nothing against the previous one), so an explicit request the gate refuses is one 9202/9203 per
+page view and using a page whose gate is closed refuses nothing. On Activity and the Overview an entry
+under `BrowseDatabase` or `RunSql` is shown only while the capability is on and the write policy passes
+the reader for its scope; a browser read the store policy refused is recorded under `BrowseDatabase` too,
+and each policy is asked once per scope per sweep. Postgres' own error text about a browser read is
+masked like everything else (qualifiers, and every whole token that spells a withheld schema — whatever
+word precedes it, in any server language, a name with a space or a hyphen matched whole), except a value
+the read bound, which is echoed as typed; the Schema screen withholds a failure's text outright when the
+schema list it would be checked against cannot be read, and a failed apply's Activity entry carries its
+SQLSTATE, not Postgres' words, which stay in event 9206; row reads do not pin `search_path`, because a
+bare `=` must find `citext`'s own operator, and a name printed unqualified names no schema. The "could
+not be built" notice names another store only to a visitor that store's policy passes, and other stores'
+databases are enumerated only when a store policy — or a write policy, while `BrowseDatabase` is on —
+will be asked.
 **Reach, not scope.** An operation Marten runs over a whole database — a progression correction, a
 rebuild, a high-water restart, a store-global agent, cancelling a rebuild, the dead-letter "Rewind
 subscription", a schema apply — is authorized as `(store, database, null)` unless the database is

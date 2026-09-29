@@ -356,7 +356,11 @@ internal sealed class SchemaDataService : ISchemaDataService
         {
             string? sqlState = (exception as PostgresException)?.SqlState;
 
-            audit.Record(ApplyAction, target, succeeded: false, exception.Message + " SQL: " + ringSql, StudioCapability.ApplySchemaChanges, wholeDatabase);
+            // The ring keeps the failure's kind and the log keeps Postgres' words. Every visitor the store policy
+            // passes for the whole database reads this entry, and a failed migration's message can name an object
+            // in a schema one of them is not shown - a view or a key elsewhere that depends on the table being
+            // changed. The page masks it for the visitor who applied; the ring cannot know who will read it.
+            audit.Record(ApplyAction, target, succeeded: false, RingFailure(exception) + " SQL: " + ringSql, StudioCapability.ApplySchemaChanges, wholeDatabase);
             logger.SchemaChangeApplied(user, scope.StoreKey, identity, "FAILED: " + exception.Message + " SQL: " + auditedSql);
 
             // What the page shows is Postgres' own words about the database, masked like every other failure on
@@ -1139,6 +1143,14 @@ internal sealed class SchemaDataService : ISchemaDataService
 
         return await EverySchemaButTheStoresAsync(resolved, storeSchemas, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// What the Activity ring says about a failed apply in place of the exception's message: its SQLSTATE or its
+    /// type, and where the whole message is (event 9206).
+    /// </summary>
+    internal static string RingFailure(Exception exception) => exception is PostgresException postgres
+        ? string.Create(CultureInfo.InvariantCulture, $"Postgres refused the migration (SQLSTATE {postgres.SqlState}); its message is in the application's log, event 9206.")
+        : string.Create(CultureInfo.InvariantCulture, $"The migration failed ({exception.GetType().Name}); its message is in the application's log, event 9206.");
 
     /// <summary>What the drift check says when Marten's own assertion passed.</summary>
     private const string MatchesAssertion = "Marten reports that this database matches its configuration.";

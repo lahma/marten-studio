@@ -9,6 +9,7 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace MartenStudio.Tests.Schema;
 
@@ -50,10 +51,11 @@ public class SchemaFailureMaskingTests
     /// <summary>
     /// An apply's failure went back to the ApplySchemaChanges holder as the exception's own message, unmasked. It
     /// is masked like every other failure on the screen now - here, withheld whole, because the schema list the
-    /// mask needs is on the same unreachable database - while the audit entry keeps what happened.
+    /// mask needs is on the same unreachable database. The Activity ring, read by every visitor the store policy
+    /// passes for the whole database, keeps the failure's kind and points at event 9206, which keeps the words.
     /// </summary>
     [Fact]
-    public async Task A_failed_apply_returns_the_masked_message_and_the_audit_keeps_the_whole_one()
+    public async Task A_failed_apply_returns_the_masked_message_and_the_ring_keeps_only_its_kind()
     {
         await using Harness harness = await Harness.CreateAsync();
 
@@ -65,7 +67,23 @@ public class SchemaFailureMaskingTests
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should()
             .ContainSingle(static x => x.Action == "Apply schema changes").Which;
         entry.Succeeded.Should().BeFalse();
-        entry.Message.Should().NotStartWith(SchemaDataService.DetailsWithheld, "the trail is where the difference is kept");
+        entry.Message.Should().StartWith("The migration failed (", "an unreachable host is no PostgresException")
+            .And.Contain("event 9206", "the ring says where Postgres' words were kept");
+    }
+
+    [Fact]
+    public void A_Postgres_refusal_in_the_ring_is_its_SQLSTATE_and_not_its_words()
+    {
+        PostgresException refusal = new(
+            messageText: "cannot drop constraint pk on table mt_doc_customer because constraint fk on table hr.salaries requires it",
+            severity: "ERROR",
+            invariantSeverity: "ERROR",
+            sqlState: "2BP01");
+
+        string ring = SchemaDataService.RingFailure(refusal);
+
+        ring.Should().Contain("SQLSTATE 2BP01").And.Contain("event 9206");
+        ring.Should().NotContain("hr.salaries", "the ring's readers include visitors the hr schema is withheld from");
     }
 
     /// <summary>A store over an unreachable host, every capability, no policy to refuse anybody.</summary>
