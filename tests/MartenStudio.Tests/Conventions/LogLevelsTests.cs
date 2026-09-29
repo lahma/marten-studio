@@ -166,7 +166,7 @@ public class LogLevelsTests
         // ---- Visitor-started reads and writes, one line per action ------------------------------------
         ["src/MartenStudio/Services/Configuration/ConfigurationService.cs : Marten Studio could not describe the databases of store {StoreKey}"] = (Verdict.VisitorAction,
             "The configuration screen's own load; not polled, and the page shows the failure."),
-        ["src/MartenStudio/Services/Projections/ProjectionDataService.cs : Marten Studio could not enumerate the databases of store {StoreKey} before {Action}, so it refused it"] = (Verdict.VisitorAction,
+        ["src/MartenStudio/Services/DatabaseReachAuthorization.cs : Marten Studio could not enumerate the databases of store {StoreKey} before {Action}, so it refused it"] = (Verdict.VisitorAction,
             "A pause, resume or store-wide correction the visitor pressed is refused because the store's databases cannot be enumerated."),
         ["src/MartenStudio/Services/Relationships/RelationshipDataService.cs : Marten Studio could not read the relationships of {StoreKey}"] = (Verdict.VisitorAction,
             "The relationships screen's load failed on a catalog read; not polled."),

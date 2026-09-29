@@ -85,6 +85,7 @@ internal sealed class EventDataService : IEventDataService
     private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<EventDataService> logger;
+    private readonly DatabaseReachAuthorization reach;
 
     public EventDataService(
         StudioScopeResolver resolver,
@@ -106,6 +107,7 @@ internal sealed class EventDataService : IEventDataService
         this.options = options;
         this.throttle = throttle;
         this.logger = logger;
+        reach = new DatabaseReachAuthorization(authorization, logger);
     }
 
     private int CommandTimeoutSeconds => (int) Math.Ceiling(options.Value.QueryTimeout.TotalSeconds);
@@ -1207,6 +1209,19 @@ internal sealed class EventDataService : IEventDataService
             projectionName + " to #" + eventSequence.ToString(CultureInfo.InvariantCulture),
             async (resolved, token) =>
             {
+                // First, what the rewind reaches, which is not the tenant in the scope. Marten 9.31's
+                // RewindSubscriptionProgressAsync opens its session with AllowAnyTenant = true, rewrites
+                // every shard's progression row of the projection and deletes the projection's dead
+                // letters at or above the floor with no tenant predicate; the daemon then restarts every
+                // agent of the subscription from there (DatabaseReach). So a visitor scoped to one tenant of
+                // a shared database is asked about the database as a whole - (store, database, null) -
+                // unless the database is exclusively that tenant's. The daemon is the one the accessor
+                // proves is this database's, so this database is the one reached. Before this, a policy
+                // allowing only (db, acme) let an acme visitor delete globex's dead letters and re-apply
+                // globex's poison event.
+                await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, StudioCapability.ManageDeadLetters, token)
+                    .ConfigureAwait(false);
+
                 // The name is checked here rather than left to Marten, and the message is the whole
                 // reason. Marten's IEventStore.RewindSubscriptionProgressAsync (DocumentStore.EventStore.cs,
                 // 9.35) throws ArgumentOutOfRangeException with "Unknown subscription name 'x'. Available
@@ -1228,7 +1243,9 @@ internal sealed class EventDataService : IEventDataService
                 // SingleTenanted, and the rewind reaches an API that applies no tenant predicate of its
                 // own. So a visitor scoped to one tenant has to be shown to be able to see the event
                 // before it is used, exactly as Skip event does - and the refusal says nothing about
-                // whose event it is (D5).
+                // whose event it is (D5). This no longer narrows what the rewind does - the check above
+                // is what authorizes that - but a rewind started from a tenant's dead-letter page is
+                // still started from an event that tenant can see.
                 await using (NpgsqlConnection connection = await OpenAsync(resolved, token).ConfigureAwait(false))
                 {
                     EventTableInfo table = await DescribeTablesAsync(resolved, connection, token).ConfigureAwait(false);
@@ -1363,7 +1380,8 @@ internal sealed class EventDataService : IEventDataService
     /// <c>sequenceFloor: 0</c>, which is a full replay of the projection rather than a rewind to one
     /// event. There is also a five-argument overload that takes a tenant id; its default implementation
     /// throws for a non-null tenant, and projection progression is per shard rather than per tenant, so
-    /// the studio uses the store-global one and the dialog says so.
+    /// the studio uses the store-global one, authorizes it for the database as a whole
+    /// (<see cref="DatabaseReachAuthorization.RequireWholeDatabaseAsync" />), and the dialog says so.
     /// </remarks>
     internal static Task RewindToFloorAsync(
         IProjectionDaemon daemon,
@@ -1402,9 +1420,9 @@ internal sealed class EventDataService : IEventDataService
         {
             resolved = await resolver.ResolveAsync(scope, capability.ToString(), cancellationToken).ConfigureAwait(false);
         }
-        catch (StudioNotAuthorizedException)
+        catch (StudioNotAuthorizedException denied)
         {
-            audit.RecordScopeDenied(scope, options.Value.WriteAuthorizationPolicy ?? "(none)", action, target);
+            audit.RecordScopeDenied(denied.Scope, options.Value.WriteAuthorizationPolicy ?? "(none)", action, target);
             throw;
         }
 
@@ -1413,13 +1431,17 @@ internal sealed class EventDataService : IEventDataService
             string outcome = await operation(resolved, cancellationToken).ConfigureAwait(false);
             audit.Record(action, target, succeeded: true, outcome, capability, scope);
         }
-        catch (StudioNotAuthorizedException)
+        catch (StudioNotAuthorizedException denied)
         {
             // A refusal the operation itself raised - the target turned out not to be in this scope after
             // the resolution had already passed, which is how "skip event 4711" behaves on a conjoined
-            // store when 4711 is another tenant's event. It is a scope denial and is audited as one (9203)
-            // rather than as an ordinary failed action, so the log says what it was.
-            audit.RecordScopeDenied(scope, options.Value.WriteAuthorizationPolicy ?? "(none)", action, target);
+            // store when 4711 is another tenant's event, or the operation reaches more than the scope and
+            // that wider question was refused, which is how a rewind from a tenant scope behaves on a
+            // shared database. It is a scope denial and is audited as one (9203) rather than as an
+            // ordinary failed action, so the log says what it was - and against the scope the refusal
+            // names rather than the one that was asked for: for the rewind that is (store, database,
+            // null), the database as a whole, which is the one fact the requested scope does not carry.
+            audit.RecordScopeDenied(denied.Scope, options.Value.WriteAuthorizationPolicy ?? "(none)", action, target);
             throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

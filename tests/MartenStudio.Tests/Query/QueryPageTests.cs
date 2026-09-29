@@ -182,6 +182,77 @@ public class QueryPageTests
         page.FindAll("#ms-query-sql").Should().BeEmpty("there is no editor to type into when the console is off");
     }
 
+    /// <summary>
+    /// DB-0-fix-3, F-a: the console reads every tenant's rows, so the page asks the question the service
+    /// asks - the database as a whole - and a visitor allowed one tenant and not the database is told so on
+    /// the console tab, before they type anything. The service refuses regardless (hard rule 5).
+    /// </summary>
+    [Fact]
+    public async Task A_visitor_allowed_one_tenant_and_not_the_database_is_told_the_console_is_refused()
+    {
+        using StudioComponentContext context = await TenantScopedAsync(WithPerson());
+        context.AuthorizationService.Allow(static resource => resource.TenantId == "acme");
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-sql").Click();
+
+        page.Find(".ms-write-refusal").TextContent.Should().Be(WritePolicyRefusal.For(StudioCapability.RunSql));
+        page.Find(".ms-query-sql-tenant").TextContent.Should().Contain("not limited to").And.Contain("acme");
+
+        context.AuthorizationService.Calls.Should().Contain(
+            static x => x.Resource.TenantId == null,
+            "the page asks about the database as a whole, as the service does")
+            .And.NotContain(
+                static x => x.Resource.TenantId == "acme" && x.Resource.Capability == nameof(StudioCapability.RunSql),
+                "RunSql is never asked about a tenant");
+    }
+
+    /// <summary>The positive control: the database as a whole allowed, nothing refused - the note stays.</summary>
+    [Fact]
+    public async Task A_visitor_allowed_the_database_sees_no_refusal_but_is_still_told_the_tenant_does_not_narrow_it()
+    {
+        using StudioComponentContext context = await TenantScopedAsync(WithPerson());
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-sql").Click();
+
+        page.FindAll(".ms-write-refusal").Should().BeEmpty();
+        page.Find(".ms-query-sql-tenant").TextContent.Should().Contain("acme");
+        page.Find("#ms-query-sql").Should().NotBeNull();
+    }
+
+    /// <summary>A policy refusal the service raised names the question that was asked.</summary>
+    [Fact]
+    public async Task A_policy_refusal_from_the_service_names_the_database_as_a_whole()
+    {
+        FakeQueryService service = WithPerson();
+        service.SqlFailure = new StudioNotAuthorizedException(new StudioScope("default", "localhost.marten", null));
+
+        using StudioComponentContext context = await TenantScopedAsync(service);
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-sql").Click();
+        RunEditor(page, "ms-query-sql", "select 1");
+
+        page.Find(".ms-query-error-message").TextContent.Should().Contain("this database as a whole");
+    }
+
+    /// <summary>
+    /// <c>RunSql</c> on, a store policy configured, and the scope settled on tenant <c>acme</c> of the one
+    /// database - the shape a host that scopes its policy by tenant has.
+    /// </summary>
+    private static async Task<StudioComponentContext> TenantScopedAsync(FakeQueryService service)
+    {
+        StudioComponentContext context = CreateContext(service, runSql: true);
+        context.Catalog.WithTenants("default", new TenantList(["acme"], IsTruncated: false, TenantListSource.Configured));
+
+        await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
+        await context.State.SetScopeAsync("default", "localhost.marten", "acme", Xunit.TestContext.Current.CancellationToken);
+
+        context.Options.StoreAuthorizationPolicy = StudioComponentContext.StorePolicyName;
+        return context;
+    }
+
     [Fact]
     public void With_RunSql_granted_a_statement_runs_and_the_grid_keeps_NULL_apart_from_a_JSON_cell()
     {

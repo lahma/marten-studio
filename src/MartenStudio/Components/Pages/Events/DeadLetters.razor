@@ -302,16 +302,20 @@
 
             <p class="ms-muted">
                 Marten deletes this projection's dead letters at or above that sequence as part of the
-                rewind, so the record you are looking at goes away whether or not the replay succeeds. The
-                rows are rewritten in place rather than dropped: this is a rewind, not a rebuild.
+                rewind - every tenant's, not only the ones listed here - so the record you are looking at
+                goes away whether or not the replay succeeds. The rows are rewritten in place rather than
+                dropped: this is a rewind, not a rebuild.
             </p>
 
             @if (State.ActiveScope?.TenantId is { Length: > 0 } tenant)
             {
-                <p class="ms-alert ms-alert-warning" role="alert">
-                    Projection progression is recorded per shard and not per tenant, so this rewind
-                    re-applies every tenant's events after that sequence - not only
-                    <code>@tenant</code>'s.
+                <p class="ms-alert ms-alert-warning ms-rewind-tenant-reach" role="alert">
+                    Selecting <code>@tenant</code> does not narrow this rewind. Projection progression is
+                    recorded per shard and not per tenant, so it deletes this projection's dead letters at
+                    or above that sequence for every tenant in this database and re-runs every tenant's
+                    events from there. Your account therefore needs to be allowed to manage dead letters for
+                    this database as a whole, not only for <code>@tenant</code>, unless the database holds
+                    <code>@tenant</code>'s data alone.
                 </p>
             }
         </div>
@@ -526,9 +530,11 @@
             "steps over it on the next attempt. The event stays in the store, and every projection that " +
             "reads it from now on will not see it.",
         DialogKind.Rewind =>
-            $"The daemon stops '{pendingRewind?.ProjectionName}', moves its progression back and starts it "
-            + "again from there, so the event it failed on is re-applied along with everything after it. "
-            + "If the projection still throws, the same failure comes back as a new dead letter.",
+            $"The daemon stops every agent of '{pendingRewind?.ProjectionName}' in this database, moves the "
+            + "progression of every one of its shards back and starts them again from there, so the event it "
+            + "failed on is re-applied along with everything after it - for every tenant in this database, "
+            + "not only the one on screen. If the projection still throws, the same failure comes back as a "
+            + "new dead letter.",
         _ => string.Empty,
     };
 

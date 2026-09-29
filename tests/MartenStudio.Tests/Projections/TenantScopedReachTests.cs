@@ -4,6 +4,7 @@ using Marten;
 using Marten.Storage;
 
 using MartenStudio.Services;
+using MartenStudio.Services.Events;
 using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Support;
 
@@ -36,7 +37,7 @@ namespace MartenStudio.Tests.Projections;
 /// The live half is <c>TenantScopedCorrectionLiveTests</c>.
 /// </para>
 /// </remarks>
-public class TenantScopedReachTests
+public partial class TenantScopedReachTests
 {
     private const string SharedConnectionString =
         "Host=marten-studio-tenant-reach.invalid;Database=shared;Username=none;Password=none;Timeout=2";
@@ -58,6 +59,10 @@ public class TenantScopedReachTests
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     /// <summary>Every operation that reaches the whole database, by the action name the audit records.</summary>
+    /// <remarks>
+    /// The dead-letter page's rewind is here since DB-0-fix-3: Marten rewrites every shard's progression row
+    /// of the projection and deletes its dead letters for every tenant (R1).
+    /// </remarks>
     public static TheoryData<string> DatabaseWideOperations =>
     [
         "AdvanceHighWaterMark",
@@ -67,10 +72,15 @@ public class TenantScopedReachTests
         "StartAgent",
         "StopAgent",
         "CancelOperation",
+        EventDataService.RewindSubscriptionAction,
     ];
 
-    /// <summary>The two corrections.</summary>
-    public static TheoryData<string> Corrections => ["AdvanceHighWaterMark", "CorrectProgression"];
+    /// <summary>
+    /// The operations whose whole-database question is left out on a database that is exclusively the
+    /// tenant's: the two corrections, and the rewind.
+    /// </summary>
+    public static TheoryData<string> TenantOrDatabaseOperations =>
+        ["AdvanceHighWaterMark", "CorrectProgression", EventDataService.RewindSubscriptionAction];
 
     // ------------------------------------------------------------------------------------------------
     // A conjoined database: the tenant is not the database
@@ -200,7 +210,10 @@ public class TenantScopedReachTests
     [InlineData("DailySales", null)]
     [InlineData("", null)]
     public void Only_a_shard_name_that_parses_with_a_tenant_is_one_tenants(string shardName, string? expected) =>
-        DatabaseReach.TenantOfShard(shardName).Should().Be(expected);
+        DatabaseReach.TenantOfShard(shardName, NoRegisteredShards).Should().Be(expected);
+
+    /// <summary>A store that registers no shard, so only the parse decides.</summary>
+    private static readonly IReadOnlySet<string> NoRegisteredShards = new HashSet<string>(StringComparer.Ordinal);
 
     // ------------------------------------------------------------------------------------------------
     // Database per tenant: the tenant is the database
@@ -212,7 +225,7 @@ public class TenantScopedReachTests
     /// one. The whole-database question is not asked at all.
     /// </summary>
     [Theory]
-    [MemberData(nameof(Corrections))]
+    [MemberData(nameof(TenantOrDatabaseOperations))]
     public async Task A_database_that_is_exclusively_the_tenants_needs_only_the_tenant(string action)
     {
         await using Harness harness = await Harness.DatabasePerTenantAsync(primaryIsDefault: false);
@@ -241,7 +254,7 @@ public class TenantScopedReachTests
     /// anybody's, and the whole-database question is asked again.
     /// </summary>
     [Theory]
-    [MemberData(nameof(Corrections))]
+    [MemberData(nameof(TenantOrDatabaseOperations))]
     public async Task The_default_database_is_never_exclusively_one_tenants(string action)
     {
         await using Harness harness = await Harness.DatabasePerTenantAsync(primaryIsDefault: true);
@@ -291,12 +304,17 @@ public class TenantScopedReachTests
         private readonly ServiceProvider provider;
         private readonly IServiceScope scope;
 
-        private Harness(ServiceProvider provider, TestStoreAuthorizationService policies, IMartenDatabase database)
+        private Harness(
+            ServiceProvider provider,
+            TestStoreAuthorizationService policies,
+            IMartenDatabase database,
+            ObservedTenancy? tenancy)
         {
             this.provider = provider;
             scope = provider.CreateScope();
             Policies = policies;
             ScopeDatabase = database;
+            Tenancy = tenancy;
         }
 
         public TestStoreAuthorizationService Policies { get; }
@@ -307,11 +325,16 @@ public class TenantScopedReachTests
         /// <summary>Its <c>Id.Identity</c>, which is how the studio addresses it.</summary>
         public string Database => ScopeDatabase.Id.Identity;
 
+        /// <summary>The tenancy as the store sees it, when a test asked for it to be observed.</summary>
+        public ObservedTenancy? Tenancy { get; }
+
         public IDocumentStore Store => provider.GetRequiredService<IDocumentStore>();
 
         public StudioActionLogService Ring => provider.GetRequiredService<StudioActionLogService>();
 
         private IProjectionDataService Service => scope.ServiceProvider.GetRequiredService<IProjectionDataService>();
+
+        private IEventDataService Events => scope.ServiceProvider.GetRequiredService<IEventDataService>();
 
         public StudioScope Scope(string? tenantId) => new(MartenStoreRegistry.DefaultStoreKey, Database, tenantId);
 
@@ -324,33 +347,61 @@ public class TenantScopedReachTests
             "StartAgent" => Service.StartAgentAsync(on, shardName, Token),
             "StopAgent" => Service.StopAgentAsync(on, shardName, Token),
             "CancelOperation" => Service.CancelOperationAsync(on, "op-1", Token),
+            EventDataService.RewindSubscriptionAction => Events.RewindSubscriptionAsync(on, "DailySales", 5, Token),
+            EventDataService.SkipEventAction => Events.SkipEventAsync(on, 5, Token),
+            EventDataService.DiscardDeadLetterAction => Events.DiscardDeadLetterAsync(on, Guid.Parse("11111111-2222-3333-4444-555555555555"), Token),
             _ => throw new ArgumentOutOfRangeException(nameof(action), action, "not an operation this test knows"),
         };
 
         /// <summary>One database, every document and the event store conjoined: acme and globex share it.</summary>
-        public static Task<Harness> ConjoinedAsync() =>
-            CreateAsync(options =>
-            {
-                options.Connection(SharedConnectionString);
-                options.Policies.AllDocumentsAreMultiTenanted();
-                options.Events.TenancyStyle = TenancyStyle.Conjoined;
-            });
+        /// <param name="configure">Anything more the store needs - a projection, say.</param>
+        /// <param name="moreTenants">Tenants the host lists beyond acme and globex.</param>
+        public static Task<Harness> ConjoinedAsync(Action<StoreOptions>? configure = null, string[]? moreTenants = null) =>
+            CreateAsync(
+                options =>
+                {
+                    options.Connection(SharedConnectionString);
+                    options.Policies.AllDocumentsAreMultiTenanted();
+                    options.Events.TenancyStyle = TenancyStyle.Conjoined;
+                    configure?.Invoke(options);
+                },
+                moreTenants: moreTenants);
 
         /// <summary>
         /// Two databases, one per tenant - acme's (or acme's and more) in the primary, globex's in the
         /// secondary - optionally with the primary as the tenancy's default database too.
         /// </summary>
-        public static Task<Harness> DatabasePerTenantAsync(bool primaryIsDefault, string[]? primaryTenants = null) =>
-            CreateAsync(options => options.MultiTenantedDatabases(tenancy =>
-            {
-                var primary = tenancy.AddMultipleTenantDatabase(PrimaryConnectionString, "primary").ForTenants(primaryTenants ?? [Acme]);
-                if (primaryIsDefault)
+        /// <param name="primaryIsDefault">Whether the primary is also where untenanted writes land.</param>
+        /// <param name="primaryTenants">The primary's tenants; acme alone by default.</param>
+        /// <param name="observe">
+        /// Put the tenancy behind an <see cref="ObservedTenancy" />, which counts tenant lookups and lets a
+        /// test act on every <c>BuildDatabases()</c>.
+        /// </param>
+        /// <param name="dynamicShape">
+        /// Have the observed tenancy answer as a master-table or sharded one does: <c>DynamicMultiple</c>
+        /// and no default.
+        /// </param>
+        /// <param name="moreTenants">Tenants the host lists beyond acme and globex.</param>
+        public static Task<Harness> DatabasePerTenantAsync(
+            bool primaryIsDefault,
+            string[]? primaryTenants = null,
+            bool observe = false,
+            bool dynamicShape = false,
+            string[]? moreTenants = null) =>
+            CreateAsync(
+                options => options.MultiTenantedDatabases(tenancy =>
                 {
-                    primary.AsDefault();
-                }
+                    var primary = tenancy.AddMultipleTenantDatabase(PrimaryConnectionString, "primary").ForTenants(primaryTenants ?? [Acme]);
+                    if (primaryIsDefault)
+                    {
+                        primary.AsDefault();
+                    }
 
-                tenancy.AddMultipleTenantDatabase(SecondaryConnectionString, "secondary").ForTenants(Globex);
-            }));
+                    tenancy.AddMultipleTenantDatabase(SecondaryConnectionString, "secondary").ForTenants(Globex);
+                }),
+                observe || dynamicShape,
+                dynamicShape,
+                moreTenants);
 
         /// <summary>
         /// Two <c>MartenDatabase</c> objects over one physical database, each listing one tenant - which is
@@ -363,16 +414,30 @@ public class TenantScopedReachTests
                 tenancy.AddMultipleTenantDatabase(PrimaryConnectionString, "second").ForTenants(Globex);
             }));
 
-        private static async Task<Harness> CreateAsync(Action<StoreOptions> configure)
+        private static async Task<Harness> CreateAsync(
+            Action<StoreOptions> configure,
+            bool observe = false,
+            bool dynamicShape = false,
+            string[]? moreTenants = null)
         {
             var users = new TestAuthenticationStateProvider();
             users.SignIn("tester");
 
             var policies = new TestStoreAuthorizationService();
+            ObservedTenancy? observed = null;
 
             var services = new ServiceCollection();
             services.AddLogging();
-            services.AddMarten(configure);
+            services.AddMarten(options =>
+            {
+                configure(options);
+
+                if (observe)
+                {
+                    observed = ObservedTenancy.Over(options.Tenancy, dynamicShape);
+                    options.Tenancy = (ITenancy) (object) observed;
+                }
+            });
 
             services.AddMartenStudio(options =>
             {
@@ -381,6 +446,11 @@ public class TenantScopedReachTests
                 options.WriteAuthorizationPolicy = WritePolicy;
                 options.KnownTenantIds.Add(Acme);
                 options.KnownTenantIds.Add(Globex);
+
+                foreach (string tenant in moreTenants ?? [])
+                {
+                    options.KnownTenantIds.Add(tenant);
+                }
             });
 
             // After AddMartenStudio, so these win over anything the framework registrations contributed.
@@ -395,7 +465,7 @@ public class TenantScopedReachTests
             // otherwise. Never databases[0] of several: a static tenancy enumerates them in hash order.
             IMartenDatabase database = databases.FirstOrDefault(static x => x.TenantIds.Contains(Acme)) ?? databases[0];
 
-            return new Harness(provider, policies, database);
+            return new Harness(provider, policies, database, observed);
         }
 
         public async ValueTask DisposeAsync()

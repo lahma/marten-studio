@@ -1,7 +1,6 @@
 using JasperFx.Events.Daemon;
 using JasperFx.Events.Projections;
 using JasperFx.Events.Subscriptions;
-using JasperFx.MultiTenancy;
 
 using Marten;
 using Marten.Schema;
@@ -87,6 +86,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
     private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<ProjectionDataService> logger;
+    private readonly DatabaseReachAuthorization reach;
 
     public ProjectionDataService(
         StudioScopeResolver resolver,
@@ -116,6 +116,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
         this.options = options;
         this.throttle = throttle;
         this.logger = logger;
+        reach = new DatabaseReachAuthorization(authorization, logger);
     }
 
     /// <summary>The budget every read here runs under - <c>MartenStudioOptions.QueryTimeout</c>.</summary>
@@ -344,7 +345,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
 
             // A rebuild empties the projection's storage for the whole database and replays every event in
             // it - every tenant's, whatever tenant the selector is on (DatabaseReach).
-            await RequireWholeDatabaseAsync(resolved, resolved.Database, StudioCapability.RebuildProjections, cancellationToken)
+            await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, StudioCapability.RebuildProjections, cancellationToken)
                 .ConfigureAwait(false);
 
             // As in ControlAsync: an externally managed store - however the accessor learned it - has no
@@ -449,7 +450,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
             // The only operation there is to cancel is a rebuild, and a rebuild half-done is every tenant's
             // problem: its tables were emptied for the whole database before the replay started. So
             // stopping one is authorized as the rebuild itself was.
-            await RequireWholeDatabaseAsync(resolved, resolved.Database, capability, cancellationToken).ConfigureAwait(false);
+            await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, capability, cancellationToken).ConfigureAwait(false);
 
             // An operation is addressed by where it runs: a visitor authorized for one database must not
             // be able to stop a rebuild running against another.
@@ -881,8 +882,8 @@ internal sealed class ProjectionDataService : IProjectionDataService
     /// The same question <see cref="StudioScopeResolver" /> asks when a scope is resolved, asked once per
     /// database rather than once for the one in the URL - because a coordinator pause is not scoped to
     /// the database the selector is on. The same per-database question, with the write form added, is
-    /// what <see cref="RequireEveryDatabaseOfTheStoreAsync" /> asks to decide whether the pause may happen
-    /// at all.
+    /// what <see cref="DatabaseReachAuthorization.RequireEveryDatabaseOfTheStoreAsync" /> asks to decide
+    /// whether the pause may happen at all.
     /// </para>
     /// <para>
     /// The read form of the policy (a <see langword="null" /> capability), because listing a database is
@@ -1017,7 +1018,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
 
             // The one control through here is a high-water restart, and the high-water agent is the
             // database's - every tenant's, or under per-tenant partitioning every tenant's own (DatabaseReach).
-            await RequireWholeDatabaseAsync(resolved, resolved.Database, capability, cancellationToken).ConfigureAwait(false);
+            await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, capability, cancellationToken).ConfigureAwait(false);
 
             // Only a Hosted answer carries a daemon: ExternallyManaged - by AsyncMode, or by a coordinator
             // whose lookup said NotSupported - is refused here with its own explanation, exactly as the
@@ -1172,8 +1173,8 @@ internal sealed class ProjectionDataService : IProjectionDataService
     /// selector honours, so it is a shape hosts are expected to have - would otherwise let a visitor
     /// allowed only database A stop the projections of database B, and the confirm dialog would name B
     /// while doing it. So the policies are asked for every coordinated database before the coordinator
-    /// is touched (<see cref="RequireEveryDatabaseOfTheStoreAsync" />), and the first refusal is a scope
-    /// denial: the same exception, the same 9203 audit entry, and nothing paused.
+    /// is touched (<see cref="DatabaseReachAuthorization.RequireEveryDatabaseOfTheStoreAsync" />), and the
+    /// first refusal is a scope denial: the same exception, the same 9203 audit entry, and nothing paused.
     /// </para>
     /// </remarks>
     private async Task CoordinatorControlAsync(
@@ -1199,7 +1200,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
             // Everything the pause would reach is authorized first, whatever the daemon's state: a visitor
             // who may not address every database of the store is refused as such, and learns nothing about
             // where the daemon runs.
-            await RequireEveryDatabaseOfTheStoreAsync(resolved, capability, action, cancellationToken).ConfigureAwait(false);
+            await reach.RequireEveryDatabaseOfTheStoreAsync(resolved, capability, action, cancellationToken).ConfigureAwait(false);
 
             // Then the accessor's answer, and not a second opinion formed here: before the coordinator is
             // handed out, anything but Hosted is refused. An externally managed store's pause and resume
@@ -1248,161 +1249,17 @@ internal sealed class ProjectionDataService : IProjectionDataService
     }
 
     /// <summary>
-    /// Refuses an operation that reaches every database of the store unless the visitor may address
-    /// <em>every</em> one of them.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Two operations are that wide: a coordinator pause or resume, and a progression correction asked
-    /// for without a tenant, which Marten 9.31 runs over <c>Tenancy.BuildDatabases()</c> - see
-    /// <see cref="AdvancedAsync" />.
-    /// </para>
-    /// <para>
-    /// The databases come from <c>IMartenStorage.AllDatabases()</c> - verified in Marten 9.31 to be
-    /// <c>Tenancy.BuildDatabases()</c>, the same set both of those operations walk, and what
-    /// <see cref="DaemonAccessor" /> reports on the card - never <c>AllSchemaNames()</c> or
-    /// <c>AllObjects()</c>, which apply migrations (hard rule 14). A store that cannot enumerate its
-    /// databases is refused rather than allowed: the whole point of the check is that the operation is
-    /// wider than the scope, so not knowing how wide is not a reason to proceed.
-    /// </para>
-    /// </remarks>
-    /// <exception cref="StudioNotAuthorizedException">
-    /// A policy refuses one of them, which the caller records as a scope denial.
-    /// </exception>
-    private async Task RequireEveryDatabaseOfTheStoreAsync(
-        ResolvedScope resolved,
-        StudioCapability capability,
-        string action,
-        CancellationToken cancellationToken)
-    {
-        if (!AnyPolicyAnswersFor(capability))
-        {
-            return;
-        }
-
-        IReadOnlyList<IMartenDatabase> databases;
-
-        try
-        {
-            databases = await resolved.Store.Storage.AllDatabases().ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            logger.LogWarning(
-                exception,
-                "Marten Studio could not enumerate the databases of store {StoreKey} before {Action}, so it refused it",
-                resolved.Registration.Key,
-                action);
-
-            throw new StudioNotAuthorizedException(resolved.Scope);
-        }
-
-        foreach (IMartenDatabase database in databases)
-        {
-            await RequireDatabaseAsync(resolved, database.Id.Identity, tenantId: null, capability, cancellationToken)
-                .ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// Refuses unless the visitor may address <paramref name="databaseId" /> - with the same two questions
-    /// <see cref="StudioScopeResolver" /> asks for the scope in the URL.
-    /// </summary>
-    /// <remarks>
-    /// The store policy with no capability, then the write policy with it: a database the visitor may
-    /// not even read is not one they may change, and asking only the write policy - which is what the
-    /// coordinator check once did - let a host that configured a write policy and no store policy skip
-    /// the per-database question entirely, because the old guard short-circuited on the store policy
-    /// alone.
-    /// </remarks>
-    /// <exception cref="StudioNotAuthorizedException">
-    /// Either policy refuses, carrying the refused scope - which the caller's catch records as
-    /// <c>denied.Scope</c>, so that the audit entry says which database the visitor was not allowed to
-    /// reach rather than the one they asked about. The two are one fact, and this throw is worth nothing
-    /// on its own.
-    /// </exception>
-    private async Task RequireDatabaseAsync(
-        ResolvedScope resolved,
-        string databaseId,
-        string? tenantId,
-        StudioCapability capability,
-        CancellationToken cancellationToken)
-    {
-        var reached = new StudioScope(resolved.Registration.Key, databaseId, tenantId);
-
-        bool allowed =
-            await authorization.IsAuthorizedAsync(reached, null, cancellationToken).ConfigureAwait(false)
-            && await authorization.IsAuthorizedAsync(reached, capability.ToString(), cancellationToken).ConfigureAwait(false);
-
-        if (!allowed)
-        {
-            throw new StudioNotAuthorizedException(reached);
-        }
-    }
-
-    /// <summary>
-    /// Refuses an operation that acts on the whole of <paramref name="database" /> unless the visitor may
-    /// address that database as a whole - or it is exclusively the tenant in scope's.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <see cref="DatabaseReach" /> says which operations these are and where in Marten 9.31 that was
-    /// read: a progression correction, a rebuild, a high-water restart, a store-global agent, and the
-    /// cancelling of a rebuild all act on every tenant stored in the database. The resolver authorized
-    /// the scope in the URL, and with a tenant selected that is <c>(store, database, tenant)</c> - which
-    /// a host that scopes its policy by tenant may allow while refusing <c>(store, database, null)</c>.
-    /// </para>
-    /// <para>
-    /// With a tenant in scope, both questions are asked, tenant first: the one the scope names, and the
-    /// one the operation reaches. The second is left out only when the database is exclusively that
-    /// tenant's (<see cref="DatabaseReach.IsExclusivelyTenantsAsync" />), which is database-per-tenant:
-    /// there, the two questions are about the same data and the tenant one is the equivalent. Without a
-    /// tenant, the whole-database question is the only one.
-    /// </para>
-    /// <para>
-    /// <paramref name="database" /> is the database the operation actually reaches, which for a tenant
-    /// correction is the tenant's own - found through the tenancy, and not provably the one in the URL.
-    /// </para>
-    /// </remarks>
-    /// <exception cref="StudioNotAuthorizedException">
-    /// Either question is refused; the refused scope is on the exception for the audit entry.
-    /// </exception>
-    private async Task RequireWholeDatabaseAsync(
-        ResolvedScope resolved,
-        IMartenDatabase database,
-        StudioCapability capability,
-        CancellationToken cancellationToken)
-    {
-        if (!AnyPolicyAnswersFor(capability))
-        {
-            return;
-        }
-
-        string databaseId = database.Id.Identity;
-
-        if (resolved.TenantId is { Length: > 0 } tenantId)
-        {
-            await RequireDatabaseAsync(resolved, databaseId, tenantId, capability, cancellationToken).ConfigureAwait(false);
-
-            if (await DatabaseReach.IsExclusivelyTenantsAsync(resolved.Store, database, tenantId, cancellationToken).ConfigureAwait(false))
-            {
-                return;
-            }
-        }
-
-        await RequireDatabaseAsync(resolved, databaseId, tenantId: null, capability, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
     /// Refuses a per-agent control unless the visitor may address what that one agent processes.
     /// </summary>
     /// <remarks>
     /// An agent whose shard name carries a tenant - the per-tenant partitioning form,
     /// <c>{Name}:{ShardKey}:{tenant}</c> - processes that tenant's events and no one else's, and is asked
     /// about as that tenant: a visitor scoped to <c>acme</c> may stop <c>acme</c>'s agent, and is asked
-    /// separately about <c>globex</c>'s. Every other shard name - a store-global shard, or a bare
-    /// projection name, which <c>StartAgentAsync</c> expands to every shard of it - reaches every tenant
-    /// in the database, and is <see cref="RequireWholeDatabaseAsync" />.
+    /// separately about <c>globex</c>'s. Every other shard name - a store-global shard, including one
+    /// whose own identity happens to parse with a tenant
+    /// (<see cref="DatabaseReach.TenantOfShard(IDocumentStore, string)" />), or a bare projection name,
+    /// which <c>StartAgentAsync</c> expands to every shard of it - reaches every tenant in the database,
+    /// and is <see cref="DatabaseReachAuthorization.RequireWholeDatabaseAsync" />.
     /// </remarks>
     private async Task RequireAgentReachAsync(
         ResolvedScope resolved,
@@ -1410,9 +1267,9 @@ internal sealed class ProjectionDataService : IProjectionDataService
         StudioCapability capability,
         CancellationToken cancellationToken)
     {
-        if (DatabaseReach.TenantOfShard(shardName) is not { } shardTenant)
+        if (DatabaseReach.TenantOfShard(resolved.Store, shardName) is not { } shardTenant)
         {
-            await RequireWholeDatabaseAsync(resolved, resolved.Database, capability, cancellationToken).ConfigureAwait(false);
+            await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, capability, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -1420,22 +1277,12 @@ internal sealed class ProjectionDataService : IProjectionDataService
         // scope's own tenant was authorized by the resolver. Anything else is a different tenant's agent.
         if (resolved.TenantId is { Length: > 0 } scoped
             && !string.Equals(scoped, shardTenant, StringComparison.Ordinal)
-            && AnyPolicyAnswersFor(capability))
+            && reach.AnyPolicyAnswersFor(capability))
         {
-            await RequireDatabaseAsync(resolved, resolved.Database.Id.Identity, shardTenant, capability, cancellationToken)
+            await reach.RequireDatabaseAsync(resolved, resolved.Database.Id.Identity, shardTenant, capability, cancellationToken)
                 .ConfigureAwait(false);
         }
     }
-
-    /// <summary>Whether any policy would be asked about <paramref name="capability" /> at all.</summary>
-    /// <remarks>
-    /// The store policy answers reads, and the write policy - or the store policy when there is no write
-    /// policy - answers the capability. Only when neither is configured is every question a yes, and only
-    /// then is enumerating the store's databases (a query, on a master-table tenancy) not worth doing.
-    /// </remarks>
-    private bool AnyPolicyAnswersFor(StudioCapability capability) =>
-        !string.IsNullOrWhiteSpace(authorization.PolicyFor(null))
-        || !string.IsNullOrWhiteSpace(authorization.PolicyFor(capability.ToString()));
 
     /// <summary>
     /// One progression correction: advance the high-water mark, or pull progression back to the highest
@@ -1459,8 +1306,9 @@ internal sealed class ProjectionDataService : IProjectionDataService
     /// </para>
     /// <para>
     /// So the studio authorizes what the call reaches rather than what the URL names. Without a tenant,
-    /// that is every database of the store (<see cref="RequireEveryDatabaseOfTheStoreAsync" />, the same
-    /// check a coordinator pause gets), and the confirm dialog says the correction reaches all of them.
+    /// that is every database of the store
+    /// (<see cref="DatabaseReachAuthorization.RequireEveryDatabaseOfTheStoreAsync" />, the same check a
+    /// coordinator pause gets), and the confirm dialog says the correction reaches all of them.
     /// Before that, a visitor whose store policy allowed database A could advance database B's
     /// high-water mark, which makes every async projection in B treat the events it has not processed as
     /// already gone.
@@ -1477,7 +1325,16 @@ internal sealed class ProjectionDataService : IProjectionDataService
     /// visitor allowed one tenant of a conjoined database advance the mark every other tenant's async
     /// projections are read against, and those projections then skipped their unprocessed events for
     /// good. So the tenant's database is asked about as a whole
-    /// (<see cref="RequireWholeDatabaseAsync" />), unless it is exclusively that tenant's.
+    /// (<see cref="DatabaseReachAuthorization.RequireWholeDatabaseAsync" />), unless it is exclusively that
+    /// tenant's.
+    /// </para>
+    /// <para>
+    /// <b>And the tenant's database is found without asking the tenancy to find the tenant</b>
+    /// (<see cref="DatabaseReach.FindTenantDatabaseAsync" />). On a sharded tenancy
+    /// <c>GetTenantAsync</c> assigns and partitions a tenant it does not know, and on a single-server
+    /// tenancy it creates a database - and that call used to come first, so a <c>KnownTenantIds</c> entry
+    /// nobody had provisioned yet ran DDL before the whole-database question was asked, let alone
+    /// answered. A tenant no database of the store holds yet is refused with nothing provisioned.
     /// </para>
     /// <para>
     /// The audit target is what was corrected: the store key for a correction that reached every
@@ -1508,16 +1365,19 @@ internal sealed class ProjectionDataService : IProjectionDataService
 
             if (resolved.TenantId is not { Length: > 0 } tenantId)
             {
-                await RequireEveryDatabaseOfTheStoreAsync(resolved, capability, action, cancellationToken).ConfigureAwait(false);
+                await reach.RequireEveryDatabaseOfTheStoreAsync(resolved, capability, action, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                // The same two calls Marten is about to make, so the database named in the audit entry and
-                // authorized here is the one the correction then writes to.
-                IMartenDatabase tenantDatabase = await TenantDatabaseAsync(resolved.Store, tenantId).ConfigureAwait(false);
+                // The database Marten is about to reach, so the one named in the audit entry and authorized
+                // here is the one the correction then writes to - found without provisioning anything.
+                IMartenDatabase tenantDatabase =
+                    await DatabaseReach.FindTenantDatabaseAsync(resolved.Store, tenantId, cancellationToken).ConfigureAwait(false)
+                    ?? throw UnprovisionedTenant(resolved.Registration.Key, tenantId);
+
                 target = tenantDatabase.Id.Identity;
 
-                await RequireWholeDatabaseAsync(resolved, tenantDatabase, capability, cancellationToken).ConfigureAwait(false);
+                await reach.RequireWholeDatabaseAsync(resolved, tenantDatabase, capability, cancellationToken).ConfigureAwait(false);
             }
 
             string user = await authorization.UserNameAsync().ConfigureAwait(false);
@@ -1547,22 +1407,16 @@ internal sealed class ProjectionDataService : IProjectionDataService
     }
 
     /// <summary>
-    /// The database Marten's tenant overloads of the progression corrections reach for
-    /// <paramref name="tenantId" />.
+    /// The refusal a tenant correction gets for a tenant no database of the store holds yet.
     /// </summary>
     /// <remarks>
-    /// The same two calls <c>AdvancedOperations</c> makes in Marten 9.31 -
-    /// <c>TenantIdStyle.MaybeCorrectTenantId</c>, then <c>Tenancy.GetTenantAsync</c> - so the database
-    /// authorized here is the database the correction then writes to, and not one the studio inferred.
-    /// Pinned by <c>MartenApiSurfaceTest</c>.
+    /// Not a policy refusal - nothing was asked, and nothing was provisioned - so it is audited as a
+    /// failed action with this message rather than as a 9203 scope denial.
     /// </remarks>
-    private static async Task<IMartenDatabase> TenantDatabaseAsync(IDocumentStore store, string tenantId)
-    {
-        string corrected = store.Options.TenantIdStyle.MaybeCorrectTenantId(tenantId);
-        Tenant tenant = await store.Options.Tenancy.GetTenantAsync(corrected).ConfigureAwait(false);
-
-        return tenant.Database;
-    }
+    internal static KeyNotFoundException UnprovisionedTenant(string storeKey, string tenantId) =>
+        new($"No database of Marten store '{storeKey}' holds tenant '{tenantId}' yet. Marten Studio does not " +
+            "ask the tenancy to find it, because on a sharded or single-server tenancy finding a tenant " +
+            "provisions one.");
 
     // ------------------------------------------------------------------------------------------------
     // Helpers

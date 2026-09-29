@@ -73,6 +73,12 @@ internal sealed class QueryHarness : IAsyncDisposable
     /// <summary>The policy that refuses every write, for the write-policy denial test.</summary>
     public const string DenyWritesPolicy = "deny-writes";
 
+    /// <summary>
+    /// The policy that allows <see cref="Acme" /> and nothing wider - not the database as a whole, not
+    /// another tenant - the shape a host that scopes its policy by tenant has.
+    /// </summary>
+    public const string AcmeOnlyPolicy = "acme-only";
+
     private readonly ServiceProvider provider;
     private readonly IServiceScope scope;
     private readonly HarnessLogCollector logs;
@@ -150,7 +156,11 @@ internal sealed class QueryHarness : IAsyncDisposable
 
         services.AddLogging(builder => builder.AddProvider(logs));
         services.AddAuthorization(options =>
-            options.AddPolicy(DenyWritesPolicy, policy => policy.RequireAssertion(static _ => false)));
+        {
+            options.AddPolicy(DenyWritesPolicy, policy => policy.RequireAssertion(static _ => false));
+            options.AddPolicy(AcmeOnlyPolicy, policy => policy.RequireAssertion(
+                static context => context.Resource is MartenStoreResource { TenantId: Acme }));
+        });
         services.AddSingleton<AuthenticationStateProvider, HarnessAuthenticationStateProvider>();
 
         services.AddMarten(options =>

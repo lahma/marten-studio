@@ -13,8 +13,11 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using MartensCoordinator = Marten.Events.Daemon.Coordination.ProjectionCoordinator;
+using MartensExplicitCoordinator = Marten.Events.Daemon.Coordination.ExplicitProjectionCoordinator;
 
 namespace MartenStudio.Tests.Projections;
 
@@ -117,13 +120,45 @@ public class DaemonLookupOrderTests
         harness.Logs.AboveDebug().Should().BeEmpty();
     }
 
+    /// <summary>
+    /// The four coordinators Marten ships are its own - <c>AddAsyncDaemon</c>'s <c>ProjectionCoordinator</c>,
+    /// the generic one an ancillary store gets, and <c>MartenDaemonModeIsSolo()</c>'s
+    /// <c>ExplicitProjectionCoordinator</c> in both forms - and nothing else is, however it is shaped.
+    /// </summary>
+    /// <remarks>
+    /// The positive half is the anti-vacuity: a predicate that answered <see langword="false" /> for
+    /// everything would pass the negative half alone, and every Marten coordinator would then be asked
+    /// <c>DaemonForDatabase</c> - which is <c>FindOrCreateDatabase</c> - on every poll.
+    /// </remarks>
     [Fact]
-    public void Only_the_coordinators_Marten_ships_are_Martens_own()
+    public async Task Only_the_coordinators_Marten_ships_are_Martens_own()
     {
+        await using DocumentStore store = DocumentStore.For(PrimaryConnectionString);
+
+        await using var plain = new MartensCoordinator(store, NullLogger<MartensCoordinator>.Instance);
+        await using var ancillary = new global::Marten.Events.Daemon.Coordination.ProjectionCoordinator<IDocumentStore>(
+            store, NullLogger<MartensCoordinator>.Instance);
+        var explicitOne = new MartensExplicitCoordinator(store, NullLogger<MartensExplicitCoordinator>.Instance);
+        var explicitAncillary = new global::Marten.Events.Daemon.Coordination.ExplicitProjectionCoordinator<IDocumentStore>(
+            store, NullLogger<MartensExplicitCoordinator>.Instance);
+
+        DaemonAccessor.IsMartensOwn(plain).Should().BeTrue("AddAsyncDaemon registers it");
+        DaemonAccessor.IsMartensOwn(ancillary).Should().BeTrue("an ancillary store's AddAsyncDaemon registers the generic form");
+        DaemonAccessor.IsMartensOwn(explicitOne).Should().BeTrue("MartenDaemonModeIsSolo registers it");
+        DaemonAccessor.IsMartensOwn(explicitAncillary).Should().BeTrue("and its generic form for an ancillary store");
+
         DaemonAccessor.IsMartensOwn(new WolverineShapedCoordinator()).Should().BeFalse();
         DaemonAccessor.IsMartensOwn(new FailingCoordinator()).Should().BeFalse();
         DaemonAccessor.IsMartensOwn(new CountingForeignCoordinator()).Should().BeFalse();
+
+        // A host's own subclass may override the lookups however it likes, so the assembly is checked too.
+        await using var subclass = new HostSubclassedCoordinator(store);
+        DaemonAccessor.IsMartensOwn(subclass).Should().BeFalse("a subclass from another assembly is a foreign coordinator");
     }
+
+    /// <summary>A host's own subclass of Marten's coordinator, which the accessor must treat as foreign.</summary>
+    private sealed class HostSubclassedCoordinator(IDocumentStore store)
+        : MartensCoordinator(store, NullLogger<MartensCoordinator>.Instance);
 
     // ------------------------------------------------------------------------------------------------
     // F6: an unverified daemon is never handed out
@@ -369,9 +404,23 @@ public class ObservedTenancy : DispatchProxy
     private ITenancy? inner;
     private bool masterTableShape;
     private int findOrCreateDatabaseCalls;
+    private int getTenantCalls;
 
     /// <summary>How many times anything asked the tenancy to find or create a database by name.</summary>
     public int FindOrCreateDatabaseCalls => Volatile.Read(ref findOrCreateDatabaseCalls);
+
+    /// <summary>
+    /// How many times anything asked the tenancy for a tenant by id - <c>GetTenant</c> or
+    /// <c>GetTenantAsync</c> - which on a sharded or single-server tenancy provisions a tenant it does not
+    /// have.
+    /// </summary>
+    public int GetTenantCalls => Volatile.Read(ref getTenantCalls);
+
+    /// <summary>
+    /// Runs before every <c>BuildDatabases()</c> is forwarded - which is what <c>AllDatabases()</c> is - so
+    /// a test can reconcile a database's tenant list the way a sharded tenancy does on that call.
+    /// </summary>
+    public Action? OnBuildDatabases { get; set; }
 
     internal static ObservedTenancy Over(ITenancy tenancy, bool masterTableShape)
     {
@@ -390,6 +439,14 @@ public class ObservedTenancy : DispatchProxy
         {
             case "FindOrCreateDatabase":
                 Interlocked.Increment(ref findOrCreateDatabaseCalls);
+                break;
+
+            case "GetTenant" or "GetTenantAsync":
+                Interlocked.Increment(ref getTenantCalls);
+                break;
+
+            case "BuildDatabases":
+                OnBuildDatabases?.Invoke();
                 break;
 
             case "get_Default" when masterTableShape:
