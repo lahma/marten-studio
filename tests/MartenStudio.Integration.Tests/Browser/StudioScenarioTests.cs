@@ -37,11 +37,6 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
 
     private static readonly Regex Digits = new(@"\d", RegexOptions.None, TimeSpan.FromSeconds(5));
 
-    private static void Write(string line) => TestContext.Current.TestOutputHelper?.WriteLine(line);
-
-    private static string Join(IReadOnlyList<string> lines) =>
-        lines.Count == 0 ? "(none)" : Environment.NewLine + "  " + string.Join(Environment.NewLine + "  ", lines);
-
     // ------------------------------------------------------------------------------------------------
     // 1. The circuit connects and the landing page is live
     // ------------------------------------------------------------------------------------------------
@@ -364,74 +359,18 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
         });
     }
 
-    /// <summary>
-    /// Every arrow is a row and every row an arrow, compared by the <c>data-edge</c> identity both carry: a
-    /// table that listed fewer rows than the picture has arrows is a screen telling two stories.
-    /// </summary>
-    private static async Task AssertTheTableListsTheDiagramAsync(ILocator edges, ILocator rows, string where)
-    {
-        (await edges.CountAsync()).Should().BeGreaterThan(0, where + " draws something");
-
-        List<string> drawn = [];
-        foreach (ILocator edge in await edges.AllAsync())
-        {
-            drawn.Add(await edge.GetAttributeAsync("data-edge") ?? string.Empty);
-        }
-
-        List<string> listed = [];
-        foreach (ILocator row in await rows.AllAsync())
-        {
-            listed.Add(await row.GetAttributeAsync("data-edge") ?? string.Empty);
-        }
-
-        listed.Should().BeEquivalentTo(drawn,
-            "in " + where + " every row of the accessible table is an arrow on the diagram and every arrow a row");
-    }
-
     // ------------------------------------------------------------------------------------------------
     // The runner
     // ------------------------------------------------------------------------------------------------
 
-    /// <summary>
-    /// Runs one scenario in a browser context of its own, and on failure leaves a screenshot and the
-    /// host's log behind.
-    /// </summary>
+    /// <summary>Runs one scenario through the suite's shared runner - see <see cref="BrowserScenario" />.</summary>
     /// <param name="name">The scenario's name, which is the screenshot's file name.</param>
     /// <param name="host">The sample host to drive.</param>
     /// <param name="user">Which demo user to sign in as.</param>
     /// <param name="body">The scenario.</param>
-    private async Task RunAsync(string name, SampleHost host, string user, Func<StudioPage, Task> body)
-    {
-        await using StudioPage studio = await StudioPage.SignInAsync(fixture.Browser, host, user);
+    private Task RunAsync(string name, SampleHost host, string user, Func<StudioPage, Task> body) =>
+        BrowserScenario.RunAsync(fixture.Browser, name, host, user, body);
 
-        try
-        {
-            await body(studio);
-        }
-        catch
-        {
-            string directory = Path.Combine(AppContext.BaseDirectory, "browser-screenshots");
-            Directory.CreateDirectory(directory);
-            string path = Path.Combine(directory, name + ".png");
-
-            try
-            {
-                await studio.ScreenshotAsync(path);
-                Write("Screenshot: " + path);
-            }
-            catch (PlaywrightException exception)
-            {
-                Write("No screenshot could be taken: " + exception.Message);
-            }
-
-            Write("Page errors:      " + Join(studio.PageErrors));
-            Write("Console problems: " + Join(studio.ConsoleProblems));
-            Write("Failed responses: " + Join(studio.FailedResponses));
-            Write("WebSockets:       " + Join(studio.WebSockets));
-            Write("Sample host (pid " + host.ProcessId + ") log, last 60 lines:");
-            Write(host.LogTail());
-
-            throw;
-        }
-    }
+    private static Task AssertTheTableListsTheDiagramAsync(ILocator edges, ILocator rows, string where) =>
+        BrowserScenario.AssertTheTableListsTheDiagramAsync(edges, rows, where);
 }

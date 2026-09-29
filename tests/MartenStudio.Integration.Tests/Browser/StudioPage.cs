@@ -358,6 +358,51 @@ internal sealed class StudioPage : IAsyncDisposable
     }
 
     /// <summary>
+    /// How far the studio's content column is wider than itself: <c>.ms-content</c>'s
+    /// <c>scrollWidth - clientWidth</c>, the 0.2.0 UX pass's metric.
+    /// </summary>
+    /// <remarks>
+    /// Anything above zero is a page the shell cuts off on the right (D25): <c>.ms-main</c> hides horizontal
+    /// overflow on purpose, so a wide table that is not in its own scroll region is not scrollable at all,
+    /// and the only symptom is this number. <c>-1</c> means there is no <c>.ms-content</c>, which is a page
+    /// that is not the studio's.
+    /// </remarks>
+    public Task<int> ContentOverflowAsync() =>
+        Page.EvaluateAsync<int>(
+            "() => { const c = document.querySelector('.ms-content'); return c === null ? -1 : c.scrollWidth - c.clientWidth; }");
+
+    /// <summary>Fails the scenario if the content column scrolls sideways - see <see cref="ContentOverflowAsync" />.</summary>
+    /// <param name="where">Which page this is, for the failure message.</param>
+    public async Task AssertNoSidewaysScrollAsync(string where)
+    {
+        int overflow = await ContentOverflowAsync();
+
+        overflow.Should().Be(
+            0,
+            "the shell never scrolls sideways (D25): a wide table sits in its own scroll region, so .ms-content's "
+            + "scrollWidth - clientWidth has to be 0 on " + where + ", and it was " + overflow);
+    }
+
+    /// <summary>
+    /// Where a link really goes: its <c>href</c> resolved against the document's base, the way the browser
+    /// resolves it when it is clicked.
+    /// </summary>
+    /// <remarks>
+    /// The studio's links are relative to a studio-rooted <c>&lt;base href&gt;</c> (D11), so the attribute on
+    /// its own says nothing about a mount path. The attribute rather than the <c>href</c> property, because
+    /// the diagram's nodes are SVG <c>&lt;a&gt;</c> elements, whose <c>href</c> is an animated string rather
+    /// than a URL.
+    /// </remarks>
+    /// <param name="link">An <c>&lt;a&gt;</c>, HTML or SVG.</param>
+    public static Task<string> ResolvedHrefAsync(ILocator link)
+    {
+        ArgumentNullException.ThrowIfNull(link);
+
+        return link.EvaluateAsync<string>(
+            "a => new URL(a.getAttribute('href') ?? a.getAttribute('xlink:href') ?? '', document.baseURI).href");
+    }
+
+    /// <summary>
     /// Fails the scenario if the page complained or the server refused anything.
     /// </summary>
     /// <param name="because">What the scenario was doing, for the failure message.</param>

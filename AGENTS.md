@@ -673,7 +673,7 @@ src/MartenStudio/Services/Relationships/      The relationship graph service, it
 src/MartenStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
 tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, page and panel - no database
 tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both ways, visibility, bounded counts
-tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: six scenarios, the D19 gate, the large-data pass
+tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: ten scenarios, the D19 gate, the large-data passes
 src/MartenStudio/Services/Database/       The database browser: the per-visitor gate, the schema matcher, the
                                          ownership classifier, the catalog cache and the object service
 src/MartenStudio/Components/Pages/Database/  The database browser's screens: the rail, the kind tabs and grids,

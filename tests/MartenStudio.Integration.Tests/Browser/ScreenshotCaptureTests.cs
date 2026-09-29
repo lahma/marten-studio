@@ -6,7 +6,7 @@ namespace MartenStudio.Integration.Tests.Browser;
 
 /// <summary>Whether the README screenshot set is retaken by this run.</summary>
 /// <remarks>
-/// Opt-in, and emphatically not part of an ordinary run: this writes nine tracked PNGs into
+/// Opt-in, and emphatically not part of an ordinary run: this writes thirteen tracked PNGs into
 /// <c>docs/screenshots/</c>. A suite that rewrote checked-in binaries on every <c>dotnet test</c> would
 /// put a diff in front of everybody who ran the tests and make "is this change intentional" unanswerable.
 /// </remarks>
@@ -49,7 +49,8 @@ public sealed class ScreenshotFactAttribute : FactAttribute
 }
 
 /// <summary>
-/// Retakes the nine screenshots <c>README.md</c> links to, from the real studio in a real browser.
+/// Retakes the screenshots <c>README.md</c> links to, from the real studio in a real browser: nine of the
+/// studio's screens, and four of the database browser.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -63,6 +64,11 @@ public sealed class ScreenshotFactAttribute : FactAttribute
 /// <b>The same shape as the existing set:</b> a 1440×900 viewport, the light theme chosen explicitly
 /// rather than inherited from the machine, and a full-page capture — which is why several of the files
 /// are taller than 900 pixels, exactly as the originals are.
+/// </para>
+/// <para>
+/// <b>Two facts, so either set can be retaken alone.</b> The database browser's four arrived in 0.3.0; a
+/// run filtered to <see cref="Retake_the_database_browser_screenshots" /> rewrites those four and leaves the
+/// other nine byte for byte, so adding a screen never puts a diff on a screenshot nobody meant to change.
 /// </para>
 /// </remarks>
 [Collection(BrowserSuite.Name)]
@@ -132,6 +138,63 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
         await CaptureAsync(studio, directory, "relationships");
 
         studio.AssertClean("retaking the README screenshots");
+    }
+
+    /// <summary>
+    /// The database browser's four: the browser on <c>quartz</c>'s tables, <c>qrtz_triggers</c>' rows with a
+    /// filter chip, one trigger's row detail with its references, and the Relationships screen in the Both
+    /// view narrowed to the Quartz tables.
+    /// </summary>
+    /// <remarks>
+    /// Each capture waits for the thing its name promises before it is taken - the chip, the references, the
+    /// diagram - because a picture of a spinner under the right file name is the failure a screenshot set
+    /// nobody looks at has.
+    /// </remarks>
+    [ScreenshotFact]
+    public async Task Retake_the_database_browser_screenshots()
+    {
+        string directory = Path.Combine(SampleHost.RepositoryRoot(), "docs", "screenshots");
+        Directory.CreateDirectory(directory);
+
+        SampleHost host = fixture.Root;
+
+        await using StudioPage studio = await StudioPage.SignInAsync(fixture.Browser, host, "admin");
+        IPage page = studio.Page;
+
+        // The browser, on the Tables kind of the quartz schema: the rail with its schemas and the current
+        // schema's tables, the kind tabs, the owner filter and the grid with the Quartz.NET hints.
+        await studio.GoAsync(host.StudioUrl("database?schema=quartz&kind=tables"));
+        await studio.SetThemeAsync("light");
+        await page.Locator("table.ms-db-relations tbody a.ms-db-name[title='quartz.qrtz_triggers']").WaitForAsync();
+        await page.Locator(".ms-db-rail-tables .ms-rail-list .ms-rail-item").First.WaitForAsync();
+        await CaptureAsync(studio, directory, "database-browser");
+
+        // qrtz_triggers' Rows tab with a filter: the chip, the index verdict, the tick timestamps' date hints.
+        await studio.GoAsync(host.StudioUrl(
+            "database/object?schema=quartz&name=qrtz_triggers&tab=rows&q=" + Uri.EscapeDataString("trigger_state = WAITING")));
+        await page.Locator(".ms-row-filter-strip .ms-row-chip").First.WaitForAsync();
+        await page.Locator(".ms-row-tab[data-state='loaded'][aria-busy='false']").WaitForAsync();
+        await page.Locator(".ms-row-grid tbody .ms-row-date-hint").First.WaitForAsync();
+        await CaptureAsync(studio, directory, "database-rows");
+
+        // One trigger, opened by its key: every column, and what it points at and what points at it.
+        await page.Locator(".ms-row-grid tbody a.ms-row-open-link").First.ClickAsync();
+        await page.WaitForURLAsync(static url => url.Contains("/database/row", StringComparison.Ordinal));
+        await page.Locator(".ms-row-detail-references section.ms-row-refs[aria-label='Referenced by']").WaitForAsync();
+        await page.Locator(".ms-row-detail-references li.ms-row-ref").First.WaitForAsync();
+        await CaptureAsync(studio, directory, "database-row-detail");
+
+        // The Relationships screen in the Both view, narrowed to quartz: the document types' keys beside the
+        // Quartz.NET tables' own.
+        await studio.GoAsync(host.StudioUrl("relationships?schema=quartz"));
+        await page.Locator("svg.ms-graph-svg .ms-graph-node-table").First.WaitForAsync();
+        (await page.Locator(".ms-graph-views button[aria-pressed='true']").InnerTextAsync()).Should().StartWith(
+            "Both", "the capture is of the Both view");
+        (await page.Locator(".ms-graph-schemas button[aria-pressed='true']").InnerTextAsync()).Should().Contain(
+            "quartz", "the capture is narrowed to the Quartz tables");
+        await CaptureAsync(studio, directory, "relationships-quartz");
+
+        studio.AssertClean("retaking the database browser's README screenshots");
     }
 
     private static async Task CaptureAsync(StudioPage studio, string directory, string name)
