@@ -27,9 +27,15 @@ namespace MartenStudio.Services.Database;
 /// </description></item>
 /// <item><description>
 /// Rows of a Marten document or event table, or of Marten's infrastructure, are <b>never</b> read here;
-/// a foreign table's rows never; a view reading a hidden type's table, never; a view that reaches into a
-/// schema the visitor may not see, never; and - while any type may be hidden - a view that calls a
-/// function, whose body could read anything.
+/// a foreign table's rows never - nor those of a partitioned table with a foreign partition, a table with
+/// a foreign inheritance child, or a view that reads any of them; a view reading Marten's own tables, or
+/// another store's its policies refuse, never; a view reading a hidden type's table, never; a view that
+/// reaches into a schema the visitor may not see - a table, a function, a type, a collation, a text search
+/// object, the schema's own name as a value - never, nor a table (or a view over one) whose partitions or
+/// children sit in such a schema; a view calling a function the studio cannot follow (a body that is
+/// source text), while a schema the reading role may read is withheld - never; and, while any type may be
+/// hidden, a view that calls such a function at all. A schema an extension owns is neither browsable nor
+/// withheld for these purposes.
 /// </description></item>
 /// <item><description>
 /// Another registered store's objects keep their classification, but its identity (store key and
@@ -47,6 +53,9 @@ internal sealed class DatabaseGate
     private readonly HashSet<string> storeSchemas;
     private readonly HashSet<string> browsable;
     private readonly HashSet<string> withheld;
+    private readonly HashSet<string> extensionSchemas;
+    private readonly bool readableWithheld;
+    private readonly bool anyWithheld;
     private readonly DatabaseRefusal closedBy;
     private readonly string? closedDenial;
     private readonly IReadOnlyList<string> configuredEntries;
@@ -126,6 +135,13 @@ internal sealed class DatabaseGate
             StringComparer.Ordinal);
         WithheldSchemaCount = withheld.Count;
 
+        extensionSchemas = new HashSet<string>(liveSchemas.Where(static x => x.OwnedByExtension).Select(static x => x.Name), StringComparer.Ordinal);
+
+        // A withheld schema the reading role has USAGE on: somewhere a function the studio cannot see into
+        // could read, as that role, and hand back through a view.
+        readableWithheld = liveSchemas.Any(x => x.HasUsage && withheld.Contains(x.Name) && !extensionSchemas.Contains(x.Name));
+        anyWithheld = withheld.Any(x => !extensionSchemas.Contains(x));
+
         DatabaseRefusal stateRefusal = closedBy != DatabaseRefusal.None
             ? closedBy
             : configuredEntries.Count == 0 ? DatabaseRefusal.SchemaNotBrowsable : DatabaseRefusal.None;
@@ -181,6 +197,42 @@ internal sealed class DatabaseGate
     public const string HiddenDependencyDenial =
         "This view reads a table whose document type the host hides from the studio " +
         "(MartenStudioOptions.IsDocumentTypeVisible), so its rows and its query are not shown.";
+
+    /// <summary>What a partitioned table with a foreign partition, or a table with a foreign child, says.</summary>
+    public const string ForeignDescendantDenial =
+        "One of its partitions (or inheritance children) is a foreign table: reading its rows would reach the " +
+        "remote server, so they are never read.";
+
+    /// <summary>What a view whose rows would be read from a foreign table says.</summary>
+    public const string ForeignViewDenial =
+        "This view reads a foreign table - directly, or through a partition or an inheritance child of a table " +
+        "it reads - so reading its rows would reach the remote server, and they are never read.";
+
+    /// <summary>What a relation whose partitions or children sit in a withheld schema says about its rows.</summary>
+    public const string WithheldDescendantDenial =
+        "Some of its rows are stored in a partition or child table in a schema you cannot see, so they are " +
+        "not shown.";
+
+    /// <summary>What a view over such a relation says about its rows.</summary>
+    public const string WithheldDescendantViewDenial =
+        "This view reads a table some of whose rows are stored in a partition or child table in a schema you " +
+        "cannot see, so its rows are not shown.";
+
+    /// <summary>What a view that reads one of Marten's own tables says about its rows.</summary>
+    public const string MartenDependencyDenial =
+        "This view reads one of Marten's own tables - a document or event table, or Marten's bookkeeping - " +
+        "whose rows are never read raw: open them in Documents or Events, where tenancy, soft delete and the " +
+        "store's serializer apply.";
+
+    /// <summary>
+    /// What a view that calls a function the studio cannot see into says about its rows, while some schema
+    /// the reading role may read is withheld from this visitor.
+    /// </summary>
+    public const string OpaqueWithheldDenial =
+        "This view calls a function whose body the studio cannot follow (PL/pgSQL, or SQL in a string), and " +
+        "there are schemas the studio's Postgres role can read that you cannot see here: the function could " +
+        "read them, so its rows are not shown. A function with a SQL-standard body (BEGIN ATOMIC or RETURN) " +
+        "is followed instead.";
 
     /// <summary>What a view over a document table no store declares says, while hiding is configured.</summary>
     public const string UndeclaredDocumentDenial =
@@ -240,6 +292,16 @@ internal sealed class DatabaseGate
         return !BrowsableSchemaMatcher.IsSystemSchema(schema) && !CanSeeStructure(schema);
     }
 
+    /// <summary>
+    /// Whether a view, or a table's partition, that reaches into <paramref name="schema" /> reaches into a
+    /// schema withheld from this visitor: <see cref="IsWithheld" />, except for a schema an extension owns
+    /// (<c>cron</c>, TimescaleDB's internals). Those are never browsable - <c>"*"</c> leaves them out - and
+    /// never withheld either, for this purpose: a view over <c>cron.job</c> or a hypertable whose chunks live
+    /// in <c>_timescaledb_internal</c> is somebody's object that the reading role may read, and refusing it
+    /// would refuse it under <c>"*"</c> too. The name is still masked in text.
+    /// </summary>
+    public bool IsWithheldDependency(string schema) => IsWithheld(schema) && !extensionSchemas.Contains(schema);
+
     /// <summary>The names of the live schemas this visitor is not told about - what <see cref="Redact" /> masks.</summary>
     public IReadOnlySet<string> WithheldSchemas => withheld;
 
@@ -273,8 +335,10 @@ internal sealed class DatabaseGate
     /// <see langword="null" /> when nothing it touches is a reason. Name and owner play no part: an
     /// <c>mt_</c>-named view over a hidden type's table is refused like any other.
     /// </summary>
-    /// <param name="dependencies">The relations it reads, through other views too.</param>
-    /// <param name="references">The functions, operators, sequences and types it refers to.</param>
+    /// <param name="dependencies">The relations it reads, through other views and followed functions too.</param>
+    /// <param name="references">
+    /// The functions, operators, sequences, types, collations, text search objects and schemas it refers to.
+    /// </param>
     public DatabaseRowAccess? ViewRefusal(
         IEnumerable<CatalogViewDependency> dependencies,
         IEnumerable<CatalogViewReference> references)
@@ -291,12 +355,12 @@ internal sealed class DatabaseGate
         {
             hidden |= Classifier.IsHiddenTable(dependency.Schema, dependency.Name);
             undeclared |= Classifier.MayHideDocumentTypes && Classifier.IsUndeclaredDocumentTable(dependency.Schema, dependency.Name);
-            reachesWithheld |= IsWithheld(dependency.Schema);
+            reachesWithheld |= IsWithheldDependency(dependency.Schema);
         }
 
         foreach (CatalogViewReference reference in references)
         {
-            reachesWithheld |= IsWithheld(reference.Schema);
+            reachesWithheld |= IsWithheldDependency(reference.Schema);
             callsCode |= reference.Kind == "f" && reference.UserCode;
         }
 
@@ -374,7 +438,40 @@ internal sealed class DatabaseGate
     /// For a view, what <see cref="ViewRefusal" /> said about what it reads, or <see langword="null" />. It is
     /// checked first, whatever the view is called or whoever owns it.
     /// </param>
-    public DatabaseRowAccess RowsFor(CatalogRelation relation, DatabaseObjectOwnership ownership, DatabaseRowAccess? viewRefusal)
+    /// <param name="viewReads">
+    /// For a view or materialized view, the relations it reads (<see cref="CatalogViewDependency" />): what
+    /// decides whether reading its rows would read a foreign table's, Marten's own, another store's, or rows
+    /// stored in a withheld schema.
+    /// </param>
+    /// <param name="viewReferences">
+    /// For a view or materialized view, the functions and other objects it refers to: what decides whether it
+    /// calls code the studio cannot see into while something the reading role may read is withheld.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <b>Foreign rows are never reached indirectly.</b> A foreign table is refused; so is a partitioned
+    /// table with a foreign partition, a table with a foreign inheritance child, and a view that reads any of
+    /// the three - every one of them reads the remote server when it is read. A materialized view is not: its
+    /// rows are stored here, and a view reaching a foreign table only through one reads nothing remote.
+    /// </para>
+    /// <para>
+    /// <b>Nor are Marten's own rows, or another store's.</b> A view (or materialized view) that reads a
+    /// Marten document or event table or Marten's bookkeeping is refused its rows as the table itself is,
+    /// and one that reads another store's table is refused whatever that store's own policies refuse. A
+    /// view over one of this store's projection or extended tables - relational data Marten manages - is not.
+    /// </para>
+    /// <para>
+    /// Only the rows: a view's query names what it reads, and what it reads here is listed anyway. The
+    /// facts that are about its query too - a hidden type's table, a withheld schema - are
+    /// <see cref="ViewRefusal" />'s.
+    /// </para>
+    /// </remarks>
+    public DatabaseRowAccess RowsFor(
+        CatalogRelation relation,
+        DatabaseObjectOwnership ownership,
+        DatabaseRowAccess? viewRefusal,
+        IReadOnlyList<CatalogViewDependency>? viewReads = null,
+        IReadOnlyList<CatalogViewReference>? viewReferences = null)
     {
         ArgumentNullException.ThrowIfNull(relation);
         ArgumentNullException.ThrowIfNull(ownership);
@@ -413,6 +510,16 @@ internal sealed class DatabaseGate
                 (relation.ForeignServer is { } server ? " '" + server + "'" : string.Empty) + ".");
         }
 
+        if (ForeignReach(relation, viewReads) is { } foreign)
+        {
+            return foreign;
+        }
+
+        if (MartenReach(relation, viewReads) is { } marten)
+        {
+            return marten;
+        }
+
         if (!DatabaseCatalogQueries.IsQuotable(relation.Schema) || !DatabaseCatalogQueries.IsQuotable(relation.Name))
         {
             return DatabaseRowAccess.Refused(
@@ -429,17 +536,31 @@ internal sealed class DatabaseGate
 
         // Another store's Marten-managed table: this store's tenant-less grant says nothing about that
         // store, so its own policies are asked (by DatabaseAccess, into otherStores) - and a store nobody
-        // asked about is refused rather than assumed.
-        if (ownership.StoreKey is { } key && IsOtherStore(key))
+        // asked about is refused rather than assumed. A view reading one is the same read.
+        if (OtherStoreRows(ownership) is { } otherStore)
         {
-            DatabaseRowAccess other = otherStores.TryGetValue(key, out DatabaseStoreAccess? access)
-                ? access.Rows
-                : DatabaseRowAccess.Refused(DatabaseRefusal.StorePolicy, OtherStorePolicyDenial);
+            return otherStore;
+        }
 
-            if (!other.Allowed)
+        if (relation.Kind is "v" or "m" && viewReads is not null)
+        {
+            foreach (CatalogViewDependency read in viewReads)
             {
-                return other;
+                if (Classifier.ClassifyRelation(read.Schema, read.Name) is { } readOwnership && OtherStoreRows(readOwnership) is { } refused)
+                {
+                    return refused;
+                }
             }
+        }
+
+        if (WithheldReach(relation, viewReads) is { } withheldRows)
+        {
+            return withheldRows;
+        }
+
+        if (OpaqueReach(relation, viewReferences) is { } opaque)
+        {
+            return opaque;
         }
 
         if (!relation.Readable)
@@ -453,6 +574,140 @@ internal sealed class DatabaseGate
         }
 
         return DatabaseRowAccess.Granted;
+    }
+
+    /// <summary>
+    /// Why reading <paramref name="relation" />'s rows would read a foreign table's - a partitioned table
+    /// with a foreign partition, a table with a foreign inheritance child, or a view reading one of those or
+    /// a foreign table directly - or <see langword="null" />. A path through a materialized view does not
+    /// count: its rows are stored here.
+    /// </summary>
+    /// <param name="relation">The relation, as the catalog has it.</param>
+    /// <param name="viewReads">For a view, what it reads; ignored for anything else.</param>
+    internal static DatabaseRowAccess? ForeignReach(CatalogRelation relation, IEnumerable<CatalogViewDependency>? viewReads)
+    {
+        ArgumentNullException.ThrowIfNull(relation);
+
+        if (relation.Kind is "p" or "r" && relation.ForeignDescendant)
+        {
+            return DatabaseRowAccess.Refused(DatabaseRefusal.ForeignTable, ForeignDescendantDenial);
+        }
+
+        if (relation.Kind != "v" || viewReads is null)
+        {
+            return null;
+        }
+
+        foreach (CatalogViewDependency read in viewReads)
+        {
+            if (!read.ThroughMaterializedView && (read.Kind == "f" || (read.Kind is "p" or "r" && read.ForeignDescendant)))
+            {
+                return DatabaseRowAccess.Refused(DatabaseRefusal.ForeignTable, ForeignViewDenial);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Why a view's or materialized view's rows would be Marten's own rows, read raw - it reads a document
+    /// or event table, or Marten's bookkeeping, directly or through anything - or <see langword="null" />.
+    /// A projection's or an extended table is Marten-managed relational data, and not a reason.
+    /// </summary>
+    private DatabaseRowAccess? MartenReach(CatalogRelation relation, IReadOnlyList<CatalogViewDependency>? viewReads)
+    {
+        if (relation.Kind is not ("v" or "m") || viewReads is null)
+        {
+            return null;
+        }
+
+        foreach (CatalogViewDependency read in viewReads)
+        {
+            if (Classifier.ClassifyRelation(read.Schema, read.Name) is
+                { Owner: DatabaseObjectOwner.MartenDocument or DatabaseObjectOwner.MartenEventStore or DatabaseObjectOwner.MartenInfrastructure })
+            {
+                return DatabaseRowAccess.Refused(DatabaseRefusal.MartenOwned, MartenDependencyDenial);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// What another store's own policies say about the rows of an object <paramref name="ownership" /> says is
+    /// that store's - or <see langword="null" /> when it is this store's, nobody's, or that store allows them.
+    /// </summary>
+    private DatabaseRowAccess? OtherStoreRows(DatabaseObjectOwnership ownership)
+    {
+        if (ownership.StoreKey is not { } key || !IsOtherStore(key))
+        {
+            return null;
+        }
+
+        DatabaseRowAccess other = otherStores.TryGetValue(key, out DatabaseStoreAccess? access)
+            ? access.Rows
+            : DatabaseRowAccess.Refused(DatabaseRefusal.StorePolicy, OtherStorePolicyDenial);
+
+        return other.Allowed ? null : other;
+    }
+
+    /// <summary>
+    /// Why <paramref name="relation" />'s rows would show rows stored in a schema this visitor may not see -
+    /// a partition or inheritance child there, of the relation or of a table a view reads - or
+    /// <see langword="null" />. A materialized view counts too: its rows were copied out of those tables.
+    /// </summary>
+    private DatabaseRowAccess? WithheldReach(CatalogRelation relation, IReadOnlyList<CatalogViewDependency>? viewReads)
+    {
+        if (relation.Kind is "p" or "r" && relation.DescendantSchemas is { } own && own.Any(IsWithheldDependency))
+        {
+            return DatabaseRowAccess.Refused(DatabaseRefusal.WithheldDependency, WithheldDescendantDenial);
+        }
+
+        if (relation.Kind is not ("v" or "m") || viewReads is null)
+        {
+            return null;
+        }
+
+        foreach (CatalogViewDependency read in viewReads)
+        {
+            if (read.Kind is "p" or "r" && read.DescendantSchemas is { } schemas && schemas.Any(IsWithheldDependency))
+            {
+                return DatabaseRowAccess.Refused(DatabaseRefusal.WithheldDependency, WithheldDescendantViewDenial);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Why a view's rows could hold whatever a function the studio cannot see into read from a withheld
+    /// schema, or <see langword="null" />.
+    /// </summary>
+    /// <remarks>
+    /// A function whose body is source text - PL/pgSQL, or SQL in a string - records no dependency on what it
+    /// reads, so a view calling it can hand back a withheld schema's rows while looking like a view over
+    /// nothing. It is refused whenever the reading role could read a withheld schema at all (it has
+    /// <c>USAGE</c> on one), and - when the function is <c>SECURITY DEFINER</c>, and so reads as its owner -
+    /// whenever any schema is withheld. The residual is D27's: under <c>"*"</c> with a <c>SqlConsoleRole</c>
+    /// narrowed to the browsable schemas, nothing is withheld that the role may read, and such a view is
+    /// read; what its function reads is then limited by the role, as every other read is.
+    /// </remarks>
+    private DatabaseRowAccess? OpaqueReach(CatalogRelation relation, IReadOnlyList<CatalogViewReference>? viewReferences)
+    {
+        if (relation.Kind is not ("v" or "m") || viewReferences is null || (!readableWithheld && !anyWithheld))
+        {
+            return null;
+        }
+
+        foreach (CatalogViewReference reference in viewReferences)
+        {
+            if (reference.Kind == "f" && reference.UserCode && (readableWithheld || (reference.SecurityDefiner && anyWithheld)))
+            {
+                return DatabaseRowAccess.Refused(DatabaseRefusal.WithheldDependency, OpaqueWithheldDenial);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>What a schema outside <see cref="MartenStudioOptions.BrowsableSchemas" /> says.</summary>

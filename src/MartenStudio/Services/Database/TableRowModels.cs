@@ -303,7 +303,11 @@ internal sealed record TableRowRequest
     /// </summary>
     public bool RunAnyway { get; init; }
 
-    /// <summary>Whether this is a first page rather than a page turn.</summary>
+    /// <summary>
+    /// Whether this asks for a first page rather than a later one. Never what decides whether a read is
+    /// audited: a cursor or an offset can be the first thing a circuit asks for (a pasted link), so the audit
+    /// goes by the read's signature instead (<see cref="TableRowService.AuditSignature" />).
+    /// </summary>
     public bool IsFirstPage => Cursor is null && Offset <= 0;
 }
 
@@ -458,6 +462,13 @@ internal sealed record TableRowPage
     /// <summary>How the page was walked.</summary>
     public TableRowPaging? Paging { get; init; }
 
+    /// <summary>
+    /// Whether the page's byte budget (<see cref="TableRowCaps.Budget" />) was spent, so that cells past it
+    /// were cut to <see cref="TableRowCaps.OverBudget" /> bytes - each marked cut, and each one expansion
+    /// from its whole value.
+    /// </summary>
+    public bool Shortened { get; init; }
+
     /// <summary>The filter and sort, with their index verdicts.</summary>
     public RowFilterVerdict Verdict { get; init; } = RowFilterVerdict.Empty;
 
@@ -507,6 +518,12 @@ internal sealed record TableRowDetail
 
     /// <summary>One cell per column, cut at <see cref="TableRowCaps.Detail" />.</summary>
     public IReadOnlyList<SqlCell> Cells { get; init; } = [];
+
+    /// <summary>
+    /// Whether the row's byte budget (<see cref="TableRowCaps.Budget" />) was spent, so that the cells past it
+    /// were cut to <see cref="TableRowCaps.OverBudget" /> bytes.
+    /// </summary>
+    public bool Shortened { get; init; }
 
     /// <summary>Whether row-level security is on.</summary>
     public bool RowSecurity { get; init; }
@@ -733,10 +750,16 @@ internal sealed record TableCellValue
     /// <summary>Whether it was cut at <see cref="Cap" />.</summary>
     public bool Truncated { get; init; }
 
-    /// <summary>The value's full length in bytes (of its text form, for everything but <c>bytea</c>).</summary>
+    /// <summary>
+    /// The value's full length in bytes (of its text form, for everything but <c>bytea</c>) - in the
+    /// database's own encoding, which is UTF-8 almost everywhere.
+    /// </summary>
     public long FullLength { get; init; }
 
-    /// <summary>The cap it was read under: characters, or bytes for <c>bytea</c>.</summary>
+    /// <summary>
+    /// The cap it was read under, in bytes: <see cref="MartenStudioOptions.MaxInlineDocumentBytes" />. A text
+    /// value is cut to that many bytes of UTF-8 on a character boundary, a <c>bytea</c> to that many bytes.
+    /// </summary>
     public int Cap { get; init; }
 
     /// <summary>The exact SQL text.</summary>

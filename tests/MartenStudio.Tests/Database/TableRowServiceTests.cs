@@ -377,6 +377,173 @@ public class TableRowServiceTests
     public void A_cursor_that_is_not_one_decodes_to_nothing(string? value) =>
         TableRowCursor.Decode(value).Should().BeNull();
 
+    // ---------------------------------------------------------------------------------------------------
+    // DB-3-fix F4: a key map names exactly one row key, or it is a refusal
+    // ---------------------------------------------------------------------------------------------------
+
+    private static readonly DatabaseRowKey StockKey = new(DatabaseRowKeySource.PrimaryKey, "stock_pkey", ["region_code", "warehouse_no", "sku"]);
+
+    [Fact]
+    public void A_key_is_matched_by_name_or_by_its_only_case_variant()
+    {
+        TableRowService.MatchedKey? exact = TableRowService.KeyOf(
+            StockKey, "r", new Dictionary<string, string> { ["sku"] = "S", ["region_code"] = "SE", ["warehouse_no"] = "1" }, allowLocator: false);
+
+        exact!.Columns.Should().Equal("region_code", "warehouse_no", "sku");
+        exact.Values.Should().Equal("SE", "1", "S");
+
+        TableRowService.KeyOf(
+                StockKey, "r", new Dictionary<string, string> { ["REGION_CODE"] = "SE", ["warehouse_no"] = "1", ["Sku"] = "S" }, allowLocator: false)!
+            .Values.Should().Equal("SE", "1", "S");
+    }
+
+    [Fact]
+    public void Two_case_variants_of_one_column_are_a_refusal_and_never_an_exception()
+    {
+        // ?key.REGION_CODE=SE&key.Region_Code=SE&key.sku=SKU-002 - three entries for a three-column key.
+        var twoVariants = new Dictionary<string, string> { ["REGION_CODE"] = "SE", ["Region_Code"] = "SE", ["sku"] = "SKU-002" };
+
+        Action keyOf = () => TableRowService.KeyOf(StockKey, "r", twoVariants, allowLocator: false);
+
+        keyOf.Should().NotThrow("a URL is not allowed to turn a refusal into an exception");
+        TableRowService.KeyOf(StockKey, "r", twoVariants, allowLocator: true).Should().BeNull();
+    }
+
+    [Fact]
+    public void An_entry_that_would_stand_for_two_columns_is_a_refusal()
+    {
+        var key = new DatabaseRowKey(DatabaseRowKeySource.PrimaryKey, "pk", ["A", "a"]);
+
+        TableRowService.KeyOf(key, "r", new Dictionary<string, string> { ["A"] = "1", ["a"] = "2" }, allowLocator: false)!
+            .Values.Should().Equal(["1", "2"], "two quoted names that differ in case are two columns");
+
+        TableRowService.KeyOf(key, "r", new Dictionary<string, string> { ["x"] = "1", ["A"] = "2" }, allowLocator: false)
+            .Should().BeNull("'a' has no entry of its own, and 'A''s value is not also its");
+    }
+
+    [Fact]
+    public void A_ctid_stands_in_only_for_a_heap_with_no_key_and_only_where_allowed()
+    {
+        var ctid = new Dictionary<string, string> { ["ctid"] = "(0,1)" };
+
+        TableRowService.KeyOf(null, "r", ctid, allowLocator: true)!.Locator.Should().Be("(0,1)");
+        TableRowService.KeyOf(null, "m", ctid, allowLocator: true)!.Locator.Should().Be("(0,1)");
+        TableRowService.KeyOf(null, "v", ctid, allowLocator: true).Should().BeNull("a view has no ctid of its own");
+        TableRowService.KeyOf(null, "r", ctid, allowLocator: false).Should().BeNull();
+        TableRowService.KeyOf(StockKey, "r", ctid, allowLocator: true).Should().BeNull("a keyed table is read by its key");
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // DB-3-fix F3: reference reads have a budget
+    // ---------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_large_pointing_table_with_no_index_on_the_key_is_not_counted()
+    {
+        CatalogRelationDetail large = TableRowTestData.Detail(
+            TableRowTestData.Relation(estimatedRows: 5_000_000, schema: "legacy", name: "events"),
+            TableRowTestData.Index("events_other", "created_on"));
+
+        string? reason = TableRowService.UnindexedInboundCount(large, ["order_id"], 100_000);
+
+        reason.Should().Contain("legacy.events").And.Contain("5,000,000").And.Contain("ExactCountThreshold").And.Contain("order_id");
+
+        TableRowService.UnindexedInboundCount(
+                TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: 5_000_000), TableRowTestData.Index("by_order", "order_id", "line")),
+                ["order_id"], 100_000)
+            .Should().BeNull("an index leading with the key finds the pointing rows");
+
+        TableRowService.UnindexedInboundCount(
+                TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: 5_000_000), TableRowTestData.Index("by_line", "line", "order_id")),
+                ["order_id"], 100_000)
+            .Should().NotBeNull("an index the key is only inside does not lead with it");
+
+        TableRowService.UnindexedInboundCount(
+                TableRowTestData.Detail(
+                    TableRowTestData.Relation(estimatedRows: 5_000_000),
+                    new CatalogIndex("partial", "create index partial", false, false, true, true, false, ["order_id"]),
+                    new CatalogIndex("broken", "create index broken", false, false, false, false, false, ["order_id"])),
+                ["order_id"], 100_000)
+            .Should().NotBeNull("a partial index serves some rows and an invalid one none");
+
+        TableRowService.UnindexedInboundCount(TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: 99_999)), ["order_id"], 100_000)
+            .Should().BeNull("a small table is counted, index or not");
+
+        TableRowService.UnindexedInboundCount(
+                TableRowTestData.Detail(TableRowTestData.Relation(estimatedRows: null, sizeBytes: (CountEstimator.MaxSpeculativePages + 1) * 8192L)),
+                ["order_id"], 100_000)
+            .Should().Contain("never analysed");
+    }
+
+    [Theory]
+    [InlineData(30, 5, 10)]
+    [InlineData(8, 5, 8)]
+    [InlineData(3, 3, 3)]
+    [InlineData(1, 1, 1)]
+    public void A_rows_reference_checks_get_a_short_timeout_each_and_a_budget_for_all(int queryTimeout, int perCheck, int total)
+    {
+        TableRowService.ReferenceStatementTimeout(TimeSpan.FromSeconds(queryTimeout)).Should().Be(TimeSpan.FromSeconds(perCheck));
+        TableRowService.ReferenceBudgetFor(TimeSpan.FromSeconds(queryTimeout)).Should().Be(TimeSpan.FromSeconds(total));
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // DB-3-fix F5: caps are bytes, and a read has a byte budget
+    // ---------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_cut_is_in_UTF8_bytes_on_a_character_boundary()
+    {
+        TableRowService.CutToUtf8Bytes("abcd", 4).Should().Be(("abcd", false));
+        TableRowService.CutToUtf8Bytes("abcde", 4).Should().Be(("abcd", true));
+        TableRowService.CutToUtf8Bytes(string.Empty, 4).Should().Be((string.Empty, false));
+
+        // Two bytes each: four bytes hold two, and the third is never half kept.
+        TableRowService.CutToUtf8Bytes("ééé", 5).Should().Be(("éé", true));
+        TableRowService.CutToUtf8Bytes("éé", 4).Should().Be(("éé", false));
+
+        // Three bytes each, and a surrogate pair is one four-byte character.
+        TableRowService.CutToUtf8Bytes("€€", 5).Should().Be(("€", true));
+        TableRowService.CutToUtf8Bytes("😀😁", 7).Should().Be(("😀", true));
+        TableRowService.CutToUtf8Bytes("😀😁", 8).Should().Be(("😀😁", false));
+    }
+
+    [Fact]
+    public void A_text_cell_cap_is_bytes_not_characters()
+    {
+        // The server sends one character past the cap: 1,025 two-byte characters for a 1,024-byte cap.
+        SqlCell cell = TableRowService.TextCell(new string('é', 1025), 2050, 1024, SqlCellKind.Text);
+
+        cell.IsTruncated.Should().BeTrue();
+        cell.Text.Should().Be(new string('é', 512) + "…");
+        System.Text.Encoding.UTF8.GetByteCount(cell.Text[..^1]).Should().Be(1024);
+        cell.FullLength.Should().Be(2050);
+    }
+
+    [Fact]
+    public void Past_the_budget_every_cell_is_cut_short_and_the_read_says_so()
+    {
+        var caps = new TableRowCaps(Text: 100, Json: 100, Binary: 16, Budget: 250, OverBudget: 10);
+        var budget = new TableRowService.CellBudget(caps);
+
+        budget.OverBudget.Should().BeFalse();
+        budget.Keep(TableRowService.TextCell(new string('a', 101), 5000, caps.Text, SqlCellKind.Text));
+        budget.Keep(TableRowService.TextCell(new string('b', 101), 5000, caps.Text, SqlCellKind.Text));
+        budget.OverBudget.Should().BeFalse("206 bytes kept of 250 - a hundred each and the three of the ellipsis");
+        budget.Shortened.Should().BeFalse("the cells so far were cut by their own cap, not the budget");
+
+        budget.Keep(TableRowService.TextCell(new string('c', 101), 5000, caps.Text, SqlCellKind.Text));
+        budget.OverBudget.Should().BeTrue();
+
+        SqlCell shortened = budget.Keep(TableRowService.TextCell(new string('d', 101), 5000, caps.OverBudget, SqlCellKind.Text));
+
+        shortened.Text.Should().Be(new string('d', 10) + "…");
+        shortened.IsTruncated.Should().BeTrue();
+        budget.Shortened.Should().BeTrue();
+
+        TableRowCaps.List.Budget.Should().Be(1024 * 1024);
+        TableRowCaps.Detail.Budget.Should().BeGreaterThan(TableRowCaps.Detail.Text, "one wide cell never spends a row's budget alone");
+    }
+
     private static PostgresException Postgres(string sqlState, string message) =>
         new(message, "ERROR", "ERROR", sqlState);
 }

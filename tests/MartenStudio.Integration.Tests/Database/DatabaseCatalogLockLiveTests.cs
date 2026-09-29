@@ -38,7 +38,17 @@ public class DatabaseCatalogLockLiveTests(DatabaseCatalogLockLiveTests.Fixture f
                 CultureInfo.InvariantCulture, $"create sequence {{l}}.lock_seq_{i};\n")))
             + "select pg_catalog.nextval('{l}.lock_seq_1'::regclass);\n"
             + "select pg_catalog.nextval('{l}.lock_seq_1'::regclass);\n"
-            + "create sequence {e}.mt_events_sequence_acme;\n";
+            + "create sequence {e}.mt_events_sequence_acme;\n"
+
+            // DB-3-fix: the walks that say where a relation's rows are - down pg_inherits from a view's
+            // tables, and through a function with a SQL-standard body - over the same sixty partitions.
+            + "create view {l}.lock_view as select id from {l}.lock_parent;\n"
+            // RETURN rather than BEGIN ATOMIC: Npgsql splits a command at its semicolons, and the one inside
+            // BEGIN ATOMIC ... END is not a statement's end.
+            + "create function {l}.lock_count() returns bigint language sql stable return (select pg_catalog.count(*) from {l}.lock_parent);\n"
+            + "create view {l}.lock_fn_view as select {l}.lock_count() as n;\n"
+            + "create table {l}.lock_family (id int);\n"
+            + "create table {l}.lock_kid () inherits ({l}.lock_family);\n";
     }
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -76,8 +86,18 @@ public class DatabaseCatalogLockLiveTests(DatabaseCatalogLockLiveTests.Fixture f
                     await DatabaseCatalogQueries.ReadTriggersAsync(connection, transaction, schemas, null, null, null, DatabaseCatalog.ListCap, Timeout, token);
                     await DatabaseCatalogQueries.ReadTypesAsync(connection, transaction, schemas, null, null, DatabaseCatalog.ListCap, Timeout, token);
                     await DatabaseCatalogQueries.ReadForeignKeysAsync(connection, transaction, schemas, null, null, DatabaseCatalog.ListCap, Timeout, token);
-                    await DatabaseCatalogQueries.ReadViewDependenciesAsync(connection, transaction, schemas, null, DatabaseCatalog.ListCap, Timeout, token);
-                    await DatabaseCatalogQueries.ReadViewReferencesAsync(connection, transaction, schemas, null, DatabaseCatalog.ListCap, Timeout, token);
+                    CatalogList<CatalogViewDependency> dependencies = await DatabaseCatalogQueries.ReadViewDependenciesAsync(
+                        connection, transaction, schemas, null, DatabaseCatalog.ListCap, Timeout, token);
+                    CatalogList<CatalogViewReference> references = await DatabaseCatalogQueries.ReadViewReferencesAsync(
+                        connection, transaction, schemas, null, DatabaseCatalog.ListCap, Timeout, token);
+
+                    // The walks went where the rows are: down the partitions, and through the function.
+                    dependencies.Items.Single(static x => x.ViewName == "lock_view" && x.Name == "lock_parent")
+                        .DescendantSchemas.Should().Equal(fixture.LegacySchema);
+                    dependencies.Items.Should().Contain(static x => x.ViewName == "lock_fn_view" && x.Name == "lock_parent" && x.Depth == 2,
+                        "a SQL-standard body's reads are followed");
+                    references.Items.Should().Contain(static x => x.ViewName == "lock_fn_view" && x.Name == "lock_count" && !x.UserCode);
+                    relations.Items.Single(static x => x.Name == "lock_family").DescendantSchemas.Should().Equal(fixture.LegacySchema);
                     IReadOnlyList<CatalogObjectCount> counts = await DatabaseCatalogQueries.ReadObjectCountsAsync(
                         connection, transaction, schemas, [], Timeout, token);
 

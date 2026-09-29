@@ -58,7 +58,7 @@ public class DatabaseObjectClassifierTests
     {
         classifier.ClassifyRelation(ReportingSchema, "ef_things")!.Owner
             .Should().Be(DatabaseObjectOwner.MartenProjectionOrExtended);
-        classifier.ClassifyRoutine(ReportingSchema, "ext_touch").Owner
+        classifier.ClassifyRoutine(ReportingSchema, "ext_touch")!.Owner
             .Should().Be(DatabaseObjectOwner.MartenProjectionOrExtended);
         classifier.ClassifySequence(ReportingSchema, "ext_numbers", null, null)!.Owner
             .Should().Be(DatabaseObjectOwner.MartenProjectionOrExtended);
@@ -80,11 +80,11 @@ public class DatabaseObjectClassifierTests
     [Fact]
     public void Marten_functions_and_sequences_are_infrastructure_wherever_they_are()
     {
-        classifier.ClassifyRoutine(EventSchema, "mt_quick_append_events").Owner
+        classifier.ClassifyRoutine(EventSchema, "mt_quick_append_events")!.Owner
             .Should().Be(DatabaseObjectOwner.MartenInfrastructure);
-        classifier.ClassifyRoutine(ReportingSchema, "mt_upsert_flat_orders_dborderplaced").Owner
+        classifier.ClassifyRoutine(ReportingSchema, "mt_upsert_flat_orders_dborderplaced")!.Owner
             .Should().Be(DatabaseObjectOwner.MartenInfrastructure);
-        classifier.ClassifyRoutine("elsewhere", "mt_jsonb_patch").Owner
+        classifier.ClassifyRoutine("elsewhere", "mt_jsonb_patch")!.Owner
             .Should().Be(DatabaseObjectOwner.MartenInfrastructure);
         classifier.ClassifySequence(EventSchema, "mt_events_sequence", null, null)!.Owner
             .Should().Be(DatabaseObjectOwner.MartenInfrastructure);
@@ -137,7 +137,7 @@ public class DatabaseObjectClassifierTests
         table.Owner.Should().Be(DatabaseObjectOwner.Other);
         table.RecognisedAs.Should().BeNull();
 
-        classifier.ClassifyRoutine("legacy", "recalculate").Owner.Should().Be(DatabaseObjectOwner.Other);
+        classifier.ClassifyRoutine("legacy", "recalculate")!.Owner.Should().Be(DatabaseObjectOwner.Other);
         classifier.ClassifyTrigger("legacy", "orders", "orders_audit")!.Owner.Should().Be(DatabaseObjectOwner.Other);
         DatabaseObjectClassifier.ClassifyType("legacy", "order_status").Owner.Should().Be(DatabaseObjectOwner.Other);
     }
@@ -159,5 +159,59 @@ public class DatabaseObjectClassifierTests
     {
         classifier.ClassifyTrigger(DocumentSchema, "mt_doc_dbcustomer", "customer_audit")!.Owner
             .Should().Be(DatabaseObjectOwner.Other);
+    }
+
+    /// <summary>
+    /// DB-1-fix re-review, item 1: the per-type functions an older Marten left beside a hidden type's table
+    /// name its alias, list its duplicated fields and name its table - so they are as absent as it is.
+    /// </summary>
+    [Theory]
+    [InlineData("mt_upsert_dbsecret")]
+    [InlineData("mt_insert_dbsecret")]
+    [InlineData("mt_update_dbsecret")]
+    [InlineData("mt_overwrite_dbsecret")]
+    [InlineData("MT_UPSERT_DBSECRET")]
+    public void A_hidden_types_own_functions_are_absent(string name)
+    {
+        classifier.IsHiddenRoutine(DocumentSchema, name).Should().BeTrue();
+        classifier.ClassifyRoutine(DocumentSchema, name).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(DocumentSchema, "mt_upsert_dbcustomer")]
+    [InlineData(DocumentSchema, "mt_upsert_")]
+    [InlineData(DocumentSchema, "mt_immutable_timestamp")]
+    [InlineData("elsewhere", "mt_upsert_dbsecret")]
+    [InlineData(DocumentSchema, "mt_delete_dbsecret")]
+    public void Every_other_function_is_classified_as_before(string schema, string name)
+    {
+        classifier.IsHiddenRoutine(schema, name).Should().BeFalse();
+        classifier.ClassifyRoutine(schema, name).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void A_definition_that_names_a_hidden_types_table_is_recognised_however_it_names_it()
+    {
+        classifier.MentionsHiddenTable("insert into \"studio_db\".\"mt_doc_dbsecret\"(data) values (doc)").Should().BeTrue();
+        classifier.MentionsHiddenTable("select count(*) from studio_db.MT_DOC_DBSECRET").Should().BeTrue();
+        classifier.MentionsHiddenTable("select 1 from mt_doc_dbsecret -- through its search_path").Should().BeTrue();
+        classifier.MentionsHiddenTable("select 1 from studio_db.mt_doc_dbcustomer").Should().BeFalse();
+        classifier.MentionsHiddenTable(null).Should().BeFalse();
+
+        Classifier(isVisible: null).MentionsHiddenTable("select 1 from mt_doc_dbsecret").Should().BeFalse("nothing is hidden");
+    }
+
+    /// <summary>The overview's count leaves out exactly what the lists leave out: the tables, and their functions.</summary>
+    [Fact]
+    public void The_count_is_given_every_hidden_table_and_its_functions()
+    {
+        classifier.HiddenTablesAndRoutines().Should().BeEquivalentTo(
+        [
+            DocumentSchema + ".mt_doc_dbsecret",
+            DocumentSchema + ".mt_upsert_dbsecret",
+            DocumentSchema + ".mt_insert_dbsecret",
+            DocumentSchema + ".mt_update_dbsecret",
+            DocumentSchema + ".mt_overwrite_dbsecret",
+        ]);
     }
 }

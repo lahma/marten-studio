@@ -337,8 +337,10 @@ public class DatabaseAccessTests
 
     /// <summary>
     /// Every failure is a value: a scope the visitor may not have comes back as a result the page draws,
-    /// never as an exception - and a read that was refused its scope is not a <c>BrowseDatabase</c> read, so
-    /// nothing is gated or audited for it.
+    /// never as an exception - and a read that was refused its scope is not a <c>BrowseDatabase</c> read.
+    /// The store policy's refusal of a list, an object or a definition is audited as what it is - a scope
+    /// refusal, with no capability named - because its sentence is the one a missing store gets, and the
+    /// trail is where the difference is kept.
     /// </summary>
     [Fact]
     public async Task A_scope_the_visitor_may_not_have_is_a_value_and_not_an_exception()
@@ -362,7 +364,101 @@ public class DatabaseAccessTests
             TenantScope, new DatabaseObjectRef(DatabaseObjectKind.View, "public", "v"), Token);
         definition.Refusal.Should().Be(DatabaseRefusal.Unavailable);
 
-        harness.Ring.GetLatest().Should().BeEmpty();
+        IReadOnlyList<StudioActionLogEntry> audited = harness.Ring.GetLatest();
+        audited.Select(static x => x.Action).Should().BeEquivalentTo(
+            [DatabaseAccess.ListAction, DatabaseAccess.ObjectAction, DatabaseAccess.DefinitionAction],
+            "each by-name read the store policy refused is in the trail");
+        audited.Should().OnlyContain(static x => !x.Succeeded && x.Capability == null && x.Message == "Not authorized for this store, database or tenant.");
+    }
+
+    /// <summary>
+    /// DB-1-fix re-review, item 4: in a schema the resolved store does not declare, a hidden type's table
+    /// or function is asked the capability, the policies and the schema list first, like every other name
+    /// there - "not found" where the rest get "capability off" would say which names are hidden types'.
+    /// </summary>
+    [Theory]
+    [InlineData(false, true, nameof(DatabaseRefusal.CapabilityOff))]
+    [InlineData(true, false, nameof(DatabaseRefusal.WritePolicy))]
+    [InlineData(true, true, nameof(DatabaseRefusal.SchemaNotBrowsable))]
+    public async Task A_hidden_name_in_another_stores_schema_is_refused_exactly_as_any_other_name_there(
+        bool capability,
+        bool policyAllows,
+        string expectedRefusal)
+    {
+        DatabaseRefusal expected = Enum.Parse<DatabaseRefusal>(expectedRefusal);
+
+        await using Harness harness = Harness.Create(
+            options =>
+            {
+                options.Capabilities.BrowseDatabase = capability;
+                options.IsDocumentTypeVisible = static type => type != typeof(DbSecret);
+                options.BrowsableSchemas.Add("quartz");
+            },
+            static services => services.AddMartenStore<IElsewhereStore>(options =>
+            {
+                options.Connection(DummyConnectionString);
+                options.DatabaseSchemaName = "elsewhere";
+                options.Schema.For<DbSecret>();
+            }));
+
+        if (!policyAllows)
+        {
+            harness.Policies.Allow(static resource => resource.Capability is null);
+        }
+
+        IDatabaseObjectService objects = harness.Resolve<IDatabaseObjectService>();
+
+        foreach (DatabaseObjectRef reference in new[]
+                 {
+                     new DatabaseObjectRef(DatabaseObjectKind.View, "elsewhere", "mt_doc_dbsecret"),
+                     new DatabaseObjectRef(DatabaseObjectKind.Function, "elsewhere", "mt_upsert_dbsecret", Arguments: "doc jsonb"),
+                     new DatabaseObjectRef(DatabaseObjectKind.View, "elsewhere", "mt_doc_nosuchthing"),
+                     new DatabaseObjectRef(DatabaseObjectKind.View, "elsewhere", "some_view"),
+                 })
+        {
+            DatabaseObjectDefinition definition = await objects.GetDefinitionAsync(TenantScope, reference, Token);
+
+            definition.Refusal.Should().Be(expected, reference.Name);
+        }
+    }
+
+    /// <summary>
+    /// DB-1-fix re-review, item 5: another store's policies are asked about <em>this</em> database, by that
+    /// store's own identity for it - never with the visitor's database id, which is this store's spelling
+    /// and, empty, means "this store's default" and so "that store's default" to the other.
+    /// </summary>
+    [Fact]
+    public async Task Another_stores_policy_is_asked_about_this_database_as_that_store_names_it()
+    {
+        await using Harness harness = Harness.Create(
+            static options => options.Capabilities.BrowseDatabase = true,
+            static services => services.AddMartenStore<IElsewhereStore>(options =>
+            {
+                options.Connection(DummyConnectionString.Replace("Host=marten-studio-database-access.invalid", "Host=MARTEN-STUDIO-DATABASE-ACCESS.invalid", StringComparison.Ordinal));
+                options.DatabaseSchemaName = "elsewhere";
+            }));
+
+        DatabaseBrowseGrant grant = await harness.Access.RequireBrowseAsync(TenantScope, DatabaseAccess.ListAction, "elsewhere", Token);
+        grant.Allowed.Should().BeTrue(grant.Reason);
+
+        IReadOnlyList<global::Marten.Storage.IMartenDatabase> elsewhere = await harness.Resolve<IElsewhereStore>().Storage.AllDatabases();
+        string theirs = elsewhere.Single().Id.Identity;
+
+        try
+        {
+            await harness.Access.GateAsync(TenantScope, grant.Resolved!, Token);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The schema list needs a database, which this test has none of; the policies were asked first.
+        }
+
+        MartenStoreResource asked = harness.Policies.Calls.Select(static x => x.Resource).Last(static x => x.StoreName == nameof(IElsewhereStore));
+
+        TenantScope.DatabaseId.Should().BeEmpty("the premise: the visitor's own id means this store's default");
+        asked.DatabaseIdentifier.Should().Be(theirs, "that store's own identity for the resolved database");
+        asked.DatabaseIdentifier.Should().BeEquivalentTo(grant.Resolved!.Database.Id.Identity, "the same database, however its host is spelled");
+        asked.TenantId.Should().BeNull();
     }
 
     [Fact]
@@ -448,3 +544,6 @@ public class DatabaseAccessTests
         }
     }
 }
+
+/// <summary>A second store, in a schema of its own, that registers the type the host hides.</summary>
+public interface IElsewhereStore : IDocumentStore;

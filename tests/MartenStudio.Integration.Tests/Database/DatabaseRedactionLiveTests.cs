@@ -190,8 +190,10 @@ public class DatabaseRedactionLiveTests(DatabaseRedactionLiveTests.Fixture fixtu
 
     /// <summary>
     /// A view that reads the hidden table through a function - called directly, or behind an operator -
-    /// is refused its rows and its query while any type is hidden; with nothing hidden, the same view is
-    /// the host's own and readable.
+    /// is refused its rows and its query while any type is hidden. With nothing hidden its query is shown,
+    /// and its rows are still refused while the reading role can read a schema withheld from the visitor
+    /// (the function could read that too); under <c>"*"</c>, where nothing the role can read is withheld,
+    /// the same view is the host's own and readable.
     /// </summary>
     [PostgresFact]
     public async Task A_view_that_calls_a_function_is_refused_while_a_type_is_hidden()
@@ -226,10 +228,27 @@ public class DatabaseRedactionLiveTests(DatabaseRedactionLiveTests.Fixture fixtu
 
         await using BrowserHost nothingHidden = fixture.Host(static options => options.IsDocumentTypeVisible = null);
 
-        DatabaseRowAccessResult open = await nothingHidden.AccessAsync(x =>
+        DatabaseRowAccessResult withheld = await nothingHidden.AccessAsync(x =>
             x.RequireRowAccessAsync(BrowserHost.Scope, fixture.LegacySchema, "fn_peek", cancellationToken: Token));
 
-        open.Allowed.Should().BeTrue("with nothing hidden, a function has nothing to hide: " + open.Reason);
+        withheld.Refusal.Should().Be(DatabaseRefusal.WithheldDependency, "the role can read a schema this visitor may not see");
+        withheld.Reason.Should().Be(DatabaseGate.OpaqueWithheldDenial);
+
+        DatabaseObjectDefinition query = await nothingHidden.ObjectsAsync(x => x.GetDefinitionAsync(
+            BrowserHost.Scope, new DatabaseObjectRef(DatabaseObjectKind.View, fixture.LegacySchema, "fn_peek"), Token));
+
+        query.Refusal.Should().Be(DatabaseRefusal.None, "the query names the function, not what it reads: " + query.Reason);
+
+        await using BrowserHost star = fixture.Host(static options =>
+        {
+            options.IsDocumentTypeVisible = null;
+            options.BrowsableSchemas.Add("*");
+        });
+
+        DatabaseRowAccessResult open = await star.AccessAsync(x =>
+            x.RequireRowAccessAsync(BrowserHost.Scope, fixture.LegacySchema, "fn_peek", cancellationToken: Token));
+
+        open.Allowed.Should().BeTrue("with nothing hidden and nothing the role can read withheld, a function has nothing to hide: " + open.Reason);
     }
 
     // ---------------------------------------------------------------------------------------------

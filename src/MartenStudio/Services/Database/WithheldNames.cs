@@ -273,9 +273,19 @@ internal static class WithheldNames
 
                 string name = text[(i + 1)..(stop - 1)].Replace("\"\"", "\"", StringComparison.Ordinal);
 
-                output.Append(IsQualifier(text, stop, end) && IsWithheld(name, quoted: true, withheld)
-                    ? Token
-                    : text[i..stop]);
+                if (IsQualifier(text, stop, end) && IsWithheld(name, quoted: true, withheld))
+                {
+                    output.Append(Token);
+                }
+                else
+                {
+                    // Its content is walked as free text too: a quoted identifier can only be told from the
+                    // inside of a body the walk misread by what is in it, and "hr.secret" masked in a column
+                    // alias costs a word, where hr.secret unmasked in a misread body costs a schema.
+                    output.Append('"');
+                    Loose(text, i + 1, stop - 1, withheld, output);
+                    output.Append('"');
+                }
 
                 i = stop;
                 continue;
@@ -518,13 +528,18 @@ internal static class WithheldNames
     }
 
     /// <summary>Reads the <c>$tag$</c> that opens a dollar-quoted body at <paramref name="position" />, if one does.</summary>
+    /// <remarks>
+    /// Postgres' <c>dolq_start</c> is a letter, an underscore or any high character, and <c>dolq_cont</c> adds
+    /// digits - so <c>$€$</c> is a tag. A tag the walk failed to recognise would leave the body to be read as
+    /// SQL, where a double quote inside it opens an "identifier" that swallows the qualifier after it.
+    /// </remarks>
     private static bool TryReadDollarTag(string text, int position, int end, out string? tag)
     {
         int probe = position + 1;
 
         if (probe < end && text[probe] != '$')
         {
-            if (!char.IsLetter(text[probe]) && text[probe] != '_')
+            if (!IsDollarTagStart(text[probe]))
             {
                 tag = null;
                 return false;
@@ -532,7 +547,7 @@ internal static class WithheldNames
 
             probe++;
 
-            while (probe < end && (char.IsLetterOrDigit(text[probe]) || text[probe] == '_'))
+            while (probe < end && (IsDollarTagStart(text[probe]) || char.IsAsciiDigit(text[probe])))
             {
                 probe++;
             }
@@ -559,6 +574,9 @@ internal static class WithheldNames
 
         return i;
     }
+
+    /// <summary>Postgres' <c>dolq_start</c>: an ASCII letter, an underscore, or a high character.</summary>
+    private static bool IsDollarTagStart(char c) => char.IsAsciiLetter(c) || c == '_' || c >= '\u0080';
 
     /// <summary>Postgres' <c>ident_start</c>: a letter, an underscore, or a high character.</summary>
     private static bool IsIdentifierStart(char c) => char.IsLetter(c) || c == '_' || c >= '\u0080';

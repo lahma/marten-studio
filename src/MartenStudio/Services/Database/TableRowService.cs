@@ -56,8 +56,20 @@ internal sealed class TableRowService : ITableRowService
     /// <summary>What the audit ring calls expanding one cell (refusals only).</summary>
     internal const string CellAction = "Read database cell";
 
-    /// <summary>What the audit ring calls an exact count (refusals only).</summary>
+    /// <summary>What the audit ring calls an exact count: its refusals, and a filtered count that ran.</summary>
     internal const string CountAction = "Count database rows";
+
+    /// <summary>
+    /// The longest one reference check may run: the lesser of this and
+    /// <see cref="MartenStudioOptions.QueryTimeout" />.
+    /// </summary>
+    internal static readonly TimeSpan ReferenceStatementCap = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// How long all of one row's reference checks together may take before the rest are left unchecked: the
+    /// lesser of this and <see cref="MartenStudioOptions.QueryTimeout" />.
+    /// </summary>
+    internal static readonly TimeSpan ReferenceBudgetCap = TimeSpan.FromSeconds(10);
 
     private const char Separator = '\u001f';
 
@@ -72,10 +84,10 @@ internal sealed class TableRowService : ITableRowService
     private readonly AuthenticationStateProvider authentication;
 
     /// <summary>
-    /// The last first page audited per relation, for this circuit: the filter, sort and paging it was read
-    /// with. A first page read again with the same signature is a refresh, not a new opening.
+    /// What this circuit last recorded per store, database and relation: the filter, sort and paging a read
+    /// was made with. A read with the same signature - a page turn, a refresh - is not a new opening.
     /// </summary>
-    private readonly Dictionary<string, string> audited = new(StringComparer.Ordinal);
+    private readonly TableRowAuditLedger ledger = new();
 
     public TableRowService(
         DatabaseAccess access,
@@ -116,7 +128,7 @@ internal sealed class TableRowService : ITableRowService
         ArgumentNullException.ThrowIfNull(request);
 
         DatabaseRowAccessResult result = await access
-            .RequireRowAccessAsync(scope, schema, name, DatabaseAccess.RowsAction, cancellationToken)
+            .RequireRowAccessAsync(scope, schema, name, DatabaseAccess.RowsAction, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         if (!result.Allowed)
@@ -244,7 +256,7 @@ internal sealed class TableRowService : ITableRowService
 
             ReadOnlySqlSession session = Session(pageSize + 1);
 
-            (List<TableRow> rows, List<string?> sortValues) = await session
+            (List<TableRow> rows, List<string?> sortValues, bool shortened) = await session
                 .InTransactionAsync(
                     connection,
                     (transaction, token) => ReadPageAsync(connection, transaction, statement, token),
@@ -270,12 +282,12 @@ internal sealed class TableRowService : ITableRowService
                 NextOffset = hasMore && plan.Mode == TableRowPagingMode.Offset && spec.Offset + pageSize <= TableRowQueryBuilder.MaxOffset
                     ? spec.Offset + pageSize
                     : null,
+                Shortened = shortened,
             };
 
-            if (request.IsFirstPage)
-            {
-                AuditFirstPage(grant, request, parse, plan);
-            }
+            // Every read that returned rows, whatever position it started from: a cursor or an offset is
+            // in the URL, so a pasted link is a first contact that never saw a first page.
+            AuditRead(grant, request, parse, plan);
 
             return page;
         }
@@ -305,7 +317,7 @@ internal sealed class TableRowService : ITableRowService
         ArgumentNullException.ThrowIfNull(key);
 
         DatabaseRowAccessResult result = await access
-            .RequireRowAccessAsync(scope, schema, name, RowAction, cancellationToken)
+            .RequireRowAccessAsync(scope, schema, name, RowAction, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         if (!result.Allowed)
@@ -316,7 +328,7 @@ internal sealed class TableRowService : ITableRowService
         DatabaseRowGrant grant = result.Grant;
         CatalogRelation relation = grant.Relation.Relation;
 
-        if (KeyOf(grant, key, allowLocator: false) is not { } matched)
+        if (KeyOf(grant.RowKey, relation.Kind, key, allowLocator: false) is not { } matched)
         {
             return TableRowDetail.Refused(DatabaseRefusal.NotApplicable, KeyProblem(grant, allowLocator: false));
         }
@@ -350,7 +362,7 @@ internal sealed class TableRowService : ITableRowService
             await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-            (List<TableRow> rows, _) = await Session(2)
+            (List<TableRow> rows, _, bool shortened) = await Session(2)
                 .InTransactionAsync(
                     connection,
                     (transaction, token) => ReadRowsAsync(connection, transaction, statement, TableRowCaps.Detail, token),
@@ -364,7 +376,7 @@ internal sealed class TableRowService : ITableRowService
 
             return rows.Count == 0
                 ? shell with { Found = false, Reason = "There is no row with that key - it may have been deleted or changed." }
-                : shell with { Found = true, Key = rows[0].Key, Cells = rows[0].Cells };
+                : shell with { Found = true, Key = rows[0].Key, Cells = rows[0].Cells, Shortened = shortened };
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
@@ -389,7 +401,7 @@ internal sealed class TableRowService : ITableRowService
         ArgumentNullException.ThrowIfNull(key);
 
         DatabaseRowAccessResult result = await access
-            .RequireRowAccessAsync(scope, schema, name, CellAction, cancellationToken)
+            .RequireRowAccessAsync(scope, schema, name, CellAction, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         if (!result.Allowed)
@@ -400,7 +412,7 @@ internal sealed class TableRowService : ITableRowService
         DatabaseRowGrant grant = result.Grant;
         CatalogRelation relation = grant.Relation.Relation;
 
-        if (KeyOf(grant, key, allowLocator: true) is not { } matched)
+        if (KeyOf(grant.RowKey, relation.Kind, key, allowLocator: true) is not { } matched)
         {
             return TableCellValue.Refused(DatabaseRefusal.NotApplicable, KeyProblem(grant, allowLocator: true));
         }
@@ -417,7 +429,10 @@ internal sealed class TableRowService : ITableRowService
         }
 
         TableRowColumn described = Columns(grant, []).First(x => string.Equals(x.Name, info.Name, StringComparison.Ordinal));
-        // The builder binds one past the cap, so the cap leaves room for it.
+
+        // Bytes, as the option says: the server sends one character past the cap and the reader cuts that
+        // to the cap in UTF-8 bytes, on a character boundary. The builder binds one past the cap, so the
+        // cap leaves room for it.
         int cap = Math.Clamp(Options.MaxInlineDocumentBytes, 1, int.MaxValue - 1);
 
         TableRowStatement statement = TableRowQueryBuilder.BuildCell(
@@ -474,7 +489,7 @@ internal sealed class TableRowService : ITableRowService
         ArgumentNullException.ThrowIfNull(scope);
 
         DatabaseRowAccessResult result = await access
-            .RequireRowAccessAsync(scope, schema, name, CountAction, cancellationToken)
+            .RequireRowAccessAsync(scope, schema, name, CountAction, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         if (!result.Allowed)
@@ -525,7 +540,7 @@ internal sealed class TableRowService : ITableRowService
             await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-            return await Session()
+            TableRowCount answer = await Session()
                 .InTransactionAsync(
                     connection,
                     async (transaction, token) =>
@@ -561,6 +576,15 @@ internal sealed class TableRowService : ITableRowService
                     },
                     cancellationToken)
                 .ConfigureAwait(false);
+
+            // A filtered count answers "how many rows match this", which is a question about the rows: it is
+            // audited like a read with that filter. An unfiltered one is the relation's size.
+            if (parse.Terms.Count > 0)
+            {
+                AuditCount(grant, filter, parse);
+            }
+
+            return answer;
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
@@ -584,7 +608,7 @@ internal sealed class TableRowService : ITableRowService
         ArgumentNullException.ThrowIfNull(key);
 
         DatabaseRowAccessResult result = await access
-            .RequireRowAccessAsync(scope, schema, name, ReferencesAction, cancellationToken)
+            .RequireRowAccessAsync(scope, schema, name, ReferencesAction, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         if (!result.Allowed)
@@ -595,7 +619,7 @@ internal sealed class TableRowService : ITableRowService
         DatabaseRowGrant grant = result.Grant;
         CatalogRelation relation = grant.Relation.Relation;
 
-        if (KeyOf(grant, key, allowLocator: false) is not { } matched)
+        if (KeyOf(grant.RowKey, relation.Kind, key, allowLocator: false) is not { } matched)
         {
             return TableRowReferences.Refused(DatabaseRefusal.NotApplicable, KeyProblem(grant, allowLocator: false));
         }
@@ -652,10 +676,17 @@ internal sealed class TableRowService : ITableRowService
             await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-            TableRowReferences references = await Session()
+            // One row's references are 1 + N statements, run one after another: each is held to a short
+            // statement_timeout of its own, and all of them to one budget, past which the rest are left
+            // unchecked rather than queued - a row with forty inbound keys is not forty QueryTimeouts.
+            var budget = new ReferenceBudget(
+                ReferenceStatementTimeout(Options.QueryTimeout),
+                ReferenceBudgetFor(Options.QueryTimeout));
+
+            TableRowReferences references = await Session(statementTimeout: budget.PerStatement)
                 .InTransactionAsync(
                     connection,
-                    (transaction, token) => ReadReferencesAsync(connection, transaction, keyRead, wanted, outbound, inbound, statements, token),
+                    (transaction, token) => ReadReferencesAsync(connection, transaction, keyRead, wanted, outbound, inbound, statements, budget, token),
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -677,8 +708,11 @@ internal sealed class TableRowService : ITableRowService
         List<OutboundCheck> outbound,
         List<InboundCheck> inbound,
         List<string> statements,
+        ReferenceBudget budget,
         CancellationToken cancellationToken)
     {
+        budget.Start();
+
         Dictionary<string, string?> values = new(StringComparer.Ordinal);
         bool found = false;
 
@@ -710,7 +744,7 @@ internal sealed class TableRowService : ITableRowService
         {
             IReadOnlyList<string?> own = [.. check.Key.Columns.Select(column => values.GetValueOrDefault(column))];
             bool read = check.Key.Columns.All(values.ContainsKey);
-            resolvedOut.Add(await ResolveOutboundAsync(connection, transaction, check, own, read, statements, cancellationToken).ConfigureAwait(false));
+            resolvedOut.Add(await ResolveOutboundAsync(connection, transaction, check, own, read, statements, budget, cancellationToken).ConfigureAwait(false));
         }
 
         List<RowInboundReference> resolvedIn = [];
@@ -719,7 +753,7 @@ internal sealed class TableRowService : ITableRowService
         {
             IReadOnlyList<string?> own = [.. check.Key.LinkedColumns.Select(column => values.GetValueOrDefault(column))];
             bool read = check.Key.LinkedColumns.All(values.ContainsKey);
-            resolvedIn.Add(await ResolveInboundAsync(connection, transaction, check, own, read, statements, cancellationToken).ConfigureAwait(false));
+            resolvedIn.Add(await ResolveInboundAsync(connection, transaction, check, own, read, statements, budget, cancellationToken).ConfigureAwait(false));
         }
 
         return new TableRowReferences
@@ -807,9 +841,16 @@ internal sealed class TableRowService : ITableRowService
 
             DatabaseRowAccess rows = gate.RowsFor(child.Relation, ownership, dependsOnHidden: false);
 
-            return rows.Allowed
-                ? new InboundCheck(key, RowInboundState.Counted, ownership, null)
-                : new InboundCheck(key, RowInboundState.NotChecked, ownership, rows.Reason);
+            if (!rows.Allowed)
+            {
+                return new InboundCheck(key, RowInboundState.NotChecked, ownership, rows.Reason);
+            }
+
+            // A bounded count still reads every row of a large table when no index finds the pointing rows:
+            // "limit 1000" stops at the thousandth match, and a table with none scans to the end.
+            return UnindexedInboundCount(child, key.Columns, Options.ExactCountThreshold) is { } unindexed
+                ? new InboundCheck(key, RowInboundState.NotChecked, ownership, unindexed)
+                : new InboundCheck(key, RowInboundState.Counted, ownership, null);
         }
         catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
         {
@@ -824,6 +865,7 @@ internal sealed class TableRowService : ITableRowService
         IReadOnlyList<string?> own,
         bool read,
         List<string> statements,
+        ReferenceBudget budget,
         CancellationToken cancellationToken)
     {
         DatabaseForeignKeyInfo key = check.Key;
@@ -889,10 +931,15 @@ internal sealed class TableRowService : ITableRowService
             ParentFilter = RowFilterGrammar.Format(key.LinkedColumns.Select((column, i) => (column, RowFilterOperator.Equal, (string?) values[i]))),
         };
 
+        if (budget.Spent)
+        {
+            return reference with { State = RowReferenceState.NotChecked, Reason = budget.Sentence };
+        }
+
         TableRowStatement exists = TableRowQueryBuilder.BuildExists(key.LinkedSchema!, key.LinkedTable!, key.LinkedColumns, values);
         statements.Add(exists.Sql);
 
-        (bool ok, bool present, TableRowError? error) = await TryScalarAsync<bool>(connection, transaction, exists, cancellationToken)
+        (bool ok, bool present, TableRowError? error) = await TryScalarAsync<bool>(connection, transaction, exists, budget, cancellationToken)
             .ConfigureAwait(false);
 
         return ok
@@ -915,6 +962,7 @@ internal sealed class TableRowService : ITableRowService
         IReadOnlyList<string?> own,
         bool read,
         List<string> statements,
+        ReferenceBudget budget,
         CancellationToken cancellationToken)
     {
         DatabaseForeignKeyInfo key = check.Key;
@@ -940,11 +988,16 @@ internal sealed class TableRowService : ITableRowService
             return reference;
         }
 
+        if (budget.Spent)
+        {
+            return reference with { State = RowInboundState.NotChecked, Reason = budget.Sentence };
+        }
+
         TableRowStatement count = TableRowQueryBuilder.BuildInboundCount(
             key.Schema, key.Table, key.Columns, [.. own.Select(static x => x!)], TableRowQueryBuilder.InboundCap);
         statements.Add(count.Sql);
 
-        (bool ok, long counted, TableRowError? error) = await TryScalarAsync<long>(connection, transaction, count, cancellationToken)
+        (bool ok, long counted, TableRowError? error) = await TryScalarAsync<long>(connection, transaction, count, budget, cancellationToken)
             .ConfigureAwait(false);
 
         if (!ok)
@@ -965,6 +1018,7 @@ internal sealed class TableRowService : ITableRowService
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         TableRowStatement statement,
+        ReferenceBudget budget,
         CancellationToken cancellationToken)
     {
         const string savepoint = "ms_reference";
@@ -980,7 +1034,11 @@ internal sealed class TableRowService : ITableRowService
         catch (PostgresException exception)
         {
             await transaction.RollbackAsync(savepoint, cancellationToken).ConfigureAwait(false);
-            return (false, default!, Describe(exception, null, Options));
+
+            TableRowError error = Describe(exception, null, Options);
+
+            // The per-check limit fired, not QueryTimeout: the sentence names the limit that did.
+            return (false, default!, exception.SqlState == "57014" ? error with { Sentence = budget.TimeoutSentence } : error);
         }
     }
 
@@ -1000,7 +1058,7 @@ internal sealed class TableRowService : ITableRowService
     // Reading
     // ---------------------------------------------------------------------------------------------------
 
-    private Task<(List<TableRow> Rows, List<string?> SortValues)> ReadPageAsync(
+    private Task<(List<TableRow> Rows, List<string?> SortValues, bool Shortened)> ReadPageAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         TableRowStatement statement,
@@ -1009,9 +1067,9 @@ internal sealed class TableRowService : ITableRowService
 
     /// <summary>
     /// The rows, and each row's raw sort value beside it - one per row, so the page can take the one that
-    /// belongs to the last row it keeps.
+    /// belongs to the last row it keeps - and whether the read's byte budget cut any cell short.
     /// </summary>
-    private async Task<(List<TableRow> Rows, List<string?> SortValues)> ReadRowsAsync(
+    private async Task<(List<TableRow> Rows, List<string?> SortValues, bool Shortened)> ReadRowsAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         TableRowStatement statement,
@@ -1022,6 +1080,7 @@ internal sealed class TableRowService : ITableRowService
         List<string?> sortValues = [];
         TableRowLayout layout = statement.Layout;
         IReadOnlyList<string> keyColumns = layout.KeyColumns;
+        var budget = new CellBudget(caps);
 
         await using NpgsqlCommand command = statement.CreateCommand(connection, transaction, CommandTimeoutSeconds);
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -1047,13 +1106,13 @@ internal sealed class TableRowService : ITableRowService
 
             for (int i = 0; i < cells.Length; i++)
             {
-                cells[i] = ReadCell(reader, layout.Cells[i], caps);
+                cells[i] = budget.Keep(ReadCell(reader, layout.Cells[i], caps, budget.OverBudget));
             }
 
             rows.Add(new TableRow(key, locator, cells));
         }
 
-        return (rows, sortValues);
+        return (rows, sortValues, budget.Shortened);
     }
 
     private async Task<TableCellValue> ReadCellAsync(
@@ -1088,16 +1147,24 @@ internal sealed class TableRowService : ITableRowService
         }
 
         string probe = reader.GetString(cell.ValueOrdinal);
-        (string text, bool truncated) = CutToCodePoints(probe, cap);
+        (string text, bool truncated) = CutToUtf8Bytes(probe, cap);
 
         return shell with { Found = true, Text = text, Truncated = truncated, FullLength = length };
     }
 
     /// <summary>One cell of a row, from the columns its layout names.</summary>
-    internal static SqlCell ReadCell(NpgsqlDataReader reader, TableRowCellLayout layout, TableRowCaps caps)
+    /// <param name="reader">The reader, on the row.</param>
+    /// <param name="layout">Where the cell's expressions are.</param>
+    /// <param name="caps">The caps.</param>
+    /// <param name="overBudget">
+    /// Whether the read's byte budget is spent, so the cell keeps only <see cref="TableRowCaps.OverBudget" />
+    /// bytes.
+    /// </param>
+    internal static SqlCell ReadCell(NpgsqlDataReader reader, TableRowCellLayout layout, TableRowCaps caps, bool overBudget = false)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(layout);
+        ArgumentNullException.ThrowIfNull(caps);
 
         if (reader.IsDBNull(layout.ValueOrdinal))
         {
@@ -1121,26 +1188,28 @@ internal sealed class TableRowService : ITableRowService
                 return BinaryCell(
                     reader.GetFieldValue<byte[]>(layout.ValueOrdinal),
                     reader.GetInt32(layout.LengthOrdinal),
-                    caps.Binary);
+                    overBudget ? Math.Min(caps.Binary, Math.Max(caps.OverBudget / 2, 1)) : caps.Binary);
 
             default:
+                int cap = layout.Shape == TableRowCellShape.Json ? caps.Json : caps.Text;
+
                 return TextCell(
                     reader.GetString(layout.ValueOrdinal),
                     reader.GetInt32(layout.LengthOrdinal),
-                    layout.Shape == TableRowCellShape.Json ? caps.Json : caps.Text,
+                    overBudget ? Math.Min(cap, caps.OverBudget) : cap,
                     TableRowQueryBuilder.KindOf(layout.Type));
         }
     }
 
     /// <summary>
-    /// A text-form cell from what the server sent - at most one character past the cap, which is how a
-    /// cut is known - and the value's full size in bytes.
+    /// A text-form cell from what the server sent - at most one character past the cap - cut to
+    /// <paramref name="cap" /> UTF-8 bytes on a character boundary, with the value's full size in bytes.
     /// </summary>
     internal static SqlCell TextCell(string probe, int fullBytes, int cap, SqlCellKind kind)
     {
         ArgumentNullException.ThrowIfNull(probe);
 
-        (string text, bool truncated) = CutToCodePoints(probe, cap);
+        (string text, bool truncated) = CutToUtf8Bytes(probe, cap);
 
         return new SqlCell(truncated ? text + "…" : text, kind, truncated, fullBytes);
     }
@@ -1190,6 +1259,41 @@ internal sealed class TableRowService : ITableRowService
 
             index += char.IsHighSurrogate(probe[index]) && index + 1 < probe.Length && char.IsLowSurrogate(probe[index + 1]) ? 2 : 1;
             codePoints++;
+        }
+
+        return (probe, false);
+    }
+
+    /// <summary>
+    /// The longest prefix of <paramref name="probe" /> that is at most <paramref name="cap" /> bytes of UTF-8,
+    /// cut between characters, and whether anything was left out.
+    /// </summary>
+    /// <remarks>
+    /// The server sends one character more than the cap, and a character is never less than one byte: so a
+    /// probe that fits is the whole value, and one that does not was cut - whatever the database's own
+    /// encoding makes of <c>octet_length</c>. A surrogate pair is one four-byte character and is never split;
+    /// a lone surrogate counts as the three bytes of the replacement character it would be sent as.
+    /// </remarks>
+    internal static (string Text, bool Truncated) CutToUtf8Bytes(string probe, int cap)
+    {
+        ArgumentNullException.ThrowIfNull(probe);
+
+        int index = 0;
+        long bytes = 0;
+
+        while (index < probe.Length)
+        {
+            char c = probe[index];
+            bool pair = char.IsHighSurrogate(c) && index + 1 < probe.Length && char.IsLowSurrogate(probe[index + 1]);
+            int width = pair ? 4 : c < 0x80 ? 1 : c < 0x800 ? 2 : 3;
+
+            if (bytes + width > cap)
+            {
+                return (probe[..index], true);
+            }
+
+            bytes += width;
+            index += pair ? 2 : 1;
         }
 
         return (probe, false);
@@ -1526,13 +1630,31 @@ internal sealed class TableRowService : ITableRowService
 
     /// <summary>
     /// The key a caller passed, matched to the row key's columns in key order - or a <c>ctid</c> for a heap
-    /// relation with no key, where <paramref name="allowLocator" /> says a cell may be read that way.
+    /// relation with no key, where <paramref name="allowLocator" /> says a cell may be read that way - or
+    /// <see langword="null" /> when it does not name exactly one row key.
     /// </summary>
-    private static MatchedKey? KeyOf(DatabaseRowGrant grant, IReadOnlyDictionary<string, string> key, bool allowLocator)
+    /// <remarks>
+    /// A column is matched by its exact name, or by a name that differs only in case when exactly one entry
+    /// does. Two entries that could both be one column (<c>?key.REGION_CODE=SE&amp;key.Region_Code=SE</c>) name
+    /// nothing, and neither does an entry used for two columns: the key comes from a URL, and an ambiguous
+    /// one is a refusal the page can say, never an exception.
+    /// </remarks>
+    /// <param name="rowKey">The relation's row key, or <see langword="null" />.</param>
+    /// <param name="relationKind">The relation's <c>relkind</c>.</param>
+    /// <param name="key">What the caller passed.</param>
+    /// <param name="allowLocator">Whether a <c>ctid</c> may stand in for a key.</param>
+    internal static MatchedKey? KeyOf(
+        DatabaseRowKey? rowKey,
+        string relationKind,
+        IReadOnlyDictionary<string, string> key,
+        bool allowLocator)
     {
-        if (grant.RowKey is { } rowKey && key.Count == rowKey.Columns.Count)
+        ArgumentNullException.ThrowIfNull(key);
+
+        if (rowKey is not null && key.Count == rowKey.Columns.Count)
         {
             List<string> values = [];
+            HashSet<string> used = new(StringComparer.Ordinal);
 
             foreach (string column in rowKey.Columns)
             {
@@ -1541,30 +1663,49 @@ internal sealed class TableRowService : ITableRowService
                     return null;
                 }
 
-                string? match = key.TryGetValue(column, out string? exact)
-                    ? exact
-                    : key.Where(x => string.Equals(x.Key, column, StringComparison.OrdinalIgnoreCase))
-                        .Select(static x => x.Value)
-                        .SingleOrDefault();
+                string? entry = key.ContainsKey(column) ? column : OnlyCaseVariant(key, column);
 
-                if (match is null)
+                if (entry is null || !used.Add(entry) || !key.TryGetValue(entry, out string? value) || value is null)
                 {
                     return null;
                 }
 
-                values.Add(match);
+                values.Add(value);
             }
 
             return new MatchedKey(rowKey.Columns, values, null);
         }
 
-        if (allowLocator && grant.RowKey is null && grant.Relation.Relation.Kind is "r" or "m"
+        if (allowLocator && rowKey is null && relationKind is "r" or "m"
             && key.Count == 1 && key.TryGetValue("ctid", out string? locator) && !string.IsNullOrEmpty(locator))
         {
             return new MatchedKey([], [], locator);
         }
 
         return null;
+    }
+
+    /// <summary>The one entry whose name is <paramref name="column" /> but for case, or <see langword="null" /> for none or several.</summary>
+    private static string? OnlyCaseVariant(IReadOnlyDictionary<string, string> key, string column)
+    {
+        string? found = null;
+
+        foreach (string candidate in key.Keys)
+        {
+            if (!string.Equals(candidate, column, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (found is not null)
+            {
+                return null;
+            }
+
+            found = candidate;
+        }
+
+        return found;
     }
 
     private static string KeyProblem(DatabaseRowGrant grant, bool allowLocator)
@@ -1585,39 +1726,59 @@ internal sealed class TableRowService : ITableRowService
     // ---------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// One ring entry for opening a relation's rows or changing its filter - never for a page turn, and
-    /// never twice for a first page read again with the same filter and sort. Values go to event 9235 only.
+    /// What a read of a relation's rows is recorded by: its filter, its sort and how it is walked - never
+    /// where in the walk it starts, how many rows it asks for or which columns it shows. Two reads with one
+    /// signature are one opening: the second is a page turn or a refresh.
     /// </summary>
-    private void AuditFirstPage(DatabaseRowGrant grant, TableRowRequest request, RowFilterParse parse, TableRowPlan plan)
+    /// <param name="request">
+    /// What was asked. Its <see cref="TableRowRequest.Cursor" />, <see cref="TableRowRequest.Offset" />,
+    /// <see cref="TableRowRequest.PageSize" />, <see cref="TableRowRequest.Columns" /> and
+    /// <see cref="TableRowRequest.RunAnyway" /> are deliberately not part of it.
+    /// </param>
+    /// <param name="parse">The filter, parsed against the catalog's columns.</param>
+    /// <param name="plan">The walk: the resolved sort, its direction and the paging mode.</param>
+    internal static string AuditSignature(TableRowRequest request, RowFilterParse parse, TableRowPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(parse);
+        ArgumentNullException.ThrowIfNull(plan);
+
+        return FilterSignature(parse) + Separator + SortText(plan) + Separator + plan.Mode;
+    }
+
+    private static string FilterSignature(RowFilterParse parse) => string.Join(' ', parse.Terms.Select(RowFilterGrammar.Describe));
+
+    private static string SortText(TableRowPlan plan) => (plan.SortColumn ?? "(key)") + (plan.Descending ? " desc" : " asc");
+
+    /// <summary>
+    /// One ring entry, and event 9235, for every first contact with a relation's rows under a filter, sort
+    /// and walk this circuit has not recorded for that store, database and relation - whatever page the read
+    /// starts on, because a cursor or an offset in a pasted URL is a first contact that never saw a first
+    /// page. A page turn and a refresh repeat the last signature and record nothing. Values go to event 9235
+    /// only.
+    /// </summary>
+    private void AuditRead(DatabaseRowGrant grant, TableRowRequest request, RowFilterParse parse, TableRowPlan plan)
     {
         CatalogRelation relation = grant.Relation.Relation;
         string target = Target(relation);
-        string filter = string.Join(' ', parse.Terms.Select(RowFilterGrammar.Describe));
-        string sort = (plan.SortColumn ?? "(key)") + (plan.Descending ? " desc" : " asc");
-        string signature = filter + Separator + sort + Separator + plan.Mode;
+        string filter = FilterSignature(parse);
+        string sort = SortText(plan);
+        string signature = AuditSignature(request, parse, plan);
 
-        string? previous;
-
-        lock (audited)
+        if (!ledger.TryRecord(LedgerKey(grant, "rows"), signature, out string? previous))
         {
-            audited.TryGetValue(target, out previous);
-
-            if (string.Equals(previous, signature, StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            audited[target] = signature;
+            return;
         }
 
         bool filterChanged = previous is not null && !previous.StartsWith(filter + Separator, StringComparison.Ordinal);
         string action = filterChanged ? FilterAction : DatabaseAccess.RowsAction;
 
         // Column names and the sort, never a value: the ring is readable by anyone with the read policy.
-        string message = parse.Terms.Count == 0
-            ? "Rows read, sorted by " + sort + "."
-            : "Rows read with " + parse.Terms.Count.ToString(CultureInfo.InvariantCulture) + " filter term(s) on " +
-              string.Join(", ", parse.Terms.Select(static x => x.Column).Distinct(StringComparer.Ordinal)) + ", sorted by " + sort + ".";
+        string message = (parse.Terms.Count == 0
+                             ? "Rows read, sorted by " + sort
+                             : "Rows read with " + parse.Terms.Count.ToString(CultureInfo.InvariantCulture) + " filter term(s) on " +
+                               string.Join(", ", parse.Terms.Select(static x => x.Column).Distinct(StringComparer.Ordinal)) + ", sorted by " + sort)
+                         + (request.IsFirstPage ? "." : ", starting past the first page.");
 
         audit.Record(action, target, succeeded: true, message, StudioCapability.BrowseDatabase, grant.Resolved.Scope);
 
@@ -1635,6 +1796,52 @@ internal sealed class TableRowService : ITableRowService
             request.Filter ?? string.Empty,
             sort);
     }
+
+    /// <summary>
+    /// One ring entry, and event 9235 with the filter as typed, for a filtered count this circuit has not
+    /// recorded with that filter for that store, database and relation.
+    /// </summary>
+    private void AuditCount(DatabaseRowGrant grant, string? filter, RowFilterParse parse)
+    {
+        if (!ledger.TryRecord(LedgerKey(grant, "count"), FilterSignature(parse), out _))
+        {
+            return;
+        }
+
+        string target = Target(grant.Relation.Relation);
+
+        audit.Record(
+            CountAction,
+            target,
+            succeeded: true,
+            "Rows counted with " + parse.Terms.Count.ToString(CultureInfo.InvariantCulture) + " filter term(s) on " +
+            string.Join(", ", parse.Terms.Select(static x => x.Column).Distinct(StringComparer.Ordinal)) + ".",
+            StudioCapability.BrowseDatabase,
+            grant.Resolved.Scope);
+
+        if (!logger.IsEnabled(LogLevel.Information))
+        {
+            return;
+        }
+
+        logger.TableRowsRead(
+            UserName(),
+            CountAction,
+            target,
+            grant.Resolved.Registration.Key,
+            grant.Resolved.Database.Id.Identity,
+            filter ?? string.Empty,
+            "(a count)");
+    }
+
+    /// <summary>What the ledger remembers a read under: the store, the database and the relation, and which kind of read.</summary>
+    private static string LedgerKey(DatabaseRowGrant grant, string kind) =>
+        TableRowAuditLedger.Key(
+            grant.Resolved.Registration.Key,
+            grant.Resolved.Database.Id.Identity,
+            grant.Relation.Relation.Schema,
+            grant.Relation.Relation.Name,
+            kind);
 
     private void LogKey(DatabaseRowGrant grant, string action, MatchedKey key)
     {
@@ -1741,12 +1948,72 @@ internal sealed class TableRowService : ITableRowService
         exception is NpgsqlException or InvalidOperationException or TimeoutException or InvalidCastException
         && exception is not OperationCanceledException;
 
-    private ReadOnlySqlSession Session(int maxRows = 500) => new(new ReadOnlySqlOptions
+    private ReadOnlySqlSession Session(int maxRows = 500, TimeSpan? statementTimeout = null) => new(new ReadOnlySqlOptions
     {
-        StatementTimeout = Options.QueryTimeout,
+        StatementTimeout = statementTimeout ?? Options.QueryTimeout,
         Role = Options.SqlConsoleRole,
         MaxRows = Math.Max(maxRows, 1),
     });
+
+    /// <summary>
+    /// The <c>statement_timeout</c> each of one row's reference checks runs under: the lesser of
+    /// <paramref name="queryTimeout" /> and <see cref="ReferenceStatementCap" />.
+    /// </summary>
+    internal static TimeSpan ReferenceStatementTimeout(TimeSpan queryTimeout) =>
+        queryTimeout > TimeSpan.Zero && queryTimeout < ReferenceStatementCap ? queryTimeout : ReferenceStatementCap;
+
+    /// <summary>
+    /// How long one row's reference checks may take together before the rest are left unchecked: the lesser
+    /// of <paramref name="queryTimeout" /> and <see cref="ReferenceBudgetCap" />.
+    /// </summary>
+    internal static TimeSpan ReferenceBudgetFor(TimeSpan queryTimeout) =>
+        queryTimeout > TimeSpan.Zero && queryTimeout < ReferenceBudgetCap ? queryTimeout : ReferenceBudgetCap;
+
+    /// <summary>
+    /// Why the rows of <paramref name="child" /> that point at a row are not counted - it is larger than
+    /// <paramref name="threshold" /> (or, never analysed, larger than a speculative count would scan) and no
+    /// valid, unconditional index leads with one of <paramref name="columns" /> - or <see langword="null" />
+    /// when counting them is cheap enough to do.
+    /// </summary>
+    /// <param name="child">The pointing table's catalog detail, indexes included.</param>
+    /// <param name="columns">Its foreign key's columns.</param>
+    /// <param name="threshold"><see cref="MartenStudioOptions.ExactCountThreshold" />.</param>
+    internal static string? UnindexedInboundCount(CatalogRelationDetail child, IReadOnlyList<string> columns, long threshold)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        CatalogRelation relation = child.Relation;
+        long limit = Math.Max(threshold, 0);
+
+        bool large = relation.EstimatedRows is { } rows
+            ? rows > limit
+            : relation.SizeBytes > CountEstimator.MaxSpeculativePages * 8192L;
+
+        if (!large)
+        {
+            return null;
+        }
+
+        bool indexed = child.Indexes.Any(index => index.IsValid
+            && !index.HasPredicate
+            && index.KeyColumns.Count > 0
+            && index.KeyColumns[0] is { } first
+            && columns.Contains(first, StringComparer.Ordinal));
+
+        if (indexed)
+        {
+            return null;
+        }
+
+        string size = relation.EstimatedRows is { } estimate
+            ? "about " + estimate.ToString("N0", CultureInfo.InvariantCulture) + " rows"
+            : "a large table Postgres has never analysed";
+
+        return "Not counted: " + Target(relation) + " holds " + size + " (more than MartenStudioOptions.ExactCountThreshold, " +
+               limit.ToString("N0", CultureInfo.InvariantCulture) + ") and no index leads with " + string.Join(", ", columns) +
+               ", so counting the rows that point here would read every one of them. Filter its rows by the key instead.";
+    }
 
     /// <summary>
     /// The relation's detail through this visitor's gate - what names the far ends of its foreign keys -
@@ -1797,7 +2064,79 @@ internal sealed class TableRowService : ITableRowService
     }
 
     /// <summary>A row key matched to its columns, or a ctid.</summary>
-    private sealed record MatchedKey(IReadOnlyList<string> Columns, IReadOnlyList<string> Values, string? Locator);
+    /// <param name="Columns">The row key's columns, in key order - empty for a ctid.</param>
+    /// <param name="Values">The caller's values for them, in the same order.</param>
+    /// <param name="Locator">The ctid, for a relation with no key.</param>
+    internal sealed record MatchedKey(IReadOnlyList<string> Columns, IReadOnlyList<string> Values, string? Locator);
+
+    /// <summary>
+    /// The time one row's reference checks are given: a <c>statement_timeout</c> for each, and a budget for
+    /// all of them, measured from the first.
+    /// </summary>
+    /// <param name="perStatement">Each check's <c>statement_timeout</c>.</param>
+    /// <param name="total">All of them together.</param>
+    private sealed class ReferenceBudget(TimeSpan perStatement, TimeSpan total)
+    {
+        private readonly System.Diagnostics.Stopwatch clock = new();
+
+        /// <summary>Each check's <c>statement_timeout</c>.</summary>
+        public TimeSpan PerStatement { get; } = perStatement;
+
+        /// <summary>All of them together.</summary>
+        public TimeSpan Total { get; } = total;
+
+        /// <summary>Whether the budget is gone, so no further check starts.</summary>
+        public bool Spent => clock.IsRunning && clock.Elapsed >= Total;
+
+        /// <summary>What a check left unchecked for want of time says.</summary>
+        public string Sentence =>
+            "Not checked: this row's reference checks had " + Seconds(Total) + " between them (the lesser of " +
+            "MartenStudioOptions.QueryTimeout and " + Seconds(ReferenceBudgetCap) + "), and the checks before this one used it.";
+
+        /// <summary>What a check its own <c>statement_timeout</c> stopped says.</summary>
+        public string TimeoutSentence =>
+            "The check took longer than the " + Seconds(PerStatement) + " each reference check is given (the lesser of " +
+            "MartenStudioOptions.QueryTimeout and " + Seconds(ReferenceStatementCap) + "), and Postgres cancelled it.";
+
+        /// <summary>Starts the clock, once.</summary>
+        public void Start()
+        {
+            if (!clock.IsRunning)
+            {
+                clock.Start();
+            }
+        }
+
+        private static string Seconds(TimeSpan value) =>
+            value.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s";
+    }
+
+    /// <summary>
+    /// The bytes of cell text one read has kept so far, against <see cref="TableRowCaps.Budget" />, and
+    /// whether the budget cut any cell short.
+    /// </summary>
+    internal sealed class CellBudget(TableRowCaps caps)
+    {
+        private long spent;
+
+        /// <summary>Whether the budget is spent, so every further cell keeps <see cref="TableRowCaps.OverBudget" /> bytes.</summary>
+        public bool OverBudget => spent >= caps.Budget;
+
+        /// <summary>Whether any cell was cut because the budget was spent.</summary>
+        public bool Shortened { get; private set; }
+
+        /// <summary>Counts <paramref name="cell" /> against the budget and hands it back.</summary>
+        public SqlCell Keep(SqlCell cell)
+        {
+            if (OverBudget && cell.IsTruncated)
+            {
+                Shortened = true;
+            }
+
+            spent += Encoding.UTF8.GetByteCount(cell.Text);
+            return cell;
+        }
+    }
 
     /// <summary>An outbound key, judged before the row is read.</summary>
     private sealed record OutboundCheck(
@@ -1870,4 +2209,80 @@ internal sealed record TableRowPlan(
         Descending ? SortDirection.Descending : SortDirection.Ascending,
         Mode == TableRowPagingMode.Offset ? offset : 0,
         Note);
+}
+
+/// <summary>
+/// What one circuit has already written to the audit ring about row reads: per store, database, relation
+/// and kind of read, the signature of the last read recorded.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Keyed by where the rows are, not by their name.</b> <c>legacy.orders</c> in another store or in
+/// another database of a multi-database store is other rows, so a read of it is a first contact of its
+/// own - a key of the relation's name alone let the second one pass unrecorded.
+/// </para>
+/// <para>
+/// <b>Bounded.</b> A circuit that visits more than <see cref="Capacity" /> relations forgets them all and
+/// starts again, which can only ever record a read twice - never skip one.
+/// </para>
+/// </remarks>
+internal sealed class TableRowAuditLedger
+{
+    /// <summary>How many keys the ledger holds before it forgets them all.</summary>
+    internal const int Capacity = 512;
+
+    private const char Separator = '\u001f';
+
+    private readonly Dictionary<string, string> signatures = new(StringComparer.Ordinal);
+    private readonly Lock gate = new();
+
+    /// <summary>How many keys are remembered - for a test.</summary>
+    internal int Count
+    {
+        get
+        {
+            lock (gate)
+            {
+                return signatures.Count;
+            }
+        }
+    }
+
+    /// <summary>The ledger key for one kind of read of one relation, in one database of one store.</summary>
+    /// <param name="storeKey">The store's registration key.</param>
+    /// <param name="databaseIdentity">The database's identity (<c>IMartenDatabase.Id.Identity</c>).</param>
+    /// <param name="schema">The relation's schema, as the catalog spells it.</param>
+    /// <param name="name">The relation's name, as the catalog spells it.</param>
+    /// <param name="kind">Which kind of read: <c>rows</c> or <c>count</c>.</param>
+    public static string Key(string storeKey, string databaseIdentity, string schema, string name, string kind) =>
+        storeKey + Separator + databaseIdentity + Separator + schema + Separator + name + Separator + kind;
+
+    /// <summary>
+    /// Whether a read under <paramref name="key" /> with <paramref name="signature" /> is one to record - it
+    /// is, unless the last one recorded under that key had the same signature - and remembers it if so.
+    /// </summary>
+    /// <param name="key">From <see cref="Key" />.</param>
+    /// <param name="signature">The read's signature.</param>
+    /// <param name="previous">The last signature recorded under the key, or <see langword="null" /> on a first contact.</param>
+    public bool TryRecord(string key, string signature, out string? previous)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(signature);
+
+        lock (gate)
+        {
+            if (signatures.TryGetValue(key, out previous) && string.Equals(previous, signature, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (previous is null && signatures.Count >= Capacity)
+            {
+                signatures.Clear();
+            }
+
+            signatures[key] = signature;
+            return true;
+        }
+    }
 }

@@ -166,6 +166,10 @@ internal sealed class DatabaseAccess
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Fingerprint, DatabaseDeclarations Declarations)> declarations =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Another store's own identity for a database, per store and database, for the life of the circuit.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> otherDatabaseIds =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public DatabaseAccess(
         IOptions<MartenStudioOptions> options,
         StudioCapabilityGuard capabilities,
@@ -354,12 +358,33 @@ internal sealed class DatabaseAccess
     /// that does not exist answer with the same sentence. That is an in-process question; tenant discovery,
     /// which can query the database, is never run here.
     /// </remarks>
-    public async Task<DatabaseStoreLookup> FindStoreAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    public Task<DatabaseStoreLookup> FindStoreAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        FindStoreAsync(scope, null, null, cancellationToken);
+
+    /// <summary>
+    /// <see cref="FindStoreAsync(StudioScope, CancellationToken)" />, with the store policy's refusal written
+    /// to the audit ring (and event 9203) under <paramref name="action" /> and <paramref name="target" /> -
+    /// the refusal is the same sentence a missing store gets, and the trail is where the difference is kept.
+    /// </summary>
+    /// <param name="scope">The visitor's scope.</param>
+    /// <param name="action">What the audit ring calls the read; <see langword="null" /> to audit nothing.</param>
+    /// <param name="target">What it was aimed at.</param>
+    /// <param name="cancellationToken">Cancels the lookup.</param>
+    public async Task<DatabaseStoreLookup> FindStoreAsync(
+        StudioScope scope,
+        string? action,
+        string? target,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
         if (!await authorization.IsAuthorizedAsync(scope, capability: null, cancellationToken).ConfigureAwait(false))
         {
+            if (action is not null)
+            {
+                audit.RecordScopeDenied(scope, StorePolicyName(options.Value), action, target ?? string.Empty);
+            }
+
             return new DatabaseStoreLookup(null, null, null, new StudioNotAuthorizedException(scope).Message);
         }
 
@@ -451,7 +476,7 @@ internal sealed class DatabaseAccess
         DatabasePolicyAnswer answer = await EvaluatePoliciesAsync(scope, cancellationToken).ConfigureAwait(false);
 
         IReadOnlyDictionary<string, DatabaseStoreAccess> others = await OtherStoresAsync(
-                scope, resolved.Registration.Key, declared.Classifier, answer.CapabilityEnabled, cancellationToken)
+                resolved, declared.Classifier, answer.CapabilityEnabled, cancellationToken)
             .ConfigureAwait(false);
 
         IReadOnlyList<CatalogSchema> live = await catalog.SchemasAsync(resolved.Database, cancellationToken)
@@ -483,18 +508,26 @@ internal sealed class DatabaseAccess
     /// decides whether the rows of its Marten-managed tables may be read.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// This store's own grant says nothing about another store: a visitor the resolver would refuse store B
     /// must not learn B's key from an ownership badge, nor read B's projection rows because they happen to
     /// sit in a schema of this store's database.
+    /// </para>
+    /// <para>
+    /// <b>Asked about this database, as that store names it.</b> The visitor's own <c>DatabaseId</c> is this
+    /// store's spelling - often empty, which means "this store's default" - and handed to store B it would
+    /// mean B's default, which need not be this database at all. So B's policy is asked with the identity
+    /// of B's own database that is this one (<see cref="OtherStoreDatabaseIdAsync" />).
+    /// </para>
     /// </remarks>
     private async Task<IReadOnlyDictionary<string, DatabaseStoreAccess>> OtherStoresAsync(
-        StudioScope scope,
-        string resolvedKey,
+        ResolvedScope resolved,
         DatabaseObjectClassifier classifier,
         bool capabilityEnabled,
         CancellationToken cancellationToken)
     {
         Dictionary<string, DatabaseStoreAccess> others = new(StringComparer.OrdinalIgnoreCase);
+        string resolvedKey = resolved.Registration.Key;
 
         foreach (StoreDeclarations store in classifier.Stores)
         {
@@ -503,7 +536,10 @@ internal sealed class DatabaseAccess
                 continue;
             }
 
-            StudioScope other = new(store.StoreKey, scope.DatabaseId, null);
+            string databaseId = await OtherStoreDatabaseIdAsync(store.StoreKey, resolved.Database, cancellationToken)
+                .ConfigureAwait(false);
+
+            StudioScope other = new(store.StoreKey, databaseId, null);
 
             if (!await authorization.IsAuthorizedAsync(other, capability: null, cancellationToken).ConfigureAwait(false))
             {
@@ -528,6 +564,53 @@ internal sealed class DatabaseAccess
         }
 
         return others;
+    }
+
+    /// <summary>
+    /// Another store's own identity for <paramref name="database" />: the identity of the database of
+    /// <paramref name="storeKey" /> that is this one - matched by <c>Id.Identity</c>, which is what that
+    /// store's scope selector and its policy see - or, when it has none (or cannot say), this database's own
+    /// identity, which at least names this database rather than that store's default. Remembered for the
+    /// circuit.
+    /// </summary>
+    private async Task<string> OtherStoreDatabaseIdAsync(string storeKey, Marten.Storage.IMartenDatabase database, CancellationToken cancellationToken)
+    {
+        string identity = database.Id.Identity;
+        string key = storeKey + "\u001f" + identity;
+
+        if (otherDatabaseIds.TryGetValue(key, out string? known))
+        {
+            return known;
+        }
+
+        string answer = identity;
+        MartenStoreRegistration? registration = registry.Find(storeKey, options);
+
+        if (registration is not null
+            && registry.TryResolve(registration, provider, out IDocumentStore? store).IsAvailable
+            && store is not null)
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                foreach (Marten.Storage.IMartenDatabase candidate in await store.Storage.AllDatabases().ConfigureAwait(false))
+                {
+                    if (string.Equals(candidate.Id.Identity, identity, StringComparison.OrdinalIgnoreCase))
+                    {
+                        answer = candidate.Id.Identity;
+                        break;
+                    }
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // That store cannot list its databases just now: this database's own identity it is.
+            }
+        }
+
+        otherDatabaseIds[key] = answer;
+        return answer;
     }
 
     /// <summary>

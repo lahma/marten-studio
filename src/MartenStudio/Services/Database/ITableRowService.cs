@@ -11,22 +11,27 @@ namespace MartenStudio.Services.Database;
 /// off under <c>ReadOnly</c>), then the scope resolved <b>with no tenant</b> and the capability named - the
 /// write policy asked of the database as a whole, because nothing here is filtered by tenant - then
 /// <c>BrowsableSchemas</c>, then the relation looked up in the catalog and judged: a Marten document or
-/// event table, Marten's bookkeeping, a foreign table and a view over a hidden type's table are refused
-/// before any row SQL is built. Every refusal comes back as a value on the result's <c>Refusal</c> and is
-/// in the audit ring; only cancellation is thrown.
+/// event table, Marten's bookkeeping, a foreign table - and anything whose rows would be read from one: a
+/// partitioned table with a foreign partition, a table with a foreign inheritance child, a view reading any
+/// of them - and a view over a hidden type's table are refused before any row SQL is built. Every refusal
+/// comes back as a value on the result's <c>Refusal</c> and is in the audit ring; only cancellation is
+/// thrown, and a key that does not name exactly one row key is a refusal too.
 /// </para>
 /// <para>
 /// <b>Read-only, bounded, and as the console's role.</b> Every statement runs inside
 /// <c>ReadOnlySqlSession.InTransactionAsync</c>: <c>SET TRANSACTION READ ONLY</c>, <c>statement_timeout</c>
 /// from <c>QueryTimeout</c>, a three-second <c>lock_timeout</c>, and <c>SET LOCAL ROLE SqlConsoleRole</c>
-/// when one is set. Cells are cut on the server, pages are bounded by <c>MaxPageSize</c>, offsets by
-/// 10,000, reference counts at "1,000+".
+/// when one is set. Cells are cut on the server and kept to a number of bytes, and a read keeps a byte
+/// budget for all its cells; pages are bounded by <c>MaxPageSize</c>, offsets by 10,000, reference counts
+/// at "1,000+", and one row's reference checks by a short per-check timeout and a budget for all of them.
 /// </para>
 /// <para>
-/// <b>Audited as a person would read the trail.</b> The ring gets one entry for opening a relation's rows
-/// (the first page of a given filter and sort), one for a filter change, one for opening a row, and one
-/// for every refusal - never one per page turn. Filter values and key values are in the application log
-/// (events 9235 and 9236) and never in the ring, which any reader of the Activity page can see.
+/// <b>Audited as a person would read the trail.</b> The ring gets one entry for every first contact with a
+/// relation's rows under a filter, sort and walk - whatever page the read starts on, because a cursor or
+/// an offset in a URL is a first contact too - one for a filter change, one for a filtered count, one for
+/// opening a row, and one for every refusal - never one per page turn. It is kept per store, database and
+/// relation. Filter values and key values are in the application log (events 9235 and 9236) and never in
+/// the ring, which any reader of the Activity page can see.
 /// </para>
 /// <para>
 /// The names avoid every verb <c>CapabilityGatingMatrixTests</c> treats as mutating.

@@ -267,7 +267,11 @@ public class TableRowQueryBuilderTests
 
         statement.Sql.Should().Contain("pg_catalog.substring(t.\"sched_name\"::text, 1, @cap)");
         statement.Sql.Should().Contain("pg_catalog.octet_length(t.\"sched_name\"::text)");
-        statement.Sql.Should().Contain("pg_catalog.substring(t.\"payload\"::text, 1, @jsonCap)");
+        statement.Sql.Should().Contain("cross join lateral (select t.\"payload\"::text as v offset 0) as j1\n");
+        statement.Sql.Should().Contain("pg_catalog.substring(j1.v, 1, @jsonCap)");
+        statement.Sql.Should().Contain("pg_catalog.octet_length(j1.v)");
+        Regex.Matches(statement.Sql, Regex.Escape("t.\"payload\"::text")).Should().ContainSingle(
+            "a jsonb value is rendered to text once per row, and the cut and the length both read that text");
         statement.Sql.Should().Contain("pg_catalog.substring(t.\"job_data\", 1, @bytes)");
         statement.Sql.Should().Contain("pg_catalog.octet_length(t.\"job_data\")");
         statement.Sql.Should().Contain("pg_catalog.substring(t.\"total\"::text, 1, @cap)", "numeric is read as the text Postgres prints");
@@ -452,6 +456,45 @@ public class TableRowQueryBuilderTests
         bytes.Sql.Should().Contain("pg_catalog.substring(t.\"blob\", 1, @cap)");
         bytes.Sql.Should().Contain("where t.ctid = @c\n");
         Value(bytes, "cap").Should().Be(1000, "bytes are cut exactly; octet_length says whether they were");
+    }
+
+    /// <summary>
+    /// DB-3-fix F5: a <c>jsonb</c> value is rendered to text once per row - by a lateral of its own, fenced
+    /// with <c>offset 0</c> so the planner cannot fold it back into both expressions - in the grid, the row
+    /// detail and the one-cell read alike; a text column needs no such thing.
+    /// </summary>
+    [Fact]
+    public void A_json_value_is_rendered_once_in_every_read()
+    {
+        TableRowStatement cell = TableRowQueryBuilder.BuildCell(
+            "legacy", "integration_messages", new TableRowColumnRead("payload", "jsonb"), ["message_id"], ["m"], null, 1000);
+
+        cell.Sql.Should().Be(
+            "select pg_catalog.substring(j1.v, 1, @cap),\n" +
+            "       pg_catalog.octet_length(j1.v)\n" +
+            "from \"legacy\".\"integration_messages\" as t\n" +
+            "cross join lateral (select t.\"payload\"::text as v offset 0) as j1\n" +
+            "where t.\"message_id\" = @k1\n" +
+            "limit 1");
+
+        TableRowStatement row = TableRowQueryBuilder.BuildRow(
+            "legacy",
+            "integration_messages",
+            [new TableRowColumnRead("payload", "jsonb"), new TableRowColumnRead("raw_body", "text"), new TableRowColumnRead("headers", "json")],
+            ["message_id"],
+            ["m"],
+            null,
+            TableRowCaps.Detail);
+
+        row.Sql.Should().Contain("cross join lateral (select t.\"payload\"::text as v offset 0) as j1\n")
+            .And.Contain("cross join lateral (select t.\"headers\"::text as v offset 0) as j2\n")
+            .And.Contain("pg_catalog.substring(t.\"raw_body\"::text, 1, @cap)")
+            .And.Contain("\nwhere t.\"message_id\" = @k1\n");
+
+        foreach (string column in new[] { "payload", "headers" })
+        {
+            Regex.Matches(row.Sql, Regex.Escape("t.\"" + column + "\"::text")).Should().ContainSingle(column);
+        }
     }
 
     [Fact]

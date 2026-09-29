@@ -183,7 +183,9 @@ internal static partial class StudioLog
     // --------------------------------------------------------------------------------------------------
 
     /// <remarks>
-    /// The other half of the ring entry for opening a relation's rows or changing its filter. The ring is
+    /// The other half of the ring entry for opening a relation's rows, changing its filter or counting the
+    /// rows a filter matches - written for every first contact under a filter and sort, whatever page it
+    /// starts on, and for no page turn. The ring is
     /// readable by anyone with the read policy, so it names the relation and the sort and never a value;
     /// this line carries the filter as typed - values included - to wherever the application logs, which
     /// is the record an operator reconstructs "who looked for what" from. Information, never above: a

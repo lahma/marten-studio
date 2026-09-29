@@ -153,6 +153,49 @@ public partial class DatabaseCatalogQueriesTests
             .And.Contain("join pg_catalog.pg_inherits i on i.inhparent = tree.relid");
     }
 
+    /// <summary>
+    /// DB-3-fix F2: the same lock-free walk starts from a table with inheritance children as well as from a
+    /// partitioned one, and says whether a foreign table is under it and which schemas its rows live in - for
+    /// the relation itself, and for every table a view reads.
+    /// </summary>
+    [Fact]
+    public void Where_a_relations_rows_really_are_comes_from_the_same_walk_of_pg_inherits()
+    {
+        DatabaseCatalogQueries.RelationsSql.Should().Contain("where p.relkind in ('p', 'r')")
+            .And.Contain("pg_catalog.bool_or(x.relkind = 'f')")
+            .And.Contain("pg_catalog.array_agg(distinct xn.nspname::text)")
+            .And.Contain("coalesce(pt.foreign_descendant, false)");
+
+        DatabaseCatalogQueries.ViewDependenciesSql.Should().Contain("join pg_catalog.pg_inherits i on i.inhparent = descendants.relid")
+            .And.Contain("pg_catalog.bool_and(walk.through_matview)")
+            .And.Contain("coalesce(ih.foreign_descendant, false)");
+    }
+
+    /// <summary>
+    /// DB-1-fix re-review, item 2: a view's walk follows the functions and operators it calls through their
+    /// own recorded dependencies - which is what a SQL-standard body has - and a view's references include a
+    /// schema named as a value, a collation and a text search configuration or dictionary.
+    /// </summary>
+    [Fact]
+    public void A_views_walk_follows_functions_and_its_references_name_every_kind_of_schema_object()
+    {
+        foreach (string sql in new[] { DatabaseCatalogQueries.ViewDependenciesSql, DatabaseCatalogQueries.ViewReferencesSql })
+        {
+            sql.Should().StartWith("with recursive walk (view_oid, classid, objid, depth, through_matview)")
+                .And.Contain("'pg_catalog.pg_proc'::pg_catalog.regclass,\n              'pg_catalog.pg_operator'::pg_catalog.regclass)")
+                .And.Contain("else walk.objid");
+        }
+
+        foreach (string catalog in new[] { "pg_namespace", "pg_collation", "pg_ts_config", "pg_ts_dict" })
+        {
+            DatabaseCatalogQueries.ViewReferencesSql.Should().Contain("refs.ref_class = 'pg_catalog." + catalog + "'::pg_catalog.regclass", catalog);
+        }
+
+        DatabaseCatalogQueries.ViewReferencesSql.Should().Contain("and not (l.lanname = 'sql' and p.prosrc = '')",
+            "a SQL-standard body is followed, not treated as code nobody can see into")
+            .And.Contain("p.prosecdef");
+    }
+
     [Fact]
     public void Every_list_is_bounded_and_filtered_by_name()
     {
@@ -346,7 +389,7 @@ public partial class DatabaseCatalogQueriesTests
         "or", "not", "when", "then", "else", "is", "on", "as", "filter", "from",
 
         // Common table expressions, named with their columns: tree (root, relid) as (...).
-        "tree", "partitioned", "walk", "refs", "named",
+        "tree", "partitioned", "walk", "refs", "named", "descendants", "inherited",
     ];
 
     [GeneratedRegex(@"\b(create|alter|drop|insert|update|delete|truncate|grant|revoke|comment\s+on|set\s+role|vacuum|analyze|refresh|lock)\b", RegexOptions.IgnoreCase)]

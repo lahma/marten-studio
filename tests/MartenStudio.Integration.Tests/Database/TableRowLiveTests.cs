@@ -161,11 +161,18 @@ public class TableRowLiveTests(TableRowLiveTests.Fixture fixture) : IClassFixtur
             .State.Should().Be(TableRowPageState.Loaded, "the physical order needs no index");
     }
 
-    /// <summary>Acceptance 2: a view has no key and pages by offset, in a deterministic order.</summary>
+    /// <summary>
+    /// Acceptance 2: a view has no key and pages by offset, in a deterministic order.
+    /// </summary>
+    /// <remarks>
+    /// Read under <c>"*"</c>: <c>active_employees</c> calls <c>legacy.format_employee_name</c>, whose body is
+    /// SQL in a string, and with <c>public</c> withheld from a <c>quartz, legacy</c> visitor the studio will
+    /// not read a view whose function could read it (<c>TableRowSecurityLiveTests</c> pins that side).
+    /// </remarks>
     [PostgresFact]
     public async Task A_view_pages_by_offset_and_every_row_appears_once()
     {
-        await using RowsHost host = fixture.Host();
+        await using RowsHost host = fixture.Host(static options => options.BrowsableSchemas.Add("*"));
 
         List<TableRowPage> pages = await host.WalkAsync("legacy", "active_employees", new TableRowRequest { PageSize = 7 });
 
@@ -513,7 +520,10 @@ public class TableRowLiveTests(TableRowLiveTests.Fixture fixture) : IClassFixtur
         system.Bounded.Should().BeFalse();
         system.Sql.Should().Contain("limit @cap) as bounded");
 
-        (await host.RowsAsync(x => x.CountExactAsync(RowsHost.Scope, "legacy", "active_employees", null, Token)))
+        // Under "*", where the view's rows may be read at all (see A_view_pages_by_offset_and_every_row_appears_once).
+        await using RowsHost star = fixture.Host(static options => options.BrowsableSchemas.Add("*"));
+
+        (await star.RowsAsync(x => x.CountExactAsync(RowsHost.Scope, "legacy", "active_employees", null, Token)))
             .Refusal.Should().Be(DatabaseRefusal.NotApplicable);
 
         await using RowsHost strict = fixture.Host(static options => options.ExactCountThreshold = 10);
@@ -570,6 +580,19 @@ public class TableRowLiveTests(TableRowLiveTests.Fixture fixture) : IClassFixtur
             ];
 
             refusals.Should().OnlyContain(x => x == expected, what);
+
+            // The control, inside the same log: a granted read of another relation, whose statements the log
+            // must see - otherwise "nothing named the relation" would be true of a log that saw nothing.
+            await using (RowsHost control = fixture.Host())
+            {
+                TableRowPage granted = await control.RowsAsync(x => x.ListRowsAsync(RowsHost.Scope, "legacy", "warehouses", new TableRowRequest(), Token));
+                granted.State.Should().Be(TableRowPageState.Loaded, what + ": " + (granted.Reason ?? granted.Error?.Sentence));
+            }
+
+            log.Statements.Should().Contain(static x => x.Contains(ReadOnlySqlSession.ReadOnlySql, StringComparison.Ordinal),
+                what + ": the log sees the session preamble");
+            log.Statements.Should().Contain(static x => x.Contains("\"legacy\".\"warehouses\"", StringComparison.Ordinal),
+                what + ": the log sees a granted row read, so it would have seen a refused one");
 
             string quoted = SqlIdentifier.Qualify(schema, table);
             log.Statements.Should().NotContain(x => x.Contains(quoted, StringComparison.Ordinal),

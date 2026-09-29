@@ -123,6 +123,30 @@ public class WithheldNamesTests
             "app.note=see " + Mask + ".salaries");
     }
 
+    /// <summary>
+    /// DB-1-fix re-review, item 3: <c>$€$</c> is a dollar tag to Postgres (<c>dolq_start</c> takes any high
+    /// character), so a walk that did not think so read the body as SQL, took the quote inside it for an
+    /// identifier, and let the qualifier inside that "identifier" through.
+    /// </summary>
+    [Theory]
+    [InlineData("select $€$ \"x $€$ || hr.secret || $€$ \" $€$")]
+    [InlineData("select $é1$ hr.secret $é1$")]
+    [InlineData("select $_€_$ \" $_€_$ || hr.secret || $_€_$ \" $_€_$")]
+    public void A_dollar_tag_with_a_high_character_is_a_tag(string text) =>
+        WithheldNames.Redact(text, Withheld).Should().Contain(Mask).And.NotContain("hr.");
+
+    /// <summary>
+    /// And a quoted identifier's own text is walked too: what looks like one may be the inside of a body the
+    /// walk misread, and a column alias spelled like a withheld qualifier costs a word to mask.
+    /// </summary>
+    [Fact]
+    public void A_quoted_identifiers_content_is_masked_as_free_text()
+    {
+        WithheldNames.Redact("select 1 as \"hr.secret\"", Withheld).Should().Be("select 1 as \"" + Mask + ".secret\"");
+        WithheldNames.Redact("select 1 as \"a \"\"quoted\"\" hr.x\"", Withheld).Should().Be("select 1 as \"a \"\"quoted\"\" " + Mask + ".x\"");
+        WithheldNames.Redact("select \"hr\".\"secret\", \"hr\" from t", Withheld).Should().Be("select " + Mask + ".\"secret\", \"hr\" from t");
+    }
+
     [Fact]
     public void Free_text_is_masked_without_assuming_any_SQL()
     {

@@ -281,7 +281,9 @@ internal static class DatabaseObjectAssembler
             outbound.Count,
             inbound.Count,
             viewRefusal,
-            dependenciesUnknown: detail.Dependencies.Truncated || detail.References.Truncated);
+            dependenciesUnknown: detail.Dependencies.Truncated || detail.References.Truncated,
+            viewReads: detail.Dependencies.Items,
+            viewReferences: detail.References.Items);
 
         List<DatabaseColumnInfo> columns = [.. detail.Columns.Select(column => new DatabaseColumnInfo(
             column.Name,
@@ -418,6 +420,11 @@ internal static class DatabaseObjectAssembler
     /// <param name="foreignKeysIn">Keys into it this visitor may see.</param>
     /// <param name="viewRefusal">For a view, <see cref="DatabaseGate.ViewRefusal" />'s answer.</param>
     /// <param name="dependenciesUnknown">Whether a read of what the views reference hit its cap.</param>
+    /// <param name="viewReads">
+    /// For a view, the relations it reads - what says whether its rows would be read from a foreign table,
+    /// from Marten's own tables or another store's, which are facts about its rows and not about its query.
+    /// </param>
+    /// <param name="viewReferences">For a view, the functions and other objects it refers to.</param>
     public static DatabaseRelationSummary Relation(
         DatabaseGate gate,
         CatalogRelation relation,
@@ -425,7 +432,9 @@ internal static class DatabaseObjectAssembler
         int foreignKeysOut,
         int foreignKeysIn,
         DatabaseRowAccess? viewRefusal,
-        bool dependenciesUnknown)
+        bool dependenciesUnknown,
+        IReadOnlyList<CatalogViewDependency>? viewReads = null,
+        IReadOnlyList<CatalogViewReference>? viewReferences = null)
     {
         ArgumentNullException.ThrowIfNull(gate);
         ArgumentNullException.ThrowIfNull(relation);
@@ -435,7 +444,12 @@ internal static class DatabaseObjectAssembler
         bool isView = kind is DatabaseObjectKind.View or DatabaseObjectKind.MaterializedView;
 
         DatabaseRowAccess? refusal = isView ? viewRefusal : null;
-        DatabaseRowAccess rows = gate.RowsFor(relation, ownership, refusal);
+        DatabaseRowAccess rows = gate.RowsFor(
+            relation,
+            ownership,
+            refusal,
+            isView ? viewReads ?? [] : null,
+            isView ? viewReferences ?? [] : null);
 
         if (rows.Allowed && isView && dependenciesUnknown)
         {
@@ -524,12 +538,11 @@ internal static class DatabaseObjectAssembler
             }
 
             (string, string) key = (relation.Schema, relation.Name);
+            bool isView = kind is DatabaseObjectKind.View or DatabaseObjectKind.MaterializedView;
+            List<CatalogViewDependency> viewReads = isView && reads.TryGetValue(key, out List<CatalogViewDependency>? read) ? read : [];
+            List<CatalogViewReference> viewReferences = isView && refersTo.TryGetValue(key, out List<CatalogViewReference>? refers) ? refers : [];
 
-            DatabaseRowAccess? viewRefusal = kind is DatabaseObjectKind.View or DatabaseObjectKind.MaterializedView
-                ? gate.ViewRefusal(
-                    reads.TryGetValue(key, out List<CatalogViewDependency>? read) ? read : [],
-                    refersTo.TryGetValue(key, out List<CatalogViewReference>? refers) ? refers : [])
-                : null;
+            DatabaseRowAccess? viewRefusal = isView ? gate.ViewRefusal(viewReads, viewReferences) : null;
 
             yield return Relation(
                 gate,
@@ -538,7 +551,9 @@ internal static class DatabaseObjectAssembler
                 outbound.GetValueOrDefault(key),
                 inbound.GetValueOrDefault(key),
                 viewRefusal,
-                dependenciesUnknown: unknown);
+                dependenciesUnknown: unknown,
+                viewReads: viewReads,
+                viewReferences: viewReferences);
         }
     }
 
@@ -562,8 +577,13 @@ internal static class DatabaseObjectAssembler
                 continue;
             }
 
+            // A hidden type's own functions are as absent as its table.
+            if (gate.Classifier.ClassifyRoutine(routine.Schema, routine.Name) is not { } ownership)
+            {
+                continue;
+            }
+
             DatabaseObjectKind kind = DatabaseObjectKinds.FromProkind(routine.Kind);
-            DatabaseObjectOwnership ownership = gate.Classifier.ClassifyRoutine(routine.Schema, routine.Name);
 
             yield return new DatabaseRoutineSummary(
                 kind,

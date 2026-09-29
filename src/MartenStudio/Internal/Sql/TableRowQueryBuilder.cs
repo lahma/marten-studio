@@ -37,17 +37,39 @@ internal enum TableRowCellShape
     Binary,
 }
 
-/// <summary>The server-side caps one read applies.</summary>
-/// <param name="Text">How many characters of a text-form cell are kept.</param>
-/// <param name="Json">How many characters of a <c>json</c>/<c>jsonb</c> cell are kept.</param>
+/// <summary>The caps one read applies: per cell, and over the whole read.</summary>
+/// <remarks>
+/// <para>
+/// <b>Bytes, not characters.</b> Every text-form cap is a number of UTF-8 bytes of the text kept - what the
+/// page holds and the circuit sends - never a number of characters, which is up to four times as many
+/// bytes. The server cuts first, by characters (<c>substring</c> counts them, and slices a TOASTed value
+/// rather than reading it whole), to one character past the cap; the reader then cuts that to the byte cap
+/// on a character boundary, and anything it dropped is a cut.
+/// </para>
+/// <para>
+/// <b>And a budget for the whole read.</b> A page of 500 rows of twenty wide columns is 40 MB of cells even
+/// when each is capped. Once the cells read so far hold <see cref="Budget" /> bytes, every further cell is
+/// cut to <see cref="OverBudget" /> bytes and marked cut - its whole value is still one expansion away.
+/// </para>
+/// </remarks>
+/// <param name="Text">How many bytes of a text-form cell are kept.</param>
+/// <param name="Json">How many bytes of a <c>json</c>/<c>jsonb</c> cell are kept.</param>
 /// <param name="Binary">How many bytes of a <c>bytea</c> cell are kept.</param>
-internal sealed record TableRowCaps(int Text, int Json, int Binary)
+/// <param name="Budget">How many bytes of cell text one read keeps before it starts cutting every cell short.</param>
+/// <param name="OverBudget">How many bytes a cell keeps once the budget is spent.</param>
+internal sealed record TableRowCaps(int Text, int Json, int Binary, int Budget = int.MaxValue, int OverBudget = 64)
 {
-    /// <summary>A grid cell: a kilobyte of text, four of JSON, sixty-four bytes of binary.</summary>
-    public static TableRowCaps List { get; } = new(1024, 4 * 1024, 64);
+    /// <summary>
+    /// A grid cell: a kilobyte of text, four of JSON, sixty-four bytes of binary - and a mebibyte for the
+    /// whole page, past which cells keep sixty-four bytes.
+    /// </summary>
+    public static TableRowCaps List { get; } = new(1024, 4 * 1024, 64, 1024 * 1024, 64);
 
-    /// <summary>Row detail: 256 KB of text or JSON per cell, four kilobytes of binary.</summary>
-    public static TableRowCaps Detail { get; } = new(256 * 1024, 256 * 1024, 4 * 1024);
+    /// <summary>
+    /// Row detail: 256 KB of text or JSON per cell, four kilobytes of binary - and two mebibytes for the whole
+    /// row, past which cells keep 256 bytes.
+    /// </summary>
+    public static TableRowCaps Detail { get; } = new(256 * 1024, 256 * 1024, 4 * 1024, 2 * 1024 * 1024, 256);
 }
 
 /// <summary>One column to read: the catalog's name and its type.</summary>
@@ -190,11 +212,14 @@ internal sealed record TableRowListSpec
 /// <b>Cells are cut on the server.</b> A text-form cell is <c>substring(col::text, 1, @cap)</c> beside
 /// <c>octet_length(col::text)</c>, a <c>bytea</c> is <c>substring(col, 1, @bytes)</c> beside
 /// <c>octet_length(col)</c>: a 40 MB value never crosses the wire to be drawn as a kilobyte. A text cap is
-/// bound one higher than the characters kept, so the reader knows a cut from a value that happens to be
-/// exactly the cap long (a byte cap needs no such margin: the octet length says whether bytes were cut).
-/// <c>substring</c> rather than <c>left</c>, because on a column stored
-/// <c>EXTERNAL</c> <c>substring</c> reads only the TOAST chunks it needs; and <c>octet_length</c> of a text
-/// column is answered from the TOAST header without detoasting it.
+/// a number of UTF-8 bytes (<see cref="TableRowCaps" />): the server sends one character more than that
+/// many, which is never fewer bytes than the cap, and the reader cuts it to the cap on a character
+/// boundary - so a cut is known from a value that happens to fit exactly (a byte cap needs no such margin:
+/// the octet length says whether bytes were cut). <c>substring</c> rather than <c>left</c>, because on a
+/// column stored <c>EXTERNAL</c> <c>substring</c> reads only the TOAST chunks it needs; and
+/// <c>octet_length</c> of a text column is answered from the TOAST header without detoasting it. A
+/// <c>json</c> or <c>jsonb</c> column's text is rendered once per row, by a lateral subquery both
+/// expressions read (<see cref="Laterals" />), rather than once for the cut and again for the length.
 /// </para>
 /// <para>
 /// <b>The keyset is read raw.</b> The row key's columns, the sort column and <c>ctid</c> are selected a
@@ -310,9 +335,11 @@ internal static class TableRowQueryBuilder
         int sortOrdinal = keyset && spec.SortColumn is { } sorted ? items.Add(Column(sorted) + "::text") : -1;
         int locatorOrdinal = spec.SelectLocator ? items.Add(Alias + ".ctid::text") : -1;
 
-        List<TableRowCellLayout> cells = [.. spec.Columns.Select(column => Cell(items, parameters, column, spec.Caps))];
+        var laterals = new Laterals();
+        List<TableRowCellLayout> cells = [.. spec.Columns.Select(column => Cell(items, parameters, laterals, column, spec.Caps))];
 
         sql.Append("\nfrom ").Append(SqlIdentifier.Qualify(spec.Schema, spec.Name)).Append(AsAlias);
+        laterals.AppendTo(sql);
 
         List<string> predicates = [.. spec.Filter.Select((term, i) => Predicate(term, i + 1, parameters))];
 
@@ -372,23 +399,30 @@ internal static class TableRowQueryBuilder
         var items = new SelectList(sql);
 
         List<int> keyOrdinals = [.. keyColumns.Select(column => items.Add(Column(column) + "::text"))];
-        List<TableRowCellLayout> cells = [.. columns.Select(column => Cell(items, parameters, column, caps))];
+
+        var laterals = new Laterals();
+        List<TableRowCellLayout> cells = [.. columns.Select(column => Cell(items, parameters, laterals, column, caps))];
 
         sql.Append("\nfrom ").Append(SqlIdentifier.Qualify(schema, name)).Append(AsAlias);
+        laterals.AppendTo(sql);
         AppendWhere(sql, ByKey(keyColumns, keyValues, locator, parameters));
         sql.Append("limit 1");
 
         return new TableRowStatement(sql.ToString(), parameters.All, new TableRowLayout(keyColumns, keyOrdinals, -1, -1, cells, []));
     }
 
-    /// <summary>One cell of one row, whole, up to <paramref name="cap" /> characters (bytes, for <c>bytea</c>).</summary>
+    /// <summary>
+    /// One cell of one row, whole, up to <paramref name="cap" /> bytes: the first <paramref name="cap" /> bytes
+    /// of a <c>bytea</c>, or one character more than <paramref name="cap" /> of anything else's text, which the
+    /// reader cuts to <paramref name="cap" /> UTF-8 bytes (see <see cref="TableRowCaps" />).
+    /// </summary>
     /// <param name="schema">The relation's schema.</param>
     /// <param name="name">The relation's name.</param>
     /// <param name="column">The column.</param>
     /// <param name="keyColumns">The key columns - or empty, and <paramref name="locator" /> given.</param>
     /// <param name="keyValues">The key values, raw text, in key order.</param>
     /// <param name="locator">A <c>ctid</c> to read by instead of a key.</param>
-    /// <param name="cap">How much to keep.</param>
+    /// <param name="cap">How many bytes to keep.</param>
     public static TableRowStatement BuildCell(
         string schema,
         string name,
@@ -406,6 +440,7 @@ internal static class TableRowQueryBuilder
         var items = new SelectList(sql);
 
         string reference = Column(column.Name);
+        var laterals = new Laterals();
         int value;
         int length;
 
@@ -417,12 +452,15 @@ internal static class TableRowQueryBuilder
         }
         else
         {
+            // A JSON value is rendered to text once, by a lateral of its own, and both expressions read that.
+            string text = column.Shape == TableRowCellShape.Json ? laterals.Add(reference) : reference + "::text";
             string chars = parameters.Add("cap", NpgsqlDbType.Integer, checked(cap + 1));
-            value = items.Add("pg_catalog.substring(" + reference + "::text, 1, " + chars + ")");
-            length = items.Add("pg_catalog.octet_length(" + reference + "::text)");
+            value = items.Add("pg_catalog.substring(" + text + ", 1, " + chars + ")");
+            length = items.Add("pg_catalog.octet_length(" + text + ")");
         }
 
         sql.Append("\nfrom ").Append(SqlIdentifier.Qualify(schema, name)).Append(AsAlias);
+        laterals.AppendTo(sql);
         AppendWhere(sql, ByKey(keyColumns, keyValues, locator, parameters));
         sql.Append("limit 1");
 
@@ -552,7 +590,12 @@ internal static class TableRowQueryBuilder
         return new TableRowStatement(sql, parameters.All, TableRowLayout.Scalar);
     }
 
-    private static TableRowCellLayout Cell(SelectList items, Parameters parameters, TableRowColumnRead column, TableRowCaps caps)
+    private static TableRowCellLayout Cell(
+        SelectList items,
+        Parameters parameters,
+        Laterals laterals,
+        TableRowColumnRead column,
+        TableRowCaps caps)
     {
         string reference = Column(column.Name);
         TableRowCellShape shape = column.Shape;
@@ -577,8 +620,12 @@ internal static class TableRowQueryBuilder
                     ? parameters.Once("jsonCap", NpgsqlDbType.Integer, checked(caps.Json + 1))
                     : parameters.Once("cap", NpgsqlDbType.Integer, checked(caps.Text + 1));
 
-                int value = items.Add("pg_catalog.substring(" + reference + "::text, 1, " + cap + ")");
-                int length = items.Add("pg_catalog.octet_length(" + reference + "::text)");
+                // A jsonb value has no text until jsonb_out writes one, and two expressions over
+                // "payload"::text would write it twice: a JSON column's text comes from a lateral of its own.
+                string text = shape == TableRowCellShape.Json ? laterals.Add(reference) : reference + "::text";
+
+                int value = items.Add("pg_catalog.substring(" + text + ", 1, " + cap + ")");
+                int length = items.Add("pg_catalog.octet_length(" + text + ")");
                 return new TableRowCellLayout(column.Name, column.Type, shape, value, length);
             }
         }
@@ -807,6 +854,38 @@ internal static class TableRowQueryBuilder
 
             sql.Append(expression);
             return count++;
+        }
+    }
+
+    /// <summary>
+    /// One <c>cross join lateral (select t."col"::text as v offset 0) as jN</c> per JSON column: its text,
+    /// rendered once per row and read twice - by the cut and by the length.
+    /// </summary>
+    /// <remarks>
+    /// <c>offset 0</c> is what makes it once: without it the planner pulls the subquery up into the outer
+    /// query and substitutes the expression back into both places that read <c>jN.v</c>. The lateral reads
+    /// only the row the outer query is on, so a filter, a keyset predicate and a key lookup still apply to
+    /// <c>t</c> before it, and the aliases are the builder's own - never an identifier from anywhere else.
+    /// </remarks>
+    private sealed class Laterals
+    {
+        private readonly List<string> clauses = [];
+
+        /// <summary>Adds a lateral for <paramref name="reference" /> and answers the expression that reads its text.</summary>
+        public string Add(string reference)
+        {
+            string alias = "j" + (clauses.Count + 1).ToString(CultureInfo.InvariantCulture);
+            clauses.Add("cross join lateral (select " + reference + "::text as v offset 0) as " + alias);
+            return alias + ".v";
+        }
+
+        /// <summary>Writes the laterals after the <c>from</c>, one per line.</summary>
+        public void AppendTo(StringBuilder sql)
+        {
+            foreach (string clause in clauses)
+            {
+                sql.Append(clause).Append('\n');
+            }
         }
     }
 

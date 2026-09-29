@@ -140,7 +140,11 @@ internal enum DatabaseRefusal
     /// <summary>Marten owns it, and its rows are read where Marten's rules apply.</summary>
     MartenOwned,
 
-    /// <summary>A foreign table: reading it would reach the remote server.</summary>
+    /// <summary>
+    /// A foreign table, or a relation whose rows include one's - a partitioned table with a foreign
+    /// partition, a table with a foreign inheritance child, a view reading any of them: reading it would
+    /// reach the remote server.
+    /// </summary>
     ForeignTable,
 
     /// <summary>A view that reads a table the host hides with <c>IsDocumentTypeVisible</c>.</summary>
@@ -168,7 +172,8 @@ internal enum DatabaseRefusal
 
     /// <summary>
     /// A view that reads from, or refers to something in, a schema this visitor may not see - so its query
-    /// and its rows would show what that schema holds.
+    /// and its rows would show what that schema holds. Also a table (or a view over one) some of whose
+    /// partitions or inheritance children are in such a schema: its rows, though not its structure.
     /// </summary>
     WithheldDependency,
 }

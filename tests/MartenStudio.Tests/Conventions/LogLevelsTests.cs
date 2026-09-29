@@ -131,7 +131,7 @@ public class LogLevelsTests
         ["src/MartenStudio/Services/StudioLog.cs : 9202 CapabilityDenied"] = (Verdict.Refusal,
             "A capability refusal reaches the service only when a client drives a control the page disabled or hid."),
         ["src/MartenStudio/Services/StudioLog.cs : 9203 ScopeAuthorizationDenied"] = (Verdict.Refusal,
-            "A policy refusal on a write or a query run, including an offered pause or correction that reaches a database the visitor may not; listings are filtered (FilterAsync logs nothing)."),
+            "A policy refusal on a write, a query run or a database-browser read (by name, of a store the store policy refuses), including an offered pause or correction that reaches a database the visitor may not; listings are filtered (FilterAsync logs nothing)."),
         ["src/MartenStudio/Services/StudioLog.cs : 9211 DocumentWriteRoundTripDropped"] = (Verdict.DataLoss,
             "A save the visitor confirmed dropped properties the CLR type does not have; the only durable record of the loss."),
         ["src/MartenStudio/Services/StudioLog.cs : 9230 DatabaseBrowserOpenToEverySchemaWithoutRole"] = (Verdict.Configuration,

@@ -39,6 +39,14 @@ internal sealed record CatalogList<T>(IReadOnlyList<T> Items, bool Truncated)
 /// <param name="ForeignServer">The foreign server's name, for a foreign table.</param>
 /// <param name="Comment">The object comment.</param>
 /// <param name="HasPrimaryKey">Whether it has a primary key.</param>
+/// <param name="ForeignDescendant">
+/// For a partitioned table, or a table with inheritance children: whether any partition or child, at any
+/// depth, is a foreign table - so that reading it reads a remote server's rows too.
+/// </param>
+/// <param name="DescendantSchemas">
+/// For the same: the schemas its partitions and children live in, at any depth - where its rows really
+/// are. <see langword="null" /> for a relation with none.
+/// </param>
 internal sealed record CatalogRelation(
     uint Oid,
     string Schema,
@@ -53,7 +61,9 @@ internal sealed record CatalogRelation(
     int PartitionCount,
     string? ForeignServer,
     string? Comment,
-    bool HasPrimaryKey);
+    bool HasPrimaryKey,
+    bool ForeignDescendant = false,
+    IReadOnlyList<string>? DescendantSchemas = null);
 
 /// <summary>One function, procedure, aggregate or window function.</summary>
 /// <param name="Schema">Its schema.</param>
@@ -197,13 +207,27 @@ internal sealed record CatalogForeignKey(
 /// <param name="Name">The relation's name.</param>
 /// <param name="Kind">The relation's <c>relkind</c>.</param>
 /// <param name="Depth">One for a direct dependency, more for one reached through another view.</param>
+/// <param name="ForeignDescendant">
+/// For a partitioned table or a table with inheritance children: whether any partition or child is a
+/// foreign table, which a read of the view reaches too.
+/// </param>
+/// <param name="DescendantSchemas">
+/// For the same: the schemas its partitions and children live in, or <see langword="null" />.
+/// </param>
+/// <param name="ThroughMaterializedView">
+/// Whether every path from the view to this relation passes through a materialized view - whose rows are
+/// stored locally, so reading the view never reads this relation's rows live.
+/// </param>
 internal sealed record CatalogViewDependency(
     string ViewSchema,
     string ViewName,
     string Schema,
     string Name,
     string Kind,
-    int Depth);
+    int Depth,
+    bool ForeignDescendant = false,
+    IReadOnlyList<string>? DescendantSchemas = null,
+    bool ThroughMaterializedView = false);
 
 /// <summary>
 /// One thing a view or materialized view refers to that is not a relation it reads rows from: a function,
@@ -211,14 +235,23 @@ internal sealed record CatalogViewDependency(
 /// </summary>
 /// <param name="ViewSchema">The view's schema.</param>
 /// <param name="ViewName">The view's name.</param>
-/// <param name="Kind"><c>f</c> a function, <c>o</c> an operator, <c>S</c> a sequence, <c>t</c> a type.</param>
-/// <param name="Schema">Its schema - never <c>pg_catalog</c> or <c>information_schema</c>, which are not read.</param>
+/// <param name="Kind">
+/// <c>f</c> a function, <c>o</c> an operator, <c>S</c> a sequence, <c>t</c> a type, <c>n</c> a schema named as
+/// a value (<c>'hr'::regnamespace</c>), <c>C</c> a collation, <c>T</c> a text search configuration, <c>D</c> a
+/// text search dictionary.
+/// </param>
+/// <param name="Schema">
+/// Its schema - for <c>n</c>, the schema itself - never <c>pg_catalog</c> or <c>information_schema</c>,
+/// which are not read.
+/// </param>
 /// <param name="Name">Its name.</param>
 /// <param name="UserCode">
-/// For a function (called directly, or the one behind an operator): that it is not an extension's, so it
-/// is code somebody wrote and the studio cannot tell what it reads.
+/// For a function (called directly, or the one behind an operator): that it is code somebody wrote whose
+/// reads the studio cannot follow - not an extension's, and not a SQL-standard body, whose dependencies
+/// Postgres records and the walk follows.
 /// </param>
-/// <param name="Depth">One when the view refers to it directly, more through another view.</param>
+/// <param name="Depth">One when the view refers to it directly, more through another view or a function.</param>
+/// <param name="SecurityDefiner">For a function: that it runs as its owner, not as the reading role.</param>
 internal sealed record CatalogViewReference(
     string ViewSchema,
     string ViewName,
@@ -226,7 +259,8 @@ internal sealed record CatalogViewReference(
     string Schema,
     string Name,
     bool UserCode,
-    int Depth);
+    int Depth,
+    bool SecurityDefiner = false);
 
 /// <summary>How many objects of one kind one schema holds, as the browser would list them.</summary>
 /// <param name="Kind">
@@ -447,9 +481,18 @@ internal static class DatabaseCatalogQueries
     /// A partitioned table's estimate and size are the sums over its partition tree, walked through
     /// <c>pg_inherits</c> - catalog rows only. <c>pg_partition_tree</c> gives the same answer and takes an
     /// <c>AccessShareLock</c> on every partition it visits (see the class remarks). The walk starts only from
-    /// the partitioned tables this read would list, so a lookup of one relation walks at most its own tree.
-    /// A leaf is a partition that is not itself partitioned: its <c>reltuples</c> count, and the sum is
-    /// <see langword="null" /> when none of them has an estimate, as <c>pg_partition_tree</c> made it.
+    /// the partitioned tables, and the tables with inheritance children, this read would list, so a lookup of
+    /// one relation walks at most its own tree. A leaf is a partition that is not itself partitioned: its
+    /// <c>reltuples</c> count, and the sum is <see langword="null" /> when none of them has an estimate, as
+    /// <c>pg_partition_tree</c> made it.
+    /// </para>
+    /// <para>
+    /// <b>Where the rows really are.</b> A <c>select</c> from a partitioned table reads every partition, and
+    /// one from a table with inheritance children reads every child: the same walk says whether any of them,
+    /// at any depth, is a foreign table (<see cref="CatalogRelation.ForeignDescendant" /> - reading the parent
+    /// would reach a remote server) and which schemas they live in
+    /// (<see cref="CatalogRelation.DescendantSchemas" /> - a partition in a schema the visitor may not see
+    /// holds rows the parent would show them). A legacy parent's own estimate and size stay its own.
     /// </para>
     /// </remarks>
     internal const string RelationsSql =
@@ -459,7 +502,7 @@ internal static class DatabaseCatalogQueries
             from pg_catalog.pg_class p
             join pg_catalog.pg_namespace pn on pn.oid = p.relnamespace
             join pg_catalog.pg_inherits i on i.inhparent = p.oid
-            where p.relkind = 'p'
+            where p.relkind in ('p', 'r')
               and not p.relispartition
               and pn.nspname = any(@schemas)
               and pg_catalog.strpos(pg_catalog.lower(p.relname::text), pg_catalog.lower(@q)) > 0
@@ -469,15 +512,18 @@ internal static class DatabaseCatalogQueries
             from tree
             join pg_catalog.pg_inherits i on i.inhparent = tree.relid
         ),
-        partitioned (root, estimated, pages) as (
+        partitioned (root, estimated, pages, foreign_descendant, descendant_schemas) as (
             select tree.root,
                    case
                        when pg_catalog.bool_and(x.reltuples < 0) filter (where x.relkind <> 'p') then null
                        else (pg_catalog.sum(greatest(x.reltuples, 0)) filter (where x.relkind <> 'p'))::bigint
                    end,
-                   pg_catalog.sum(x.relpages::bigint)
+                   pg_catalog.sum(x.relpages::bigint),
+                   pg_catalog.bool_or(x.relkind = 'f'),
+                   pg_catalog.array_agg(distinct xn.nspname::text)
             from tree
             join pg_catalog.pg_class x on x.oid = tree.relid
+            join pg_catalog.pg_namespace xn on xn.oid = x.relnamespace
             group by tree.root
         )
         select c.oid,
@@ -512,7 +558,9 @@ internal static class DatabaseCatalogQueries
                   where i.inhparent = c.oid and ch.relispartition)::int,
                fs.srvname::text,
                pg_catalog.obj_description(c.oid, 'pg_class'),
-               exists (select 1 from pg_catalog.pg_index pk where pk.indrelid = c.oid and pk.indisprimary)
+               exists (select 1 from pg_catalog.pg_index pk where pk.indrelid = c.oid and pk.indisprimary),
+               coalesce(pt.foreign_descendant, false),
+               pt.descendant_schemas
         from pg_catalog.pg_class c
         join pg_catalog.pg_namespace n on n.oid = c.relnamespace
         left join partitioned pt on pt.root = c.oid
@@ -787,56 +835,134 @@ internal static class DatabaseCatalogQueries
         """;
 
     /// <summary>
-    /// What every view and materialized view in the schema set reads, followed through other views.
+    /// The walk <see cref="ViewDependenciesSql" /> and <see cref="ViewReferencesSql" /> share: from every
+    /// view and materialized view in the set, everything it reaches - the relations its rule reads, the
+    /// functions and operators it calls, and, recursively, what those read and call.
     /// </summary>
     /// <remarks>
-    /// A view's query is its <c>_RETURN</c> rule in <c>pg_rewrite</c>, and the rule's <c>pg_depend</c>
-    /// rows name every relation (and column) it touches. Recursing through the rules of the views it
-    /// touches is what catches a view over a view over a hidden type's table - a view is refused rows if
-    /// anything under it is hidden, not only its first level. The depth is capped at sixteen, which no
-    /// real view stack reaches; the rule's dependency on its own view is excluded so the walk starts one
-    /// level down. <c>@exact</c> is empty for every view in the set, or one view's name - which is what the
-    /// row gate reads, so that the answer for the view being opened never depends on a list's cap.
+    /// <para>
+    /// A node is a relation, a function or an operator (<c>classid</c>, <c>objid</c>). A relation's
+    /// dependencies are its <c>_RETURN</c> rule's <c>pg_depend</c> rows (a table has none, and ends the
+    /// walk); a function's or an operator's are its own. That is what follows a function with a SQL-standard
+    /// body (<c>BEGIN ATOMIC</c> or <c>RETURN</c>): Postgres records a dependency on every table and function
+    /// that body names, so a view calling it is judged on what it really reads. A function whose body is
+    /// source text - PL/pgSQL, or SQL in a string - records none, and is <see cref="CatalogViewReference.UserCode" />.
+    /// </para>
+    /// <para>
+    /// The depth is capped at sixteen, which no real view stack reaches, and each view starts at depth zero
+    /// on itself. <c>through_matview</c> says that the path to a node passed through a materialized view
+    /// below the view itself, whose rows are stored locally.
+    /// </para>
     /// </remarks>
-    internal const string ViewDependenciesSql =
+    private const string ViewWalk =
         """
-        with recursive deps (view_oid, ref_oid, depth) as (
-            select v.oid, d.refobjid, 1
+        with recursive walk (view_oid, classid, objid, depth, through_matview) as (
+            select v.oid,
+                   'pg_catalog.pg_class'::pg_catalog.regclass::pg_catalog.oid,
+                   v.oid,
+                   0,
+                   false
             from pg_catalog.pg_class v
             join pg_catalog.pg_namespace vn on vn.oid = v.relnamespace
-            join pg_catalog.pg_rewrite r on r.ev_class = v.oid
-            join pg_catalog.pg_depend d
-              on d.classid = 'pg_catalog.pg_rewrite'::pg_catalog.regclass
-             and d.objid = r.oid
             where v.relkind in ('v', 'm')
               and vn.nspname = any(@schemas)
               and (@exact = '' or v.relname::text = @exact)
-              and d.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
-              and d.refobjid <> v.oid
             union
-            select deps.view_oid, d.refobjid, deps.depth + 1
-            from deps
-            join pg_catalog.pg_rewrite r on r.ev_class = deps.ref_oid
+            select walk.view_oid,
+                   d.refclassid,
+                   d.refobjid,
+                   walk.depth + 1,
+                   walk.through_matview or coalesce(walk.depth > 0 and rc.relkind = 'm', false)
+            from walk
+            left join pg_catalog.pg_class rc
+                   on walk.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                  and rc.oid = walk.objid
+            left join pg_catalog.pg_rewrite r on r.ev_class = rc.oid
             join pg_catalog.pg_depend d
-              on d.classid = 'pg_catalog.pg_rewrite'::pg_catalog.regclass
-             and d.objid = r.oid
-            where d.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
-              and d.refobjid <> deps.ref_oid
-              and deps.depth < 16
+              on d.classid = case
+                                 when walk.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                                 then 'pg_catalog.pg_rewrite'::pg_catalog.regclass::pg_catalog.oid
+                                 else walk.classid
+                             end
+             and d.objid = case
+                               when walk.classid = 'pg_catalog.pg_class'::pg_catalog.regclass then r.oid
+                               else walk.objid
+                           end
+            where d.refclassid in (
+                      'pg_catalog.pg_class'::pg_catalog.regclass,
+                      'pg_catalog.pg_proc'::pg_catalog.regclass,
+                      'pg_catalog.pg_operator'::pg_catalog.regclass)
+              and not (d.refclassid = walk.classid and d.refobjid = walk.objid)
+              and walk.depth < 16
+        )
+        """;
+
+    /// <summary>
+    /// What every view and materialized view in the schema set reads, followed through other views and
+    /// through the functions whose bodies Postgres records dependencies for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A view's query is its <c>_RETURN</c> rule in <c>pg_rewrite</c>, and the rule's <c>pg_depend</c>
+    /// rows name every relation (and column) it touches. Recursing through the rules of the views it
+    /// touches is what catches a view over a view over a hidden type's table - a view is refused rows if
+    /// anything under it is hidden, not only its first level - and recursing through a function with a
+    /// SQL-standard body catches a view over a function over one (see <see cref="ViewWalk" />).
+    /// <c>@exact</c> is empty for every view in the set, or one view's name - which is what the row gate
+    /// reads, so that the answer for the view being opened never depends on a list's cap.
+    /// </para>
+    /// <para>
+    /// <b>What a view's rows reach.</b> A view over a partitioned table reads every partition, and one over
+    /// a table with inheritance children reads every child - but <c>pg_depend</c> names only the parent. So
+    /// each table the walk reaches is followed down <c>pg_inherits</c> as well (catalog rows only, as
+    /// <see cref="RelationsSql" /> does it), and the row says whether a foreign table is among its partitions
+    /// or children and which schemas they live in. It also says whether every path to it passes through a
+    /// materialized view, whose rows are stored locally: a view over a materialized view over a foreign
+    /// table reads nothing remote.
+    /// </para>
+    /// </remarks>
+    internal const string ViewDependenciesSql = ViewWalk + ",\n" +
+        """
+        descendants (root, relid) as (
+            select reached.objid, i.inhrelid
+            from (select distinct walk.objid
+                  from walk
+                  where walk.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                    and walk.depth > 0) as reached
+            join pg_catalog.pg_inherits i on i.inhparent = reached.objid
+            union all
+            select descendants.root, i.inhrelid
+            from descendants
+            join pg_catalog.pg_inherits i on i.inhparent = descendants.relid
+        ),
+        inherited (root, foreign_descendant, descendant_schemas) as (
+            select descendants.root,
+                   pg_catalog.bool_or(x.relkind = 'f'),
+                   pg_catalog.array_agg(distinct xn.nspname::text)
+            from descendants
+            join pg_catalog.pg_class x on x.oid = descendants.relid
+            join pg_catalog.pg_namespace xn on xn.oid = x.relnamespace
+            group by descendants.root
         )
         select vn.nspname::text,
                v.relname::text,
                n.nspname::text,
                c.relname::text,
                c.relkind::text,
-               pg_catalog.min(deps.depth)::int
-        from deps
-        join pg_catalog.pg_class v on v.oid = deps.view_oid
+               pg_catalog.min(walk.depth)::int,
+               coalesce(ih.foreign_descendant, false),
+               ih.descendant_schemas,
+               pg_catalog.bool_and(walk.through_matview)
+        from walk
+        join pg_catalog.pg_class v on v.oid = walk.view_oid
         join pg_catalog.pg_namespace vn on vn.oid = v.relnamespace
-        join pg_catalog.pg_class c on c.oid = deps.ref_oid
+        join pg_catalog.pg_class c on c.oid = walk.objid
         join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-        where c.relkind in ('r', 'p', 'v', 'm', 'f')
-        group by vn.nspname, v.relname, n.nspname, c.relname, c.relkind
+        left join inherited ih on ih.root = walk.objid
+        where walk.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+          and walk.depth > 0
+          and c.relkind in ('r', 'p', 'v', 'm', 'f')
+        group by vn.nspname, v.relname, n.nspname, c.relname, c.relkind, ih.foreign_descendant, ih.descendant_schemas
         order by 1, 2, 6, 3, 4
         limit @cap
         """;
@@ -844,61 +970,59 @@ internal static class DatabaseCatalogQueries
     /// <summary>
     /// What every view and materialized view in the schema set refers to besides the relations it reads:
     /// the functions it calls, the operators it uses and the functions behind them, the sequences and the
-    /// types it names - through other views too, like <see cref="ViewDependenciesSql" />.
+    /// types it names, the schemas it names as values, the collations and text search configurations and
+    /// dictionaries it uses - through other views and followed functions too, like
+    /// <see cref="ViewDependenciesSql" />.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Why.</b> <see cref="ViewDependenciesSql" /> follows only <c>pg_class</c> references, so a view that
-    /// reads a hidden document type's table <em>through a function</em> looked like a view over nothing:
-    /// its rows and its query were granted. A function's body is source text Postgres records no
-    /// dependency for, so the studio cannot tell what it reads - which is what
-    /// <see cref="CatalogViewReference.UserCode" /> says, for every function outside <c>pg_catalog</c> and
-    /// <c>information_schema</c> that no extension owns. An operator is recorded as the operator, not as the
-    /// function it runs, so both are returned. The rest - sequences, types, operators - are here for their
-    /// schema: a view that names one in a schema the visitor may not see is a view whose query and rows
-    /// reach into that schema.
+    /// <b>Why.</b> <see cref="ViewDependenciesSql" /> follows only relations, and the functions whose bodies
+    /// Postgres records dependencies for. A function whose body is source text records none, so the studio
+    /// cannot tell what it reads - which is what <see cref="CatalogViewReference.UserCode" /> says, for every
+    /// function outside <c>pg_catalog</c> and <c>information_schema</c> that no extension owns and that has
+    /// no SQL-standard body (Postgres stores such a body parsed, and leaves <c>prosrc</c> empty - on every
+    /// version, which is why this reads <c>prosrc</c> and not the PG 14 <c>prosqlbody</c> column). An operator is
+    /// recorded as the operator, not as the function it runs, so both are returned. The rest are here for
+    /// their schema: a view that names one in a schema the visitor may not see is a view whose query and rows
+    /// reach into that schema - a sequence, a type, an operator, a collation (<c>COLLATE hr.c</c>), a text
+    /// search configuration or dictionary (<c>'hr.cfg'::regconfig</c>), and a schema itself
+    /// (<c>'hr'::regnamespace</c>, whose value is the withheld schema's name).
     /// </para>
     /// <para>
     /// References into <c>pg_catalog</c> and <c>information_schema</c> are never returned: they are
-    /// Postgres' own and say nothing about anybody's schema. The walk is the same as
-    /// <see cref="ViewDependenciesSql" />'s: every view in the set, then the relations its rule reads,
-    /// recursively to a depth of sixteen, and the rules of all of them.
+    /// Postgres' own and say nothing about anybody's schema.
     /// </para>
     /// </remarks>
-    internal const string ViewReferencesSql =
+    internal const string ViewReferencesSql = ViewWalk + ",\n" +
         """
-        with recursive walk (view_oid, rel_oid, depth) as (
-            select v.oid, v.oid, 0
-            from pg_catalog.pg_class v
-            join pg_catalog.pg_namespace vn on vn.oid = v.relnamespace
-            where v.relkind in ('v', 'm')
-              and vn.nspname = any(@schemas)
-              and (@exact = '' or v.relname::text = @exact)
-            union
-            select walk.view_oid, d.refobjid, walk.depth + 1
-            from walk
-            join pg_catalog.pg_rewrite r on r.ev_class = walk.rel_oid
-            join pg_catalog.pg_depend d
-              on d.classid = 'pg_catalog.pg_rewrite'::pg_catalog.regclass
-             and d.objid = r.oid
-            where d.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
-              and d.refobjid <> walk.rel_oid
-              and walk.depth < 16
-        ),
         refs (view_oid, depth, ref_class, ref_oid) as (
             select walk.view_oid, walk.depth, d.refclassid, d.refobjid
             from walk
-            join pg_catalog.pg_rewrite r on r.ev_class = walk.rel_oid
+            left join pg_catalog.pg_class rc
+                   on walk.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                  and rc.oid = walk.objid
+            left join pg_catalog.pg_rewrite r on r.ev_class = rc.oid
             join pg_catalog.pg_depend d
-              on d.classid = 'pg_catalog.pg_rewrite'::pg_catalog.regclass
-             and d.objid = r.oid
+              on d.classid = case
+                                 when walk.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                                 then 'pg_catalog.pg_rewrite'::pg_catalog.regclass::pg_catalog.oid
+                                 else walk.classid
+                             end
+             and d.objid = case
+                               when walk.classid = 'pg_catalog.pg_class'::pg_catalog.regclass then r.oid
+                               else walk.objid
+                           end
             where d.refclassid in (
                 'pg_catalog.pg_proc'::pg_catalog.regclass,
                 'pg_catalog.pg_operator'::pg_catalog.regclass,
                 'pg_catalog.pg_type'::pg_catalog.regclass,
-                'pg_catalog.pg_class'::pg_catalog.regclass)
+                'pg_catalog.pg_class'::pg_catalog.regclass,
+                'pg_catalog.pg_namespace'::pg_catalog.regclass,
+                'pg_catalog.pg_collation'::pg_catalog.regclass,
+                'pg_catalog.pg_ts_config'::pg_catalog.regclass,
+                'pg_catalog.pg_ts_dict'::pg_catalog.regclass)
         ),
-        named (view_oid, depth, kind, schema_oid, name, user_code) as (
+        named (view_oid, depth, kind, schema_oid, name, user_code, definer) as (
             select refs.view_oid, refs.depth, 'f'::text, p.pronamespace, p.proname::text,
                    not exists (
                        select 1
@@ -906,11 +1030,14 @@ internal static class DatabaseCatalogQueries
                        where e.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass
                          and e.objid = p.oid
                          and e.deptype = 'e')
+                   and not (l.lanname = 'sql' and p.prosrc = ''),
+                   p.prosecdef
             from refs
             join pg_catalog.pg_proc p on p.oid = refs.ref_oid
+            join pg_catalog.pg_language l on l.oid = p.prolang
             where refs.ref_class = 'pg_catalog.pg_proc'::pg_catalog.regclass
             union all
-            select refs.view_oid, refs.depth, 'o'::text, o.oprnamespace, o.oprname::text, false
+            select refs.view_oid, refs.depth, 'o'::text, o.oprnamespace, o.oprname::text, false, false
             from refs
             join pg_catalog.pg_operator o on o.oid = refs.ref_oid
             where refs.ref_class = 'pg_catalog.pg_operator'::pg_catalog.regclass
@@ -922,21 +1049,44 @@ internal static class DatabaseCatalogQueries
                        where e.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass
                          and e.objid = p.oid
                          and e.deptype = 'e')
+                   and not (l.lanname = 'sql' and p.prosrc = ''),
+                   p.prosecdef
             from refs
             join pg_catalog.pg_operator o on o.oid = refs.ref_oid
             join pg_catalog.pg_proc p on p.oid = o.oprcode
+            join pg_catalog.pg_language l on l.oid = p.prolang
             where refs.ref_class = 'pg_catalog.pg_operator'::pg_catalog.regclass
             union all
-            select refs.view_oid, refs.depth, 't'::text, t.typnamespace, t.typname::text, false
+            select refs.view_oid, refs.depth, 't'::text, t.typnamespace, t.typname::text, false, false
             from refs
             join pg_catalog.pg_type t on t.oid = refs.ref_oid
             where refs.ref_class = 'pg_catalog.pg_type'::pg_catalog.regclass
             union all
-            select refs.view_oid, refs.depth, 'S'::text, s.relnamespace, s.relname::text, false
+            select refs.view_oid, refs.depth, 'S'::text, s.relnamespace, s.relname::text, false, false
             from refs
             join pg_catalog.pg_class s on s.oid = refs.ref_oid
             where refs.ref_class = 'pg_catalog.pg_class'::pg_catalog.regclass
               and s.relkind = 'S'
+            union all
+            select refs.view_oid, refs.depth, 'n'::text, ns.oid, ns.nspname::text, false, false
+            from refs
+            join pg_catalog.pg_namespace ns on ns.oid = refs.ref_oid
+            where refs.ref_class = 'pg_catalog.pg_namespace'::pg_catalog.regclass
+            union all
+            select refs.view_oid, refs.depth, 'C'::text, co.collnamespace, co.collname::text, false, false
+            from refs
+            join pg_catalog.pg_collation co on co.oid = refs.ref_oid
+            where refs.ref_class = 'pg_catalog.pg_collation'::pg_catalog.regclass
+            union all
+            select refs.view_oid, refs.depth, 'T'::text, cf.cfgnamespace, cf.cfgname::text, false, false
+            from refs
+            join pg_catalog.pg_ts_config cf on cf.oid = refs.ref_oid
+            where refs.ref_class = 'pg_catalog.pg_ts_config'::pg_catalog.regclass
+            union all
+            select refs.view_oid, refs.depth, 'D'::text, dc.dictnamespace, dc.dictname::text, false, false
+            from refs
+            join pg_catalog.pg_ts_dict dc on dc.oid = refs.ref_oid
+            where refs.ref_class = 'pg_catalog.pg_ts_dict'::pg_catalog.regclass
         )
         select vn.nspname::text,
                v.relname::text,
@@ -944,7 +1094,8 @@ internal static class DatabaseCatalogQueries
                n.nspname::text,
                named.name,
                pg_catalog.bool_or(named.user_code),
-               pg_catalog.min(named.depth + 1)::int
+               pg_catalog.min(named.depth + 1)::int,
+               pg_catalog.bool_or(named.definer)
         from named
         join pg_catalog.pg_class v on v.oid = named.view_oid
         join pg_catalog.pg_namespace vn on vn.oid = v.relnamespace
@@ -970,8 +1121,9 @@ internal static class DatabaseCatalogQueries
     /// </para>
     /// <para>
     /// <c>@hidden</c> is the lower-cased <c>schema.table</c> of every hidden document type's table, which a
-    /// list drops in C#: the table itself, the triggers on it, and a sequence one of its columns owns. The
-    /// per-tenant event sequences (<c>mt_events_sequence_&lt;tenant&gt;</c>) are rolled up rather than
+    /// list drops in C#: the table itself, the triggers on it, a sequence one of its columns owns - and, as
+    /// <c>schema.function</c> names beside them, the per-type functions an older Marten left for each
+    /// (<c>DatabaseObjectClassifier.HiddenTablesAndRoutines</c>). The per-tenant event sequences (<c>mt_events_sequence_&lt;tenant&gt;</c>) are rolled up rather than
     /// listed, so they are not counted either.
     /// </para>
     /// </remarks>
@@ -1012,6 +1164,7 @@ internal static class DatabaseCatalogQueries
             from pg_catalog.pg_proc p
             join pg_catalog.pg_namespace n on n.oid = p.pronamespace
             where n.nspname = any(@schemas)
+              and pg_catalog.lower(n.nspname::text || '.' || p.proname::text) <> all(@hidden)
               and not exists (
                   select 1
                   from pg_catalog.pg_depend d
@@ -1333,7 +1486,9 @@ internal static class DatabaseCatalogQueries
                 reader.GetInt32(10),
                 NullableString(reader, 11),
                 NullableString(reader, 12),
-                reader.GetBoolean(13)),
+                reader.GetBoolean(13),
+                reader.GetBoolean(14),
+                reader.IsDBNull(15) ? null : reader.GetFieldValue<string[]>(15)),
             schemas,
             cap,
             commandTimeoutSeconds,
@@ -1644,7 +1799,10 @@ internal static class DatabaseCatalogQueries
                 reader.GetString(2),
                 reader.GetString(3),
                 reader.GetString(4),
-                reader.GetInt32(5)),
+                reader.GetInt32(5),
+                reader.GetBoolean(6),
+                reader.IsDBNull(7) ? null : reader.GetFieldValue<string[]>(7),
+                !reader.IsDBNull(8) && reader.GetBoolean(8)),
             schemas,
             cap,
             commandTimeoutSeconds,
@@ -1679,7 +1837,8 @@ internal static class DatabaseCatalogQueries
                 reader.GetString(3),
                 reader.GetString(4),
                 !reader.IsDBNull(5) && reader.GetBoolean(5),
-                reader.GetInt32(6)),
+                reader.GetInt32(6),
+                !reader.IsDBNull(7) && reader.GetBoolean(7)),
             schemas,
             cap,
             commandTimeoutSeconds,

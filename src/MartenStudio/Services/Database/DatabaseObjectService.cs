@@ -10,7 +10,8 @@ namespace MartenStudio.Services.Database;
 /// <remarks>
 /// <para>
 /// <b>The order, for anything past the store's own structure.</b> The store the scope names is found first
-/// (<see cref="DatabaseAccess.FindStoreAsync" />) - the store policy for the visitor's own scope, then the
+/// (<see cref="DatabaseAccess.FindStoreAsync(StudioScope, string?, string?, CancellationToken)" />) - the store
+/// policy for the visitor's own scope, audited when it refuses, then the
 /// registration and its declarations, which is how the service knows whether the schema asked about is one
 /// of the store's own - and nothing about the database or the tenant is asked yet. A request that needs
 /// <c>BrowseDatabase</c> then goes through <see cref="DatabaseAccess.RequireBrowseAsync" /> - the capability,
@@ -83,7 +84,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
             // Counted by a query of its own, grouped by schema - exact, whatever a list's cap is.
             IReadOnlyList<CatalogObjectCount> counts = await catalog
-                .CountsAsync(resolved.Database, gate.VisibleSchemas, gate.Classifier.HiddenTables, cancellationToken)
+                .CountsAsync(resolved.Database, gate.VisibleSchemas, gate.Classifier.HiddenTablesAndRoutines(), cancellationToken)
                 .ConfigureAwait(false);
 
             return DatabaseObjectAssembler.Overview(gate, counts);
@@ -510,8 +511,13 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                     return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.NotFound, notFound);
                 }
 
-                return routine.RoutineKind == "a" || routine.Sql is null
-                    ? DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.NotApplicable, AggregateHasNoBody)
+                if (routine.RoutineKind == "a" || routine.Sql is null)
+                {
+                    return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.NotApplicable, AggregateHasNoBody);
+                }
+
+                return gate.Classifier.MentionsHiddenTable(routine.Sql)
+                    ? DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.HiddenDependency, HiddenTableNamedDenial)
                     : new DatabaseObjectDefinition(reference, gate.Redact(routine.Sql), null, DatabaseRefusal.None, null);
             }
 
@@ -536,7 +542,10 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                         "Its function is in a schema you cannot see, and the definition names it.");
                 }
 
-                return new DatabaseObjectDefinition(reference, gate.Redact(sql), null, DatabaseRefusal.None, null);
+                // A WHEN clause or an argument can name a hidden type's table as well as a body can.
+                return gate.Classifier.MentionsHiddenTable(sql)
+                    ? DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.HiddenDependency, HiddenTableNamedDenial)
+                    : new DatabaseObjectDefinition(reference, gate.Redact(sql), null, DatabaseRefusal.None, null);
             }
 
             default:
@@ -598,6 +607,11 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         return matching.Length == 1 ? matching[0] : null;
     }
 
+    /// <summary>What a routine's or trigger's definition says when its text names a hidden type's table.</summary>
+    internal const string HiddenTableNamedDenial =
+        "Its definition names a table whose document type the host hides from the studio " +
+        "(MartenStudioOptions.IsDocumentTypeVisible), so it is not shown.";
+
     /// <summary>What an aggregate's definition says.</summary>
     internal const string AggregateHasNoBody =
         "An aggregate has no body Postgres will print: pg_get_functiondef refuses aggregates (42809).";
@@ -637,7 +651,8 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         CancellationToken cancellationToken)
     {
         // 1. The store, and its declarations - the store policy for the visitor's own scope, and no database.
-        DatabaseStoreLookup store = await access.FindStoreAsync(scope, cancellationToken).ConfigureAwait(false);
+        //    A store-policy refusal is audited there, under this read's action and target.
+        DatabaseStoreLookup store = await access.FindStoreAsync(scope, action, target, cancellationToken).ConfigureAwait(false);
 
         if (!store.Found)
         {
@@ -653,8 +668,21 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
         if (kind == RouteKind.NotThere)
         {
-            // Settled by the name alone - a hidden type's table, a per-tenant sequence - so nothing is asked
-            // and nothing is audited: the answer is the one a missing object gets.
+            // Settled by the name alone - a hidden type's table or function, a per-tenant sequence - and
+            // answered as a missing object is. In a schema the store does not declare, a missing object is
+            // a BrowseDatabase read that the capability, the policies and the schema list answer first: so
+            // this one is asked the same questions, in the same order, before it is "not there" - otherwise
+            // "not found" where every other name gets "capability off" says the name is a hidden type's.
+            if (schema is not null && !IsStoreSchema(store.Declarations, schema))
+            {
+                Route browse = await BrowseAsync(scope, schema, action, target, cancellationToken).ConfigureAwait(false);
+
+                if (!browse.Allowed)
+                {
+                    return browse;
+                }
+            }
+
             return Route.Refused(DatabaseRefusal.NotFound, DatabaseObjectAssembler.NotFound(schema ?? string.Empty, name ?? string.Empty));
         }
 
@@ -669,9 +697,22 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 : new Route(resolved, DatabaseRefusal.None, null);
         }
 
-        // 2b. A BrowseDatabase read: the capability, the two policies and the tenant-less scope, then the
-        //     schema against the entry list - before the database is asked anything, and never with the
-        //     visitor's tenant.
+        // 2b. A BrowseDatabase read.
+        return await BrowseAsync(scope, schema, action, target, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A <c>BrowseDatabase</c> read's route: the capability, the two policies and the tenant-less scope, then
+    /// the schema against the entry list - before the database is asked anything, and never with the
+    /// visitor's tenant. Every refusal is audited.
+    /// </summary>
+    private async Task<Route> BrowseAsync(
+        StudioScope scope,
+        string? schema,
+        string action,
+        string target,
+        CancellationToken cancellationToken)
+    {
         DatabaseBrowseGrant grant = await access.RequireBrowseAsync(scope, action, target, cancellationToken)
             .ConfigureAwait(false);
 

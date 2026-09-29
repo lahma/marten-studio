@@ -79,7 +79,12 @@ public abstract class TableRowDemoFixture(PostgresFixture postgres) : IAsyncLife
         }
 
         await ExecuteAsync(ExtraSql.Replace("{role}", SqlIdentifier.Quote(Role), StringComparison.Ordinal));
+
+        await InitializeExtrasAsync();
     }
+
+    /// <summary>More setup for one test class, after the demo and the shared extras exist.</summary>
+    protected virtual Task InitializeExtrasAsync() => Task.CompletedTask;
 
     /// <inheritdoc />
     public virtual ValueTask DisposeAsync()

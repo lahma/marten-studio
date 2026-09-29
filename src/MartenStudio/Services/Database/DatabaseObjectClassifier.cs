@@ -24,7 +24,9 @@ internal sealed record StoreDeclarations(string StoreKey, SchemaDeclarations Dec
 /// <para>
 /// <b>A hidden type is not "Other", it is absent.</b> A table whose document type
 /// <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> hides answers <see langword="null" />, and so
-/// does everything that is only about it - its triggers, and a sequence one of its columns owns. Its
+/// does everything that is only about it - its triggers, a sequence one of its columns owns, and the
+/// per-type <c>mt_upsert_</c>/<c>mt_insert_</c>/<c>mt_update_</c>/<c>mt_overwrite_</c> functions an older Marten
+/// left beside it. A definition anybody else wrote that names its table is refused rather than shown. Its
 /// indexes and partitions never reach a list anyway (indexes are read per relation, partitions are rolled
 /// up), and the foreign keys into and out of it are dropped where they are assembled. A view that reads it
 /// is still listed, because the view is somebody's object, but its rows are refused
@@ -55,6 +57,12 @@ internal sealed class DatabaseObjectClassifier
 
     /// <summary>The prefix of every Marten document table's name.</summary>
     internal const string DocumentTablePrefix = "mt_doc_";
+
+    /// <summary>
+    /// The prefixes of the per-type functions older Marten versions created beside a document table, each
+    /// followed by the type's alias (Marten's <c>SchemaConstants</c>).
+    /// </summary>
+    internal static readonly IReadOnlyList<string> PerTypeRoutinePrefixes = ["mt_upsert_", "mt_insert_", "mt_update_", "mt_overwrite_"];
 
     private readonly Dictionary<string, (string StoreKey, MartenDeclaredObject Declared)> declared =
         new(StringComparer.OrdinalIgnoreCase);
@@ -165,9 +173,102 @@ internal sealed class DatabaseObjectClassifier
         return Other(schema, name);
     }
 
-    /// <summary>Whose one function, procedure, aggregate or window function is.</summary>
-    public DatabaseObjectOwnership ClassifyRoutine(string schema, string name)
+    /// <summary>
+    /// Whether <paramref name="schema" />.<paramref name="name" /> is one of a hidden document type's own
+    /// functions: <c>mt_upsert_&lt;alias&gt;</c>, <c>mt_insert_</c>, <c>mt_update_</c> or <c>mt_overwrite_</c>
+    /// beside a hidden type's <c>mt_doc_&lt;alias&gt;</c> table.
+    /// </summary>
+    /// <remarks>
+    /// Marten 9 writes documents with inline SQL and creates none of these, but a database a Marten 7 or 8
+    /// store once wrote to keeps them - and each one's name is the type's alias, its arguments list the
+    /// type's duplicated fields, and its body names the hidden table. So a hidden type's functions are as
+    /// absent as its table: from every list, every count, and every definition.
+    /// </remarks>
+    public bool IsHiddenRoutine(string schema, string name)
     {
+        ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(name);
+
+        foreach (string prefix in PerTypeRoutinePrefixes)
+        {
+            if (name.Length > prefix.Length && name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return IsHiddenTable(schema, DocumentTablePrefix + name[prefix.Length..]);
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Every hidden table's <c>schema.table</c> key, and beside each the <c>schema.function</c> names of the
+    /// per-type functions an older Marten would have created for it - what the overview's count query
+    /// leaves out, so that it counts exactly what the lists show.
+    /// </summary>
+    public IReadOnlyList<string> HiddenTablesAndRoutines()
+    {
+        List<string> names = [];
+
+        foreach (string key in hiddenTables)
+        {
+            names.Add(key);
+
+            int dot = key.LastIndexOf('.');
+            string table = dot >= 0 ? key[(dot + 1)..] : key;
+
+            if (dot < 0 || !table.StartsWith(DocumentTablePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string alias = table[DocumentTablePrefix.Length..];
+
+            foreach (string prefix in PerTypeRoutinePrefixes)
+            {
+                names.Add(key[..(dot + 1)] + prefix + alias);
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="text" /> - a routine's or a trigger's definition - names a hidden type's
+    /// table, qualified or not, quoted or not: its name alone, <c>mt_doc_&lt;alias&gt;</c>, is distinctive
+    /// enough to look for anywhere, and a body that relies on its <c>search_path</c> names it unqualified.
+    /// </summary>
+    public bool MentionsHiddenTable(string? text)
+    {
+        if (string.IsNullOrEmpty(text) || hiddenTables.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (string key in hiddenTables)
+        {
+            int dot = key.IndexOf('.', StringComparison.Ordinal);
+            string table = dot >= 0 ? key[(dot + 1)..] : key;
+
+            if (table.Length > 0 && text.Contains(table, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whose one function, procedure, aggregate or window function is, or <see langword="null" /> when the
+    /// browser must not show it at all: one of a hidden type's own functions (<see cref="IsHiddenRoutine" />).
+    /// </summary>
+    public DatabaseObjectOwnership? ClassifyRoutine(string schema, string name)
+    {
+        if (IsHiddenRoutine(schema, name))
+        {
+            return null;
+        }
+
         declared.TryGetValue(SchemaKey.For(schema, name), out var found);
 
         if (IsMartenName(name))
