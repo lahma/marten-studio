@@ -1663,10 +1663,10 @@ internal sealed class TableRowService : ITableRowService
         LogLevel level = IsExpected(error.SqlState, exception)
             ? LogLevel.Debug
             : throttle.WarningOrDebug(
-                "TableRowService." + (error.SqlState.Length > 0 ? error.SqlState : exception.GetType().Name),
+                "TableRowService.Read",
                 grant.Resolved.Registration.Key,
                 grant.Resolved.Database.Id.Identity,
-                exception.GetType());
+                StudioLogThrottle.KindOf(exception));
 
         if (logger.IsEnabled(level))
         {
