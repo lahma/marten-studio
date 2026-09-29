@@ -24,7 +24,10 @@ internal sealed record RelationshipSchemaChip(string Schema, int Tables, int Hue
 /// The graph cut down to what is drawn: its document nodes, its table nodes and its edges. The
 /// accessible table lists exactly <see cref="RelationshipGraph.Edges" /> of this graph.
 /// </param>
-/// <param name="Isolated">Tables in visible schemas with no key at all, for the Tables view's chips.</param>
+/// <param name="Isolated">
+/// Tables in visible schemas - the chosen one, under a schema chip - with no key at all, listed as chips
+/// under the Tables and Both views' diagram rather than drawn.
+/// </param>
 /// <param name="DocumentEdges">How many keys the Documents view draws.</param>
 /// <param name="TableEdges">How many keys the Tables view draws, under the current schema filter.</param>
 /// <param name="Schemas">The schema chips.</param>
@@ -37,6 +40,14 @@ internal sealed record RelationshipProjection(
     IReadOnlyList<RelationshipSchemaChip> Schemas,
     bool OverCap)
 {
+    /// <summary>
+    /// Document types with no key at all, listed as chips beside <see cref="Isolated" /> under the Tables
+    /// and Both views' diagram rather than drawn as a column of unconnected boxes. Always empty in the
+    /// Documents view, and on a screen with no table in any key, which draw every document type as the
+    /// screen always has.
+    /// </summary>
+    public IReadOnlyList<RelationshipNode> IsolatedDocuments { get; init; } = [];
+
     /// <summary>How many keys the Both view draws.</summary>
     public int AllEdges => DocumentEdges + TableEdges;
 
@@ -77,8 +88,9 @@ internal static class RelationshipViews
     /// <param name="graph">The whole graph, as the service answered it for this visitor.</param>
     /// <param name="mode">The view.</param>
     /// <param name="schema">
-    /// The schema chip, or <see langword="null" /> for every schema. It filters table nodes only: a
-    /// document type is in the store's schemas and is drawn in every view that draws documents.
+    /// The schema chip, or <see langword="null" /> for every schema. It filters table nodes, and the keys
+    /// that reach them: a document type is in the store's schemas, and outside the Documents view it is
+    /// drawn whenever a drawn key reaches it - the keys between document types are drawn under every chip.
     /// </param>
     public static RelationshipProjection Project(RelationshipGraph graph, RelationshipViewMode mode, string? schema)
     {
@@ -131,11 +143,13 @@ internal static class RelationshipViews
             ends.Add(edge.ToAlias);
         }
 
-        // Documents and Both draw every document type, as the screen always has - an unconnected type is
-        // still part of the store's shape. Tables draws only the ones its keys reach.
-        List<RelationshipNode> documents = mode == RelationshipViewMode.Tables
-            ? [.. graph.Nodes.Where(x => ends.Contains(x.Alias))]
-            : [.. graph.Nodes];
+        // Documents draws every document type, as the screen always has - an unconnected type is still part
+        // of the store's shape. Tables and Both draw only the ones a drawn key reaches, and list the ones with
+        // no key at all as chips under the picture: drawn, they were a column of a dozen unconnected boxes
+        // down the left of the diagram, which pushed the keys that are the point of it off the first screen.
+        List<RelationshipNode> documents = mode == RelationshipViewMode.Documents
+            ? [.. graph.Nodes]
+            : [.. graph.Nodes.Where(x => ends.Contains(x.Alias))];
 
         List<RelationshipTableNode> tables = mode == RelationshipViewMode.Documents
             ? []
@@ -149,7 +163,10 @@ internal static class RelationshipViews
             documentEdges,
             tableEdges,
             Chips(graph),
-            OverCap: tables.Count > 0 && documents.Count + tables.Count > NodeCap);
+            OverCap: tables.Count > 0 && documents.Count + tables.Count > NodeCap)
+        {
+            IsolatedDocuments = mode == RelationshipViewMode.Documents ? [] : IsolatedDocuments(graph),
+        };
     }
 
     /// <summary>
@@ -276,12 +293,7 @@ internal static class RelationshipViews
 
     private static List<RelationshipTableNode> Isolated(RelationshipGraph graph, string? schema)
     {
-        HashSet<string> connected = new(StringComparer.Ordinal);
-        foreach (RelationshipEdge edge in graph.Edges)
-        {
-            connected.Add(edge.FromAlias);
-            connected.Add(edge.ToAlias);
-        }
+        HashSet<string> connected = Connected(graph);
 
         return
         [
@@ -289,6 +301,30 @@ internal static class RelationshipViews
                 !connected.Contains(x.Key)
                 && (schema is null || string.Equals(x.Schema, schema, StringComparison.Ordinal))),
         ];
+    }
+
+    /// <summary>
+    /// The document types with no key at all. A type whose keys all reach tables a schema chip leaves out is
+    /// not one of them: it has keys, and saying it had none would be false - the chip filters it away with
+    /// the tables at the other end.
+    /// </summary>
+    private static List<RelationshipNode> IsolatedDocuments(RelationshipGraph graph)
+    {
+        HashSet<string> connected = Connected(graph);
+
+        return [.. graph.Nodes.Where(x => !connected.Contains(x.Alias))];
+    }
+
+    private static HashSet<string> Connected(RelationshipGraph graph)
+    {
+        HashSet<string> connected = new(StringComparer.Ordinal);
+        foreach (RelationshipEdge edge in graph.Edges)
+        {
+            connected.Add(edge.FromAlias);
+            connected.Add(edge.ToAlias);
+        }
+
+        return connected;
     }
 
     private static List<RelationshipSchemaChip> Chips(RelationshipGraph graph)

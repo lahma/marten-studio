@@ -525,6 +525,66 @@ public class ObjectDetailPageTests
         page.Find(".ms-db-rail").TextContent.Should().NotContain("secret", "the rail lists what the visitor may see, not what the link named");
     }
 
+    /// <summary>
+    /// UX-6, U2: a viewer's refused page said "No such table or view" above a sentence naming the policy that
+    /// refused it - the object exists, so the heading misled, and "not for you" would confirm that it does
+    /// (D27). One heading fits both, above the service's own sentence.
+    /// </summary>
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("policy")]
+    [InlineData("withheld schema")]
+    public void The_neutral_panel_s_heading_fits_both_not_there_and_not_shown(string why)
+    {
+        using var context = DatabasePageData.Context();
+        (string schema, string name) = why switch
+        {
+            "missing" => ("quartz", "no_such_table"),
+            "withheld schema" => ("secret", "payroll"),
+            _ => ("quartz", "qrtz_triggers"),
+        };
+
+        context.DatabaseObjects.Detail = why switch
+        {
+            "policy" => DatabaseObjectDetail.Unavailable(DatabaseRefusal.WritePolicy, "Your account may not browse the database here."),
+            "withheld schema" => DatabaseObjectDetail.Unavailable(DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"])),
+            _ => null,
+        };
+
+        var page = DatabasePageData.RenderObject(context, schema, name);
+
+        IElement panel = page.Find(".ms-db-not-found");
+        panel.QuerySelector(".ms-empty-title")!.TextContent.Should().Be("Not available here");
+        panel.TextContent.Should().NotContain("No such", "the heading says neither that it is missing nor that it is there");
+
+        IElement back = panel.QuerySelector("a.ms-db-back-link")!;
+        back.TextContent.Should().Be("Back to the database browser");
+        back.GetAttribute("href").Should().StartWith("database").And.Contain("store=default");
+    }
+
+    [Fact]
+    public void The_breadcrumb_names_a_schema_the_visitor_may_see_even_when_the_object_is_not_there()
+    {
+        using var context = DatabasePageData.Context();
+
+        var page = DatabasePageData.RenderObject(context, "quartz", "no_such_table");
+
+        page.FindAll(".ms-db-breadcrumb a").Select(static x => x.TextContent.Trim()).Should().Equal("Database", "quartz");
+    }
+
+    [Fact]
+    public void The_breadcrumb_never_names_a_schema_the_visitor_may_not_see()
+    {
+        using var context = DatabasePageData.Context();
+        context.DatabaseObjects.Detail = DatabaseObjectDetail.Unavailable(
+            DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"]));
+
+        var page = DatabasePageData.RenderObject(context, "secret", "payroll");
+
+        page.FindAll(".ms-db-breadcrumb a").Select(static x => x.TextContent.Trim()).Should().Equal("Database");
+        page.Find(".ms-db-breadcrumb").TextContent.Should().NotContain("secret");
+    }
+
     [Fact]
     public void The_rail_stays_with_the_schema_s_tables_and_marks_this_one_and_starts_closed_on_a_phone()
     {

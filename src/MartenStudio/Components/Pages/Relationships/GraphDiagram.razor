@@ -26,11 +26,16 @@
 
     Arrowheads are drawn rather than referenced through <marker url(#id)>: see GraphLayout.Arrow for why a
     fragment-only url() and the studio's <base href> do not get on.
+
+    Drawn at its natural size and never shrunk to fit (UX-6): scaled to the width of a desktop column, the
+    labels on the arrows and the second line of every box came out at about seven pixels. So the frame is a
+    labelled scroll region like every wide table's (D25) - focusable, with the same edge cue - and a picture
+    wider than the column scrolls sideways inside it.
 *@
 
 @if (placed.Nodes.Count > 0)
 {
-<div class="ms-graph">
+<div class="ms-graph ms-table-scroll" role="region" aria-label="@RegionLabel" tabindex="0">
     <svg class="ms-graph-svg"
          viewBox="@placed.ViewBox"
          width="@Number(placed.Width)"
@@ -109,6 +114,10 @@
     public object? Model { get; set; }
 
     private GraphDiagramModel Diagram => DocumentComponentModel.Read(Model, GraphDiagramModel.Empty);
+
+    /// <summary>The scroll region's accessible name; the picture inside it carries the sentence that describes it.</summary>
+    [Parameter]
+    public string RegionLabel { get; set; } = "Relationships diagram";
 
     // Not called "layout": that is a Razor directive, and "@layout.ViewBox" in markup parses as one.
     private GraphLayoutResult placed = GraphLayoutResult.Empty;

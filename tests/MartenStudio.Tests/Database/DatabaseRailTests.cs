@@ -3,6 +3,8 @@ using AngleSharp.Dom;
 using Bunit;
 
 using MartenStudio.Components.Pages.Database;
+using MartenStudio.Services.Database;
+using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
@@ -10,8 +12,9 @@ using Microsoft.AspNetCore.Components.Web;
 namespace MartenStudio.Tests.Database;
 
 /// <summary>
-/// The database browser's rail: pins remembered per store in this browser, the filter, and the
-/// narrow-screen summary.
+/// The database browser's rail: pins remembered per store in this browser, the filter, the narrow-screen
+/// summary, and - since the UX-6 pass - which page draws the tables and views bands, what each schema's
+/// number counts, and the open object scrolled into view.
 /// </summary>
 public class DatabaseRailTests
 {
@@ -38,7 +41,7 @@ public class DatabaseRailTests
     {
         using var context = DatabasePageData.Context();
 
-        var page = DatabasePageData.RenderBrowser(context, "schema=quartz");
+        var page = DatabasePageData.RenderObject(context, "quartz", "qrtz_triggers");
 
         IElement pin = PinButton(page, "qrtz_job_details");
         pin.GetAttribute("aria-pressed").Should().Be("false");
@@ -85,7 +88,7 @@ public class DatabaseRailTests
     {
         using var context = DatabasePageData.Context();
 
-        var page = DatabasePageData.RenderBrowser(context, "schema=quartz");
+        var page = DatabasePageData.RenderObject(context, "quartz", "qrtz_triggers");
 
         await page.Find(".ms-db-rail-filter input").ChangeAsync(new ChangeEventArgs { Value = "simprop" });
 
@@ -110,16 +113,50 @@ public class DatabaseRailTests
     }
 
     [Fact]
-    public void With_no_schema_picked_the_rail_says_how_to_list_tables_and_its_summary_counts_schemas()
+    public void With_no_schema_picked_the_summary_counts_the_kind_on_screen_across_every_schema()
     {
         using var context = DatabasePageData.Context();
 
         var page = DatabasePageData.RenderBrowser(context);
 
-        page.Find(".ms-db-rail-hint").TextContent.Should().Contain("Pick a schema");
-        page.FindAll(".ms-db-rail-tables").Should().BeEmpty();
-        page.Find(".ms-db-rail-summary").TextContent.Trim().Should().Be("All schemas · 4 schemas");
+        int tables = FakeDatabaseObjects.Overview().Schemas.Sum(static x => x.Tables);
+
+        page.Find(".ms-db-rail-summary").TextContent.Trim().Should().Be($"All schemas · {tables} tables",
+            "the summary says what the phone's closed rail would list, in the unit the page is counting");
         page.Find(".ms-db-rail-schemas a.ms-rail-link-active").TextContent.Should().Contain("All schemas");
+    }
+
+    /// <summary>
+    /// UX-6, U1a: the browser page's grid is the schema's list of tables and views, and the rail's bands
+    /// repeated it beside itself and were cut off at the bottom of the screen. They are object detail's.
+    /// </summary>
+    [Fact]
+    public void The_browser_page_rail_is_the_filter_the_schemas_and_the_pins_and_nothing_else()
+    {
+        using var context = DatabasePageData.Context();
+
+        var page = DatabasePageData.RenderBrowser(context, "schema=quartz");
+
+        page.FindAll(".ms-db-rail-filter").Should().ContainSingle();
+        page.FindAll(".ms-db-rail-schemas").Should().ContainSingle();
+        page.FindAll(".ms-db-rail-pinned").Should().ContainSingle();
+        page.FindAll(".ms-db-rail-tables, .ms-db-rail-views, .ms-db-rail-hint").Should().BeEmpty();
+
+        context.DatabaseObjects.Queries.Should().OnlyContain(static x => x.Category == DatabaseObjectCategory.Tables,
+            "the browser no longer reads a list for bands it does not draw");
+        page.Find(".ms-db-rail-pinned .ms-rail-empty").TextContent.Should().Contain("Open a table or view",
+            "the stars are on object detail's bands, so the empty pin band says where to find them");
+    }
+
+    [Fact]
+    public void Object_detail_keeps_the_bands_for_one_click_hops_between_tables()
+    {
+        using var context = DatabasePageData.Context();
+
+        var page = DatabasePageData.RenderObject(context, "quartz", "qrtz_triggers");
+
+        page.FindAll(".ms-db-rail-tables").Should().ContainSingle();
+        page.FindAll(".ms-db-rail-views").Should().ContainSingle();
     }
 
     [Fact]
@@ -127,13 +164,143 @@ public class DatabaseRailTests
     {
         using var context = DatabasePageData.Context();
 
-        var page = DatabasePageData.RenderBrowser(context, "schema=studio_sample");
+        var page = DatabasePageData.RenderObject(context, "studio_sample", "host_settings");
 
         List<IElement> entries = [.. page.FindAll(".ms-db-rail-tables .ms-rail-entry")];
 
         entries.Where(x => x.QuerySelector(".ms-db-flag-marten") is not null)
             .Select(x => x.QuerySelector(".ms-db-rail-name")!.TextContent.Trim())
             .Should().BeEquivalentTo("mt_doc_customer", "flat_orders");
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // U1b: the open object, scrolled into view inside the rail
+    // ------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Object_detail_scrolls_the_open_object_into_view_inside_the_rail_once()
+    {
+        using var context = DatabasePageData.Context();
+
+        var page = DatabasePageData.RenderObject(context, "quartz", "qrtz_triggers");
+
+        page.WaitForAssertion(() => context.JSInterop.Invocations["martenStudio.scroll.revealWithin"].Should().ContainSingle());
+
+        var call = context.JSInterop.Invocations["martenStudio.scroll.revealWithin"].Single();
+        call.Arguments[0].Should().BeOfType<ElementReference>("the rail's own element, not the page, is what is scrolled");
+        call.Arguments[1].Should().Be(DatabaseRail.ActiveEntrySelector);
+        page.Find(DatabaseRail.ActiveEntrySelector).TextContent.Should().Contain("qrtz_triggers",
+            "the selector finds the open object's band entry, not the pinned band's or the schema's");
+
+        page.Render();
+
+        context.JSInterop.Invocations["martenStudio.scroll.revealWithin"].Should().ContainSingle(
+            "a re-render of the same object is not a reason to move the rail under the visitor's pointer");
+    }
+
+    [Fact]
+    public void The_browser_page_and_a_missing_object_scroll_nothing()
+    {
+        using var context = DatabasePageData.Context();
+
+        DatabasePageData.RenderBrowser(context, "schema=quartz");
+        DatabasePageData.RenderObject(context, "quartz", "no_such_table");
+
+        context.JSInterop.Invocations["martenStudio.scroll.revealWithin"].Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_rail_whose_browser_went_away_while_scrolling_is_still_drawn()
+    {
+        using var context = DatabasePageData.Context();
+        context.JSInterop.Setup<bool>("martenStudio.scroll.revealWithin", _ => true)
+            .SetException(new Microsoft.JSInterop.JSDisconnectedException("the tab closed"));
+
+        var page = DatabasePageData.RenderObject(context, "quartz", "qrtz_triggers");
+
+        page.WaitForAssertion(() => context.JSInterop.Invocations["martenStudio.scroll.revealWithin"].Should().ContainSingle());
+        page.Find(".ms-db-rail-tables .ms-rail-link-active").TextContent.Should().Contain("qrtz_triggers");
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // U1c: what the numbers count, said
+    // ------------------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("", "tables")]
+    [InlineData("kind=functions", "functions")]
+    [InlineData("kind=views&schema=legacy", "views")]
+    public void The_schemas_heading_says_what_the_browser_s_numbers_count(string query, string counted)
+    {
+        using var context = DatabasePageData.Context();
+
+        var page = DatabasePageData.RenderBrowser(context, query);
+
+        page.Find(".ms-db-rail-schemas .ms-rail-title").TextContent.Should().Contain("Schemas").And.Contain("· " + counted);
+        page.Find(".ms-db-rail-counting").TextContent.Trim().Should().Be("· " + counted);
+    }
+
+    [Fact]
+    public void Object_detail_counts_tables_and_views_whatever_kind_of_relation_is_open()
+    {
+        using var context = DatabasePageData.Context();
+
+        DatabaseSchemaSummary legacy = FakeDatabaseObjects.Overview().Schemas.Single(static x => x.Name == FakeDatabaseObjects.Legacy);
+        legacy.Views.Should().BeGreaterThan(0, "the premise: the schema has views, so a view's page is one");
+
+        var page = DatabasePageData.RenderObject(context, FakeDatabaseObjects.Legacy, "order_totals");
+
+        page.Find(".ms-db-rail-counting").TextContent.Trim().Should().Be("· tables and views");
+
+        IElement entry = page.FindAll(".ms-db-rail-schemas a.ms-rail-link")
+            .Single(static x => x.QuerySelector(".ms-db-rail-name")!.TextContent.Trim() == FakeDatabaseObjects.Legacy);
+        entry.QuerySelector(".ms-rail-badge-count")!.TextContent.Trim().Should().Be((legacy.Tables + legacy.Views).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "on a view's page the count is not the views alone - it counts what the bands below list");
+
+        page.Find(".ms-db-rail-summary").TextContent.Trim().Should().Be($"legacy · {legacy.Tables} tables, {legacy.Views} views");
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // U1d: the phone rail starts closed on every page
+    // ------------------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("schema=quartz")]
+    [InlineData("kind=functions")]
+    public void The_browser_page_s_rail_starts_closed_on_a_phone(string query)
+    {
+        using var context = DatabasePageData.Context();
+
+        var page = DatabasePageData.RenderBrowser(context, query);
+
+        page.Find("details.ms-db-rail-collapse").HasAttribute("open").Should().BeFalse(
+            "a phone opens on the page, not on a screenful of schema cards; above 900 px the rail shows regardless");
+    }
+
+    /// <summary>
+    /// A link followed from the open phone rail lands on a page with the rail shut - closed through the
+    /// browser rather than by drawing a new element, which took the keyboard focus away with the link that
+    /// had it.
+    /// </summary>
+    [Fact]
+    public void Following_a_link_to_another_schema_closes_the_rail_through_the_browser()
+    {
+        using var context = DatabasePageData.Context();
+
+        var page = DatabasePageData.RenderBrowser(context);
+        int before = context.JSInterop.Invocations["martenStudio.disclosure.close"].Count;
+
+        context.Navigate("marten/database?schema=quartz");
+        page.WaitForAssertion(() => page.Find(".ms-db-rail-schemas a.ms-rail-link-active").TextContent.Should().Contain("quartz"));
+
+        var closes = context.JSInterop.Invocations["martenStudio.disclosure.close"];
+        closes.Count.Should().BeGreaterThan(before);
+        closes[^1].Arguments[0].Should().BeOfType<ElementReference>();
+
+        int settled = closes.Count;
+        page.Render();
+        context.JSInterop.Invocations["martenStudio.disclosure.close"].Count.Should().Be(settled, "a render of the same page closes nothing");
     }
 
     private static IElement PinButton<T>(IRenderedComponent<T> page, string name)

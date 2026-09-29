@@ -1,5 +1,6 @@
 @page "/marten/relationships"
 @using Microsoft.Extensions.Options
+@using MartenStudio.Components.Pages.Documents
 @using MartenStudio.Services.Documents
 @using MartenStudio.Services.Relationships
 @using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph
@@ -30,13 +31,6 @@
 <div class="ms-page">
     <div class="ms-page-header">
         <h1 class="ms-page-title">Relationships</h1>
-        <div class="ms-graph-actions">
-            @if (!loading && graph.ReadAt != DateTimeOffset.MinValue)
-            {
-                <span class="ms-graph-readat">Read @State.FormatInSelectedTimeZone(graph.ReadAt)</span>
-            }
-            <button type="button" class="ms-button" @onclick="LoadAsync" disabled="@loading">Refresh</button>
-        </div>
     </div>
 
     @if (graph.Tables.Count > 0)
@@ -55,6 +49,58 @@
             screen writes anything.
         </p>
     }
+
+    @if (Drawing && graph.HasTableEdges)
+    {
+        <div class="ms-graph-toolbar">
+            <div class="ms-segmented ms-graph-views" role="group" aria-label="Which relationships to draw">
+                @ViewButton(RelationshipViewMode.Documents, "Documents", projection.DocumentEdges)
+                @ViewButton(RelationshipViewMode.Tables, "Tables", projection.TableEdges)
+                @ViewButton(RelationshipViewMode.Both, "Both", projection.AllEdges)
+            </div>
+
+            @if (view != RelationshipViewMode.Documents && projection.Schemas.Count > 0)
+            {
+                <div class="ms-graph-schemas" role="group" aria-label="Schemas">
+                    <button type="button"
+                            class="ms-graph-schema-chip"
+                            aria-pressed="@(schema is null ? "true" : "false")"
+                            @onclick="() => SelectSchema(null)">All schemas</button>
+                    @foreach (RelationshipSchemaChip chip in projection.Schemas)
+                    {
+                        <button type="button"
+                                class="ms-graph-schema-chip"
+                                style="--ms-collection-hue: @chip.Hue"
+                                aria-pressed="@(string.Equals(schema, chip.Schema, StringComparison.Ordinal) ? "true" : "false")"
+                                title="@($"{chip.Tables} tables of {chip.Schema} take part in a foreign key")"
+                                @key="chip.Schema"
+                                @onclick="() => SelectSchema(chip.Schema)">
+                            <span class="ms-graph-schema-chip-dot" aria-hidden="true"></span>
+                            @chip.Schema
+                            <span class="ms-graph-view-count">@chip.Tables</span>
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @* The legend and the refresh sit on the diagram's own top edge, next to what they describe. The bar is
+       drawn in every state and at the same place in the render tree, so Refresh is one element before,
+       during and after a read rather than a button torn down and drawn again somewhere else. *@
+    <div class="ms-graph-bar">
+        @if (Drawing)
+        {
+            <RelationshipLegend Styles="@styles" />
+        }
+        <div class="ms-graph-actions">
+            @if (!loading && graph.ReadAt != DateTimeOffset.MinValue)
+            {
+                <span class="ms-graph-readat">Read @State.FormatInSelectedTimeZone(graph.ReadAt)</span>
+            }
+            <button type="button" class="ms-button" @onclick="LoadAsync" disabled="@loading">Refresh</button>
+        </div>
+    </div>
 
     @if (loading)
     {
@@ -103,43 +149,6 @@
     }
     else
     {
-        @if (graph.HasTableEdges)
-        {
-            <div class="ms-graph-toolbar">
-                <div class="ms-segmented ms-graph-views" role="group" aria-label="Which relationships to draw">
-                    @ViewButton(RelationshipViewMode.Documents, "Documents", projection.DocumentEdges)
-                    @ViewButton(RelationshipViewMode.Tables, "Tables", projection.TableEdges)
-                    @ViewButton(RelationshipViewMode.Both, "Both", projection.AllEdges)
-                </div>
-
-                @if (view != RelationshipViewMode.Documents && projection.Schemas.Count > 0)
-                {
-                    <div class="ms-graph-schemas" role="group" aria-label="Schemas">
-                        <button type="button"
-                                class="ms-graph-schema-chip"
-                                aria-pressed="@(schema is null ? "true" : "false")"
-                                @onclick="() => SelectSchema(null)">All schemas</button>
-                        @foreach (RelationshipSchemaChip chip in projection.Schemas)
-                        {
-                            <button type="button"
-                                    class="ms-graph-schema-chip"
-                                    style="--ms-collection-hue: @chip.Hue"
-                                    aria-pressed="@(string.Equals(schema, chip.Schema, StringComparison.Ordinal) ? "true" : "false")"
-                                    title="@($"{chip.Tables} tables of {chip.Schema} take part in a foreign key")"
-                                    @key="chip.Schema"
-                                    @onclick="() => SelectSchema(chip.Schema)">
-                                <span class="ms-graph-schema-chip-dot" aria-hidden="true"></span>
-                                @chip.Schema
-                                <span class="ms-graph-view-count">@chip.Tables</span>
-                            </button>
-                        }
-                    </div>
-                }
-            </div>
-        }
-
-        <RelationshipLegend Styles="@styles" />
-
         @if (projection.OverCap)
         {
             <div class="ms-graph-toomany" role="status">
@@ -154,23 +163,25 @@
             <RelationshipGraph Model="@projection.Drawn" HrefFor="@CollectionHref" TableHrefFor="@TableHref" />
         }
 
-        <div class="ms-graph-table-panel">
-            <h2 class="ms-section-title">Relationships</h2>
-            @if (projection.Drawn.Edges.Count == 0)
-            {
-                <p class="ms-schema-note">No foreign key is drawn in this view.</p>
-            }
-            <RelationshipTable Model="@projection.Drawn" HrefFor="@CollectionHref" TableHrefFor="@TableHref" />
-        </div>
-
-        @if (view == RelationshipViewMode.Tables && graph.HasTableEdges && projection.Isolated.Count > 0)
+        @* What has no key at all, as chips right under the picture: drawn, a dozen unconnected boxes filled
+           the diagram's first column. Only where tables take part in keys, and never in the Documents view,
+           which draws every document type as the screen always has. *@
+        @if (view != RelationshipViewMode.Documents && graph.HasTableEdges && projection.IsolatedDocuments.Count + projection.Isolated.Count > 0)
         {
             <div class="ms-graph-isolated">
-                <h2 class="ms-section-title">Tables with no foreign key</h2>
-                <ul class="ms-graph-isolated-list">
+                <h2 class="ms-section-title">No foreign keys</h2>
+                <ul class="ms-graph-isolated-list" aria-label="Document types and tables with no foreign key">
+                    @foreach (RelationshipNode document in projection.IsolatedDocuments)
+                    {
+                        <li @key="@("d:" + document.Alias)">
+                            <a class="ms-graph-row-link" href="@CollectionHref(document.Alias)" title="@($"{document.Alias} - {document.DisplayName}: no foreign key from or to it")">
+                                <CollectionChip Alias="@document.Alias" Hue="@document.Hue" Small="true" />
+                            </a>
+                        </li>
+                    }
                     @foreach (RelationshipTableNode table in projection.Isolated.Take(IsolatedLimit))
                     {
-                        <li @key="table.Key">
+                        <li @key="@("t:" + table.Key)">
                             <a class="ms-graph-row-link" href="@TableHref(table.Schema, table.Name)">
                                 <TableChip Schema="@table.Schema" Name="@table.Name" Hue="@table.Hue" Small="true" />
                             </a>
@@ -179,10 +190,19 @@
                 </ul>
                 @if (projection.Isolated.Count > IsolatedLimit)
                 {
-                    <p class="ms-schema-note">And @(projection.Isolated.Count - IsolatedLimit) more - pick a schema to see them.</p>
+                    <p class="ms-schema-note">And @(projection.Isolated.Count - IsolatedLimit) more tables - pick a schema to see them.</p>
                 }
             </div>
         }
+
+        <div class="ms-graph-table-panel">
+            <h2 class="ms-section-title">Relationships</h2>
+            @if (projection.Drawn.Edges.Count == 0)
+            {
+                <p class="ms-schema-note">No foreign key is drawn in this view.</p>
+            }
+            <RelationshipTable Model="@projection.Drawn" HrefFor="@CollectionHref" TableHrefFor="@TableHref" />
+        </div>
 
         @Notes()
 
@@ -250,6 +270,10 @@
     /// <summary>The schema chip, as the URL carries it.</summary>
     [SupplyParameterFromQuery(Name = "schema")]
     public string? SchemaToken { get; set; }
+
+    /// <summary>Whether the picture and its table are on screen - the branch the view switch and the legend belong to.</summary>
+    private bool Drawing =>
+        !loading && graph.Error is not { Length: > 0 } && State.ActiveScope is not null && !graph.IsEmpty;
 
     protected override async Task OnInitializedAsync()
     {

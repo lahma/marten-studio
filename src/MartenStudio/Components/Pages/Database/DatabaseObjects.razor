@@ -24,9 +24,9 @@
 <div class="ms-page ms-doc-page ms-db-page">
     <div class="ms-doc-layout ms-db-layout">
         <div class="ms-doc-rail">
+            @* The schemas and the pins only: this page's grid is the schema's list of tables and views, and
+               the rail's bands for them are object detail's, where they are the way to the next table. *@
             <DatabaseRail Overview="overview"
-                          Tables="railTables"
-                          Views="railViews"
                           Schema="@FoundSchema"
                           Kind="@DatabaseLinks.KindToken(Category)" />
         </div>
@@ -112,7 +112,7 @@
                         <p class="ms-empty-title">Nothing to list here</p>
                         <p class="ms-empty-description">@(list.Reason ?? "This list could not be read.")</p>
                         <p class="ms-empty-description">
-                            <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, null, Category)">Show every schema you can see</a>
+                            <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, null, Category)">Show every schema you can see</a>
                         </p>
                     </div>
                 }
@@ -160,8 +160,6 @@
     private CancellationTokenSource? cts;
     private DatabaseBrowserOverview? overview;
     private DatabaseObjectList? list;
-    private DatabaseObjectList? railTables;
-    private DatabaseObjectList? railViews;
     private string? loadError;
     private bool loading = true;
     private string? loadedSignature;
@@ -333,30 +331,12 @@
         {
             // One after the other rather than together: each resolves the scope and asks the policy, and a
             // scoped authorization service is not something to drive from two threads at once. The catalog
-            // behind them is cached, so the second and third are cheap.
+            // behind them is cached, so the second is cheap.
             overview = await Data.GetOverviewAsync(scope, token);
 
             if (overview.Refusal == DatabaseRefusal.None)
             {
                 list = await Data.ListAsync(scope, new DatabaseObjectQuery(Category, Schema, Owner, Filter), token);
-
-                // The rail's bands are the same schema asked again: when the grid's own list of it was refused,
-                // they would be refused the same way - and audited again, as a second refusal of one page view.
-                if (Schema is { } schema && list.Refusal == DatabaseRefusal.None)
-                {
-                    railTables = Reuses(DatabaseObjectCategory.Tables)
-                        ? list
-                        : await Data.ListAsync(scope, new DatabaseObjectQuery(DatabaseObjectCategory.Tables, schema), token);
-
-                    railViews = Reuses(DatabaseObjectCategory.Views)
-                        ? list
-                        : await Data.ListAsync(scope, new DatabaseObjectQuery(DatabaseObjectCategory.Views, schema), token);
-                }
-                else
-                {
-                    railTables = null;
-                    railViews = null;
-                }
             }
         }
         catch (OperationCanceledException)
@@ -377,10 +357,6 @@
             StateHasChanged();
         }
     }
-
-    /// <summary>Whether the grid's own list is exactly what the rail's band would ask for.</summary>
-    private bool Reuses(DatabaseObjectCategory category) =>
-        Category == category && Owner == DatabaseOwnerFilter.All && Filter is null;
 
     private CancellationToken ResetCancellation()
     {

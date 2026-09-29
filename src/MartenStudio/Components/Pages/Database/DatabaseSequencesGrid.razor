@@ -41,7 +41,7 @@
             {
                 <tr class="@(sequence.Ownership.IsMarten ? "ms-db-row-marten" : null)" @key="sequence.Schema + '\u001f' + sequence.Name">
                     <td class="ms-db-cell-name">
-                        <span class="ms-db-name"><span class="ms-db-schema-prefix">@(ShowSchema ? sequence.Schema + "." : null)</span>@sequence.Name</span>
+                        <span class="ms-db-name ms-db-name-cut" title="@DatabaseLinks.QualifiedName(sequence.Schema, sequence.Name)"><span class="ms-db-schema-prefix">@(ShowSchema ? sequence.Schema + "." : null)</span>@sequence.Name</span>
                         @if (sequence.RolledUp is { } rolled && rolled > 0)
                         {
                             <span class="ms-db-badge"

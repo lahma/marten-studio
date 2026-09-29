@@ -161,12 +161,13 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
         await using StudioPage studio = await StudioPage.SignInAsync(fixture.Browser, host, "admin");
         IPage page = studio.Page;
 
-        // The browser, on the Tables kind of the quartz schema: the rail with its schemas and the current
-        // schema's tables, the kind tabs, the owner filter and the grid with the Quartz.NET hints.
+        // The browser, on the Tables kind of the quartz schema: the rail with its schemas and pins (the
+        // tables and views bands are object detail's since UX-6), the kind tabs, the owner filter and the
+        // grid with the Quartz.NET hints.
         await studio.GoAsync(host.StudioUrl("database?schema=quartz&kind=tables"));
         await studio.SetThemeAsync("light");
         await page.Locator("table.ms-db-relations tbody a.ms-db-name[title='quartz.qrtz_triggers']").WaitForAsync();
-        await page.Locator(".ms-db-rail-tables .ms-rail-list .ms-rail-item").First.WaitForAsync();
+        await page.Locator(".ms-db-rail-schemas .ms-rail-list .ms-rail-item").First.WaitForAsync();
         await CaptureAsync(studio, directory, "database-browser");
 
         // qrtz_triggers' Rows tab with a filter: the chip, the index verdict, the tick timestamps' date hints.

@@ -54,7 +54,11 @@ else
                             (string Text, string Kind) cell = columnIndex < cells.Count
                                 ? cells[columnIndex]
                                 : (string.Empty, NullKind);
-                            <td class="ms-table-cell ms-query-cell ms-query-cell-@cell.Kind" @key="columnIndex">
+                            @* ms-query-kind-, never ms-query-cell- + kind: for a text cell that spells
+                               ms-query-cell-text, the class of the span inside a cell - an inline-block - and a
+                               cell that is an inline-block is not a table cell. The row grid learnt the same
+                               thing first (RowGrid's CellClass). *@
+                            <td class="ms-table-cell ms-query-cell ms-query-kind-@cell.Kind" @key="columnIndex">
                                 @* NULL, the JSON chip and plain text are SqlCellView's, shared with the database
                                    browser's row grid so the two grids never spell a cell two ways. *@
                                 <SqlCellView Text="@cell.Text"

@@ -16,7 +16,8 @@
         a `timestamp` is shown as stored, never converted - it has no zone to convert from - and says
         "no tz" so nobody reads it as the one or the other;
       - a `bytea` is sniffed from its first bytes: JSON (a chip that opens the viewer - the caller fetches the
-        whole value), gzip, PNG or UTF-8 text, each with its size, and hex for anything else;
+        whole value), UTF-8 text (a chip that opens the text the same way), gzip or PNG - each with its size,
+        and with a title saying why those two do not open - and hex for anything else;
       - a `DateHint` from the grid - "≈ 2026-09-29 14:03" under a bigint of ticks - is drawn under the number,
         which stays.
 
@@ -106,13 +107,18 @@ else
     [Parameter]
     public string? DateHintTitle { get; set; }
 
-    /// <summary>Opens the value: a JSON chip, or a <c>bytea</c> that holds JSON.</summary>
+    /// <summary>Opens the value: a JSON chip, or a <c>bytea</c> that holds JSON or UTF-8 text.</summary>
     [Parameter]
     public EventCallback OnOpen { get; set; }
 
     private bool IsKind(string kind) => string.Equals(Kind, kind, StringComparison.OrdinalIgnoreCase);
 
     private async Task OpenAsync() => await OnOpen.InvokeAsync();
+
+    /// <summary>Why a gzip stream or an image does not open, with the bytes it starts with.</summary>
+    private string BinaryTitle(BinarySniff sniff) =>
+        (sniff.Shape == BinaryShape.Png ? "A PNG image" : "A gzip stream") +
+        " - binary, shown as its size and type only; it does not open here. " + Text;
 
     private RenderFragment RenderBinary() => __builder =>
     {
@@ -137,17 +143,23 @@ else
                 break;
 
             case BinaryShape.Text:
-                <span class="ms-row-bytes" title="@Text">@sniff.Label</span>
+                <button type="button"
+                        class="ms-chip ms-query-json-chip ms-row-bytes-text"
+                        title="A bytea holding UTF-8 text - open all of it under the grid"
+                        @onclick="OpenAsync"
+                        @onkeydown:stopPropagation="true">@sniff.Label</button>
                 <span class="ms-row-bytes-preview">“@sniff.Preview”</span>
                 break;
 
             case BinaryShape.Gzip:
             case BinaryShape.Png:
-                <span class="ms-row-bytes" title="@Text">@sniff.Label</span>
+                @* Not a button: there is nothing here a browser could show of a compressed stream or an image's
+                   bytes, and a chip that looked like the JSON one and did nothing would be a lie. *@
+                <span class="ms-row-bytes" title="@BinaryTitle(sniff)">@sniff.Label</span>
                 break;
 
             default:
-                <span class="ms-query-cell-text ms-row-hex" title="@(SqlCellFormat.Bytes(FullLength) + " of binary")">@Text</span>
+                <span class="ms-query-cell-text ms-row-hex" title="@(SqlCellFormat.Bytes(FullLength) + " of binary, shown as hex: it does not open here")">@Text</span>
                 break;
         }
     };

@@ -415,16 +415,55 @@ public class RelationshipTablesBuilderTests
             .Should().Be("customer_id", "a tenant column leading both keys is the scope, not the relationship");
     }
 
+    /// <summary>
+    /// UX-6: a detail table keyed by exactly its parent's key - Quartz.NET's four trigger-detail tables into
+    /// <c>qrtz_triggers</c> - is a one-to-one extension of it. Its three columns said nothing the arrow did
+    /// not, and were cut to <c>sched_name, trigger_name, trigg…</c> on every one of the four arrows.
+    /// </summary>
     [Fact]
-    public void A_label_that_would_strip_every_column_shows_them_all()
+    public void A_key_that_is_both_whole_primary_keys_is_labelled_one_to_one()
     {
         RelationshipGraphBuilder.LabelFor(
                 ["sched_name", "trigger_name", "trigger_group"],
                 ["sched_name", "trigger_name", "trigger_group"],
                 ["sched_name", "trigger_name", "trigger_group"],
                 ["sched_name", "trigger_name", "trigger_group"])
+            .Should().Be("primary key (1:1)");
+
+        RelationshipGraphBuilder.LabelFor(["customer_id"], ["id"], ["customer_id"], ["id"])
+            .Should().Be(RelationshipGraphBuilder.OneToOneLabel, "one column is still the whole of both keys");
+
+        RelationshipGraphBuilder.LabelFor(["b", "a"], ["y", "x"], ["a", "b"], ["x", "y"])
+            .Should().Be(RelationshipGraphBuilder.OneToOneLabel, "a key is a set of columns: the order they are declared in does not make it less whole");
+    }
+
+    [Fact]
+    public void A_key_that_is_only_part_of_a_primary_key_is_not_one_to_one()
+    {
+        RelationshipGraphBuilder.LabelFor(
+                ["sched_name", "job_name", "job_group"],
+                ["sched_name", "job_name", "job_group"],
+                ["sched_name", "trigger_name", "trigger_group"],
+                ["sched_name", "job_name", "job_group"])
+            .Should().Be("job_name, job_group", "the pointing side is not its table's key: many triggers share one job");
+
+        RelationshipGraphBuilder.LabelFor(["customer_id"], ["id"], ["customer_id"], ["tenant_id", "id"])
+            .Should().Be("customer_id", "the referenced side is not the whole of its table's key");
+
+        RelationshipGraphBuilder.LabelFor(["customer_id"], ["id"], null, ["id"])
+            .Should().Be("customer_id", "without the pointing table's key there is nothing to call one-to-one");
+    }
+
+    [Fact]
+    public void A_label_that_would_strip_every_column_shows_them_all()
+    {
+        RelationshipGraphBuilder.LabelFor(
+                ["sched_name", "trigger_name", "trigger_group"],
+                ["sched_name", "trigger_name", "trigger_group"],
+                ["sched_name", "trigger_name", "trigger_group", "fired_at"],
+                ["sched_name", "trigger_name", "trigger_group"])
             .Should().Be("sched_name, trigger_name, trigger_group",
-                "a detail table keyed by exactly its parent's key shares all of it, and an empty label says nothing");
+                "a key that shares the whole prefix without being both whole keys strips to nothing, and an empty label says nothing");
     }
 
     [Fact]
@@ -450,6 +489,23 @@ public class RelationshipTablesBuilderTests
         edge.LinkedColumns.Should().Be("sched_name, job_name, job_group");
         RelationshipDiagram.Describe(graph, edge).Should().Contain("sched_name, job_name, job_group",
             "the tooltip always lists every column");
+    }
+
+    [Fact]
+    public void A_detail_table_s_key_into_its_parent_is_drawn_one_to_one_and_the_tooltip_still_lists_every_column()
+    {
+        string[] triggerKey = ["sched_name", "trigger_name", "trigger_group"];
+
+        RelationshipGraph graph = Build(
+            [Key("quartz", "qrtz_simple_triggers", triggerKey, "quartz", "qrtz_triggers", primaryKey: triggerKey, linkedPrimaryKey: triggerKey)],
+            Open("quartz"));
+
+        RelationshipEdge edge = graph.Edges.Should().ContainSingle().Subject;
+
+        edge.Column.Should().Be("primary key (1:1)");
+        edge.AllColumns.Should().Be("sched_name, trigger_name, trigger_group", "the table lists every column beneath the label");
+        RelationshipDiagram.Describe(graph, edge).Should().Contain("(sched_name, trigger_name, trigger_group) → quartz.qrtz_triggers (sched_name, trigger_name, trigger_group)",
+            "the tooltip always lists every column on both sides");
     }
 
     // ----------------------------------------------------------------------------------------------

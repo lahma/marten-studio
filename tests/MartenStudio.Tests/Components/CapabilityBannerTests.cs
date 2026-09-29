@@ -1,3 +1,5 @@
+using AngleSharp.Dom;
+
 using Bunit;
 
 using MartenStudio.Components.Layout;
@@ -55,6 +57,25 @@ public class CapabilityBannerTests
     /// Every row names the exact property a host would have to set (D4). "Not permitted" with nothing to
     /// act on is the failure mode of every feature-flagged admin UI.
     /// </summary>
+    /// <summary>
+    /// UX-6, U9: a viewer the write policy refuses everything saw "10 / 10 capabilities" and read it as
+    /// their own. The chip describes the studio's configuration, and the popover says so before it lists it -
+    /// without trying to compute what this visitor may do, which the policies answer per call and scope.
+    /// </summary>
+    [Fact]
+    public void The_popover_says_it_describes_the_studio_and_not_the_visitor()
+    {
+        using var context = new StudioComponentContext();
+        context.Options.Capabilities = MartenStudioCapabilities.All();
+
+        var banner = context.Render<CapabilityBanner>();
+
+        IElement lead = banner.Find("#ms-capability-popover > p");
+        lead.ClassList.Should().Contain("ms-popover-lead", "it comes first, before either list");
+        lead.TextContent.Trim().Should().Be("What this studio allows. Your account's policies decide what you may do.");
+        banner.Find(".ms-chip").TextContent.Trim().Should().Be("10 / 10 capabilities", "the count itself is unchanged");
+    }
+
     [Fact]
     public void The_popover_lists_every_capability_with_its_state_and_its_option_name()
     {

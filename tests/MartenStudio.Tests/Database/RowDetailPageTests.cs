@@ -227,7 +227,8 @@ public class RowDetailPageTests
 
         var page = Render(context, TriggerRow);
 
-        page.Find(".ms-row-not-found .ms-empty-title").TextContent.Should().Be("No such row");
+        page.Find(".ms-row-not-found .ms-empty-title").TextContent.Should().Be("Not available here",
+            "one heading for not there and not shown, as object detail's (UX-6)");
         page.FindAll(".ms-row-kv").Should().BeEmpty();
         context.TableRows.ReferencesAsked.Should().BeEmpty("nothing is read about a row that is not there");
         string notThere = page.Find(".ms-row-not-found").TextContent;
@@ -247,7 +248,12 @@ public class RowDetailPageTests
 
         var page = Render(context, TriggerRow);
 
-        page.Find(".ms-row-not-found").TextContent.Should().Contain("Capabilities.BrowseDatabase");
+        IElement panel = page.Find(".ms-row-not-found");
+        panel.TextContent.Should().Contain("Capabilities.BrowseDatabase");
+        panel.QuerySelector(".ms-empty-title")!.TextContent.Should().Be("Not available here",
+            "the heading fits a refusal as well as an absence, so neither is said to be the other");
+        panel.TextContent.Should().NotContain("deleted", "a gate that refused is not a row that went away");
+        panel.QuerySelector("a.ms-db-back-link")!.TextContent.Should().Be("Back to the database browser");
     }
 
     [Fact]

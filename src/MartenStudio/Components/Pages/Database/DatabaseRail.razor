@@ -7,27 +7,39 @@
 
 @*
     The database browser's left rail, the sibling of the documents' CollectionsRail and drawn with the same
-    .ms-rail classes: a filter, the schemas this visitor may see, what they pinned, and the current schema's
-    tables and views - which stay here on object detail, so hopping from one table to the next is one click.
+    .ms-rail classes: a filter, the schemas this visitor may see, what they pinned - and, on object detail
+    only (ShowRelations), the current schema's tables and views, so hopping from one table to the next is
+    one click. The browser page leaves those two bands out: its grid already is that list, and two copies of
+    it side by side were one too many, the rail's cut off at the bottom of the screen.
+
+    Every schema carries a number, and the band's heading says what it counts: the kind on screen on the
+    browser ("Schemas · functions"), and tables and views together on object detail, whatever kind of
+    relation is open - a count that silently followed the kind read "quartz 0" under Functions and "All
+    schemas 3" on a view. The title on each number lists every kind.
 
     The store's own schemas carry an M: their structure is what the Schema screen has always shown, and it
     is visible whether or not the capability is on. Schemas that exist but are not shown are a count and
     never a list of names, with the gate that withholds them - a name is itself something a visitor may not
     be meant to learn.
 
-    Below 900 px the rail is a <details> whose summary says where you are ("quartz · 14 tables"), open on
-    the browser and closed once an object is picked, so a phone opens on the object rather than on the
-    list it came from. It is keyed on the object for exactly that reason: a new object is a new, closed
-    element, whatever the visitor did to the last one. Above 900 px the summary is hidden and the content
-    shown regardless (::details-content, in the DB-4 section of the stylesheet), so a closed <details> never
-    hides the rail on a desktop.
+    Below 900 px the rail is a <details> whose summary says where you are ("quartz · 14 tables"), and it
+    starts closed on every page, so a phone opens on the page rather than on a screenful of schema cards.
+    A link followed from inside it - another schema, kind or object - closes it again once the new page is
+    drawn, through martenStudio.disclosure.close, while typing into its filter keeps it open. It is closed
+    rather than re-created: an element keyed on the page was closed too, and took the keyboard focus with the
+    link that had it, which on a desktop left the visitor at the top of the document after every hop. Above
+    900 px the summary is hidden and the content shown regardless (::details-content, in the DB-4 section of
+    the stylesheet), so a closed <details> never hides the rail on a desktop.
+
+    On object detail the open object is scrolled into view inside the rail's own scroll region, once per
+    object: a schema with forty tables otherwise put the one you are on below the fold of the rail.
 
     Pins live in this browser's local storage under ms_db_pins_{store}, like the documents rail's.
 *@
 
-<nav class="ms-rail ms-db-rail" aria-label="Database schemas and objects">
-    <details class="ms-db-rail-collapse" open="@(!Collapsed)" @key="CollapseKey">
-        <summary class="ms-db-rail-summary">@SummaryText</summary>
+<nav class="ms-rail ms-db-rail" aria-label="Database schemas and objects" @ref="railElement">
+    <details class="ms-db-rail-collapse" @ref="collapseElement">
+        <summary class="ms-db-rail-summary"><span class="ms-db-rail-summary-text">@SummaryText</span></summary>
 
         <div class="ms-db-rail-body">
             <div class="ms-db-rail-filter">
@@ -38,8 +50,7 @@
 
             <section class="ms-rail-group ms-db-rail-schemas">
                 <h2 class="ms-rail-title">
-                    <span class="ms-rail-name">Schemas</span>
-                    <span class="ms-rail-count">@Schemas.Count</span>
+                    <span class="ms-rail-name">Schemas <span class="ms-db-rail-counting">· @CountingLabel</span></span>
                 </h2>
 
                 <ul class="ms-rail-list">
@@ -66,9 +77,9 @@
 
                         <li class="ms-rail-item" @key="schema.Name">
                             <div class="ms-rail-entry">
-                                <a class="@LinkClass(active)" href="@SchemaHref(schema.Name)" aria-current="@(active ? "page" : null)">
+                                <a class="@LinkClass(active)" href="@SchemaHref(schema.Name)" aria-current="@(active ? "page" : null)" title="@schema.Name">
                                     <span class="ms-db-rail-name">@schema.Name</span>
-                                    <span class="ms-rail-badge-count" title="@CountTitle(schema)">@DatabasePresentation.Number(schema.CountOf(Category))</span>
+                                    <span class="ms-rail-badge-count" title="@CountTitle(schema)">@DatabasePresentation.Number(CountFor(schema))</span>
                                 </a>
                                 <span class="ms-rail-flags">
                                     @if (schema.IsStoreSchema)
@@ -99,7 +110,11 @@
 
                 @if (VisiblePins.Count == 0)
                 {
-                    <p class="ms-rail-empty">Nothing pinned yet. Use ☆ beside a table or view to keep it here.</p>
+                    <p class="ms-rail-empty">
+                        @(ShowRelations && Schema is not null
+                            ? "Nothing pinned yet. Use ☆ beside a table or view below to keep it here."
+                            : "Nothing pinned yet. Open a table or view, then use ☆ beside it in this rail to keep it here.")
+                    </p>
                 }
                 else
                 {
@@ -133,14 +148,17 @@
                 }
             </section>
 
-            @if (Schema is { } current)
+            @if (ShowRelations)
             {
-                @RenderBand("tables", "Tables", Tables, current)
-                @RenderBand("views", "Views", Views, current)
-            }
-            else
-            {
-                <p class="ms-rail-empty ms-db-rail-hint">Pick a schema to list its tables and views here.</p>
+                @if (Schema is { } current)
+                {
+                    @RenderBand("tables", "Tables", Tables, current)
+                    @RenderBand("views", "Views", Views, current)
+                }
+                else
+                {
+                    <p class="ms-rail-empty ms-db-rail-hint">Pick a schema to list its tables and views here.</p>
+                }
             }
 
             @if (error is { Length: > 0 })
@@ -152,8 +170,19 @@
 </nav>
 
 @code {
+    /// <summary>
+    /// What the open object's entry is found by inside the rail: its band's link marked as the page. The
+    /// pinned band can carry the same mark and comes first, so it is named out.
+    /// </summary>
+    internal const string ActiveEntrySelector =
+        ".ms-db-rail-tables a[aria-current='page'], .ms-db-rail-views a[aria-current='page']";
+
     private readonly List<(string Schema, string Name)> pins = [];
+    private ElementReference railElement;
+    private ElementReference collapseElement;
+    private string? drawnFor;
     private string? pinsLoadedFor;
+    private string? revealedFor;
     private string filter = string.Empty;
     private string? error;
 
@@ -181,9 +210,13 @@
     [Parameter]
     public string? ActiveName { get; set; }
 
-    /// <summary>Whether the narrow-screen summary starts closed: once an object is picked.</summary>
+    /// <summary>
+    /// Whether this is object detail's rail: the current schema's tables and views as bands under the pins,
+    /// and every schema counted by its tables and views. Off, it is the browser page's: the schemas and the
+    /// pins, counted by the kind on screen.
+    /// </summary>
     [Parameter]
-    public bool Collapsed { get; set; }
+    public bool ShowRelations { get; set; }
 
     private DatabaseBrowserOverview? OverviewModel => Overview as DatabaseBrowserOverview;
 
@@ -197,11 +230,30 @@
 
     private string PinKey => "ms_db_pins_" + StoreKey;
 
-    private string CollapseKey => Collapsed ? "closed\u001f" + Schema + "\u001f" + ActiveName : "open";
+    /// <summary>The page the rail is drawn for: a change of it closes the phone rail, typing into its filter does not.</summary>
+    private string PageKey => string.Join('\u001f', Schema, Kind, ActiveName);
 
-    private string SummaryText => Schema is { } schema
-        ? schema + " · " + DatabasePresentation.CountOf(Category, Schemas.FirstOrDefault(x => x.Name == schema)?.CountOf(Category) ?? 0)
-        : "All schemas · " + (Schemas.Count == 1 ? "1 schema" : DatabasePresentation.Number(Schemas.Count) + " schemas");
+    /// <summary>What each schema's number counts, as the band's heading says it.</summary>
+    private string CountingLabel => ShowRelations
+        ? "tables and views"
+        : DatabasePresentation.CategoryLabel(Category).ToLowerInvariant();
+
+    /// <summary>"quartz · 14 tables", "All schemas · 44 functions", "legacy · 11 tables, 3 views".</summary>
+    private string SummaryText
+    {
+        get
+        {
+            IReadOnlyList<DatabaseSchemaSummary> scope = Schema is { } schema
+                ? [.. Schemas.Where(x => string.Equals(x.Name, schema, StringComparison.Ordinal))]
+                : Schemas;
+
+            string counted = ShowRelations
+                ? DatabasePresentation.RelationsOf(scope.Sum(static x => x.Tables), scope.Sum(static x => x.Views))
+                : DatabasePresentation.CountOf(Category, scope.Sum(x => x.CountOf(Category)));
+
+            return (Schema ?? "All schemas") + " · " + counted;
+        }
+    }
 
     /// <summary>Pins in a schema this visitor can see: one that is no longer shown is not offered as a dead link.</summary>
     private List<(string Schema, string Name)> VisiblePins =>
@@ -211,14 +263,75 @@
     {
         // Local storage exists only once there is a browser, and pins are per store: read them on the first
         // interactive render and again whenever the store changes under the rail.
-        if (string.Equals(pinsLoadedFor, StoreKey, StringComparison.Ordinal))
+        if (!string.Equals(pinsLoadedFor, StoreKey, StringComparison.Ordinal))
+        {
+            pinsLoadedFor = StoreKey;
+            await LoadPinsAsync();
+        }
+
+        await CloseOnNewPageAsync();
+        await RevealActiveAsync();
+    }
+
+    /// <summary>
+    /// Shuts the phone rail when the page under it changed - the first page is drawn with it shut already -
+    /// without re-creating it, so a keyboard focus on the link just followed stays where it is.
+    /// </summary>
+    private async Task CloseOnNewPageAsync()
+    {
+        string page = PageKey;
+        bool changed = drawnFor is not null && !string.Equals(drawnFor, page, StringComparison.Ordinal);
+        drawnFor = page;
+
+        if (!changed)
         {
             return;
         }
 
-        pinsLoadedFor = StoreKey;
-        await LoadPinsAsync();
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("martenStudio.disclosure.close", new object?[] { collapseElement });
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // Nothing to close without a browser, and a rail left open is still a rail.
+        }
     }
+
+    /// <summary>
+    /// Scrolls the open object's entry into view inside the rail's own scroll region - once per object, and
+    /// only once its band has drawn it. The helper touches nothing else: a phone's collapsed rail, or one
+    /// that fits its box, is left exactly where it is.
+    /// </summary>
+    private async Task RevealActiveAsync()
+    {
+        if (!ShowRelations || Schema is not { } schema || ActiveName is not { } name || !(Lists(Tables, schema, name) || Lists(Views, schema, name)))
+        {
+            return;
+        }
+
+        string key = schema + "\u001f" + name;
+        if (string.Equals(revealedFor, key, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        revealedFor = key;
+
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("martenStudio.scroll.revealWithin", new object?[] { railElement, ActiveEntrySelector });
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // A closed circuit, or a browser that refused: the rail is still the rail, only not scrolled.
+        }
+    }
+
+    private static bool Lists(object? model, string schema, string name) =>
+        model is DatabaseObjectList { Refusal: DatabaseRefusal.None } list
+        && list.Items.OfType<DatabaseRelationSummary>().Any(x =>
+            string.Equals(x.Schema, schema, StringComparison.Ordinal) && string.Equals(x.Name, name, StringComparison.Ordinal));
 
     private RenderFragment RenderBand(string key, string title, object? model, string schema) =>
         @<section class="ms-rail-group ms-db-rail-@key" @key="key">
@@ -307,7 +420,11 @@
         DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, name);
 
     private int TotalOf(DatabaseSchemaSummary? schema) =>
-        schema is null ? Schemas.Sum(x => x.CountOf(Category)) : schema.CountOf(Category);
+        schema is null ? Schemas.Sum(CountFor) : CountFor(schema);
+
+    /// <summary>One schema's number: the kind on screen on the browser, its tables and views on object detail.</summary>
+    private int CountFor(DatabaseSchemaSummary schema) =>
+        ShowRelations ? schema.Tables + schema.Views : schema.CountOf(Category);
 
     private string CountTitle(DatabaseSchemaSummary? schema)
     {

@@ -85,6 +85,61 @@ public class RelationshipViewTests
             [("legacy", 3), ("quartz", 3)], "the chips count every schema, whichever one is picked");
     }
 
+    /// <summary>
+    /// UX-6, U3a: in the Both and Tables views a document type no key reaches is listed as a chip under the
+    /// picture rather than drawn as a box - a dozen of them were the whole first column of the diagram.
+    /// </summary>
+    [Theory]
+    [InlineData("both", null)]
+    [InlineData("both", "quartz")]
+    [InlineData("tables", null)]
+    public void Outside_the_documents_view_a_document_type_with_no_key_is_listed_not_drawn(string view, string? schema)
+    {
+        GraphModel graph = FakeRelationshipDataService.WithTablesAndUnkeyedDocuments();
+
+        RelationshipProjection projection = RelationshipViews.Project(graph, RelationshipViews.Parse(view), schema);
+
+        projection.Drawn.Nodes.Select(static x => x.Alias).Should().NotContain(["auditnote", "vehicle"]);
+        projection.IsolatedDocuments.Select(static x => x.Alias).Should().Equal(["auditnote", "vehicle"]);
+        projection.Drawn.Nodes.Should().OnlyContain(x => projection.Drawn.Edges.Any(e => e.FromAlias == x.Alias || e.ToAlias == x.Alias),
+            "every box on the picture has an arrow");
+    }
+
+    [Fact]
+    public void The_documents_view_still_draws_every_document_type()
+    {
+        GraphModel graph = FakeRelationshipDataService.WithTablesAndUnkeyedDocuments();
+
+        RelationshipProjection projection = RelationshipViews.Project(graph, RelationshipViewMode.Documents, null);
+
+        projection.Drawn.Nodes.Select(static x => x.Alias).Should().Equal(["customer", "order", "auditnote", "vehicle"]);
+        projection.IsolatedDocuments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_screen_with_no_table_in_any_key_draws_its_unconnected_types_as_it_always_did()
+    {
+        GraphModel graph = FakeRelationshipDataService.WithoutKeys();
+
+        RelationshipProjection projection = RelationshipViews.Project(graph, RelationshipViewMode.Both, null);
+
+        projection.Drawn.Nodes.Select(static x => x.Alias).Should().Equal(["customer"]);
+        projection.IsolatedDocuments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_document_type_whose_keys_a_schema_chip_filters_away_is_not_said_to_have_none()
+    {
+        GraphModel graph = FakeRelationshipDataService.WithTables();
+
+        // customer_credit (legacy) is the only table key that reaches customer; under the quartz chip that key
+        // is gone, and customer is still drawn because order → customer is a key between document types.
+        RelationshipProjection quartz = RelationshipViews.Project(graph, RelationshipViewMode.Both, "quartz");
+
+        quartz.IsolatedDocuments.Should().BeEmpty("every document type here has a key, drawn or not");
+        quartz.Drawn.Nodes.Select(static x => x.Alias).Should().Equal(["customer", "order"]);
+    }
+
     [Fact]
     public void Past_the_cap_a_picture_with_tables_is_not_drawn()
     {

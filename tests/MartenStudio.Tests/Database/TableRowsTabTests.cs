@@ -3,6 +3,7 @@ using AngleSharp.Dom;
 using Bunit;
 
 using MartenStudio.Components.Pages.Database;
+using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
@@ -175,6 +176,64 @@ public class TableRowsTabTests
         context.TableRows.CellsAsked.Should().ContainSingle("the whole value is kept for as long as the page is on screen")
             .Which.Column.Should().Be("job_data");
         context.TableRows.CellsAsked[0].Key.Should().BeEquivalentTo(FakeTableRows.KeyOf(0));
+    }
+
+    /// <summary>
+    /// UX-6, U8: a bytea of UTF-8 text opens under the grid as text, as a JSON one opens in the viewer -
+    /// from the page when every byte is on it, and read whole (capped) when it was cut. A gzip stream or an
+    /// image stays a label, and its title says why nothing opens.
+    /// </summary>
+    [Fact]
+    public async Task A_bytea_holding_text_opens_as_text_and_binary_says_why_it_does_not()
+    {
+        await using var context = await RowUiData.ContextAsync();
+
+        byte[] note = System.Text.Encoding.UTF8.GetBytes("sku;quantity\nSKU-001;4");
+        byte[] longNote = System.Text.Encoding.UTF8.GetBytes(new string('a', 200) + " the end");
+        byte[] gzip = [0x1f, 0x8b, 0x08, 0x00, 0x00];
+        byte[] png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00];
+
+        context.TableRows.Page = RowUiData.PageOf(
+            [RowUiData.Column("attachment", 1, "bytea", sortable: false)],
+            [
+                new TableRow(null, "(0,1)", [Bytes(note, note.Length)]),
+                new TableRow(null, "(0,2)", [Bytes(longNote[..64], longNote.Length)]),
+                new TableRow(null, "(0,3)", [Bytes(gzip, 52)]),
+                new TableRow(null, "(0,4)", [Bytes(png, 30)]),
+            ],
+            key: null,
+            mode: TableRowPagingMode.Ctid,
+            name: "integration_messages");
+        context.TableRows.Cell = new TableCellValue { Found = true, Bytes = longNote, FullLength = longNote.Length, Cap = 512 * 1024 };
+
+        var tab = RowUiData.RenderTab(context, schema: "legacy", name: "integration_messages");
+
+        IElement whole = tab.FindAll("tbody tr.ms-row-item")[0].QuerySelector("button.ms-row-bytes-text")!;
+        whole.TextContent.Should().StartWith("text · ");
+        whole.Click();
+
+        tab.Find(".ms-row-json-panel .ms-row-text-panel-body").TextContent.Should().Be("sku;quantity\nSKU-001;4");
+        tab.Find(".ms-row-json-panel .ms-row-text-panel").GetAttribute("role").Should().Be("region");
+        context.TableRows.CellsAsked.Should().BeEmpty("every byte of it was on the page");
+
+        tab.FindAll("tbody tr.ms-row-item")[1].QuerySelector("button.ms-row-bytes-text")!.Click();
+
+        tab.WaitForAssertion(() => tab.Find(".ms-row-json-panel .ms-row-text-panel-body").TextContent.Should().EndWith("the end"));
+        context.TableRows.CellsAsked.Should().ContainSingle("a value cut on the page is read whole once")
+            .Which.Key.Should().ContainKey("ctid");
+
+        foreach (int row in (int[])[2, 3])
+        {
+            IElement cell = tab.FindAll("tbody tr.ms-row-item")[row].QuerySelector("td.ms-row-cell")!;
+            cell.QuerySelector("button").Should().BeNull("nothing a browser can show is in a compressed stream or an image's bytes");
+            cell.QuerySelector(".ms-row-bytes")!.GetAttribute("title").Should().Contain("shown as its size and type only").And.Contain("does not open");
+        }
+
+        static SqlCell Bytes(byte[] prefix, int fullLength) =>
+            new("\\x" + Convert.ToHexStringLower(prefix) + (prefix.Length < fullLength ? "…" : string.Empty) + " (" + fullLength.ToString(System.Globalization.CultureInfo.InvariantCulture) + " bytes)",
+                SqlCellKind.Binary,
+                prefix.Length < fullLength,
+                fullLength);
     }
 
     [Fact]

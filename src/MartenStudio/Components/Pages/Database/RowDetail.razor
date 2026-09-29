@@ -439,19 +439,25 @@
 
     /// <summary>
     /// The neutral panel: the same words for a row that is not there and for one outside the gate, so the
-    /// page is not a way to find out what exists. A gate that is an option or the account is named.
+    /// page is not a way to find out what exists. A gate that is an option or the account is named - in place
+    /// of "it may have been deleted", which is not what happened when a gate refused. The heading fits both,
+    /// as object detail's does.
     /// </summary>
     private RenderFragment RenderNotFound() => __builder =>
     {
         <div class="ms-empty ms-row-not-found" role="status">
-            <p class="ms-empty-title">No such row</p>
-            <p class="ms-empty-description">There is no row with this key here that this studio shows you. It may have been deleted, or its key changed.</p>
+            <p class="ms-empty-title">Not available here</p>
             @if (detail is { Refusal: var refusal, Reason: { Length: > 0 } reason } && RowPresentation.IsGate(refusal))
             {
+                <p class="ms-empty-description">There is no row with this key here that this studio shows you.</p>
                 <p class="ms-empty-description">@reason</p>
             }
+            else
+            {
+                <p class="ms-empty-description">There is no row with this key here that this studio shows you. It may have been deleted, or its key changed.</p>
+            }
             <p class="ms-empty-description">
-                <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Back to the database browser</a>
+                <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Back to the database browser</a>
             </p>
         </div>
     };

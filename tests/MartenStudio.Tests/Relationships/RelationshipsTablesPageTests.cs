@@ -224,7 +224,9 @@ public class RelationshipsTablesPageTests
         var page = context.Render<RelationshipsPage>();
 
         List<string> fromPicture = [.. page.FindAll(".ms-graph-svg .ms-graph-node").Select(static x => x.GetAttribute("href") ?? string.Empty)];
-        List<string> fromTable = [.. page.FindAll(".ms-graph-row-link").Select(static x => x.GetAttribute("href") ?? string.Empty)];
+        // The table's rows only: the Both view also lists the tables with no key as chips under the picture,
+        // which link to object detail too and are, by definition, no node of it.
+        List<string> fromTable = [.. page.FindAll(".ms-graph-table .ms-graph-row-link").Select(static x => x.GetAttribute("href") ?? string.Empty)];
 
         fromTable.Should().Contain(static x => x.StartsWith("database/object", StringComparison.Ordinal));
         fromTable.Should().BeSubsetOf(fromPicture);
@@ -277,6 +279,85 @@ public class RelationshipsTablesPageTests
 
         page.FindAll(".ms-graph-views").Should().BeEmpty();
         page.Find(".ms-graph-withheld").TextContent.Should().Contain("Only document types are drawn").And.Contain("57014");
+    }
+
+    // ----------------------------------------------------------------------------------------------
+    // UX-6: what has no key, the diagram's size, and what sits next to it
+    // ----------------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("?schema=quartz")]
+    [InlineData("?view=tables")]
+    public void What_has_no_key_is_listed_as_chips_right_under_the_diagram_rather_than_drawn(string query)
+    {
+        using var context = NewContext(out FakeRelationshipDataService relationships);
+        relationships.Graph = FakeRelationshipDataService.WithTablesAndUnkeyedDocuments();
+        context.Navigate("/marten/relationships" + query);
+
+        var page = context.Render<RelationshipsPage>();
+
+        List<string> boxes = [.. page.FindAll(".ms-graph-svg .ms-graph-node:not(.ms-graph-node-table) .ms-graph-node-alias").Select(static x => x.TextContent)];
+        boxes.Should().NotContain(["auditnote", "vehicle"], "a document type with no key is not a box with no arrow");
+
+        IElement isolated = page.Find(".ms-graph-isolated");
+        isolated.QuerySelector(".ms-section-title")!.TextContent.Should().Be("No foreign keys");
+        List<string> links = [.. isolated.QuerySelectorAll("a").Select(static x => x.GetAttribute("href") ?? string.Empty)];
+        links.Should().Contain(static x => x.StartsWith("documents/auditnote", StringComparison.Ordinal));
+        links.Should().Contain(static x => x.StartsWith("documents/vehicle", StringComparison.Ordinal));
+        bool auditLog = links.Exists(static x => x.StartsWith("database/object?schema=legacy&name=audit_log", StringComparison.Ordinal));
+        auditLog.Should().Be(!query.Contains("quartz", StringComparison.Ordinal),
+            "a table with no key is listed too - in the schema chosen, when one is");
+
+        IElement diagramOrPanel = page.Find(".ms-graph, .ms-graph-toomany");
+        diagramOrPanel.NextElementSibling!.ClassList.Should().Contain("ms-graph-isolated", "the chips are right under the picture, above the table");
+    }
+
+    [Fact]
+    public void The_documents_view_still_draws_every_document_type_and_lists_none()
+    {
+        using var context = NewContext(out FakeRelationshipDataService relationships);
+        relationships.Graph = FakeRelationshipDataService.WithTablesAndUnkeyedDocuments();
+        context.Navigate("/marten/relationships?view=documents");
+
+        var page = context.Render<RelationshipsPage>();
+
+        page.FindAll(".ms-graph-svg .ms-graph-node-alias").Select(static x => x.TextContent)
+            .Should().Contain(["auditnote", "vehicle"]);
+        page.FindAll(".ms-graph-isolated").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void The_diagram_is_drawn_at_its_natural_size_in_a_labelled_scroll_region()
+    {
+        using var context = NewContext(out _);
+
+        var page = context.Render<RelationshipsPage>();
+
+        IElement frame = page.Find(".ms-graph");
+        frame.ClassList.Should().Contain("ms-table-scroll", "the same edge cue and focus ring as every wide table (D25)");
+        frame.GetAttribute("role").Should().Be("region");
+        frame.GetAttribute("aria-label").Should().Be("Relationships diagram");
+        frame.GetAttribute("tabindex").Should().Be("0", "a region only a mouse can scroll is a picture a keyboard cannot reach");
+
+        IElement svg = frame.QuerySelector("svg.ms-graph-svg")!;
+        svg.GetAttribute("width").Should().NotBeNullOrEmpty("the picture says its own size, and the stylesheet no longer shrinks it");
+    }
+
+    [Fact]
+    public void The_legend_and_refresh_sit_next_to_the_diagram_they_describe()
+    {
+        using var context = NewContext(out _);
+
+        var page = context.Render<RelationshipsPage>();
+
+        page.Find(".ms-page-header").QuerySelectorAll("button").Should().BeEmpty("the header is the title alone");
+
+        IElement bar = page.Find(".ms-graph-bar");
+        bar.QuerySelector(".ms-graph-legend").Should().NotBeNull();
+        bar.QuerySelector(".ms-graph-readat")!.TextContent.Should().StartWith("Read ");
+        bar.QuerySelectorAll("button").Single().TextContent.Trim().Should().Be("Refresh");
+        bar.NextElementSibling!.ClassList.Should().Contain("ms-graph", "the bar is the diagram's own top edge");
     }
 
     private static IElement ViewButton(IRenderedComponent<RelationshipsPage> page, string label) =>

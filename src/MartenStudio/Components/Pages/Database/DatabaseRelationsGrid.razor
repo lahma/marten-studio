@@ -44,7 +44,7 @@
             {
                 <tr class="@(relation.Ownership.IsMarten ? "ms-db-row-marten" : null)" @key="relation.Schema + '\u001f' + relation.Name">
                     <td class="ms-db-cell-name">
-                        <a class="ms-db-name" href="@ObjectHref(relation)" title="@DatabaseLinks.QualifiedName(relation.Schema, relation.Name)"><span class="ms-db-schema-prefix">@(ShowSchema ? relation.Schema + "." : null)</span>@relation.Name</a>
+                        <a class="ms-db-name ms-db-name-cut" href="@ObjectHref(relation)" title="@DatabaseLinks.QualifiedName(relation.Schema, relation.Name)"><span class="ms-db-schema-prefix">@(ShowSchema ? relation.Schema + "." : null)</span>@relation.Name</a>
                         <DatabaseRelationBadges Model="relation" />
                     </td>
                     <td class="ms-db-cell-owner"><DatabaseOwnerBadge Model="relation.Ownership" /></td>

@@ -158,6 +158,20 @@ internal sealed class FakeRelationshipDataService : IRelationshipDataService
         VisibleSchemas = ["studio_sample", "studio_sample_events", "legacy", "quartz"],
     };
 
+    /// <summary>
+    /// <see cref="WithTables" /> with two document types no key reaches at all - the column of unconnected
+    /// boxes the Both view used to draw down the left of the diagram.
+    /// </summary>
+    public static GraphModel WithTablesAndUnkeyedDocuments()
+    {
+        GraphModel graph = WithTables();
+
+        return graph with
+        {
+            Nodes = [.. graph.Nodes, Node("auditnote", "AuditNote"), Node("vehicle", "Vehicle")],
+        };
+    }
+
     /// <summary>A table node, coloured by its schema the way the builder colours one.</summary>
     public static RelationshipTableNode Table(string schema, string name, string? recognisedAs = null) =>
         new(

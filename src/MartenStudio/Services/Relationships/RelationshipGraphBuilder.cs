@@ -211,10 +211,18 @@ internal static class RelationshipGraphBuilder
     /// which is what tells it from any other key in the schema.
     /// </para>
     /// <para>
-    /// <b>Stripping everything shows everything.</b> A detail table keyed by exactly its parent's key
-    /// (<c>qrtz_simple_triggers</c> by <c>qrtz_triggers</c>' three columns) shares the whole prefix, and an
-    /// empty label would be worse than a long one. The tooltip and the table always list every column
-    /// either way.
+    /// <b>A key that is both whole primary keys reads as what it is.</b> A detail table keyed by exactly its
+    /// parent's key (<c>qrtz_simple_triggers</c> by <c>qrtz_triggers</c>' three columns) is a one-to-one
+    /// extension of it: every one of its columns is in the key, so any label made of them says nothing the
+    /// arrow does not, and the three of them were cut to <c>sched_name, trigger_name, trigg…</c> on every
+    /// such arrow. It is labelled <see cref="OneToOneLabel" /> - when the pointing columns are the whole of
+    /// the pointing table's primary key and the referenced ones the whole of the referenced table's, in any
+    /// order. The tooltip and the table always list every column either way.
+    /// </para>
+    /// <para>
+    /// <b>Stripping everything else shows everything.</b> A key that shares the whole prefix without being
+    /// both primary keys - the child's key is longer than the key it points with - would strip to nothing, and
+    /// an empty label would be worse than a long one.
     /// </para>
     /// </remarks>
     /// <param name="columns">The pointing columns, in constraint order.</param>
@@ -229,6 +237,11 @@ internal static class RelationshipGraphBuilder
     {
         ArgumentNullException.ThrowIfNull(columns);
         ArgumentNullException.ThrowIfNull(linkedColumns);
+
+        if (IsWholeKey(columns, primaryKey) && IsWholeKey(linkedColumns, linkedPrimaryKey))
+        {
+            return OneToOneLabel;
+        }
 
         int shared = 0;
 
@@ -256,6 +269,26 @@ internal static class RelationshipGraphBuilder
         return strip == 0 || strip >= columns.Count
             ? string.Join(", ", columns)
             : string.Join(", ", columns.Skip(strip));
+    }
+
+    /// <summary>The label of a key whose columns are both tables' whole primary keys: a one-to-one extension.</summary>
+    internal const string OneToOneLabel = "primary key (1:1)";
+
+    /// <summary>
+    /// Whether <paramref name="columns" /> are exactly <paramref name="primaryKey" />'s columns - each once,
+    /// in any order. Ordinal, like every identifier comparison here: two quoted names that differ by case are
+    /// two columns.
+    /// </summary>
+    private static bool IsWholeKey(IReadOnlyList<string> columns, IReadOnlyList<string>? primaryKey)
+    {
+        if (primaryKey is not { Count: > 0 } || columns.Count != primaryKey.Count)
+        {
+            return false;
+        }
+
+        HashSet<string> key = new(primaryKey, StringComparer.Ordinal);
+
+        return key.Count == columns.Count && columns.All(key.Contains) && columns.Distinct(StringComparer.Ordinal).Count() == columns.Count;
     }
 
     /// <summary>

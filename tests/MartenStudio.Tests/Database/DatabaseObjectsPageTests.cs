@@ -72,20 +72,25 @@ public class DatabaseObjectsPageTests
         quartz.GetAttribute("href").Should().StartWith("database?schema=quartz&kind=functions").And.Contain("store=default");
     }
 
+    /// <summary>
+    /// UX-6: picking a schema lists its tables and views in the grid, which is the page; the rail marks the
+    /// schema and says so in its phone summary, and leaves the list to the grid rather than drawing it twice.
+    /// The bands are object detail's (see <see cref="DatabaseRailTests" />).
+    /// </summary>
     [Fact]
-    public void Picking_a_schema_lists_its_tables_and_views_in_the_rail()
+    public void Picking_a_schema_lists_its_tables_in_the_grid_and_marks_it_in_the_rail()
     {
         using var context = DatabasePageData.Context();
 
         var page = DatabasePageData.RenderBrowser(context, "schema=legacy");
 
-        page.Find(".ms-db-rail-tables").QuerySelectorAll(".ms-db-rail-name").Select(x => x.TextContent.Trim())
+        page.FindAll(".ms-db-relations tbody .ms-db-name").Select(x => x.TextContent.Trim())
             .Should().Contain(["orders", "measurements", "payroll", "keyless_log"]);
-        page.Find(".ms-db-rail-views").QuerySelectorAll(".ms-db-rail-name").Select(x => x.TextContent.Trim())
-            .Should().BeEquivalentTo("order_totals", "order_stats", "secret_view");
+        page.FindAll(".ms-db-rail-tables, .ms-db-rail-views").Should().BeEmpty();
 
+        page.Find(".ms-db-rail-schemas a.ms-rail-link-active").TextContent.Should().Contain("legacy");
         page.Find(".ms-db-rail-summary").TextContent.Trim().Should().Be("legacy · 6 tables");
-        page.Find("details.ms-db-rail-collapse").HasAttribute("open").Should().BeTrue("nothing is picked yet on the browser");
+        page.Find("details.ms-db-rail-collapse").HasAttribute("open").Should().BeFalse("a phone opens on the grid, not on the rail");
     }
 
     // ------------------------------------------------------------------------------------------------

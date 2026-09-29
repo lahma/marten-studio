@@ -63,7 +63,7 @@
                                 @onclick="() => ToggleAsync(reference, available)">@(open ? "▾" : "▸")</button>
                     </td>
                     <td class="ms-db-cell-name">
-                        <span class="ms-db-name">@trigger.Name</span>
+                        <span class="ms-db-name ms-db-name-cut" title="@trigger.Name">@trigger.Name</span>
                         @if (trigger.IsConstraintTrigger)
                         {
                             <span class="ms-db-badge" title="A CONSTRAINT TRIGGER: it can be deferred to the end of the transaction">constraint</span>
@@ -72,7 +72,7 @@
                     @if (ShowTable)
                     {
                         <td class="ms-db-cell-name">
-                            <a class="ms-db-name" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, trigger.Schema, trigger.Table)"><span class="ms-db-schema-prefix">@(ShowSchema ? trigger.Schema + "." : null)</span>@trigger.Table</a>
+                            <a class="ms-db-name ms-db-name-cut" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, trigger.Schema, trigger.Table)" title="@DatabaseLinks.QualifiedName(trigger.Schema, trigger.Table)"><span class="ms-db-schema-prefix">@(ShowSchema ? trigger.Schema + "." : null)</span>@trigger.Table</a>
                         </td>
                     }
                     <td>@trigger.Timing</td>

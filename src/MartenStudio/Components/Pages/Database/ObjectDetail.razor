@@ -37,13 +37,13 @@
                           Schema="@FoundSchema"
                           Kind="@DatabaseLinks.KindToken(RailCategory)"
                           ActiveName="@(detail?.Found == true ? Name : null)"
-                          Collapsed="true" />
+                          ShowRelations="true" />
         </div>
 
         <div class="ms-doc-main">
             <nav class="ms-db-breadcrumb" aria-label="Breadcrumb">
                 <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Database</a>
-                @if (FoundSchema is { Length: > 0 } crumb)
+                @if (VisibleSchema is { Length: > 0 } crumb)
                 {
                     <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
                     <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, crumb, RailCategory)">@crumb</a>
@@ -189,6 +189,16 @@
     /// schema name back as if it were one the visitor may browse.
     /// </summary>
     private string? FoundSchema => detail?.Found == true ? Schema : null;
+
+    /// <summary>
+    /// The schema the breadcrumb names: the link's, but only when the overview lists it as one this visitor
+    /// may see. That is true of a schema with no such object in it, which the breadcrumb can then still offer
+    /// as the way back - and never of a withheld one, whose name the page does not repeat, found or not (D27).
+    /// </summary>
+    private string? VisibleSchema =>
+        Schema is { Length: > 0 } schema && overview?.Schemas.Any(x => string.Equals(x.Name, schema, StringComparison.Ordinal)) == true
+            ? schema
+            : null;
 
     /// <summary>The rail's kind: views for a view, tables otherwise, so the schema links land on the right tab.</summary>
     private DatabaseObjectCategory RailCategory =>
@@ -597,12 +607,18 @@
             }
         </div>;
 
+    /// <summary>
+    /// The neutral panel. Its heading fits both of the things it stands for - nothing there, and something
+    /// there this visitor may not see - because saying "no such table" above a sentence that names the policy
+    /// which refused it told the truth about neither, and "not for you" would confirm the object exists
+    /// (D27). The sentence under it is the service's own.
+    /// </summary>
     private RenderFragment RenderNotFound(DatabaseObjectDetail missing) =>
         @<div class="ms-empty ms-db-not-found" role="status">
-            <p class="ms-empty-title">No such table or view</p>
+            <p class="ms-empty-title">Not available here</p>
             <p class="ms-empty-description">@(missing.Reason ?? "There is nothing here that this studio shows you.")</p>
             <p class="ms-empty-description">
-                <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Back to the database browser</a>
+                <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Back to the database browser</a>
             </p>
         </div>;
 

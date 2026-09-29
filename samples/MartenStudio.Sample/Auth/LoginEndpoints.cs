@@ -131,6 +131,7 @@ internal static class LoginEndpoints
               <meta charset="utf-8" />
               <meta name="viewport" content="width=device-width, initial-scale=1" />
               <title>Sign in - Marten Studio sample</title>
+              <link rel="icon" href="data:," />
               <style>
                 body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 34rem; line-height: 1.5; }
                 label { display: block; margin-top: 1rem; font-weight: 600; }

@@ -5735,15 +5735,17 @@ a.ms-event-chip:focus-visible {
     vertical-align: bottom;
 }
 
-.ms-query-cell-number .ms-query-cell-text,
-.ms-query-cell-timestamp .ms-query-cell-text,
-.ms-query-cell-uuid .ms-query-cell-text,
-.ms-query-cell-binary .ms-query-cell-text {
+/* The cell's kind is on the <td> as ms-query-kind-*, never ms-query-cell-*: ms-query-cell-text is the span
+   above, and a td that took its inline-block stopped being a table cell (UX-6, U7). */
+.ms-query-kind-number .ms-query-cell-text,
+.ms-query-kind-timestamp .ms-query-cell-text,
+.ms-query-kind-uuid .ms-query-cell-text,
+.ms-query-kind-binary .ms-query-cell-text {
     font-family: var(--ms-font-mono);
     font-variant-numeric: tabular-nums;
 }
 
-.ms-query-cell-number {
+.ms-query-kind-number {
     text-align: right;
 }
 
@@ -9412,4 +9414,245 @@ a.ms-row-ref-key:hover {
     .ms-row-fk-link {
         max-width: 10rem;
     }
+}
+
+/* ==========================================================================
+   UX-6. Database browser polish
+
+   What the 0.3.0 UI validation found on the database browser, the
+   Relationships diagram and the notices they share with the rest of the
+   studio. Appended after DB-5 on purpose (D26): several rules below
+   re-declare an earlier selector and win by source order -
+   .ms-db-schema-prefix, .ms-graph-table-chip-schema, .ms-graph-svg and
+   .ms-graph-readat. One earlier rule was edited in place and says so where
+   it stands: the SQL console's cell kinds, now ms-query-kind-* on the <td>.
+
+   Contrast, computed from the tokens (WCAG AA wants 4.5:1 for this text):
+   muted on the info tint is 2.10:1 light and 2.42:1 dark, and muted on the
+   surface 2.56:1 and 3.07:1 - so nothing here that has to be read is drawn
+   in --ms-color-text-muted any more. Body text on the info tint is 14.6:1
+   and 10.5:1; secondary on the surface 7.58:1 and 5.71:1, on the page
+   background 7.24:1 and 6.96:1; primary on the page background 4.94:1 and
+   4.85:1.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The rail
+   -------------------------------------------------------------------------- */
+
+/* "SCHEMAS · tables": what each schema's number counts, in the case it is written in. */
+.ms-db-rail-counting {
+    color: var(--ms-color-text-secondary);
+    font-weight: var(--ms-font-weight-normal);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* The phone summary is one line whatever the schema is called; its chevron stays in view. */
+.ms-db-rail-summary-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* "1 other schema not shown: …" is the rail's one explanation of what it leaves out. */
+.ms-db-rail .ms-rail-empty {
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   The neutral panel and its way back
+   -------------------------------------------------------------------------- */
+
+.ms-db-not-found .ms-empty-description,
+.ms-row-not-found .ms-empty-description,
+.ms-db-refused .ms-empty-description {
+    color: var(--ms-color-text-secondary);
+}
+
+/* A studio link, not the user agent's underlined blue. */
+.ms-db-back-link {
+    color: var(--ms-color-primary);
+    font-weight: var(--ms-font-weight-medium);
+    text-decoration: none;
+}
+
+.ms-db-back-link:hover {
+    text-decoration: underline;
+}
+
+.ms-db-back-link:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+    border-radius: var(--ms-radius-sm);
+}
+
+/* --------------------------------------------------------------------------
+   The page heading's focus ring
+
+   The shell's `.ms-studio h1:focus-visible` rule draws a ring round the heading
+   FocusOnNavigate focused - for a keyboard focus. Chromium counts a script's
+   focus as one whenever the page has had no pointer input yet, which is every
+   page opened from the address bar, a bookmark or a reload, so every such page
+   drew a box round its whole title row for a mouse user, the database pages
+   among them. marten-studio.js writes `data-ms-keyboard` on the document
+   element while the visitor's last input was a key; without it there is no
+   ring. A keyboard user who opens a link with Enter still gets one.
+   -------------------------------------------------------------------------- */
+
+.ms-studio h1:focus-visible:not(:root[data-ms-keyboard] *) {
+    outline: none;
+}
+
+/* --------------------------------------------------------------------------
+   Names and tabs on a phone
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+    /* One row that scrolls sideways, rather than six tabs wrapped onto three. The line under the tabs is
+       an inset shadow here, because a scroll box clips the border the active tab used to sit on. */
+    .ms-db-kind-tabs,
+    .ms-db-object-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin;
+        border-bottom: 0;
+        box-shadow: inset 0 -1px 0 var(--ms-color-border);
+    }
+
+    .ms-db-kind-tabs .ms-tab,
+    .ms-db-object-tabs .ms-tab {
+        flex: none;
+        white-space: nowrap;
+    }
+
+    .ms-db-kind-tabs .ms-tab-active,
+    .ms-db-object-tabs .ms-tab-active {
+        margin-bottom: 0;
+        padding-bottom: var(--ms-space-sm);
+    }
+
+    /* The tables' edge cue (UX-1), for the tabs past the edge: marten-studio.js stamps the same two
+       attributes on these rows. The row itself takes no focus - its tabs do - so it has no ring of its
+       own for the mask to hide, and needs no focus exception. */
+    .ms-db-kind-tabs[data-scroll-end="true"],
+    .ms-db-object-tabs[data-scroll-end="true"] {
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+        mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+    }
+
+    .ms-db-kind-tabs[data-scroll-start="true"],
+    .ms-db-object-tabs[data-scroll-start="true"] {
+        -webkit-mask-image: linear-gradient(to right, transparent 0, #000 2.5rem);
+        mask-image: linear-gradient(to right, transparent 0, #000 2.5rem);
+    }
+
+    .ms-db-kind-tabs[data-scroll-start="true"][data-scroll-end="true"],
+    .ms-db-object-tabs[data-scroll-start="true"][data-scroll-end="true"] {
+        -webkit-mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
+        mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
+    }
+}
+
+@media (max-width: 640px) {
+    /* A long qualified name is cut with an ellipsis where it would otherwise run off the screen; its whole
+       name is the element's title. */
+    .ms-db-table .ms-db-name-cut {
+        display: inline-block;
+        max-width: 14rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: bottom;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Contrast
+   -------------------------------------------------------------------------- */
+
+/* The capability and database-access notices: body text on the info tint, not muted grey or the info blue
+   (4.24:1 light, 3.13:1 dark). The border and the tint still say "information". */
+.ms-capability-disabled,
+.ms-capability-disabled .ms-muted {
+    color: var(--ms-color-text);
+}
+
+/* The "legacy." in front of a name: quieter than the name, and still readable in both themes. */
+.ms-db-schema-prefix,
+.ms-graph-table-chip-schema {
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   The Relationships diagram
+   -------------------------------------------------------------------------- */
+
+/* Its natural size, never scaled down to the column: the frame is a labelled scroll region (D25). */
+.ms-graph-svg {
+    max-width: none;
+}
+
+/* The legend, and Read … / Refresh, on the diagram's own top edge. */
+.ms-graph-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+}
+
+.ms-graph-bar .ms-graph-legend {
+    flex: 1 1 24rem;
+    min-width: 0;
+}
+
+.ms-graph-bar .ms-graph-actions {
+    flex: none;
+    margin-left: auto;
+}
+
+.ms-graph-readat {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-graph-bar + .ms-graph,
+.ms-graph-bar + .ms-graph-toomany {
+    margin-top: 0;
+}
+
+/* --------------------------------------------------------------------------
+   A bytea that holds text, opened under the grid
+   -------------------------------------------------------------------------- */
+
+.ms-row-text-panel {
+    max-height: 24rem;
+    overflow: auto;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-row-text-panel:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+.ms-row-text-panel-body {
+    margin: 0;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--ms-color-text);
+}
+
+/* --------------------------------------------------------------------------
+   The capability chip's popover
+   -------------------------------------------------------------------------- */
+
+.ms-popover-lead {
+    margin: 0 0 var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
 }

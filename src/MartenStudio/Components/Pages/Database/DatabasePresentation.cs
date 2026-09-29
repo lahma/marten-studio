@@ -67,6 +67,12 @@ internal static class DatabasePresentation
         return Number(count) + " " + noun;
     }
 
+    /// <summary>Tables and views together, as object detail's rail counts them: "14 tables", "11 tables, 3 views".</summary>
+    public static string RelationsOf(int tables, int views) =>
+        views == 0
+            ? CountOf(DatabaseObjectCategory.Tables, tables)
+            : CountOf(DatabaseObjectCategory.Tables, tables) + ", " + CountOf(DatabaseObjectCategory.Views, views);
+
     /// <summary>Every kind tab, in the order they are drawn.</summary>
     public static IReadOnlyList<DatabaseObjectCategory> Categories { get; } =
     [

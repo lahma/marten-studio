@@ -27,7 +27,8 @@
     Enter, and the page has no shortcut of its own. (The browser's own Space - scrolling the page - is stopped
     on the row by marten-studio.js, which is the one thing a Blazor handler cannot decide per key.)
 
-    A JSON cell, and a bytea that holds JSON, open the viewer under the grid. What the grid has of a cell is
+    A JSON cell, and a bytea that holds JSON, open the viewer under the grid; a bytea that holds UTF-8 text
+    opens there as text. A gzip stream or an image does not open at all, and its chip says so. What the grid has of a cell is
     cut on the server at a kilobyte (JSON at four, bytes at sixty-four), so a cell that was cut is read again
     whole through GetCellAsync - by its key, or by ctid for a heap relation with no key - once, and kept for
     as long as the page is on screen.
@@ -252,6 +253,17 @@
                       AutoExpandDepth="1"
                       ShowSearch="false"
                       DownloadFileName="@(shownPanel.Column + ".json")" />
+        }
+        else if (shownPanel.Text is { } text)
+        {
+            @if (shownPanel.Note is { Length: > 0 } note)
+            {
+                <p class="ms-row-value-note">@note</p>
+            }
+            @* Its own labelled scroll region: a long value scrolls here rather than growing the page. *@
+            <div class="ms-row-text-panel" role="region" aria-label="@shownPanel.Title" tabindex="0">
+                <pre class="ms-row-text-panel-body">@text</pre>
+            </div>
         }
     </div>
 }
@@ -576,8 +588,9 @@
     // ------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// Opens a JSON cell, or a bytea that holds JSON, in the viewer under the grid: straight from the page when
-    /// it was read whole, through GetCellAsync when it was cut. A failure is drawn in the panel (hard rule 6).
+    /// Opens a JSON cell, or a bytea that holds JSON or UTF-8 text, under the grid - JSON in the viewer, text
+    /// as text: straight from the page when it was read whole, through GetCellAsync when it was cut, which
+    /// caps it at MaxInlineDocumentBytes. A failure is drawn in the panel (hard rule 6).
     /// </summary>
     private async Task OpenCellAsync(int rowIndex, int columnIndex)
     {
@@ -606,6 +619,15 @@
             return;
         }
 
+        byte[]? prefix = cell.Kind == SqlCellKind.Binary ? SqlCellFormat.HexPrefix(cell.Text) : null;
+        bool isText = prefix is not null && SqlCellFormat.Sniff(prefix, cell.FullLength).Shape == BinaryShape.Text;
+
+        if (isText && !cell.IsTruncated && prefix!.Length >= cell.FullLength)
+        {
+            panel = new CellPanel(title, column.Name) { Text = SqlCellFormat.DecodeText(prefix, cut: false) ?? Encoding.UTF8.GetString(prefix) };
+            return;
+        }
+
         if (CellKey(row) is not { } key || State.ActiveScope is not { } scope)
         {
             panel = new CellPanel(title, column.Name)
@@ -629,7 +651,16 @@
                 { Refusal: not DatabaseRefusal.None } => new CellPanel(title, column.Name) { Error = value.Reason ?? "This value may not be read here." },
                 { Error: { } failure } => new CellPanel(title, column.Name) { Error = failure.Sentence },
                 { Found: false } => new CellPanel(title, column.Name) { Error = value.Reason ?? "The row is not there any more - it may have been deleted or changed." },
+                { IsNull: true } when isText => new CellPanel(title, column.Name) { Text = "NULL" },
                 { IsNull: true } => new CellPanel(title, column.Name) { Json = "null" },
+                _ when isText => new CellPanel(title, column.Name)
+                {
+                    Text = value.Text ?? (value.Bytes is { } read ? SqlCellFormat.DecodeText(read, value.Truncated) ?? Encoding.UTF8.GetString(read) : string.Empty),
+                    Note = value.Truncated
+                        ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
+                          " (MartenStudioOptions.MaxInlineDocumentBytes); the SQL console reads the rest."
+                        : null,
+                },
                 _ => new CellPanel(title, column.Name)
                 {
                     Json = value.Text ?? (value.Bytes is { } bytes ? Encoding.UTF8.GetString(bytes) : string.Empty),
@@ -666,6 +697,9 @@
         public bool Loading { get; init; }
 
         public string? Json { get; init; }
+
+        /// <summary>A bytea's UTF-8 text, drawn as text rather than through the JSON viewer.</summary>
+        public string? Text { get; init; }
 
         public string? Error { get; init; }
 

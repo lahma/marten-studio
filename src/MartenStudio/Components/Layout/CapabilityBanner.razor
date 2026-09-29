@@ -20,6 +20,10 @@ else
        Two groups, because two kinds of switch: the reads that reach past the store's own documents and
        events (the SQL console, the database browser) change nothing, and are still authorized as writes. *@
     <div id="ms-capability-popover" popover="auto" class="ms-popover">
+        @* The chip counts the studio's switches, not the visitor's rights: a viewer the write policy refuses
+           everything still sees "10 / 10". Said once, here, rather than computed per visitor - the policies
+           answer per call and per scope, and a number that tried to sum them would be a guess. *@
+        <p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p>
         <p class="ms-popover-title">Reads beyond the store</p>
         <ul class="ms-capability-list" aria-label="Reads beyond the store">
             @foreach (StudioCapability capability in StudioCapabilityGuard.ReadsBeyondTheStore)

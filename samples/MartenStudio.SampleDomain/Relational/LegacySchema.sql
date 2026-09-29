@@ -426,7 +426,7 @@ COMMENT ON COLUMN legacy.employees.email IS 'legacy.email_address, a domain with
 COMMENT ON TABLE legacy.audit_log IS 'Append-only, with no primary key and no unique index. Two rows are exact duplicates, as they are in the real thing.';
 COMMENT ON TABLE legacy.purchase_order_lines IS 'Its foreign key to purchase_orders is NOT VALID: order 9001 was purged by the old system and its line was not.';
 COMMENT ON COLUMN legacy.purchase_orders.invoice_number IS 'Drawn from legacy.invoice_number_seq, a sequence no column owns.';
-COMMENT ON TABLE legacy.integration_messages IS 'Messages from partner systems: jsonb, TOASTed text, bytea and both kinds of timestamp. Has a citext sender column only when the citext extension was installed before the demo schema was applied.';
+COMMENT ON TABLE legacy.integration_messages IS 'Messages received from partner systems by webhook, SFTP, e-mail and EDI: the parsed payload, the raw body as it arrived, any attachment, and when each message was sent and received.';
 COMMENT ON COLUMN legacy.integration_messages.raw_body IS 'Stored EXTERNAL; several values are over 10 KB.';
 COMMENT ON COLUMN legacy.integration_messages.sent_at_local IS 'timestamp without time zone, in whatever zone the sender was in.';
 COMMENT ON TABLE legacy.sensor_readings IS 'Range-partitioned by read_at, one partition per half-year.';
