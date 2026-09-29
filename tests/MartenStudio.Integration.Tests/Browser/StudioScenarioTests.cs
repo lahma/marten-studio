@@ -312,8 +312,9 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     // ------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The diagram draws the store's foreign keys, and the table beside it lists exactly the same edges —
-    /// which is what makes the screen usable by somebody who cannot see the picture.
+    /// The diagram draws the store's foreign keys and - for a visitor the database browser admits - the
+    /// sample's Quartz.NET and legacy tables beside them, and in every view the table beside it lists
+    /// exactly the same edges, which is what makes the screen usable by somebody who cannot see the picture.
     /// </summary>
     [BrowserFact]
     public async Task The_relationships_diagram_and_its_table_list_the_same_edges()
@@ -324,44 +325,67 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
 
             await studio.Page.Locator("svg.ms-graph-svg").WaitForAsync();
 
-            // Scoped to the diagram itself: the legend beside it draws three sample arrows that carry the
-            // same classes, and counting those would compare five edges against two rows.
+            // Scoped to the diagram itself: the legend beside it draws sample arrows that carry the same
+            // classes, and counting those would compare more edges than there are rows.
             ILocator nodes = studio.Page.Locator("svg.ms-graph-svg .ms-graph-node");
+            ILocator tables = studio.Page.Locator("svg.ms-graph-svg .ms-graph-node-table");
             ILocator edges = studio.Page.Locator("svg.ms-graph-svg .ms-graph-edge");
             ILocator rows = studio.Page.Locator(".ms-graph-table tbody tr.ms-graph-row");
 
             (await nodes.CountAsync()).Should().BeGreaterThan(
                 1, "the demo declares foreign keys between order, invoice and customer");
-            (await edges.CountAsync()).Should().BeGreaterThan(0);
 
-            (await rows.CountAsync()).Should().Be(
-                await edges.CountAsync(),
-                "a table that listed fewer rows than the picture has arrows is a screen telling two stories");
+            // Both is the default, and admin passes the write policy BrowseDatabase is asked under, with
+            // quartz and legacy in the sample's BrowsableSchemas.
+            (await studio.Page.Locator(".ms-graph-views button[aria-pressed='true']").InnerTextAsync())
+                .Should().StartWith("Both");
+            (await tables.CountAsync()).Should().BeGreaterThan(0, "the sample's Quartz.NET tables take part in keys");
 
             List<string> titles = [];
-            foreach (ILocator edge in await edges.AllAsync())
+            foreach (ILocator title in await tables.Locator(".ms-graph-node-alias").AllAsync())
             {
-                // TextContentAsync, not InnerTextAsync: an SVG <title> is not an HTMLElement and has no
-                // rendered text, so innerText is undefined for it.
-                titles.Add((await edge.Locator("title").TextContentAsync() ?? string.Empty).Trim());
+                // TextContentAsync, not InnerTextAsync: SVG text is not an HTMLElement's rendered text.
+                titles.Add((await title.TextContentAsync() ?? string.Empty).Trim());
             }
 
-            foreach (ILocator row in await rows.AllAsync())
-            {
-                // The alias out of the chip, not the whole cell: the "Points at" cell also carries the
-                // arrow glyph the table draws for sighted readers.
-                string from = (await row.Locator("td").Nth(0).Locator(".ms-collection-alias").InnerTextAsync()).Trim();
-                string to = (await row.Locator("td").Nth(1).Locator(".ms-collection-alias").InnerTextAsync()).Trim();
-                string column = (await row.Locator("td").Nth(2).InnerTextAsync()).Trim();
+            titles.Should().Contain("qrtz_triggers");
 
-                titles.Should().Contain(
-                    x => x.StartsWith(from + "." + column + " → " + to, StringComparison.Ordinal),
-                    "every row of the accessible table is an arrow on the diagram; looked for "
-                    + from + "." + column + " -> " + to + " among: " + string.Join(" | ", titles));
-            }
+            await AssertTheTableListsTheDiagramAsync(edges, rows, "the Both view");
 
-            studio.AssertClean("reading the relationships screen");
+            // The Tables view, through the switch - a click that reaches the server and redraws.
+            await studio.Page.Locator(".ms-graph-views button", new PageLocatorOptions { HasTextString = "Tables" }).ClickAsync();
+            await studio.Page.Locator(".ms-graph-views button[aria-pressed='true']", new PageLocatorOptions { HasTextString = "Tables" })
+                .WaitForAsync();
+
+            (await tables.CountAsync()).Should().BeGreaterThan(0);
+            await AssertTheTableListsTheDiagramAsync(edges, rows, "the Tables view");
+
+            studio.AssertClean("reading the relationships screen in two views");
         });
+    }
+
+    /// <summary>
+    /// Every arrow is a row and every row an arrow, compared by the <c>data-edge</c> identity both carry: a
+    /// table that listed fewer rows than the picture has arrows is a screen telling two stories.
+    /// </summary>
+    private static async Task AssertTheTableListsTheDiagramAsync(ILocator edges, ILocator rows, string where)
+    {
+        (await edges.CountAsync()).Should().BeGreaterThan(0, where + " draws something");
+
+        List<string> drawn = [];
+        foreach (ILocator edge in await edges.AllAsync())
+        {
+            drawn.Add(await edge.GetAttributeAsync("data-edge") ?? string.Empty);
+        }
+
+        List<string> listed = [];
+        foreach (ILocator row in await rows.AllAsync())
+        {
+            listed.Add(await row.GetAttributeAsync("data-edge") ?? string.Empty);
+        }
+
+        listed.Should().BeEquivalentTo(drawn,
+            "in " + where + " every row of the accessible table is an arrow on the diagram and every arrow a row");
     }
 
     // ------------------------------------------------------------------------------------------------

@@ -266,49 +266,63 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
         (await ReadAsync()).Edges.Should().NotContain(x => x.FromAlias == "loosenote");
     }
 
+    /// <summary>
+    /// Two plain tables in the store's own schema, with a key between them, are drawn as two table nodes
+    /// and an edge - their structure is visible without <c>BrowseDatabase</c>, as the Schema screen has
+    /// always shown it (D27) - rather than listed as a key that could not be drawn.
+    /// </summary>
     [PostgresFact]
-    public async Task A_key_between_tables_no_document_type_maps_is_listed_rather_than_drawn()
+    public async Task A_key_between_two_plain_tables_in_the_store_schema_is_drawn_between_table_nodes()
     {
         RelationshipGraph graph = await ReadAsync();
 
-        graph.Nodes.Should().NotContain(x => x.Alias.Contains("legacy", StringComparison.Ordinal));
-        graph.Edges.Should().NotContain(x => x.FromAlias.Contains("legacy", StringComparison.Ordinal));
+        graph.Nodes.Should().NotContain(x => x.Alias.Contains("legacy", StringComparison.Ordinal),
+            "a plain table is a table node, never a document node");
 
-        UnmatchedForeignKey unmatched = graph.Unmatched.Should()
-            .ContainSingle(x => x.Name == "legacy_child_parent_fkey").Subject;
+        graph.Tables.Select(x => x.Name).Should().Contain(["legacy_parent", "legacy_child"]);
 
-        unmatched.Physical.Should().BeTrue();
-        unmatched.Declared.Should().BeFalse();
-        unmatched.From.Should().Contain("legacy_child");
-        unmatched.To.Should().Contain("legacy_parent");
+        RelationshipEdge edge = graph.Edges.Should().ContainSingle(x => x.ConstraintName == "legacy_child_parent_fkey").Subject;
+
+        edge.FromIsTable.Should().BeTrue();
+        edge.ToIsTable.Should().BeTrue();
+        graph.DisplayName(edge.FromAlias).Should().Be(Schema + ".legacy_child");
+        graph.DisplayName(edge.ToAlias).Should().Be(Schema + ".legacy_parent");
+        edge.Column.Should().Be("parent_id");
+        edge.Validated.Should().BeTrue();
+
+        graph.Unmatched.Should().NotContain(x => x.Name == "legacy_child_parent_fkey");
     }
 
     /// <summary>
-    /// A partitioned table's key is reported once — the one somebody declared — and never once per
-    /// partition.
+    /// A partitioned table's key is drawn once — the one somebody declared — and never once per
+    /// partition, and no partition is ever a node.
     /// </summary>
     /// <remarks>
     /// Postgres clones a foreign key declared on a partitioned table onto every partition, and onto the
     /// parent once per referenced partition. On a store using Marten's tenant partitioning that is a row
     /// per tenant per key, each naming <c>mt_doc_&lt;alias&gt;_&lt;tenant&gt;</c> — a table the mappings do not know,
-    /// so every one would be listed as a key "on a table no document type maps": the tenant list printed
-    /// on a page the visitor may be scoped to one tenant of, and past <c>IsDocumentTypeVisible</c>, which
-    /// can only recognise the parent. Found by the adversarial review of P10, measured on a live catalog.
+    /// so every one would have been reported: the tenant list printed on a page the visitor may be scoped
+    /// to one tenant of, and past <c>IsDocumentTypeVisible</c>, which can only recognise the parent. Found
+    /// by the adversarial review of P10, measured on a live catalog.
     /// </remarks>
     [PostgresFact]
     public async Task A_partitioned_tables_key_is_reported_once_and_never_once_per_partition()
     {
         RelationshipGraph graph = await ReadAsync();
 
-        graph.Unmatched.Should().ContainSingle(x => x.Name == "legacy_parted_parent_fkey",
+        graph.Edges.Should().ContainSingle(x => x.ConstraintName == "legacy_parted_parent_fkey",
             "the parent's declared key is the only one of the four rows Postgres holds that anybody wrote");
 
-        graph.Unmatched.Should().OnlyContain(x => !x.From.Contains("legacy_parted_acme", StringComparison.Ordinal)
-                                                  && !x.From.Contains("legacy_parted_globex", StringComparison.Ordinal),
+        graph.Tables.Should().Contain(x => x.Name == "legacy_parted");
+
+        graph.Tables.Should().NotContain(
+            x => x.Name.Contains("legacy_parted_acme", StringComparison.Ordinal)
+                 || x.Name.Contains("legacy_parted_globex", StringComparison.Ordinal),
             "a partition name is a tenant id on a store that partitions by tenant");
 
-        graph.Unmatched.Should().OnlyContain(x => !x.To.Contains("legacy_parted_acme", StringComparison.Ordinal)
-                                                  && !x.To.Contains("legacy_parted_globex", StringComparison.Ordinal));
+        graph.Unmatched.Should().NotContain(
+            x => x.From.Contains("legacy_parted", StringComparison.Ordinal)
+                 || x.To.Contains("legacy_parted", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -321,13 +335,15 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
     {
         RelationshipGraph graph = await ReadAsync();
 
-        graph.Unmatched.Should().OnlyContain(
-            x => x.Name == "legacy_child_parent_fkey" || x.Name == "legacy_parted_parent_fkey",
-            "the two keys this fixture creates outside the mappings are the only ones worth reporting");
+        graph.Unmatched.Should().BeEmpty(
+            "the fixture's own plain tables are drawn now, and nothing else here is worth reporting");
 
-        graph.Unmatched.Should().NotContain(
-            x => x.From.Contains("mt_events", StringComparison.Ordinal)
-                 || x.From.Contains("mt_streams", StringComparison.Ordinal));
+        graph.Tables.Should().NotContain(
+            x => x.Name.StartsWith("mt_", StringComparison.Ordinal),
+            "Marten's bookkeeping is never a table node");
+
+        graph.Edges.Should().NotContain(
+            x => x.ConstraintName != null && x.ConstraintName.Contains("mt_events", StringComparison.Ordinal));
     }
 
     [PostgresFact]
@@ -466,6 +482,10 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
             scope.ServiceProvider.GetRequiredService<ColumnCatalog>(),
             new StudioSnapshotCache(TimeProvider.System, timeToLive),
             scope.ServiceProvider.GetRequiredService<ILogger<RelationshipDataService>>(),
+            scope.ServiceProvider.GetRequiredService<MartenStudio.Services.Database.DatabaseAccess>(),
+            scope.ServiceProvider.GetRequiredService<MartenStudio.Services.Database.DatabaseCatalog>(),
+            scope.ServiceProvider.GetRequiredService<StudioCapabilityGuard>(),
+            scope.ServiceProvider.GetRequiredService<StudioActionLog>(),
             TimeProvider.System);
 
     [PostgresFact]
@@ -480,8 +500,17 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
 
     // -----------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// Reads the graph through the container's own service - after dropping whatever the container's
+    /// single-flight cache holds, because several tests here change a constraint and read straight after,
+    /// and a key read shared for a second with the test before would be a test of the cache rather than of
+    /// the drift. <see cref="The_inbound_panel_reads_the_foreign_key_graph_once_per_scope" /> is the one
+    /// about the cache, and it builds a cache of its own.
+    /// </summary>
     private async Task<RelationshipGraph> ReadAsync(string? tenantId = null)
     {
+        Marten.Services.GetRequiredService<StudioSnapshotCache>().InvalidatePrefix("default|");
+
         using MartenFixture.ScopedService<IRelationshipDataService> service =
             Marten.Resolve<IRelationshipDataService>();
 
@@ -494,6 +523,8 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
         string? tenantId = null,
         string alias = "customer")
     {
+        Marten.Services.GetRequiredService<StudioSnapshotCache>().InvalidatePrefix("default|");
+
         using MartenFixture.ScopedService<IRelationshipDataService> service =
             Marten.Resolve<IRelationshipDataService>();
 

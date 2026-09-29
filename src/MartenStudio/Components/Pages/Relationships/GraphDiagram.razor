@@ -1,0 +1,179 @@
+@using MartenStudio.Components.Pages.Documents
+@using MartenStudio.Services.Relationships
+
+@*
+    A picture of boxes and arrows, as inline SVG rendered by Blazor from a layout the server computed.
+
+    The neutral half of the relationships diagram (plan §5): nothing in here knows what a document type,
+    a table or a foreign key is. RelationshipGraph turns a relationship graph into a GraphDiagramModel, and
+    so does the object detail page's neighbourhood graph, so the two draw with the same markup and the
+    same layout.
+
+    No library and no JavaScript. The layout is a pure function (GraphLayout), so the same model draws the
+    same picture in every session and in every process; everything interactive here is a link or a CSS
+    :hover / :focus-within rule, which is why the diagram survives a circuit that has lost its browser.
+
+    Accessibility: the <svg> is one image with a sentence for a name, and the nodes inside it are pointer
+    affordances rather than tab stops - the table every caller renders beside it carries exactly the same
+    relationships and the same links as real, announced, focusable content. That is why the anchors here
+    are tabindex="-1": an element a keyboard can focus but a screen reader will not describe, because its
+    container is role="img", is worse than one it skips.
+
+    Sizes: every box is one width, fitted to the longest title between 176 and 256 units, and a title past
+    that is cut with an ellipsis - the whole name is in the box's <title>. The gap between layers widens to
+    fit the labels written on the arrows, and only when there are labels, so a picture with none keeps the
+    geometry it always had.
+
+    Arrowheads are drawn rather than referenced through <marker url(#id)>: see GraphLayout.Arrow for why a
+    fragment-only url() and the studio's <base href> do not get on.
+*@
+
+@if (placed.Nodes.Count > 0)
+{
+<div class="ms-graph">
+    <svg class="ms-graph-svg"
+         viewBox="@placed.ViewBox"
+         width="@Number(placed.Width)"
+         height="@Number(placed.Height)"
+         role="img"
+         aria-label="@Diagram.Summary"
+         xmlns="http://www.w3.org/2000/svg">
+        <g class="ms-graph-edges">
+            @foreach (GraphEdgePath path in placed.Edges)
+            {
+                GraphDiagramEdge edge = EdgeFor(path);
+
+                <g class="ms-graph-edge @edge.CssClass" data-edge="@edge.Id" @key="path.Ordinal">
+                    <title>@edge.Description</title>
+                    <path class="ms-graph-edge-hit" d="@path.Path" />
+                    <path class="ms-graph-edge-line" d="@path.Path" />
+                    @if (path.Arrow.Length > 0)
+                    {
+                        <path class="ms-graph-edge-arrow" d="@path.Arrow" />
+                    }
+                    @if (edge.Label is { Length: > 0 } label)
+                    {
+                        @* Inside a <g>, not straight inside the @if: there, Razor reads <text> as its own tag. *@
+                        <g class="ms-graph-edge-caption">
+                            <text class="ms-graph-edge-label"
+                                  x="@Number(path.LabelX)"
+                                  y="@Number(path.LabelY - 5)"
+                                  text-anchor="middle">@GraphLayout.Ellipsis(label, labelCapacity)</text>
+                        </g>
+                    }
+                </g>
+            }
+        </g>
+        <g class="ms-graph-nodes">
+            @foreach (GraphNodeBox box in placed.Nodes)
+            {
+                GraphDiagramNode node = NodeFor(box.Alias);
+
+                <a class="ms-graph-node @NodeClass(node)"
+                   href="@node.Href"
+                   tabindex="-1"
+                   style="--ms-collection-hue: @node.Hue"
+                   @key="box.Alias">
+                    <title>@node.Tooltip</title>
+                    <rect class="ms-graph-node-box"
+                          x="@Number(box.X)" y="@Number(box.Y)"
+                          width="@Number(box.Width)" height="@Number(box.Height)"
+                          rx="@Radius(node)" ry="@Radius(node)" />
+                    @if (node.Shape == GraphNodeShape.Square)
+                    {
+                        <rect class="ms-graph-node-dot"
+                              x="@Number(box.X + 10)" y="@Number(box.Y + 16)" width="10" height="10" />
+                    }
+                    else
+                    {
+                        <circle class="ms-graph-node-dot"
+                                cx="@Number(box.X + 15)" cy="@Number(box.Y + 21)" r="5" />
+                    }
+                    <text class="ms-graph-node-alias" x="@Number(box.X + 28)" y="@Number(box.Y + 25)">@GraphLayout.Ellipsis(node.Title, titleCapacity)</text>
+                    <text class="ms-graph-node-type" x="@Number(box.X + 14)" y="@Number(box.Y + 42)">@GraphLayout.Ellipsis(node.Subtitle ?? string.Empty, subtitleCapacity)</text>
+                    <text class="ms-graph-node-count" x="@Number(box.X + 14)" y="@Number(box.Y + 56)">@node.Detail</text>
+                </a>
+            }
+        </g>
+    </svg>
+</div>
+}
+
+@code {
+    /// <summary>
+    /// The picture, as a <c>GraphDiagramModel</c>. Typed <see cref="object" /> for the reason
+    /// <see cref="DocumentComponentModel" /> records: the Razor SDK emits every component as public, and a
+    /// public parameter may not expose an internal type.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    private GraphDiagramModel Diagram => DocumentComponentModel.Read(Model, GraphDiagramModel.Empty);
+
+    // Not called "layout": that is a Razor directive, and "@layout.ViewBox" in markup parses as one.
+    private GraphLayoutResult placed = GraphLayoutResult.Empty;
+
+    private Dictionary<string, GraphDiagramNode> nodes = new(StringComparer.Ordinal);
+
+    private int titleCapacity = GraphLayout.TitleCapacity(GraphLayout.NodeWidth);
+
+    private int subtitleCapacity = GraphLayout.SubtitleCapacity(GraphLayout.NodeWidth);
+
+    private int labelCapacity = GraphLayout.LabelCapacity(GraphLayout.LayerGap);
+
+    protected override void OnParametersSet()
+    {
+        GraphDiagramModel diagram = Diagram;
+
+        // Ordinal, like the layout: two quoted names that differ only by case are two boxes.
+        nodes = new Dictionary<string, GraphDiagramNode>(StringComparer.Ordinal);
+        List<string> keys = [];
+
+        foreach (GraphDiagramNode node in diagram.Nodes)
+        {
+            if (nodes.TryAdd(node.Key, node))
+            {
+                keys.Add(node.Key);
+            }
+        }
+
+        List<GraphLink> links = [];
+        List<string?> labels = [];
+
+        foreach (GraphDiagramEdge edge in diagram.Edges)
+        {
+            links.Add(new GraphLink(edge.From, edge.To));
+            labels.Add(edge.Label);
+        }
+
+        double nodeWidth = GraphLayout.FitNodeWidth(diagram.Nodes.Select(static x => x.Title));
+        double layerGap = GraphLayout.FitLayerGap(labels);
+
+        titleCapacity = GraphLayout.TitleCapacity(nodeWidth);
+        subtitleCapacity = GraphLayout.SubtitleCapacity(nodeWidth);
+        labelCapacity = GraphLayout.LabelCapacity(layerGap);
+
+        placed = GraphLayout.Compute(keys, links, nodeWidth, layerGap);
+    }
+
+    /// <summary>The edge a laid-out path came from. The ordinal is its index in the model's own list.</summary>
+    private GraphDiagramEdge EdgeFor(GraphEdgePath path) =>
+        path.Ordinal >= 0 && path.Ordinal < Diagram.Edges.Count
+            ? Diagram.Edges[path.Ordinal]
+            : new GraphDiagramEdge(path.FromAlias, path.ToAlias, string.Empty, string.Empty, null, string.Empty);
+
+    private GraphDiagramNode NodeFor(string key) =>
+        nodes.TryGetValue(key, out GraphDiagramNode? node)
+            ? node
+            : new GraphDiagramNode(key, key, null, null, 210, GraphNodeShape.Rounded, "#", key);
+
+    private static string NodeClass(GraphDiagramNode node) =>
+        (node.Shape == GraphNodeShape.Square ? "ms-graph-node-table" : string.Empty) +
+        (node.Emphasis ? " ms-graph-node-emphasis" : string.Empty);
+
+    /// <summary>Square corners for a table, the rounded ones a document type has always had.</summary>
+    private static string Radius(GraphDiagramNode node) => node.Shape == GraphNodeShape.Square ? "0" : "8";
+
+    private static string Number(double value) =>
+        value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+}

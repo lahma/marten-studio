@@ -7,14 +7,22 @@
 @inject IRelationshipDataService RelationshipData
 @inject StudioState State
 @inject IOptions<MartenStudioOptions> Options
+@inject NavigationManager Navigation
 
 @*
-    The Relationships screen: one node per document type, one arrow per foreign key.
+    The Relationships screen: one node per document type, one per table beside them the visitor may see,
+    one arrow per foreign key.
 
     One read per navigation and no polling (D10 lists the pages that poll; this is not one of them). A
     store's foreign keys change when somebody deploys a migration, not second by second, so a refresh
     button is the honest affordance and a timer would be one more query per circuit per interval for a
     picture that is the same every time.
+
+    Tables arrive only when some table takes part in a key. Until then there is no view switch, no schema
+    chip and no cap: the screen is exactly the document-type diagram it always was. Once there are, the
+    view (?view=documents|tables|both) and the schema chip (?schema=) live in the URL, so a pasted link
+    reopens the same picture (D9) - and every view is a pure function of one read, so switching costs
+    nothing and the picture and the table can never disagree.
 *@
 
 <PageTitle>Relationships</PageTitle>
@@ -31,11 +39,22 @@
         </div>
     </div>
 
-    <p class="ms-schema-note">
-        Every foreign key between this store's document types, as <code>StoreOptions</code> declares them
-        and as Postgres actually has them. Counts are <code>pg_class</code> estimates; nothing on this
-        screen writes anything.
-    </p>
+    @if (graph.Tables.Count > 0)
+    {
+        <p class="ms-schema-note">
+            Every foreign key between this store's document types, as <code>StoreOptions</code> declares them
+            and as Postgres actually has them, and between them and the other tables of this database that you
+            may see. Counts are <code>pg_class</code> estimates; nothing on this screen writes anything.
+        </p>
+    }
+    else
+    {
+        <p class="ms-schema-note">
+            Every foreign key between this store's document types, as <code>StoreOptions</code> declares them
+            and as Postgres actually has them. Counts are <code>pg_class</code> estimates; nothing on this
+            screen writes anything.
+        </p>
+    }
 
     @if (loading)
     {
@@ -56,25 +75,116 @@
     }
     else if (graph.IsEmpty)
     {
-        <div class="ms-empty">
-            <p class="ms-empty-title">No foreign keys are declared between the document types of this store</p>
-            <p class="ms-empty-description">
-                Marten declares one with
-                <code>opts.Schema.For&lt;Order&gt;().ForeignKey&lt;Customer&gt;(x =&gt; x.CustomerId)</code>,
-                which duplicates the member into its own column and puts a real constraint on it.
-            </p>
-        </div>
+        @if (graph.Tables.Count > 0)
+        {
+            <div class="ms-empty">
+                <p class="ms-empty-title">No foreign keys connect the document types and tables you can see</p>
+                <p class="ms-empty-description">
+                    A table's keys are its own: <code>REFERENCES</code> in its DDL, which this screen draws as soon
+                    as Postgres has one. Between document types, Marten declares one with
+                    <code>opts.Schema.For&lt;Order&gt;().ForeignKey&lt;Customer&gt;(x =&gt; x.CustomerId)</code>,
+                    and into a table with <code>ForeignKey(x =&gt; x.CustomerId, "schema", "table", "column")</code>.
+                </p>
+            </div>
+        }
+        else
+        {
+            <div class="ms-empty">
+                <p class="ms-empty-title">No foreign keys are declared between the document types of this store</p>
+                <p class="ms-empty-description">
+                    Marten declares one with
+                    <code>opts.Schema.For&lt;Order&gt;().ForeignKey&lt;Customer&gt;(x =&gt; x.CustomerId)</code>,
+                    which duplicates the member into its own column and puts a real constraint on it.
+                </p>
+            </div>
+        }
+
+        @Notes()
     }
     else
     {
-        <RelationshipLegend />
+        @if (graph.HasTableEdges)
+        {
+            <div class="ms-graph-toolbar">
+                <div class="ms-segmented ms-graph-views" role="group" aria-label="Which relationships to draw">
+                    @ViewButton(RelationshipViewMode.Documents, "Documents", projection.DocumentEdges)
+                    @ViewButton(RelationshipViewMode.Tables, "Tables", projection.TableEdges)
+                    @ViewButton(RelationshipViewMode.Both, "Both", projection.AllEdges)
+                </div>
 
-        <RelationshipGraph Model="@graph" HrefFor="@CollectionHref" />
+                @if (view != RelationshipViewMode.Documents && projection.Schemas.Count > 0)
+                {
+                    <div class="ms-graph-schemas" role="group" aria-label="Schemas">
+                        <button type="button"
+                                class="ms-graph-schema-chip"
+                                aria-pressed="@(schema is null ? "true" : "false")"
+                                @onclick="() => SelectSchema(null)">All schemas</button>
+                        @foreach (RelationshipSchemaChip chip in projection.Schemas)
+                        {
+                            <button type="button"
+                                    class="ms-graph-schema-chip"
+                                    style="--ms-collection-hue: @chip.Hue"
+                                    aria-pressed="@(string.Equals(schema, chip.Schema, StringComparison.Ordinal) ? "true" : "false")"
+                                    title="@($"{chip.Tables} tables of {chip.Schema} take part in a foreign key")"
+                                    @key="chip.Schema"
+                                    @onclick="() => SelectSchema(chip.Schema)">
+                                <span class="ms-graph-schema-chip-dot" aria-hidden="true"></span>
+                                @chip.Schema
+                                <span class="ms-graph-view-count">@chip.Tables</span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        <RelationshipLegend Styles="@styles" />
+
+        @if (projection.OverCap)
+        {
+            <div class="ms-graph-toomany" role="status">
+                <p class="ms-graph-toomany-title">@projection.DrawnNodes objects are too many to draw — pick a schema or a view.</p>
+                <p class="ms-graph-toomany-description">
+                    Every foreign key of this view is still in the table below.
+                </p>
+            </div>
+        }
+        else
+        {
+            <RelationshipGraph Model="@projection.Drawn" HrefFor="@CollectionHref" TableHrefFor="@TableHref" />
+        }
 
         <div class="ms-graph-table-panel">
             <h2 class="ms-section-title">Relationships</h2>
-            <RelationshipTable Model="@graph" HrefFor="@CollectionHref" />
+            @if (projection.Drawn.Edges.Count == 0)
+            {
+                <p class="ms-schema-note">No foreign key is drawn in this view.</p>
+            }
+            <RelationshipTable Model="@projection.Drawn" HrefFor="@CollectionHref" TableHrefFor="@TableHref" />
         </div>
+
+        @if (view == RelationshipViewMode.Tables && graph.HasTableEdges && projection.Isolated.Count > 0)
+        {
+            <div class="ms-graph-isolated">
+                <h2 class="ms-section-title">Tables with no foreign key</h2>
+                <ul class="ms-graph-isolated-list">
+                    @foreach (RelationshipTableNode table in projection.Isolated.Take(IsolatedLimit))
+                    {
+                        <li @key="table.Key">
+                            <a class="ms-graph-row-link" href="@TableHref(table.Schema, table.Name)">
+                                <TableChip Schema="@table.Schema" Name="@table.Name" Hue="@table.Hue" Small="true" />
+                            </a>
+                        </li>
+                    }
+                </ul>
+                @if (projection.Isolated.Count > IsolatedLimit)
+                {
+                    <p class="ms-schema-note">And @(projection.Isolated.Count - IsolatedLimit) more - pick a schema to see them.</p>
+                }
+            </div>
+        }
+
+        @Notes()
 
         @if (graph.Unmatched.Count > 0)
         {
@@ -117,10 +227,29 @@
 </div>
 
 @code {
+    /// <summary>How many isolated tables are listed before "and N more".</summary>
+    private const int IsolatedLimit = 200;
+
     private readonly CancellationTokenSource lifetime = new();
 
     private GraphModel graph = GraphModel.None;
+    private RelationshipProjection projection = RelationshipViews.Project(GraphModel.None, RelationshipViewMode.Both, null);
+    private IReadOnlyList<string> styles = [];
     private bool loading = true;
+
+    private RelationshipViewMode view = RelationshipViewMode.Both;
+    private string? schema;
+    private string? seenView;
+    private string? seenSchema;
+    private bool seenParameters;
+
+    /// <summary>The view, as the URL carries it: <c>documents</c>, <c>tables</c> or <c>both</c> (the default).</summary>
+    [SupplyParameterFromQuery(Name = "view")]
+    public string? ViewToken { get; set; }
+
+    /// <summary>The schema chip, as the URL carries it.</summary>
+    [SupplyParameterFromQuery(Name = "schema")]
+    public string? SchemaToken { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -130,6 +259,26 @@
         // it is the only thing rendered, which is what a component test does.
         await State.EnsureInitializedAsync();
         await LoadAsync();
+    }
+
+    protected override void OnParametersSet()
+    {
+        // The URL is the authority whenever it changes - a pasted link, the back button - and only then:
+        // a click sets the state first and the navigation it makes then agrees with it.
+        if (!seenParameters || !string.Equals(ViewToken, seenView, StringComparison.Ordinal))
+        {
+            view = RelationshipViews.Parse(ViewToken);
+            seenView = ViewToken;
+        }
+
+        if (!seenParameters || !string.Equals(SchemaToken, seenSchema, StringComparison.Ordinal))
+        {
+            schema = string.IsNullOrWhiteSpace(SchemaToken) ? null : SchemaToken;
+            seenSchema = SchemaToken;
+        }
+
+        seenParameters = true;
+        Recompute();
     }
 
     private async Task LoadAsync()
@@ -157,10 +306,70 @@
         }
         finally
         {
+            Recompute();
             loading = false;
             await InvokeAsync(StateHasChanged);
         }
     }
+
+    private void Recompute()
+    {
+        projection = RelationshipViews.Project(graph, view, schema);
+        styles = RelationshipViews.Styles(projection.Drawn.Edges);
+    }
+
+    private void SelectView(RelationshipViewMode mode)
+    {
+        view = mode;
+        Recompute();
+        Navigation.NavigateTo(RelationshipLinks.ToRelationships(Options.Value, State.ActiveScope, view, schema));
+    }
+
+    private void SelectSchema(string? chip)
+    {
+        schema = chip;
+        Recompute();
+        Navigation.NavigateTo(RelationshipLinks.ToRelationships(Options.Value, State.ActiveScope, view, schema));
+    }
+
+    private RenderFragment ViewButton(RelationshipViewMode mode, string label, int count) => __builder =>
+    {
+        bool on = view == mode;
+
+        <button type="button"
+                class="ms-segmented-option @(on ? "ms-segmented-option-on" : null)"
+                aria-pressed="@(on ? "true" : "false")"
+                title="@($"{count} foreign keys")"
+                @onclick="() => SelectView(mode)">
+            @label <span class="ms-graph-view-count">@count</span>
+        </button>
+    };
+
+    /// <summary>What the picture leaves out, said once below it: withheld keys, a gate that failed, a cap.</summary>
+    private RenderFragment Notes() => __builder =>
+    {
+        if (graph.Withheld.Count > 0)
+        {
+            <p class="ms-graph-withheld" role="note">
+                @(graph.Withheld.Count == 1
+                    ? "1 foreign key connects what is shown here to a schema this studio does not show you."
+                    : $"{graph.Withheld.Count} foreign keys connect what is shown here to schemas this studio does not show you.")
+            </p>
+        }
+
+        if (graph.TablesUnavailable is { Length: > 0 } unavailable)
+        {
+            <p class="ms-graph-withheld" role="note">Only document types are drawn: @unavailable</p>
+        }
+
+        if (graph.Truncated)
+        {
+            <p class="ms-graph-withheld" role="note">
+                The database holds more tables or keys than the studio reads at once, so this picture is partial.
+                Narrow MartenStudioOptions.BrowsableSchemas to see all of one part of it.
+            </p>
+        }
+    };
 
     /// <summary>
     /// The link to a collection's list, scope and all. Built through <c>DocumentLinks</c> rather than by
@@ -169,6 +378,10 @@
     /// </summary>
     private string CollectionHref(string alias) =>
         DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias);
+
+    /// <summary>The link to a table's object detail, scope and all.</summary>
+    private string TableHref(string tableSchema, string name) =>
+        RelationshipLinks.ToObject(Options.Value, State.ActiveScope, tableSchema, name);
 
     private async Task OnScopeChangedAsync() => await LoadAsync();
 

@@ -21,6 +21,15 @@ namespace MartenStudio.Internal.Sql;
 /// <param name="Name">The constraint name.</param>
 /// <param name="OnDelete">The delete action, spelled the way <c>CascadeAction</c> spells it.</param>
 /// <param name="OnUpdate">The update action, spelled the same way.</param>
+/// <param name="Validated">
+/// <c>convalidated</c>: <see langword="false" /> for a key added <c>NOT VALID</c>, whose existing rows
+/// Postgres has never checked. Every row written since is checked all the same.
+/// </param>
+/// <param name="PrimaryKey">
+/// The pointing table's primary-key columns in index order, or <see langword="null" /> when it has none.
+/// What the relationship graph strips a composite key's shared leading columns against.
+/// </param>
+/// <param name="LinkedPrimaryKey">The referenced table's primary-key columns, likewise.</param>
 internal sealed record PhysicalForeignKey(
     string Schema,
     string Table,
@@ -30,11 +39,24 @@ internal sealed record PhysicalForeignKey(
     IReadOnlyList<string> LinkedColumns,
     string Name,
     string OnDelete,
-    string OnUpdate);
+    string OnUpdate,
+    bool Validated = true,
+    IReadOnlyList<string>? PrimaryKey = null,
+    IReadOnlyList<string>? LinkedPrimaryKey = null);
+
+/// <summary>A bounded foreign-key read: the keys, and whether the cap stopped it.</summary>
+/// <param name="Keys">The keys, at most the cap.</param>
+/// <param name="Truncated">Whether the catalog held more than the cap.</param>
+internal sealed record PhysicalForeignKeyRead(IReadOnlyList<PhysicalForeignKey> Keys, bool Truncated)
+{
+    /// <summary>Nothing, and nothing cut off.</summary>
+    public static PhysicalForeignKeyRead Empty { get; } = new([], false);
+}
 
 /// <summary>
-/// The two reads behind the Relationships screen: every foreign key Postgres has in the store's schemas,
-/// and the bounded "how many of these point at that one document" count.
+/// The reads behind the Relationships screen: every foreign key Postgres has in the store's schemas (or
+/// touching any set of schemas), and the bounded "how many of these point at that one document" counts,
+/// for a collection and for a table the studio does not map.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -87,30 +109,98 @@ internal static class RelationshipQueries
     /// A clone has a non-zero <c>conparentid</c>; a key declared directly on a partition has zero and is
     /// still reported, which is right.
     /// </para>
+    /// <para>
+    /// Both ends' primary keys come back with the key - the first <c>indnkeyatts</c> entries of the
+    /// primary index's <c>indkey</c>, so an <c>INCLUDE</c> column is never mistaken for part of it - because
+    /// that is what a composite key's label is stripped against (<c>RelationshipGraphBuilder.LabelFor</c>):
+    /// Quartz.NET's <c>sched_name</c> leads every key of every table, and a label that repeated it would
+    /// say the same thing on every arrow.
+    /// </para>
     /// </remarks>
     internal const string ForeignKeysSql =
+        ForeignKeysSelect +
+        """
+
+        where con.contype = 'f' and con.conparentid = 0 and ns.nspname = any(@schemas)
+        order by ns.nspname, cl.relname, con.conname
+        """;
+
+    /// <summary>
+    /// Every foreign key with <em>either</em> end in the schema set, bounded - what the relationship graph
+    /// reads once per database and then filters per visitor.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Either end, because the far end is exactly what a visitor must not be told about.</b>
+    /// <c>legacy.customer_credit</c> points into the document schema and cascades when a customer is
+    /// deleted; a read that only looked at keys <em>declared in</em> the store's schemas would never see it,
+    /// and neither the "referenced by" panel nor the delete dialog could say it exists. So the read takes
+    /// every key that touches the set, and the per-visitor filter decides which ends may be named - an end
+    /// in a schema the visitor is not shown is counted, never named.
+    /// </para>
+    /// <para>
+    /// <b>No partition at either end</b>, as in the database browser's own read: a partition is rolled up
+    /// under its parent and never listed, because on a tenant-partitioned store its name is a tenant id.
+    /// <c>conparentid = 0</c> already drops the clones; this drops the keys somebody declared on one
+    /// partition by hand too, which the browser does not show either.
+    /// </para>
+    /// <para>
+    /// <b>Capped</b> at <c>@cap</c> rows, one more than the caller will keep, so that a database with more
+    /// keys than anybody could draw says so rather than timing out or quietly drawing some of them.
+    /// </para>
+    /// </remarks>
+    internal const string ForeignKeysTouchingSql =
+        ForeignKeysSelect +
+        """
+
+        where con.contype = 'f'
+          and con.conparentid = 0
+          and not cl.relispartition
+          and not fcl.relispartition
+          and (ns.nspname = any(@schemas) or fns.nspname = any(@schemas))
+        order by ns.nspname, cl.relname, con.conname
+        limit @cap
+        """;
+
+    /// <summary>
+    /// The column list every foreign-key read shares: both ends by name, the columns in constraint order,
+    /// the two referential actions, <c>convalidated</c>, and both ends' primary keys.
+    /// </summary>
+    private const string ForeignKeysSelect =
         """
         select ns.nspname::text,
                cl.relname::text,
-               (select array_agg(a.attname::text order by u.ord)
-                  from unnest(con.conkey) with ordinality as u(attnum, ord)
+               (select pg_catalog.array_agg(a.attname::text order by u.ord)
+                  from pg_catalog.unnest(con.conkey) with ordinality as u(attnum, ord)
                   join pg_catalog.pg_attribute a on a.attrelid = con.conrelid and a.attnum = u.attnum),
                fns.nspname::text,
                fcl.relname::text,
-               (select array_agg(a.attname::text order by u.ord)
-                  from unnest(con.confkey) with ordinality as u(attnum, ord)
+               (select pg_catalog.array_agg(a.attname::text order by u.ord)
+                  from pg_catalog.unnest(con.confkey) with ordinality as u(attnum, ord)
                   join pg_catalog.pg_attribute a on a.attrelid = con.confrelid and a.attnum = u.attnum),
                con.conname::text,
                con.confdeltype::text,
-               con.confupdtype::text
+               con.confupdtype::text,
+               con.convalidated,
+               (select pg_catalog.array_agg(a.attname::text order by u.ord)
+                  from pg_catalog.pg_index i
+                  cross join lateral pg_catalog.unnest(i.indkey::pg_catalog.int2[]) with ordinality as u(attnum, ord)
+                  join pg_catalog.pg_attribute a on a.attrelid = i.indrelid and a.attnum = u.attnum
+                  where i.indrelid = con.conrelid and i.indisprimary and u.ord <= i.indnkeyatts),
+               (select pg_catalog.array_agg(a.attname::text order by u.ord)
+                  from pg_catalog.pg_index i
+                  cross join lateral pg_catalog.unnest(i.indkey::pg_catalog.int2[]) with ordinality as u(attnum, ord)
+                  join pg_catalog.pg_attribute a on a.attrelid = i.indrelid and a.attnum = u.attnum
+                  where i.indrelid = con.confrelid and i.indisprimary and u.ord <= i.indnkeyatts)
         from pg_catalog.pg_constraint con
         join pg_catalog.pg_class cl on cl.oid = con.conrelid
         join pg_catalog.pg_namespace ns on ns.oid = cl.relnamespace
         join pg_catalog.pg_class fcl on fcl.oid = con.confrelid
         join pg_catalog.pg_namespace fns on fns.oid = fcl.relnamespace
-        where con.contype = 'f' and con.conparentid = 0 and ns.nspname = any(@schemas)
-        order by ns.nspname, cl.relname, con.conname
         """;
+
+    /// <summary>How many keys <see cref="ReadForeignKeysTouchingAsync" /> keeps before it says there were more.</summary>
+    public const int DefaultForeignKeyCap = 20_000;
 
     /// <summary>Reads every physical foreign key in the store's schemas.</summary>
     /// <param name="connection">An open connection to the database in scope.</param>
@@ -126,11 +216,9 @@ internal static class RelationshipQueries
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(schemas);
 
-        List<PhysicalForeignKey> keys = [];
-
         if (schemas.Count == 0)
         {
-            return keys;
+            return [];
         }
 
         await using var command = new NpgsqlCommand(ForeignKeysSql, connection)
@@ -138,28 +226,173 @@ internal static class RelationshipQueries
             CommandTimeout = commandTimeoutSeconds,
         };
 
-        command.Parameters.Add(new NpgsqlParameter("schemas", NpgsqlDbType.Array | NpgsqlDbType.Text)
-        {
-            Value = schemas as string[] ?? [.. schemas],
-        });
+        BindSchemas(command, schemas);
+
+        List<PhysicalForeignKey> keys = [];
 
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            keys.Add(new PhysicalForeignKey(
-                reader.GetString(0),
-                reader.GetString(1),
-                Names(reader, 2),
-                reader.GetString(3),
-                reader.GetString(4),
-                Names(reader, 5),
-                reader.GetString(6),
-                CascadeAction(reader.IsDBNull(7) ? null : reader.GetString(7)),
-                CascadeAction(reader.IsDBNull(8) ? null : reader.GetString(8))));
+            keys.Add(Read(reader));
         }
 
         return keys;
+    }
+
+    /// <summary>
+    /// Reads every foreign key with either end in <paramref name="schemas" />, up to <paramref name="cap" />.
+    /// </summary>
+    /// <param name="connection">An open connection to the database in scope.</param>
+    /// <param name="transaction">
+    /// The read-only transaction to run in (<c>ReadOnlySqlSession.InTransactionAsync</c>), so the read has
+    /// its <c>lock_timeout</c> and runs as <c>SqlConsoleRole</c> like every other catalog read of objects
+    /// Marten does not own; <see langword="null" /> only for a caller that has none.
+    /// </param>
+    /// <param name="schemas">The schemas to read around.</param>
+    /// <param name="cap">How many keys to keep.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public static async Task<PhysicalForeignKeyRead> ReadForeignKeysTouchingAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        IReadOnlyList<string> schemas,
+        int cap,
+        int commandTimeoutSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(schemas);
+
+        if (schemas.Count == 0)
+        {
+            return PhysicalForeignKeyRead.Empty;
+        }
+
+        int kept = Math.Max(cap, 1);
+
+        await using var command = new NpgsqlCommand(ForeignKeysTouchingSql, connection, transaction)
+        {
+            CommandTimeout = commandTimeoutSeconds,
+        };
+
+        BindSchemas(command, schemas);
+        command.Parameters.Add(new NpgsqlParameter("cap", NpgsqlDbType.Integer) { Value = kept + 1 });
+
+        List<PhysicalForeignKey> keys = [];
+        bool truncated = false;
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (keys.Count == kept)
+            {
+                truncated = true;
+                break;
+            }
+
+            keys.Add(Read(reader));
+        }
+
+        return new PhysicalForeignKeyRead(keys, truncated);
+    }
+
+    /// <summary>
+    /// The bounded inbound count for a pointing table the studio does not map: how many of its rows carry
+    /// the given values in the given columns.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same bounded shape as <see cref="BuildInboundCount" />, over a relation that is not a Marten
+    /// collection - so there is no tenant predicate and no soft-delete predicate to add, because neither
+    /// exists: a raw count of a non-Marten table is a count for every tenant at once, which is why only a
+    /// visitor the <c>BrowseDatabase</c> row gate admits ever gets one.
+    /// </para>
+    /// <para>
+    /// The schema, table and column names are the catalog's own (the foreign-key read), quoted through
+    /// <see cref="SqlIdentifier" />. Each value is bound as text with <see cref="NpgsqlDbType.Unknown" />,
+    /// so Postgres applies the column's own input function - a uuid, a bigint, a varchar or a domain are all
+    /// compared correctly without a type name ever being written into the statement, and a value the column
+    /// cannot hold is a 22P02 for this one count rather than a wrong answer.
+    /// </para>
+    /// </remarks>
+    /// <param name="schema">The pointing table's schema.</param>
+    /// <param name="table">The pointing table.</param>
+    /// <param name="columns">The columns to match, in the order of <paramref name="values" />.</param>
+    /// <param name="values">The values, as text.</param>
+    /// <param name="cap">How many rows to look at before stopping.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout.</param>
+    public static NpgsqlCommand BuildTableInboundCount(
+        string schema,
+        string table,
+        IReadOnlyList<string> columns,
+        IReadOnlyList<string> values,
+        int cap,
+        int commandTimeoutSeconds)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(schema);
+        ArgumentException.ThrowIfNullOrEmpty(table);
+        ArgumentNullException.ThrowIfNull(columns);
+        ArgumentNullException.ThrowIfNull(values);
+
+        if (columns.Count == 0 || columns.Count != values.Count)
+        {
+            throw new ArgumentException("Every column needs exactly one value.", nameof(values));
+        }
+
+        var command = new NpgsqlCommand { CommandTimeout = commandTimeoutSeconds };
+
+        try
+        {
+            command.CommandText = TableInboundCountSql(schema, table, columns);
+
+            for (int i = 0; i < values.Count; i++)
+            {
+                command.Parameters.Add(new NpgsqlParameter("k" + i.ToString(System.Globalization.CultureInfo.InvariantCulture), NpgsqlDbType.Unknown)
+                {
+                    Value = values[i],
+                });
+            }
+
+            command.Parameters.Add(new NpgsqlParameter("cap", NpgsqlDbType.Integer) { Value = Math.Max(cap, 1) });
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>The text of <see cref="BuildTableInboundCount" />: quoted identifiers, numbered parameters.</summary>
+    /// <param name="schema">The pointing table's schema.</param>
+    /// <param name="table">The pointing table.</param>
+    /// <param name="columns">The columns matched.</param>
+    internal static string TableInboundCountSql(string schema, string table, IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+
+        var sql = new System.Text.StringBuilder("select count(*) from (select 1 from ")
+            .Append(SqlIdentifier.Quote(schema))
+            .Append('.')
+            .Append(SqlIdentifier.Quote(table))
+            .Append(" where ");
+
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (i > 0)
+            {
+                sql.Append(" and ");
+            }
+
+            sql.Append(SqlIdentifier.Quote(columns[i]))
+                .Append(" = @k")
+                .Append(i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return sql.Append(" limit @cap) as bounded").ToString();
     }
 
     /// <summary>
@@ -278,6 +511,28 @@ internal static class RelationshipQueries
         "d" => "SetDefault",
         _ => "NoAction",
     };
+
+    private static void BindSchemas(NpgsqlCommand command, IReadOnlyList<string> schemas) =>
+        command.Parameters.Add(new NpgsqlParameter("schemas", NpgsqlDbType.Array | NpgsqlDbType.Text)
+        {
+            Value = schemas as string[] ?? [.. schemas],
+        });
+
+    /// <summary>One row of <see cref="ForeignKeysSelect" />.</summary>
+    private static PhysicalForeignKey Read(NpgsqlDataReader reader) =>
+        new(
+            reader.GetString(0),
+            reader.GetString(1),
+            Names(reader, 2),
+            reader.GetString(3),
+            reader.GetString(4),
+            Names(reader, 5),
+            reader.GetString(6),
+            CascadeAction(reader.IsDBNull(7) ? null : reader.GetString(7)),
+            CascadeAction(reader.IsDBNull(8) ? null : reader.GetString(8)),
+            reader.IsDBNull(9) || reader.GetBoolean(9),
+            reader.IsDBNull(10) ? null : reader.GetFieldValue<string[]>(10),
+            reader.IsDBNull(11) ? null : reader.GetFieldValue<string[]>(11));
 
     private static string[] Names(NpgsqlDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? [] : reader.GetFieldValue<string[]>(ordinal);

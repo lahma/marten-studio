@@ -2,6 +2,7 @@ using Marten.Schema;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Database;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Schema;
 
@@ -15,16 +16,33 @@ using NpgsqlTypes;
 namespace MartenStudio.Services.Relationships;
 
 /// <summary>
-/// Reads the foreign-key graph of one store, and the inbound half of one document's relationships.
+/// Reads the foreign-key graph around one store - its document types and the tables beside them the
+/// visitor may see - and the inbound half of one document's relationships.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Two catalog reads and a pure function. The schemas come from <c>SchemaDeclarationReader</c>, which
-/// reads <c>StoreOptions</c> and opens no connection — never <c>AllSchemaNames()</c>, which is
+/// <b>One shared read, filtered per visitor.</b> The foreign keys come from one <c>pg_constraint</c> read
+/// per database, cached through <see cref="StudioSnapshotCache" /> under a key built only from the store,
+/// the database, <c>SqlConsoleRole</c> and a schema set that is the same for every visitor: the store's own
+/// schemas and whatever <see cref="MartenStudioOptions.BrowsableSchemas" /> admits. Who is asking is never
+/// part of it. Each visitor's database-browser gate (<see cref="DatabaseAccess.GateAsync" />, D27) is then
+/// applied by <see cref="RelationshipGraphBuilder" /> <em>after</em> the cache, so nothing another visitor may
+/// not see is ever handed to them from it.
+/// </para>
+/// <para>
+/// <b>Nothing here migrates.</b> The schemas come from <c>SchemaDeclarationReader</c>, which reads
+/// <c>StoreOptions</c> and opens no connection — never <c>AllSchemaNames()</c>, which is
 /// <c>AllObjects()</c> and applies Marten's HiLo migration on the way through (AGENTS.md hard rule 14).
-/// Nothing here calls <c>DocumentTables()</c>, <c>Functions()</c> or <c>CreateMigrationAsync()</c>
-/// either: opening a tab must not write DDL, and <c>RelationshipsNoDdlLiveTests</c> is what holds this
-/// file to it.
+/// The key read and the table counts run in the read-only session, as every read of objects Marten does
+/// not own does; <c>RelationshipsNoDdlLiveTests</c> is what holds this file to it.
+/// </para>
+/// <para>
+/// <b>A non-Marten table's rows are counted only through the row gate.</b> "How many rows of
+/// <c>legacy.customer_credit</c> point at this customer" is a read of that table's rows, so it needs
+/// <c>BrowseDatabase</c>, the write policy with no tenant, and a schema <c>BrowsableSchemas</c> admits - the
+/// page's own gate is asked first, unaudited, so a visitor who may not is never refused (and never
+/// audited or logged as refused) for merely opening a document; the enforcement,
+/// <see cref="DatabaseAccess.RequireRowAccessAsync" />, then runs in front of the read itself.
 /// </para>
 /// <para>
 /// Failures are values. A page that draws a diagram cannot afford an exception on the circuit for a
@@ -35,11 +53,18 @@ namespace MartenStudio.Services.Relationships;
 /// </remarks>
 internal sealed class RelationshipDataService : IRelationshipDataService
 {
+    /// <summary>What the audit ring calls counting the rows of a non-Marten table that reference a document.</summary>
+    internal const string ReferencesAction = "Count referencing rows";
+
     private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioScopeResolver resolver;
     private readonly ColumnCatalog columnCatalog;
     private readonly StudioSnapshotCache cache;
     private readonly ILogger<RelationshipDataService> logger;
+    private readonly DatabaseAccess access;
+    private readonly DatabaseCatalog catalog;
+    private readonly StudioCapabilityGuard capabilities;
+    private readonly StudioActionLog audit;
     private readonly TimeProvider timeProvider;
 
     public RelationshipDataService(
@@ -47,8 +72,12 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         StudioScopeResolver resolver,
         ColumnCatalog columnCatalog,
         StudioSnapshotCache cache,
-        ILogger<RelationshipDataService> logger)
-        : this(options, resolver, columnCatalog, cache, logger, TimeProvider.System)
+        ILogger<RelationshipDataService> logger,
+        DatabaseAccess access,
+        DatabaseCatalog catalog,
+        StudioCapabilityGuard capabilities,
+        StudioActionLog audit)
+        : this(options, resolver, columnCatalog, cache, logger, access, catalog, capabilities, audit, TimeProvider.System)
     {
     }
 
@@ -58,6 +87,10 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         ColumnCatalog columnCatalog,
         StudioSnapshotCache cache,
         ILogger<RelationshipDataService> logger,
+        DatabaseAccess access,
+        DatabaseCatalog catalog,
+        StudioCapabilityGuard capabilities,
+        StudioActionLog audit,
         TimeProvider timeProvider)
     {
         this.options = options;
@@ -65,6 +98,10 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         this.columnCatalog = columnCatalog;
         this.cache = cache;
         this.logger = logger;
+        this.access = access;
+        this.catalog = catalog;
+        this.capabilities = capabilities;
+        this.audit = audit;
         this.timeProvider = timeProvider;
     }
 
@@ -85,32 +122,44 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
             string[] schemas = SchemaDeclarationReader.SchemaNames(resolved.Store.Options);
 
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-            // One grouped reltuples read for every node's count (D8), and one pg_constraint read for the
-            // whole diagram. A diagram of forty document types is two round trips, not eighty.
-            IReadOnlyDictionary<string, DocumentBrowseQueries.TableEstimate> tableEstimates = await DocumentBrowseQueries
-                .EstimateAllAsync(connection, schemas, CommandTimeoutSeconds, cancellationToken)
+            (RelationshipDatabaseView? view, string? unavailable) = await ViewAsync(scope, resolved, withRelations: true, cancellationToken)
                 .ConfigureAwait(false);
 
-            // The diagram draws a row count per node and nothing else; the page count the browser's rail
-            // uses to decide whether an exact count is affordable has no meaning here.
-            IReadOnlyDictionary<string, long> estimates = tableEstimates.ToDictionary(
-                static pair => pair.Key,
-                static pair => pair.Value.Rows,
-                StringComparer.Ordinal);
+            IReadOnlyDictionary<string, long> estimates;
 
-            IReadOnlyList<PhysicalForeignKey> physical = await RelationshipQueries
-                .ReadForeignKeysAsync(connection, schemas, CommandTimeoutSeconds, cancellationToken)
-                .ConfigureAwait(false);
+            await using (NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read))
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-            return RelationshipGraphBuilder.Build(
+                // One grouped reltuples read for every document node's count (D8); the table nodes' come
+                // with the gate's relation list. A diagram of forty document types is not eighty round trips.
+                IReadOnlyDictionary<string, DocumentBrowseQueries.TableEstimate> tableEstimates = await DocumentBrowseQueries
+                    .EstimateAllAsync(connection, schemas, CommandTimeoutSeconds, cancellationToken)
+                    .ConfigureAwait(false);
+
+                // The diagram draws a row count per node and nothing else; the page count the browser's rail
+                // uses to decide whether an exact count is affordable has no meaning here.
+                estimates = tableEstimates.ToDictionary(
+                    static pair => pair.Key,
+                    static pair => pair.Value.Rows,
+                    StringComparer.Ordinal);
+            }
+
+            PhysicalForeignKeyRead keys = await ForeignKeysAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+
+            RelationshipGraph graph = RelationshipGraphBuilder.Build(
                 resolved.Store.Options,
                 options.Value.IsDocumentTypeVisible,
-                physical,
+                keys.Keys,
                 estimates,
-                readAt);
+                readAt,
+                view);
+
+            return graph with
+            {
+                TablesUnavailable = unavailable,
+                Truncated = graph.Truncated || keys.Truncated,
+            };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -142,20 +191,34 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             // the same check for the same scope (the rule StudioSnapshotCache's own remarks state).
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
-            RelationshipGraph graph = await cache
-                .GetAsync(CacheKey(scope), token => ReadGraphAsync(resolved, token), cancellationToken)
+            (RelationshipDatabaseView? view, _) = await ViewAsync(scope, resolved, withRelations: false, cancellationToken)
                 .ConfigureAwait(false);
+
+            PhysicalForeignKeyRead keys = await ForeignKeysAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+
+            // The same graph the screen draws, filtered for this visitor, so the two can never disagree
+            // about what points where - or about what may be named.
+            RelationshipGraph graph = RelationshipGraphBuilder.Build(
+                resolved.Store.Options,
+                options.Value.IsDocumentTypeVisible,
+                keys.Keys,
+                new Dictionary<string, long>(StringComparer.Ordinal),
+                timeProvider.GetUtcNow(),
+                view);
 
             List<RelationshipEdge> inbound = [];
             foreach (RelationshipEdge edge in graph.Edges)
             {
-                if (string.Equals(edge.ToAlias, alias, StringComparison.OrdinalIgnoreCase))
+                if (!edge.ToIsTable && string.Equals(edge.ToAlias, alias, StringComparison.OrdinalIgnoreCase))
                 {
                     inbound.Add(edge);
                 }
             }
 
-            if (inbound.Count == 0)
+            int withheld = graph.Withheld.Count(x =>
+                x.VisibleEndIsTarget && string.Equals(x.VisibleEnd, alias, StringComparison.OrdinalIgnoreCase));
+
+            if (inbound.Count == 0 && withheld == 0)
             {
                 // Nothing points here, so there is nothing to count and no connection to open. Most
                 // document types are in this state, and every one of their detail pages used to pay for a
@@ -183,29 +246,63 @@ internal sealed class RelationshipDataService : IRelationshipDataService
                 }
             }
 
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            List<ReferencedByEntry> documents = [];
+            List<ReferencedByEntry> tables = [];
 
-            List<ReferencedByEntry> entries = [];
+            if (inbound.Any(static x => !x.FromIsTable))
+            {
+                await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+                foreach (RelationshipEdge edge in inbound)
+                {
+                    if (edge.FromIsTable || !byAlias.TryGetValue(edge.FromAlias, out IDocumentType? source))
+                    {
+                        continue;
+                    }
+
+                    documents.Add(await CountAsync(connection, resolved, source, edge, id, cancellationToken)
+                        .ConfigureAwait(false));
+                }
+            }
 
             foreach (RelationshipEdge edge in inbound)
             {
-                if (!byAlias.TryGetValue(edge.FromAlias, out IDocumentType? source))
+                if (!edge.FromIsTable
+                    || view is null
+                    || graph.FindTable(edge.FromAlias) is not { } table
+                    || !byAlias.TryGetValue(alias, out IDocumentType? target))
                 {
                     continue;
                 }
 
-                entries.Add(await CountAsync(connection, resolved, source, edge, id, cancellationToken)
+                PhysicalForeignKey? key = keys.Keys.FirstOrDefault(x =>
+                    string.Equals(x.Schema, table.Schema, StringComparison.Ordinal)
+                    && string.Equals(x.Table, table.Name, StringComparison.Ordinal)
+                    && string.Equals(x.Name, edge.ConstraintName, StringComparison.Ordinal));
+
+                if (key is null)
+                {
+                    continue;
+                }
+
+                tables.Add(await CountTableAsync(scope, view.Gate, table, target, edge, key, id, cancellationToken)
                     .ConfigureAwait(false));
             }
 
-            entries.Sort(static (left, right) =>
+            documents.Sort(static (left, right) =>
             {
                 var byFrom = string.CompareOrdinal(left.FromAlias, right.FromAlias);
                 return byFrom != 0 ? byFrom : string.CompareOrdinal(left.Column, right.Column);
             });
 
-            return new ReferencedBy(entries);
+            tables.Sort(static (left, right) =>
+            {
+                var byFrom = string.CompareOrdinal(left.FromAlias, right.FromAlias);
+                return byFrom != 0 ? byFrom : string.CompareOrdinal(left.Column, right.Column);
+            });
+
+            return new ReferencedBy([.. documents, .. tables]) { Withheld = withheld };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -217,52 +314,142 @@ internal sealed class RelationshipDataService : IRelationshipDataService
     }
 
     /// <summary>
-    /// The foreign-key graph alone — no row counts — for one scope, shared between the circuits that ask
-    /// for it at once.
+    /// This visitor's database-browser gate, with the relations it admits when the picture needs them -
+    /// or, when the gate cannot be read, nothing and the reason, so the caller falls back to the document
+    /// types alone rather than guess whose each table is (D27's classification fails closed).
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The <c>pg_constraint</c> read and the whole graph build are what every document-detail load paid
-    /// for, on every navigation, even for a document type nothing points at: the panel needs the graph to
-    /// find that out. Neither half depends on the document, and both are the same for every visitor of
-    /// the same scope, so they belong behind the single-flight cache the live pages already share (D10)
-    /// rather than behind a short-circuit — the graph is what would have to be read to know whether a
-    /// short-circuit applied, since a foreign key somebody added by hand is physical-only and appears in
-    /// no <c>StoreOptions</c>.
-    /// </para>
-    /// <para>
-    /// The estimates are deliberately empty. The diagram's node counts are a separate read that changes
-    /// every time anything is written, and folding them in here would tie a picture of the schema to a
-    /// number that moves - so <see cref="GetGraphAsync"/> keeps its own uncached read and this answers
-    /// only the question the detail page asks: what points at what.
-    /// </para>
-    /// </remarks>
-    private async Task<RelationshipGraph> ReadGraphAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    private async Task<(RelationshipDatabaseView? View, string? Unavailable)> ViewAsync(
+        StudioScope scope,
+        ResolvedScope resolved,
+        bool withRelations,
+        CancellationToken cancellationToken)
     {
-        string[] schemas = SchemaDeclarationReader.SchemaNames(resolved.Store.Options);
+        try
+        {
+            DatabaseGateRead read = await access.GateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
 
-        await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            if (!read.Succeeded)
+            {
+                return (null, read.Reason ?? "The database browser's gate could not be read.");
+            }
 
-        IReadOnlyList<PhysicalForeignKey> physical = await RelationshipQueries
-            .ReadForeignKeysAsync(connection, schemas, CommandTimeoutSeconds, cancellationToken)
-            .ConfigureAwait(false);
+            if (!withRelations)
+            {
+                return (new RelationshipDatabaseView(read.Gate, []), null);
+            }
 
-        // The same graph the screen draws, so the two can never disagree about what points where.
-        return RelationshipGraphBuilder.Build(
-            resolved.Store.Options,
-            options.Value.IsDocumentTypeVisible,
-            physical,
-            new Dictionary<string, long>(StringComparer.Ordinal),
-            timeProvider.GetUtcNow());
+            // The same cached, read-only catalog read the database browser lists its tables from, over
+            // exactly the schemas this visitor's gate admits.
+            CatalogSnapshot snapshot = await catalog
+                .SnapshotAsync(resolved.Database, read.Gate.VisibleSchemas, CatalogParts.Relations, null, cancellationToken)
+                .ConfigureAwait(false);
+
+            return (new RelationshipDatabaseView(read.Gate, snapshot.Relations.Items, snapshot.Relations.Truncated), null);
+        }
+        catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
+        {
+            // The screen says so beside a document-only picture; the database's own trouble is what the
+            // catalog read reports, and it is not a studio fault worth a Warning of its own.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "Marten Studio drew the relationships of {StoreKey} without tables", scope.StoreKey);
+            }
+
+            return (null, DatabaseAccess.CatalogFailure(exception));
+        }
     }
 
     /// <summary>
-    /// One key per scope, in the shape the other services use so that the cache's prefix invalidation
-    /// reaches it when anything in that scope is changed.
+    /// Every foreign key touching the schemas any visitor might see, from the single-flight cache.
     /// </summary>
-    private static string CacheKey(StudioScope scope) =>
-        scope.StoreKey + "|" + scope.DatabaseId + "|" + (scope.TenantId ?? string.Empty) + "|relationship-graph";
+    /// <remarks>
+    /// <para>
+    /// The <c>pg_constraint</c> read is what every document-detail load and every Relationships load paid
+    /// for, and it depends on nothing about the visitor: the schema set is the store's own plus what
+    /// <c>BrowsableSchemas</c> admits, which is a fact about the options and the database. So it belongs
+    /// behind the cache the live pages already share (D10), keyed per database - and deliberately not per
+    /// tenant, because a catalog read has nothing tenant-shaped in it.
+    /// </para>
+    /// <para>
+    /// The scope has already been resolved for this visitor when this runs, and the result is filtered for
+    /// them afterwards; the cache key names no visitor because nothing in the value is theirs.
+    /// </para>
+    /// </remarks>
+    private async Task<PhysicalForeignKeyRead> ForeignKeysAsync(
+        StudioScope scope,
+        ResolvedScope resolved,
+        CancellationToken cancellationToken)
+    {
+        string[] schemas = await SchemaSetAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+        return await cache
+            .GetAsync(CacheKey(scope, schemas), token => ReadForeignKeysAsync(resolved.Database, schemas, token), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The schemas the shared read spans: the store's own, and - when <c>BrowseDatabase</c> is on for the
+    /// process at all - every schema <c>BrowsableSchemas</c> admits. The same for every visitor.
+    /// </summary>
+    private async Task<string[]> SchemaSetAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    {
+        HashSet<string> set = new(SchemaDeclarationReader.SchemaNames(resolved.Store.Options), StringComparer.Ordinal);
+
+        MartenStudioOptions value = options.Value;
+
+        if (capabilities.IsEnabled(StudioCapability.BrowseDatabase) && value.BrowsableSchemas.Count > 0)
+        {
+            try
+            {
+                IReadOnlyList<CatalogSchema> live = await catalog.SchemasAsync(resolved.Database, cancellationToken)
+                    .ConfigureAwait(false);
+
+                set.UnionWith(BrowsableSchemaMatcher.Match(value.BrowsableSchemas, live));
+            }
+            catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
+            {
+                // The store's own schemas still draw; the gate read beside this one fails the same way and
+                // says so on the screen.
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(exception, "Marten Studio read the relationships of the store's own schemas only");
+                }
+            }
+        }
+
+        return [.. set.Order(StringComparer.Ordinal)];
+    }
+
+    /// <summary>The key read itself, in the read-only session.</summary>
+    private async Task<PhysicalForeignKeyRead> ReadForeignKeysAsync(
+        IMartenDatabase database,
+        IReadOnlyList<string> schemas,
+        CancellationToken cancellationToken)
+    {
+        await using NpgsqlConnection connection = database.CreateConnection(ConnectionUsage.Read);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        return await Session()
+            .InTransactionAsync(
+                connection,
+                (transaction, token) => RelationshipQueries.ReadForeignKeysTouchingAsync(
+                    connection,
+                    transaction,
+                    schemas,
+                    RelationshipQueries.DefaultForeignKeyCap,
+                    SessionCommandTimeoutSeconds,
+                    token),
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// One key per database and schema set, in the shape the other services use so that the cache's prefix
+    /// invalidation reaches it when anything in that scope is changed.
+    /// </summary>
+    private string CacheKey(StudioScope scope, IReadOnlyList<string> schemas) =>
+        scope.StoreKey + "|" + scope.DatabaseId + "|relationship-keys|" + (options.Value.SqlConsoleRole ?? string.Empty)
+        + "|" + string.Join('\u001e', schemas);
 
     /// <summary>
     /// How many of one collection's documents point at one id, bounded by the cap.
@@ -282,6 +469,12 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         CancellationToken cancellationToken)
     {
         var hue = CollectionColorizer.HueFor(edge.FromAlias);
+
+        ReferencedByEntry Entry(long count = 0, bool capped = false, string? error = null) =>
+            new(edge.FromAlias, edge.Column, edge.Member, hue, count, capped, edge.Declared, edge.Physical, error)
+            {
+                OnDelete = edge.OnDelete,
+            };
 
         try
         {
@@ -303,9 +496,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
             if (column is null)
             {
-                return new ReferencedByEntry(
-                    edge.FromAlias, edge.Column, edge.Member, hue, 0, false, edge.Declared, edge.Physical,
-                    $"'{source.TableName.QualifiedName}' has no column called '{edge.Column}'.");
+                return Entry(error: $"'{source.TableName.QualifiedName}' has no column called '{edge.Column}'.");
             }
 
             IdParseResult parsed = DocumentQueryBuilder.ParseId(
@@ -313,9 +504,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
             if (!parsed.Success)
             {
-                return new ReferencedByEntry(
-                    edge.FromAlias, edge.Column, edge.Member, hue, 0, false, edge.Declared, edge.Physical,
-                    parsed.Error);
+                return Entry(error: parsed.Error);
             }
 
             NpgsqlDbType dbType = PostgresColumn.ToNpgsqlDbType(column.UdtName);
@@ -338,15 +527,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
             var capped = count >= RelationshipQueries.DefaultInboundCap;
 
-            return new ReferencedByEntry(
-                edge.FromAlias,
-                edge.Column,
-                edge.Member,
-                hue,
-                capped ? RelationshipQueries.DefaultInboundCap - 1 : count,
-                capped,
-                edge.Declared,
-                edge.Physical);
+            return Entry(capped ? RelationshipQueries.DefaultInboundCap - 1 : count, capped);
         }
         catch (PostgresException exception)
         {
@@ -355,11 +536,192 @@ internal sealed class RelationshipDataService : IRelationshipDataService
                 logger.LogDebug(exception, "Marten Studio could not count references from '{Alias}'", edge.FromAlias);
             }
 
-            return new ReferencedByEntry(
-                edge.FromAlias, edge.Column, edge.Member, hue, 0, false, edge.Declared, edge.Physical,
-                $"{exception.SqlState}: {exception.MessageText}");
+            return Entry(error: $"{exception.SqlState}: {exception.MessageText}");
         }
     }
+
+    /// <summary>
+    /// How many rows of a table the studio does not map point at one document, bounded by the cap - when
+    /// this visitor may read that table's rows at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The order is the database browser's.</b> The visitor's own gate first, asked without an audit
+    /// entry, because a visitor who may not read these rows has merely opened a document and must not be
+    /// recorded as refused for it; the row says why it is not counted instead. Only a visitor the gate
+    /// admits reaches <see cref="DatabaseAccess.RequireRowAccessAsync" /> - capability, the write policy
+    /// with no tenant, the schema, the catalog's own row for the table, whose it is and whether the role
+    /// may select from it - which refuses and audits on its own if any of that changed in between. The
+    /// count names the catalog's schema and table, never a string from the page.
+    /// </para>
+    /// <para>
+    /// <b>Bound from the document, or not counted.</b> A key into a document table references its
+    /// <c>id</c> - and, for a conjoined type, perhaps its <c>tenant_id</c>, which is filled from the scope's
+    /// tenant or left out to count every tenant's rows, as the document list does with no tenant selected.
+    /// A key into any other column of the document table has no value the studio could supply, and says so.
+    /// </para>
+    /// </remarks>
+    private async Task<ReferencedByEntry> CountTableAsync(
+        StudioScope scope,
+        DatabaseGate gate,
+        RelationshipTableNode table,
+        IDocumentType target,
+        RelationshipEdge edge,
+        PhysicalForeignKey key,
+        string id,
+        CancellationToken cancellationToken)
+    {
+        ReferencedByEntry Entry(long count = 0, bool capped = false, string? error = null, string? notCounted = null) =>
+            new(table.QualifiedName, edge.Column, null, table.Hue, count, capped, Declared: false, Physical: true, error)
+            {
+                Schema = table.Schema,
+                Table = table.Name,
+                OnDelete = edge.OnDelete,
+                AllColumns = edge.AllColumns,
+                NotCounted = notCounted,
+            };
+
+        DocumentTableInfo info = DocumentTableInfo.FromDocumentType(target);
+        string? tenantColumn = info.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined
+            ? info.MetadataColumnName(DocumentMetadataColumn.TenantId)
+            : null;
+
+        List<string> columns = [];
+        List<string> values = [];
+
+        for (int i = 0; i < key.Columns.Count && i < key.LinkedColumns.Count; i++)
+        {
+            string linked = key.LinkedColumns[i];
+
+            if (string.Equals(linked, DocumentTableInfo.IdColumn, StringComparison.Ordinal))
+            {
+                columns.Add(key.Columns[i]);
+                values.Add(id);
+            }
+            else if (tenantColumn is not null && string.Equals(linked, tenantColumn, StringComparison.Ordinal))
+            {
+                if (scope.TenantId is { } tenant)
+                {
+                    columns.Add(key.Columns[i]);
+                    values.Add(tenant);
+                }
+            }
+            else
+            {
+                return Entry(notCounted:
+                    $"The key references '{linked}' of the {target.Alias} table, which the studio cannot fill in from a document's id.");
+            }
+        }
+
+        if (columns.Count == 0)
+        {
+            return Entry(notCounted: "The key does not reference the document's id, so there is nothing to count by.");
+        }
+
+        // The row gate refuses a relation whose own name cannot be quoted; a column's name is this read's
+        // alone to check, and one that cannot be quoted is a row that says so rather than a panel that fails.
+        if (!columns.All(DatabaseCatalogQueries.IsQuotable))
+        {
+            return Entry(notCounted: "A column of this key has a name the studio cannot put into SQL safely, so its rows are not counted.");
+        }
+
+        DatabaseRowAccess rows = gate.DataAccess(table.Schema);
+
+        if (!rows.Allowed)
+        {
+            return Entry(notCounted: rows.Reason ?? "This studio does not let you read that table's rows.");
+        }
+
+        string qualified = DatabaseAccess.Target(table.Schema, table.Name);
+
+        DatabaseRowAccessResult grant = await access
+            .RequireRowAccessAsync(scope, table.Schema, table.Name, ReferencesAction, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!grant.Allowed)
+        {
+            return Entry(notCounted: grant.Reason ?? "This studio does not let you read that table's rows.");
+        }
+
+        CatalogRelation relation = grant.Grant.Relation.Relation;
+
+        try
+        {
+            await using NpgsqlConnection connection = grant.Grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            long count = await Session()
+                .InTransactionAsync(
+                    connection,
+                    async (transaction, token) =>
+                    {
+                        await using NpgsqlCommand command = RelationshipQueries.BuildTableInboundCount(
+                            relation.Schema,
+                            relation.Name,
+                            columns,
+                            values,
+                            RelationshipQueries.DefaultInboundCap,
+                            SessionCommandTimeoutSeconds);
+
+                        command.Connection = connection;
+                        command.Transaction = transaction;
+
+                        object? result = await command.ExecuteScalarAsync(token).ConfigureAwait(false);
+
+                        return result is null or DBNull
+                            ? 0L
+                            : Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            bool capped = count >= RelationshipQueries.DefaultInboundCap;
+
+            // The row gate's grant is not audited - the caller knows what it then read and records it. The
+            // document's id is not in the entry: a value somebody filtered on belongs in the log, never the
+            // ring (plan §1, Audit).
+            audit.Record(
+                ReferencesAction,
+                qualified,
+                succeeded: true,
+                $"Counted the rows that reference one {target.Alias} document.",
+                StudioCapability.BrowseDatabase,
+                scope with { TenantId = null });
+
+            return Entry(capped ? RelationshipQueries.DefaultInboundCap - 1 : count, capped);
+        }
+        catch (PostgresException exception)
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "Marten Studio could not count references from '{Table}'", qualified);
+            }
+
+            return Entry(error: $"{exception.SqlState}: {exception.MessageText}");
+        }
+    }
+
+    /// <summary>
+    /// The read-only session every read of an object Marten does not own runs in: read-only transaction,
+    /// <c>statement_timeout</c> from <see cref="MartenStudioOptions.QueryTimeout" />, a short
+    /// <c>lock_timeout</c>, and <c>SqlConsoleRole</c> when one is set.
+    /// </summary>
+    private ReadOnlySqlSession Session()
+    {
+        MartenStudioOptions value = options.Value;
+
+        return new ReadOnlySqlSession(new ReadOnlySqlOptions
+        {
+            StatementTimeout = value.QueryTimeout,
+            Role = value.SqlConsoleRole,
+        });
+    }
+
+    /// <summary>
+    /// A little past the server-side <c>statement_timeout</c>, which is what should fire: it produces 57014
+    /// with a message, where a client-side timeout only breaks the connection.
+    /// </summary>
+    private int SessionCommandTimeoutSeconds => (int) Math.Ceiling(options.Value.QueryTimeout.TotalSeconds) + 5;
 
     private static string Describe(Exception exception) => exception switch
     {

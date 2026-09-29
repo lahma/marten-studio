@@ -148,20 +148,65 @@ internal static class GraphLayout
     public const int BarycentreSweeps = 4;
 
     /// <summary>
+    /// The widest a node's box grows to fit its title. <c>qrtz_simprop_triggers</c> fits well inside it;
+    /// past it a title is cut with an ellipsis and the whole name is in the node's tooltip.
+    /// </summary>
+    public const double MaxNodeWidth = 256;
+
+    /// <summary>
+    /// How much horizontal room one character of a node's title takes, in user units - the average advance
+    /// of the studio's sans-serif at its base size and semibold weight, rounded up so that a name the
+    /// arithmetic says fits does fit.
+    /// </summary>
+    public const double TitleCharacterWidth = 8;
+
+    /// <summary>
+    /// What a node's box needs beside its title: the colour marker and the gap before the text, and the
+    /// padding after it. With <see cref="TitleCharacterWidth" /> this makes <see cref="NodeWidth" /> hold
+    /// exactly seventeen characters, which is where the diagram has always cut an alias.
+    /// </summary>
+    public const double TitlePadding = 40;
+
+    /// <summary>How much room one character of an edge label takes, in user units (the monospace face, small size).</summary>
+    public const double LabelCharacterWidth = 6.6;
+
+    /// <summary>What an edge label needs around it inside the gap between two layers.</summary>
+    public const double LabelPadding = 24;
+
+    /// <summary>The widest the gap between two layers grows to fit the labels drawn in it.</summary>
+    public const double MaxLayerGap = 240;
+
+    /// <summary>
     /// Lays out <paramref name="aliases" /> and <paramref name="links" />.
     /// </summary>
     /// <param name="aliases">
     /// The nodes, in the order they should break ties — the caller sorts them, and that order is what
-    /// makes the result stable.
+    /// makes the result stable. Keys are compared <em>ordinally</em>: two tables whose quoted names differ
+    /// only by case are two nodes, not one.
     /// </param>
     /// <param name="links">The edges. Links naming an alias that is not a node are ignored.</param>
-    public static GraphLayoutResult Compute(IReadOnlyList<string> aliases, IReadOnlyList<GraphLink> links)
+    /// <param name="nodeWidth">
+    /// How wide every box is: <see cref="NodeWidth" />, or what <see cref="FitNodeWidth" /> says the titles
+    /// need. One width for every box, so "no two boxes overlap" stays a property of the constants.
+    /// </param>
+    /// <param name="layerGap">
+    /// The empty space between two layers: <see cref="LayerGap" />, or what <see cref="FitLayerGap" /> says
+    /// the edge labels need.
+    /// </param>
+    public static GraphLayoutResult Compute(
+        IReadOnlyList<string> aliases,
+        IReadOnlyList<GraphLink> links,
+        double nodeWidth = NodeWidth,
+        double layerGap = LayerGap)
     {
         ArgumentNullException.ThrowIfNull(aliases);
         ArgumentNullException.ThrowIfNull(links);
 
+        nodeWidth = Math.Clamp(nodeWidth, NodeWidth, MaxNodeWidth);
+        layerGap = Math.Clamp(layerGap, LayerGap, MaxLayerGap);
+
         List<string> nodes = [];
-        Dictionary<string, int> index = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, int> index = new(StringComparer.Ordinal);
 
         foreach (var alias in aliases)
         {
@@ -192,7 +237,7 @@ internal static class GraphLayout
         int[] layers = AssignLayers(nodes.Count, resolved, isBackEdge);
         List<List<int>> rows = OrderWithinLayers(nodes.Count, resolved, isBackEdge, layers);
 
-        GraphNodeBox[] boxes = Place(nodes, layers, rows);
+        GraphNodeBox[] boxes = Place(nodes, layers, rows, nodeWidth, layerGap);
 
         var width = (boxes.Max(static x => x.X + x.Width)) + Margin;
         var bottom = boxes.Max(static x => x.Y + x.Height);
@@ -223,6 +268,69 @@ internal static class GraphLayout
         var height = bottom + (hasBackEdge ? BackEdgeDrop + Margin : Margin);
 
         return new GraphLayoutResult(boxes, paths, Round(width), Round(height));
+    }
+
+    /// <summary>
+    /// The box width that fits the longest of <paramref name="titles" />, between <see cref="NodeWidth" />
+    /// and <see cref="MaxNodeWidth" />.
+    /// </summary>
+    /// <param name="titles">What the boxes will say on their first line.</param>
+    public static double FitNodeWidth(IEnumerable<string> titles)
+    {
+        ArgumentNullException.ThrowIfNull(titles);
+
+        int longest = 0;
+        foreach (string title in titles)
+        {
+            longest = Math.Max(longest, title?.Length ?? 0);
+        }
+
+        return Math.Clamp(Math.Ceiling((longest * TitleCharacterWidth) + TitlePadding), NodeWidth, MaxNodeWidth);
+    }
+
+    /// <summary>How many characters of a title fit a box <paramref name="nodeWidth" /> wide.</summary>
+    /// <remarks>Seventeen at <see cref="NodeWidth" />, which is where the diagram has always cut an alias.</remarks>
+    public static int TitleCapacity(double nodeWidth) =>
+        Math.Max(4, (int) Math.Floor((nodeWidth - TitlePadding) / TitleCharacterWidth));
+
+    /// <summary>How many characters of a box's second line fit - twenty-two at <see cref="NodeWidth" />.</summary>
+    public static int SubtitleCapacity(double nodeWidth) =>
+        Math.Max(4, (int) Math.Floor((nodeWidth - 22) / 7));
+
+    /// <summary>
+    /// The layer gap that fits the longest of <paramref name="labels" />, between <see cref="LayerGap" />
+    /// and <see cref="MaxLayerGap" />. No labels, no change: a diagram with nothing written on its edges
+    /// keeps the gap it has always had.
+    /// </summary>
+    /// <param name="labels">What the edges will say, <see langword="null" /> for an edge with no label.</param>
+    public static double FitLayerGap(IEnumerable<string?> labels)
+    {
+        ArgumentNullException.ThrowIfNull(labels);
+
+        int longest = 0;
+        foreach (string? label in labels)
+        {
+            longest = Math.Max(longest, label?.Length ?? 0);
+        }
+
+        return longest == 0
+            ? LayerGap
+            : Math.Clamp(Math.Ceiling((longest * LabelCharacterWidth) + LabelPadding), LayerGap, MaxLayerGap);
+    }
+
+    /// <summary>How many characters of an edge label fit a gap <paramref name="layerGap" /> wide.</summary>
+    public static int LabelCapacity(double layerGap) =>
+        Math.Max(4, (int) Math.Floor((layerGap - LabelPadding) / LabelCharacterWidth));
+
+    /// <summary>
+    /// <paramref name="value" /> cut to <paramref name="capacity" /> characters with an ellipsis at the
+    /// end, or as it is when it fits.
+    /// </summary>
+    public static string Ellipsis(string value, int capacity)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+
+        return value.Length <= capacity ? value : value[..Math.Max(capacity - 1, 1)] + "…";
     }
 
     /// <summary>
@@ -468,7 +576,12 @@ internal static class GraphLayout
         }
     }
 
-    private static GraphNodeBox[] Place(List<string> nodes, int[] layers, List<List<int>> rows)
+    private static GraphNodeBox[] Place(
+        List<string> nodes,
+        int[] layers,
+        List<List<int>> rows,
+        double nodeWidth,
+        double layerGap)
     {
         var tallest = 0;
         foreach (List<int> row in rows)
@@ -492,9 +605,9 @@ internal static class GraphLayout
 
                 boxes[node] = new GraphNodeBox(
                     nodes[node],
-                    Round(Margin + (layer * (NodeWidth + LayerGap))),
+                    Round(Margin + (layer * (nodeWidth + layerGap))),
                     Round(Margin + offset + (r * (NodeHeight + RowGap))),
-                    NodeWidth,
+                    nodeWidth,
                     NodeHeight,
                     layers[node],
                     r);

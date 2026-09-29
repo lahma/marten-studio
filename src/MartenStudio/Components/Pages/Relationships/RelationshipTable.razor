@@ -6,17 +6,21 @@
     The same relationships the diagram draws, as a table.
 
     Not a fallback and not an afterthought: this is the accessible form of the picture and the only form
-    below 900px, so it has to carry every edge the SVG draws and the same links. RelationshipTableTests
-    asserts exactly that, against the layout the diagram was given, because a table that quietly listed
-    fewer rows than the picture had arrows would be a screen that tells two different stories depending on
-    who is reading it.
+    below 900px, so it has to carry every edge the SVG draws and the same links. The page tests assert
+    exactly that, against the layout the diagram was given, and every row carries the same data-edge the
+    arrow it describes carries - because a table that quietly listed fewer rows than the picture had arrows
+    would be a screen that tells two different stories depending on who is reading it.
+
+    A key between two document types reads as it always has. A key with a table at either end names the
+    table as a square chip linking to its object detail, shows its label with every column of the key
+    beneath it, and says whether Postgres has validated it.
 *@
 
 <TableScroll Label="Relationships table">
-    <table class="ms-table ms-graph-table">
+    <table class="ms-table ms-graph-table @(Compact ? "ms-graph-table-compact" : null)">
         <caption class="ms-sr-only">
-            Every foreign key between the document types of this store, with the collection that points, the
-            collection pointed at, the column, and whether the database has the constraint.
+            Every foreign key between the document types and tables on the diagram, with the end that points,
+            the end pointed at, the columns, whether the database has the constraint, and what a delete does.
         </caption>
         <thead>
             <tr>
@@ -33,19 +37,31 @@
             {
                 RelationshipEdge edge = Graph.Edges[i];
 
-                <tr class="ms-table-row ms-graph-row @RowClass(edge)" @key="i">
+                <tr class="ms-table-row ms-graph-row @RowClass(edge)" data-edge="@RelationshipDiagram.EdgeId(Graph, edge)" @key="i">
                     <td class="ms-table-cell">
-                        <a href="@HrefFor(edge.FromAlias)" class="ms-graph-row-link">
-                            <CollectionChip Alias="@edge.FromAlias" Hue="@Hue(edge.FromAlias)" Small="true" />
-                        </a>
+                        @End(edge.FromAlias, edge.FromIsTable)
                     </td>
                     <td class="ms-table-cell">
                         <span class="ms-graph-row-arrow" aria-hidden="true">→</span>
-                        <a href="@HrefFor(edge.ToAlias)" class="ms-graph-row-link">
-                            <CollectionChip Alias="@edge.ToAlias" Hue="@Hue(edge.ToAlias)" Small="true" />
-                        </a>
+                        @End(edge.ToAlias, edge.ToIsTable)
                     </td>
-                    <td class="ms-table-cell ms-table-cell-mono">@edge.Column</td>
+                    @if (edge.IsTableEdge)
+                    {
+                        <td class="ms-table-cell ms-table-cell-mono ms-graph-row-keycell">
+                            <span class="ms-graph-row-label">@edge.Column</span>
+                            @* Every column on both sides, when that says more than the label: a stripped label,
+                               or referenced columns named differently from the pointing ones. *@
+                            @if (!string.Equals(edge.AllColumns, edge.Column, StringComparison.Ordinal)
+                                 || (edge.LinkedColumns.Length > 0 && !string.Equals(edge.LinkedColumns, edge.AllColumns, StringComparison.Ordinal)))
+                            {
+                                <span class="ms-graph-row-columns">@edge.AllColumns@(edge.LinkedColumns.Length > 0 ? " → " + edge.LinkedColumns : string.Empty)</span>
+                            }
+                        </td>
+                    }
+                    else
+                    {
+                        <td class="ms-table-cell ms-table-cell-mono">@edge.Column</td>
+                    }
                     <td class="ms-table-cell ms-table-cell-mono">@(edge.Member ?? "-")</td>
                     <td class="ms-table-cell">
                         <span class="ms-badge @BadgeClass(edge)" title="@StateTitle(edge)">@edge.State</span>
@@ -66,45 +82,63 @@
     [Parameter]
     public Func<string, string> HrefFor { get; set; } = static _ => "#";
 
-    private GraphModel Graph => Model as GraphModel ?? GraphModel.None;
+    /// <summary>Builds the link to a table's object detail, from its schema and name.</summary>
+    [Parameter]
+    public Func<string, string, string> TableHrefFor { get; set; } = static (_, _) => "#";
 
-    private int Hue(string alias)
+    /// <summary>The tighter layout the object detail page's neighbourhood uses.</summary>
+    [Parameter]
+    public bool Compact { get; set; }
+
+    private GraphModel Graph => DocumentComponentModel.Read(Model, GraphModel.None);
+
+    private RenderFragment End(string key, bool isTable) => __builder =>
     {
-        foreach (RelationshipNode node in Graph.Nodes)
+        if (isTable && Graph.FindTable(key) is { } table)
         {
-            if (string.Equals(node.Alias, alias, StringComparison.OrdinalIgnoreCase))
-            {
-                return node.Hue;
-            }
+            <a href="@TableHrefFor(table.Schema, table.Name)" class="ms-graph-row-link">
+                <TableChip Schema="@table.Schema" Name="@table.Name" Hue="@table.Hue" Small="true" />
+            </a>
         }
+        else
+        {
+            <a href="@HrefFor(key)" class="ms-graph-row-link">
+                <CollectionChip Alias="@key" Hue="@Hue(key)" Small="true" />
+            </a>
+        }
+    };
 
-        return 210;
-    }
+    private int Hue(string alias) => Graph.FindDocument(alias)?.Hue ?? 210;
 
-    private static string RowClass(RelationshipEdge edge) => (edge.Declared, edge.Physical) switch
+    private static string RowClass(RelationshipEdge edge) => RelationshipViews.StyleOf(edge) switch
     {
-        (true, false) => "ms-graph-row-declared",
-        (false, true) => "ms-graph-row-physical",
+        "declared" => "ms-graph-row-declared",
+        "physical" => "ms-graph-row-physical",
+        "notvalid" => "ms-graph-row-notvalid",
         _ => string.Empty,
     };
 
-    private static string BadgeClass(RelationshipEdge edge) => (edge.Declared, edge.Physical) switch
+    private static string BadgeClass(RelationshipEdge edge) => RelationshipViews.StyleOf(edge) switch
     {
-        (true, true) => "ms-badge-subclass",
-        (true, false) => "ms-badge-warning",
-        (false, true) => "ms-badge-tenant",
+        "declared" => "ms-badge-warning",
+        "physical" => "ms-badge-tenant",
+        "notvalid" => "ms-badge-warning",
         _ => "ms-badge-subclass",
     };
 
-    private static string StateTitle(RelationshipEdge edge) => (edge.Declared, edge.Physical) switch
+    private static string StateTitle(RelationshipEdge edge) => RelationshipViews.StyleOf(edge) switch
     {
-        (true, true) => "StoreOptions declares this key and the database has the constraint.",
-        (true, false) =>
+        "both" => "StoreOptions declares this key and the database has the constraint.",
+        "declared" =>
             "StoreOptions declares this key but the database has no such constraint - nothing is enforcing it. " +
             "The Schema screen's migration preview is where that gets applied.",
-        (false, true) =>
+        "physical" =>
             "The database has this constraint and StoreOptions does not declare it. Marten does not know " +
             "about it, and an apply under CreateOrUpdate would drop it.",
+        "table" => "The database has this constraint and has checked every row against it.",
+        "notvalid" =>
+            "The constraint was added NOT VALID: rows written since are checked, but the rows that were there " +
+            "when it was added never were, and some may not match.",
         _ => string.Empty,
     };
 }

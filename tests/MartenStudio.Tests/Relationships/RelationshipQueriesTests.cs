@@ -142,6 +142,77 @@ public class RelationshipQueriesTests
             "the panel says '1000+', which needs one row beyond the thousand to know there is a beyond");
     }
 
+    /// <summary>
+    /// The read the graph shares between visitors takes a key if <em>either</em> end is in the schema set -
+    /// a key from <c>legacy</c> into the document schema is exactly the one that must be counted for a
+    /// visitor who may not see <c>legacy</c> - and it is bounded, and never has a partition at either end.
+    /// </summary>
+    [Fact]
+    public void The_shared_read_takes_a_key_by_either_end_bounded_and_never_a_partition()
+    {
+        string sql = RelationshipQueries.ForeignKeysTouchingSql;
+
+        sql.Should().Contain("(ns.nspname = any(@schemas) or fns.nspname = any(@schemas))");
+        sql.Should().Contain("con.conparentid = 0");
+        sql.Should().Contain("not cl.relispartition");
+        sql.Should().Contain("not fcl.relispartition");
+        sql.Should().Contain("limit @cap");
+        sql.Should().Contain("with ordinality");
+
+        foreach (string forbidden in new[] { "AllObjects", "DocumentTables", "mt_hilo", "create ", "alter ", "information_schema" })
+        {
+            sql.Should().NotContain(forbidden);
+        }
+    }
+
+    /// <summary>
+    /// Both reads carry what the graph needs beyond the names: whether Postgres validated the key, and
+    /// both ends' primary keys - the key columns only, never an <c>INCLUDE</c> column.
+    /// </summary>
+    [Fact]
+    public void Both_reads_carry_validation_and_both_primary_keys()
+    {
+        foreach (string sql in new[] { RelationshipQueries.ForeignKeysSql, RelationshipQueries.ForeignKeysTouchingSql })
+        {
+            sql.Should().Contain("con.convalidated");
+            sql.Should().Contain("i.indisprimary");
+            sql.Should().Contain("u.ord <= i.indnkeyatts");
+            sql.Should().Contain("i.indrelid = con.conrelid");
+            sql.Should().Contain("i.indrelid = con.confrelid");
+        }
+
+        RelationshipQueries.ForeignKeysSql.Should().NotContain("fns.nspname = any(@schemas)",
+            "the store-schema read DB-3's inbound counts use keeps its meaning: the pointing end only");
+    }
+
+    [Fact]
+    public void The_table_count_quotes_the_catalogs_names_and_binds_every_value_untyped()
+    {
+        string sql = RelationshipQueries.TableInboundCountSql("legacy", "Customer Credit", ["customer_id", "tenant_id"]);
+
+        sql.Should().Be(
+            "select count(*) from (select 1 from \"legacy\".\"Customer Credit\" where \"customer_id\" = @k0 " +
+            "and \"tenant_id\" = @k1 limit @cap) as bounded");
+
+        using var command = RelationshipQueries.BuildTableInboundCount(
+            "legacy", "customer_credit", ["customer_id"], ["6f9619ff-8b86-d011-b42d-00cf4fc964ff"], 1001, 35);
+
+        command.Parameters.Should().HaveCount(2);
+        command.Parameters["k0"].NpgsqlDbType.Should().Be(NpgsqlDbType.Unknown,
+            "Postgres applies the column's own input function, so no type name is ever written into the SQL");
+        command.Parameters["k0"].Value.Should().Be("6f9619ff-8b86-d011-b42d-00cf4fc964ff");
+        command.Parameters["cap"].Value.Should().Be(1001);
+        command.CommandTimeout.Should().Be(35);
+    }
+
+    [Fact]
+    public void The_table_count_refuses_a_column_without_a_value()
+    {
+        Action build = () => RelationshipQueries.BuildTableInboundCount("legacy", "t", ["a", "b"], ["1"], 10, 5);
+
+        build.Should().Throw<ArgumentException>();
+    }
+
     [Theory]
     [InlineData("a", "NoAction")]
     [InlineData("r", "Restrict")]

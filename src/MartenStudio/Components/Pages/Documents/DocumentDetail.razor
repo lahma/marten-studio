@@ -477,11 +477,13 @@
         return false;
     }
 
-    private static string DeleteMessage(DocumentModel detail) => IsSoftDeleteType(detail)
+    // A hard delete also says what its ON DELETE actions do to tables the studio does not map, from the
+    // referenced-by counts already on the page (DB-6); a soft delete is an update and fires none of them.
+    private string DeleteMessage(DocumentModel detail) => IsSoftDeleteType(detail)
         ? $"'{detail.Alias}' is soft-deleted, so this marks the document as deleted: the row stays in " +
           $"{detail.TableName}, Marten's own queries stop returning it, and it can be undeleted."
         : $"'{detail.Alias}' is not soft-deleted, so this removes the row from {detail.TableName}. " +
-          "There is no undo.";
+          "There is no undo." + (referencedBy.DeleteConsequence() is { } consequence ? " " + consequence : string.Empty);
 
     /// <summary>
     /// Opens the editor, but only after the round trip has been asked whether this document can survive

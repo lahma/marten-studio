@@ -8211,3 +8211,281 @@ a.ms-db-name:hover {
         flex: 1 1 100%;
     }
 }
+
+/* ==========================================================================
+   DB-6. Relationships over tables
+
+   The relationships diagram draws the database's other tables beside the
+   document types: square boxes coloured by their schema, solid arrows for a
+   key on somebody else's table and dashed ones for a key Postgres added NOT
+   VALID, labels on those arrows, a Documents / Tables / Both switch, schema
+   chips, and the "too many to draw" panel that replaces a picture past sixty
+   boxes. Appended last on purpose (D26): nothing here overrides a rule of an
+   earlier section except by adding to it.
+   -------------------------------------------------------------------------- */
+
+/* --- The view switch and the schema chips --- */
+
+.ms-graph-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    margin: var(--ms-space-md) 0 var(--ms-space-sm);
+}
+
+.ms-graph-view-count {
+    margin-left: var(--ms-space-xs);
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-graph-schemas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+}
+
+.ms-graph-schema-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 2px var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text-secondary);
+    font-family: inherit;
+    font-size: var(--ms-font-size-xs);
+    cursor: pointer;
+}
+
+.ms-graph-schema-chip:hover {
+    background: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-graph-schema-chip[aria-pressed="true"] {
+    border-color: var(--ms-color-primary);
+    background: var(--ms-color-primary-light);
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+/* A schema's colour is a square, where a collection's is a circle: the same rule the diagram's boxes
+   follow, so a chip, a box and a table cell of one schema read as one thing. */
+.ms-graph-schema-chip-dot,
+.ms-graph-table-chip-dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    background: hsl(var(--ms-collection-hue, 210) 60% 50%);
+}
+
+@supports (color: oklch(50% 0.1 200)) {
+    .ms-graph-schema-chip-dot,
+    .ms-graph-table-chip-dot {
+        background: oklch(var(--ms-collection-lightness) var(--ms-collection-chroma) var(--ms-collection-hue, 210));
+    }
+}
+
+/* --- Table nodes, the neighbourhood's centre, and the new line styles --- */
+
+.ms-graph-node-table .ms-graph-node-box {
+    stroke: hsl(var(--ms-collection-hue, 210) 30% 55%);
+}
+
+.ms-graph-node-emphasis .ms-graph-node-box {
+    stroke: var(--ms-color-primary);
+    stroke-width: 2.5;
+}
+
+.ms-graph-edge-table .ms-graph-edge-line {
+    /* A key on somebody else's table: Postgres enforces it and Marten has no say in it, so it is drawn as
+       plainly as a declared-and-enforced key. */
+    stroke: var(--ms-color-border-strong);
+}
+
+.ms-graph-edge-table .ms-graph-edge-arrow {
+    fill: var(--ms-color-border-strong);
+}
+
+.ms-graph-edge-notvalid .ms-graph-edge-line {
+    /* Added NOT VALID: checked for every row written since, never for the rows already there. Dashed and
+       muted - distinct from the warning-coloured "declared only" dash, which means nothing enforces it. */
+    stroke: var(--ms-color-text-muted);
+    stroke-dasharray: 5 4;
+}
+
+.ms-graph-edge-notvalid .ms-graph-edge-arrow {
+    fill: var(--ms-color-text-muted);
+}
+
+.ms-graph-edge-label {
+    fill: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-mono);
+    font-size: 11px;
+    /* A halo in the diagram's own background, so a label stays readable where it crosses a line. */
+    paint-order: stroke;
+    stroke: var(--ms-color-surface);
+    stroke-width: 4px;
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+
+/* --- Too many boxes to draw --- */
+
+.ms-graph-toomany {
+    margin-top: var(--ms-space-md);
+    padding: var(--ms-space-lg);
+    border: 1px dashed var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-lg);
+    background: var(--ms-color-surface);
+    text-align: center;
+}
+
+.ms-graph-toomany-title {
+    margin: 0;
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-graph-toomany-description {
+    margin: var(--ms-space-xs) 0 0;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-sm);
+}
+
+/* --- A table's name as a chip, in the table, the isolated list and "referenced by" --- */
+
+.ms-graph-table-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 2px var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-surface-alt);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    white-space: nowrap;
+}
+
+.ms-graph-table-chip-small {
+    padding: 1px 6px;
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-graph-table-chip-text {
+    min-width: 0;
+}
+
+.ms-graph-table-chip-schema {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-graph-table-chip-name {
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-graph-row-link:hover .ms-graph-table-chip-name,
+.ms-referenced-link:hover .ms-graph-table-chip-name {
+    text-decoration: underline;
+}
+
+/* --- The table's rows for a key with a table at either end --- */
+
+.ms-graph-row-label {
+    display: block;
+}
+
+/* A composite key's cell holds a label and every column on both sides. Squeezed to the width of a phone
+   it became a column one word wide and rows ten lines tall; with a floor it stays readable and the
+   table's own scroll region (D25) takes the width instead. */
+.ms-graph-row-keycell {
+    min-width: 16rem;
+}
+
+/* "→ schema.table" is one thing: the arrow never wraps onto a line of its own above the chip. */
+.ms-graph-table .ms-table-cell:nth-child(2) {
+    white-space: nowrap;
+}
+
+.ms-graph-row-columns {
+    display: block;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-graph-row-notvalid {
+    box-shadow: inset 3px 0 0 var(--ms-color-text-muted);
+}
+
+.ms-graph-table-compact .ms-table-cell {
+    padding-top: var(--ms-space-xs);
+    padding-bottom: var(--ms-space-xs);
+}
+
+/* --- Isolated tables, and what the picture leaves out --- */
+
+.ms-graph-isolated {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-graph-isolated-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    margin: var(--ms-space-sm) 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-graph-withheld {
+    margin: var(--ms-space-md) 0 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+/* --- The object detail page's neighbourhood --- */
+
+.ms-neighbourhood {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    min-width: 0;
+}
+
+.ms-neighbourhood .ms-graph {
+    margin-top: 0;
+}
+
+/* --- Referenced by: tables, ON DELETE, and keys from schemas not shown --- */
+
+.ms-referenced-ondelete {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+.ms-referenced-notcounted {
+    border: 1px solid var(--ms-color-border);
+    background: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-referenced-withheld {
+    margin: var(--ms-space-sm) 0 0;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* Below 900px the picture goes away and the table is the screen (see the diagram's own section); the
+   "too many to draw" panel is about the picture, so it goes with it. */
+@media (max-width: 899px) {
+    .ms-graph-toomany {
+        display: none;
+    }
+}

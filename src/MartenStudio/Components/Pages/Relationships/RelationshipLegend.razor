@@ -1,34 +1,49 @@
 @*
-    What the three line styles mean. Constant markup - the swatches are the same CSS the diagram uses, so
-    a legend can never drift from the picture it explains.
+    What the line styles on the diagram mean - only the ones it actually draws. The swatches are the same
+    CSS the diagram uses, so a legend can never drift from the picture it explains.
+
+    Without Styles the legend explains the three drift styles of a key on a document table, which is what
+    the screen drew before tables could be on it.
 *@
 
+@if (Shown.Count > 0)
+{
 <ul class="ms-graph-legend">
-    <li class="ms-graph-legend-item">
-        <svg class="ms-graph-legend-swatch" viewBox="0 0 40 10" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-            <g class="ms-graph-edge ms-graph-edge-both">
-                <path class="ms-graph-edge-line" d="M 2 5 L 30 5" />
-                <path class="ms-graph-edge-arrow" d="M 38 5 L 29 9 L 29 1 Z" />
-            </g>
-        </svg>
-        <span>Declared and enforced - <code>StoreOptions</code> declares the key and Postgres has the constraint.</span>
-    </li>
-    <li class="ms-graph-legend-item">
-        <svg class="ms-graph-legend-swatch" viewBox="0 0 40 10" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-            <g class="ms-graph-edge ms-graph-edge-declared">
-                <path class="ms-graph-edge-line" d="M 2 5 L 30 5" />
-                <path class="ms-graph-edge-arrow" d="M 38 5 L 29 9 L 29 1 Z" />
-            </g>
-        </svg>
-        <span>Declared only - configured, never applied. Nothing is enforcing it.</span>
-    </li>
-    <li class="ms-graph-legend-item">
-        <svg class="ms-graph-legend-swatch" viewBox="0 0 40 10" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-            <g class="ms-graph-edge ms-graph-edge-physical">
-                <path class="ms-graph-edge-line" d="M 2 5 L 30 5" />
-                <path class="ms-graph-edge-arrow" d="M 38 5 L 29 9 L 29 1 Z" />
-            </g>
-        </svg>
-        <span>In the database only - Marten does not know about it, and an apply would drop it.</span>
-    </li>
+    @foreach (string style in Shown)
+    {
+        <li class="ms-graph-legend-item" @key="style">
+            <svg class="ms-graph-legend-swatch" viewBox="0 0 40 10" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+                <g class="ms-graph-edge ms-graph-edge-@style">
+                    <path class="ms-graph-edge-line" d="M 2 5 L 30 5" />
+                    <path class="ms-graph-edge-arrow" d="M 38 5 L 29 9 L 29 1 Z" />
+                </g>
+            </svg>
+            <span>@Describe(style)</span>
+        </li>
+    }
 </ul>
+}
+
+@code {
+    /// <summary>The three styles a key between document types can be drawn in.</summary>
+    private static readonly IReadOnlyList<string> DocumentStyles = ["both", "declared", "physical"];
+
+    /// <summary>
+    /// Which styles to explain, by name - <c>both</c>, <c>declared</c>, <c>physical</c>, <c>table</c>,
+    /// <c>notvalid</c> - in legend order. <see langword="null" /> for the three drift styles.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyCollection<string>? Styles { get; set; }
+
+    private IReadOnlyCollection<string> Shown => Styles ?? DocumentStyles;
+
+    private static RenderFragment Describe(string style) => style switch
+    {
+        "both" => @<text>Declared and enforced - <code>StoreOptions</code> declares the key and Postgres has the constraint.</text>,
+        "declared" => @<text>Declared only - configured, never applied. Nothing is enforcing it.</text>,
+        "physical" => @<text>In the database only - Marten does not know about it, and an apply would drop it.</text>,
+        "table" => @<text>A key on a table Marten does not map - enforced by Postgres.</text>,
+        "notvalid" => @<text>NOT VALID - Postgres checks new rows but never checked the ones already there.</text>,
+        _ => @<text>@style</text>,
+    };
+}

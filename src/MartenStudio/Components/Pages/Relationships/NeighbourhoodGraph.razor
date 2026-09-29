@@ -1,0 +1,182 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Relationships
+@using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph
+@implements IDisposable
+@inject IRelationshipDataService RelationshipData
+@inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    One object and its direct neighbours: every foreign key into and out of it, as a small diagram and the
+    table that is its accessible form. What the object detail page's Relationships tab shows.
+
+    It reads the same graph the Relationships screen draws - the same per-visitor filter, so a neighbour in
+    a schema the visitor is not shown is counted and never named, and a hidden document type is simply not
+    there - and cuts it down to one node's edges (RelationshipViews.Neighbourhood). Two parameters and the
+    scope from StudioState, so the page that hosts it needs nothing but the names it already has.
+
+    Loading, failure, "not in a schema you are shown" and "no keys" are all states of its own, so the tab
+    can host it without knowing anything about what it reads.
+*@
+
+<section class="ms-neighbourhood" aria-label="@($"Foreign keys of {Schema}.{Name}")">
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (graph.Error is { Length: > 0 } error)
+    {
+        <ErrorAlert Message="@error" OnRetry="LoadAsync" />
+    }
+    else if (neighbourhood.State == NeighbourhoodState.Refused)
+    {
+        <div class="ms-empty ms-neighbourhood-refused">
+            <p class="ms-empty-title">Relationships not shown</p>
+            <p class="ms-empty-description">@neighbourhood.Reason</p>
+        </div>
+    }
+    else if (neighbourhood.State == NeighbourhoodState.Empty)
+    {
+        <div class="ms-empty ms-neighbourhood-empty">
+            <p class="ms-empty-title">No foreign keys</p>
+            <p class="ms-empty-description">
+                Nothing you can see points at <code>@($"{Schema}.{Name}")</code>, and it points at nothing you can see.
+            </p>
+        </div>
+
+        @Withheld()
+    }
+    else
+    {
+        <RelationshipLegend Styles="@styles" />
+
+        @if (neighbourhood.Graph.Nodes.Count + neighbourhood.Graph.Tables.Count > RelationshipViews.NodeCap)
+        {
+            <div class="ms-graph-toomany" role="status">
+                <p class="ms-graph-toomany-title">
+                    @(neighbourhood.Graph.Nodes.Count + neighbourhood.Graph.Tables.Count) objects are too many to draw.
+                </p>
+                <p class="ms-graph-toomany-description">Every foreign key is still in the table below.</p>
+            </div>
+        }
+        else
+        {
+            <RelationshipGraph Model="@neighbourhood.Graph"
+                               HrefFor="@CollectionHref"
+                               TableHrefFor="@TableHref"
+                               Centre="@neighbourhood.Centre" />
+        }
+
+        <RelationshipTable Model="@neighbourhood.Graph"
+                           HrefFor="@CollectionHref"
+                           TableHrefFor="@TableHref"
+                           Compact="true" />
+
+        @Withheld()
+    }
+</section>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private GraphModel graph = GraphModel.None;
+    private RelationshipNeighbourhood neighbourhood = RelationshipNeighbourhood.Empty(0);
+    private IReadOnlyList<string> styles = [];
+    private bool loading = true;
+    private string? loadedSignature;
+
+    /// <summary>The object's schema, as the catalog has it.</summary>
+    [Parameter]
+    public string Schema { get; set; } = string.Empty;
+
+    /// <summary>The object's name, as the catalog has it.</summary>
+    [Parameter]
+    public string Name { get; set; } = string.Empty;
+
+    protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await State.EnsureInitializedAsync();
+
+        StudioScope? scope = State.ActiveScope;
+        string signature = string.Join('\u001f', Schema, Name, scope?.StoreKey, scope?.DatabaseId, scope?.TenantId);
+
+        if (string.Equals(signature, loadedSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        loadedSignature = signature;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StudioScope? scope = State.ActiveScope;
+
+            if (scope is null)
+            {
+                graph = GraphModel.None;
+                neighbourhood = RelationshipNeighbourhood.Refused(
+                    "This application registered no Marten store that you are authorized to see.");
+                return;
+            }
+
+            graph = await RelationshipData.GetGraphAsync(scope, lifetime.Token);
+            neighbourhood = RelationshipViews.Neighbourhood(graph, Schema, Name);
+            styles = RelationshipViews.Styles(neighbourhood.Graph.Edges);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // The service answers with a value rather than throwing, so reaching here means something outside
+            // it did. On the tab either way, never on the circuit.
+            graph = GraphModel.Failed(exception.Message, DateTimeOffset.UtcNow);
+        }
+        finally
+        {
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private RenderFragment Withheld() => __builder =>
+    {
+        if (neighbourhood.Withheld > 0)
+        {
+            <p class="ms-graph-withheld" role="note">
+                @(neighbourhood.Withheld == 1
+                    ? "1 more foreign key reaches a schema this studio does not show you."
+                    : $"{neighbourhood.Withheld} more foreign keys reach schemas this studio does not show you.")
+            </p>
+        }
+    };
+
+    private string CollectionHref(string alias) =>
+        DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias);
+
+    private string TableHref(string tableSchema, string name) =>
+        RelationshipLinks.ToObject(Options.Value, State.ActiveScope, tableSchema, name);
+
+    private Task OnScopeChangedAsync() => InvokeAsync(async () =>
+    {
+        loadedSignature = null;
+        await OnParametersSetAsync();
+    });
+
+    public void Dispose()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}
