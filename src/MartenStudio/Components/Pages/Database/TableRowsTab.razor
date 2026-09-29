@@ -176,10 +176,42 @@
 
     private string DateHintPreference => "ms_db_datehint_" + PreferenceScope;
 
+    /// <summary>
+    /// Whether this render is the circuit's: set by the first <see cref="OnAfterRenderAsync" />, which static
+    /// rendering never calls. Rows are read only then (see <see cref="OnParametersSetAsync" />).
+    /// </summary>
+    private bool interactive;
+
+    /// <remarks>
+    /// <para>
+    /// <b>No rows are read while prerendering.</b> The route prerenders, and a DI scope of its own is a ledger of
+    /// its own (<c>TableRowAuditLedger</c>): a read in the prerender and the same read again in the circuit was
+    /// two ring entries, event 9235 twice, and for a link the gate refuses event 9203 - a Warning - twice, for one
+    /// pasted link or one refresh. So a static render draws the loading state and reads nothing, and the circuit's
+    /// first render reads. It is also what keeps a static re-render of the page - the layout writing the scope
+    /// into the address bar can cost one - from reading and recording the same rows a third time.
+    /// </para>
+    /// <para>
+    /// "Is this render interactive" is asked the way <c>StudioLayout</c> asks it, by whether
+    /// <see cref="OnAfterRenderAsync" /> has run, rather than through <c>RendererInfo</c>: the framework calls it
+    /// for an interactive render and never for a static one, and a test host that supplies no renderer
+    /// information - bUnit throws for it unless a test sets one - needs nothing to say so.
+    /// </para>
+    /// </remarks>
     protected override async Task OnParametersSetAsync()
     {
         url = RowsUrl.Read(Navigation.Uri);
 
+        if (!interactive)
+        {
+            return;
+        }
+
+        await LoadIfChangedAsync();
+    }
+
+    private async Task LoadIfChangedAsync()
+    {
         string signature = Signature();
         if (string.Equals(signature, loadedSignature, StringComparison.Ordinal))
         {
@@ -197,6 +229,7 @@
             return;
         }
 
+        interactive = true;
         preferencesLoaded = true;
 
         string? hints = await ReadPreferenceAsync(DateHintPreference);
@@ -211,7 +244,11 @@
         if (url.Columns is null && await ReadPreferenceAsync(ColumnsPreference) is { Length: > 0 } stored)
         {
             Navigate(url with { Columns = stored }, replace: true);
+            url = RowsUrl.Read(Navigation.Uri);
         }
+
+        // The first read, after the preferences: a stored column set is part of it, rather than a second read.
+        await LoadIfChangedAsync();
     }
 
     private string Signature() => string.Join(

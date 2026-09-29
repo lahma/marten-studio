@@ -229,13 +229,46 @@
             ? "None of these belong to " + (Owner == DatabaseOwnerFilter.Marten ? "Marten." : "anyone but Marten.")
             : "No " + DatabasePresentation.CategoryLabel(Category).ToLowerInvariant() + (Schema is null ? " in the schemas you can see." : " in " + Schema + ".");
 
+    /// <summary>
+    /// Whether this render is the circuit's: set by the first <see cref="OnAfterRenderAsync" />, which static
+    /// rendering never calls. The lists are read only then.
+    /// </summary>
+    private bool interactive;
+
     protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
 
+    /// <remarks>
+    /// Nothing is read while prerendering, nor in any other static render: a <c>?schema=</c> the visitor's gate
+    /// refuses is one refusal per page view, and a read in each of the prerender, the circuit and the static
+    /// re-render the layout's scope navigation costs recorded it three times (the object page's rule, for the
+    /// same reason).
+    /// </remarks>
     protected override async Task OnParametersSetAsync()
     {
         await State.EnsureInitializedAsync();
         await ApplyScopeFromUrlAsync();
 
+        if (!interactive)
+        {
+            return;
+        }
+
+        await LoadIfChangedAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        interactive = true;
+        await LoadIfChangedAsync();
+    }
+
+    private async Task LoadIfChangedAsync()
+    {
         string signature = Signature();
         if (string.Equals(signature, loadedSignature, StringComparison.Ordinal))
         {
@@ -307,7 +340,9 @@
             {
                 list = await Data.ListAsync(scope, new DatabaseObjectQuery(Category, Schema, Owner, Filter), token);
 
-                if (Schema is { } schema)
+                // The rail's bands are the same schema asked again: when the grid's own list of it was refused,
+                // they would be refused the same way - and audited again, as a second refusal of one page view.
+                if (Schema is { } schema && list.Refusal == DatabaseRefusal.None)
                 {
                     railTables = Reuses(DatabaseObjectCategory.Tables)
                         ? list

@@ -122,6 +122,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         ArgumentNullException.ThrowIfNull(scope);
 
         DateTimeOffset readAt = timeProvider.GetUtcNow();
+        DatabaseGate? gate = null;
 
         try
         {
@@ -132,11 +133,13 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             (RelationshipDatabaseView? view, string? unavailable) = await ViewAsync(scope, resolved, withRelations: true, cancellationToken)
                 .ConfigureAwait(false);
 
+            gate = view?.Gate;
+
             IReadOnlyDictionary<string, long> estimates;
 
             await using (NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read))
             {
-                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
                 // One grouped reltuples read for every document node's count (D8); the table nodes' come
                 // with the gate's relation list. A diagram of forty document types is not eighty round trips.
@@ -173,7 +176,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             logger.LogWarning(
                 exception, "Marten Studio could not read the relationships of {StoreKey}", scope.StoreKey);
 
-            return RelationshipGraph.Failed(Describe(exception), readAt);
+            return RelationshipGraph.Failed(Describe(exception, gate), readAt);
         }
     }
 
@@ -191,6 +194,8 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             return ReferencedBy.None;
         }
 
+        DatabaseGate? gate = null;
+
         try
         {
             // Before the cache and never inside it: resolving is where the store, database and tenant
@@ -200,6 +205,8 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
             (RelationshipDatabaseView? view, _) = await ViewAsync(scope, resolved, withRelations: false, cancellationToken)
                 .ConfigureAwait(false);
+
+            gate = view?.Gate;
 
             PhysicalForeignKeyRead keys = await ForeignKeysAsync(resolved, cancellationToken).ConfigureAwait(false);
 
@@ -260,7 +267,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             if (inbound.Any(static x => !x.FromIsTable))
             {
                 await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
-                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+                await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
                 foreach (RelationshipEdge edge in inbound)
                 {
@@ -269,7 +276,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
                         continue;
                     }
 
-                    documents.Add(await CountAsync(connection, resolved, source, edge, id, cancellationToken)
+                    documents.Add(await CountAsync(connection, resolved, gate, source, edge, id, cancellationToken)
                         .ConfigureAwait(false));
                 }
             }
@@ -317,7 +324,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             logger.LogWarning(
                 exception, "Marten Studio could not read what references '{Id}' of '{Alias}'", id, alias);
 
-            return ReferencedBy.Failed(Describe(exception));
+            return ReferencedBy.Failed(Describe(exception, gate));
         }
     }
 
@@ -332,14 +339,19 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         bool withRelations,
         CancellationToken cancellationToken)
     {
+        DatabaseGate? known = null;
+
         try
         {
             DatabaseGateRead read = await access.GateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
 
             if (!read.Succeeded)
             {
+                // Its sentence names another store only to a visitor that store's policy passes (D27).
                 return (null, read.Reason ?? "The database browser's gate could not be read.");
             }
+
+            known = read.Gate;
 
             if (!withRelations)
             {
@@ -363,7 +375,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
                 logger.LogDebug(exception, "Marten Studio drew the relationships of {StoreKey} without tables", scope.StoreKey);
             }
 
-            return (null, DatabaseAccess.CatalogFailure(exception));
+            return (null, DatabaseAccess.CatalogFailure(exception, known));
         }
     }
 
@@ -434,7 +446,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         CancellationToken cancellationToken)
     {
         await using NpgsqlConnection connection = database.CreateConnection(ConnectionUsage.Read);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
         return await Session()
             .InTransactionAsync(
@@ -467,14 +479,26 @@ internal sealed class RelationshipDataService : IRelationshipDataService
     /// How many of one collection's documents point at one id, bounded by the cap.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The parameter is typed from the <em>physical</em> column rather than from the target's CLR id type:
     /// a strong-typed id guesses <c>Unknown</c> from the CLR type and would be sent as an untyped literal,
     /// which cannot use an index and is one Postgres type-resolution rule away from failing outright -
     /// the same trap the related-documents strip fell into (P2-fix H4).
+    /// </para>
+    /// <para>
+    /// <b>In a read-only transaction, under <c>statement_timeout</c>, as <see cref="CountTableAsync" /> is</b> - as
+    /// the store's own role, though, not <c>SqlConsoleRole</c>, because these are Marten's own tables. A
+    /// count on a large collection with no index behind the key used to run against the client's
+    /// <c>CommandTimeout</c> alone: Postgres was never told to stop, and the timeout arrived as an
+    /// <see cref="NpgsqlException" /> that no catch here expected - so it failed the whole panel, with a
+    /// Warning, on a document open, which is an expected state. A count out of time is now the row's
+    /// "not counted", logged at Debug, and the other collections still say theirs.
+    /// </para>
     /// </remarks>
     private async Task<ReferencedByEntry> CountAsync(
         NpgsqlConnection connection,
         ResolvedScope resolved,
+        DatabaseGate? gate,
         IDocumentType source,
         RelationshipEdge edge,
         string id,
@@ -482,10 +506,11 @@ internal sealed class RelationshipDataService : IRelationshipDataService
     {
         var hue = CollectionColorizer.HueFor(edge.FromAlias);
 
-        ReferencedByEntry Entry(long count = 0, bool capped = false, string? error = null) =>
+        ReferencedByEntry Entry(long count = 0, bool capped = false, string? error = null, string? notCounted = null) =>
             new(edge.FromAlias, edge.Column, edge.Member, hue, count, capped, edge.Declared, edge.Physical, error)
             {
                 OnDelete = edge.OnDelete,
+                NotCounted = notCounted,
             };
 
         try
@@ -521,25 +546,49 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
             NpgsqlDbType dbType = PostgresColumn.ToNpgsqlDbType(column.UdtName);
 
-            await using NpgsqlCommand command = RelationshipQueries.BuildInboundCount(
-                table,
-                edge.Column,
-                dbType,
-                parsed.Value!,
-                resolved.TenantId,
-                RelationshipQueries.DefaultInboundCap,
-                CommandTimeoutSeconds);
+            // The store's own role, as every document read is: SqlConsoleRole narrows what the studio reads
+            // beyond Marten's tables, never Marten's own.
+            var session = new ReadOnlySqlSession(new ReadOnlySqlOptions { StatementTimeout = options.Value.QueryTimeout });
 
-            command.Connection = connection;
+            long count = await session
+                .InTransactionAsync(
+                    connection,
+                    async (transaction, token) =>
+                    {
+                        await using NpgsqlCommand command = RelationshipQueries.BuildInboundCount(
+                            table,
+                            edge.Column,
+                            dbType,
+                            parsed.Value!,
+                            resolved.TenantId,
+                            RelationshipQueries.DefaultInboundCap,
+                            SessionCommandTimeoutSeconds);
 
-            var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-            var count = result is null or DBNull
-                ? 0L
-                : Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
+                        command.Connection = connection;
+                        command.Transaction = transaction;
+
+                        object? result = await command.ExecuteScalarAsync(token).ConfigureAwait(false);
+
+                        return result is null or DBNull
+                            ? 0L
+                            : Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
 
             var capped = count >= RelationshipQueries.DefaultInboundCap;
 
             return Entry(capped ? RelationshipQueries.DefaultInboundCap - 1 : count, capped);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException && PostgresFailure.IsTimeout(exception))
+        {
+            // The budget doing its job on a large collection: the row says so, and the panel carries on.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "Marten Studio stopped counting references from '{Alias}' at its timeout", edge.FromAlias);
+            }
+
+            return Entry(notCounted: NotCountedInTime());
         }
         catch (PostgresException exception)
         {
@@ -548,9 +597,15 @@ internal sealed class RelationshipDataService : IRelationshipDataService
                 logger.LogDebug(exception, "Marten Studio could not count references from '{Alias}'", edge.FromAlias);
             }
 
-            return Entry(error: $"{exception.SqlState}: {exception.MessageText}");
+            return Entry(error: Describe(exception, gate));
         }
     }
+
+    /// <summary>What a count that ran out of time says on its row.</summary>
+    private string NotCountedInTime() =>
+        "Counting these took longer than MartenStudioOptions.QueryTimeout (" +
+        options.Value.QueryTimeout.TotalSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) +
+        " s), so they were not counted.";
 
     /// <summary>
     /// How many rows of a table the studio does not map point at one document, bounded by the cap - when
@@ -678,7 +733,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         try
         {
             await using NpgsqlConnection connection = grant.Grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             long count = await Session()
                 .InTransactionAsync(
@@ -716,6 +771,15 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
             return Entry(capped ? RelationshipQueries.DefaultInboundCap - 1 : count, capped) with { ChildFilter = childFilter };
         }
+        catch (Exception exception) when (exception is not OperationCanceledException && PostgresFailure.IsTimeout(exception))
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "Marten Studio stopped counting references from '{Table}' at its timeout", qualified);
+            }
+
+            return Entry(notCounted: NotCountedInTime());
+        }
         catch (PostgresException exception)
         {
             if (logger.IsEnabled(LogLevel.Debug))
@@ -723,7 +787,9 @@ internal sealed class RelationshipDataService : IRelationshipDataService
                 logger.LogDebug(exception, "Marten Studio could not count references from '{Table}'", qualified);
             }
 
-            return Entry(error: $"{exception.SqlState}: {exception.MessageText}");
+            // The values bound are this document's id and tenant: what the visitor already has on screen.
+            return Entry(error: exception.SqlState + ": " +
+                PostgresErrorText.Redact(exception.MessageText, grant.Grant.Gate.WithheldSchemas, values));
         }
     }
 
@@ -765,10 +831,19 @@ internal sealed class RelationshipDataService : IRelationshipDataService
     /// </summary>
     private int SessionCommandTimeoutSeconds => (int) Math.Ceiling(options.Value.QueryTimeout.TotalSeconds) + 5;
 
-    private static string Describe(Exception exception) => exception switch
+    /// <summary>
+    /// A failure as the page shows it, Postgres' own words masked through the visitor's gate when it was read
+    /// (<see cref="PostgresErrorText" />); before it was, what failed was the scope or the gate itself.
+    /// </summary>
+    private static string Describe(Exception exception, DatabaseGate? gate)
     {
-        PostgresException postgres => $"{postgres.SqlState}: {postgres.MessageText}",
-        NpgsqlException => "The database could not be reached: " + exception.Message,
-        _ => exception.Message,
-    };
+        string message = exception switch
+        {
+            PostgresException postgres => $"{postgres.SqlState}: {postgres.MessageText}",
+            NpgsqlException => "The database could not be reached: " + exception.Message,
+            _ => exception.Message,
+        };
+
+        return gate is null ? message : PostgresErrorText.Redact(message, gate.WithheldSchemas) ?? message;
+    }
 }

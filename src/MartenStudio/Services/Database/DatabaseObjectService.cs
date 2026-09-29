@@ -72,6 +72,8 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             return DatabaseBrowserOverview.Unavailable(refused!);
         }
 
+        DatabaseGate? known = null;
+
         try
         {
             DatabaseGateRead gateRead = await access.GateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
@@ -80,7 +82,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 return DatabaseBrowserOverview.Unavailable(gateRead.Reason ?? "The database browser is unavailable.", gateRead.Refusal);
             }
 
-            DatabaseGate gate = gateRead.Gate;
+            DatabaseGate gate = known = gateRead.Gate;
 
             // Counted by a query of its own, grouped by schema - exact, whatever a list's cap is.
             IReadOnlyList<CatalogObjectCount> counts = await catalog
@@ -91,7 +93,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         }
         catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
         {
-            return DatabaseBrowserOverview.Unavailable(DatabaseAccess.CatalogFailure(exception));
+            return DatabaseBrowserOverview.Unavailable(DatabaseAccess.CatalogFailure(exception, known));
         }
     }
 
@@ -129,6 +131,8 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             return DatabaseObjectList.Refused(clamped, route.Refusal, route.Reason!);
         }
 
+        DatabaseGate? known = null;
+
         try
         {
             DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
@@ -137,7 +141,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 return DatabaseObjectList.Refused(clamped, gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.");
             }
 
-            DatabaseGate gate = gateRead.Gate;
+            DatabaseGate gate = known = gateRead.Gate;
 
             if (clamped.Schema is { } schema && !gate.CanSeeStructure(schema))
             {
@@ -157,7 +161,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         }
         catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
         {
-            return DatabaseObjectList.Refused(clamped, DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception));
+            return DatabaseObjectList.Refused(clamped, DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception, known));
         }
     }
 
@@ -193,6 +197,8 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             return DatabaseObjectDetail.Unavailable(route.Refusal, route.Reason!);
         }
 
+        DatabaseGate? known = null;
+
         try
         {
             DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
@@ -201,7 +207,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 return DatabaseObjectDetail.Unavailable(gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.");
             }
 
-            DatabaseGate gate = gateRead.Gate;
+            DatabaseGate gate = known = gateRead.Gate;
 
             if (!gate.CanSeeStructure(schema))
             {
@@ -221,7 +227,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         }
         catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
         {
-            return DatabaseObjectDetail.Unavailable(DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception));
+            return DatabaseObjectDetail.Unavailable(DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception, known));
         }
     }
 
@@ -281,6 +287,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         }
 
         StudioScope tenantless = scope with { TenantId = null };
+        DatabaseGate? known = null;
 
         try
         {
@@ -290,7 +297,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 return DatabaseObjectDefinition.Unavailable(reference, gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.");
             }
 
-            DatabaseGate gate = gateRead.Gate;
+            DatabaseGate gate = known = gateRead.Gate;
 
             if (!gate.CanSeeStructure(schema))
             {
@@ -322,7 +329,9 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         }
         catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
         {
-            return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception));
+            // A definition read Postgres refused - pg_get_functiondef on something it will not print, a lock
+            // it gave up on - is said in Postgres' words, masked through this visitor's gate.
+            return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception, known));
         }
     }
 
@@ -386,6 +395,8 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             return DatabaseSequenceValue.Unavailable(reference, refusal, reason);
         }
 
+        DatabaseGate? known = null;
+
         try
         {
             DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
@@ -394,7 +405,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 return Refuse(gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.", audited: false);
             }
 
-            DatabaseGate gate = gateRead.Gate;
+            DatabaseGate gate = known = gateRead.Gate;
 
             if (!gate.CanSeeStructure(schema))
             {
@@ -440,7 +451,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         }
         catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
         {
-            return Refuse(DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception), audited: false);
+            return Refuse(DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception, known), audited: false);
         }
     }
 
@@ -661,7 +672,12 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
         if (!store.Declarations.Succeeded)
         {
-            return Route.Refused(DatabaseRefusal.Unavailable, store.Declarations.Failure!);
+            // Another store that will not build is named only to a visitor its store policy passes (D27). No
+            // database is resolved yet, so that policy is asked with the visitor's own database id, as the
+            // Schema screen's classification asks it.
+            return Route.Refused(
+                DatabaseRefusal.Unavailable,
+                await access.DescribeFailureAsync(store.Declarations, scope.DatabaseId, cancellationToken).ConfigureAwait(false));
         }
 
         RouteKind kind = decide(store.Declarations);

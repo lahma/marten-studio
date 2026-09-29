@@ -4,6 +4,7 @@
 @inject StudioActionLog ActionLog
 @inject StudioState State
 @inject StudioAuthorization Authorization
+@inject StudioCapabilityGuard Capabilities
 
 <PageTitle>Activity</PageTitle>
 
@@ -111,19 +112,13 @@
     /// </summary>
     /// <remarks>
     /// The ring is process-wide and every circuit writes into it, so it is the one place in the studio
-    /// where one visitor's actions can be read by another. The per-store policy decides, entry by entry,
-    /// against the store, database and tenant the action was aimed at - the same question
-    /// <see cref="StudioScopeResolver" /> asks before any of those actions could have run. Entries whose
-    /// scope was never settled carry a placeholder store key, which no policy recognises, so they are
-    /// filtered out too; that is the safe direction.
+    /// where one visitor's actions can be read by another. <see cref="StudioActionLog.GetVisibleAsync" />
+    /// decides, entry by entry - the store policy against the scope the action was aimed at, and a read
+    /// beyond the store only for a visitor who may make it - and the Overview asks it the same way.
     /// </remarks>
     private async Task ReloadAsync()
     {
-        IReadOnlyList<StudioActionLogEntry> entries = ActionLog.GetLatest();
-
-        List<StudioActionLogEntry> allowed = await Authorization.FilterAsync(
-            entries,
-            static entry => new StudioScope(entry.StoreKey, entry.DatabaseId, entry.TenantId));
+        List<StudioActionLogEntry> allowed = await ActionLog.GetVisibleAsync(Authorization, Capabilities);
 
         if (string.IsNullOrWhiteSpace(filter))
         {

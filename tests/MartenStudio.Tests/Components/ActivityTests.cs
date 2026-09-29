@@ -177,6 +177,83 @@ public class ActivityTests
         actions.Should().NotContain("TheirsAction");
     }
 
+    /// <summary>
+    /// SEC-fix F2: a database-browser read names a non-Marten table and the columns a filter was on, and a SQL
+    /// console run carries two hundred characters of its statement. The store policy says nothing about who may
+    /// learn those, so a visitor the store policy allows and the write policy refuses read here what operators
+    /// browsed. They are shown only to a visitor who may make that read: the capability on, and the write
+    /// policy's yes with the capability named, against the entry's own scope.
+    /// </summary>
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    public void A_read_beyond_the_store_is_listed_only_for_a_visitor_who_may_make_it(bool capabilities, bool writePolicyAllows, bool listed)
+    {
+        using var context = ReadsBeyondTheStore(capabilities, writePolicyAllows);
+
+        var cells = context.Render<Activity>().TextOfAll("tbody tr td");
+
+        cells.Should().Contain("DeleteDocument", "an entry that is no read beyond the store is the store policy's alone");
+
+        if (listed)
+        {
+            cells.Should().Contain("quartz.qrtz_triggers").And.Contain("select * from legacy.payroll");
+        }
+        else
+        {
+            cells.Should().NotContain("quartz.qrtz_triggers", "a browser read names a table the visitor may not browse")
+                .And.NotContain("select * from legacy.payroll", "a console run carries the statement");
+            cells.Should().NotContain(static x => x.Contains("grade", StringComparison.Ordinal), "nor the column the filter was on");
+        }
+    }
+
+    /// <summary>
+    /// The Overview's recent activity is the same filter over the same ring (<see cref="StudioActionLog.GetVisibleAsync" />):
+    /// a visitor the write policy refuses the browser does not see an operator's reads there either.
+    /// </summary>
+    [Fact]
+    public async Task The_overview_filters_reads_beyond_the_store_the_way_Activity_does()
+    {
+        using var context = ReadsBeyondTheStore(capabilities: true, writePolicyAllows: false);
+        context.StoreInfo.WithStore();
+        await context.ReadyAsync();
+
+        var page = context.Render<Overview>();
+
+        page.WaitForAssertion(() => page.TextOfAll(".ms-overview-activity .ms-overview-list-name").Should().Equal("DeleteDocument"));
+    }
+
+    /// <summary>
+    /// A ring holding a database-browser read and a SQL console run by an operator, and a document delete, read
+    /// by a visitor the store policy allows everywhere - and the write policy as <paramref name="writePolicyAllows" /> says.
+    /// </summary>
+    private static StudioComponentContext ReadsBeyondTheStore(bool capabilities, bool writePolicyAllows)
+    {
+        var context = new StudioComponentContext();
+        context.Options.StoreAuthorizationPolicy = StudioComponentContext.StorePolicyName;
+        context.Options.WriteAuthorizationPolicy = "MartenStudioWrite";
+        context.Options.Capabilities.BrowseDatabase = capabilities;
+        context.Options.Capabilities.RunSql = capabilities;
+        context.Options.Capabilities.DeleteDocuments = true;
+
+        context.AuthenticationState.SignIn("ops");
+        var wholeDatabase = new StudioScope("default", "localhost.marten", null);
+
+        context.ActionLog.Record(
+            "Browse database rows", "quartz.qrtz_triggers", succeeded: true,
+            "Rows read with 1 filter term(s) on grade, sorted by (key) asc.", StudioCapability.BrowseDatabase, wholeDatabase);
+        context.ActionLog.Record(
+            "Run SQL", "select * from legacy.payroll", succeeded: true, "12 rows", StudioCapability.RunSql, wholeDatabase);
+        context.ActionLog.Record(
+            "DeleteDocument", "customer/42", succeeded: true, "deleted", StudioCapability.DeleteDocuments, wholeDatabase);
+
+        context.AuthenticationState.SignIn("viewer");
+        context.AuthorizationService.Allow(resource => resource.Capability is null || writePolicyAllows);
+
+        return context;
+    }
+
     [Fact]
     public void With_no_store_policy_configured_nothing_is_filtered_out()
     {

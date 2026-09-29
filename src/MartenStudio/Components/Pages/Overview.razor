@@ -12,6 +12,7 @@
 @inject StudioState State
 @inject StudioActionLog ActionLog
 @inject StudioAuthorization Authorization
+@inject StudioCapabilityGuard Capabilities
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IOptions<MartenStudioOptions> Options
 
@@ -781,25 +782,19 @@
     /// the sweep.
     /// </para>
     /// <para>
-    /// <b>Through <see cref="StudioAuthorization.FilterAsync{T}" />, which is where that rule lives.</b>
-    /// The bound is its <c>take</c> argument rather than a loop here, because the per-entry overload
-    /// fetches the authentication state on every call and a sweep wants it once - and because the
-    /// Activity screen filters the same ring and the two must not drift. With no per-store policy
-    /// configured nothing is asked at all, which is the reason an application that never set the option
-    /// pays nothing for this panel.
+    /// <b>Through <see cref="StudioActionLog.GetVisibleAsync" />, which is where that rule lives.</b>
+    /// The bound is its <c>take</c> argument rather than a loop here, because a sweep wants the
+    /// authentication state once - and because the Activity screen filters the same ring and the two must
+    /// not drift: a database-browser read or a SQL console run is shown only to a visitor who may make
+    /// one. With no policy configured nothing is asked at all, which is the reason an application that
+    /// never set the option pays nothing for this panel.
     /// </para>
     /// </remarks>
     private async Task<List<StudioActionLogEntry>> ReadActivityAsync(CancellationToken cancellationToken)
     {
-        IReadOnlyList<StudioActionLogEntry> entries = ActionLog.GetLatest();
-
         cancellationToken.ThrowIfCancellationRequested();
 
-        return await Authorization.FilterAsync(
-            entries,
-            static entry => new StudioScope(entry.StoreKey, entry.DatabaseId, entry.TenantId),
-            RecentCount,
-            cancellationToken);
+        return await ActionLog.GetVisibleAsync(Authorization, Capabilities, RecentCount, cancellationToken);
     }
 
     private string Link(string route) => EventLinks.To(Options.Value, route, State.ActiveScope);

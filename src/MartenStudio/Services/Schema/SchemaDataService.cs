@@ -145,8 +145,22 @@ internal sealed class SchemaDataService : ISchemaDataService
 
         SchemaCheck check = await RunCheckAsync(grant.Resolved, cancellationToken).ConfigureAwait(false);
 
-        return await LateRefusalAsync(scope, grant, SchemaScript.Check, CheckAction, cancellationToken).ConfigureAwait(false) is { } late
-            ? SchemaCheck.Refused(late)
+        if (await LateRefusalAsync(scope, grant, SchemaScript.Check, CheckAction, cancellationToken).ConfigureAwait(false) is { } late)
+        {
+            return SchemaCheck.Refused(late);
+        }
+
+        // Marten's assertion and a failure's message are free text about the database, and can name a schema this
+        // visitor is not shown - a foreign key's far end, a function an index calls.
+        return (check.AssertionMessage is { } assertion && !string.Equals(assertion, MatchesAssertion, StringComparison.Ordinal))
+               || (check.Reason is not null && check.Status == SchemaCheckStatus.Unavailable)
+            ? check with
+            {
+                AssertionMessage = await MaskAsync(scope, grant.Resolved, check.AssertionMessage, cancellationToken).ConfigureAwait(false),
+                Reason = check.Status == SchemaCheckStatus.Unavailable
+                    ? await MaskAsync(scope, grant.Resolved, check.Reason, cancellationToken).ConfigureAwait(false)
+                    : check.Reason,
+            }
             : check;
     }
 
@@ -171,7 +185,10 @@ internal sealed class SchemaDataService : ISchemaDataService
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Marten Studio could not preview a schema migration for database {DatabaseId}", grant.Resolved.Database.Id.Identity);
-            preview = MigrationPreview.None with { Notice = exception.Message };
+            preview = MigrationPreview.None with
+            {
+                Notice = await MaskAsync(scope, grant.Resolved, exception.Message, cancellationToken).ConfigureAwait(false),
+            };
         }
 
         return await LateRefusalAsync(scope, grant, SchemaScript.Preview, PreviewAction, cancellationToken).ConfigureAwait(false) is { } late
@@ -459,7 +476,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Marten Studio could not read table statistics for database {DatabaseId}", resolved.Database.Id.Identity);
-            return SchemaTables.Unavailable(exception.Message);
+            return SchemaTables.Unavailable(await MaskAsync(scope, resolved, exception.Message, cancellationToken).ConfigureAwait(false) ?? exception.Message);
         }
     }
 
@@ -583,7 +600,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Marten Studio could not read index statistics for database {DatabaseId}", resolved.Database.Id.Identity);
-            return SchemaIndexes.Unavailable(exception.Message);
+            return SchemaIndexes.Unavailable(await MaskAsync(scope, resolved, exception.Message, cancellationToken).ConfigureAwait(false) ?? exception.Message);
         }
     }
 
@@ -770,7 +787,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Marten Studio could not read functions for database {DatabaseId}", resolved.Database.Id.Identity);
-            return SchemaFunctions.Unavailable(exception.Message);
+            return SchemaFunctions.Unavailable(await MaskAsync(scope, resolved, exception.Message, cancellationToken).ConfigureAwait(false) ?? exception.Message);
         }
     }
 
@@ -800,7 +817,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Marten Studio could not produce a database script for database {DatabaseId}", grant.Resolved.Database.Id.Identity);
-            script = DdlScript.Unavailable(exception.Message);
+            script = DdlScript.Unavailable(await MaskAsync(scope, grant.Resolved, exception.Message, cancellationToken).ConfigureAwait(false) ?? exception.Message);
         }
 
         return await LateRefusalAsync(scope, grant, SchemaScript.Ddl, DdlAction, cancellationToken).ConfigureAwait(false) is { } late
@@ -824,7 +841,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         try
         {
             await database.AssertDatabaseMatchesConfigurationAsync(cancellationToken).ConfigureAwait(false);
-            assertion = "Marten reports that this database matches its configuration.";
+            assertion = MatchesAssertion;
         }
         catch (OperationCanceledException)
         {
@@ -1118,6 +1135,38 @@ internal sealed class SchemaDataService : ISchemaDataService
         }
 
         return await EverySchemaButTheStoresAsync(resolved, storeSchemas, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>What the drift check says when Marten's own assertion passed.</summary>
+    private const string MatchesAssertion = "Marten reports that this database matches its configuration.";
+
+    /// <summary>
+    /// Free text about the database - an exception's message, Marten's assertion - with every schema this visitor
+    /// is not shown masked (<see cref="PostgresErrorText" />): the browser gate's withheld set, or every schema but
+    /// the store's own while the gate cannot be read. When not even the schema list can be read, the text is
+    /// returned as it is: what failed then is the connection, whose messages name no schema.
+    /// </summary>
+    private async Task<string?> MaskAsync(StudioScope scope, ResolvedScope resolved, string? text, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return text;
+        }
+
+        try
+        {
+            DatabaseGateRead read = await databaseAccess.GateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+
+            IReadOnlySet<string> withheld = read.Succeeded
+                ? read.Gate.WithheldSchemas
+                : await EverySchemaButTheStoresAsync(resolved, SchemaNames(resolved), cancellationToken).ConfigureAwait(false);
+
+            return PostgresErrorText.Redact(text, withheld);
+        }
+        catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
+        {
+            return text;
+        }
     }
 
     /// <summary>

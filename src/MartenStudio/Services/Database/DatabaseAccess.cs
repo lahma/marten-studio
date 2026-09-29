@@ -12,7 +12,12 @@ namespace MartenStudio.Services.Database;
 /// <summary>The declarations of every registered store, or why they could not all be read.</summary>
 /// <param name="Classifier">The classifier over every store, when every store could be read.</param>
 /// <param name="StoreSchemas">The resolved store's own schemas.</param>
-/// <param name="Failure">Why the classification is unavailable - fail closed.</param>
+/// <param name="Failure">
+/// Why the classification is unavailable - fail closed - in words any visitor of the resolved store may read:
+/// the resolved store is named, because the visitor's own scope names it, and another store is "a registered
+/// Marten store". <see cref="DatabaseAccess.DescribeFailureAsync" /> names that one to a visitor its store
+/// policy passes.
+/// </param>
 internal sealed record DatabaseDeclarations(
     DatabaseObjectClassifier? Classifier,
     IReadOnlyList<string> StoreSchemas,
@@ -21,6 +26,18 @@ internal sealed record DatabaseDeclarations(
     /// <summary>Whether every store's declarations were read.</summary>
     [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(Classifier))]
     public bool Succeeded => Classifier is not null && Failure is null;
+
+    /// <summary>
+    /// The registration key of the other store <see cref="Failure" /> is about, when it is not the resolved
+    /// store - shown only to a visitor that store's store policy passes (AGENTS.md D27).
+    /// </summary>
+    public string? FailedStoreKey { get; init; }
+
+    /// <summary>
+    /// <see cref="Failure" /> with <see cref="FailedStoreKey" /> named and the reason it gave, for a visitor
+    /// that store's store policy passes; <see langword="null" /> when <see cref="Failure" /> names no other store.
+    /// </summary>
+    public string? NamedFailure { get; init; }
 }
 
 /// <summary>
@@ -85,12 +102,18 @@ internal sealed record DatabaseBrowseGrant(ResolvedScope? Resolved, DatabaseRefu
 /// <param name="Ownership">Whose it is.</param>
 /// <param name="Columns">Its columns.</param>
 /// <param name="RowKey">Its row key, or <see langword="null" /> when it has none.</param>
+/// <param name="Gate">
+/// The visitor's gate the grant was decided by - what judges the far ends of the relation's keys, and whose
+/// <see cref="DatabaseGate.WithheldSchemas" /> masks whatever Postgres says about a read of it
+/// (<see cref="PostgresErrorText" />), so nothing a page shows names a schema the visitor may not see.
+/// </param>
 internal sealed record DatabaseRowGrant(
     ResolvedScope Resolved,
     CatalogRelationDetail Relation,
     DatabaseObjectOwnership Ownership,
     IReadOnlyList<DatabaseColumnInfo> Columns,
-    DatabaseRowKey? RowKey);
+    DatabaseRowKey? RowKey,
+    DatabaseGate Gate);
 
 /// <summary>A row grant, or the refusal naming the gate that is shut.</summary>
 /// <param name="Grant">The grant.</param>
@@ -149,6 +172,12 @@ internal sealed class DatabaseAccess
     /// <summary>What the audit ring calls reading a relation's rows.</summary>
     internal const string RowsAction = "Browse database rows";
 
+    /// <summary>
+    /// What a sentence about another registered store calls it, for a visitor that store's store policy does
+    /// not pass: its key is not theirs to learn (AGENTS.md D27).
+    /// </summary>
+    internal const string UnnamedStore = "A registered Marten store";
+
     private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioCapabilityGuard capabilities;
     private readonly StudioAuthorization authorization;
@@ -198,7 +227,8 @@ internal sealed class DatabaseAccess
     /// <para>
     /// <b>Fail closed.</b> A store that will not build, or whose declarations throw, is a store whose
     /// tables would all read as "Other" - rows included. So one failure is a failure of the whole
-    /// classification, named after the store, rather than a smaller map.
+    /// classification rather than a smaller map - named after the store only for a visitor that store's store
+    /// policy passes (<see cref="DescribeFailureAsync" />), because another store's key is not everybody's.
     /// </para>
     /// <para>
     /// Every registration, ancillary stores included whatever
@@ -247,12 +277,17 @@ internal sealed class DatabaseAccess
 
             if (!availability.IsAvailable || store is null)
             {
-                return new DatabaseDeclarations(
-                    null,
-                    [],
-                    "Marten store '" + each.Key + "' could not be built (" +
-                    (availability.Message ?? "unknown reason") + "), so the studio cannot tell its tables " +
-                    "from anybody else's and shows no classification until it builds.");
+                const string consequence =
+                    ", so the studio cannot tell its tables from anybody else's and shows no classification until it builds.";
+
+                // Another store: its key - and the reason it gave, which can say anything about it - only for a
+                // visitor that store's store policy passes (DescribeFailureAsync).
+                return new DatabaseDeclarations(null, [], UnnamedStore + " could not be built" + consequence)
+                {
+                    FailedStoreKey = each.Key,
+                    NamedFailure = "Marten store '" + each.Key + "' could not be built (" +
+                                   (availability.Message ?? "unknown reason") + ")" + consequence,
+                };
             }
 
             stores.Add((each.Key, store));
@@ -326,11 +361,24 @@ internal sealed class DatabaseAccess
 
             if (!read.Succeeded)
             {
+                string named = "The configuration of Marten store '" + key + "' could not be read, so the " +
+                               "studio cannot tell its tables from anybody else's: " + read.Failure;
+
+                if (string.Equals(key, resolvedKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    // The visitor's own store: its key is in their own scope already.
+                    return new DatabaseDeclarations(null, [], named);
+                }
+
                 return new DatabaseDeclarations(
                     null,
                     [],
-                    "The configuration of Marten store '" + key + "' could not be read, so the " +
-                    "studio cannot tell its tables from anybody else's: " + read.Failure);
+                    "The configuration of a registered Marten store could not be read, so the studio cannot tell " +
+                    "its tables from anybody else's.")
+                {
+                    FailedStoreKey = key,
+                    NamedFailure = named,
+                };
             }
 
             if (ReferenceEquals(store, resolvedStore) && string.Equals(key, resolvedKey, StringComparison.OrdinalIgnoreCase))
@@ -345,6 +393,41 @@ internal sealed class DatabaseAccess
             new DatabaseObjectClassifier(declared, hidesDocumentTypes: isVisible is not null),
             storeSchemas,
             null);
+    }
+
+    /// <summary>
+    /// Why <paramref name="declared" /> failed, as this visitor may read it: another store that could not be
+    /// built or read is named, with the reason it gave, only when that store's store policy passes the visitor
+    /// for <c>(that store, <paramref name="databaseId" />, no tenant)</c> - the rule D27 sets for another store's
+    /// key everywhere else on the browser. Anybody else reads "a registered Marten store".
+    /// </summary>
+    /// <param name="declared">A failed read.</param>
+    /// <param name="databaseId">
+    /// The database the other store's policy is asked about. A store that cannot be built - or whose
+    /// configuration cannot be read - cannot say which of its databases this is, and is not asked to enumerate
+    /// them to find out: <see cref="GateAsync" /> passes this database's own identity, and a caller that has not
+    /// resolved a database yet the visitor's own <see cref="StudioScope.DatabaseId" />, as the Schema screen's
+    /// classification does.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the policy's evaluation.</param>
+    internal async Task<string> DescribeFailureAsync(
+        DatabaseDeclarations declared,
+        string databaseId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(declared);
+
+        string unnamed = declared.Failure ?? "The database browser is unavailable.";
+
+        if (declared.FailedStoreKey is not { } key || declared.NamedFailure is not { } named)
+        {
+            return unnamed;
+        }
+
+        return await authorization.IsAuthorizedAsync(new StudioScope(key, databaseId, null), capability: null, cancellationToken)
+            .ConfigureAwait(false)
+            ? named
+            : unnamed;
     }
 
     /// <summary>
@@ -470,7 +553,10 @@ internal sealed class DatabaseAccess
 
         if (!declared.Succeeded)
         {
-            return new DatabaseGateRead(null, DatabaseRefusal.Unavailable, declared.Failure);
+            return new DatabaseGateRead(
+                null,
+                DatabaseRefusal.Unavailable,
+                await DescribeFailureAsync(declared, resolved.Database.Id.Identity, cancellationToken).ConfigureAwait(false));
         }
 
         DatabasePolicyAnswer answer = await EvaluatePoliciesAsync(scope, cancellationToken).ConfigureAwait(false);
@@ -519,6 +605,13 @@ internal sealed class DatabaseAccess
     /// mean B's default, which need not be this database at all. So B's policy is asked with the identity
     /// of B's own database that is this one (<see cref="OtherStoreDatabaseIdAsync" />).
     /// </para>
+    /// <para>
+    /// <b>And only when somebody will be asked.</b> Finding B's identity for this database means
+    /// <c>AllDatabases()</c> on B, which on a master-table or sharded tenancy is a query - and, the first time
+    /// in the process, B's own <c>CreateOrUpdate</c> of its pool or master table (D27). The identity is only
+    /// ever the resource a policy is shown, so with no store policy - and, while the capability is on, no
+    /// write policy either - nothing is enumerated, on this page or on any document open that reads the gate.
+    /// </para>
     /// </remarks>
     private async Task<IReadOnlyDictionary<string, DatabaseStoreAccess>> OtherStoresAsync(
         ResolvedScope resolved,
@@ -529,6 +622,11 @@ internal sealed class DatabaseAccess
         Dictionary<string, DatabaseStoreAccess> others = new(StringComparer.OrdinalIgnoreCase);
         string resolvedKey = resolved.Registration.Key;
 
+        // The same two questions the loop asks, and the policies that would answer them: the store policy for
+        // B's identity, and - only while the capability is on - the write policy for B's rows.
+        bool anyPolicyAsked = !string.IsNullOrWhiteSpace(authorization.PolicyFor(null))
+            || (capabilityEnabled && !string.IsNullOrWhiteSpace(authorization.PolicyFor(nameof(StudioCapability.BrowseDatabase))));
+
         foreach (StoreDeclarations store in classifier.Stores)
         {
             if (string.Equals(store.StoreKey, resolvedKey, StringComparison.OrdinalIgnoreCase) || others.ContainsKey(store.StoreKey))
@@ -536,8 +634,9 @@ internal sealed class DatabaseAccess
                 continue;
             }
 
-            string databaseId = await OtherStoreDatabaseIdAsync(store.StoreKey, resolved.Database, cancellationToken)
-                .ConfigureAwait(false);
+            string databaseId = anyPolicyAsked
+                ? await OtherStoreDatabaseIdAsync(store.StoreKey, resolved.Database, cancellationToken).ConfigureAwait(false)
+                : resolved.Database.Id.Identity;
 
             StudioScope other = new(store.StoreKey, databaseId, null);
 
@@ -658,7 +757,9 @@ internal sealed class DatabaseAccess
 
         if (!await authorization.IsAuthorizedAsync(tenantless, StudioCapability.BrowseDatabase, cancellationToken).ConfigureAwait(false))
         {
-            audit.RecordScopeDenied(tenantless, WritePolicyName(value), action, target);
+            // Named BrowseDatabase in the ring, so the Activity screen shows the refusal - and the name it was
+            // aimed at - only to a visitor who may browse too (StudioActionLog.GetVisibleAsync).
+            audit.RecordScopeDenied(tenantless, WritePolicyName(value), action, target, StudioCapability.BrowseDatabase);
             return new DatabaseBrowseGrant(null, DatabaseRefusal.WritePolicy, DatabaseGate.WritePolicyDenial);
         }
 
@@ -675,7 +776,7 @@ internal sealed class DatabaseAccess
         }
         catch (StudioNotAuthorizedException)
         {
-            audit.RecordScopeDenied(tenantless, WritePolicyName(value), action, target);
+            audit.RecordScopeDenied(tenantless, WritePolicyName(value), action, target, StudioCapability.BrowseDatabase);
             return new DatabaseBrowseGrant(null, DatabaseRefusal.WritePolicy, DatabaseGate.WritePolicyDenial);
         }
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
@@ -761,6 +862,8 @@ internal sealed class DatabaseAccess
             return Refuse(DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial(schema, entries));
         }
 
+        DatabaseGate? known = null;
+
         try
         {
             DatabaseGateRead gateRead = await GateAsync(tenantless, grant.Resolved, cancellationToken).ConfigureAwait(false);
@@ -770,7 +873,7 @@ internal sealed class DatabaseAccess
                 return Refuse(gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.");
             }
 
-            DatabaseGate gate = gateRead.Gate;
+            DatabaseGate gate = known = gateRead.Gate;
 
             if (!gate.CanSeeStructure(schema))
             {
@@ -802,13 +905,13 @@ internal sealed class DatabaseAccess
             }
 
             return new DatabaseRowAccessResult(
-                new DatabaseRowGrant(grant.Resolved, relation, summary.Ownership, detail.Columns, detail.RowKey),
+                new DatabaseRowGrant(grant.Resolved, relation, summary.Ownership, detail.Columns, detail.RowKey, gate),
                 DatabaseRefusal.None,
                 null);
         }
         catch (Exception exception) when (IsCatalogFailure(exception))
         {
-            return Refuse(DatabaseRefusal.Unavailable, CatalogFailure(exception));
+            return Refuse(DatabaseRefusal.Unavailable, CatalogFailure(exception, known));
         }
     }
 
@@ -821,10 +924,28 @@ internal sealed class DatabaseAccess
         && exception is not OperationCanceledException;
 
     /// <summary>The sentence for a catalog read that failed.</summary>
-    internal static string CatalogFailure(Exception exception) =>
-        exception is PostgresException postgres
-            ? "The catalog could not be read: " + postgres.SqlState + " " + postgres.MessageText
-            : "The catalog could not be read: " + exception.Message;
+    /// <remarks>
+    /// Postgres' message is the visitor's to read only with every withheld schema masked; a caller that holds
+    /// the visitor's gate passes it to <see cref="CatalogFailure(Exception, DatabaseGate?)" />. With none - the
+    /// gate itself was being read - what failed was the schema list, whose failures name no schema.
+    /// </remarks>
+    internal static string CatalogFailure(Exception exception) => CatalogFailure(exception, gate: null);
+
+    /// <summary>
+    /// The sentence for a catalog read that failed, with Postgres' own words masked through
+    /// <paramref name="gate" />'s withheld schemas (<see cref="PostgresErrorText" />) when there is one.
+    /// </summary>
+    internal static string CatalogFailure(Exception exception, DatabaseGate? gate)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        string message = exception is PostgresException postgres
+            ? postgres.SqlState + " " + postgres.MessageText
+            : exception.Message;
+
+        return "The catalog could not be read: " +
+               (gate is null ? message : PostgresErrorText.Redact(message, gate.WithheldSchemas) ?? message);
+    }
 
     /// <summary>The policy a write-policy refusal names in event 9203.</summary>
     internal static string WritePolicyName(MartenStudioOptions value) =>

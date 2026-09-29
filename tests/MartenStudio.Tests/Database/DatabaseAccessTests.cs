@@ -293,7 +293,8 @@ public class DatabaseAccessTests
 
     /// <summary>
     /// Acceptance 4, fail closed across stores: a registered store that will not build is a store whose
-    /// tables would all read as "Other", so the whole classification is refused, named after it.
+    /// tables would all read as "Other", so the whole classification is refused - and the store is named, with
+    /// the reason it gave, only to a visitor that store's store policy passes (SEC-fix F3, AGENTS.md D27).
     /// </summary>
     [Fact]
     public async Task A_registered_store_that_will_not_build_fails_the_classification_closed()
@@ -310,14 +311,111 @@ public class DatabaseAccessTests
 
         declarations.Succeeded.Should().BeFalse();
         declarations.Classifier.Should().BeNull();
-        declarations.Failure.Should().Contain(nameof(IBrokenStore)).And.Contain("could not be built");
+        declarations.Failure.Should().StartWith(DatabaseAccess.UnnamedStore + " could not be built")
+            .And.NotContain(nameof(IBrokenStore), "the sentence any visitor may read names no other store");
+        declarations.FailedStoreKey.Should().Be(nameof(IBrokenStore));
+        declarations.NamedFailure.Should().Contain(nameof(IBrokenStore)).And.Contain("its connection string is wrong");
 
-        DatabaseBrowserOverview overview = await harness.Resolve<IDatabaseObjectService>()
-            .GetOverviewAsync(new StudioScope("default", string.Empty, null), Token);
+        // A visitor the broken store's own policy refuses reads "a registered Marten store", on every page the
+        // sentence reaches: the browser's overview, an object page, the relationships screen's table notice.
+        harness.Policies.Allow(static resource => resource.StoreName != nameof(IBrokenStore));
 
-        overview.Refusal.Should().Be(DatabaseRefusal.Unavailable);
-        overview.Schemas.Should().BeEmpty("nothing is classified 'Other' when the classification cannot be completed");
-        overview.Reason.Should().Contain(nameof(IBrokenStore));
+        IDatabaseObjectService objects = harness.Resolve<IDatabaseObjectService>();
+        var scope = new StudioScope("default", string.Empty, null);
+
+        DatabaseBrowserOverview refused = await objects.GetOverviewAsync(scope, Token);
+
+        refused.Refusal.Should().Be(DatabaseRefusal.Unavailable);
+        refused.Schemas.Should().BeEmpty("nothing is classified 'Other' when the classification cannot be completed");
+        refused.Reason.Should().Be(declarations.Failure);
+
+        DatabaseObjectDetail detail = await objects.GetObjectAsync(scope, "quartz", "qrtz_triggers", Token);
+        detail.Refusal.Should().Be(DatabaseRefusal.Unavailable);
+        detail.Reason.Should().NotContain(nameof(IBrokenStore)).And.NotContain("connection string");
+
+        harness.Policies.Calls.Should().Contain(static x =>
+            x.Resource.StoreName == nameof(IBrokenStore) && x.Resource.TenantId == null && x.Resource.Capability == null,
+            "the broken store's own store policy is what was asked");
+
+        // Its store policy passes: named, with its reason.
+        harness.Policies.Allow(static _ => true);
+
+        DatabaseBrowserOverview named = await objects.GetOverviewAsync(scope, Token);
+
+        named.Refusal.Should().Be(DatabaseRefusal.Unavailable);
+        named.Reason.Should().Be(declarations.NamedFailure);
+
+        (await objects.GetObjectAsync(scope, "quartz", "qrtz_triggers", Token)).Reason.Should().Contain(nameof(IBrokenStore));
+    }
+
+    /// <summary>
+    /// SEC-fix F4: another store's databases are enumerated only to name the resource a policy is shown - so with
+    /// no store policy, and no write policy while the capability is on, nothing is enumerated at all. On a
+    /// master-table or sharded tenancy an enumeration is a query, and the first one in the process is that
+    /// store's own <c>CreateOrUpdate</c>; every document open reads this gate.
+    /// </summary>
+    [Theory]
+    [InlineData(null, null, true, false)]
+    [InlineData(null, null, false, false)]
+    [InlineData(null, WritePolicy, false, false)]
+    [InlineData(null, WritePolicy, true, true)]
+    [InlineData(StorePolicy, null, false, true)]
+    [InlineData(StorePolicy, WritePolicy, true, true)]
+    public async Task Another_stores_databases_are_enumerated_only_when_a_policy_will_be_asked(
+        string? storePolicy,
+        string? writePolicy,
+        bool capability,
+        bool enumerated)
+    {
+        int builds = 0;
+
+        await using Harness harness = Harness.Create(
+            options =>
+            {
+                options.StoreAuthorizationPolicy = storePolicy;
+                options.WriteAuthorizationPolicy = writePolicy;
+                options.Capabilities.BrowseDatabase = capability;
+            },
+            services => services.AddMartenStore<IElsewhereStore>(options =>
+            {
+                // A tenancy with databases of its own - the shape whose enumeration can be a query - seen through a
+                // proxy that counts every BuildDatabases(), which is what AllDatabases() is.
+                options.MultiTenantedDatabases(tenancy =>
+                    tenancy.AddMultipleTenantDatabase(DummyConnectionString, "elsewhere-db").ForTenants("acme"));
+                options.DatabaseSchemaName = "elsewhere";
+
+                MartenStudio.Tests.Projections.ObservedTenancy observed =
+                    MartenStudio.Tests.Projections.ObservedTenancy.Over(options.Tenancy, masterTableShape: false);
+                observed.OnBuildDatabases = () => Interlocked.Increment(ref builds);
+                options.Tenancy = (global::Marten.Storage.ITenancy) (object) observed;
+            }));
+
+        ResolvedScope resolved = await harness.Resolve<StudioScopeResolver>()
+            .ResolveAsync(new StudioScope("default", string.Empty, null), null, Token);
+
+        // Built first, so whatever building it costs is not counted against the gate.
+        harness.Resolve<IElsewhereStore>().Should().NotBeNull();
+        int before = Volatile.Read(ref builds);
+
+        try
+        {
+            await harness.Access.GateAsync(TenantScope, resolved, Token);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The schema list needs a database, which this test has none of; the other stores came first.
+        }
+
+        int during = Volatile.Read(ref builds) - before;
+
+        if (enumerated)
+        {
+            during.Should().BePositive("a policy is asked about that store, by its own identity for this database");
+        }
+        else
+        {
+            during.Should().Be(0, "nobody is asked, so nothing is enumerated");
+        }
     }
 
     [Fact]

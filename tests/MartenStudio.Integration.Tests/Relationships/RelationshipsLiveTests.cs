@@ -487,6 +487,69 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
             scope.ServiceProvider.GetRequiredService<StudioCapabilityGuard>(),
             TimeProvider.System);
 
+    /// <summary>
+    /// SEC-fix F6: a document collection's count that runs out of time is that row's "not counted", logged at
+    /// Debug - never a failed panel and a Warning on a document open. It used to run against the client's
+    /// <c>CommandTimeout</c> alone, so Postgres was never told to stop and the timeout came back as an
+    /// <c>NpgsqlException</c> nothing expected. Somebody holding the pointing table is the slow count, made
+    /// deterministic: the count waits behind the lock until its <c>statement_timeout</c> ends it.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_count_that_runs_out_of_time_is_not_counted_on_its_row_and_warns_nobody()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+        using IServiceScope scope = Services.CreateScope();
+
+        var capture = new MartenStudio.Integration.Tests.Logging.LogCapture();
+        using ILoggerFactory loggers = LoggerFactory.Create(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Trace);
+            builder.AddProvider(capture);
+        });
+
+        var service = new RelationshipDataService(
+            Microsoft.Extensions.Options.Options.Create(new MartenStudioOptions { QueryTimeout = TimeSpan.FromSeconds(1) }),
+            scope.ServiceProvider.GetRequiredService<StudioScopeResolver>(),
+            scope.ServiceProvider.GetRequiredService<ColumnCatalog>(),
+            new StudioSnapshotCache(TimeProvider.System, TimeSpan.FromMinutes(5)),
+            loggers.CreateLogger<RelationshipDataService>(),
+            scope.ServiceProvider.GetRequiredService<MartenStudio.Services.Database.DatabaseAccess>(),
+            scope.ServiceProvider.GetRequiredService<MartenStudio.Services.Database.DatabaseCatalog>(),
+            scope.ServiceProvider.GetRequiredService<StudioCapabilityGuard>(),
+            TimeProvider.System);
+
+        await using NpgsqlConnection holder = await Postgres.OpenAsync(token);
+        await using NpgsqlTransaction held = await holder.BeginTransactionAsync(token);
+
+        await using (var hold = new NpgsqlCommand($"lock table \"{Schema}\".\"mt_doc_order\" in access exclusive mode", holder, held))
+        {
+            await hold.ExecuteNonQueryAsync(token);
+        }
+
+        ReferencedBy referenced;
+
+        try
+        {
+            referenced = await service.GetReferencedByAsync(Scope, "customer", fixture.OrderedCustomerId.ToString(), token);
+        }
+        finally
+        {
+            await held.RollbackAsync(token);
+        }
+
+        referenced.Error.Should().BeNull("one collection whose count ran out of time must not blank the panel");
+
+        ReferencedByEntry order = Entry(referenced, "order");
+        order.IsCounted.Should().BeFalse();
+        order.Error.Should().BeNull("running out of time is not a fault");
+        order.NotCounted.Should().Contain("MartenStudioOptions.QueryTimeout (1 s)");
+
+        Entry(referenced, "refnote").IsCounted.Should().BeTrue("the other collections still say theirs");
+
+        capture.WarningsOrWorse.Should().BeEmpty();
+        capture.Lines.Should().Contain(static x => x.Level == LogLevel.Debug && x.Message.Contains("at its timeout", StringComparison.Ordinal));
+    }
+
     [PostgresFact]
     public async Task A_malformed_id_is_reported_on_the_row_rather_than_thrown()
     {

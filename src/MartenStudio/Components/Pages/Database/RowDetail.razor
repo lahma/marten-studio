@@ -150,8 +150,20 @@
     private IReadOnlyDictionary<string, string> KeyDictionary =>
         key.GroupBy(static x => x.Key, StringComparer.Ordinal).ToDictionary(static x => x.Key, static x => x.First().Value, StringComparer.Ordinal);
 
+    /// <summary>
+    /// Whether this render is the circuit's: set by the first <see cref="OnAfterRenderAsync" />, which static
+    /// rendering never calls. The row is read only then.
+    /// </summary>
+    private bool interactive;
+
     protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
 
+    /// <remarks>
+    /// No row is read while prerendering, nor in any other static render: opening a row is audited, and the
+    /// prerender's DI scope and the circuit's would each have recorded it - a pasted link written to the ring
+    /// twice, and refused twice as a Warning when the gate says no. The static render draws the loading state;
+    /// the circuit's first render reads (the same rule as the Rows tab, for the same reason).
+    /// </remarks>
     protected override async Task OnParametersSetAsync()
     {
         await State.EnsureInitializedAsync();
@@ -159,6 +171,27 @@
 
         key = DatabaseLinks.ReadKey(Navigation.Uri);
 
+        if (!interactive)
+        {
+            return;
+        }
+
+        await LoadIfChangedAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        interactive = true;
+        await LoadIfChangedAsync();
+    }
+
+    private async Task LoadIfChangedAsync()
+    {
         string signature = string.Join(
             '\u001f',
             State.ActiveScope?.StoreKey,

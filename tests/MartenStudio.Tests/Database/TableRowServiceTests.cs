@@ -263,6 +263,28 @@ public class TableRowServiceTests
         lost.Sentence.Should().Be("The database could not be reached.");
     }
 
+    /// <summary>
+    /// SEC-fix, minor: Npgsql spells a statement past its command timeout and a pool that ran dry the same way.
+    /// The rows are read on a connection opened through <c>PostgresFailure.OpenAsync</c>, which marks the second,
+    /// so only the first is the visitor's own budget - expected, and said as a timeout.
+    /// </summary>
+    [Fact]
+    public void A_statement_out_of_time_is_a_timeout_and_a_connection_that_never_opened_is_not()
+    {
+        var statement = new NpgsqlException("Exception while reading from stream", new TimeoutException());
+
+        TableRowService.Describe(statement, TableRowTestData.Relation(), new MartenStudioOptions())
+            .Sentence.Should().Be("The read timed out before Postgres answered.");
+        TableRowService.IsExpected(string.Empty, statement).Should().BeTrue();
+
+        var exhausted = new NpgsqlException("The connection pool has been exhausted", new TimeoutException());
+        MartenStudio.Services.PostgresFailure.MarkAsConnectionFailure(exhausted);
+
+        TableRowService.Describe(exhausted, TableRowTestData.Relation(), new MartenStudioOptions())
+            .Sentence.Should().Be("The database could not be reached.");
+        TableRowService.IsExpected(string.Empty, exhausted).Should().BeFalse("an operator needs to see a pool that ran dry");
+    }
+
     [Theory]
     [InlineData("57014", true)]
     [InlineData("55000", true)]

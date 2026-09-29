@@ -41,6 +41,14 @@ namespace MartenStudio.Services.Database;
 /// sentence, logged at Debug (event 9237). Anything else is an anomaly, logged through
 /// <see cref="StudioLogThrottle" />.
 /// </para>
+/// <para>
+/// <b>What Postgres said is masked like everything else it prints.</b> Its message can name a withheld
+/// schema - <c>invalid input value for enum hr.grade</c> for a filter on a column of that type - so it is
+/// masked through the gate the grant carries (<see cref="PostgresErrorText" />) before a page sees it, with
+/// the values the statement bound left as the visitor typed them. The <c>search_path</c> is deliberately not
+/// pinned here, as the catalog reads pin it: a bare <c>=</c> has to find <c>citext</c>'s own operator in the
+/// schema the extension lives in (<see cref="PostgresErrorText" /> says why that is safe).
+/// </para>
 /// </remarks>
 internal sealed class TableRowService : ITableRowService
 {
@@ -139,8 +147,7 @@ internal sealed class TableRowService : ITableRowService
         DatabaseRowGrant grant = result.Grant;
         CatalogRelation relation = grant.Relation.Relation;
 
-        DatabaseObjectDetail? detail = await DetailAsync(grant, cancellationToken).ConfigureAwait(false);
-        List<TableRowColumn> available = Columns(grant, detail?.ForeignKeysOut ?? []);
+        List<TableRowColumn> available = Columns(grant, Detail(grant).ForeignKeysOut);
 
         var page = new TableRowPage
         {
@@ -200,10 +207,12 @@ internal sealed class TableRowService : ITableRowService
             1,
             Math.Max(1, Math.Min(value.MaxPageSize, DocumentListQuery.MaxPageSize - 1)));
 
+        TableRowStatement? statement = null;
+
         try
         {
             await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             // The version is on the connection already - Postgres sends it at startup - so asking costs
             // nothing and needs no statement.
@@ -238,7 +247,8 @@ internal sealed class TableRowService : ITableRowService
                 Caps = TableRowCaps.List,
             };
 
-            TableRowStatement statement = TableRowQueryBuilder.BuildList(spec);
+            statement = TableRowQueryBuilder.BuildList(spec);
+            TableRowStatement read = statement;
             RowFilterVerdict verdict = BuildVerdict(grant.Relation, grant.RowKey, parse, plan.SortColumn, plan.Mode);
 
             page = page with
@@ -259,7 +269,7 @@ internal sealed class TableRowService : ITableRowService
             (List<TableRow> rows, List<string?> sortValues, bool shortened) = await session
                 .InTransactionAsync(
                     connection,
-                    (transaction, token) => ReadPageAsync(connection, transaction, statement, token),
+                    (transaction, token) => ReadPageAsync(connection, transaction, read, token),
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -296,7 +306,7 @@ internal sealed class TableRowService : ITableRowService
             return page with
             {
                 State = TableRowPageState.Failed,
-                Error = Fail(exception, grant, DatabaseAccess.RowsAction),
+                Error = Fail(exception, grant, DatabaseAccess.RowsAction, statement),
             };
         }
     }
@@ -333,8 +343,7 @@ internal sealed class TableRowService : ITableRowService
             return TableRowDetail.Refused(DatabaseRefusal.NotApplicable, KeyProblem(grant, allowLocator: false));
         }
 
-        DatabaseObjectDetail? detail = await DetailAsync(grant, cancellationToken).ConfigureAwait(false);
-        List<TableRowColumn> columns = [.. Columns(grant, detail?.ForeignKeysOut ?? []).Where(static x => x.Shown)];
+        List<TableRowColumn> columns = [.. Columns(grant, Detail(grant).ForeignKeysOut).Where(static x => x.Shown)];
 
         TableRowStatement statement = TableRowQueryBuilder.BuildRow(
             relation.Schema,
@@ -360,7 +369,7 @@ internal sealed class TableRowService : ITableRowService
         try
         {
             await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             (List<TableRow> rows, _, bool shortened) = await Session(2)
                 .InTransactionAsync(
@@ -380,7 +389,7 @@ internal sealed class TableRowService : ITableRowService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return shell with { Error = Fail(exception, grant, RowAction) };
+            return shell with { Error = Fail(exception, grant, RowAction, statement) };
         }
     }
 
@@ -455,7 +464,7 @@ internal sealed class TableRowService : ITableRowService
         try
         {
             await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             TableCellValue value = await Session()
                 .InTransactionAsync(
@@ -470,7 +479,7 @@ internal sealed class TableRowService : ITableRowService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return shell with { Error = Fail(exception, grant, CellAction) };
+            return shell with { Error = Fail(exception, grant, CellAction, statement) };
         }
     }
 
@@ -538,7 +547,7 @@ internal sealed class TableRowService : ITableRowService
         try
         {
             await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             TableRowCount answer = await Session()
                 .InTransactionAsync(
@@ -588,7 +597,7 @@ internal sealed class TableRowService : ITableRowService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return shell with { Error = Fail(exception, grant, CountAction) };
+            return shell with { Error = Fail(exception, grant, CountAction, statement) };
         }
     }
 
@@ -624,26 +633,10 @@ internal sealed class TableRowService : ITableRowService
             return TableRowReferences.Refused(DatabaseRefusal.NotApplicable, KeyProblem(grant, allowLocator: false));
         }
 
-        DatabaseGateRead gateRead;
-        DatabaseObjectDetail detail;
-
-        try
-        {
-            gateRead = await access.GateAsync(grant.Resolved.Scope, grant.Resolved, cancellationToken).ConfigureAwait(false);
-
-            if (!gateRead.Succeeded)
-            {
-                return TableRowReferences.Refused(gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.");
-            }
-
-            detail = DatabaseObjectAssembler.Detail(gateRead.Gate, grant.Relation);
-        }
-        catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
-        {
-            return TableRowReferences.Refused(DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception));
-        }
-
-        DatabaseGate gate = gateRead.Gate;
+        // The gate the grant was decided by: the far ends of the keys are judged by the same answer, and read
+        // no second time.
+        DatabaseGate gate = grant.Gate;
+        DatabaseObjectDetail detail = DatabaseObjectAssembler.Detail(gate, grant.Relation);
 
         // Every far end is judged before a connection is opened for this row: the catalog lookups are cached
         // reads of their own, and a far end the gate refuses is never named in a statement below.
@@ -674,7 +667,7 @@ internal sealed class TableRowService : ITableRowService
         try
         {
             await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             // One row's references are 1 + N statements, run one after another: each is held to a short
             // statement_timeout of its own, and all of them to one budget, past which the rest are left
@@ -686,7 +679,7 @@ internal sealed class TableRowService : ITableRowService
             TableRowReferences references = await Session(statementTimeout: budget.PerStatement)
                 .InTransactionAsync(
                     connection,
-                    (transaction, token) => ReadReferencesAsync(connection, transaction, keyRead, wanted, outbound, inbound, statements, budget, token),
+                    (transaction, token) => ReadReferencesAsync(connection, transaction, grant, keyRead, wanted, outbound, inbound, statements, budget, token),
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -696,13 +689,14 @@ internal sealed class TableRowService : ITableRowService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return new TableRowReferences { Error = Fail(exception, grant, ReferencesAction), Statements = statements };
+            return new TableRowReferences { Error = Fail(exception, grant, ReferencesAction, keyRead), Statements = statements };
         }
     }
 
     private async Task<TableRowReferences> ReadReferencesAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
+        DatabaseRowGrant grant,
         TableRowStatement keyRead,
         List<string> wanted,
         List<OutboundCheck> outbound,
@@ -744,7 +738,7 @@ internal sealed class TableRowService : ITableRowService
         {
             IReadOnlyList<string?> own = [.. check.Key.Columns.Select(column => values.GetValueOrDefault(column))];
             bool read = check.Key.Columns.All(values.ContainsKey);
-            resolvedOut.Add(await ResolveOutboundAsync(connection, transaction, check, own, read, statements, budget, cancellationToken).ConfigureAwait(false));
+            resolvedOut.Add(await ResolveOutboundAsync(connection, transaction, grant.Gate, check, own, read, statements, budget, cancellationToken).ConfigureAwait(false));
         }
 
         List<RowInboundReference> resolvedIn = [];
@@ -753,7 +747,7 @@ internal sealed class TableRowService : ITableRowService
         {
             IReadOnlyList<string?> own = [.. check.Key.LinkedColumns.Select(column => values.GetValueOrDefault(column))];
             bool read = check.Key.LinkedColumns.All(values.ContainsKey);
-            resolvedIn.Add(await ResolveInboundAsync(connection, transaction, check, own, read, statements, budget, cancellationToken).ConfigureAwait(false));
+            resolvedIn.Add(await ResolveInboundAsync(connection, transaction, grant.Gate, check, own, read, statements, budget, cancellationToken).ConfigureAwait(false));
         }
 
         return new TableRowReferences
@@ -807,7 +801,7 @@ internal sealed class TableRowService : ITableRowService
         }
         catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
         {
-            return new OutboundCheck(key, RowReferenceState.Failed, null, null, DatabaseAccess.CatalogFailure(exception));
+            return new OutboundCheck(key, RowReferenceState.Failed, null, null, DatabaseAccess.CatalogFailure(exception, gate));
         }
     }
 
@@ -854,13 +848,14 @@ internal sealed class TableRowService : ITableRowService
         }
         catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
         {
-            return new InboundCheck(key, RowInboundState.Failed, null, DatabaseAccess.CatalogFailure(exception));
+            return new InboundCheck(key, RowInboundState.Failed, null, DatabaseAccess.CatalogFailure(exception, gate));
         }
     }
 
     private async Task<RowOutboundReference> ResolveOutboundAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
+        DatabaseGate gate,
         OutboundCheck check,
         IReadOnlyList<string?> own,
         bool read,
@@ -939,7 +934,7 @@ internal sealed class TableRowService : ITableRowService
         TableRowStatement exists = TableRowQueryBuilder.BuildExists(key.LinkedSchema!, key.LinkedTable!, key.LinkedColumns, values);
         statements.Add(exists.Sql);
 
-        (bool ok, bool present, TableRowError? error) = await TryScalarAsync<bool>(connection, transaction, exists, budget, cancellationToken)
+        (bool ok, bool present, TableRowError? error) = await TryScalarAsync<bool>(connection, transaction, gate, exists, budget, cancellationToken)
             .ConfigureAwait(false);
 
         return ok
@@ -958,6 +953,7 @@ internal sealed class TableRowService : ITableRowService
     private async Task<RowInboundReference> ResolveInboundAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
+        DatabaseGate gate,
         InboundCheck check,
         IReadOnlyList<string?> own,
         bool read,
@@ -997,7 +993,7 @@ internal sealed class TableRowService : ITableRowService
             key.Schema, key.Table, key.Columns, [.. own.Select(static x => x!)], TableRowQueryBuilder.InboundCap);
         statements.Add(count.Sql);
 
-        (bool ok, long counted, TableRowError? error) = await TryScalarAsync<long>(connection, transaction, count, budget, cancellationToken)
+        (bool ok, long counted, TableRowError? error) = await TryScalarAsync<long>(connection, transaction, gate, count, budget, cancellationToken)
             .ConfigureAwait(false);
 
         if (!ok)
@@ -1017,6 +1013,7 @@ internal sealed class TableRowService : ITableRowService
     private async Task<(bool Ok, T Value, TableRowError? Error)> TryScalarAsync<T>(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
+        DatabaseGate gate,
         TableRowStatement statement,
         ReferenceBudget budget,
         CancellationToken cancellationToken)
@@ -1035,7 +1032,7 @@ internal sealed class TableRowService : ITableRowService
         {
             await transaction.RollbackAsync(savepoint, cancellationToken).ConfigureAwait(false);
 
-            TableRowError error = Describe(exception, null, Options);
+            TableRowError error = Redact(Describe(exception, null, Options), gate, statement);
 
             if (exception.SqlState != "57014")
             {
@@ -1871,9 +1868,17 @@ internal sealed class TableRowService : ITableRowService
             text);
     }
 
-    private TableRowError Fail(Exception exception, DatabaseRowGrant grant, string action)
+    /// <summary>
+    /// A failed read as the page shows it - Postgres' own words masked through the visitor's gate - logged at
+    /// the level its kind deserves.
+    /// </summary>
+    /// <param name="exception">The failure.</param>
+    /// <param name="grant">The grant the read ran under; its gate is the visitor's.</param>
+    /// <param name="action">What the read was, for the log.</param>
+    /// <param name="statement">The statement that failed, when it had been built: the values it bound are the visitor's own and stay as typed.</param>
+    private TableRowError Fail(Exception exception, DatabaseRowGrant grant, string action, TableRowStatement? statement)
     {
-        TableRowError error = Describe(exception, grant.Relation.Relation, Options);
+        TableRowError error = Redact(Describe(exception, grant.Relation.Relation, Options), grant.Gate, statement);
 
         LogLevel level = IsExpected(error.SqlState, exception)
             ? LogLevel.Debug
@@ -1904,10 +1909,38 @@ internal sealed class TableRowService : ITableRowService
     /// row-level security, a lock somebody else holds, a relation changed under the page, a value that does
     /// not fit its column.
     /// </summary>
+    /// <remarks>
+    /// A statement that ran past its command timeout is the visitor's own budget, in either of the spellings
+    /// Npgsql gives it (<see cref="PostgresFailure.IsTimeout" />); a connection that timed out while opening
+    /// - a pool run dry, a server that did not answer - is not, because the open is marked
+    /// (<see cref="PostgresFailure.OpenAsync" />).
+    /// </remarks>
     internal static bool IsExpected(string sqlState, Exception exception) =>
         sqlState is "57014" or "55000" or "42501" or "42704" or "55P03" or "42P01" or "42703"
         || sqlState.StartsWith("22", StringComparison.Ordinal)
-        || exception is TimeoutException;
+        || PostgresFailure.IsTimeout(exception);
+
+    /// <summary>
+    /// <paramref name="error" /> with Postgres' message masked through <paramref name="gate" />'s withheld schemas
+    /// (<see cref="PostgresErrorText" />) - every value <paramref name="statement" /> bound left as the visitor
+    /// typed it, so a masked echo cannot answer whether a name they guessed is a schema being withheld.
+    /// </summary>
+    internal static TableRowError Redact(TableRowError error, DatabaseGate gate, TableRowStatement? statement)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        ArgumentNullException.ThrowIfNull(gate);
+
+        return error with
+        {
+            PostgresMessage = PostgresErrorText.Redact(error.PostgresMessage, gate.WithheldSchemas, BoundText(statement)),
+        };
+    }
+
+    /// <summary>Every value a statement bound as text - what Postgres can echo back in a message.</summary>
+    private static IEnumerable<string?> BoundText(TableRowStatement? statement) =>
+        statement is null
+            ? []
+            : statement.Parameters.Select(static x => x.Value as string);
 
     /// <summary>A failed read as a value: the SQLSTATE and a sentence that names what governs it.</summary>
     internal static TableRowError Describe(Exception exception, CatalogRelation? relation, MartenStudioOptions options)
@@ -1946,7 +1979,8 @@ internal sealed class TableRowService : ITableRowService
 
         return exception switch
         {
-            TimeoutException => new TableRowError(string.Empty, "The read timed out before Postgres answered.", exception.Message),
+            _ when PostgresFailure.IsTimeout(exception) =>
+                new TableRowError(string.Empty, "The read timed out before Postgres answered.", exception.Message),
             NpgsqlException => new TableRowError(string.Empty, "The database could not be reached.", exception.Message),
             _ => new TableRowError(string.Empty, "The read failed.", exception.Message),
         };
@@ -2024,24 +2058,10 @@ internal sealed class TableRowService : ITableRowService
     }
 
     /// <summary>
-    /// The relation's detail through this visitor's gate - what names the far ends of its foreign keys -
-    /// or <see langword="null" /> when the gate cannot be read; a header without "→ parent" markers is
-    /// still a page.
+    /// The relation's detail through the gate the grant was decided by - what names the far ends of its
+    /// foreign keys - with no second read of the gate.
     /// </summary>
-    private async Task<DatabaseObjectDetail?> DetailAsync(DatabaseRowGrant grant, CancellationToken cancellationToken)
-    {
-        try
-        {
-            DatabaseGateRead gateRead = await access.GateAsync(grant.Resolved.Scope, grant.Resolved, cancellationToken)
-                .ConfigureAwait(false);
-
-            return gateRead.Succeeded ? DatabaseObjectAssembler.Detail(gateRead.Gate, grant.Relation) : null;
-        }
-        catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
-        {
-            return null;
-        }
-    }
+    private static DatabaseObjectDetail Detail(DatabaseRowGrant grant) => DatabaseObjectAssembler.Detail(grant.Gate, grant.Relation);
 
     private string UserName()
     {

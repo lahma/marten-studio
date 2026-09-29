@@ -104,16 +104,141 @@ internal sealed class StudioActionLog
     /// Records a scope refusal: event 9203, and a ring entry naming the scope that was refused.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The scope is named here and nowhere the visitor can see it. A refusal has to be reconstructible by
     /// whoever administers the process, and it must not tell the person who was refused which stores,
     /// databases and tenants exist.
+    /// </para>
+    /// <para>
+    /// <paramref name="capability" /> is the capability the write policy refused, when that is what refused:
+    /// it puts the entry under the same rule as a read of that capability on the Activity screen
+    /// (<see cref="GetVisibleAsync" />), so the name somebody was refused is shown only to a visitor who may
+    /// make that read.
+    /// </para>
     /// </remarks>
-    public void RecordScopeDenied(StudioScope scope, string policyName, string action, string target)
+    public void RecordScopeDenied(
+        StudioScope scope,
+        string policyName,
+        string action,
+        string target,
+        StudioCapability? capability = null)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        Record(action, target, succeeded: false, "Not authorized for this store, database or tenant.", capability: null, scope);
+        Record(action, target, succeeded: false, "Not authorized for this store, database or tenant.", capability, scope);
         logger.ScopeAuthorizationDenied(UserName(), scope.StoreKey, scope.DatabaseId, scope.TenantId ?? AllTenants, policyName);
+    }
+
+    /// <summary>
+    /// The entries of the ring this circuit's visitor may read, newest first - what the Activity screen and the
+    /// Overview's recent activity both show, so the two cannot disagree.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The store policy, entry by entry</b>, against the store, database and tenant the action was aimed at:
+    /// the ring is process-wide and every circuit writes into it, so it is the one place one visitor's actions
+    /// can be read by another. An entry whose scope was never settled carries a placeholder store key, which no
+    /// policy recognises; that is the safe direction.
+    /// </para>
+    /// <para>
+    /// <b>And a read beyond the store only for somebody who may make it.</b> An entry recorded under
+    /// <c>BrowseDatabase</c> or <c>RunSql</c> names what was read - a non-Marten table and the columns a
+    /// filter was on, up to two hundred characters of a statement - and the store policy says nothing about
+    /// who may learn those: a visitor the write policy refuses the browser would read, here, the tables and
+    /// columns an operator browsed. So such an entry is kept only while the capability is on for the process
+    /// and the write policy, asked with the capability named against the entry's own scope, passes this
+    /// visitor - the question the service asked before the read could run (<see cref="StudioCapabilityGuard.ReadsBeyondTheStore" />).
+    /// </para>
+    /// <para>
+    /// <b>Bounded.</b> <paramref name="take" /> stops the sweep at the last entry a panel draws, and the
+    /// principal is fetched once - and only when a policy is configured at all - because a panel refreshed
+    /// every interval must not pay five hundred authentication-state reads to draw fifteen rows.
+    /// </para>
+    /// </remarks>
+    /// <param name="authorization">The circuit's policy evaluator.</param>
+    /// <param name="capabilities">Which capabilities the process has on.</param>
+    /// <param name="take">Stop after this many are kept, or <see langword="null" /> for all of them.</param>
+    /// <param name="cancellationToken">Checked between entries, so a page that went away stops asking.</param>
+    public async ValueTask<List<StudioActionLogEntry>> GetVisibleAsync(
+        StudioAuthorization authorization,
+        StudioCapabilityGuard capabilities,
+        int? take = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(authorization);
+        ArgumentNullException.ThrowIfNull(capabilities);
+
+        IReadOnlyList<StudioActionLogEntry> entries = store.GetLatest();
+        int limit = take is { } wanted ? Math.Max(wanted, 0) : int.MaxValue;
+
+        bool storePolicy = !string.IsNullOrWhiteSpace(authorization.PolicyFor(null));
+        System.Security.Claims.ClaimsPrincipal? user = null;
+
+        List<StudioActionLogEntry> visible = new(Math.Min(entries.Count, limit));
+
+        foreach (StudioActionLogEntry entry in entries)
+        {
+            if (visible.Count >= limit)
+            {
+                break;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            StudioScope scope = new(entry.StoreKey, entry.DatabaseId, entry.TenantId);
+
+            if (storePolicy)
+            {
+                user ??= await PrincipalAsync().ConfigureAwait(false);
+
+                if (!await authorization.IsAuthorizedAsync(user, scope, capability: null, cancellationToken).ConfigureAwait(false))
+                {
+                    continue;
+                }
+            }
+
+            if (ReadBeyondTheStore(entry) is { } capability)
+            {
+                if (!capabilities.IsEnabled(capability))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(authorization.PolicyFor(capability.ToString())))
+                {
+                    user ??= await PrincipalAsync().ConfigureAwait(false);
+
+                    if (!await authorization.IsAuthorizedAsync(user, scope, capability.ToString(), cancellationToken).ConfigureAwait(false))
+                    {
+                        continue;
+                    }
+                }
+            }
+
+            visible.Add(entry);
+        }
+
+        return visible;
+    }
+
+    /// <summary>The read beyond the store an entry was recorded under, or <see langword="null" />.</summary>
+    private static StudioCapability? ReadBeyondTheStore(StudioActionLogEntry entry)
+    {
+        foreach (StudioCapability capability in StudioCapabilityGuard.ReadsBeyondTheStore)
+        {
+            if (string.Equals(entry.Capability, capability.ToString(), StringComparison.Ordinal))
+            {
+                return capability;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<System.Security.Claims.ClaimsPrincipal> PrincipalAsync()
+    {
+        AuthenticationState state = await authenticationStateProvider.GetAuthenticationStateAsync().ConfigureAwait(false);
+        return state.User;
     }
 
     /// <inheritdoc cref="StudioActionLogService.GetLatest" />

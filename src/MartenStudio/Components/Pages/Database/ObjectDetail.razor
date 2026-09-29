@@ -194,13 +194,47 @@
     private DatabaseObjectCategory RailCategory =>
         detail?.Relation is { } relation ? DatabaseObjectKinds.CategoryOf(relation.Kind) : DatabaseObjectCategory.Tables;
 
+    /// <summary>
+    /// Whether this render is the circuit's: set by the first <see cref="OnAfterRenderAsync" />, which static
+    /// rendering never calls. The object is read only then.
+    /// </summary>
+    private bool interactive;
+
     protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
 
+    /// <remarks>
+    /// Nothing is read while prerendering, nor in any other static render of this page. A link to an object
+    /// the visitor's gate refuses is a refusal worth one audit entry and one event 9202/9203 per page view -
+    /// and it was three: the prerender, the circuit, and the static re-render the layout's scope-in-the-URL
+    /// navigation costs, each in a DI scope of its own (measured on the sample, 2026-09-29). The static renders
+    /// draw the loading state; the circuit's first render reads, once.
+    /// </remarks>
     protected override async Task OnParametersSetAsync()
     {
         await State.EnsureInitializedAsync();
         await ApplyScopeFromUrlAsync();
 
+        if (!interactive)
+        {
+            return;
+        }
+
+        await LoadIfChangedAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        interactive = true;
+        await LoadIfChangedAsync();
+    }
+
+    private async Task LoadIfChangedAsync()
+    {
         string signature = Signature();
         if (!string.Equals(signature, loadedSignature, StringComparison.Ordinal))
         {
