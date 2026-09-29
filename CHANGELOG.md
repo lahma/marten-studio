@@ -1,3 +1,101 @@
+# 0.3.0
+
+- A database browser. A new **Database** section (Tables, and Relationships moved from Data with its route
+  unchanged) lists every table, view, materialized view, foreign table, function, procedure, aggregate,
+  trigger, sequence and enum, domain, composite or range type in the store's Postgres database that the
+  visitor may see — a Quartz.NET job store, a legacy schema, another library's tables — grouped by schema.
+  Marten's own objects are told apart at a glance: quieter, sorted last, and linked to where their data is
+  really read (Documents, Streams, the Schema screen), and a Quartz.NET, Wolverine, EF Core, Hangfire or
+  Flyway object wears a neutral "recognised by name" hint. Object detail (`/marten/database/object`) shows
+  columns, keys and indexes, foreign keys both ways, triggers, a view's query and the object's
+  neighbourhood in the relationships diagram.
+- Rows of non-Marten tables, views and materialized views, read-only: keyset paging over composite keys (by
+  `ctid` for a table with no key, by offset for a view); a `col = value` / `col ~ text` / `col is:null`
+  filter shown as chips with an index verdict, and "Run anyway" for an unindexed read of a large table;
+  Show SQL with parameter names only; an estimate and an on-demand exact count; headers with the type and
+  PK and → parent markers; `timestamptz` in the chosen time zone and `timestamp` marked "no tz"; JSON and
+  sniffed `bytea` opening in the viewer; a "≈ date" hint under `bigint` columns holding .NET ticks or epoch
+  times; a sticky key column, Space to open a row in place and Enter for its detail. Cells are cut on the
+  server in bytes, and a page has a byte budget. Row detail
+  (`/marten/database/row?schema=&name=&key.<column>=`) shows every column, what the row points at (the
+  parent row, a "missing" badge, or the Marten document in Documents) and what points at it (bounded at
+  1,000+, with ON DELETE), and copies the row as JSON, its key or a WHERE clause.
+- Gated like the SQL console: `MartenStudioCapabilities.BrowseDatabase` (off by default, included in
+  `All()`, turned off by `ReadOnly`) and `MartenStudioOptions.BrowsableSchemas` (exact schema names, or
+  `"*"` for every schema the studio's role has `USAGE` on except Postgres' own and extensions'). The
+  structure of the store's own schemas is shown without either, as the Schema screen always did; everything
+  else, every non-Marten definition and every row needs both, and the write policy is asked with `TenantId
+  = null`, because nothing filters a non-Marten table by tenant. Reads run in the read-only session as
+  `SqlConsoleRole` under `QueryTimeout`, lists lock nothing they list, and every first read of a relation's
+  rows is audited by its filter and sort (the values go to the log, never to the Activity ring). `"*"`
+  without a `SqlConsoleRole` logs event 9230 once at the start of a host that maps the studio:
+  `BrowsableSchemas` limits what the screens show, `SqlConsoleRole` what can be read.
+- What the browser never shows: the rows of Marten's document and event tables (they are read in Documents
+  and Events, where tenancy, soft delete and the serializer apply) or of any `mt_` table; the rows of a
+  foreign table, directly or through a view, a partition or an inheritance child; hidden document types
+  (`IsDocumentTypeVisible`) with their indexes, keys, triggers, partitions and leftover per-type functions,
+  and the rows of any view over them; per-tenant partition and sequence names; and the names of schemas the
+  visitor may not see, which read `‹withheld›` inside every definition, type and default. A view is judged
+  on everything it reaches — other views, functions with SQL-standard bodies, schemas named as values,
+  collations and text search objects — and a view calling a function whose body the studio cannot follow is
+  refused its rows while any schema is withheld.
+- The Relationships screen draws the database's other tables beside the document types — Quartz.NET's, a
+  legacy schema's, and keys between a document and a plain table — with a Documents / Tables / Both view,
+  schema chips, composite-key labels that leave out the leading columns both primary keys share, and dashed
+  NOT VALID keys; keys into schemas a visitor may not see are counted, never named. Document detail's
+  "Referenced by" lists keys from those tables with their ON DELETE action and links to exactly the rows it
+  counted, and a hard delete's confirmation says which rows it will cascade into and what it may change
+  that it could not count.
+- The Schema screen follows the browser. *Tables* classifies with the same rules (a Quartz.NET table in the
+  event schema is no longer badged "event store"), rolls partitions into their parent without naming them,
+  and shows a partition count or a Marten tenancy table's row count only past the browser's gate, because
+  either is the number of tenants. *Functions* reads a body when its row is opened, and a body Marten does
+  not own needs the browser's gate. *Indexes* treats projection and `ExtendedSchemaObjects` tables as
+  Marten-managed — an apply drops their undeclared indexes, and the tab now says so — and masks withheld
+  schemas. The reads give up after three seconds behind a migration's lock, and a registered store that
+  will not build no longer blanks the tabs.
+- Security: Schema › Check, Preview and DDL print the whole database — every tenant's partition by name,
+  every document type's table — and now answer only a visitor the store policy allows for the database with
+  no tenant selected, and, while a document type is hidden, one past the browser's gate. Schema › Apply is
+  authorized as `(db, null, ApplySchemaChanges)` whatever tenant is selected, because `CreateOrUpdate`
+  reaches every tenant, and its confirmation says so. A host with no store policy and no hidden type sees
+  no change.
+- Security: an operation Marten runs over a whole database is authorized for the database as a whole unless
+  it holds only the selected tenant. That covers Advance high water mark and Correct progression (Marten
+  moves the database's high-water mark and rewrites every progression row, so a visitor allowed one tenant
+  could make every other tenant's async projections skip their unprocessed events), Rebuild, the high-water
+  restart, a store-global agent, cancelling a rebuild, and the dead-letter "Rewind subscription", which
+  deletes the projection's dead letters and replays events for every tenant. Without a tenant, a correction
+  is authorized for every database it reaches. The SQL console, and the Mode A `EXPLAIN` and subquery lift
+  it grants, are always asked with `TenantId = null`.
+- Security: the tenant selector and the Configuration page list only the databases and tenants the store
+  policy allows; under a store policy the selector is the allowed list with an "Other…" entry and no longer
+  reveals that a store has more than 200 tenants. The README's example `MartenStoreResource` handler let a
+  `null` tenant through for everybody; it now requires an explicit all-tenants claim, and
+  `docs/security.md` says why.
+- No warnings for states the host configured. A store whose async projections run elsewhere —
+  `DaemonMode.ExternallyManaged`, which Wolverine's managed event-subscription distribution sets, or a
+  coordinator that refuses daemon lookups — shows as "External" and its coordinator is never asked: the
+  "could not reach the async daemon" warning that repeated at every refresh in every open tab is gone. A
+  store with no async projections says there is no daemon to host. Expected conditions (a visitor's own
+  timeout, the documents rail's speculative counts, event tables not created yet) are Debug; a real anomaly
+  on a polled path is a Warning once per store, database and kind of failure per ten minutes and Debug in
+  between (events 9212–9221, listed in the README), and a convention test holds every Warning-or-higher
+  site to a written reason. Opening a document, or a definition the gate withholds, writes no audit entry
+  and no security warning.
+- The daemon card: a hosted daemon on a single-database master-table or sharded tenancy shows as hosted;
+  the Projections page no longer asks Marten's coordinator to find or create a database by name, which on a
+  sharded tenancy could provision a tenant; pause and resume are refused unless the daemon answered as
+  hosted here; and a store whose event tables exist but hold no events has a high-water mark of 0 and no
+  "nothing is running these projections" alert.
+- The sample host seeds two non-Marten schemas beside the store — Quartz.NET's own job store (vendored,
+  Apache-2.0, see `samples/MartenStudio.SampleDomain/Relational/THIRD-PARTY-NOTICES.md`) and a `legacy`
+  schema covering every catalog edge case — sets `BrowsableSchemas` to both, never writes into a `quartz`
+  or `legacy` schema it did not create, and has a `--no-daemon` switch. The demo-data panel's Truncate no
+  longer times out at the Large preset.
+- The capability chip counts ten and lists "Reads beyond the store" (`RunSql`, `BrowseDatabase`) apart from
+  "Mutating operations"; `ReadOnly` turns both off.
+
 # 0.2.0
 
 - A user-interface pass, measured in a real browser at 1440×900, 1280×720 and 390×844 in both themes.
