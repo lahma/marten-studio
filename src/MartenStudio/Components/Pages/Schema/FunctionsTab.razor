@@ -23,8 +23,22 @@
 
     Marten 9.35 does NOT install a per-document mt_upsert_<alias> function - the upsert is written inline
     by its generated code - so do not expect one here. SchemaLiveTests asserts that, so this comment stops
-    being true loudly rather than quietly.
+    being true loudly rather than quietly. A database an earlier Marten wrote keeps them, though, and a
+    hidden document type's are absent here like its table.
+
+    While a registered store cannot be read, the database browser reads nothing, so the service reads
+    Marten's own bodies itself, with the list, and hands them over already read (FunctionInfo.Definition);
+    this draws them as they are and asks nobody for them.
 *@
+
+@if (!loading && catalog.ClassificationNotice is { Length: > 0 } notice)
+{
+    <div class="ms-alert ms-alert-warning ms-schema-degraded" role="status">
+        <div class="ms-alert-content">
+            <p>@notice</p>
+        </div>
+    </div>
+}
 
 @if (loading)
 {
@@ -93,6 +107,10 @@ else
                 @if (!function.DefinitionAvailable)
                 {
                     <p class="ms-schema-note ms-function-refusal">@function.DefinitionRefusal</p>
+                }
+                else if (function.Definition is { } preloaded)
+                {
+                    <SqlText Sql="@preloaded" Label="@function.Signature" Wrap="true" ShowLineNumbers="false" />
                 }
                 else if (bodies.TryGetValue(function.Key, out FunctionBody? body))
                 {
@@ -219,7 +237,7 @@ else
     /// already read (or being read) and does nothing.
     /// </remarks>
     private Task OnToggledAsync(FunctionInfo function) =>
-        !function.DefinitionAvailable || bodies.ContainsKey(function.Key)
+        !function.DefinitionAvailable || function.Definition is not null || bodies.ContainsKey(function.Key)
             ? Task.CompletedTask
             : LoadBodyAsync(function);
 

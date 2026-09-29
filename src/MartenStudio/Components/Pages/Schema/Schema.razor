@@ -1,4 +1,5 @@
 @page "/marten/schema"
+@using MartenStudio.Services.Database
 @using Microsoft.AspNetCore.WebUtilities
 @using Microsoft.Extensions.Options
 @implements IDisposable
@@ -156,16 +157,11 @@
 
     /// <summary>
     /// A link to one relation's detail in the database browser - <c>/marten/database/object?schema=&amp;name=</c>
-    /// - carrying the scope.
+    /// - carrying the scope, built by the browser's own <see cref="DatabaseLinks" /> so the two screens can
+    /// never disagree about the route or its parameters.
     /// </summary>
-    /// <remarks>
-    /// TODO(DB-7, consolidate): DB-4's <c>Services/Database/DatabaseLinks</c> builds this same link, with the
-    /// same route and the same parameter names (plan §4, "Routes"); once it lands this becomes one call to it.
-    /// Built here through the page's own <see cref="Link" /> until then, so the mount path and the scope
-    /// travel exactly as every other link on this screen.
-    /// </remarks>
     private string ObjectLink(string schema, string name) =>
-        Link("database/object", ("schema", schema), ("name", name));
+        DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, name);
 
     private string Link(string subPath, params (string Name, string? Value)[] extra)
     {

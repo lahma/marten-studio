@@ -83,6 +83,13 @@ internal sealed record IndexStatsRow(
 /// <param name="Kind"><c>prokind</c>: <c>f</c>, <c>p</c>, <c>a</c> or <c>w</c>.</param>
 internal sealed record FunctionStatsRow(string Schema, string Name, string IdentityArguments, string Kind);
 
+/// <summary>One routine's body, as <c>pg_get_functiondef</c> prints it.</summary>
+/// <param name="Schema">The schema the routine lives in.</param>
+/// <param name="Name">The routine name.</param>
+/// <param name="IdentityArguments">What tells one overload from another.</param>
+/// <param name="Definition">The <c>CREATE OR REPLACE</c> statement, or <see langword="null" /> when the routine vanished mid-read.</param>
+internal sealed record FunctionBodyRow(string Schema, string Name, string IdentityArguments, string? Definition);
+
 /// <summary>
 /// The catalog and statistics reads behind the Schema screen.
 /// </summary>
@@ -95,6 +102,15 @@ internal sealed record FunctionStatsRow(string Schema, string Name, string Ident
 /// own tables, which is both a surprise and an information leak in a shared database. No identifier is
 /// interpolated into any statement here; the schema names travel as a value like everything else
 /// (AGENTS.md hard rule 4).
+/// </para>
+/// <para>
+/// <b>Every read takes the transaction it runs in.</b> The service runs them inside
+/// <c>ReadOnlySqlSession.InTransactionAsync</c>, as the database browser runs its catalog reads: a read-only
+/// transaction, <c>statement_timeout</c>, a three-second <c>lock_timeout</c> and <c>SET LOCAL ROLE</c> to
+/// <c>MartenStudioOptions.SqlConsoleRole</c>. The size functions open each listed table with an
+/// <c>AccessShareLock</c>, which queues behind an <c>ACCESS EXCLUSIVE</c> lock on it - Marten adding a
+/// tenant's partition to a parent, say - and without the lock timeout a Schema tab would sit in that queue
+/// for the whole of <c>QueryTimeout</c> and hold up every session queued behind it.
 /// </para>
 /// <para>
 /// The numbers are estimates and are labelled as such on screen. <c>reltuples</c> is a planner estimate
@@ -327,21 +343,67 @@ internal static class SchemaStatsQueries
         order by n.nspname, p.proname, 3
         """;
 
+    /// <summary>
+    /// The bodies of the named routines in the store's schemas - asked for only while the database browser,
+    /// which otherwise reads a body one routine at a time, cannot answer at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The database browser fails closed when a registered Marten store will not build: it cannot tell that
+    /// store's objects from anybody else's, so it reads nothing, and the Functions tab's bodies - read through
+    /// it - went with it, Marten's own included, although they are Marten's by their <c>mt_</c> name whoever
+    /// owns them and the Schema screen always showed them. So in that state, and only then, the service asks
+    /// for Marten's own bodies in the store's own schemas here, with the list, by name - the caller passes
+    /// only names it has already classified as Marten's - and matches each back to its overload.
+    /// </para>
+    /// <para>
+    /// <c>pg_get_functiondef</c> reads the system cache and locks nothing. It prints a type or name that the
+    /// <c>search_path</c> would not find with its schema, so the caller pins the path to <c>pg_catalog</c>
+    /// first (as every catalog read of the browser's does) and a withheld schema can be masked. An aggregate
+    /// is never asked for: <c>pg_get_functiondef</c> refuses one (<c>42809</c>).
+    /// </para>
+    /// </remarks>
+    internal const string FunctionBodiesSql =
+        """
+        select n.nspname::text,
+               p.proname::text,
+               pg_catalog.pg_get_function_identity_arguments(p.oid),
+               pg_catalog.pg_get_functiondef(p.oid)
+        from pg_catalog.pg_proc p
+        join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = any(@schemas)
+          and p.proname::text = any(@names)
+          and p.prokind in ('f', 'p', 'w')
+          and not exists (
+              select 1
+              from pg_catalog.pg_depend d
+              where d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass
+                and d.objid = p.oid
+                and d.deptype in ('e', 'i'))
+        order by n.nspname, p.proname, 3
+        """;
+
     /// <summary>The size of the database the connection is open against.</summary>
-    internal const string DatabaseSizeSql = "select pg_database_size(current_database())";
+    internal const string DatabaseSizeSql = "select pg_catalog.pg_database_size(pg_catalog.current_database())";
+
+    /// <summary>Every statement this class runs, for the tests that hold them to their rules.</summary>
+    internal static IReadOnlyList<string> AllStatements { get; } =
+        [TableStatsSql, IndexStatsSql, FunctionsSql, FunctionBodiesSql, DatabaseSizeSql];
 
     /// <summary>Reads table sizes and activity for the store's schemas.</summary>
     /// <param name="connection">An open connection to the database in scope.</param>
+    /// <param name="transaction">The read-only transaction to run in, or <see langword="null" /> for none.</param>
     /// <param name="schemas">The schemas the store owns, derived from its options.</param>
     /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<IReadOnlyList<TableStatsRow>> ReadTablesAsync(
         NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
         IReadOnlyList<string> schemas,
         int commandTimeoutSeconds,
         CancellationToken cancellationToken = default)
     {
-        await using NpgsqlCommand command = CreateCommand(connection, TableStatsSql, schemas, commandTimeoutSeconds);
+        await using NpgsqlCommand command = CreateCommand(connection, transaction, TableStatsSql, schemas, commandTimeoutSeconds);
 
         List<TableStatsRow> rows = [];
 
@@ -370,16 +432,18 @@ internal static class SchemaStatsQueries
 
     /// <summary>Reads every index in the store's schemas, with its size and its recorded use.</summary>
     /// <param name="connection">An open connection to the database in scope.</param>
+    /// <param name="transaction">The read-only transaction to run in, or <see langword="null" /> for none.</param>
     /// <param name="schemas">The schemas the store owns.</param>
     /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<IReadOnlyList<IndexStatsRow>> ReadIndexesAsync(
         NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
         IReadOnlyList<string> schemas,
         int commandTimeoutSeconds,
         CancellationToken cancellationToken = default)
     {
-        await using NpgsqlCommand command = CreateCommand(connection, IndexStatsSql, schemas, commandTimeoutSeconds);
+        await using NpgsqlCommand command = CreateCommand(connection, transaction, IndexStatsSql, schemas, commandTimeoutSeconds);
 
         List<IndexStatsRow> rows = [];
 
@@ -403,16 +467,18 @@ internal static class SchemaStatsQueries
 
     /// <summary>Reads the routines Marten (or anyone else) put into the store's schemas, without their bodies.</summary>
     /// <param name="connection">An open connection to the database in scope.</param>
+    /// <param name="transaction">The read-only transaction to run in, or <see langword="null" /> for none.</param>
     /// <param name="schemas">The schemas the store owns.</param>
     /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<IReadOnlyList<FunctionStatsRow>> ReadFunctionsAsync(
         NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
         IReadOnlyList<string> schemas,
         int commandTimeoutSeconds,
         CancellationToken cancellationToken = default)
     {
-        await using NpgsqlCommand command = CreateCommand(connection, FunctionsSql, schemas, commandTimeoutSeconds);
+        await using NpgsqlCommand command = CreateCommand(connection, transaction, FunctionsSql, schemas, commandTimeoutSeconds);
 
         List<FunctionStatsRow> rows = [];
 
@@ -429,18 +495,64 @@ internal static class SchemaStatsQueries
         return rows;
     }
 
+    /// <summary>Reads the bodies of the named routines in the store's schemas (see <see cref="FunctionBodiesSql" />).</summary>
+    /// <param name="connection">An open connection to the database in scope.</param>
+    /// <param name="transaction">The read-only transaction to run in, its <c>search_path</c> already pinned.</param>
+    /// <param name="schemas">The schemas the store owns.</param>
+    /// <param name="names">The routine names to read - only ones the caller has classified as Marten's.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public static async Task<IReadOnlyList<FunctionBodyRow>> ReadFunctionBodiesAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        IReadOnlyList<string> schemas,
+        IReadOnlyList<string> names,
+        int commandTimeoutSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+
+        if (names.Count == 0 || schemas.Count == 0)
+        {
+            return [];
+        }
+
+        await using NpgsqlCommand command = CreateCommand(connection, transaction, FunctionBodiesSql, schemas, commandTimeoutSeconds);
+
+        command.Parameters.Add(new NpgsqlParameter("names", NpgsqlDbType.Array | NpgsqlDbType.Text)
+        {
+            Value = names as string[] ?? [.. names],
+        });
+
+        List<FunctionBodyRow> rows = [];
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            rows.Add(new FunctionBodyRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetString(3)));
+        }
+
+        return rows;
+    }
+
     /// <summary>The size of the whole database, for the Tables tab's footer.</summary>
     /// <param name="connection">An open connection to the database in scope.</param>
+    /// <param name="transaction">The read-only transaction to run in, or <see langword="null" /> for none.</param>
     /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public static async Task<long> ReadDatabaseSizeAsync(
         NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
         int commandTimeoutSeconds,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
 
-        await using var command = new NpgsqlCommand(DatabaseSizeSql, connection)
+        await using var command = new NpgsqlCommand(DatabaseSizeSql, connection, transaction)
         {
             CommandTimeout = commandTimeoutSeconds,
         };
@@ -451,6 +563,7 @@ internal static class SchemaStatsQueries
 
     private static NpgsqlCommand CreateCommand(
         NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
         string sql,
         IReadOnlyList<string> schemas,
         int commandTimeoutSeconds)
@@ -458,7 +571,7 @@ internal static class SchemaStatsQueries
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(schemas);
 
-        var command = new NpgsqlCommand(sql, connection)
+        var command = new NpgsqlCommand(sql, connection, transaction)
         {
             CommandTimeout = commandTimeoutSeconds,
         };

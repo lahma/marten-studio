@@ -33,6 +33,12 @@ namespace MartenStudio.Services.Schema;
 /// aggregate never, because Postgres prints no body for one.
 /// </param>
 /// <param name="DefinitionRefusal">Why not, naming what would change it - or <see langword="null" />.</param>
+/// <param name="Definition">
+/// The body, already read - set only while the database browser cannot answer (a registered store will not
+/// build, so it classifies nothing and reads nothing), and then only for Marten's own routines in the store's
+/// own schemas, which the Schema screen has always shown. Otherwise <see langword="null" />, and the body is
+/// read when the row is opened.
+/// </param>
 internal sealed record FunctionInfo(
     string Schema,
     string Name,
@@ -41,7 +47,8 @@ internal sealed record FunctionInfo(
     bool DeclaredByMarten,
     DatabaseObjectOwnership Ownership,
     bool DefinitionAvailable,
-    string? DefinitionRefusal)
+    string? DefinitionRefusal,
+    string? Definition = null)
 {
     /// <summary>The qualified name.</summary>
     public string QualifiedName => Schema + "." + Name;
@@ -66,6 +73,12 @@ internal sealed record SchemaFunctions(IReadOnlyList<FunctionInfo> Functions, st
 
     /// <summary>The read failed, and this is why.</summary>
     public static SchemaFunctions Unavailable(string reason) => new([], reason);
+
+    /// <summary>
+    /// What the list leaves out, and why, while a registered Marten store cannot be read - or
+    /// <see langword="null" /> when every store could be (<see cref="SchemaClassification" />).
+    /// </summary>
+    public string? ClassificationNotice { get; init; }
 }
 
 /// <summary>The whole creation script for the store's schema objects.</summary>
@@ -78,6 +91,19 @@ internal sealed record DdlScript(string Text, string? Reason)
 
     /// <summary>The script could not be produced, and this is why.</summary>
     public static DdlScript Unavailable(string reason) => new(string.Empty, reason);
+
+    /// <summary>The script was not produced for this visitor, and this is why.</summary>
+    public static DdlScript Refused(SchemaScriptRefusal refusal)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        return new DdlScript(string.Empty, null) { Withheld = refusal };
+    }
+
+    /// <summary>
+    /// Why this visitor may not see the script, or <see langword="null" /> when they may. It spans every
+    /// tenant and every document type (<see cref="SchemaScriptGate" />).
+    /// </summary>
+    public SchemaScriptRefusal? Withheld { get; init; }
 
     /// <summary>How large the script is, for the download button's label.</summary>
     public int Bytes => System.Text.Encoding.UTF8.GetByteCount(Text);

@@ -22,8 +22,20 @@
     "unmanaged" - a statement about what the studio can see, never a promise that an apply leaves it alone.
 
     An index on a partition is never listed (it is named after the partition, and a Marten partition is
-    named after its tenant), and neither is anything on a hidden document type's table.
+    named after its tenant), and neither is anything on a hidden document type's table. A definition that
+    names a schema this visitor may not see - an expression index calling a function there - reads
+    ‹withheld› in its place, as the database browser's object detail does. A registered store that cannot
+    be read withholds the indexes of every table it could own, with a notice, rather than blanking the tab.
 *@
+
+@if (!loading && indexes.ClassificationNotice is { Length: > 0 } notice)
+{
+    <div class="ms-alert ms-alert-warning ms-schema-degraded" role="status">
+        <div class="ms-alert-content">
+            <p>@notice</p>
+        </div>
+    </div>
+}
 
 @if (loading)
 {
@@ -31,7 +43,7 @@
 }
 else if (indexes.Reason is { Length: > 0 } reason)
 {
-    <ErrorAlert Message="@reason" OnRetry="LoadAsync" />
+    <ErrorAlert Message="@reason" OnRetry="LoadAsync" RetryText="@(indexes.Busy ? "Try again" : "Retry")" />
 }
 else
 {

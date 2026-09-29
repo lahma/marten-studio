@@ -17,6 +17,12 @@ internal enum SchemaCheckStatus
     /// value and is drawn differently from "in sync" (plan §4.8).
     /// </summary>
     Unavailable,
+
+    /// <summary>
+    /// This visitor may not see the answer: it spans every tenant and every document type
+    /// (<see cref="SchemaScriptGate" />), and <see cref="SchemaCheck.Withheld" /> says which gate refused.
+    /// </summary>
+    Withheld,
 }
 
 /// <summary>One schema object that differs from its configuration.</summary>
@@ -37,7 +43,10 @@ internal sealed record SchemaObjectDifference(string Name, string Kind, string D
 /// Marten's own message names every object it disagrees about and is the most useful sentence on the
 /// page, but it arrives as an exception, and an exception on a tab is a blank tab.
 /// </param>
-/// <param name="Reason">Why the check could not run, when <see cref="Status" /> is unavailable.</param>
+/// <param name="Reason">
+/// Why the check could not run, when <see cref="Status" /> is unavailable, or why it was not run for this
+/// visitor, when it is withheld.
+/// </param>
 internal sealed record SchemaCheck(
     SchemaCheckStatus Status,
     int DifferenceCount,
@@ -64,12 +73,26 @@ internal sealed record SchemaCheck(
     public static SchemaCheck Unavailable(string reason) =>
         new(SchemaCheckStatus.Unavailable, 0, [], [], null, reason);
 
+    /// <summary>The check was not run for this visitor, and this is why.</summary>
+    public static SchemaCheck Refused(SchemaScriptRefusal refusal)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        return new(SchemaCheckStatus.Withheld, 0, [], [], null, refusal.Reason) { Withheld = refusal };
+    }
+
+    /// <summary>
+    /// Why this visitor may not see the check, or <see langword="null" /> when they may. Set exactly when
+    /// <see cref="Status" /> is <see cref="SchemaCheckStatus.Withheld" />.
+    /// </summary>
+    public SchemaScriptRefusal? Withheld { get; init; }
+
     /// <summary>The badge's text.</summary>
     public string BadgeText => Status switch
     {
         SchemaCheckStatus.Matches => "In sync",
         SchemaCheckStatus.Differences => DifferenceCount == 1 ? "1 difference" : $"{DifferenceCount} differences",
         SchemaCheckStatus.Unavailable => "Cannot report",
+        SchemaCheckStatus.Withheld => "Withheld",
         _ => "Not checked",
     };
 }

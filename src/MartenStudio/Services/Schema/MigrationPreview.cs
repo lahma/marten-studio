@@ -29,6 +29,20 @@ internal sealed record MigrationPreview(
     /// <summary>Nobody has asked for a preview yet.</summary>
     public static MigrationPreview None { get; } = new(string.Empty, 0, [], "None", null);
 
+    /// <summary>The preview was not rendered for this visitor, and this is why.</summary>
+    public static MigrationPreview Refused(SchemaScriptRefusal refusal)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        return None with { Withheld = refusal };
+    }
+
+    /// <summary>
+    /// Why this visitor may not see the migration, or <see langword="null" /> when they may. The script spans
+    /// every tenant and every document type (<see cref="SchemaScriptGate" />), so a refused preview carries no
+    /// SQL, no deltas and no notice at all.
+    /// </summary>
+    public SchemaScriptRefusal? Withheld { get; init; }
+
     /// <summary>Whether there is any SQL to copy, download or apply.</summary>
     public bool HasSql => Sql.Trim().Length > 0;
 
@@ -67,4 +81,17 @@ internal sealed record SchemaApplyResult(
     /// <summary>Whether the refusal was "this role may not do that".</summary>
     public bool IsInsufficientPrivilege =>
         string.Equals(SqlState, Npgsql.PostgresErrorCodes.InsufficientPrivilege, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Why the apply was refused before anything ran, when the visitor may not see the script it would run
+    /// (<see cref="SchemaScriptGate" />) - or <see langword="null" />.
+    /// </summary>
+    public SchemaScriptRefusal? Withheld { get; init; }
+
+    /// <summary>An apply refused because the visitor may not see what it would run.</summary>
+    public static SchemaApplyResult Refused(SchemaScriptRefusal refusal)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        return new SchemaApplyResult(Succeeded: false, "Refused", 0, refusal.Reason, SqlState: null) { Withheld = refusal };
+    }
 }

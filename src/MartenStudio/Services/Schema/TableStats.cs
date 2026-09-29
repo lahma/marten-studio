@@ -45,6 +45,13 @@ namespace MartenStudio.Services.Schema;
 /// gate (<c>Capabilities.BrowseDatabase</c> and the write policy's yes); <see cref="SchemaTables.PartitionCountsWithheld" />
 /// says why when it is not. The partitions' names are never here, whoever asks.
 /// </param>
+/// <param name="FiguresWithheld">
+/// Whether the row figures - the estimate, the live and dead rows, the scan counters - are withheld: set for
+/// Marten's tenancy registry tables (<c>mt_tenant_partitions</c>, <c>mt_tenant_databases</c>,
+/// <c>mt_tenant_migration_log</c>) exactly when the partition counts are, because each holds a row per tenant
+/// and its row count is the number of tenants. <see cref="EstimatedRows" /> is then <c>-1</c> and the counters
+/// <see langword="null" />.
+/// </param>
 internal sealed record TableStats(
     string Schema,
     string Table,
@@ -63,7 +70,8 @@ internal sealed record TableStats(
     DatabaseObjectOwnership Ownership,
     bool OwnedByThisStore = true,
     bool IsPartitioned = false,
-    int? PartitionCount = null)
+    int? PartitionCount = null,
+    bool FiguresWithheld = false)
 {
     /// <summary>The qualified name, which is what a person copies into psql.</summary>
     public string QualifiedName => Schema + "." + Table;
@@ -84,8 +92,8 @@ internal sealed record TableStats(
 /// <param name="DatabaseBytes"><c>pg_database_size</c> for the whole database.</param>
 /// <param name="Reason">Why nothing could be read, or <see langword="null" />.</param>
 /// <param name="PartitionCountsWithheld">
-/// Why the partition counts are not shown, naming the gate that is shut - or <see langword="null" /> when
-/// they are.
+/// Why the partition counts - and the tenancy registry tables' row figures - are not shown, naming the gate
+/// that is shut, or <see langword="null" /> when they are.
 /// </param>
 internal sealed record SchemaTables(
     IReadOnlyList<TableStats> Tables,
@@ -99,4 +107,19 @@ internal sealed record SchemaTables(
 
     /// <summary>The read failed, and this is why.</summary>
     public static SchemaTables Unavailable(string reason) => new([], [], 0, reason);
+
+    /// <summary>A table was locked, and the read gave up rather than queue behind the lock (<c>55P03</c>).</summary>
+    public static SchemaTables Locked(string reason) => new([], [], 0, reason) { Busy = true };
+
+    /// <summary>
+    /// Whether the read gave up on a lock - somebody is changing a table in these schemas right now - rather
+    /// than failing. <see cref="Reason" /> says so, and trying again in a moment is the answer.
+    /// </summary>
+    public bool Busy { get; init; }
+
+    /// <summary>
+    /// What the list leaves out, and why, while a registered Marten store cannot be read - or
+    /// <see langword="null" /> when every store could be (<see cref="SchemaClassification" />).
+    /// </summary>
+    public string? ClassificationNotice { get; init; }
 }

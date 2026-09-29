@@ -21,10 +21,18 @@ namespace MartenStudio.Services.Schema;
 /// says so, and none of them may be called on navigation.
 /// </para>
 /// <para>
+/// <b>And what they show spans the whole database</b> - every tenant's partitions by name, every document
+/// type's tables, the hidden ones included - so each of the three, and <see cref="ApplyAsync" />, answers
+/// only a visitor the store policy allows for the database with no tenant and, while the store hides a
+/// document type, one past the database browser's gate. Anybody else gets the refusal as a value
+/// (<see cref="SchemaScriptRefusal" />), audited (<see cref="SchemaScriptGate" />).
+/// </para>
+/// <para>
 /// <see cref="TablesAsync" />, <see cref="IndexesAsync" /> and <see cref="FunctionsAsync" /> are the
 /// navigation paths and execute no DDL at all: their schema list and their declarations come from
 /// <c>StoreOptions</c> (see <see cref="SchemaDeclarationReader" />) and their numbers from
-/// <c>pg_catalog</c> over a read connection. <c>SchemaNoDdlLiveTests</c> holds them to it.
+/// <c>pg_catalog</c>, read in the database browser's read-only session. <c>SchemaNoDdlLiveTests</c> holds
+/// them to it.
 /// </para>
 /// </remarks>
 internal interface ISchemaDataService
@@ -61,10 +69,23 @@ internal interface ISchemaDataService
     /// nothing.
     /// </param>
     /// <param name="cancellationToken">Cancels the apply.</param>
+    /// <returns>
+    /// What was applied - or, while the store hides a document type and the visitor is not past the database
+    /// browser's gate, a result that did not succeed and carries the refusal
+    /// (<see cref="SchemaApplyResult.Withheld" />), with nothing run: the migration would print that type's table.
+    /// </returns>
+    /// <remarks>
+    /// The migration is the whole database's - every tenant's tables and partitions - whatever tenant
+    /// <paramref name="scope" /> selects, so both policies are asked about <c>scope with { TenantId = null }</c>:
+    /// the store policy, then the write policy with <c>ApplySchemaChanges</c> named.
+    /// </remarks>
     /// <exception cref="StudioCapabilityDeniedException">
     /// <c>MartenStudioOptions.Capabilities.ApplySchemaChanges</c> is off, or <c>ReadOnly</c> is on.
     /// </exception>
-    /// <exception cref="StudioNotAuthorizedException">The write policy refused this scope.</exception>
+    /// <exception cref="StudioNotAuthorizedException">
+    /// The store policy or the write policy refused this store and database as a whole; its
+    /// <see cref="StudioNotAuthorizedException.Scope" /> carries no tenant.
+    /// </exception>
     Task<SchemaApplyResult> ApplyAsync(
         StudioScope scope,
         string confirmation,

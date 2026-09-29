@@ -114,6 +114,18 @@ internal sealed record SchemaIndexes(
     /// <summary>The read failed, and this is why.</summary>
     public static SchemaIndexes Unavailable(string reason) => new([], [], [], reason);
 
+    /// <summary>An index was locked, and the read gave up rather than queue behind the lock (<c>55P03</c>).</summary>
+    public static SchemaIndexes Locked(string reason) => new([], [], [], reason) { Busy = true };
+
+    /// <summary>Whether the read gave up on a lock rather than failing. <see cref="Reason" /> says so.</summary>
+    public bool Busy { get; init; }
+
+    /// <summary>
+    /// What the list leaves out, and why, while a registered Marten store cannot be read - or
+    /// <see langword="null" /> when every store could be (<see cref="SchemaClassification" />).
+    /// </summary>
+    public string? ClassificationNotice { get; init; }
+
     /// <summary>How many indexes Postgres has recorded no scan of.</summary>
     public int NeverUsedCount
     {

@@ -164,8 +164,8 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
         await using NpgsqlTransaction reading = await reader.BeginTransactionAsync(Token);
         await ExecuteAsync(reader, "set local lock_timeout = '2s'");
 
-        IReadOnlyList<TableStatsRow> tables = await SchemaStatsQueries.ReadTablesAsync(reader, schemas, 30, Token);
-        IReadOnlyList<IndexStatsRow> indexes = await SchemaStatsQueries.ReadIndexesAsync(reader, schemas, 30, Token);
+        IReadOnlyList<TableStatsRow> tables = await SchemaStatsQueries.ReadTablesAsync(reader, reading, schemas, 30, Token);
+        IReadOnlyList<IndexStatsRow> indexes = await SchemaStatsQueries.ReadIndexesAsync(reader, reading, schemas, 30, Token);
 
         tables.Should().Contain(x => x.Table == Partitioned && x.IsPartitioned && x.PartitionCount == Tenants.Length);
         tables.Should().NotContain(x => x.Table.StartsWith(Partitioned + "_", StringComparison.Ordinal));
@@ -272,6 +272,48 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
         IReadOnlyList<string> after = await host.IndexNamesAsync("ext_things");
         after.Should().NotContain(HandMadeOnExtended, "AutoCreate.CreateOrUpdate is not additive, on an extended table too");
         after.Should().Contain(ExtendedIndex, "and the declared one is kept");
+    }
+
+    /// <summary>
+    /// DB-7-fix, item 4: the same drop, seen before it happens - through the studio's own preview, where
+    /// <see cref="MigrationRisk" /> lists the hand-made index on the extended table as a destructive
+    /// <c>drop index</c> for the dialog to show before the typed confirmation. The store hides a document type,
+    /// so the visitor is past the database browser's gate to be shown the script at all.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_preview_lists_the_extended_tables_undeclared_index_as_a_destructive_drop_index()
+    {
+        await using Host host = await StartAsync("db7_extpreview", open: true);
+
+        MigrationPreview preview = await host.SchemaAsync(x => x.PreviewAsync(Scope));
+
+        preview.Withheld.Should().BeNull();
+        preview.Notice.Should().BeNull();
+        preview.IsDestructive.Should().BeTrue();
+
+        DestructiveStatement drop = preview.DestructiveStatements
+            .Should().ContainSingle(static x => x.Statement.Contains(HandMadeOnExtended, StringComparison.Ordinal)).Subject;
+        drop.Kind.Should().Be("drops an index");
+        drop.Statement.Should().StartWithEquivalentOf("drop index");
+
+        preview.DestructiveStatements.Should().NotContain(static x => x.Statement.Contains(ExtendedIndex, StringComparison.Ordinal),
+            "the declared index is kept");
+        MigrationRisk.KindsIn(preview.Sql).Should().Contain("drops an index");
+
+        (await host.IndexNamesAsync("ext_things")).Should().Contain(HandMadeOnExtended, "a preview runs nothing");
+    }
+
+    /// <summary>The same store, with the gate shut: the preview names the hidden type's table, so it is withheld.</summary>
+    [PostgresFact]
+    public async Task With_the_gate_shut_the_preview_of_a_store_that_hides_a_type_is_withheld()
+    {
+        await using Host host = await StartAsync("db7_extpreview_shut");
+
+        MigrationPreview preview = await host.SchemaAsync(x => x.PreviewAsync(Scope));
+
+        preview.Withheld!.Kind.Should().Be(DatabaseRefusal.CapabilityOff);
+        preview.HasSql.Should().BeFalse();
+        preview.DestructiveStatements.Should().BeEmpty();
     }
 
     // ------------------------------------------------------------------------------------------------

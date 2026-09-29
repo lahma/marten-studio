@@ -14,9 +14,23 @@
 
     A partition is never a row: Marten names a tenant's partition after the tenant, so the list would be
     the tenant list. Its figures are added into its parent's, and how many partitions there are is shown
-    only past the database browser's gate, because that number is the number of tenants. The service
-    decides both; this only draws them. A hidden document type's table is not here at all.
+    only past the database browser's gate, because that number is the number of tenants - and so are the
+    row figures of Marten's tenancy tables (mt_tenant_partitions, mt_tenant_databases), one row per tenant.
+    The service decides both; this only draws them. A hidden document type's table is not here at all.
+
+    Two states are not errors and are drawn as such. A registered store that cannot be read withholds the
+    tables it could own, with a notice naming it, rather than blanking the tab (SchemaClassification). And a
+    read that gave up behind somebody's lock after three seconds says so, with a retry (SchemaTables.Busy).
 *@
+
+@if (!loading && tables.ClassificationNotice is { Length: > 0 } notice)
+{
+    <div class="ms-alert ms-alert-warning ms-schema-degraded" role="status">
+        <div class="ms-alert-content">
+            <p>@notice</p>
+        </div>
+    </div>
+}
 
 @if (loading)
 {
@@ -24,7 +38,7 @@
 }
 else if (tables.Reason is { Length: > 0 } reason)
 {
-    <ErrorAlert Message="@reason" OnRetry="LoadAsync" />
+    <ErrorAlert Message="@reason" OnRetry="LoadAsync" RetryText="@(tables.Busy ? "Try again" : "Retry")" />
 }
 else if (tables.Tables.Count == 0)
 {
@@ -51,12 +65,17 @@ else
         are the database browser's: a table this store does not declare is "not Marten", wherever it lives.
     </p>
 
-    @if (HasPartitionedTable)
+    @if (HasPartitionedTable || HasWithheldFigures)
     {
         <p class="ms-schema-note ms-schema-partition-note">
-            A partitioned table is one row. Its partitions are never listed - a per-tenant partition is named
-            after its tenant - and their sizes, row estimates and counters are added into it, the sizes from
-            the catalog's page counts, which <code>VACUUM</code> and <code>ANALYZE</code> refresh.
+            @if (HasPartitionedTable)
+            {
+                <text>
+                    A partitioned table is one row. Its partitions are never listed - a per-tenant partition is
+                    named after its tenant - and their sizes, row estimates and counters are added into it, the
+                    sizes from the catalog's page counts, which <code>VACUUM</code> and <code>ANALYZE</code> refresh.
+                </text>
+            }
             @if (tables.PartitionCountsWithheld is { Length: > 0 } withheld)
             {
                 @(" " + withheld)
@@ -147,11 +166,22 @@ else
                         <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.TotalBytes)</td>
                         <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.HeapBytes)</td>
                         <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.IndexBytes)</td>
-                        <td class="ms-table-cell ms-num ms-schema-estimate">@SchemaFormat.Estimate(table.EstimatedRows)</td>
-                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.LiveRows)</td>
-                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.DeadRows)</td>
-                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.SequentialScans)</td>
-                        <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.IndexScans)</td>
+                        @if (table.FiguresWithheld)
+                        {
+                            <td class="ms-table-cell ms-num ms-schema-withheld" title="@WithheldFigureTitle">withheld</td>
+                            <td class="ms-table-cell ms-num ms-schema-withheld" title="@WithheldFigureTitle">withheld</td>
+                            <td class="ms-table-cell ms-num ms-schema-withheld" title="@WithheldFigureTitle">withheld</td>
+                            <td class="ms-table-cell ms-num ms-schema-withheld" title="@WithheldFigureTitle">withheld</td>
+                            <td class="ms-table-cell ms-num ms-schema-withheld" title="@WithheldFigureTitle">withheld</td>
+                        }
+                        else
+                        {
+                            <td class="ms-table-cell ms-num ms-schema-estimate">@SchemaFormat.Estimate(table.EstimatedRows)</td>
+                            <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.LiveRows)</td>
+                            <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.DeadRows)</td>
+                            <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.SequentialScans)</td>
+                            <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.IndexScans)</td>
+                        }
                         <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastVacuum)</td>
                         <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastAnalyze)</td>
                     </tr>
@@ -166,6 +196,10 @@ else
         "Marten migrates it on the application's behalf - a flat-table projection's table, an " +
         "EventProjection's table, or one of StoreOptions.Storage.ExtendedSchemaObjects - and its rows are the " +
         "application's own relational data.";
+
+    private const string WithheldFigureTitle =
+        "One of Marten's tenancy tables holds a row per tenant, so its row figures are the number of tenants - " +
+        "shown only past the database browser's gate, like a partition count.";
 
     private const string InfrastructureTitle =
         "Marten's own bookkeeping (every mt_ table that is not a registered document or event table: " +
@@ -222,6 +256,22 @@ else
             foreach (TableStats table in tables.Tables)
             {
                 if (table.IsPartitioned)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    private bool HasWithheldFigures
+    {
+        get
+        {
+            foreach (TableStats table in tables.Tables)
+            {
+                if (table.FiguresWithheld)
                 {
                     return true;
                 }

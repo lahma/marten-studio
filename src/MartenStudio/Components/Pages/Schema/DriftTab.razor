@@ -15,6 +15,11 @@
     Marten's own bookkeeping objects (mt_hilo, mt_get_next_hi) in a schema that did not have them. That
     is a fine thing to do on purpose and an indefensible thing to do because somebody opened a tab, so
     the tab arrives with two buttons that say what pressing them may do (packet P7-fix, finding B1).
+
+    And both answers span the whole database - every tenant's partition by name, every document type's
+    table, the hidden ones included - so the service gives them only to a visitor who may see all of it
+    (SchemaScriptGate), and anybody else a refusal naming the option, drawn as a note rather than an error:
+    pressing again changes nothing. The apply is refused the same way, to the same visitor.
 *@
 
 <div class="ms-schema-toolbar">
@@ -59,7 +64,15 @@
     </div>
 }
 
-@if (check.Status is not SchemaCheckStatus.NotChecked)
+@if (check.Withheld is { } checkWithheld)
+{
+    <div class="ms-alert ms-alert-info ms-schema-refusal" role="note">
+        <div class="ms-alert-content">
+            <p>@checkWithheld.Reason</p>
+        </div>
+    </div>
+}
+else if (check.Status is not SchemaCheckStatus.NotChecked)
 {
     <div class="ms-kv">
         <div class="ms-kv-row">
@@ -115,7 +128,16 @@
     }
 }
 
-@if (previewed)
+@if (previewed && preview.Withheld is { } previewWithheld)
+{
+    <h2 class="ms-section-title">Migration preview</h2>
+    <div class="ms-alert ms-alert-info ms-schema-refusal" role="note">
+        <div class="ms-alert-content">
+            <p>@previewWithheld.Reason</p>
+        </div>
+    </div>
+}
+else if (previewed)
 {
     <h2 class="ms-section-title">Migration preview</h2>
     <MigrationPreviewPanel Sql="@preview.Sql"
@@ -158,7 +180,9 @@
 else
 {
     <p class="ms-schema-note">
-        Applying runs Marten's own migration for <strong>this database only</strong>, with
+        Applying runs Marten's own migration for <strong>this database only</strong> - but for all of it:
+        <strong>every tenant's</strong> tables and partitions, whichever tenant is selected above, which is why
+        your account needs the write policy for the database as a whole. It runs with
         <code>AutoCreate.CreateOrUpdate</code> - the same mode the preview above was rendered with, so what
         runs is what you read. It never uses <code>AutoCreate.All</code>, which would drop and recreate
         every object Marten manages. The SQL is written to the audit log under event id 9206.
@@ -275,20 +299,20 @@ else
     private bool Acknowledged => !preview.IsDestructive || acknowledged;
 
     /// <summary>
-    /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor
-    /// apply a migration to the database on screen.
+    /// Whether the store policy and <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> let
+    /// <em>this</em> visitor apply a migration to the database on screen - all of it, every tenant's.
     /// </summary>
     /// <remarks>
     /// Asked once, when this tab is first rendered, and never memoised: the answer is about this
     /// circuit's user. It defaults to <see langword="true" /> because the common case is a host that
     /// configured no write policy at all, and fail-open is safe because this is not the enforcement -
-    /// <c>ISchemaDataService.ApplyAsync</c> resolves the scope with the same capability and throws
-    /// (AGENTS.md hard rule 5).
+    /// <c>ISchemaDataService.ApplyAsync</c> asks both policies about the same tenant-less scope, with the
+    /// same capability, and throws (AGENTS.md hard rule 5).
     /// </remarks>
     private bool mayApply = true;
 
     private string ApplyTitle => mayApply
-        ? "Runs the previewed migration against this database"
+        ? "Runs the previewed migration against this database - every tenant's tables included"
         : WritePolicyRefusal.For(StudioCapability.ApplySchemaChanges);
 
     protected override async Task OnInitializedAsync()
@@ -301,10 +325,12 @@ else
 
         try
         {
-            mayApply = await Authorization.IsAuthorizedAsync(
-                scope,
-                StudioCapability.ApplySchemaChanges,
-                lifetime.Token);
+            // Asked as the service asks it: about the database as a whole, with no tenant, since the migration
+            // is every tenant's - the store policy, then the write policy with the capability named.
+            StudioScope wholeDatabase = scope with { TenantId = null };
+
+            mayApply = await Authorization.IsAuthorizedAsync(wholeDatabase, capability: null, lifetime.Token)
+                && await Authorization.IsAuthorizedAsync(wholeDatabase, StudioCapability.ApplySchemaChanges, lifetime.Token);
         }
         catch (OperationCanceledException)
         {
@@ -325,7 +351,8 @@ else
         get
         {
             string message =
-                $"This runs {preview.ObjectCount} schema change(s) against {databaseIdentity}. " +
+                $"This runs {preview.ObjectCount} schema change(s) against {databaseIdentity} - the whole " +
+                "database, every tenant's tables and partitions included, whichever tenant is selected. " +
                 "It cannot be undone from here.";
 
             return preview.IsDestructive

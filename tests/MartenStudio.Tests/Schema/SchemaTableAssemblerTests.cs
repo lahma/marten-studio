@@ -160,6 +160,97 @@ public class SchemaTableAssemblerTests
             .Should().Contain("WriteAuthorizationPolicy");
     }
 
+    /// <summary>
+    /// DB-7-fix, item 5: the sentence names the policy that actually refused - the store policy for the database
+    /// as a whole, or the write policy with the capability named - as <c>DatabaseAccess</c> now reports it.
+    /// </summary>
+    [Fact]
+    public void The_withheld_sentence_names_the_store_policy_when_it_was_the_store_policy_that_refused()
+    {
+        string store = SchemaTableAssembler.PartitionCountsWithheld(
+            readOnly: false, capabilityEnabled: true, authorized: false, DatabaseRefusal.StorePolicy)!;
+
+        store.Should().Contain("The store policy (MartenStudioOptions.StoreAuthorizationPolicy)")
+            .And.NotContain("WriteAuthorizationPolicy");
+
+        SchemaTableAssembler.PartitionCountsWithheld(
+                readOnly: false, capabilityEnabled: true, authorized: false, DatabaseRefusal.WritePolicy)
+            .Should().Contain("The write policy (MartenStudioOptions.WriteAuthorizationPolicy");
+    }
+
+    /// <summary>
+    /// DB-7-fix, item 2 - F9 closed: <c>mt_tenant_partitions</c> holds a row per tenant, so its row figures are
+    /// the tenant count, and are withheld exactly when the partition counts are.
+    /// </summary>
+    [Theory]
+    [InlineData("mt_tenant_partitions")]
+    [InlineData("mt_tenant_databases")]
+    [InlineData("mt_tenant_migration_log")]
+    [InlineData("MT_TENANT_PARTITIONS")]
+    public void A_tenancy_tables_row_figures_are_withheld_while_the_gate_is_shut(string table)
+    {
+        TableStatsRow row = Row(DocumentSchema, table) with { EstimatedRows = 3, LiveRows = 3, DeadRows = 1, SequentialScans = 7, IndexScans = 2 };
+
+        TableStats shut = Assemble([row], partitionCountsShown: false).Single();
+
+        shut.FiguresWithheld.Should().BeTrue();
+        shut.EstimatedRows.Should().Be(-1);
+        shut.HasRowEstimate.Should().BeFalse();
+        shut.LiveRows.Should().BeNull();
+        shut.DeadRows.Should().BeNull();
+        shut.SequentialScans.Should().BeNull();
+        shut.IndexScans.Should().BeNull();
+        shut.Ownership.Owner.Should().Be(DatabaseObjectOwner.MartenInfrastructure, "it is still listed, as Marten's");
+
+        TableStats open = Assemble([row], partitionCountsShown: true).Single();
+
+        open.FiguresWithheld.Should().BeFalse();
+        open.EstimatedRows.Should().Be(3);
+        open.LiveRows.Should().Be(3);
+        open.IndexScans.Should().Be(2);
+    }
+
+    [Fact]
+    public void Any_other_tables_figures_are_shown_whatever_the_gate_says()
+    {
+        TableStats table = Assemble([Row(DocumentSchema, "mt_doc_dbcustomer")], partitionCountsShown: false).Single();
+
+        table.FiguresWithheld.Should().BeFalse();
+        table.EstimatedRows.Should().Be(10);
+        table.LiveRows.Should().Be(10);
+    }
+
+    /// <summary>
+    /// DB-7-fix, item 3: with a store that cannot be read, the tab keeps what the readable one declares and
+    /// Marten's bookkeeping, withholds what nobody readable declares, and counts it - a hidden type's table is
+    /// absent, not counted.
+    /// </summary>
+    [Fact]
+    public void A_degraded_classification_keeps_what_is_declared_and_withholds_and_counts_the_rest()
+    {
+        SchemaDeclarationRead read = SchemaDeclarationReader.ReadForClassification(DefaultStore(), IsVisible);
+        var defaultOnly = new DatabaseObjectClassifier([new StoreDeclarations("default", read.Declarations!)], hidesDocumentTypes: true);
+        SchemaClassification degraded = SchemaClassification.Degraded(
+            defaultOnly, [new UnreadableStore(OtherStoreKey, "could not be built", "boom")]);
+
+        AssembledTables assembled = SchemaTableAssembler.Assemble(
+            [
+                Row(DocumentSchema, "mt_doc_dbcustomer"),
+                Row(DocumentSchema, "host_audit_log"),
+                Row(OtherSchema, "mt_doc_dbinvoice"),
+                Row(DocumentSchema, "mt_hilo"),
+                Row(DocumentSchema, "mt_doc_dbsecret"),
+                Row(EventSchema, "mt_events"),
+            ],
+            degraded,
+            "default",
+            TypeNames,
+            partitionCountsShown: false);
+
+        assembled.Tables.Select(x => x.Table).Should().Equal("mt_doc_dbcustomer", "mt_hilo", "mt_events");
+        assembled.Withheld.Should().Be(2, "the host's table and the unreadable store's document table; the hidden type is simply absent");
+    }
+
     [Fact]
     public void The_rows_keep_the_order_the_catalog_read_gave_them()
     {
