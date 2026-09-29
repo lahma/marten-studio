@@ -70,13 +70,20 @@ internal interface ISchemaDataService
         string confirmation,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Table sizes and activity for the store's schemas.</summary>
+    /// <summary>
+    /// Table sizes and activity for the store's schemas, each table classified by the database browser's
+    /// rules, partitions rolled into their parent, hidden document types left out.
+    /// </summary>
     Task<SchemaTables> TablesAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
     /// <summary>Every index that exists, every index that is declared, and what to do about the difference.</summary>
     Task<SchemaIndexes> IndexesAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
-    /// <summary>The functions in the store's schemas, with their definitions.</summary>
+    /// <summary>
+    /// The functions, procedures, aggregates and window functions in the store's schemas, with whether this
+    /// visitor may read each one's body - never the bodies themselves, which the database browser's
+    /// definition read serves one at a time.
+    /// </summary>
     Task<SchemaFunctions> FunctionsAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
     /// <summary>The whole creation script for the store's schema objects.</summary>

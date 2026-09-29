@@ -40,7 +40,7 @@
             @switch (ActiveTab)
             {
                 case TablesTabKey:
-                    <TablesTab CollectionLink="CollectionLink" />
+                    <TablesTab CollectionLink="CollectionLink" ObjectLink="ObjectLink" StreamsLink="@StreamsLink" />
                     break;
 
                 case IndexesTabKey:
@@ -150,6 +150,22 @@
 
     /// <summary>A link to a document collection, carrying the scope.</summary>
     private string CollectionLink(string alias) => Link("documents/" + Uri.EscapeDataString(alias));
+
+    /// <summary>A link to the event store's streams, carrying the scope.</summary>
+    private string StreamsLink => Link("events/streams");
+
+    /// <summary>
+    /// A link to one relation's detail in the database browser - <c>/marten/database/object?schema=&amp;name=</c>
+    /// - carrying the scope.
+    /// </summary>
+    /// <remarks>
+    /// TODO(DB-7, consolidate): DB-4's <c>Services/Database/DatabaseLinks</c> builds this same link, with the
+    /// same route and the same parameter names (plan §4, "Routes"); once it lands this becomes one call to it.
+    /// Built here through the page's own <see cref="Link" /> until then, so the mount path and the scope
+    /// travel exactly as every other link on this screen.
+    /// </remarks>
+    private string ObjectLink(string schema, string name) =>
+        Link("database/object", ("schema", schema), ("name", name));
 
     private string Link(string subPath, params (string Name, string? Value)[] extra)
     {

@@ -8,6 +8,7 @@ using Marten.Schema;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Database;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -78,6 +79,7 @@ internal sealed class SchemaDataService : ISchemaDataService
     private readonly StudioActionLog audit;
     private readonly ColumnCatalog columnCatalog;
     private readonly IndexCatalog indexCatalog;
+    private readonly DatabaseAccess databaseAccess;
     private readonly ILogger<SchemaDataService> logger;
 
     public SchemaDataService(
@@ -88,6 +90,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         StudioActionLog audit,
         ColumnCatalog columnCatalog,
         IndexCatalog indexCatalog,
+        DatabaseAccess databaseAccess,
         ILogger<SchemaDataService> logger)
     {
         this.options = options;
@@ -97,6 +100,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         this.audit = audit;
         this.columnCatalog = columnCatalog;
         this.indexCatalog = indexCatalog;
+        this.databaseAccess = databaseAccess;
         this.logger = logger;
     }
 
@@ -316,13 +320,44 @@ internal sealed class SchemaDataService : ISchemaDataService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Classified by the database browser's own rules (<see cref="DatabaseObjectClassifier" />, read through
+    /// <see cref="DatabaseAccess.ReadDeclarations" /> over every registered store), and failing closed as the
+    /// browser does: a configuration that cannot be read is a tab that says so, never a list in which a
+    /// hidden type's table or another store's table passes for somebody else's.
+    /// </para>
+    /// <para>
+    /// The partition counts are the one thing on this tab past the store's structure. A per-tenant partition
+    /// count is the number of tenants, so it is shown only when the visitor passes the database browser's
+    /// gate - <c>Capabilities.BrowseDatabase</c> and the write policy for the database with no tenant - asked
+    /// here, in the service, with <see cref="DatabaseAccess.EvaluateAsync" />: the same question the browser's
+    /// enforcement asks.
+    /// </para>
+    /// </remarks>
     public async Task<SchemaTables> TablesAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
         string[] schemas = SchemaNames(resolved);
-        string eventSchema = resolved.Store.Options.Events.DatabaseSchemaName;
 
-        Dictionary<string, IDocumentType> byTable = DocumentTypesByTable(resolved.Store.Options);
+        DatabaseDeclarations declared = databaseAccess.ReadDeclarations(resolved);
+        if (!declared.Succeeded)
+        {
+            return SchemaTables.Unavailable(declared.Failure ?? "The store's configuration could not be read.");
+        }
+
+        (bool capabilityEnabled, bool? authorized) = await databaseAccess
+            .EvaluateAsync(scope, cancellationToken)
+            .ConfigureAwait(false);
+
+        string? withheld = SchemaTableAssembler.PartitionCountsWithheld(
+            capabilities.ReadOnly, capabilityEnabled, authorized);
+
+        Dictionary<string, string> typeNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach ((string key, IDocumentType documentType) in DocumentTypesByTable(resolved.Store.Options))
+        {
+            typeNames[key] = SchemaTypeName.Of(documentType.DocumentType);
+        }
 
         try
         {
@@ -337,30 +372,14 @@ internal sealed class SchemaDataService : ISchemaDataService
                 .ReadDatabaseSizeAsync(connection, CommandTimeoutSeconds, cancellationToken)
                 .ConfigureAwait(false);
 
-            List<TableStats> tables = new(rows.Count);
-            foreach (TableStatsRow row in rows)
-            {
-                byTable.TryGetValue(SchemaKey.For(row.Schema, row.Table), out IDocumentType? documentType);
+            IReadOnlyList<TableStats> tables = SchemaTableAssembler.Assemble(
+                rows,
+                declared.Classifier,
+                resolved.Registration.Key,
+                typeNames,
+                partitionCountsShown: withheld is null);
 
-                tables.Add(new TableStats(
-                    row.Schema,
-                    row.Table,
-                    row.TotalBytes,
-                    row.HeapBytes,
-                    row.IndexBytes,
-                    row.EstimatedRows,
-                    row.LiveRows,
-                    row.DeadRows,
-                    row.SequentialScans,
-                    row.IndexScans,
-                    row.LastVacuum,
-                    row.LastAnalyze,
-                    documentType?.Alias,
-                    documentType is null ? null : SchemaTypeName.Of(documentType.DocumentType),
-                    string.Equals(row.Schema, eventSchema, StringComparison.OrdinalIgnoreCase)));
-            }
-
-            return new SchemaTables(tables, schemas, databaseBytes, null);
+            return new SchemaTables(tables, schemas, databaseBytes, null, withheld);
         }
         catch (OperationCanceledException)
         {
@@ -374,6 +393,22 @@ internal sealed class SchemaDataService : ISchemaDataService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>What an apply migrates is wider than <see cref="SchemaDeclarations.ManagedTables" />.</b> Marten's
+    /// <c>StorageFeatures.AllActiveFeatures</c> yields <c>StoreOptions.Storage.ExtendedSchemaObjects</c> as a
+    /// feature of its own, so an apply migrates those tables - and drops the indexes they do not declare -
+    /// exactly as it does a document table. So the managed set is the kind map's (every table it names a
+    /// document, event, projection, extended or infrastructure table), the extended tables' declared and
+    /// ignored indexes are read from their own Weasel definitions, and a projection's or extended table's
+    /// undeclared index is told so in words that fit a table the host built
+    /// (<see cref="IndexAdvice.ManagedTableSuggestion" />).
+    /// </para>
+    /// <para>
+    /// A hidden document type's indexes are left out with its table, by the browser's classification over
+    /// every registered store - which fails closed here as it does there.
+    /// </para>
+    /// </remarks>
     public async Task<SchemaIndexes> IndexesAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
@@ -387,6 +422,14 @@ internal sealed class SchemaDataService : ISchemaDataService
                 resolved.Store.Options,
                 options.Value.IsDocumentTypeVisible);
 
+            DatabaseDeclarations declared = databaseAccess.ReadDeclarations(resolved);
+            if (!declared.Succeeded)
+            {
+                return SchemaIndexes.Unavailable(declared.Failure ?? "The store's configuration could not be read.");
+            }
+
+            ManagedTableSet managed = ManagedTables(resolved.Store.Options, declarations);
+
             await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
@@ -396,10 +439,12 @@ internal sealed class SchemaDataService : ISchemaDataService
 
             return IndexAdvice.Join(
                 actual,
-                declarations.Indexes,
+                managed.Indexes,
                 DeclaredCollections(resolved),
-                declarations.ManagedTables,
-                declarations.IgnoredIndexes);
+                managed.Tables,
+                managed.IgnoredIndexes,
+                managed.RelationalTables,
+                HiddenTables(declared.Classifier));
         }
         catch (OperationCanceledException)
         {
@@ -413,6 +458,22 @@ internal sealed class SchemaDataService : ISchemaDataService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// Names and kinds only. A body is read one routine at a time, when a person opens its row, through
+    /// <see cref="IDatabaseObjectService.GetDefinitionAsync" /> - the database browser's definition read,
+    /// which is where the gate is enforced and audited (AGENTS.md hard rule 5). This tab used to read
+    /// <c>pg_get_functiondef</c> for every function in the store's schemas on arrival, the host's own in
+    /// <c>public</c> included, with no capability at all.
+    /// </para>
+    /// <para>
+    /// <see cref="FunctionInfo.DefinitionAvailable" /> is the same gate's answer asked in advance -
+    /// <see cref="DatabaseGate.DefinitionAccess" /> over the browser's classification - so the tab never
+    /// offers a body the service would refuse: Marten's own in the store's own schemas to everybody, the
+    /// rest only past <c>Capabilities.BrowseDatabase</c>, the write policy and <c>BrowsableSchemas</c>, and
+    /// an aggregate's never. A gate that cannot be read withholds every body, with the reason.
+    /// </para>
+    /// </remarks>
     public async Task<SchemaFunctions> FunctionsAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
@@ -423,22 +484,48 @@ internal sealed class SchemaDataService : ISchemaDataService
                 resolved.Store.Options,
                 options.Value.IsDocumentTypeVisible);
 
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            IReadOnlyList<FunctionStatsRow> rows;
 
-            IReadOnlyList<FunctionStatsRow> rows = await SchemaStatsQueries
-                .ReadFunctionsAsync(connection, [.. declarations.Schemas], CommandTimeoutSeconds, cancellationToken)
+            await using (NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read))
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+                rows = await SchemaStatsQueries
+                    .ReadFunctionsAsync(connection, [.. declarations.Schemas], CommandTimeoutSeconds, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            (DatabaseGate? gate, string? gateFailure) = await DefinitionGateAsync(scope, resolved, cancellationToken)
                 .ConfigureAwait(false);
 
             List<FunctionInfo> functions = new(rows.Count);
             foreach (FunctionStatsRow row in rows)
             {
+                bool declaredHere = declarations.Functions.Contains(SchemaKey.For(row.Schema, row.Name));
+                DatabaseObjectKind kind = DatabaseObjectKinds.FromProkind(row.Kind);
+
+                DatabaseObjectOwnership ownership = gate?.Classifier.ClassifyRoutine(row.Schema, row.Name)
+                    ?? (declaredHere || DatabaseObjectClassifier.IsMartenName(row.Name)
+                        ? new DatabaseObjectOwnership(DatabaseObjectOwner.MartenInfrastructure)
+                        : new DatabaseObjectOwnership(
+                            DatabaseObjectOwner.Other,
+                            RecognisedAs: DatabaseObjectClassifier.RecognisedAs(row.Schema, row.Name)));
+
+                DatabaseRowAccess access = kind == DatabaseObjectKind.Aggregate
+                    ? DatabaseRowAccess.Refused(DatabaseRefusal.NotApplicable, DatabaseObjectService.AggregateHasNoBody)
+                    : gate is null
+                        ? DatabaseRowAccess.Refused(DatabaseRefusal.Unavailable, gateFailure ?? "The database browser's gate could not be read.")
+                        : gate.DefinitionAccess(row.Schema, ownership);
+
                 functions.Add(new FunctionInfo(
                     row.Schema,
                     row.Name,
-                    row.Signature,
-                    row.Definition,
-                    declarations.Functions.Contains(SchemaKey.For(row.Schema, row.Name))));
+                    row.IdentityArguments,
+                    kind,
+                    declaredHere,
+                    ownership,
+                    access.Allowed,
+                    access.Allowed ? null : access.Reason));
             }
 
             return new SchemaFunctions(functions, null);
@@ -577,6 +664,171 @@ internal sealed class SchemaDataService : ISchemaDataService
     /// </remarks>
     private static string[] SchemaNames(ResolvedScope resolved) =>
         SchemaDeclarationReader.SchemaNames(resolved.Store.Options);
+
+    /// <summary>
+    /// The database browser's gate for the Functions tab's bodies, or why there is none - asked, never
+    /// enforced: enforcement is <see cref="IDatabaseObjectService.GetDefinitionAsync" />'s.
+    /// </summary>
+    /// <remarks>
+    /// A gate that cannot be built - a configuration the classifier cannot read, a catalog read that failed -
+    /// withholds every body with its reason rather than failing the list: the names are this tab's own
+    /// structure, and only the bodies were ever the gate's.
+    /// </remarks>
+    private async Task<(DatabaseGate? Gate, string? Failure)> DefinitionGateAsync(
+        StudioScope scope,
+        ResolvedScope resolved,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            DatabaseGateRead read = await databaseAccess.GateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+
+            return read.Succeeded
+                ? (read.Gate, null)
+                : (null, read.Reason ?? "The database browser's gate could not be read.");
+        }
+        catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
+        {
+            return (null, DatabaseAccess.CatalogFailure(exception));
+        }
+    }
+
+    /// <summary>
+    /// The tables an apply from here migrates, the indexes they declare and ignore, and which of them are
+    /// relational tables the host shaped.
+    /// </summary>
+    /// <param name="Tables">Every table an apply migrates.</param>
+    /// <param name="RelationalTables">The projections' and <c>ExtendedSchemaObjects</c>' tables among them.</param>
+    /// <param name="Indexes">Every declared index, the extended tables' included.</param>
+    /// <param name="IgnoredIndexes">Every ignored index, the extended tables' included.</param>
+    private sealed record ManagedTableSet(
+        IReadOnlySet<string> Tables,
+        IReadOnlySet<string> RelationalTables,
+        IReadOnlyList<DeclaredIndex> Indexes,
+        IReadOnlySet<string> IgnoredIndexes);
+
+    /// <summary>
+    /// Everything an apply from this store migrates, from its options alone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The kind map (<see cref="SchemaDeclarations.Objects" />) is the source of which tables: a document,
+    /// event, projection, extended or infrastructure table is migrated by an apply. What the reader does not
+    /// yet give is the <c>ExtendedSchemaObjects</c> tables' own declared and ignored indexes - their
+    /// <c>Table.Indexes</c> and <c>Table.IgnoredIndexes</c> - so they are read here, from the same in-memory
+    /// list, touching no connection (hard rule 14).
+    /// </para>
+    /// <para>
+    /// TODO(DB-7, consolidate): this walk belongs in <c>SchemaDeclarationReader.ReadExtendedObjects</c>, which
+    /// DB-7 may not edit; the packet report carries the diff. Once it is there, <c>ManagedTables</c>,
+    /// <c>Indexes</c> and <c>IgnoredIndexes</c> on the declarations cover it and this becomes the kind map
+    /// alone.
+    /// </para>
+    /// </remarks>
+    private static ManagedTableSet ManagedTables(IReadOnlyStoreOptions storeOptions, SchemaDeclarations declarations)
+    {
+        HashSet<string> tables = new(declarations.ManagedTables, StringComparer.OrdinalIgnoreCase);
+        HashSet<string> relational = new(StringComparer.OrdinalIgnoreCase);
+        List<DeclaredIndex> indexes = [.. declarations.Indexes];
+        HashSet<string> ignored = new(declarations.IgnoredIndexes, StringComparer.OrdinalIgnoreCase);
+
+        // Keyed, so that the day the reader declares the extended tables' indexes itself nothing here is
+        // counted twice - a declared index listed twice is a missing index reported twice.
+        HashSet<string> indexKeys = new(
+            indexes.Select(static x => SchemaKey.For(x.Schema, x.Table, x.Name)),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach ((string key, MartenDeclaredObject declared) in declarations.Objects)
+        {
+            switch (declared.Kind)
+            {
+                case MartenObjectKind.DocumentTable:
+                case MartenObjectKind.EventTable:
+                case MartenObjectKind.Infrastructure:
+                    tables.Add(key);
+                    break;
+
+                case MartenObjectKind.ProjectionOrExtendedTable:
+                    tables.Add(key);
+                    relational.Add(key);
+                    break;
+            }
+        }
+
+        if (storeOptions is StoreOptions concrete)
+        {
+            foreach (ISchemaObject schemaObject in concrete.Storage.ExtendedSchemaObjects)
+            {
+                if (schemaObject is not Table table)
+                {
+                    continue;
+                }
+
+                string schema = string.IsNullOrWhiteSpace(table.Identifier.Schema)
+                    ? storeOptions.DatabaseSchemaName
+                    : table.Identifier.Schema;
+                string name = table.Identifier.Name;
+
+                tables.Add(SchemaKey.For(schema, name));
+                relational.Add(SchemaKey.For(schema, name));
+
+                foreach (string ignoredIndex in table.IgnoredIndexes)
+                {
+                    ignored.Add(SchemaKey.For(schema, name, ignoredIndex));
+                }
+
+                foreach (IndexDefinition index in table.Indexes)
+                {
+                    if (!indexKeys.Add(SchemaKey.For(schema, name, index.Name)))
+                    {
+                        continue;
+                    }
+
+                    indexes.Add(new DeclaredIndex(
+                        IndexAdvice.ManagedTableAlias,
+                        IndexAdvice.ManagedTableAlias,
+                        schema,
+                        name,
+                        index.Name,
+                        IndexDdl(index, table)));
+                }
+            }
+        }
+
+        return new ManagedTableSet(tables, relational, indexes, ignored);
+    }
+
+    /// <summary>The statement Weasel would write for <paramref name="index" />, or its name when it will not render.</summary>
+    private static string IndexDdl(IndexDefinition index, Table table)
+    {
+        try
+        {
+            return index.ToDDL(table);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return index.Name;
+        }
+    }
+
+    /// <summary>Every hidden document type's table, in every registered store, by qualified name.</summary>
+    private static HashSet<string> HiddenTables(DatabaseObjectClassifier classifier)
+    {
+        HashSet<string> hidden = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (StoreDeclarations store in classifier.Stores)
+        {
+            foreach ((string key, MartenDeclaredObject declared) in store.Declarations.Objects)
+            {
+                if (declared is { Kind: MartenObjectKind.DocumentTable, Visible: false })
+                {
+                    hidden.Add(key);
+                }
+            }
+        }
+
+        return hidden;
+    }
 
     private Dictionary<string, IDocumentType> DocumentTypesByTable(IReadOnlyStoreOptions storeOptions)
     {

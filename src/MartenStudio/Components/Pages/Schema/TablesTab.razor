@@ -1,12 +1,21 @@
+@using MartenStudio.Services.Database
 @using MartenStudio.Services.Schema
 @implements IDisposable
 @inject ISchemaDataService SchemaData
 @inject StudioState State
 
 @*
-    Every ordinary table in the schemas this store owns, largest first, joined to what the statistics
-    collector has recorded. A document table is linked to its collection, which is the whole reason this
-    screen beats \dt+ - the studio knows which mt_doc_* table belongs to which registered type.
+    Every ordinary and partitioned table in the schemas this store owns, largest first, joined to what the
+    statistics collector has recorded - and whose each one is, by the database browser's own rules
+    (DatabaseObjectClassifier, AGENTS.md D27). A document table is linked to its collection and the event
+    store's tables to Streams, which is the whole reason this screen beats \dt+; somebody else's table in
+    the same schema - a Quartz.NET job store in the event schema, say - is "not Marten", with the browser's
+    "recognised by name" hint, rather than the "event store" it used to be badged for living there.
+
+    A partition is never a row: Marten names a tenant's partition after the tenant, so the list would be
+    the tenant list. Its figures are added into its parent's, and how many partitions there are is shown
+    only past the database browser's gate, because that number is the number of tenants. The service
+    decides both; this only draws them. A hidden document type's table is not here at all.
 *@
 
 @if (loading)
@@ -38,15 +47,29 @@ else
 
     <p class="ms-schema-note">
         Row counts are <code>pg_class.reltuples</code> estimates (D8) and the scan counters come from
-        <code>pg_stat_user_tables</code>, which <code>pg_stat_reset()</code> and a crash both zero.
+        <code>pg_stat_user_tables</code>, which <code>pg_stat_reset()</code> and a crash both zero. Owners
+        are the database browser's: a table this store does not declare is "not Marten", wherever it lives.
     </p>
+
+    @if (HasPartitionedTable)
+    {
+        <p class="ms-schema-note ms-schema-partition-note">
+            A partitioned table is one row. Its partitions are never listed - a per-tenant partition is named
+            after its tenant - and their sizes, row estimates and counters are added into it, the sizes from
+            the catalog's page counts, which <code>VACUUM</code> and <code>ANALYZE</code> refresh.
+            @if (tables.PartitionCountsWithheld is { Length: > 0 } withheld)
+            {
+                @(" " + withheld)
+            }
+        </p>
+    }
 
     <TableScroll Label="Schema tables table">
         <table class="ms-table">
             <thead>
                 <tr>
                     <th>Table</th>
-                    <th>Collection</th>
+                    <th>Owner</th>
                     <th class="ms-num">Total</th>
                     <th class="ms-num">Heap</th>
                     <th class="ms-num">Indexes</th>
@@ -63,22 +86,63 @@ else
                 @foreach (TableStats table in tables.Tables)
                 {
                     <tr class="ms-table-row" @key="table.QualifiedName">
-                        <td class="ms-table-cell ms-table-cell-mono">@table.QualifiedName</td>
+                        <td class="ms-table-cell ms-table-cell-mono">
+                            <a class="ms-schema-object-link"
+                               href="@ObjectLink(table.Schema, table.Table)"
+                               title="Open @table.QualifiedName in the database browser">@table.QualifiedName</a>
+                            @if (table.IsPartitioned)
+                            {
+                                <span class="ms-index-flag ms-schema-partitions"
+                                      title="Its partitions' figures are added into this row; their names are never listed.">@PartitionLabel(table)</span>
+                            }
+                        </td>
                         <td class="ms-table-cell">
-                            @if (table.CollectionAlias is { Length: > 0 } alias)
-                            {
-                                @* The Documents page arrives with packet P2; the link is written now so the
-                                   scope travels with it when it does (plan D9). *@
-                                <a class="ms-collection-link" href="@CollectionLink(alias)" title="@table.DocumentTypeName">@alias</a>
-                            }
-                            else if (table.IsEventTable)
-                            {
-                                <span class="ms-index-flag ms-index-flag-info">event store</span>
-                            }
-                            else
-                            {
-                                <span class="ms-text-muted">-</span>
-                            }
+                            <span class="ms-schema-owner" data-owner="@table.Ownership.Owner">
+                                @switch (table.Ownership.Owner)
+                                {
+                                    case DatabaseObjectOwner.MartenDocument when table.CollectionAlias is { Length: > 0 } alias:
+                                        <a class="ms-collection-link"
+                                           href="@CollectionLink(alias)"
+                                           title="@DocumentTitle(table)">@alias</a>
+                                        break;
+
+                                    case DatabaseObjectOwner.MartenDocument:
+                                        <span class="ms-index-flag ms-index-flag-info"
+                                              title="A document collection another registered Marten store declares.">document collection</span>
+                                        break;
+
+                                    case DatabaseObjectOwner.MartenEventStore when table.OwnedByThisStore:
+                                        <a class="ms-index-flag ms-index-flag-info"
+                                           href="@StreamsLink"
+                                           title="One of the event store's own tables. Its rows are read in Streams, the Feed and Projections.">event store</a>
+                                        break;
+
+                                    case DatabaseObjectOwner.MartenEventStore:
+                                        <span class="ms-index-flag ms-index-flag-info"
+                                              title="One of the event store's own tables, in another registered Marten store.">event store</span>
+                                        break;
+
+                                    case DatabaseObjectOwner.MartenProjectionOrExtended:
+                                        <span class="ms-index-flag ms-index-flag-info"
+                                              title="@ManagedTitle">Marten-managed</span>
+                                        break;
+
+                                    case DatabaseObjectOwner.MartenInfrastructure:
+                                        <span class="ms-index-flag"
+                                              title="@InfrastructureTitle">Marten infrastructure</span>
+                                        break;
+
+                                    default:
+                                        <span class="ms-index-flag ms-schema-owner-other"
+                                              title="This store's configuration does not declare it, and neither does any other registered Marten store.">not Marten</span>
+                                        @if (table.Ownership.RecognisedAs is { Length: > 0 } hint)
+                                        {
+                                            <span class="ms-schema-hint"
+                                                  title="A guess from the name, and nothing more: nothing about the table is read to make it.">@hint, recognised by name</span>
+                                        }
+                                        break;
+                                }
+                            </span>
                         </td>
                         <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.TotalBytes)</td>
                         <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.HeapBytes)</td>
@@ -98,6 +162,15 @@ else
 }
 
 @code {
+    private const string ManagedTitle =
+        "Marten migrates it on the application's behalf - a flat-table projection's table, an " +
+        "EventProjection's table, or one of StoreOptions.Storage.ExtendedSchemaObjects - and its rows are the " +
+        "application's own relational data.";
+
+    private const string InfrastructureTitle =
+        "Marten's own bookkeeping (every mt_ table that is not a registered document or event table: " +
+        "mt_hilo, the tenancy tables, a table no registered type declares any more).";
+
     private readonly CancellationTokenSource lifetime = new();
 
     private SchemaTables tables = SchemaTables.Empty;
@@ -115,6 +188,19 @@ else
     [EditorRequired]
     public Func<string, string> CollectionLink { get; set; } = static alias => alias;
 
+    /// <summary>
+    /// Where a table's name points: the database browser's object detail, scope query and all. Supplied by
+    /// the page for the same reason as <see cref="CollectionLink" />.
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
+    public Func<string, string, string> ObjectLink { get; set; } = static (schema, name) => schema + "." + name;
+
+    /// <summary>Where the event store's badge points: Streams, scope query and all.</summary>
+    [Parameter]
+    [EditorRequired]
+    public string StreamsLink { get; set; } = string.Empty;
+
     private long TotalBytes
     {
         get
@@ -128,6 +214,38 @@ else
             return total;
         }
     }
+
+    private bool HasPartitionedTable
+    {
+        get
+        {
+            foreach (TableStats table in tables.Tables)
+            {
+                if (table.IsPartitioned)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// "N partitions" past the gate, and "partitioned" with no number before it - the service has already
+    /// withheld the number, so there is nothing here to leak.
+    /// </summary>
+    private static string PartitionLabel(TableStats table) => table.PartitionCount switch
+    {
+        null => "partitioned",
+        1 => "1 partition",
+        int count => count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " partitions",
+    };
+
+    private static string DocumentTitle(TableStats table) =>
+        table.DocumentTypeName is { Length: > 0 } typeName
+            ? "Document collection · " + typeName
+            : "Document collection";
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 

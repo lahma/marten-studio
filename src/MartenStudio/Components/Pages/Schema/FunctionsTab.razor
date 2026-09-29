@@ -1,14 +1,25 @@
+@using MartenStudio.Services.Database
 @using MartenStudio.Services.Schema
 @implements IDisposable
 @inject ISchemaDataService SchemaData
+@inject IDatabaseObjectService DatabaseObjects
 @inject StudioState State
 
 @*
-    The functions Marten installs in this store's schemas: the jsonb and immutable-cast helpers its
-    generated SQL calls, and the event store's own mt_quick_append_events, mt_archive_stream and
-    progression functions. This is where to read the one that is actually installed when an append or a
-    patch does something surprising. Every body below is dollar-quoted, which is why the tokenizer knows
-    about $function$ (Services/Schema/SqlTokenizer.cs).
+    The routines in this store's schemas: the jsonb and immutable-cast helpers Marten's generated SQL
+    calls, the event store's own mt_quick_append_events, mt_archive_stream and progression functions - and
+    whatever else lives there, the application's own procedures and aggregates included, each saying what
+    kind of routine it is. This is where to read the one that is actually installed when an append or a
+    patch does something surprising. Every body is dollar-quoted, which is why the tokenizer knows about
+    $function$ (Services/Schema/SqlTokenizer.cs).
+
+    A body is read when its row is opened, one routine at a time, through the database browser's
+    definition read (IDatabaseObjectService.GetDefinitionAsync) - which is where the gate is enforced and
+    audited. Marten's own routines in the store's schemas are shown to everybody, as they always were; a
+    body Marten does not own is the application's code, and needs what the browser needs:
+    Capabilities.BrowseDatabase, the write policy, and a schema BrowsableSchemas admits. The list says in
+    advance which bodies this visitor will be refused, and why, so nothing is offered that the service
+    would turn down. An aggregate has no body Postgres will print, so it is listed and never asked for.
 
     Marten 9.35 does NOT install a per-document mt_upsert_<alias> function - the upsert is written inline
     by its generated code - so do not expect one here. SchemaLiveTests asserts that, so this comment stops
@@ -38,22 +49,74 @@ else
     <div class="ms-schema-summary">
         <span><strong>@catalog.Functions.Count</strong> functions</span>
         <span><strong>@DeclaredCount</strong> declared by this store's configuration</span>
+        @if (WithheldCount > 0)
+        {
+            <span><strong>@WithheldCount</strong> @(WithheldCount == 1 ? "body" : "bodies") withheld</span>
+        }
     </div>
+
+    <p class="ms-schema-note">
+        A body is read when its row is opened. Marten's own are shown to everybody; the body of a routine
+        Marten does not own is the application's code, and is shown only past the database browser's gate.
+    </p>
 
     <SearchFilter Placeholder="Filter by name" OnFilterChanged="OnFilterChangedAsync" />
 
     @foreach (FunctionInfo function in Filtered)
     {
-        <details class="ms-function" @key="function.Schema + function.Signature">
+        <details class="ms-function" @key="function.Key" @ontoggle="() => OnToggledAsync(function)">
             <summary class="ms-function-summary">
                 <span>@function.QualifiedName</span>
-                @if (!function.DeclaredByMarten)
+                @if (function.Kind != DatabaseObjectKind.Function)
+                {
+                    <span class="ms-index-flag ms-function-kind">@KindLabel(function.Kind)</span>
+                }
+                @if (!function.Ownership.IsMarten)
+                {
+                    <span class="ms-index-flag ms-index-flag-info ms-schema-owner-other">not Marten</span>
+                    @if (function.Ownership.RecognisedAs is { Length: > 0 } hint)
+                    {
+                        <span class="ms-schema-hint">@hint, recognised by name</span>
+                    }
+                }
+                else if (!function.DeclaredByMarten)
                 {
                     <span class="ms-index-flag ms-index-flag-info">undeclared</span>
                 }
+                @if (IsWithheld(function))
+                {
+                    <span class="ms-index-flag ms-index-flag-warn ms-function-withheld"
+                          title="@function.DefinitionRefusal">body withheld</span>
+                }
             </summary>
             <div class="ms-function-body">
-                <SqlText Sql="@function.Definition" Label="@function.Signature" Wrap="true" ShowLineNumbers="false" />
+                @if (!function.DefinitionAvailable)
+                {
+                    <p class="ms-schema-note ms-function-refusal">@function.DefinitionRefusal</p>
+                }
+                else if (bodies.TryGetValue(function.Key, out FunctionBody? body))
+                {
+                    @if (body.Loading)
+                    {
+                        <LoadingSpinner />
+                    }
+                    else if (body.Error is { Length: > 0 } error)
+                    {
+                        <ErrorAlert Message="@error" OnRetry="() => LoadBodyAsync(function)" />
+                    }
+                    else if (body.Sql is { } sql)
+                    {
+                        <SqlText Sql="@sql" Label="@function.Signature" Wrap="true" ShowLineNumbers="false" />
+                    }
+                    else
+                    {
+                        <p class="ms-schema-note ms-function-refusal">@body.Refusal</p>
+                    }
+                }
+                else
+                {
+                    <p class="ms-schema-note">@function.Signature</p>
+                }
             </div>
         </details>
     }
@@ -61,6 +124,9 @@ else
 
 @code {
     private readonly CancellationTokenSource lifetime = new();
+
+    /// <summary>The bodies read so far, by <see cref="FunctionInfo.Key" />: read once, kept while the tab lives.</summary>
+    private readonly Dictionary<string, FunctionBody> bodies = new(StringComparer.Ordinal);
 
     private SchemaFunctions catalog = SchemaFunctions.Empty;
     private string filter = string.Empty;
@@ -74,6 +140,23 @@ else
             foreach (FunctionInfo function in catalog.Functions)
             {
                 if (function.DeclaredByMarten)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+    }
+
+    private int WithheldCount
+    {
+        get
+        {
+            int count = 0;
+            foreach (FunctionInfo function in catalog.Functions)
+            {
+                if (IsWithheld(function))
                 {
                     count++;
                 }
@@ -107,12 +190,72 @@ else
         }
     }
 
+    /// <summary>A body the gate refuses - as opposed to an aggregate's, which does not exist.</summary>
+    private static bool IsWithheld(FunctionInfo function) =>
+        !function.DefinitionAvailable && function.Kind != DatabaseObjectKind.Aggregate;
+
+    private static string KindLabel(DatabaseObjectKind kind) => kind switch
+    {
+        DatabaseObjectKind.Procedure => "procedure",
+        DatabaseObjectKind.Aggregate => "aggregate",
+        DatabaseObjectKind.WindowFunction => "window function",
+        _ => "function",
+    };
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private Task OnFilterChangedAsync(string value)
     {
         filter = value;
         return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Reads a body the first time its row is opened - and never one the list already says is refused.
+    /// </summary>
+    /// <remarks>
+    /// <c>toggle</c> fires on opening and on closing alike and carries nothing to tell them apart, so this
+    /// does not try to: a row's first toggle is always its opening, and every later one finds the body
+    /// already read (or being read) and does nothing.
+    /// </remarks>
+    private Task OnToggledAsync(FunctionInfo function) =>
+        !function.DefinitionAvailable || bodies.ContainsKey(function.Key)
+            ? Task.CompletedTask
+            : LoadBodyAsync(function);
+
+    private async Task LoadBodyAsync(FunctionInfo function)
+    {
+        string key = function.Key;
+        bodies[key] = FunctionBody.Reading;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StudioScope? scope = State.ActiveScope;
+            if (scope is null)
+            {
+                bodies.Remove(key);
+                return;
+            }
+
+            DatabaseObjectDefinition definition = await DatabaseObjects.GetDefinitionAsync(scope, function.Ref, lifetime.Token);
+
+            bodies[key] = definition is { Found: true, Sql: { } sql }
+                ? FunctionBody.Read(sql)
+                : FunctionBody.Refused(definition.Reason ?? "The body could not be read.");
+        }
+        catch (OperationCanceledException)
+        {
+            bodies.Remove(key);
+        }
+        catch (Exception exception)
+        {
+            bodies[key] = FunctionBody.Failed(exception.Message);
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task LoadAsync()
@@ -126,6 +269,7 @@ else
             catalog = scope is null
                 ? SchemaFunctions.Empty
                 : await SchemaData.FunctionsAsync(scope, lifetime.Token);
+            bodies.Clear();
         }
         catch (OperationCanceledException)
         {
@@ -145,5 +289,17 @@ else
     {
         lifetime.Cancel();
         lifetime.Dispose();
+    }
+
+    /// <summary>One body: being read, read, refused, or failed.</summary>
+    private sealed record FunctionBody(bool Loading, string? Sql, string? Refusal, string? Error)
+    {
+        public static FunctionBody Reading { get; } = new(true, null, null, null);
+
+        public static FunctionBody Read(string sql) => new(false, sql, null, null);
+
+        public static FunctionBody Refused(string reason) => new(false, null, reason, null);
+
+        public static FunctionBody Failed(string error) => new(false, null, null, error);
     }
 }

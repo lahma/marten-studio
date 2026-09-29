@@ -8489,3 +8489,43 @@ a.ms-db-name:hover {
         display: none;
     }
 }
+
+/* ==========================================================================
+   DB-7. The Schema screen, in line with the database browser
+   ========================================================================== */
+
+/* A table's name on the Tables tab opens it in the database browser: the collection link's look, since
+   it is the same kind of hop, under a name of its own so the two are never mistaken for each other. */
+.ms-schema-object-link {
+    color: var(--ms-color-primary);
+    text-decoration: none;
+    font-family: var(--ms-font-mono);
+}
+
+.ms-schema-object-link:hover {
+    text-decoration: underline;
+}
+
+/* The owner cell: one badge, and for somebody else's table the name-based hint beside it. */
+.ms-schema-owner {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+/* The event store's badge is also its link to Streams: a badge first, a link on hover. */
+a.ms-index-flag {
+    text-decoration: none;
+}
+
+a.ms-index-flag:hover {
+    text-decoration: underline;
+}
+
+/* "Quartz.NET, recognised by name" - a guess, said quietly beside the badge. */
+.ms-schema-hint {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}

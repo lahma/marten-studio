@@ -8,9 +8,10 @@ namespace MartenStudio.Tests.Schema;
 /// not there, which have never been scanned, and which collections have nothing but a primary key.
 /// </summary>
 /// <remarks>
-/// Pure, so it is tested without a Postgres. The two lists are exactly what
+/// Pure, so it is tested without a Postgres. The lists are exactly what
 /// <c>SchemaDataService.IndexesAsync</c> hands it - <c>pg_index</c> joined to
-/// <c>pg_stat_user_indexes</c>, and the tables Marten's own <c>AllObjects()</c> says it configures.
+/// <c>pg_stat_user_indexes</c>, and the tables <c>SchemaDeclarationReader</c>'s kind map says an apply
+/// migrates (never <c>AllObjects()</c>, which applies migrations on the way).
 /// </remarks>
 public class IndexAdviceTests
 {
@@ -76,8 +77,9 @@ public class IndexAdviceTests
     }
 
     /// <summary>
-    /// A host's own table can live in a schema Marten owns. No migration from here touches it, so
-    /// "undeclared" must not carry the drop warning there.
+    /// A host's own table can live in a schema Marten owns. The studio cannot see an apply dropping its
+    /// indexes, so "undeclared" must not carry the drop warning there - and must not promise the opposite
+    /// either (DB-7).
     /// </summary>
     [Fact]
     public void An_index_on_a_table_Marten_does_not_manage_is_not_threatened_with_a_drop()
@@ -92,6 +94,90 @@ public class IndexAdviceTests
         result.Indexes[0].WouldBeDropped.Should().BeFalse();
         result.WouldBeDroppedCount.Should().Be(0);
         result.Indexes[0].Suggestion.Should().Be(IndexAdvice.ForeignTableSuggestion);
+    }
+
+    /// <summary>
+    /// DB-7, acceptance 4. The old sentence said a table Marten does not configure is one "no migration
+    /// from here touches" - false for every <c>ExtendedSchemaObjects</c> table (Marten yields them as a
+    /// feature of its own and migrates them, drop index included) and unprovable for a feature added with
+    /// <c>Storage.Add</c>, which the studio cannot list without applying migrations (hard rule 14). The new
+    /// sentence is pinned whole, because the wording is the fix.
+    /// </summary>
+    [Fact]
+    public void The_unmanaged_table_sentence_promises_nothing_about_what_an_apply_leaves_alone()
+    {
+        IndexAdvice.ForeignTableSuggestion.Should().Be(
+            "This store's configuration does not declare this table, as far as the studio can see, so the " +
+            "studio cannot say an apply drops this index - and cannot promise it will not: an apply also " +
+            "migrates every feature added with StoreOptions.Storage.Add(...), whose tables the studio cannot " +
+            "list, drop index included. It is listed because it lives in a schema this store owns.");
+
+        IndexAdvice.ForeignTableSuggestion.Should().NotContain("no migration",
+            "hard rule 14: nothing may tell a person that an apply leaves their index alone");
+        IndexAdvice.ForeignTableSuggestion.Should().NotContain("touches");
+    }
+
+    /// <summary>
+    /// DB-7: a projection's table and an <c>ExtendedSchemaObjects</c> table are migrated by an apply, so an
+    /// index nothing declares on one is dropped - and the remedy is the Weasel table's, not a
+    /// <c>Schema.For&lt;T&gt;()</c> line.
+    /// </summary>
+    [Fact]
+    public void An_undeclared_index_on_an_extended_or_projection_table_would_be_dropped_and_says_how_to_keep_it()
+    {
+        SchemaIndexes result = IndexAdvice.Join(
+            [
+                Row("ef_things", "ef_things_idx_name", scans: 3),
+                Row("ef_things", "hand_rolled_on_extended", scans: 3),
+            ],
+            [new DeclaredIndex(IndexAdvice.ManagedTableAlias, IndexAdvice.ManagedTableAlias, Schema, "ef_things", "ef_things_idx_name", "CREATE INDEX ...")],
+            [],
+            managedTables: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            relationalTables: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Schema + ".ef_things" });
+
+        IndexInfo declared = result.Indexes.Single(x => x.Name == "ef_things_idx_name");
+        declared.OnMartenTable.Should().BeTrue("a relational table Marten migrates is a Marten-managed table");
+        declared.DeclaredByMarten.Should().BeTrue();
+        declared.WouldBeDropped.Should().BeFalse();
+
+        IndexInfo handMade = result.Indexes.Single(x => x.Name == "hand_rolled_on_extended");
+        handMade.OnMartenTable.Should().BeTrue();
+        handMade.WouldBeDropped.Should().BeTrue();
+        handMade.Suggestion.Should().Be(IndexAdvice.ManagedTableSuggestion);
+        result.WouldBeDroppedCount.Should().Be(1);
+
+        IndexAdvice.ManagedTableSuggestion.Should().Contain("DROPS it");
+        IndexAdvice.ManagedTableSuggestion.Should().Contain("ExtendedSchemaObjects");
+        IndexAdvice.ManagedTableSuggestion.Should().Contain("AutoCreate.CreateOrUpdate is not additive");
+        IndexAdvice.ManagedTableSuggestion.Should().Contain("table.IgnoreIndex(");
+    }
+
+    /// <summary>
+    /// A hidden document type's table is absent from the Indexes tab as it is from every list: its indexes,
+    /// its declared-but-missing indexes and its "only a primary key" advice all name it.
+    /// </summary>
+    [Fact]
+    public void A_hidden_types_indexes_missing_indexes_and_collection_advice_are_all_absent()
+    {
+        HashSet<string> hidden = new(StringComparer.OrdinalIgnoreCase) { Schema + ".mt_doc_secret" };
+
+        SchemaIndexes result = IndexAdvice.Join(
+            [
+                Row("mt_doc_secret", "pkey_mt_doc_secret_id", primaryKey: true, unique: true),
+                Row("mt_doc_secret", "hand_rolled_secret_idx"),
+                Row("mt_doc_customer", "pkey_mt_doc_customer_id", primaryKey: true, unique: true),
+            ],
+            [
+                Declared("secret", "mt_doc_secret", "mt_doc_secret_idx_code"),
+                Declared("customer", "mt_doc_customer", "mt_doc_customer_idx_email"),
+            ],
+            [Collection("secret", "mt_doc_secret"), Collection("customer", "mt_doc_customer")],
+            hiddenTables: hidden);
+
+        result.Indexes.Select(x => x.Table).Should().OnlyContain(x => x == "mt_doc_customer");
+        result.Missing.Select(x => x.Name).Should().Equal("mt_doc_customer_idx_email");
+        result.Unindexed.Select(x => x.Alias).Should().Equal("customer");
+        result.WouldBeDroppedCount.Should().Be(0, "the hand-made index on the hidden table is not on the page at all");
     }
 
     /// <summary>

@@ -80,39 +80,91 @@ internal static class IndexAdvice
         "(opts.Schema.For<T>().Index(...)), or tell the migration to leave it alone with " +
         "opts.Schema.For<T>().IgnoreIndex(\"<name>\") - or, on an event table, opts.Events.IgnoreIndex(\"<name>\").";
 
+    /// <summary>
+    /// What an index on a Marten-managed <em>relational</em> table that its definition does not declare
+    /// gets said about it: a flat-table projection's table, an <c>EventProjection.SchemaObjects</c> table,
+    /// or one of <c>StoreOptions.Storage.ExtendedSchemaObjects</c>.
+    /// </summary>
+    /// <remarks>
+    /// These used to be told the opposite. The extended ones were not in the configuration's table list,
+    /// so their indexes read as "not a Marten table, no migration from here touches it" - and Marten's
+    /// <c>StorageFeatures.AllActiveFeatures</c> yields <c>ExtendedSchemaObjects</c> as a feature of its own,
+    /// so an apply migrates them exactly like its own tables, <c>drop index</c> for the extras included
+    /// (AGENTS.md hard rule 14; proven live by <c>SchemaAlignmentLiveTests</c>). The remedy is different from
+    /// a document's, which is why this is a sentence of its own: the table is a Weasel <c>Table</c> the host
+    /// built, so the index is declared on it, or ignored with <c>Table.IgnoreIndex</c>.
+    /// </remarks>
+    internal const string ManagedTableSuggestion =
+        "This index is not declared on the table Marten manages here - a projection's table, or one of " +
+        "StoreOptions.Storage.ExtendedSchemaObjects - and applying a migration DROPS it: Marten migrates these " +
+        "tables like its own, AutoCreate.CreateOrUpdate is not additive, and Weasel writes \"drop index\" for " +
+        "every index such a table does not declare. Add it to the Weasel table's Indexes where the table is " +
+        "defined, or tell the migration to leave it alone with table.IgnoreIndex(\"<name>\").";
+
     /// <summary>What an index the host told Marten to ignore gets said about it.</summary>
     internal const string IgnoredSuggestion =
         "The configuration tells Marten's migration detection to ignore this index " +
         "(IgnoreIndex), so it is neither created nor dropped by an apply.";
 
-    /// <summary>What an index on a table Marten does not manage gets said about it.</summary>
+    /// <summary>What an index on a table this store's configuration does not declare gets said about it.</summary>
+    /// <remarks>
+    /// Worded as what the studio can see and no further. It used to say "no migration from here touches
+    /// it", which was false for every <c>ExtendedSchemaObjects</c> table (those are
+    /// <see cref="ManagedTableSuggestion" /> now) and is still unprovable for a feature added with
+    /// <c>StoreOptions.Storage.Add(IFeatureSchema)</c>: Marten migrates those too, and the only way to list
+    /// them is the internal <c>AllActiveFeatures</c>, which applies migrations on the way (hard rule 14).
+    /// </remarks>
     internal const string ForeignTableSuggestion =
-        "This table is not one Marten configures, so no migration from here touches it or its indexes. " +
-        "It is listed because it lives in a schema this store owns.";
+        "This store's configuration does not declare this table, as far as the studio can see, so the studio " +
+        "cannot say an apply drops this index - and cannot promise it will not: an apply also migrates every " +
+        "feature added with StoreOptions.Storage.Add(...), whose tables the studio cannot list, drop index " +
+        "included. It is listed because it lives in a schema this store owns.";
+
+    /// <summary>What the index list names a relational Marten-managed table's declared indexes after.</summary>
+    internal const string ManagedTableAlias = "Marten-managed";
 
     /// <summary>Joins the lists and produces the tab's answer.</summary>
     /// <param name="actual">Every index Postgres reports in the store's schemas.</param>
     /// <param name="declared">Every index the store's configuration asks for.</param>
     /// <param name="collections">Every document collection, so a table with only a primary key can be named.</param>
     /// <param name="managedTables">
-    /// The qualified names of the tables Marten configures. An index on anything else in these schemas
-    /// belongs to the host application, and saying "the apply drops this" about one of those would be
-    /// false.
+    /// The qualified names of the tables an apply from here migrates: the document and event tables, the
+    /// projections' and <c>ExtendedSchemaObjects</c>' tables, Marten's own bookkeeping. An index on anything
+    /// else in these schemas is not one the studio can see an apply dropping, and saying "the apply drops
+    /// this" about one of those would be false.
     /// </param>
     /// <param name="ignoredIndexes">
     /// The qualified names of the indexes the host told Marten to ignore. Weasel removes them from both
     /// sides of the delta, so they are neither created nor dropped.
+    /// </param>
+    /// <param name="relationalTables">
+    /// Which of the managed tables are relational tables the host shaped - a projection's, an
+    /// <c>ExtendedSchemaObjects</c> one - whose undeclared index gets <see cref="ManagedTableSuggestion" />
+    /// rather than a <c>Schema.For&lt;T&gt;()</c> line. A table named here is managed whether or not
+    /// <paramref name="managedTables" /> names it.
+    /// </param>
+    /// <param name="hiddenTables">
+    /// The tables of document types <c>MartenStudioOptions.IsDocumentTypeVisible</c> hides. Their indexes,
+    /// their declared-but-missing indexes and their collections are left out altogether: an index name is
+    /// the table's name with a suffix.
     /// </param>
     public static SchemaIndexes Join(
         IReadOnlyList<IndexStatsRow> actual,
         IReadOnlyList<DeclaredIndex> declared,
         IReadOnlyList<DeclaredCollection> collections,
         IReadOnlySet<string>? managedTables = null,
-        IReadOnlySet<string>? ignoredIndexes = null)
+        IReadOnlySet<string>? ignoredIndexes = null,
+        IReadOnlySet<string>? relationalTables = null,
+        IReadOnlySet<string>? hiddenTables = null)
     {
         ArgumentNullException.ThrowIfNull(actual);
         ArgumentNullException.ThrowIfNull(declared);
         ArgumentNullException.ThrowIfNull(collections);
+
+        bool Hidden(string schema, string table) =>
+            hiddenTables is not null && hiddenTables.Contains(SchemaKey.For(schema, table));
+
+        bool Relational(string tableKey) => relationalTables is not null && relationalTables.Contains(tableKey);
 
         Dictionary<string, DeclaredIndex> declaredByKey = new(StringComparer.OrdinalIgnoreCase);
         foreach (DeclaredIndex index in declared)
@@ -150,6 +202,14 @@ internal static class IndexAdvice
             }
         }
 
+        if (relationalTables is not null)
+        {
+            foreach (string table in relationalTables)
+            {
+                managed.Add(table);
+            }
+        }
+
         List<IndexInfo> indexes = new(actual.Count);
         HashSet<string> present = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> tablesPresent = new(StringComparer.OrdinalIgnoreCase);
@@ -157,6 +217,11 @@ internal static class IndexAdvice
 
         foreach (IndexStatsRow row in actual)
         {
+            if (Hidden(row.Schema, row.Table))
+            {
+                continue;
+            }
+
             string tableKey = SchemaKey.For(row.Schema, row.Table);
             string indexKey = SchemaKey.For(row.Schema, row.Table, row.Name);
 
@@ -193,7 +258,7 @@ internal static class IndexAdvice
                 row.IsUnique,
                 isDeclared,
                 collection?.Alias,
-                SuggestionFor(row, isDeclared, onMartenTable, ignored),
+                SuggestionFor(row, isDeclared, onMartenTable, ignored, Relational(tableKey)),
                 onMartenTable,
                 ignored));
         }
@@ -202,8 +267,9 @@ internal static class IndexAdvice
         foreach (DeclaredIndex index in declared)
         {
             // Only on a table that is actually there: a whole table that has not been created yet is a
-            // Drift tab fact, and listing each of its indexes here as "missing" would bury it.
-            if (!tablesPresent.Contains(SchemaKey.For(index.Schema, index.Table)))
+            // Drift tab fact, and listing each of its indexes here as "missing" would bury it. A hidden
+            // type's table is never "there" as far as this tab is concerned.
+            if (!tablesPresent.Contains(SchemaKey.For(index.Schema, index.Table)) || Hidden(index.Schema, index.Table))
             {
                 continue;
             }
@@ -219,7 +285,9 @@ internal static class IndexAdvice
         {
             string tableKey = SchemaKey.For(collection.Schema, collection.Table);
 
-            if (tablesPresent.Contains(tableKey) && nonPrimaryKeyIndexes.GetValueOrDefault(tableKey) == 0)
+            if (!Hidden(collection.Schema, collection.Table)
+                && tablesPresent.Contains(tableKey)
+                && nonPrimaryKeyIndexes.GetValueOrDefault(tableKey) == 0)
             {
                 unindexed.Add(new UnindexedCollection(
                     collection.Alias,
@@ -260,7 +328,7 @@ internal static class IndexAdvice
         return lines;
     }
 
-    private static string? SuggestionFor(IndexStatsRow row, bool isDeclared, bool onMartenTable, bool ignored)
+    private static string? SuggestionFor(IndexStatsRow row, bool isDeclared, bool onMartenTable, bool ignored, bool relational)
     {
         if (ignored)
         {
@@ -269,7 +337,9 @@ internal static class IndexAdvice
 
         if (!isDeclared)
         {
-            return onMartenTable ? UndeclaredSuggestion : ForeignTableSuggestion;
+            return !onMartenTable ? ForeignTableSuggestion
+                : relational ? ManagedTableSuggestion
+                : UndeclaredSuggestion;
         }
 
         // A primary key or a unique index is enforcing something; "nobody scanned it" is not an argument

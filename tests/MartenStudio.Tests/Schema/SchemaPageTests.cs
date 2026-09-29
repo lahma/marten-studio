@@ -1,6 +1,7 @@
 using Bunit;
 
 using MartenStudio.Services;
+using MartenStudio.Services.Database;
 using MartenStudio.Services.Schema;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
@@ -270,9 +271,11 @@ public class SchemaPageTests
         schema.Tables = new SchemaTables(
             [
                 new TableStats("studio", "mt_doc_customer", 98304, 65536, 32768, 1200, 1200, 3, 4, 500,
-                    DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, "customer", "Customer", false),
+                    DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, "customer", "Customer",
+                    new DatabaseObjectOwnership(DatabaseObjectOwner.MartenDocument, "default", "customer")),
                 new TableStats("studio_events", "mt_events", 16384, 8192, 8192, -1, null, null, null, null,
-                    null, null, null, null, true),
+                    null, null, null, null,
+                    new DatabaseObjectOwnership(DatabaseObjectOwner.MartenEventStore, "default")),
             ],
             ["studio", "studio_events"],
             1048576,
@@ -285,8 +288,8 @@ public class SchemaPageTests
         page.Markup.Should().Contain("96.0 KiB");
         page.Markup.Should().Contain("~1,200");
         page.Markup.Should().Contain("not analyzed");
-        page.Find(".ms-collection-link").GetAttribute("href").Should().Contain("documents/customer");
-        page.Find(".ms-collection-link").GetAttribute("href").Should().Contain("store=default");
+        page.Find(".ms-schema-owner .ms-collection-link").GetAttribute("href").Should().Contain("documents/customer");
+        page.Find(".ms-schema-owner .ms-collection-link").GetAttribute("href").Should().Contain("store=default");
     }
 
     [Fact]
@@ -312,20 +315,30 @@ public class SchemaPageTests
     }
 
     [Fact]
-    public void The_Functions_tab_renders_each_definition_through_the_tokenizer()
+    public async Task The_Functions_tab_renders_each_definition_through_the_tokenizer()
     {
         using var context = NewContext(out FakeSchemaDataService schema);
         schema.Functions = new SchemaFunctions(
             [
-                new FunctionInfo("studio", "mt_upsert_customer", "mt_upsert_customer(jsonb, uuid)",
-                    "CREATE FUNCTION studio.mt_upsert_customer() RETURNS void AS $function$ BEGIN END; $function$;", true),
+                new FunctionInfo("studio", "mt_upsert_customer", "jsonb, uuid", DatabaseObjectKind.Function, true,
+                    new DatabaseObjectOwnership(DatabaseObjectOwner.MartenInfrastructure), true, null),
             ],
+            null);
+        context.DatabaseObjects.Definition = new DatabaseObjectDefinition(
+            new DatabaseObjectRef(DatabaseObjectKind.Function, "studio", "mt_upsert_customer", "jsonb, uuid"),
+            "CREATE FUNCTION studio.mt_upsert_customer() RETURNS void AS $function$ BEGIN END; $function$;",
+            null,
+            DatabaseRefusal.None,
             null);
 
         context.Navigate("/marten/schema?tab=functions");
         var page = context.Render<SchemaPage>();
 
         page.Markup.Should().Contain("studio.mt_upsert_customer");
+
+        // Read when the row is opened, and not before (DB-7).
+        await page.Find("details.ms-function").TriggerEventAsync("ontoggle", EventArgs.Empty);
+
         page.FindAll(".ms-sql-string").Select(x => x.TextContent).Should()
             .Contain(x => x.Contains("$function$", StringComparison.Ordinal));
     }
@@ -523,7 +536,8 @@ public class SchemaPageTests
         schema.Tables = new SchemaTables(
             [
                 new TableStats("studio", "mt_doc_customer", 98304, 65536, 32768, 1200, 1200, 3, 4, 500,
-                    DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, "customer", "Customer", false),
+                    DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, "customer", "Customer",
+                    new DatabaseObjectOwnership(DatabaseObjectOwner.MartenDocument, "default", "customer")),
             ],
             ["studio"],
             1048576,
