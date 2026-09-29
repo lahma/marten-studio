@@ -418,9 +418,30 @@ public class SchemaScriptGateLiveTests(PostgresFixture fixture)
                 await session.SaveChangesAsync(Token);
             }
 
+            // Only this test's own schema. A bare ANALYZE analyses every other class's tables in the shared
+            // database, and several of them are about a table that has never been analysed - which a
+            // parallel run then quietly turned into a test of the other branch (and a failure).
             await using NpgsqlConnection connection = await fixture.OpenAsync(Token);
-            await using var analyze = new NpgsqlCommand("analyze", connection);
-            await analyze.ExecuteNonQueryAsync(Token);
+            List<string> statements = [];
+            await using (var list = new NpgsqlCommand(
+                "select pg_catalog.format('analyze %I.%I', n.nspname, c.relname) from pg_catalog.pg_class c " +
+                "join pg_catalog.pg_namespace n on n.oid = c.relnamespace " +
+                "where n.nspname = @schema and c.relkind in ('r', 'p') and not c.relispartition",
+                connection))
+            {
+                list.Parameters.AddWithValue("schema", schema);
+                await using NpgsqlDataReader reader = await list.ExecuteReaderAsync(Token);
+                while (await reader.ReadAsync(Token))
+                {
+                    statements.Add(reader.GetString(0));
+                }
+            }
+
+            foreach (string statement in statements)
+            {
+                await using var analyze = new NpgsqlCommand(statement, connection);
+                await analyze.ExecuteNonQueryAsync(Token);
+            }
 
             return host;
         }
