@@ -123,7 +123,19 @@ internal sealed class StudioPage : IAsyncDisposable
     /// theme, the time zone and the pinned collections there) and the recorded console never leak from
     /// one scenario into the next.
     /// </remarks>
-    public static async Task<StudioPage> SignInAsync(IBrowser browser, SampleHost host, string user)
+    public static Task<StudioPage> SignInAsync(IBrowser browser, SampleHost host, string user) =>
+        SignInAsync(browser, host, user, SignInTimeout);
+
+    /// <summary>How long each sign-in step may take in a scenario: generous, because a CI runner is slow.</summary>
+    internal static readonly TimeSpan SignInTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>How long the fixture's warm-up may take: the first request to a cold host.</summary>
+    internal static readonly TimeSpan WarmUpTimeout = TimeSpan.FromSeconds(180);
+
+    /// <summary>
+    /// Signs in with an explicit per-step timeout, and says which step ran out of it.
+    /// </summary>
+    internal static async Task<StudioPage> SignInAsync(IBrowser browser, SampleHost host, string user, TimeSpan timeout)
     {
         ArgumentNullException.ThrowIfNull(browser);
         ArgumentNullException.ThrowIfNull(host);
@@ -140,13 +152,34 @@ internal sealed class StudioPage : IAsyncDisposable
         IPage page = await context.NewPageAsync();
         var studio = new StudioPage(context, page, host);
 
-        await page.GotoAsync(host.Url("/login"), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
-        await page.FillAsync("#username", user);
-        await page.FillAsync("#password", user);
-        await page.ClickAsync("form[action='/login'] button[type=submit]");
-        await page.WaitForURLAsync(host.Url("/"), new PageWaitForURLOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+        float ms = (float) timeout.TotalMilliseconds;
+
+        await Step("open /login", () => page.GotoAsync(
+            host.Url("/login"), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = ms }));
+        await Step("fill the form", async () =>
+        {
+            await page.FillAsync("#username", user, new PageFillOptions { Timeout = ms });
+            await page.FillAsync("#password", user, new PageFillOptions { Timeout = ms });
+        });
+        await Step("submit", () => page.ClickAsync("form[action='/login'] button[type=submit]", new PageClickOptions { Timeout = ms }));
+        await Step("land on /", () => page.WaitForURLAsync(
+            host.Url("/"), new PageWaitForURLOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = ms }));
 
         return studio;
+
+        async Task Step(string name, Func<Task> action)
+        {
+            try
+            {
+                await action();
+            }
+            catch (TimeoutException exception)
+            {
+                throw new TimeoutException(
+                    $"Signing in as '{user}' at {host.BaseAddress} timed out at step '{name}' after {timeout.TotalSeconds:0} s.",
+                    exception);
+            }
+        }
     }
 
     /// <summary>

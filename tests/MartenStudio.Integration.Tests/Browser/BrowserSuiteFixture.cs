@@ -12,9 +12,13 @@ namespace MartenStudio.Integration.Tests.Browser;
 /// <remarks>
 /// One collection, so the scenarios run one after another against one browser and two sample hosts. They
 /// are the most expensive tests in the repository — a Chromium, two .NET processes and a Postgres — and
-/// running two of them at once would measure the machine rather than the studio.
+/// running two of them at once would measure the machine rather than the studio. It is also kept out of
+/// the parallel run altogether (<c>DisableParallelization</c>): xunit then runs it after every parallel
+/// collection has finished, so a sign-in never waits behind six hundred live tests competing for the same
+/// cores — which is what made <c>A_viewer_sees_the_write_controls_refused_with_a_reason</c> time out on a
+/// loaded machine while it passed in half a second on a quiet one.
 /// </remarks>
-[CollectionDefinition(BrowserSuite.Name)]
+[CollectionDefinition(BrowserSuite.Name, DisableParallelization = true)]
 public sealed class BrowserSuite : ICollectionFixture<BrowserSuiteFixture>
 {
     /// <summary>The collection name.</summary>
@@ -91,6 +95,20 @@ public sealed class BrowserSuiteFixture(PostgresFixture postgres) : IAsyncLifeti
 
         await SampleHost.WaitForSeedAsync(rootConnection);
         await SampleHost.WaitForSeedAsync(subPathConnection);
+
+        // The first sign-in and the first studio page of a freshly started host pay for JIT, Razor
+        // component discovery and the first circuit. Paying it here, once per host and outside any
+        // scenario's timeout, keeps a scenario measuring the studio rather than a cold process.
+        await WarmUpAsync(browser, root);
+        await WarmUpAsync(browser, subPath);
+    }
+
+    private static async Task WarmUpAsync(IBrowser browser, SampleHost host)
+    {
+        await using StudioPage studio = await StudioPage.SignInAsync(browser, host, "admin", StudioPage.WarmUpTimeout);
+        await studio.Page.GotoAsync(
+            host.StudioUrl(),
+            new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle, Timeout = (float) StudioPage.WarmUpTimeout.TotalMilliseconds });
     }
 
     /// <summary>Stops both hosts by pid, then the browser.</summary>
