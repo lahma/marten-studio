@@ -125,4 +125,22 @@ public class RowSharedComponentsTests
 
         panel.Find(".ms-referenced-table .ms-referenced-link").GetAttribute("href").Should().Be("database/object?schema=legacy&name=customer_credit");
     }
+
+    [Fact]
+    public void A_foreign_key_read_that_was_cut_short_says_so_even_with_nothing_listed()
+    {
+        using var context = new StudioComponentContext();
+
+        var panel = context.Render<ReferencedByPanel>(parameters => parameters
+            .Add(x => x.Model, (object?) new ReferencedByModel([]) { Truncated = true })
+            .Add(x => x.DocumentId, "6f9619ff-8b86-d011-b42d-00cf4fc964ff"));
+
+        panel.Find(".ms-referenced-truncated").TextContent.Should().Be("More foreign keys point here than were read.");
+
+        panel = context.Render<ReferencedByPanel>(parameters => parameters
+            .Add(x => x.Model, (object?) new ReferencedByModel([]))
+            .Add(x => x.DocumentId, "6f9619ff-8b86-d011-b42d-00cf4fc964ff"));
+
+        panel.FindAll(".ms-referenced-truncated").Should().BeEmpty("a complete read says nothing about being complete");
+    }
 }

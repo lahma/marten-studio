@@ -36,7 +36,7 @@
 {
     <ErrorAlert Message="@error" />
 }
-else if (Referenced.Entries.Count > 0 || Referenced.Withheld > 0)
+else if (Referenced.Entries.Count > 0 || Referenced.Withheld > 0 || Referenced.Truncated)
 {
     <section class="ms-referenced" aria-label="Referenced by">
         <h3 class="ms-doc-meta-title">Referenced by</h3>
@@ -105,6 +105,13 @@ else if (Referenced.Entries.Count > 0 || Referenced.Withheld > 0)
                     ? "1 more foreign key points here from a schema this studio does not show you."
                     : $"{Referenced.Withheld} more foreign keys point here from schemas this studio does not show you.")
             </p>
+        }
+        @* The foreign-key read stops at RelationshipQueries.DefaultForeignKeyCap; past it a key that points
+           here may be missing from both the list and the count above, and the panel says so rather than
+           reading as complete. *@
+        @if (Referenced.Truncated)
+        {
+            <p class="ms-referenced-withheld ms-referenced-truncated" role="note">More foreign keys point here than were read.</p>
         }
     </section>
 }
