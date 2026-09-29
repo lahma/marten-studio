@@ -1,0 +1,78 @@
+@using MartenStudio.Services.Database
+
+@*
+    Which gate is shut, in the words of the gate itself (DatabaseGate's sentences, which the service hands
+    over as DatabaseAccessState.Denial), and what opening it would add. The same shape CapabilityDisabled
+    has, because it is the same kind of message: "not permitted" with nothing to act on is the failure mode
+    of every feature-flagged admin UI (D4), so every one of these names the exact option or policy a host
+    would change.
+
+    Nothing is shown while the gate is open, and nothing while the state is unknown - a failed read says so
+    through the page's own error, and a notice guessing at a gate it was not told about would be wrong half
+    of the time.
+*@
+
+@if (Access is { IsOpen: false, Denial: { Length: > 0 } denial } access)
+{
+    <div class="ms-alert ms-alert-info ms-capability-disabled ms-db-access" role="note" data-refusal="@access.Refusal">
+        <div class="ms-alert-content">
+            <p class="ms-db-access-title">@Headline(access.Refusal)</p>
+            <p class="ms-muted">@denial</p>
+            <p class="ms-muted">
+                @switch (access.Refusal)
+                {
+                    case DatabaseRefusal.CapabilityOff:
+                    case DatabaseRefusal.ReadOnly:
+                        <text>
+                            What is shown is the structure of this store's own schemas, as the Schema screen
+                            shows it. With <code>Capabilities.BrowseDatabase</code> on, this screen would also
+                            show the other schemas <code>MartenStudioOptions.BrowsableSchemas</code>
+                            admits@(WithheldPhrase(access)), the definitions of views, functions and triggers
+                            Marten does not own, and the rows of tables it does not own.
+                        </text>
+                        break;
+
+                    case DatabaseRefusal.WritePolicy:
+                        <text>
+                            The structure of this store's own schemas is still shown. The policy is asked about
+                            the database as a whole with no tenant selected, because nothing filters a table
+                            Marten does not own by tenant.
+                        </text>
+                        break;
+
+                    default:
+                        <text>
+                            The structure of this store's own schemas is still shown. Definitions and rows of
+                            objects Marten does not own need their schema listed there.
+                        </text>
+                        break;
+                }
+            </p>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>The gate, as a <c>DatabaseAccessState</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    private DatabaseAccessState? Access => Model as DatabaseAccessState;
+
+    private static string Headline(DatabaseRefusal refusal) => refusal switch
+    {
+        DatabaseRefusal.ReadOnly => "The database browser is limited to this store's own schemas: the studio is read-only.",
+        DatabaseRefusal.CapabilityOff => "Browsing beyond this store's own schemas is not enabled.",
+        DatabaseRefusal.WritePolicy => "Your account may not browse beyond this store's own schemas.",
+        DatabaseRefusal.SchemaNotBrowsable => "No schema is browsable yet.",
+        _ => "The database browser is limited to this store's own schemas.",
+    };
+
+    /// <summary>How many schemas are withheld, as an aside - a count, never their names.</summary>
+    private static string WithheldPhrase(DatabaseAccessState access) => access.WithheldSchemaCount switch
+    {
+        <= 0 => string.Empty,
+        1 => " (this database has one more)",
+        _ => " (this database has " + DatabasePresentation.Number(access.WithheldSchemaCount) + " more)",
+    };
+}

@@ -1,0 +1,633 @@
+@page "/marten/database/object"
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Database
+@using MartenStudio.Services.Live
+@implements IAsyncDisposable
+@inject IDatabaseObjectService Data
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+@inject IJSRuntime JsRuntime
+@inject ToastService Toasts
+
+@*
+    One table, view, materialized view or foreign table: its structure on five tabs, and its rows on a sixth
+    where the gate lets this visitor read them. The default tab is Rows when it does and Columns when it
+    does not, so nobody lands on a refusal they did not ask for.
+
+    A Marten document or event table never gets a row grid here. Its Rows tab is a card that says where its
+    rows are read - Documents, or Streams and the Feed - because that is where tenancy, soft delete and the
+    serializer apply, and it links there with the scope carried.
+
+    A link to something that is not there, and a link to something outside the gate, get the same neutral
+    panel with the service's own sentence, which says the same thing either way: the page must not become
+    a way to find out what exists.
+*@
+
+<PageTitle>@(Name is { Length: > 0 } name ? name + " — Database" : "Database")</PageTitle>
+
+<div class="ms-page ms-doc-page ms-db-page">
+    <div class="ms-doc-layout ms-db-layout">
+        <div class="ms-doc-rail">
+            <DatabaseRail Overview="overview"
+                          Tables="railTables"
+                          Views="railViews"
+                          Schema="@FoundSchema"
+                          Kind="@DatabaseLinks.KindToken(RailCategory)"
+                          ActiveName="@(detail?.Found == true ? Name : null)"
+                          Collapsed="true" />
+        </div>
+
+        <div class="ms-doc-main">
+            <nav class="ms-db-breadcrumb" aria-label="Breadcrumb">
+                <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Database</a>
+                @if (FoundSchema is { Length: > 0 } crumb)
+                {
+                    <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
+                    <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, crumb, RailCategory)">@crumb</a>
+                }
+            </nav>
+
+            @if (string.IsNullOrWhiteSpace(Schema) || string.IsNullOrWhiteSpace(Name))
+            {
+                <div class="ms-empty">
+                    <p class="ms-empty-title">No object asked for</p>
+                    <p class="ms-empty-description">
+                        This page opens one table or view, named in the query string
+                        (<code>?schema=&amp;name=</code>). Pick one from <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">the database browser</a>.
+                    </p>
+                </div>
+            }
+            else if (loading && detail is null)
+            {
+                <LoadingSpinner />
+            }
+            else if (loadError is { Length: > 0 } error)
+            {
+                <ErrorAlert Message="@error" OnRetry="ReloadAsync" />
+            }
+            else if (detail is { Relation: null } missing)
+            {
+                @RenderNotFound(missing)
+            }
+            else if (detail is { Relation: { } relation } found)
+            {
+                @RenderHeader(relation, found)
+
+                <nav class="ms-tabs ms-db-object-tabs" aria-label="@($"Sections of {relation.Name}")">
+                    @foreach (DatabaseObjectTab tab in Tabs)
+                    {
+                        <a class="@(tab == ActiveTab ? "ms-tab ms-tab-active" : "ms-tab")"
+                           href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, relation.Schema, relation.Name, tab)"
+                           aria-current="@(tab == ActiveTab ? "page" : null)"
+                           @key="tab">
+                            @TabLabel(tab)
+                            @if (TabCount(tab, found) is { } count)
+                            {
+                                <span class="ms-tab-count">@count</span>
+                            }
+                        </a>
+                    }
+                </nav>
+
+                <div class="ms-db-object-tab" @key="@(ActiveTab + "\u001f" + relation.Schema + "\u001f" + relation.Name)">
+                    @switch (ActiveTab)
+                    {
+                        case DatabaseObjectTab.Rows:
+                            @RenderRows(relation, found)
+                            break;
+
+                        case DatabaseObjectTab.Keys:
+                            <ObjectKeysTab Detail="found" />
+                            break;
+
+                        case DatabaseObjectTab.Triggers:
+                            <DatabaseTriggersGrid Model="found.Triggers"
+                                                  ShowTable="false"
+                                                  Label="@($"Triggers on {relation.Name}")"
+                                                  EmptyText="No triggers on it." />
+                            break;
+
+                        case DatabaseObjectTab.Relationships:
+                            <DatabaseRelationshipsSlot Schema="@relation.Schema" Name="@relation.Name" Detail="found" />
+                            break;
+
+                        case DatabaseObjectTab.Definition:
+                            @RenderDefinition(relation, found)
+                            break;
+
+                        default:
+                            <ObjectColumnsTab Detail="found" />
+                            break;
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private static readonly DatabaseObjectTab[] Tabs =
+    [
+        DatabaseObjectTab.Rows,
+        DatabaseObjectTab.Columns,
+        DatabaseObjectTab.Keys,
+        DatabaseObjectTab.Triggers,
+        DatabaseObjectTab.Relationships,
+        DatabaseObjectTab.Definition,
+    ];
+
+    private CancellationTokenSource? cts;
+    private DatabaseBrowserOverview? overview;
+    private DatabaseObjectList? railTables;
+    private DatabaseObjectList? railViews;
+    private DatabaseObjectDetail? detail;
+    private DatabaseObjectDefinition? definition;
+    private string? definitionError;
+    private bool definitionLoading;
+    private string? loadError;
+    private bool loading = true;
+    private bool mayRunSql;
+    private string? loadedSignature;
+    private string? definitionFor;
+
+    /// <summary>The relation's schema.</summary>
+    [SupplyParameterFromQuery(Name = "schema")]
+    public string? Schema { get; set; }
+
+    /// <summary>The relation's name.</summary>
+    [SupplyParameterFromQuery(Name = "name")]
+    public string? Name { get; set; }
+
+    /// <summary>The tab, as <c>?tab=</c> spells it.</summary>
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? Tab { get; set; }
+
+    /// <summary>The store key, so a pasted link reopens the same store (D9).</summary>
+    [SupplyParameterFromQuery(Name = "store")]
+    public string? StoreKey { get; set; }
+
+    /// <summary>The database identity.</summary>
+    [SupplyParameterFromQuery(Name = "db")]
+    public string? DatabaseId { get; set; }
+
+    /// <summary>The tenant, or empty for all of them.</summary>
+    [SupplyParameterFromQuery(Name = "tenant")]
+    public string? TenantId { get; set; }
+
+    /// <summary>The tab on screen: the one asked for, or Rows when they may be read and Columns when not.</summary>
+    private DatabaseObjectTab ActiveTab =>
+        DatabaseLinks.ParseTab(Tab)
+        ?? (detail?.Relation is { Rows.Allowed: true } ? DatabaseObjectTab.Rows : DatabaseObjectTab.Columns);
+
+    /// <summary>
+    /// The schema the rail and the breadcrumb are about: the object's, once the service has said there is
+    /// one. A link to something missing or out of view leaves both on every schema, so neither repeats a
+    /// schema name back as if it were one the visitor may browse.
+    /// </summary>
+    private string? FoundSchema => detail?.Found == true ? Schema : null;
+
+    /// <summary>The rail's kind: views for a view, tables otherwise, so the schema links land on the right tab.</summary>
+    private DatabaseObjectCategory RailCategory =>
+        detail?.Relation is { } relation ? DatabaseObjectKinds.CategoryOf(relation.Kind) : DatabaseObjectCategory.Tables;
+
+    protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await State.EnsureInitializedAsync();
+        await ApplyScopeFromUrlAsync();
+
+        string signature = Signature();
+        if (!string.Equals(signature, loadedSignature, StringComparison.Ordinal))
+        {
+            loadedSignature = signature;
+            await LoadAsync();
+        }
+
+        await LoadDefinitionIfShownAsync();
+    }
+
+    private string Signature() => string.Join(
+        '\u001f',
+        State.ActiveScope?.StoreKey,
+        State.ActiveScope?.DatabaseId,
+        State.ActiveScope?.TenantId,
+        Schema,
+        Name);
+
+    /// <summary>
+    /// Points the studio at the scope the URL names, when it names one. The listing validates it, so a
+    /// pasted link to a store the visitor may not see quietly stays on the one they are allowed.
+    /// </summary>
+    private async Task ApplyScopeFromUrlAsync()
+    {
+        if (StoreKey is null && DatabaseId is null && TenantId is null)
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+
+        bool differs = (StoreKey is not null && !string.Equals(StoreKey, active?.StoreKey, StringComparison.OrdinalIgnoreCase))
+            || (DatabaseId is not null && !string.Equals(DatabaseId, active?.DatabaseId, StringComparison.OrdinalIgnoreCase))
+            || (TenantId is not null && !string.Equals(NullIfBlank(TenantId), active?.TenantId, StringComparison.Ordinal));
+
+        if (differs)
+        {
+            await State.SetScopeAsync(StoreKey ?? active?.StoreKey, DatabaseId ?? active?.DatabaseId, TenantId);
+        }
+    }
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || string.IsNullOrWhiteSpace(Schema) || string.IsNullOrWhiteSpace(Name))
+        {
+            loading = false;
+            return;
+        }
+
+        CancellationToken token = ResetCancellation();
+
+        loading = true;
+        loadError = null;
+        definition = null;
+        definitionError = null;
+        definitionFor = null;
+        StateHasChanged();
+
+        try
+        {
+            // The object first: it is the page. The rail's reads follow, one after the other for the reason
+            // the browser gives; the catalog behind them is cached.
+            detail = await Data.GetObjectAsync(scope, Schema, Name, token);
+
+            // Per visitor, and so not something the process-wide capability guard can answer alone: the
+            // console link is drawn only for somebody whose Run would be allowed.
+            mayRunSql = Capabilities.IsEnabled(StudioCapability.RunSql)
+                && await Authorization.IsAuthorizedAsync(scope, StudioCapability.RunSql, token);
+
+            overview = await Data.GetOverviewAsync(scope, token);
+
+            if (overview.Refusal == DatabaseRefusal.None && detail.Relation is { } relation)
+            {
+                railTables = await Data.ListAsync(scope, new DatabaseObjectQuery(DatabaseObjectCategory.Tables, relation.Schema), token);
+                railViews = await Data.ListAsync(scope, new DatabaseObjectQuery(DatabaseObjectCategory.Views, relation.Schema), token);
+            }
+            else
+            {
+                railTables = null;
+                railViews = null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            loadError = "You are not authorized for this store, database or tenant.";
+        }
+        catch (Exception exception)
+        {
+            loadError = exception.Message;
+        }
+        finally
+        {
+            loading = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Reads a view's query when the Definition tab is on screen, once per object. Never for a table,
+    /// which has none; never before the tab is opened, because it is a gated - and audited - read.
+    /// </summary>
+    private async Task LoadDefinitionIfShownAsync()
+    {
+        if (ActiveTab != DatabaseObjectTab.Definition
+            || detail?.Relation is not { } relation
+            || !HasStoredDefinition(relation.Kind)
+            || State.ActiveScope is not { } scope)
+        {
+            return;
+        }
+
+        string key = relation.Schema + "\u001f" + relation.Name;
+        if (string.Equals(definitionFor, key, StringComparison.Ordinal) && (definition is not null || definitionLoading))
+        {
+            return;
+        }
+
+        definitionFor = key;
+        definitionLoading = true;
+        definitionError = null;
+        StateHasChanged();
+
+        try
+        {
+            definition = await Data.GetDefinitionAsync(scope, new DatabaseObjectRef(relation.Kind, relation.Schema, relation.Name), cts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            definitionError = exception.Message;
+        }
+        finally
+        {
+            definitionLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task RetryDefinitionAsync()
+    {
+        definitionFor = null;
+        definition = null;
+        return LoadDefinitionIfShownAsync();
+    }
+
+    private static bool HasStoredDefinition(DatabaseObjectKind kind) =>
+        kind is DatabaseObjectKind.View or DatabaseObjectKind.MaterializedView;
+
+    private CancellationToken ResetCancellation()
+    {
+        CancellationTokenSource? previous = cts;
+        cts = new CancellationTokenSource();
+        previous?.Cancel();
+        previous?.Dispose();
+        return cts.Token;
+    }
+
+    private Task OnScopeChangedAsync() => InvokeAsync(async () =>
+    {
+        try
+        {
+            loadedSignature = null;
+            await OnParametersSetAsync();
+        }
+        catch (Exception exception)
+        {
+            loadError = exception.Message;
+            StateHasChanged();
+        }
+    });
+
+    private Task ReloadAsync()
+    {
+        loadedSignature = null;
+        return OnParametersSetAsync();
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Rendering
+    // ------------------------------------------------------------------------------------------------
+
+    private RenderFragment RenderHeader(DatabaseRelationSummary relation, DatabaseObjectDetail found) =>
+        @<div class="ms-db-object-header">
+            <div class="ms-page-header ms-db-object-heading">
+                <h1 class="ms-page-title ms-db-object-title">
+                    <span class="ms-db-object-name">@relation.Name</span>
+                </h1>
+
+                <div class="ms-db-object-actions">
+                    @if (mayRunSql && DatabaseLinks.ToQueryConsole(Options.Value, State.ActiveScope, relation.Schema, relation.Name) is { } queryHref)
+                    {
+                        <a class="ms-btn ms-btn-sm" href="@queryHref" title="Open the SQL console with a SELECT of this relation written into it">Open in Query</a>
+                    }
+
+                    <MenuButton WrapperClass="ms-db-copy-menu"
+                                ButtonClass="ms-btn ms-btn-sm ms-db-copy-menu-button"
+                                PopoverClass="ms-db-copy-popover"
+                                ElementId="ms-db-copy-menu"
+                                Text="Copy"
+                                Title="Copy this relation's name, or a SELECT of it"
+                                Label="@($"Copy from {DatabaseLinks.QualifiedName(relation.Schema, relation.Name)}")"
+                                Items="CopyItems(relation)" />
+                </div>
+            </div>
+
+            <div class="ms-db-object-meta">
+                <CopyBadge Value="@DatabaseLinks.QualifiedName(relation.Schema, relation.Name)" />
+                <span class="ms-db-badge ms-db-badge-kind">@DatabasePresentation.KindLabel(relation.Kind)</span>
+                <DatabaseOwnerBadge Model="relation.Ownership" />
+                <DatabaseRelationBadges Model="relation" />
+                <span class="ms-db-object-fact" title="@DatabasePresentation.RowsTitle(relation)">@RowsFact(relation)</span>
+                @if (DatabasePresentation.Size(relation) is not "—" and var size)
+                {
+                    <span class="ms-db-object-fact" title="Estimated from pg_class.relpages">@size</span>
+                }
+            </div>
+
+            @if (relation.Comment is { Length: > 0 } comment)
+            {
+                <p class="ms-db-object-comment">@comment</p>
+            }
+        </div>;
+
+    /// <summary>The estimate as a phrase that stands on its own in the header: "~1,204 rows", "rows not analyzed".</summary>
+    private static string RowsFact(DatabaseRelationSummary relation) => DatabasePresentation.Rows(relation) switch
+    {
+        "—" => "no rows of its own",
+        "not analyzed" => "rows not analyzed",
+        string estimate => estimate + " rows",
+    };
+
+    private RenderFragment RenderRows(DatabaseRelationSummary relation, DatabaseObjectDetail found) =>
+        @<div class="ms-db-rows-tab">
+            @if (relation.Rows.Allowed)
+            {
+                <DatabaseRowsSlot Schema="@relation.Schema" Name="@relation.Name" Detail="found" />
+            }
+            else
+            {
+                <div class="ms-db-rows-card" role="note" data-refusal="@relation.Rows.Refusal">
+                    @switch (relation.Ownership.Owner)
+                    {
+                        case DatabaseObjectOwner.MartenDocument when relation.Rows.Refusal == DatabaseRefusal.MartenOwned:
+                            <p class="ms-db-rows-card-title">Browsed in Documents, where tenancy, soft delete and the serializer apply</p>
+                            <p class="ms-muted">
+                                This is the table behind a Marten document type. Reading it raw would show every
+                                tenant's rows and the soft-deleted ones as if they were live, in the JSON the
+                                serializer wrote rather than the document it means.
+                            </p>
+                            <p><a class="ms-btn ms-btn-primary ms-btn-sm" href="@DatabaseLinks.ToWhereItLives(Options.Value, State.ActiveScope, relation.Ownership)">Open @(relation.Ownership.Alias ?? "the collection") in Documents</a></p>
+                            break;
+
+                        case DatabaseObjectOwner.MartenEventStore when relation.Rows.Refusal == DatabaseRefusal.MartenOwned:
+                            <p class="ms-db-rows-card-title">Browsed in Streams, the Feed and Projections</p>
+                            <p class="ms-muted">@relation.Rows.Reason</p>
+                            <p class="ms-db-rows-card-links">
+                                <a class="ms-btn ms-btn-primary ms-btn-sm" href="@DatabaseLinks.ToStreams(Options.Value, State.ActiveScope)">Open Streams</a>
+                                <a class="ms-btn ms-btn-sm" href="@DatabaseLinks.ToFeed(Options.Value, State.ActiveScope)">Feed</a>
+                                <a class="ms-btn ms-btn-sm" href="@DatabaseLinks.ToProjections(Options.Value, State.ActiveScope)">Projections</a>
+                            </p>
+                            break;
+
+                        case DatabaseObjectOwner.MartenInfrastructure when relation.Rows.Refusal == DatabaseRefusal.MartenOwned:
+                            <p class="ms-db-rows-card-title">Marten's own bookkeeping is never browsed raw</p>
+                            <p class="ms-muted">@relation.Rows.Reason</p>
+                            <p><a class="ms-btn ms-btn-sm" href="@DatabaseLinks.ToSchema(Options.Value, State.ActiveScope)">See it on the Schema screen</a></p>
+                            break;
+
+                        default:
+                            <p class="ms-db-rows-card-title">@RefusalTitle(relation.Rows.Refusal)</p>
+                            <p class="ms-muted">@(relation.Rows.Reason ?? "Its rows cannot be read here.")</p>
+                            break;
+                    }
+
+                    <p class="ms-muted ms-db-rows-card-foot">Its structure is on the other tabs.</p>
+                </div>
+            }
+        </div>;
+
+    private static string RefusalTitle(DatabaseRefusal refusal) => refusal switch
+    {
+        DatabaseRefusal.ForeignTable => "A foreign table is listed, never read",
+        DatabaseRefusal.HiddenDependency => "This view reads a table the host hides",
+        DatabaseRefusal.NoPrivilege => "The reading role may not select from it",
+        DatabaseRefusal.Unquotable => "Its name cannot be put into SQL safely",
+        DatabaseRefusal.CapabilityOff => "Reading rows here needs Capabilities.BrowseDatabase",
+        DatabaseRefusal.ReadOnly => "The studio is read-only",
+        DatabaseRefusal.WritePolicy => "Your account may not read rows here",
+        DatabaseRefusal.SchemaNotBrowsable => "This schema is not in BrowsableSchemas",
+        _ => "Its rows are not shown here",
+    };
+
+    private RenderFragment RenderDefinition(DatabaseRelationSummary relation, DatabaseObjectDetail found) =>
+        @<div class="ms-db-definition-tab">
+            @if (!HasStoredDefinition(relation.Kind))
+            {
+                <p class="ms-db-refusal" role="note">
+                    @(relation.Kind == DatabaseObjectKind.ForeignTable
+                        ? "A foreign table has no stored definition here; its columns are on Columns, and its data is on the remote server."
+                        : "Tables have no stored definition; see Columns and Keys.")
+                </p>
+            }
+            else
+            {
+                @if (relation.Kind == DatabaseObjectKind.View)
+                {
+                    <p class="ms-muted ms-db-view-note">A view keeps no rows: every read of it runs this query.</p>
+                }
+
+                <DatabaseDefinitionBody Model="definition"
+                                        Loading="definitionLoading"
+                                        Error="@definitionError"
+                                        OnRetry="RetryDefinitionAsync"
+                                        Label="@($"Definition of {relation.Name}")"
+                                        FileName="@(relation.Name + ".sql")"
+                                        ShowLineNumbers="true" />
+
+                @if (found.Dependencies.Count > 0)
+                {
+                    <section class="ms-db-dependencies">
+                        <h2 class="ms-db-section-title">Reads</h2>
+                        <ul class="ms-db-fk-list">
+                            @foreach (DatabaseViewDependency dependency in found.Dependencies)
+                            {
+                                <li>
+                                    @if (dependency is { Visible: true, Schema: { } schema, Name: { } name })
+                                    {
+                                        <a class="ms-db-name" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, name)">@DatabaseLinks.QualifiedName(schema, name)</a>
+                                        <span class="ms-db-fk-meta">@DatabasePresentation.KindLabel(dependency.Kind)@(dependency.Depth > 1 ? ", through another view" : string.Empty)</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="ms-db-none">a relation you cannot see</span>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    </section>
+                }
+            }
+        </div>;
+
+    private RenderFragment RenderNotFound(DatabaseObjectDetail missing) =>
+        @<div class="ms-empty ms-db-not-found" role="status">
+            <p class="ms-empty-title">No such table or view</p>
+            <p class="ms-empty-description">@(missing.Reason ?? "There is nothing here that this studio shows you.")</p>
+            <p class="ms-empty-description">
+                <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Back to the database browser</a>
+            </p>
+        </div>;
+
+    private static string TabLabel(DatabaseObjectTab tab) => tab switch
+    {
+        DatabaseObjectTab.Rows => "Rows",
+        DatabaseObjectTab.Keys => "Keys & indexes",
+        DatabaseObjectTab.Triggers => "Triggers",
+        DatabaseObjectTab.Relationships => "Relationships",
+        DatabaseObjectTab.Definition => "Definition",
+        _ => "Columns",
+    };
+
+    private static string? TabCount(DatabaseObjectTab tab, DatabaseObjectDetail found) => tab switch
+    {
+        DatabaseObjectTab.Columns => DatabasePresentation.Number(found.Columns.Count),
+        DatabaseObjectTab.Keys => DatabasePresentation.Number(found.Constraints.Count + found.Indexes.Count + found.ForeignKeysOut.Count),
+        DatabaseObjectTab.Triggers => DatabasePresentation.Number(found.Triggers.Count),
+        DatabaseObjectTab.Relationships => DatabasePresentation.Number(found.ForeignKeysOut.Count + found.ForeignKeysIn.Count),
+        _ => null,
+    };
+
+    // ------------------------------------------------------------------------------------------------
+    // Copy
+    // ------------------------------------------------------------------------------------------------
+
+    private IReadOnlyList<(string Label, string? Detail, Func<Task> OnSelect)> CopyItems(DatabaseRelationSummary relation)
+    {
+        string qualified = DatabaseLinks.QualifiedName(relation.Schema, relation.Name);
+        List<(string Label, string? Detail, Func<Task> OnSelect)> items =
+        [
+            ("Copy qualified name", qualified, () => CopyAsync(qualified, "name")),
+        ];
+
+        if (DatabaseLinks.SelectStatement(relation.Schema, relation.Name) is { } select)
+        {
+            items.Add(("Copy SELECT statement", select, () => CopyAsync(select, "SELECT statement")));
+        }
+
+        return items;
+    }
+
+    private async Task CopyAsync(string text, string what)
+    {
+        try
+        {
+            bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
+
+            if (copied)
+            {
+                await Toasts.Success("Copied the " + what + ".");
+            }
+            else
+            {
+                await Toasts.Error("This browser refused the clipboard.");
+            }
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            await Toasts.Error("This browser refused the clipboard.");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        if (cts is { } source)
+        {
+            await source.CancelAsync();
+            source.Dispose();
+            cts = null;
+        }
+    }
+}

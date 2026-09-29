@@ -1,0 +1,70 @@
+@using MartenStudio.Services.Database
+@using MartenStudio.Components.Pages.Schema
+
+@*
+    One definition, or why there is none. The SQL is tokenized and coloured on the server by SqlText - no
+    highlighter runs in the browser (AGENTS.md hard rule 3) - with copy and download beside it. A refusal
+    is the service's own sentence, which names the gate that is shut; it is drawn as a note rather than as
+    an error, because "you may not read this" is an answer, not a failure.
+*@
+
+@if (Loading)
+{
+    <LoadingSpinner />
+}
+else if (Error is { Length: > 0 } error)
+{
+    <ErrorAlert Message="@error" OnRetry="OnRetry" />
+}
+else if (Definition is { } definition)
+{
+    if (definition.Found && definition.Sql is { Length: > 0 } sql)
+    {
+        <div class="ms-db-definition">
+            <SqlText Sql="@sql" Label="@Label" Wrap="true" ShowLineNumbers="@ShowLineNumbers" />
+            <div class="ms-db-definition-actions">
+                <SqlActions Text="@sql" FileName="@FileName" />
+            </div>
+        </div>
+    }
+    else if (definition.Found && definition.Type is { } type)
+    {
+        <DatabaseTypeDescription Model="type" />
+    }
+    else
+    {
+        <p class="ms-db-refusal" role="note">@(definition.Reason ?? "There is no definition to show.")</p>
+    }
+}
+
+@code {
+    /// <summary>The definition, as a <c>DatabaseObjectDefinition</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Whether it is still being read.</summary>
+    [Parameter]
+    public bool Loading { get; set; }
+
+    /// <summary>Why the read failed, when it did.</summary>
+    [Parameter]
+    public string? Error { get; set; }
+
+    /// <summary>Tries the read again.</summary>
+    [Parameter]
+    public EventCallback OnRetry { get; set; }
+
+    /// <summary>The SQL block's accessible name.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Definition";
+
+    /// <summary>What the download is called.</summary>
+    [Parameter]
+    public string FileName { get; set; } = "definition.sql";
+
+    /// <summary>Whether the SQL has a line-number gutter.</summary>
+    [Parameter]
+    public bool ShowLineNumbers { get; set; }
+
+    private DatabaseObjectDefinition? Definition => Model as DatabaseObjectDefinition;
+}

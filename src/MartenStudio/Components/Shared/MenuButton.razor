@@ -1,0 +1,230 @@
+@using MartenStudio.Services.Live
+@inject IJSRuntime JsRuntime
+@inject ToastService Toasts
+
+@*
+    A button that opens a small menu of actions: the copy menu on document detail, the copy menu on a
+    database object. Extracted from DocumentCopyMenu so the second one is the same control rather than a
+    second opinion about how a menu behaves.
+
+    The mechanism is the platform's own popover, the same one JsonCopyMenu and CapabilityBanner use: no
+    positioning library and no third-party menu component (AGENTS.md hard rule 3), and light dismiss and
+    Escape for free. The caller names the classes, so each menu keeps its own anchor and placement rules in
+    the stylesheet.
+
+    role="menu" is a promise about the keyboard rather than a label. A menu is one tab stop, and inside it
+    the arrow keys, Home and End move a roving tabindex between the items, through the shared focus helper.
+    Escape is the popover's own light dismiss; the menu also hands focus back to the button that opened it,
+    so a keyboard user is left where they started rather than on whatever the browser picks.
+
+    The items are tuples of public types on purpose. The Razor compiler emits every component as a public
+    class, so a parameter typed with one of the studio's internal records would be a compile error - or,
+    worse, a reason to make that record public (AGENTS.md D12, D20).
+*@
+
+<span class="@WrapperClass">
+    <button type="button"
+            id="@ButtonId"
+            class="@ButtonClass"
+            popovertarget="@PopoverId"
+            aria-controls="@PopoverId"
+            aria-haspopup="menu"
+            aria-expanded="@(open ? "true" : "false")"
+            title="@Title">
+        <span>@Text</span>
+        @Chevron
+    </button>
+
+    @* `ontoggle` is what keeps aria-expanded honest: Escape and a click anywhere else close this
+       popover without the circuit hearing anything. The event fires once per transition and the
+       transitions strictly alternate, so flipping the flag is exact. *@
+    <div id="@PopoverId"
+         popover="auto"
+         class="@PopoverClass"
+         role="menu"
+         aria-label="@Label"
+         @ontoggle="OnToggledAsync"
+         @onkeydown="OnKeyDownAsync">
+        @for (var i = 0; i < Items.Count; i++)
+        {
+            var index = i;
+            var item = Items[index];
+
+            <button type="button"
+                    id="@ItemId(index)"
+                    class="ms-menu-item"
+                    role="menuitem"
+                    tabindex="@(index == activeIndex ? 0 : -1)"
+                    popovertarget="@PopoverId"
+                    popovertargetaction="hide"
+                    @key="index"
+                    @onclick="() => SelectAsync(index)">
+                <span class="ms-menu-item-label">@item.Label</span>
+                @if (item.Detail is not null)
+                {
+                    <span class="ms-menu-item-detail">@item.Detail</span>
+                }
+            </button>
+        }
+    </div>
+</span>
+
+@code {
+    private static readonly MarkupString Chevron = new(
+        """<svg class="ms-btn-glyph" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4,7 9,12 14,7" /></svg>""");
+
+    private static int instances;
+
+    private readonly string generatedId =
+        "ms-menu-" + Interlocked.Increment(ref instances).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private int activeIndex;
+    private bool open;
+
+    /// <summary>
+    /// The menu's offers, in order: what each says, an optional line under it saying what it will do or put
+    /// on the clipboard, and what it does.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<(string Label, string? Detail, Func<Task> OnSelect)> Items { get; set; } = [];
+
+    /// <summary>
+    /// The DOM id the button's <c>popovertarget</c> points at. Generated per instance when not given, so two
+    /// menus on one page never collide.
+    /// </summary>
+    [Parameter]
+    public string? ElementId { get; set; }
+
+    /// <summary>The menu's accessible name - "Copy from quartz.qrtz_triggers".</summary>
+    [Parameter]
+    public string Label { get; set; } = "Menu";
+
+    /// <summary>What the button says.</summary>
+    [Parameter]
+    public string Text { get; set; } = "Copy";
+
+    /// <summary>The button's tooltip.</summary>
+    [Parameter]
+    public string? Title { get; set; }
+
+    /// <summary>The classes of the element round the button and its popover.</summary>
+    [Parameter]
+    public string WrapperClass { get; set; } = "ms-menu-button";
+
+    /// <summary>The button's classes; the anchor the popover is placed against is named by one of them.</summary>
+    [Parameter]
+    public string ButtonClass { get; set; } = "ms-btn ms-btn-sm";
+
+    /// <summary>The popover's classes.</summary>
+    [Parameter]
+    public string PopoverClass { get; set; } = "ms-menu-popover";
+
+    private string PopoverId => string.IsNullOrWhiteSpace(ElementId) ? generatedId : ElementId;
+
+    private string ButtonId => PopoverId + "-button";
+
+    protected override void OnParametersSet()
+    {
+        if (activeIndex >= Items.Count)
+        {
+            activeIndex = 0;
+        }
+    }
+
+    private string ItemId(int index) =>
+        PopoverId + "-item-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Runs one offer. A failure is put on screen as a toast rather than left to escape the handler, where
+    /// it would end the circuit (AGENTS.md hard rule 6).
+    /// </summary>
+    private async Task SelectAsync(int index)
+    {
+        if (index < 0 || index >= Items.Count)
+        {
+            return;
+        }
+
+        activeIndex = index;
+
+        try
+        {
+            await Items[index].OnSelect();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            await Toasts.Error(exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Moves focus into the menu when the browser opens it. A <c>popover="auto"</c> opened through
+    /// <c>popovertarget</c> does not focus anything on its own, so without this the roving tabindex has
+    /// nothing to rove and the arrow keys below would never be reached.
+    /// </summary>
+    private async Task OnToggledAsync()
+    {
+        open = !open;
+
+        if (!open)
+        {
+            return;
+        }
+
+        activeIndex = 0;
+        await FocusAsync(ItemId(0));
+    }
+
+    /// <summary>
+    /// The menu keyboard pattern: one tab stop, arrows and Home/End inside it. Tab is left alone, because
+    /// leaving is what Tab is for. Escape is the popover's own light dismiss; what the menu adds is putting
+    /// focus back on the button, and starting the next opening at the top.
+    /// </summary>
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (Items.Count == 0 || args.CtrlKey || args.AltKey || args.MetaKey)
+        {
+            return;
+        }
+
+        if (args.Key == "Escape")
+        {
+            activeIndex = 0;
+            await FocusAsync(ButtonId);
+            return;
+        }
+
+        var next = args.Key switch
+        {
+            "ArrowDown" => (activeIndex + 1) % Items.Count,
+            "ArrowUp" => (activeIndex - 1 + Items.Count) % Items.Count,
+            "Home" => 0,
+            "End" => Items.Count - 1,
+            _ => -1,
+        };
+
+        if (next < 0)
+        {
+            return;
+        }
+
+        activeIndex = next;
+        await FocusAsync(ItemId(next));
+    }
+
+    private async Task FocusAsync(string elementId)
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.json.focusElement", elementId);
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // Prerender, or a circuit that closed while the menu was open. Focus is a courtesy; the
+            // items are still reachable with the mouse and with Tab.
+        }
+    }
+}

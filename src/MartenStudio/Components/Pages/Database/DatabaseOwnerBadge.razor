@@ -1,0 +1,66 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Database
+@using MartenStudio.Components.Pages.Documents
+@inject IOptions<MartenStudioOptions> Options
+@inject StudioState State
+
+@*
+    Whose an object is, and - for what Marten owns - where its data is really read.
+
+    A document table's badge is its collection chip, and it is a link to that collection: the raw table is
+    never browsed here, because Documents is where tenancy, soft delete and the store's serializer apply. The
+    event store's links to Streams, and Marten's bookkeeping to the Schema screen that describes it. A
+    flat-table projection is Marten-managed relational data whose rows are browsable right here, so it is a
+    badge and not a link. Anything else is somebody else's: the host's own, or another library's - and when
+    the name looks like a known library's, a neutral grey hint says so and says it is a guess.
+*@
+
+@if (Ownership is { } owner)
+{
+    string title = DatabasePresentation.OwnerTitle(owner);
+    string? href = DatabaseLinks.ToWhereItLives(Options.Value, State.ActiveScope, owner);
+
+    switch (owner.Owner)
+    {
+        case DatabaseObjectOwner.MartenDocument:
+            <a class="ms-db-owner ms-db-owner-link ms-db-owner-document" href="@href" title="@title">
+                <CollectionChip Alias="@(owner.Alias ?? "documents")"
+                                Hue="@CollectionColorizer.HueFor(owner.Alias)"
+                                Title="@title"
+                                Small="true" />
+                <span class="ms-sr-only">, open in Documents</span>
+            </a>
+            break;
+
+        case DatabaseObjectOwner.MartenEventStore:
+            <a class="ms-db-owner ms-db-owner-link ms-db-owner-events" href="@href" title="@title">event store</a>
+            break;
+
+        case DatabaseObjectOwner.MartenInfrastructure:
+            <a class="ms-db-owner ms-db-owner-link ms-db-owner-internal" href="@href" title="@title">Marten internal</a>
+            break;
+
+        case DatabaseObjectOwner.MartenProjectionOrExtended:
+            <span class="ms-db-owner ms-db-owner-managed" title="@title">Marten-managed</span>
+            break;
+
+        default:
+            if (owner.RecognisedAs is { Length: > 0 } hint)
+            {
+                <span class="ms-db-hint" title="Recognised by name">@hint</span>
+            }
+            else
+            {
+                <span class="ms-db-owner ms-db-owner-other" title="@title">other</span>
+            }
+            break;
+    }
+}
+
+@code {
+    /// <summary>The object's <c>DatabaseObjectOwnership</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    private DatabaseObjectOwnership? Ownership => Model as DatabaseObjectOwnership;
+}

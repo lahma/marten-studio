@@ -1,0 +1,203 @@
+@using MartenStudio.Services.Database
+@implements IDisposable
+@inject IDatabaseObjectService Data
+@inject StudioState State
+
+@*
+    Functions, procedures, aggregates and window functions, one row per overload - the identity arguments
+    are what tell recalculate(bigint) from recalculate(bigint, boolean), so they are part of the name.
+
+    A body is read only when its row is opened, and once: see DatabaseDefinitionLoader. The studio never
+    executes a function; it reads pg_get_functiondef and nothing else.
+
+    SECURITY DEFINER is the one badge here that is a warning, and only when search_path is not pinned: such
+    a function runs with its owner's rights and resolves unqualified names through the caller's
+    search_path, which is the classic way to make one call something it did not mean to.
+*@
+
+<TableScroll Label="@Label">
+    <table class="ms-table ms-db-table ms-db-functions">
+        <thead>
+            <tr>
+                <th class="ms-db-col-expand" scope="col"><span class="ms-sr-only">Definition</span></th>
+                @Header("name", "Name")
+                <th scope="col">Kind</th>
+                <th scope="col">Returns</th>
+                <th scope="col">Language</th>
+                <th scope="col">Volatility</th>
+                <th scope="col">Security</th>
+                @Header("owner", "Owner")
+            </tr>
+        </thead>
+        <tbody>
+            @if (Routines.Count == 0)
+            {
+                <tr>
+                    <td class="ms-table-empty" colspan="@ColumnSpan">@EmptyText</td>
+                </tr>
+            }
+
+            @foreach (DatabaseRoutineSummary routine in Sorted())
+            {
+                DatabaseObjectRef reference = routine.Ref;
+                bool open = expanded.Contains(reference);
+                string rowKey = Key(routine);
+
+                <tr class="@(routine.Ownership.IsMarten ? "ms-db-row-marten" : null)" @key="rowKey">
+                    <td class="ms-db-cell-expand">
+                        <button type="button"
+                                class="ms-doc-expander ms-db-expander"
+                                aria-expanded="@(open ? "true" : "false")"
+                                aria-controls="@DefinitionId(rowKey)"
+                                aria-label="@((open ? "Hide the definition of " : "Show the definition of ") + Signature(routine))"
+                                @onclick="() => ToggleAsync(reference)">@(open ? "▾" : "▸")</button>
+                    </td>
+                    <td class="ms-db-cell-name">
+                        <span class="ms-db-name ms-db-signature" title="@(DatabaseLinks.QualifiedName(routine.Schema, routine.Name) + "(" + routine.IdentityArguments + ")")"><span class="ms-db-schema-prefix">@(ShowSchema ? routine.Schema + "." : null)</span>@routine.Name<span class="ms-db-arguments">(@routine.IdentityArguments)</span></span>
+                    </td>
+                    <td><span class="ms-db-badge" title="@DatabasePresentation.KindLabel(routine.Kind)">@DatabasePresentation.RoutineKindShort(routine.Kind)</span></td>
+                    <td class="ms-db-cell-type">@(routine.Result ?? "—")</td>
+                    <td>@routine.Language</td>
+                    <td>@routine.Volatility</td>
+                    <td>
+                        @if (routine.UnpinnedSecurityDefiner)
+                        {
+                            <span class="ms-db-badge ms-db-badge-warning"
+                                  title="Runs with its owner's privileges and does not pin search_path, so a caller's search_path decides what its unqualified names resolve to. Add SET search_path to it.">SECURITY DEFINER</span>
+                        }
+                        else if (routine.SecurityDefiner)
+                        {
+                            <span class="ms-db-badge" title="Runs with its owner's privileges; search_path is pinned">SECURITY DEFINER</span>
+                        }
+                        else
+                        {
+                            <span class="ms-db-none" title="Runs with the caller's privileges">invoker</span>
+                        }
+                    </td>
+                    <td class="ms-db-cell-owner"><DatabaseOwnerBadge Model="routine.Ownership" /></td>
+                </tr>
+
+                @if (open)
+                {
+                    <tr class="ms-doc-preview-row ms-db-definition-row" id="@DefinitionId(rowKey)" @key="@(rowKey + "\u001fdefinition")">
+                        <td class="ms-doc-preview-cell" colspan="@ColumnSpan">
+                            <DatabaseDefinitionBody Model="definitions.Find(reference)"
+                                                    Loading="definitions.IsLoading(reference)"
+                                                    Error="@definitions.FailureOf(reference)"
+                                                    OnRetry="() => LoadAsync(reference)"
+                                                    Label="@("Definition of " + Signature(routine))"
+                                                    FileName="@(routine.Name + ".sql")" />
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</TableScroll>
+
+@code {
+    private const int ColumnSpan = 8;
+
+    private readonly HashSet<DatabaseObjectRef> expanded = [];
+    private readonly DatabaseDefinitionLoader definitions = new();
+    private object? shownModel;
+    private string sortKey = "default";
+    private bool descending;
+
+    /// <summary>The list, as a <c>DatabaseObjectList</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Whether to put the schema in front of each name - when the list spans schemas.</summary>
+    [Parameter]
+    public bool ShowSchema { get; set; }
+
+    /// <summary>The scroll region's accessible name.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Functions";
+
+    /// <summary>What an empty list says.</summary>
+    [Parameter]
+    public string EmptyText { get; set; } = "Nothing here.";
+
+    private List<DatabaseRoutineSummary> Routines => [.. ((Model as DatabaseObjectList)?.Items ?? []).OfType<DatabaseRoutineSummary>()];
+
+    protected override void OnParametersSet()
+    {
+        // A new list is a new question: what was open, and what was read for it, belonged to the old one.
+        if (!ReferenceEquals(shownModel, Model))
+        {
+            shownModel = Model;
+            expanded.Clear();
+            definitions.Reset();
+        }
+    }
+
+    private static string Key(DatabaseRoutineSummary routine) =>
+        routine.Schema + '\u001f' + routine.Name + '\u001f' + routine.IdentityArguments;
+
+    private static string Signature(DatabaseRoutineSummary routine) =>
+        DatabaseLinks.QualifiedName(routine.Schema, routine.Name) + "(" + routine.IdentityArguments + ")";
+
+    private static string DefinitionId(string rowKey) =>
+        "ms-db-def-" + Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(rowKey)).ToLowerInvariant();
+
+    private IEnumerable<DatabaseRoutineSummary> Sorted()
+    {
+        List<DatabaseRoutineSummary> routines = Routines;
+
+        IEnumerable<DatabaseRoutineSummary> ordered = sortKey switch
+        {
+            "name" => routines.OrderBy(static x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(static x => x.Schema, StringComparer.Ordinal)
+                .ThenBy(static x => x.IdentityArguments, StringComparer.Ordinal),
+            "owner" => routines.OrderBy(static x => x.Ownership.IsMarten)
+                .ThenBy(static x => DatabasePresentation.OwnerLabel(x.Ownership), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(static x => x.Name, StringComparer.Ordinal),
+            _ => DatabasePresentation.DefaultOrder(routines).ThenBy(static x => x.IdentityArguments, StringComparer.Ordinal),
+        };
+
+        return descending ? ordered.Reverse() : ordered;
+    }
+
+    private async Task ToggleAsync(DatabaseObjectRef reference)
+    {
+        if (expanded.Remove(reference))
+        {
+            return;
+        }
+
+        expanded.Add(reference);
+        await LoadAsync(reference);
+    }
+
+    private async Task LoadAsync(DatabaseObjectRef reference)
+    {
+        // Drawn open with its spinner first, then filled; the loader turns every failure into a value.
+        StateHasChanged();
+        await definitions.LoadAsync(Data, State.ActiveScope, reference);
+    }
+
+    private Task SortAsync(string key)
+    {
+        descending = string.Equals(sortKey, key, StringComparison.Ordinal) && !descending;
+        sortKey = key;
+        return Task.CompletedTask;
+    }
+
+    private RenderFragment Header(string key, string label) =>
+        @<th scope="col" aria-sort="@DatabasePresentation.AriaSort(sortKey == key, descending)">
+            <button type="button"
+                    class="ms-doc-sort @(sortKey == key ? "ms-doc-sort-on" : null)"
+                    title="@($"Sort by {label.ToLowerInvariant()}")"
+                    @onclick="() => SortAsync(key)">
+                @label
+                @if (sortKey == key)
+                {
+                    <span class="ms-doc-sort-arrow" aria-hidden="true">@(descending ? "▼" : "▲")</span>
+                }
+            </button>
+        </th>;
+
+    public void Dispose() => definitions.Dispose();
+}

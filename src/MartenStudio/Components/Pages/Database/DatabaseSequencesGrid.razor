@@ -1,0 +1,181 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Database
+@inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    Sequences. The owning column is a link to its table, because "which serial is this" is the question a
+    sequence list is opened to answer. The last value is shown only where the reading role may read it and
+    the gate lets this visitor read the object's data; otherwise the cell says which of the two it was.
+
+    Marten's per-tenant event sequences roll up into one row: their names are the tenant list, which no
+    grid here ever prints.
+*@
+
+<TableScroll Label="@Label">
+    <table class="ms-table ms-db-table ms-db-sequences">
+        <thead>
+            <tr>
+                @Header("name", "Name")
+                <th scope="col">Owned by</th>
+                <th scope="col" class="ms-db-col-number">Last value</th>
+                <th scope="col" class="ms-db-col-number">Increment</th>
+                <th scope="col">Range</th>
+                <th scope="col">Cycles</th>
+                <th scope="col">Type</th>
+                @Header("owner", "Owner")
+            </tr>
+        </thead>
+        <tbody>
+            @if (Sequences.Count == 0)
+            {
+                <tr>
+                    <td class="ms-table-empty" colspan="8">@EmptyText</td>
+                </tr>
+            }
+
+            @foreach (DatabaseSequenceSummary sequence in Sorted())
+            {
+                <tr class="@(sequence.Ownership.IsMarten ? "ms-db-row-marten" : null)" @key="sequence.Schema + '\u001f' + sequence.Name">
+                    <td class="ms-db-cell-name">
+                        <span class="ms-db-name"><span class="ms-db-schema-prefix">@(ShowSchema ? sequence.Schema + "." : null)</span>@sequence.Name</span>
+                        @if (sequence.RolledUp > 0)
+                        {
+                            <span class="ms-db-badge"
+                                  title="@($"{DatabasePresentation.Number(sequence.RolledUp)} per-tenant sequences are rolled into this row. Their names are never listed: they would name every tenant.")">
+                                +@sequence.RolledUp per tenant
+                            </span>
+                        }
+                    </td>
+                    <td class="ms-db-cell-name">
+                        @if (sequence is { OwnerSchema: { } ownerSchema, OwnerTable: { } ownerTable, OwnerColumn: { } ownerColumn })
+                        {
+                            <a class="ms-db-name"
+                               href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, ownerSchema, ownerTable, DatabaseObjectTab.Columns)"
+                               title="The column this sequence belongs to: dropping the column drops the sequence">@(DatabaseLinks.QualifiedName(ownerSchema, ownerTable)).@ownerColumn</a>
+                        }
+                        else if (sequence.OwnedOutsideView)
+                        {
+                            <span class="ms-db-none" title="It belongs to a column of a table this studio does not show you">a table you cannot see</span>
+                        }
+                        else
+                        {
+                            <span class="ms-db-none" title="No column owns it">—</span>
+                        }
+                    </td>
+                    <td class="ms-db-cell-number">
+                        @if (!sequence.CanReadValue)
+                        {
+                            <span class="ms-db-none" title="@WithheldTitle(sequence)">@(MayReadData(sequence) ? "no privilege" : "withheld")</span>
+                        }
+                        else if (sequence.LastValue is { } last)
+                        {
+                            @DatabasePresentation.Number(last)
+                        }
+                        else
+                        {
+                            <span class="ms-db-none" title="nextval has never been called on it">never used</span>
+                        }
+                    </td>
+                    <td class="ms-db-cell-number">@DatabasePresentation.Number(sequence.Increment)</td>
+                    <td class="ms-db-cell-range" title="@(DatabasePresentation.Number(sequence.Minimum) + " to " + DatabasePresentation.Number(sequence.Maximum) + ", starting at " + DatabasePresentation.Number(sequence.Start))">@Bound(sequence.Minimum, sequence.DataType) … @Bound(sequence.Maximum, sequence.DataType)</td>
+                    <td>@(sequence.Cycles ? "yes" : "no")</td>
+                    <td class="ms-db-cell-type">@sequence.DataType</td>
+                    <td class="ms-db-cell-owner"><DatabaseOwnerBadge Model="sequence.Ownership" /></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</TableScroll>
+
+@code {
+    private string sortKey = "default";
+    private bool descending;
+
+    /// <summary>The list, as a <c>DatabaseObjectList</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Whether to put the schema in front of each name - when the list spans schemas.</summary>
+    [Parameter]
+    public bool ShowSchema { get; set; }
+
+    /// <summary>The scroll region's accessible name.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Sequences";
+
+    /// <summary>What an empty list says.</summary>
+    [Parameter]
+    public string EmptyText { get; set; } = "Nothing here.";
+
+    private DatabaseObjectList? List => Model as DatabaseObjectList;
+
+    private List<DatabaseSequenceSummary> Sequences => [.. (List?.Items ?? []).OfType<DatabaseSequenceSummary>()];
+
+    /// <summary>
+    /// Whether the gate lets this visitor read the object's data, so that a withheld value was the reading
+    /// role's privilege rather than the gate. Marten's own in the store's schemas always, as on the Schema
+    /// screen; anything else needs the gate open and the schema browsable.
+    /// </summary>
+    private bool MayReadData(DatabaseSequenceSummary sequence)
+    {
+        DatabaseAccessState? access = List?.Access;
+        if (access is null)
+        {
+            return false;
+        }
+
+        return (sequence.Ownership.IsMarten && access.StoreSchemas.Contains(sequence.Schema))
+            || (access.IsOpen && access.BrowsableSchemas.Contains(sequence.Schema));
+    }
+
+    private string WithheldTitle(DatabaseSequenceSummary sequence) =>
+        MayReadData(sequence)
+            ? "The reading role has neither SELECT nor USAGE on this sequence, so its value cannot be read."
+            : List?.Access.Denial ?? "Its value is data, and the gate does not let this visitor read data in this schema.";
+
+    /// <summary>A bound, with the type's own limits spelled as such rather than as nineteen digits.</summary>
+    private static string Bound(long value, string dataType) => (value, dataType) switch
+    {
+        (long.MaxValue, _) or (int.MaxValue, "integer") or (short.MaxValue, "smallint") => "max",
+        (long.MinValue, _) or (int.MinValue, "integer") or (short.MinValue, "smallint") => "min",
+        _ => DatabasePresentation.Number(value),
+    };
+
+    private IEnumerable<DatabaseSequenceSummary> Sorted()
+    {
+        List<DatabaseSequenceSummary> sequences = Sequences;
+
+        IEnumerable<DatabaseSequenceSummary> ordered = sortKey switch
+        {
+            "name" => sequences.OrderBy(static x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(static x => x.Schema, StringComparer.Ordinal),
+            "owner" => sequences.OrderBy(static x => x.Ownership.IsMarten)
+                .ThenBy(static x => DatabasePresentation.OwnerLabel(x.Ownership), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(static x => x.Name, StringComparer.Ordinal),
+            _ => DatabasePresentation.DefaultOrder(sequences),
+        };
+
+        return descending ? ordered.Reverse() : ordered;
+    }
+
+    private Task SortAsync(string key)
+    {
+        descending = string.Equals(sortKey, key, StringComparison.Ordinal) && !descending;
+        sortKey = key;
+        return Task.CompletedTask;
+    }
+
+    private RenderFragment Header(string key, string label) =>
+        @<th scope="col" aria-sort="@DatabasePresentation.AriaSort(sortKey == key, descending)">
+            <button type="button"
+                    class="ms-doc-sort @(sortKey == key ? "ms-doc-sort-on" : null)"
+                    title="@($"Sort by {label.ToLowerInvariant()}")"
+                    @onclick="() => SortAsync(key)">
+                @label
+                @if (sortKey == key)
+                {
+                    <span class="ms-doc-sort-arrow" aria-hidden="true">@(descending ? "▼" : "▲")</span>
+                }
+            </button>
+        </th>;
+}

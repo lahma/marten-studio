@@ -1,0 +1,102 @@
+@implements IDisposable
+
+@*
+    The browser's name filter. It drives ?q=, so a pasted link reopens the same list (D9) - which is why this
+    is not SearchFilter: SearchFilter starts empty and has no way to be told what the URL already says, so a
+    link carrying a filter would open with the filter applied and an empty box, and the next keystroke would
+    silently throw the filter away. Same look (ms-search-filter), same debounce, plus the value it is given.
+
+    Typing is debounced; Enter and leaving the box (the change event) apply at once, so a person who knows
+    what they want does not wait for the timer.
+*@
+
+<input type="search"
+       class="ms-input ms-search-filter ms-db-name-filter"
+       placeholder="@Placeholder"
+       aria-label="@Placeholder"
+       value="@current"
+       @oninput="OnInputAsync"
+       @onchange="OnChangeAsync" />
+
+@code {
+    private string current = string.Empty;
+    private string? applied;
+    private CancellationTokenSource debounce = new();
+
+    /// <summary>What the URL says the filter is.</summary>
+    [Parameter]
+    public string? Value { get; set; }
+
+    /// <summary>The placeholder, and the box's accessible name.</summary>
+    [Parameter]
+    public string Placeholder { get; set; } = "Filter by name";
+
+    /// <summary>How long typing has to pause before the filter applies.</summary>
+    [Parameter]
+    public TimeSpan Debounce { get; set; } = TimeSpan.FromMilliseconds(350);
+
+    /// <summary>Applies a new filter; empty means none.</summary>
+    [Parameter]
+    public EventCallback<string> OnFilterChanged { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        // Only a change that came from outside moves the box: the URL after back/forward, or a link. A
+        // render caused by the visitor's own typing leaves what they typed alone.
+        string incoming = Value ?? string.Empty;
+        if (!string.Equals(incoming, applied, StringComparison.Ordinal))
+        {
+            applied = incoming;
+            current = incoming;
+        }
+    }
+
+    private async Task OnInputAsync(ChangeEventArgs args)
+    {
+        current = args.Value?.ToString() ?? string.Empty;
+
+        CancellationToken token = Restart();
+
+        try
+        {
+            await Task.Delay(Debounce, token);
+            await ApplyAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task OnChangeAsync(ChangeEventArgs args)
+    {
+        current = args.Value?.ToString() ?? string.Empty;
+        Restart();
+        await ApplyAsync();
+    }
+
+    private async Task ApplyAsync()
+    {
+        string value = current.Trim();
+        if (string.Equals(value, applied, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        applied = value;
+        await OnFilterChanged.InvokeAsync(value);
+    }
+
+    private CancellationToken Restart()
+    {
+        debounce.Cancel();
+        debounce.Dispose();
+        debounce = new CancellationTokenSource();
+        return debounce.Token;
+    }
+
+    public void Dispose()
+    {
+        debounce.Cancel();
+        debounce.Dispose();
+    }
+}

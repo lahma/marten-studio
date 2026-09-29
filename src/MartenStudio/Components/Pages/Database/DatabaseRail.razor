@@ -1,0 +1,411 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Database
+@using MartenStudio.Services.Live
+@inject IOptions<MartenStudioOptions> Options
+@inject StudioState State
+@inject IJSRuntime JsRuntime
+
+@*
+    The database browser's left rail, the sibling of the documents' CollectionsRail and drawn with the same
+    .ms-rail classes: a filter, the schemas this visitor may see, what they pinned, and the current schema's
+    tables and views - which stay here on object detail, so hopping from one table to the next is one click.
+
+    The store's own schemas carry an M: their structure is what the Schema screen has always shown, and it
+    is visible whether or not the capability is on. Schemas that exist but are not shown are a count and
+    never a list of names, with the gate that withholds them - a name is itself something a visitor may not
+    be meant to learn.
+
+    Below 900 px the rail is a <details> whose summary says where you are ("quartz · 14 tables"), open on
+    the browser and closed once an object is picked, so a phone opens on the object rather than on the
+    list it came from. It is keyed on the object for exactly that reason: a new object is a new, closed
+    element, whatever the visitor did to the last one. Above 900 px the summary is hidden and the content
+    shown regardless (::details-content, in the DB-4 section of the stylesheet), so a closed <details> never
+    hides the rail on a desktop.
+
+    Pins live in this browser's local storage under ms_db_pins_{store}, like the documents rail's.
+*@
+
+<nav class="ms-rail ms-db-rail" aria-label="Database schemas and objects">
+    <details class="ms-db-rail-collapse" open="@(!Collapsed)" @key="CollapseKey">
+        <summary class="ms-db-rail-summary">@SummaryText</summary>
+
+        <div class="ms-db-rail-body">
+            <div class="ms-db-rail-filter">
+                <DatabaseNameFilter Value="@filter"
+                                    Placeholder="Filter this list"
+                                    OnFilterChanged="FilterAsync" />
+            </div>
+
+            <section class="ms-rail-group ms-db-rail-schemas">
+                <h2 class="ms-rail-title">
+                    <span class="ms-rail-name">Schemas</span>
+                    <span class="ms-rail-count">@Schemas.Count</span>
+                </h2>
+
+                <ul class="ms-rail-list">
+                    @if (Matches("all schemas"))
+                    {
+                        <li class="ms-rail-item" @key="@("all")">
+                            <div class="ms-rail-entry">
+                                <a class="@LinkClass(Schema is null)" href="@SchemaHref(null)" aria-current="@(Schema is null ? "page" : null)">
+                                    <span class="ms-db-rail-name">All schemas</span>
+                                    <span class="ms-rail-badge-count" title="@CountTitle(null)">@DatabasePresentation.Number(TotalOf(null))</span>
+                                </a>
+                            </div>
+                        </li>
+                    }
+
+                    @foreach (DatabaseSchemaSummary schema in Schemas)
+                    {
+                        if (!Matches(schema.Name))
+                        {
+                            continue;
+                        }
+
+                        bool active = string.Equals(schema.Name, Schema, StringComparison.Ordinal);
+
+                        <li class="ms-rail-item" @key="schema.Name">
+                            <div class="ms-rail-entry">
+                                <a class="@LinkClass(active)" href="@SchemaHref(schema.Name)" aria-current="@(active ? "page" : null)">
+                                    <span class="ms-db-rail-name">@schema.Name</span>
+                                    <span class="ms-rail-badge-count" title="@CountTitle(schema)">@DatabasePresentation.Number(schema.CountOf(Category))</span>
+                                </a>
+                                <span class="ms-rail-flags">
+                                    @if (schema.IsStoreSchema)
+                                    {
+                                        <span class="ms-rail-flag ms-db-flag-marten"
+                                              title="Declared by this Marten store. Its structure is shown whether or not Capabilities.BrowseDatabase is on.">M</span>
+                                    }
+                                </span>
+                            </div>
+                        </li>
+                    }
+                </ul>
+
+                @if (Access is { WithheldSchemaCount: > 0 } access)
+                {
+                    <p class="ms-rail-empty ms-db-rail-withheld" title="@(access.Denial ?? WithheldReason(access))">
+                        @(access.WithheldSchemaCount == 1 ? "1 other schema" : DatabasePresentation.Number(access.WithheldSchemaCount) + " other schemas")
+                        not shown: @WithheldReason(access)
+                    </p>
+                }
+            </section>
+
+            <section class="ms-rail-group ms-db-rail-pinned">
+                <h2 class="ms-rail-title">
+                    <span class="ms-rail-name">Pinned</span>
+                    <span class="ms-rail-count">@VisiblePins.Count</span>
+                </h2>
+
+                @if (VisiblePins.Count == 0)
+                {
+                    <p class="ms-rail-empty">Nothing pinned yet. Use ☆ beside a table or view to keep it here.</p>
+                }
+                else
+                {
+                    <ul class="ms-rail-list">
+                        @foreach ((string pinSchema, string pinName) in VisiblePins)
+                        {
+                            if (!Matches(pinSchema + "." + pinName))
+                            {
+                                continue;
+                            }
+
+                            bool active = IsActive(pinSchema, pinName);
+
+                            <li class="ms-rail-item" @key="@(pinSchema + "\u001f" + pinName)">
+                                <div class="ms-rail-entry">
+                                    <a class="@LinkClass(active)" href="@ObjectHref(pinSchema, pinName)" aria-current="@(active ? "page" : null)" title="@DatabaseLinks.QualifiedName(pinSchema, pinName)">
+                                        <span class="ms-db-rail-name"><span class="ms-db-schema-prefix">@(pinSchema).</span>@pinName</span>
+                                    </a>
+                                    <span class="ms-rail-flags">
+                                        <button type="button"
+                                                class="ms-rail-action ms-rail-action-on"
+                                                title="Unpin"
+                                                aria-label="@($"Unpin {DatabaseLinks.QualifiedName(pinSchema, pinName)}")"
+                                                aria-pressed="true"
+                                                @onclick="() => TogglePinAsync(pinSchema, pinName)">★</button>
+                                    </span>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+
+            @if (Schema is { } current)
+            {
+                @RenderBand("tables", "Tables", Tables, current)
+                @RenderBand("views", "Views", Views, current)
+            }
+            else
+            {
+                <p class="ms-rail-empty ms-db-rail-hint">Pick a schema to list its tables and views here.</p>
+            }
+
+            @if (error is { Length: > 0 })
+            {
+                <p class="ms-rail-empty ms-db-rail-error" role="status">@error</p>
+            }
+        </div>
+    </details>
+</nav>
+
+@code {
+    private readonly List<(string Schema, string Name)> pins = [];
+    private string? pinsLoadedFor;
+    private string filter = string.Empty;
+    private string? error;
+
+    /// <summary>The overview, as a <c>DatabaseBrowserOverview</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    [Parameter]
+    public object? Overview { get; set; }
+
+    /// <summary>The current schema's tables, as a <c>DatabaseObjectList</c>, or <see langword="null" />.</summary>
+    [Parameter]
+    public object? Tables { get; set; }
+
+    /// <summary>The current schema's views, as a <c>DatabaseObjectList</c>, or <see langword="null" />.</summary>
+    [Parameter]
+    public object? Views { get; set; }
+
+    /// <summary>The schema the page is on, or <see langword="null" /> for every schema.</summary>
+    [Parameter]
+    public string? Schema { get; set; }
+
+    /// <summary>The kind tab, as <c>?kind=</c> spells it; the schema links keep it.</summary>
+    [Parameter]
+    public string? Kind { get; set; }
+
+    /// <summary>The relation the page is showing, when it is object detail.</summary>
+    [Parameter]
+    public string? ActiveName { get; set; }
+
+    /// <summary>Whether the narrow-screen summary starts closed: once an object is picked.</summary>
+    [Parameter]
+    public bool Collapsed { get; set; }
+
+    private DatabaseBrowserOverview? OverviewModel => Overview as DatabaseBrowserOverview;
+
+    private DatabaseAccessState? Access => OverviewModel?.Access;
+
+    private IReadOnlyList<DatabaseSchemaSummary> Schemas => OverviewModel?.Schemas ?? [];
+
+    private DatabaseObjectCategory Category => DatabaseLinks.ParseKind(Kind);
+
+    private string StoreKey => State.ActiveScope?.StoreKey ?? "default";
+
+    private string PinKey => "ms_db_pins_" + StoreKey;
+
+    private string CollapseKey => Collapsed ? "closed\u001f" + Schema + "\u001f" + ActiveName : "open";
+
+    private string SummaryText => Schema is { } schema
+        ? schema + " · " + DatabasePresentation.CountOf(Category, Schemas.FirstOrDefault(x => x.Name == schema)?.CountOf(Category) ?? 0)
+        : "All schemas · " + (Schemas.Count == 1 ? "1 schema" : DatabasePresentation.Number(Schemas.Count) + " schemas");
+
+    /// <summary>Pins in a schema this visitor can see: one that is no longer shown is not offered as a dead link.</summary>
+    private List<(string Schema, string Name)> VisiblePins =>
+        [.. pins.Where(x => Schemas.Any(s => string.Equals(s.Name, x.Schema, StringComparison.Ordinal)))];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Local storage exists only once there is a browser, and pins are per store: read them on the first
+        // interactive render and again whenever the store changes under the rail.
+        if (string.Equals(pinsLoadedFor, StoreKey, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        pinsLoadedFor = StoreKey;
+        await LoadPinsAsync();
+    }
+
+    private RenderFragment RenderBand(string key, string title, object? model, string schema) =>
+        @<section class="ms-rail-group ms-db-rail-@key" @key="key">
+            @{
+                DatabaseObjectList? list = model as DatabaseObjectList;
+                List<DatabaseRelationSummary> relations = [.. (list?.Items ?? []).OfType<DatabaseRelationSummary>().Where(x => Matches(x.Name))];
+            }
+            <h2 class="ms-rail-title">
+                <span class="ms-rail-name">@title</span>
+                <span class="ms-rail-count">@(list?.Items.Count ?? 0)</span>
+            </h2>
+
+            @if (list is null)
+            {
+                <p class="ms-rail-empty">Loading…</p>
+            }
+            else if (list.Refusal != DatabaseRefusal.None)
+            {
+                <p class="ms-rail-empty">@(list.Reason ?? "Nothing could be listed.")</p>
+            }
+            else if (relations.Count == 0)
+            {
+                <p class="ms-rail-empty">@(list.Items.Count == 0 ? "None in " + schema + "." : "Nothing matches the filter.")</p>
+            }
+            else
+            {
+                <ul class="ms-rail-list">
+                    @foreach (DatabaseRelationSummary relation in DatabasePresentation.DefaultOrder(relations))
+                    {
+                        bool active = IsActive(relation.Schema, relation.Name);
+                        bool pinned = IsPinned(relation.Schema, relation.Name);
+
+                        <li class="ms-rail-item" @key="relation.Name">
+                            <div class="ms-rail-entry">
+                                <a class="@(LinkClass(active) + (relation.Ownership.IsMarten ? " ms-db-rail-link-marten" : string.Empty))"
+                                   href="@ObjectHref(relation.Schema, relation.Name)"
+                                   aria-current="@(active ? "page" : null)"
+                                   title="@DatabaseLinks.QualifiedName(relation.Schema, relation.Name)">
+                                    <span class="ms-db-rail-name">@relation.Name</span>
+                                    @if (relation.EstimatedRows is { } rows)
+                                    {
+                                        <span class="ms-rail-badge-count" title="Estimated from pg_class.reltuples">~@DatabasePresentation.Number(rows)</span>
+                                    }
+                                </a>
+                                <span class="ms-rail-flags">
+                                    @if (relation.Ownership.IsMarten)
+                                    {
+                                        <span class="ms-rail-flag ms-db-flag-marten" title="@DatabasePresentation.OwnerTitle(relation.Ownership)">M</span>
+                                    }
+                                    <button type="button"
+                                            class="ms-rail-action @(pinned ? "ms-rail-action-on" : null)"
+                                            title="@(pinned ? "Unpin" : "Pin to the top of the rail")"
+                                            aria-label="@((pinned ? "Unpin " : "Pin ") + DatabaseLinks.QualifiedName(relation.Schema, relation.Name))"
+                                            aria-pressed="@(pinned ? "true" : "false")"
+                                            @onclick="() => TogglePinAsync(relation.Schema, relation.Name)">@(pinned ? "★" : "☆")</button>
+                                </span>
+                            </div>
+                        </li>
+                    }
+                </ul>
+
+                @if (list.Truncated)
+                {
+                    <p class="ms-rail-empty">Showing the first @DatabasePresentation.Number(list.Items.Count) — refine the filter.</p>
+                }
+            }
+        </section>;
+
+    private static string LinkClass(bool active) => active ? "ms-rail-link ms-rail-link-active" : "ms-rail-link";
+
+    private bool IsActive(string schema, string name) =>
+        ActiveName is not null
+        && string.Equals(schema, Schema, StringComparison.Ordinal)
+        && string.Equals(name, ActiveName, StringComparison.Ordinal);
+
+    private bool IsPinned(string schema, string name) =>
+        pins.Exists(x => string.Equals(x.Schema, schema, StringComparison.Ordinal) && string.Equals(x.Name, name, StringComparison.Ordinal));
+
+    private bool Matches(string text) =>
+        filter.Length == 0 || text.Contains(filter, StringComparison.OrdinalIgnoreCase);
+
+    private string SchemaHref(string? schema) =>
+        DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, schema, Category);
+
+    private string ObjectHref(string schema, string name) =>
+        DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, name);
+
+    private int TotalOf(DatabaseSchemaSummary? schema) =>
+        schema is null ? Schemas.Sum(x => x.CountOf(Category)) : schema.CountOf(Category);
+
+    private string CountTitle(DatabaseSchemaSummary? schema)
+    {
+        IEnumerable<DatabaseSchemaSummary> scope = schema is null ? Schemas : [schema];
+
+        return string.Join(
+            " · ",
+            DatabasePresentation.Categories.Select(category =>
+                DatabasePresentation.CountOf(category, scope.Sum(x => x.CountOf(category)))));
+    }
+
+    private static string WithheldReason(DatabaseAccessState access) => access.Refusal switch
+    {
+        DatabaseRefusal.ReadOnly => "the studio is read-only",
+        DatabaseRefusal.CapabilityOff => "they need Capabilities.BrowseDatabase",
+        DatabaseRefusal.WritePolicy => "your account may not browse them",
+        DatabaseRefusal.SchemaNotBrowsable => "BrowsableSchemas is empty",
+        _ => "BrowsableSchemas does not list them",
+    };
+
+    private Task FilterAsync(string value)
+    {
+        filter = value.Trim();
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadPinsAsync()
+    {
+        error = null;
+
+        try
+        {
+            string? stored = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { PinKey });
+
+            pins.Clear();
+            pins.AddRange(Parse(stored));
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // Prerendering, a closed circuit, or a browser that refused: none of them is a pin, and none of
+            // them is worth breaking the rail for.
+            return;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task TogglePinAsync(string schema, string name)
+    {
+        int index = pins.FindIndex(x =>
+            string.Equals(x.Schema, schema, StringComparison.Ordinal) && string.Equals(x.Name, name, StringComparison.Ordinal));
+
+        if (index >= 0)
+        {
+            pins.RemoveAt(index);
+        }
+        else
+        {
+            pins.Add((schema, name));
+        }
+
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", new object?[] { PinKey, Format(pins) });
+            error = null;
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            error = "This browser would not remember the pin; it lasts until the page is reloaded.";
+        }
+    }
+
+    /// <summary>
+    /// Pins as stored: <c>schema/name</c> pairs, each half escaped, joined with commas. An escaped
+    /// identifier has neither character in it, so no name - however odd - splits in the wrong place.
+    /// </summary>
+    internal static string Format(IEnumerable<(string Schema, string Name)> values) =>
+        string.Join(',', values.Select(static x => Uri.EscapeDataString(x.Schema) + "/" + Uri.EscapeDataString(x.Name)));
+
+    /// <summary>Reads what <see cref="Format" /> wrote; anything else is ignored rather than trusted.</summary>
+    internal static IEnumerable<(string Schema, string Name)> Parse(string? stored)
+    {
+        if (string.IsNullOrWhiteSpace(stored))
+        {
+            yield break;
+        }
+
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        foreach (string entry in stored.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            int slash = entry.IndexOf('/', StringComparison.Ordinal);
+            if (slash <= 0 || slash == entry.Length - 1 || !seen.Add(entry))
+            {
+                continue;
+            }
+
+            yield return (Uri.UnescapeDataString(entry[..slash]), Uri.UnescapeDataString(entry[(slash + 1)..]));
+        }
+    }
+}

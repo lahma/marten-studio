@@ -1,0 +1,168 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Database
+@inject IOptions<MartenStudioOptions> Options
+@inject StudioState State
+
+@*
+    Tables and views: the grid the browser opens on.
+
+    Marten's rows are drawn quieter than everybody else's and sort after them, because what somebody opens
+    this screen to find is the Quartz schema or the legacy table, not the forty mt_doc_* tables they already
+    browse in Documents. Quieter is text colour, never opacity: an opacity fade takes the contrast of every
+    badge and link in the row down with it, in both themes.
+
+    The badges say what a row is rather than what it contains - partitioned, foreign, unlogged, row-level
+    security, a role that may not read it, a name that cannot be quoted, a materialized view nobody has
+    refreshed - and each one's title says what that means for reading it.
+*@
+
+<TableScroll Label="@Label">
+    <table class="ms-table ms-db-table ms-db-relations">
+        <thead>
+            <tr>
+                @Header("name", "Name")
+                @Header("owner", "Owner")
+                @Header("rows", "~Rows", numeric: true)
+                @Header("size", "Size", numeric: true)
+                @if (!IsViews)
+                {
+                    <th scope="col">Key</th>
+                    @Header("fk", "Foreign keys")
+                }
+                <th scope="col">Comment</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Relations.Count == 0)
+            {
+                <tr>
+                    <td class="ms-table-empty" colspan="@(IsViews ? 5 : 7)">@EmptyText</td>
+                </tr>
+            }
+
+            @foreach (DatabaseRelationSummary relation in Sorted())
+            {
+                <tr class="@(relation.Ownership.IsMarten ? "ms-db-row-marten" : null)" @key="relation.Schema + '\u001f' + relation.Name">
+                    <td class="ms-db-cell-name">
+                        <a class="ms-db-name" href="@ObjectHref(relation)" title="@DatabaseLinks.QualifiedName(relation.Schema, relation.Name)"><span class="ms-db-schema-prefix">@(ShowSchema ? relation.Schema + "." : null)</span>@relation.Name</a>
+                        <DatabaseRelationBadges Model="relation" />
+                    </td>
+                    <td class="ms-db-cell-owner"><DatabaseOwnerBadge Model="relation.Ownership" /></td>
+                    <td class="ms-db-cell-number" title="@DatabasePresentation.RowsTitle(relation)">@DatabasePresentation.Rows(relation)</td>
+                    <td class="ms-db-cell-number">@DatabasePresentation.Size(relation)</td>
+                    @if (!IsViews)
+                    {
+                        <td class="ms-db-cell-key">
+                            @if (relation.HasPrimaryKey)
+                            {
+                                <span title="It has a primary key; its columns are on the object's Keys tab">primary key</span>
+                            }
+                            else
+                            {
+                                <span class="ms-db-none" title="No primary key">none</span>
+                            }
+                        </td>
+                        <td class="ms-db-cell-fk">
+                            @if (relation.ForeignKeysOut == 0 && relation.ForeignKeysIn == 0)
+                            {
+                                <span class="ms-db-none">—</span>
+                            }
+                            else
+                            {
+                                <span title="Foreign keys from this table">@relation.ForeignKeysOut out</span>
+                                <span class="ms-db-sep" aria-hidden="true">·</span>
+                                <span title="Foreign keys pointing at it, from tables you can see">@relation.ForeignKeysIn in</span>
+                            }
+                        </td>
+                    }
+                    <td class="ms-db-cell-comment">
+                        @if (relation.Comment is { Length: > 0 } comment)
+                        {
+                            <span class="ms-db-comment" title="@comment">@comment</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</TableScroll>
+
+@code {
+    private string sortKey = DefaultSort;
+    private bool descending;
+
+    private const string DefaultSort = "default";
+
+    /// <summary>The list, as a <c>DatabaseObjectList</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Whether to put the schema in front of each name - when the list spans schemas.</summary>
+    [Parameter]
+    public bool ShowSchema { get; set; }
+
+    /// <summary>The scroll region's accessible name.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Tables";
+
+    /// <summary>What an empty list says.</summary>
+    [Parameter]
+    public string EmptyText { get; set; } = "Nothing here.";
+
+    private DatabaseObjectList? List => Model as DatabaseObjectList;
+
+    private List<DatabaseRelationSummary> Relations => [.. (List?.Items ?? []).OfType<DatabaseRelationSummary>()];
+
+    private bool IsViews => List?.Query.Category == DatabaseObjectCategory.Views;
+
+    private string ObjectHref(DatabaseRelationSummary relation) =>
+        DatabaseLinks.ToObject(Options.Value, State.ActiveScope, relation.Schema, relation.Name);
+
+    private IEnumerable<DatabaseRelationSummary> Sorted()
+    {
+        List<DatabaseRelationSummary> relations = Relations;
+
+        IEnumerable<DatabaseRelationSummary> ordered = sortKey switch
+        {
+            "name" => relations.OrderBy(static x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(static x => x.Schema, StringComparer.Ordinal),
+            "owner" => relations.OrderBy(static x => x.Ownership.IsMarten).ThenBy(static x => DatabasePresentation.OwnerLabel(x.Ownership), StringComparer.OrdinalIgnoreCase).ThenBy(static x => x.Name, StringComparer.Ordinal),
+            "rows" => relations.OrderBy(static x => x.EstimatedRows ?? -1).ThenBy(static x => x.Name, StringComparer.Ordinal),
+            "size" => relations.OrderBy(static x => x.SizeBytes).ThenBy(static x => x.Name, StringComparer.Ordinal),
+            "fk" => relations.OrderBy(static x => x.ForeignKeysOut + x.ForeignKeysIn).ThenBy(static x => x.Name, StringComparer.Ordinal),
+            _ => DatabasePresentation.DefaultOrder(relations),
+        };
+
+        return descending ? ordered.Reverse() : ordered;
+    }
+
+    private Task SortAsync(string key)
+    {
+        if (string.Equals(sortKey, key, StringComparison.Ordinal))
+        {
+            descending = !descending;
+        }
+        else
+        {
+            sortKey = key;
+
+            // Numbers read biggest-first, names A to Z: the first click is the one people mean.
+            descending = key is "rows" or "size" or "fk";
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private RenderFragment Header(string key, string label, bool numeric = false) =>
+        @<th scope="col" class="@(numeric ? "ms-db-col-number" : null)" aria-sort="@DatabasePresentation.AriaSort(sortKey == key, descending)">
+            <button type="button"
+                    class="ms-doc-sort @(sortKey == key ? "ms-doc-sort-on" : null)"
+                    title="@($"Sort by {label.TrimStart('~').ToLowerInvariant()}")"
+                    @onclick="() => SortAsync(key)">
+                @label
+                @if (sortKey == key)
+                {
+                    <span class="ms-doc-sort-arrow" aria-hidden="true">@(descending ? "▼" : "▲")</span>
+                }
+            </button>
+        </th>;
+}

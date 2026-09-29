@@ -1,0 +1,238 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Database
+@implements IDisposable
+@inject IDatabaseObjectService Data
+@inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    Triggers a person wrote - never an internal one, never a partition's clone - on the browser's Triggers
+    tab and on one table's detail. The table is a link to that table; the function is a link to the
+    Functions tab filtered to it, because a trigger is mostly the function it calls. A function in a
+    schema this visitor may not see is named nowhere, only said to be out of view.
+
+    Enabled is tgenabled, spelled out: a disabled trigger is exactly the thing somebody is looking for when
+    "the audit row never appears", and "replica only" is the one that surprises people after a logical
+    replication setup.
+*@
+
+<TableScroll Label="@Label">
+    <table class="ms-table ms-db-table ms-db-triggers">
+        <thead>
+            <tr>
+                <th class="ms-db-col-expand" scope="col"><span class="ms-sr-only">Definition</span></th>
+                @Header("name", "Name")
+                @if (ShowTable)
+                {
+                    @Header("table", "Table")
+                }
+                <th scope="col">Timing</th>
+                <th scope="col">Events</th>
+                <th scope="col">Level</th>
+                <th scope="col">Function</th>
+                @Header("state", "State")
+                <th scope="col">Owner</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Triggers.Count == 0)
+            {
+                <tr>
+                    <td class="ms-table-empty" colspan="@ColumnSpan">@EmptyText</td>
+                </tr>
+            }
+
+            @foreach (DatabaseTriggerSummary trigger in Sorted())
+            {
+                DatabaseObjectRef reference = trigger.Ref;
+                bool open = expanded.Contains(reference);
+                string rowKey = trigger.Schema + '\u001f' + trigger.Table + '\u001f' + trigger.Name;
+
+                <tr class="@(trigger.Ownership.IsMarten ? "ms-db-row-marten" : null)" @key="rowKey">
+                    <td class="ms-db-cell-expand">
+                        <button type="button"
+                                class="ms-doc-expander ms-db-expander"
+                                aria-expanded="@(open ? "true" : "false")"
+                                aria-label="@((open ? "Hide the definition of " : "Show the definition of ") + trigger.Name)"
+                                @onclick="() => ToggleAsync(reference)">@(open ? "▾" : "▸")</button>
+                    </td>
+                    <td class="ms-db-cell-name">
+                        <span class="ms-db-name">@trigger.Name</span>
+                        @if (trigger.IsConstraintTrigger)
+                        {
+                            <span class="ms-db-badge" title="A CONSTRAINT TRIGGER: it can be deferred to the end of the transaction">constraint</span>
+                        }
+                    </td>
+                    @if (ShowTable)
+                    {
+                        <td class="ms-db-cell-name">
+                            <a class="ms-db-name" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, trigger.Schema, trigger.Table)"><span class="ms-db-schema-prefix">@(ShowSchema ? trigger.Schema + "." : null)</span>@trigger.Table</a>
+                        </td>
+                    }
+                    <td>@trigger.Timing</td>
+                    <td>@string.Join(" OR ", trigger.Events)</td>
+                    <td>@(trigger.ForEachRow ? "row" : "statement")</td>
+                    <td class="ms-db-cell-name">
+                        @if (trigger.FunctionSchema is { } functionSchema && trigger.FunctionName is { } functionName)
+                        {
+                            <a class="ms-db-name"
+                               href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, functionSchema, DatabaseObjectCategory.Functions, nameFilter: functionName)"
+                               title="Show this function on the Functions tab">@(DatabaseLinks.QualifiedName(functionSchema, functionName) + "()")</a>
+                        }
+                        else
+                        {
+                            <span class="ms-db-none" title="Its function is in a schema this studio does not show you">not visible</span>
+                        }
+                    </td>
+                    <td>
+                        <span class="ms-db-state ms-db-state-@StateToken(trigger.EnabledMode)" title="@StateTitle(trigger.EnabledMode)">@StateLabel(trigger.EnabledMode)</span>
+                    </td>
+                    <td class="ms-db-cell-owner"><DatabaseOwnerBadge Model="trigger.Ownership" /></td>
+                </tr>
+
+                @if (open)
+                {
+                    <tr class="ms-doc-preview-row ms-db-definition-row" @key="@(rowKey + "\u001fdefinition")">
+                        <td class="ms-doc-preview-cell" colspan="@ColumnSpan">
+                            <DatabaseDefinitionBody Model="definitions.Find(reference)"
+                                                    Loading="definitions.IsLoading(reference)"
+                                                    Error="@definitions.FailureOf(reference)"
+                                                    OnRetry="() => LoadAsync(reference)"
+                                                    Label="@("Definition of trigger " + trigger.Name)"
+                                                    FileName="@(trigger.Name + ".sql")" />
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</TableScroll>
+
+@code {
+    private readonly HashSet<DatabaseObjectRef> expanded = [];
+    private readonly DatabaseDefinitionLoader definitions = new();
+    private object? shownModel;
+    private string sortKey = "default";
+    private bool descending;
+
+    /// <summary>
+    /// The triggers: a <c>DatabaseObjectList</c> from the browser, or one table's
+    /// <c>IReadOnlyList&lt;DatabaseTriggerSummary&gt;</c> from its detail. Typed <see cref="object" /> - see
+    /// <c>DocumentComponentModel</c>.
+    /// </summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Whether the table column is drawn; not on the table's own detail page.</summary>
+    [Parameter]
+    public bool ShowTable { get; set; } = true;
+
+    /// <summary>Whether to put the schema in front of each table name - when the list spans schemas.</summary>
+    [Parameter]
+    public bool ShowSchema { get; set; }
+
+    /// <summary>The scroll region's accessible name.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Triggers";
+
+    /// <summary>What an empty list says.</summary>
+    [Parameter]
+    public string EmptyText { get; set; } = "Nothing here.";
+
+    private int ColumnSpan => ShowTable ? 9 : 8;
+
+    private List<DatabaseTriggerSummary> Triggers => Model switch
+    {
+        DatabaseObjectList list => [.. list.Items.OfType<DatabaseTriggerSummary>()],
+        IEnumerable<DatabaseTriggerSummary> triggers => [.. triggers],
+        _ => [],
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(shownModel, Model))
+        {
+            shownModel = Model;
+            expanded.Clear();
+            definitions.Reset();
+        }
+    }
+
+    private IEnumerable<DatabaseTriggerSummary> Sorted()
+    {
+        List<DatabaseTriggerSummary> triggers = Triggers;
+
+        IEnumerable<DatabaseTriggerSummary> ordered = sortKey switch
+        {
+            "name" => triggers.OrderBy(static x => x.Name, StringComparer.OrdinalIgnoreCase).ThenBy(static x => x.Table, StringComparer.Ordinal),
+            "table" => triggers.OrderBy(static x => x.Table, StringComparer.OrdinalIgnoreCase).ThenBy(static x => x.Name, StringComparer.Ordinal),
+            "state" => triggers.OrderBy(static x => x.Enabled).ThenBy(static x => x.Name, StringComparer.Ordinal),
+            _ => DatabasePresentation.DefaultOrder(triggers).ThenBy(static x => x.Table, StringComparer.Ordinal),
+        };
+
+        return descending ? ordered.Reverse() : ordered;
+    }
+
+    private static string StateLabel(string mode) => mode switch
+    {
+        "D" => "disabled",
+        "R" => "replica only",
+        "A" => "always",
+        _ => "enabled",
+    };
+
+    private static string StateToken(string mode) => mode switch
+    {
+        "D" => "disabled",
+        "R" => "replica",
+        _ => "enabled",
+    };
+
+    private static string StateTitle(string mode) => mode switch
+    {
+        "D" => "Disabled (ALTER TABLE ... DISABLE TRIGGER): it does not fire",
+        "R" => "ENABLE REPLICA: it fires only when session_replication_role is replica, so not in an ordinary session",
+        "A" => "ENABLE ALWAYS: it fires whatever session_replication_role is",
+        _ => "Enabled: it fires in an ordinary session",
+    };
+
+    private async Task ToggleAsync(DatabaseObjectRef reference)
+    {
+        if (expanded.Remove(reference))
+        {
+            return;
+        }
+
+        expanded.Add(reference);
+        await LoadAsync(reference);
+    }
+
+    private async Task LoadAsync(DatabaseObjectRef reference)
+    {
+        StateHasChanged();
+        await definitions.LoadAsync(Data, State.ActiveScope, reference);
+    }
+
+    private Task SortAsync(string key)
+    {
+        descending = string.Equals(sortKey, key, StringComparison.Ordinal) && !descending;
+        sortKey = key;
+        return Task.CompletedTask;
+    }
+
+    private RenderFragment Header(string key, string label) =>
+        @<th scope="col" aria-sort="@DatabasePresentation.AriaSort(sortKey == key, descending)">
+            <button type="button"
+                    class="ms-doc-sort @(sortKey == key ? "ms-doc-sort-on" : null)"
+                    title="@($"Sort by {label.ToLowerInvariant()}")"
+                    @onclick="() => SortAsync(key)">
+                @label
+                @if (sortKey == key)
+                {
+                    <span class="ms-doc-sort-arrow" aria-hidden="true">@(descending ? "▼" : "▲")</span>
+                }
+            </button>
+        </th>;
+
+    public void Dispose() => definitions.Dispose();
+}

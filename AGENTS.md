@@ -633,6 +633,8 @@ tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both w
 tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: six scenarios, the D19 gate, the large-data pass
 src/MartenStudio/Services/Database/       The database browser: the per-visitor gate, the schema matcher, the
                                          ownership classifier, the catalog cache and the object service
+src/MartenStudio/Components/Pages/Database/  The database browser's screens: the rail, the kind tabs and grids,
+                                         object detail and its tabs, the Rows and Relationships slots
 tests/MartenStudio.Tests/Database/        Gate, matcher, classifier, catalog SQL shape, options - no database
 tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, the gate and its audit, no DDL,
                                          and the relational demo schemas' idempotency and demo-data flows

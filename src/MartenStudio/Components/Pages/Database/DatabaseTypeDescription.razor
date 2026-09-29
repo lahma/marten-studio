@@ -1,0 +1,81 @@
+@using MartenStudio.Services.Database
+
+@*
+    A type, described rather than printed as DDL: an enum's labels as chips in their declared order (which
+    is the order Postgres sorts them in, and so worth seeing), a composite's attributes, a domain's base
+    type with its NOT NULL, default and checks, a range's subtype. When the gate withholds the description
+    the service leaves every part empty, and this says so rather than drawing an empty cell.
+*@
+
+@if (Type is { } type)
+{
+    @if (!type.DefinitionAvailable)
+    {
+        <span class="ms-db-none" title="Its description is a definition, and the gate does not let this visitor read definitions in this schema">description withheld</span>
+    }
+    else
+    {
+        @switch (type.Kind)
+        {
+            case DatabaseObjectKind.EnumType:
+                @if (type.Labels.Count == 0)
+                {
+                    <span class="ms-db-none">no labels</span>
+                }
+                else
+                {
+                    <ol class="ms-db-chips ms-db-enum-labels" aria-label="@($"Labels of {type.Name}, in order")">
+                        @foreach (string label in type.Labels)
+                        {
+                            <li class="ms-db-chip">@label</li>
+                        }
+                    </ol>
+                }
+                break;
+
+            case DatabaseObjectKind.CompositeType:
+                <ul class="ms-db-attributes">
+                    @foreach (DatabaseTypeAttribute member in type.Attributes)
+                    {
+                        <li><span class="ms-db-attribute-name">@member.Name</span> <span class="ms-db-attribute-type">@member.Type</span></li>
+                    }
+                </ul>
+                break;
+
+            case DatabaseObjectKind.DomainType:
+                <span class="ms-db-domain">
+                    <span class="ms-db-attribute-type">@(type.BaseType ?? "?")</span>
+                    @if (type.NotNull)
+                    {
+                        <span class="ms-db-badge">NOT NULL</span>
+                    }
+                    @if (type.Default is { Length: > 0 } defaultValue)
+                    {
+                        <span class="ms-db-domain-default">default <code>@defaultValue</code></span>
+                    }
+                </span>
+                @if (type.Checks.Count > 0)
+                {
+                    <ul class="ms-db-attributes ms-db-checks">
+                        @foreach (string check in type.Checks)
+                        {
+                            <li><code>@check</code></li>
+                        }
+                    </ul>
+                }
+                break;
+
+            case DatabaseObjectKind.RangeType:
+                <span>range of <span class="ms-db-attribute-type">@(type.RangeSubtype ?? "?")</span></span>
+                break;
+        }
+    }
+}
+
+@code {
+    /// <summary>The type, as a <c>DatabaseTypeSummary</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    private DatabaseTypeSummary? Type => Model as DatabaseTypeSummary;
+}

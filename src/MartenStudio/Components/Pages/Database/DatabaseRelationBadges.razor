@@ -1,0 +1,84 @@
+@using MartenStudio.Services.Database
+
+@*
+    What a relation is, beyond "a table": each badge is a fact that changes what reading it means, and its
+    title says what. Drawn beside the name in the grid and in the object header, so the two never disagree.
+*@
+
+@if (Relation is { } relation)
+{
+    <span class="ms-db-badges">
+        @switch (relation.Kind)
+        {
+            case DatabaseObjectKind.PartitionedTable:
+                <span class="ms-db-badge"
+                      title="@($"Partitioned into {DatabasePresentation.Number(relation.PartitionCount)} partitions, rolled up here. Their names are never listed: per-tenant partitions would name every tenant.")">
+                    partitioned · @relation.PartitionCount
+                </span>
+                break;
+
+            case DatabaseObjectKind.ForeignTable:
+                <span class="ms-db-badge" title="@ForeignTitle(relation)">
+                    foreign@(relation.ForeignServer is { Length: > 0 } server ? " · " + server : string.Empty)
+                </span>
+                break;
+
+            case DatabaseObjectKind.MaterializedView:
+                @if (!relation.Populated)
+                {
+                    <span class="ms-db-badge ms-db-badge-warning"
+                          title="This materialized view has never been refreshed (REFRESH MATERIALIZED VIEW), so it has no rows to read.">
+                        never refreshed
+                    </span>
+                }
+                else
+                {
+                    <span class="ms-db-badge" title="A materialized view: its rows are stored, as of its last refresh">materialized</span>
+                }
+                break;
+        }
+
+        @if (relation.Unlogged)
+        {
+            <span class="ms-db-badge" title="Unlogged: not written to the WAL, emptied after a crash, and not replicated">unlogged</span>
+        }
+
+        @if (relation.RowSecurity)
+        {
+            <span class="ms-db-badge" title="Row-level security is on: what a read returns depends on the role that reads it">RLS</span>
+        }
+
+        @if (!relation.Readable)
+        {
+            <span class="ms-db-badge ms-db-badge-lock" title="@(relation.Rows.Refusal == DatabaseRefusal.NoPrivilege ? relation.Rows.Reason : "The reading role has no SELECT privilege on it.")">
+                <svg class="ms-db-badge-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                    <rect x="3" y="7" width="10" height="7" rx="1.5" />
+                    <path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
+                </svg>
+                no SELECT
+            </span>
+        }
+
+        @if (!relation.Quotable)
+        {
+            <span class="ms-db-badge ms-db-badge-warning" title="@(relation.Rows.Reason ?? "Its name cannot be put into SQL safely, so it is listed and never read.")">cannot browse</span>
+        }
+
+        @if (relation.Rows.Refusal == DatabaseRefusal.HiddenDependency)
+        {
+            <span class="ms-db-badge ms-db-badge-warning" title="@relation.Rows.Reason">reads a hidden table</span>
+        }
+    </span>
+}
+
+@code {
+    /// <summary>The relation, as a <c>DatabaseRelationSummary</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    private DatabaseRelationSummary? Relation => Model as DatabaseRelationSummary;
+
+    private static string ForeignTitle(DatabaseRelationSummary relation) =>
+        "A foreign table" + (relation.ForeignServer is { Length: > 0 } server ? " on server '" + server + "'" : string.Empty) +
+        ". It is listed, never read: reading it would reach the remote server.";
+}
