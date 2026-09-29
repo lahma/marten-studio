@@ -269,7 +269,11 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         try
         {
             await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            // Marked, so that a dry pool or a connect timeout is never read as the count's own statement
+            // timeout by the IsTimeout filter below: that would draw "?" and offer the button again for a
+            // database that is not answering at all.
+            await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             CollectionContext? context = await LoadContextAsync(resolved, connection, alias, cancellationToken)
                 .ConfigureAwait(false);

@@ -118,9 +118,16 @@ public class ProjectionsPageReachAndBannerTests
         page.WaitForElement(".ms-confirm-dialog").TextContent.Should().NotContain("every database of this store");
     }
 
-    /// <summary>With a tenant selected, Marten corrects that tenant's database only, and there is nothing to add.</summary>
-    [Fact]
-    public async Task A_correction_with_a_tenant_selected_says_nothing_about_other_databases()
+    /// <summary>
+    /// DB-0-fix-2, B1: with a tenant selected, Marten corrects that tenant's database - not every
+    /// database, and not only that tenant either. The dialog used to say "that tenant's database only",
+    /// which read as "that tenant only", while the high-water mark and the progression rows it moves are
+    /// the database's and every tenant stored there is read against them.
+    /// </summary>
+    [Theory]
+    [InlineData(".ms-daemon-advance-high-water")]
+    [InlineData(".ms-daemon-correct-progression")]
+    public async Task A_correction_with_a_tenant_selected_says_it_reaches_every_tenant_in_that_database(string button)
     {
         await using var context = new StudioComponentContext().WithAllCapabilities();
         context.Catalog
@@ -131,8 +138,52 @@ public class ProjectionsPageReachAndBannerTests
         await context.State.SetScopeAsync("default", "db-a.marten", "acme", Token);
 
         var page = context.Render<Page>();
-        page.Find(".ms-daemon-advance-high-water").Click();
+        page.Find(button).Click();
 
-        page.WaitForElement(".ms-confirm-dialog").TextContent.Should().NotContain("every database of this store");
+        string text = page.WaitForElement(".ms-confirm-dialog").TextContent;
+
+        text.Should().NotContain("every database of this store", "a tenant correction reaches the tenant's database, not all of them");
+        text.Should().Contain("With tenant acme selected, Marten does this in that tenant's database, and it is not limited to that tenant");
+        text.Should().Contain("every tenant stored in it is affected");
+        text.Should().Contain("refused unless you may change that database as a whole, or it holds this tenant and no other");
+    }
+
+    /// <summary>
+    /// DB-0-fix-2, B1: a rebuild asked from a tenant's scope is not that tenant's rebuild either - Marten
+    /// empties the projection's storage for the whole database - and the typed-name dialog says so before
+    /// anybody types the name.
+    /// </summary>
+    [Fact]
+    public async Task The_rebuild_dialog_says_a_tenant_in_scope_does_not_narrow_the_rebuild()
+    {
+        await using var context = new StudioComponentContext().WithAllCapabilities();
+        context.Catalog
+            .WithStore("default", "Default", DatabaseCardinality.Single, "localhost.marten")
+            .WithTenants("default", new TenantList(["acme"], IsTruncated: false, TenantListSource.Configured));
+        context.ProjectionData.WithProjection("DailySales");
+        await context.State.EnsureInitializedAsync(Token);
+        await context.State.SetScopeAsync("default", "localhost.marten", "acme", Token);
+
+        var page = context.Render<Page>();
+        page.Find(".ms-projection-rebuild").Click();
+
+        IElement note = page.WaitForElement(".ms-confirm-dialog .ms-rebuild-tenant-note");
+        note.TextContent.Should().Contain("acme").And.Contain("is not limited to it")
+            .And.Contain("for every tenant stored in this database");
+    }
+
+    /// <summary>Without a tenant in scope there is nothing to correct in the reader's mind, and no note.</summary>
+    [Fact]
+    public async Task The_rebuild_dialog_has_no_tenant_note_without_a_tenant()
+    {
+        await using var context = new StudioComponentContext().WithAllCapabilities();
+        context.ProjectionData.WithProjection("DailySales");
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+        page.Find(".ms-projection-rebuild").Click();
+
+        page.WaitForElement(".ms-confirm-dialog");
+        page.FindAll(".ms-rebuild-tenant-note").Should().BeEmpty();
     }
 }

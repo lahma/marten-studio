@@ -602,7 +602,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   | 9202, 9203 | `CapabilityDenied`, `ScopeAuthorizationDenied` | Always `Warning`: a capability or policy refused an action |
   | 9210 | `StoreUnavailable` | A registered store will not build |
   | 9211 | `DocumentWriteRoundTripDropped` | Always `Warning`: an edit was saved and the round trip dropped properties |
-  | 9212 | `DaemonUnreachable` | A registered coordinator answered with something other than a daemon |
+  | 9212 | `DaemonUnreachable` | A registered coordinator answered with something other than a daemon for this database, or could not be constructed for a reason other than Wolverine's unknown-store shape |
   | 9213 | `StoreDatabasesUnreadable` | A store's databases could not be listed |
   | 9214 | `PostgresVersionUnreadable` | The server version could not be read |
   | 9215 | `ShardTrackerUnobservable` | The in-process shard tracker could not be observed |

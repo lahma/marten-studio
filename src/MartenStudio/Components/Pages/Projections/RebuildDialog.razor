@@ -45,6 +45,17 @@
         <code>MartenStudioOptions.RebuildShardTimeout</code> if this store needs longer.
     </p>
 
+    @if (Tenant is { Length: > 0 })
+    {
+        @* A tenant in the selector narrows what the page reads, not what the daemon rebuilds: Marten
+           empties the projection's storage for the whole database and replays every event in it. The
+           service authorizes the rebuild for the database as a whole for the same reason. *@
+        <p class="ms-alert ms-alert-warning ms-rebuild-tenant-note" role="note">
+            Tenant <strong>@Tenant</strong> is selected, but the rebuild is not limited to it: it rewrites
+            @ProjectionName for every tenant stored in this database.
+        </p>
+    }
+
     @if (!IsAsync)
     {
         <p class="ms-alert ms-alert-warning ms-rebuild-inline-warning" role="note">
@@ -82,6 +93,13 @@
     /// <summary>Whether the daemon is what runs this projection.</summary>
     [Parameter]
     public bool IsAsync { get; set; }
+
+    /// <summary>
+    /// The tenant the scope selector is on, or <see langword="null" />. Said in the dialog because it does
+    /// not narrow the rebuild.
+    /// </summary>
+    [Parameter]
+    public string? Tenant { get; set; }
 
     /// <summary>
     /// How long each shard is given to replay - <c>MartenStudioOptions.RebuildShardTimeout</c>.

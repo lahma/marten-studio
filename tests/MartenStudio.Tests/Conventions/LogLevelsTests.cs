@@ -158,6 +158,8 @@ public class LogLevelsTests
             "Tenant discovery failed; the header asks on every scope change in every circuit."),
         ["src/MartenStudio/Services/StudioLog.cs : 9220 LiveUpdateHandlerFailed"] = (Verdict.Throttled,
             "A page's own refresh-failure handler threw: a studio bug, on a loop that runs every RefreshInterval."),
+        ["src/MartenStudio/Services/StudioLog.cs : 9221 TenantPolicyFailed"] = (Verdict.Throttled,
+            "The host's store policy threw while the header asked which discovered tenants to list; asked on every scope change in every circuit."),
         ["src/MartenStudio/Services/StudioLog.cs : 9237 TableRowReadFailed"] = (Verdict.Throttled,
             "A row read failed by connection or an unexpected SQLSTATE; a timeout, privilege, RLS or unrefreshed view is Debug, and page turns repeat it."),
 
@@ -354,7 +356,7 @@ public class LogLevelsTests
 
     /// <summary>
     /// The events the rule is about are exactly the ones the roster files as throttled in
-    /// <c>StudioLog.cs</c> - 9210 and 9212-9220 - so neither list can drift from the other.
+    /// <c>StudioLog.cs</c> - 9210, 9212-9221 and 9237 - so neither list can drift from the other.
     /// </summary>
     [Fact]
     public void The_throttled_events_are_the_ones_the_roster_files_as_throttled()

@@ -154,6 +154,15 @@ internal static partial class StudioLog
     public static partial void LiveUpdateHandlerFailed(this ILogger logger, LogLevel level, Exception exception);
 
     /// <remarks>
+    /// Tenant discovery answered, and the host's <c>StoreAuthorizationPolicy</c> threw while it was asked
+    /// which of those tenants to list. A fault in the host's authorization handler, not in the database -
+    /// which is why it is not 9219 - and asked on every scope change in every circuit, which is why it is
+    /// throttled. The selector lists no tenant: a policy that could not answer has allowed nothing.
+    /// </remarks>
+    [LoggerMessage(EventId = 9221, Message = "Marten Studio could not ask the store policy which tenants of store {StoreKey}, database {DatabaseId} to list")]
+    public static partial void TenantPolicyFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
+
+    /// <remarks>
     /// <para>
     /// Warning, once per host start, from <c>DatabaseBrowserConfigurationNotice</c>. <c>"*"</c> in
     /// <c>BrowsableSchemas</c> is a legitimate development setting, and it is also the one line that makes

@@ -258,19 +258,25 @@ internal sealed class DaemonAccessor
     /// same answer whatever shape the store has.
     /// </para>
     /// <para>
-    /// <b>The per-database lookup is asked first, on every shape of store.</b> It is the call an
-    /// externally managing coordinator refuses: Wolverine's <c>DaemonForMainDatabase()</c> and
+    /// <b>Which call is asked first depends on whose coordinator it is</b> - see
+    /// <see cref="LookUpDaemonAsync" />. Marten's own is matched against its set of daemons by tracker and
+    /// is never asked the per-database lookup, because on Marten's coordinator that lookup is
+    /// <c>Storage.FindOrCreateDatabase(id)</c>, and a sharded tenancy provisions a tenant for a string it
+    /// does not recognise. Any other coordinator is asked the per-database lookup first, because that is
+    /// the call an externally managing coordinator refuses: Wolverine's <c>DaemonForMainDatabase()</c> and
     /// <c>DaemonForDatabase()</c> throw <c>NotSupportedException</c>, while its <c>AllDaemonsAsync()</c>
-    /// answers - with the very daemons its agents run. So a multi-database store whose lookup started
-    /// from the set was found "hosted" on a Wolverine release that leaves <c>AsyncMode</c> alone, the
-    /// same coordinator on a single-database store was "external", and whether the studio offered to
-    /// pause somebody else's projections depended on how many databases they had.
+    /// answers - with the very daemons its agents run - so a lookup that started from the set found
+    /// somebody else's projections "hosted here".
     /// </para>
     /// <para>
-    /// <b>Only the lookup itself is read as "external".</b> A <c>NotSupportedException</c> from
-    /// enumerating the databases, or from the set the multi-database match falls back to, is not the
-    /// deployment answering; it is a coordinator or a tenancy that failed, and it is logged as one
-    /// (event 9212, throttled) rather than silently turning the store's controls off.
+    /// <b>Only a foreign coordinator's lookup is ever read as "external".</b> Marten's own coordinator
+    /// is not an external system, whatever it throws: its <c>DaemonForMainDatabase()</c> reads
+    /// <c>Store.Tenancy.Default</c>, which a master-table or sharded tenancy answers with
+    /// <c>NotSupportedException</c>, and reading that as "external" is how a daemon hosted in this very
+    /// process was drawn as somebody else's. A <c>NotSupportedException</c> from enumerating the
+    /// databases, or from the set a foreign coordinator's match falls back to, is not the deployment
+    /// answering either. Each of those - and a coordinator that holds no daemon provably built against
+    /// this database - is event 9212, throttled, and "not hosted here".
     /// </para>
     /// </remarks>
     /// <param name="scope">An already-resolved scope: the authorization has happened before this is called.</param>
@@ -317,7 +323,7 @@ internal sealed class DaemonAccessor
             cancellationToken.ThrowIfCancellationRequested();
 
             IProjectionDaemon? daemon = await LookUpDaemonAsync(
-                coordinator, scope.Database, databases.Count, storeKey, cancellationToken).ConfigureAwait(false);
+                coordinator, scope.Store, scope.Database, storeKey, cancellationToken).ConfigureAwait(false);
 
             return daemon is null
                 ? DaemonHosting.ExternallyManaged()
@@ -364,6 +370,14 @@ internal sealed class DaemonAccessor
     /// <c>ExternallyManaged</c> does not give - so the lookup said "external" and hid the controls, and a
     /// client that drove them anyway reached Wolverine's coordinator here.
     /// </para>
+    /// <para>
+    /// <b>And only a <see cref="DaemonHostingState.Hosted" /> answer hands one out.</b> "Not hosted
+    /// here" is not always "nothing is registered": it is also what a lookup that <em>faulted</em>
+    /// answers - a coordinator that threw, a tenancy that could not list its databases, a coordinator
+    /// with no daemon provably built against this database. Refusing only the external answer let a
+    /// pause or a resume through to a coordinator the accessor had just failed to get a straight answer
+    /// from, which is the one coordinator nobody should be stopping blind.
+    /// </para>
     /// </remarks>
     /// <param name="scope">An already-resolved scope: the authorization has happened before this is called.</param>
     /// <param name="hosting">What <see cref="ForScopeAsync" /> answered for <paramref name="scope" />.</param>
@@ -375,7 +389,7 @@ internal sealed class DaemonAccessor
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(hosting);
 
-        if (hosting.State == DaemonHostingState.ExternallyManaged)
+        if (hosting.State != DaemonHostingState.Hosted)
         {
             explanation = hosting.Explanation;
             return null;
@@ -392,35 +406,77 @@ internal sealed class DaemonAccessor
     }
 
     /// <summary>
-    /// The coordinator's daemon for <paramref name="database" />, or <see langword="null" /> when the
-    /// coordinator refuses to hand one out.
+    /// What the lookup says when a coordinator answered and none of its daemons is provably this
+    /// database's. Thrown into <see cref="ForScopeAsync" />'s own handler, so it is event 9212 - throttled -
+    /// and "not hosted here", exactly like any other coordinator that could not answer.
+    /// </summary>
+    internal const string NoDaemonForDatabaseMessage =
+        "The projection coordinator holds no daemon built against this database.";
+
+    /// <summary>
+    /// The coordinator's daemon for <paramref name="database" />, or <see langword="null" /> when a
+    /// foreign coordinator refuses to hand one out.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The per-database call comes first for every shape of store, and it is the only call whose
-    /// <c>NotSupportedException</c> is read as "externally managed" - see <see cref="ForScopeAsync" />.
-    /// One database is the overwhelmingly common shape, and <c>DaemonForMainDatabase</c> is the call that
-    /// works before any database has been resolved by name; a multi-database store is asked
-    /// <c>DaemonForDatabase</c> with the tenancy's own name for the database (<see cref="IdentifierOf" />).
+    /// <b>Marten's own coordinator</b> (<see cref="IsMartensOwn" />) is matched against its whole set by
+    /// tracker, and is never asked <c>DaemonForDatabase</c>. On Marten's coordinator that call is
+    /// <c>Storage.FindOrCreateDatabase(id)</c>: <c>ShardedTenancy.FindOrCreateDatabase</c> corrects the
+    /// string with <c>TenantIdStyle</c> <em>before</em> it looks in its pool, so under
+    /// <c>ForceLowerCase</c> a pool id like <c>Shard_A</c> misses and the call provisions a tenant named
+    /// <c>shard_a</c> - an assignment row and its partition and sequence DDL, because somebody opened the
+    /// Projections page - and <c>SingleServerMultiTenancy</c> registers a tenant named after the
+    /// database. The set is <c>Storage.AllDatabases()</c> - which <see cref="ForScopeAsync" /> has just
+    /// asked for anyway - with one daemon per database, keyed as the lookup would key it (verified against
+    /// Marten 9.31's <c>ProjectionCoordinator</c> and <c>ExplicitProjectionCoordinator</c>).
+    /// <c>DaemonForMainDatabase()</c> is the fallback only where the tenancy's cardinality is
+    /// <c>Single</c>: it reads <c>Store.Tenancy.Default</c>, which <c>MasterTableTenancy</c> and
+    /// <c>ShardedTenancy</c> answer with <c>NotSupportedException</c> however many databases they happen
+    /// to have. Nothing Marten's coordinator throws is read as "externally managed": it is Marten's.
     /// </para>
     /// <para>
-    /// The multi-database answer is then checked against the database it is supposed to be about, and
-    /// only if it is not provably that one is the set asked for (<see cref="MatchInSetAsync" />).
+    /// <b>Any other coordinator</b> is asked the per-database lookup first, and only that lookup's
+    /// <c>NotSupportedException</c> is read as "externally managed" - see <see cref="ForScopeAsync" />.
+    /// A single-database tenancy is asked <c>DaemonForMainDatabase</c>; anything else
+    /// <c>DaemonForDatabase</c> with the tenancy's own name for the database (<see cref="IdentifierOf" />),
+    /// and that answer is checked against the database it is supposed to be about - and replaced by the
+    /// set's, if the set holds one that is provably this database's.
+    /// </para>
+    /// <para>
+    /// A daemon that cannot be shown to be this database's is never returned: it may be another
+    /// database's, and every control on the page would then act on the wrong one.
+    /// <see cref="NoDaemonForDatabaseMessage" /> is thrown instead.
     /// </para>
     /// </remarks>
     private async ValueTask<IProjectionDaemon?> LookUpDaemonAsync(
         MartenCoordinator coordinator,
+        IDocumentStore store,
         IMartenDatabase database,
-        int databaseCount,
         string storeKey,
         CancellationToken cancellationToken)
     {
         string identifier = IdentifierOf(database);
+        bool single = IsSingleDatabase(store);
+
+        if (IsMartensOwn(coordinator))
+        {
+            IProjectionDaemon? own = await MatchInSetAsync(coordinator, database, identifier, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (own is null && single)
+            {
+                IProjectionDaemon main = coordinator.DaemonForMainDatabase();
+                own = IsBuiltAgainst(main, database, identifier) ? main : null;
+            }
+
+            return own ?? throw new InvalidOperationException(NoDaemonForDatabaseMessage);
+        }
+
         IProjectionDaemon daemon;
 
         try
         {
-            daemon = databaseCount <= 1
+            daemon = single
                 ? coordinator.DaemonForMainDatabase()
                 : await coordinator.DaemonForDatabase(identifier).ConfigureAwait(false);
         }
@@ -442,12 +498,50 @@ internal sealed class DaemonAccessor
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (databaseCount <= 1 || IsBuiltAgainst(daemon, database, identifier))
+        if (single || IsBuiltAgainst(daemon, database, identifier))
         {
             return daemon;
         }
 
-        return await MatchInSetAsync(coordinator, database, identifier, cancellationToken).ConfigureAwait(false) ?? daemon;
+        return await MatchInSetAsync(coordinator, database, identifier, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException(NoDaemonForDatabaseMessage);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="coordinator" /> is one Marten itself ships: <c>ProjectionCoordinator</c>
+    /// (which <c>AddAsyncDaemon</c> registers, and whose generic form an ancillary store gets) or
+    /// <c>ExplicitProjectionCoordinator</c> (which <c>MartenDaemonModeIsSolo()</c> registers).
+    /// </summary>
+    /// <remarks>
+    /// The type <em>and</em> its assembly, so a host's own subclass - which may override the lookups and
+    /// answer them however it likes, <c>NotSupportedException</c> included - is treated as the foreign
+    /// coordinator it is. Both types are pinned by <c>MartenApiSurfaceTest</c>.
+    /// </remarks>
+    internal static bool IsMartensOwn(MartenCoordinator coordinator) =>
+        coordinator is Marten.Events.Daemon.Coordination.ProjectionCoordinator
+            or Marten.Events.Daemon.Coordination.ExplicitProjectionCoordinator
+        && coordinator.GetType().Assembly == typeof(Marten.Events.Daemon.Coordination.ProjectionCoordinator).Assembly;
+
+    /// <summary>
+    /// Whether the store's tenancy has exactly one database by construction
+    /// (<c>Tenancy.Cardinality == DatabaseCardinality.Single</c>), which is the only shape where "the main
+    /// database" is a question every tenancy can answer.
+    /// </summary>
+    /// <remarks>
+    /// Not "whether <c>AllDatabases()</c> answered one": a master-table or sharded tenancy with one tenant
+    /// database so far has one database and no main one, and its <c>Tenancy.Default</c> throws. A tenancy
+    /// that cannot say is treated as having several, which asks the lookup that names the database.
+    /// </remarks>
+    private static bool IsSingleDatabase(IDocumentStore store)
+    {
+        try
+        {
+            return store.Options.Tenancy.Cardinality == JasperFx.Descriptors.DatabaseCardinality.Single;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -485,10 +579,11 @@ internal sealed class DaemonAccessor
     /// <see langword="null" /> when none of them is provably that database's.
     /// </summary>
     /// <remarks>
-    /// Only reached when <c>DaemonForDatabase</c> answered with a daemon that is not provably about this
-    /// database, and never read as "externally managed" - a coordinator that got that far has already
-    /// handed out a daemon, so a <c>NotSupportedException</c> from here is a fault like any other (event
-    /// 9212). Reference first, then the stamped identifier, for the reasons on <see cref="IsBuiltAgainst" />.
+    /// The first question for Marten's own coordinator, and for any other only when its
+    /// <c>DaemonForDatabase</c> answered with a daemon that is not provably about this database. Never
+    /// read as "externally managed": a <c>NotSupportedException</c> from here is a fault like any other
+    /// (event 9212). Reference first, then the stamped identifier, for the reasons on
+    /// <see cref="IsBuiltAgainst" />.
     /// </remarks>
     private static async ValueTask<IProjectionDaemon?> MatchInSetAsync(
         MartenCoordinator coordinator,

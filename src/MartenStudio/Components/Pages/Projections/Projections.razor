@@ -426,6 +426,7 @@
                    Tables="rebuild?.TablesAffected ?? []"
                    Lifecycle="@(rebuild?.Lifecycle.ToString() ?? string.Empty)"
                    IsAsync="@(rebuild?.Lifecycle == JasperFx.Events.Projections.ProjectionLifecycle.Async)"
+                   Tenant="@State.ActiveScope?.TenantId"
                    ShardTimeout="@(rebuild?.ShardTimeout ?? Options.Value.RebuildShardTimeout)"
                    OnConfirm="ConfirmRebuildAsync"
                    OnCancel="CancelRebuild" />
@@ -1022,18 +1023,33 @@
     /// <para>
     /// The names come from the scope selector's own listing, which is already filtered through the store
     /// policy, so the dialog never names a database the visitor may not address - nor says how many
-    /// others there are. With a tenant selected, Marten corrects that tenant's database only, and there is
-    /// nothing to add.
+    /// others there are.
+    /// </para>
+    /// <para>
+    /// <b>With a tenant selected it is still not that tenant's correction.</b> Marten finds the tenant's
+    /// database and then runs the same untenanted correction over it: the high-water mark it advances and
+    /// the progression rows it rewrites are the database's, and every tenant stored there is read against
+    /// them. The dialog says so, because "that tenant's database only" read as "that tenant only", and the
+    /// service refuses it unless the visitor may change the database as a whole - or the database holds
+    /// no one else (<c>ProjectionDataService.RequireWholeDatabaseAsync</c>).
     /// </para>
     /// </remarks>
     private string CorrectionReach
     {
         get
         {
+            if (State.ActiveScope?.TenantId is { Length: > 0 } tenantId)
+            {
+                return $" With tenant {tenantId} selected, Marten does this in that tenant's database, and it is "
+                    + "not limited to that tenant: the high water mark and the progression rows belong to the "
+                    + "database, so every tenant stored in it is affected. It is refused unless you may change "
+                    + "that database as a whole, or it holds this tenant and no other.";
+            }
+
             bool several = State.Cardinality is JasperFx.Descriptors.DatabaseCardinality.StaticMultiple
                 or JasperFx.Descriptors.DatabaseCardinality.DynamicMultiple;
 
-            if (!several || State.ActiveScope?.TenantId is { Length: > 0 })
+            if (!several)
             {
                 return string.Empty;
             }

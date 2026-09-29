@@ -219,6 +219,10 @@ public class ProjectionProgressQueriesTests
     /// sequence of their own, so the store-global <c>mt_events_sequence</c> is never advanced and its
     /// <c>last_value</c> reads as 1. Marten reads <c>max(seq_id)</c> in that mode; so does the studio,
     /// and for the same reason. <c>TenantPartitionedEventsLiveTests</c> runs both against a real store.
+    /// The ordinary branch reads <c>last_value</c> only once the sequence has handed a number out
+    /// (DB-0-fix-2, F1): a fresh sequence reports 1 with <c>is_called = false</c>, which is the next value
+    /// and not one any event has, and it raised the "nothing is running" alarm on a store with event
+    /// tables and no events. <c>HighWaterMarkLiveTests</c> runs it against a real fresh sequence.
     /// </remarks>
     [Fact]
     public void The_high_water_read_is_the_sequence_and_the_events_table_under_tenant_partitioning()
@@ -226,7 +230,8 @@ public class ProjectionProgressQueriesTests
         using NpgsqlCommand ordinary = ProjectionProgressQueries.BuildHighWaterMark("studio_events", false);
         using NpgsqlCommand partitioned = ProjectionProgressQueries.BuildHighWaterMark("studio_events", true);
 
-        ordinary.CommandText.Should().Be("select last_value from \"studio_events\".\"mt_events_sequence\"");
+        ordinary.CommandText.Should()
+            .Be("select case when is_called then last_value else 0 end from \"studio_events\".\"mt_events_sequence\"");
         partitioned.CommandText.Should()
             .Be("select coalesce(max(\"seq_id\"), 0) from \"studio_events\".\"mt_events\"");
 

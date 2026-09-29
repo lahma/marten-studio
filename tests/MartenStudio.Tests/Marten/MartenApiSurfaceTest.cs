@@ -27,6 +27,8 @@ using Weasel.Postgresql.Tables;
 
 using JasperFxCoordinator = JasperFx.Events.Daemon.IProjectionCoordinator;
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using MartensCoordinator = Marten.Events.Daemon.Coordination.ProjectionCoordinator;
+using MartensExplicitCoordinator = Marten.Events.Daemon.Coordination.ExplicitProjectionCoordinator;
 using ProjectionOptions = Marten.Events.Projections.ProjectionOptions;
 using MartenEventStoreOperations = Marten.Events.IEventStoreOperations;
 using MartenMetadataConfig = Marten.Events.IReadonlyMetadataConfig;
@@ -706,6 +708,83 @@ public class MartenApiSurfaceTest
         RequireProperty(typeof(Tenant), "Database").PropertyType.Should().Be<IMartenDatabase>();
         RequireMethod(typeof(TenantIdStyleExtensions), "MaybeCorrectTenantId", typeof(TenantIdStyle), typeof(string))
             .ReturnType.Should().Be<string>();
+    }
+
+    /// <summary>
+    /// DB-0-fix-2, B1: a tenant correction reaches the tenant's whole database unless that database is
+    /// exclusively the tenant's - and <c>DatabaseReach.IsExclusivelyTenantsAsync</c> decides that from these
+    /// members.
+    /// </summary>
+    /// <remarks>
+    /// <c>IDatabase.TenantIds</c> is the list every tenancy fills for a database (<c>ForTenants</c>, the
+    /// master table, a shard's assignments); <c>ITenancy.Default</c> is where untenanted writes land;
+    /// <c>DatabaseId.Identity</c> is how two <c>MartenDatabase</c> objects over one physical database are
+    /// told to be one. <c>ShardName.TryParse</c> and <c>ShardName.TenantId</c> are what say whether an
+    /// agent is one tenant's (<c>DatabaseReach.TenantOfShard</c>).
+    /// </remarks>
+    [Fact]
+    public void What_decides_whether_a_database_is_exclusively_one_tenants_is_there()
+    {
+        RequireProperty(typeof(IMartenDatabase), "TenantIds").PropertyType.Should().Be<List<string>>();
+        RequireProperty(typeof(IMartenDatabase), "Id").PropertyType.Should().Be<DatabaseId>();
+        RequireProperty(typeof(DatabaseId), "Server").PropertyType.Should().Be<string>();
+        RequireProperty(typeof(DatabaseId), "Name").PropertyType.Should().Be<string>();
+        RequireProperty(typeof(ITenancy), "Default").PropertyType.Should().Be<Tenant>();
+        RequireProperty(typeof(ITenancy), "Cardinality").PropertyType.Should().Be<DatabaseCardinality>();
+
+        ShardName.TryParse("Orders:All:acme", out ShardName? tenanted).Should().BeTrue();
+        tenanted!.TenantId.Should().Be("acme");
+        ShardName.TryParse("Orders:All", out ShardName? global).Should().BeTrue();
+        global!.TenantId.Should().BeNull("a store-global shard processes every tenant's events");
+    }
+
+    /// <summary>
+    /// DB-0-fix-2, F2 and F3: the two coordinators Marten ships, and the two tenancies whose
+    /// <c>Default</c> is a <c>NotSupportedException</c> whatever their database count.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read at tag <c>V9.31.0</c>: <c>ProjectionCoordinator.DaemonForMainDatabase()</c> is
+    /// <c>findDaemonForDatabase(Store.Tenancy.Default.Database)</c>, <c>DaemonForDatabase(id)</c> is
+    /// <c>findDaemonForDatabase(await Store.Storage.FindOrCreateDatabase(id))</c>, and
+    /// <c>AllDaemonsAsync()</c> is <c>Store.Storage.AllDatabases()</c> through the same cache, keyed on
+    /// <c>IDatabase.Identifier</c>; <c>ExplicitProjectionCoordinator</c> (what
+    /// <c>MartenDaemonModeIsSolo()</c> registers) has the same three bodies. So on Marten's own
+    /// coordinator the studio matches the set by tracker (<c>DaemonAccessor.IsMartensOwn</c>) and never
+    /// asks the lookup that goes through <c>FindOrCreateDatabase</c> - on <c>ShardedTenancy</c> that call
+    /// corrects the id with <c>TenantIdStyle</c> before it looks in its pool, and provisions a tenant for a
+    /// pool id it then misses.
+    /// </para>
+    /// <para>
+    /// Neither tenancy is connected to here: both take their data source lazily.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Martens_own_coordinators_and_the_tenancies_with_no_default_are_what_the_accessor_expects()
+    {
+        typeof(MartenCoordinator).IsAssignableFrom(typeof(MartensCoordinator)).Should().BeTrue();
+        typeof(MartenCoordinator).IsAssignableFrom(typeof(MartensExplicitCoordinator)).Should().BeTrue();
+        typeof(global::Marten.Events.Daemon.Coordination.ProjectionCoordinator<>).BaseType
+            .Should().Be<MartensCoordinator>("an ancillary store's coordinator is Marten's own too");
+        typeof(global::Marten.Events.Daemon.Coordination.ExplicitProjectionCoordinator<>).BaseType
+            .Should().Be<MartensExplicitCoordinator>();
+
+        var registered = new ServiceCollection();
+        registered.AddMarten(x => x.Connection(DummyConnectionString)).AddAsyncDaemon(DaemonMode.Solo);
+        registered.Should().Contain(
+            x => x.ServiceType == typeof(MartenCoordinator) && x.ImplementationType == typeof(MartensCoordinator),
+            "AddAsyncDaemon registers Marten's own coordinator");
+
+        var masterTable = new StoreOptions();
+        masterTable.MultiTenantedDatabasesWithMasterDatabaseTable(DummyConnectionString, "tenants");
+        masterTable.Tenancy.Cardinality.Should().Be(DatabaseCardinality.DynamicMultiple);
+        FluentActions.Invoking(() => masterTable.Tenancy.Default).Should().Throw<NotSupportedException>(
+            "so DaemonForMainDatabase throws on a master-table store with one tenant database as surely as with ten");
+
+        var sharded = new StoreOptions();
+        sharded.MultiTenantedWithShardedDatabases(x => x.ConnectionString = DummyConnectionString);
+        sharded.Tenancy.Cardinality.Should().Be(DatabaseCardinality.DynamicMultiple);
+        FluentActions.Invoking(() => sharded.Tenancy.Default).Should().Throw<NotSupportedException>();
     }
 
     // --------------------------------------------------------------------------------------------
