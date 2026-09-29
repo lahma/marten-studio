@@ -603,7 +603,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   | 9214 | `PostgresVersionUnreadable` | The server version could not be read |
   | 9215 | `ShardTrackerUnobservable` | The in-process shard tracker could not be observed |
   | 9216 | `ProjectionSummaryUnreadable` | The Overview's or the navigation's projection summary failed |
-  | 9217 | `EventReadFailed` | An event-store read failed for a reason other than a timeout or a missing table |
+  | 9217 | `EventReadFailed` | An event-store read failed for a reason other than a statement timeout |
   | 9218 | `StreamTimestampMissing` | A hand-migrated `mt_streams` has a row with a null timestamp |
   | 9219 | `TenantDiscoveryFailed` | The scope selector could not discover a store's tenants |
   | 9220 | `LiveUpdateHandlerFailed` | A page's own refresh-failure handler threw |
