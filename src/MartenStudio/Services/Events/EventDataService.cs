@@ -409,7 +409,8 @@ internal sealed class EventDataService : IEventDataService
             // tick create an event store, on a timer, on a database that has none (hard rule 14, and see
             // ProjectionProgressQueries for where that was verified in Marten 9.35).
             //
-            // Be clear about what the number is: `select last_value from <schema>.mt_events_sequence`,
+            // Be clear about what the number is: the sequence's last_value from <schema>.mt_events_sequence
+            // (0 until it has handed one out - a fresh sequence reports 1 with is_called false),
             // or on a store with UseTenantPartitionedEvents `select coalesce(max(seq_id), 0) from
             // mt_events`. So it is neither the daemon's high-water mark nor a count of committed events -
             // a sequence's last_value runs ahead of what is visible, because numbers are handed out

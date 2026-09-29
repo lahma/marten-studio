@@ -179,7 +179,7 @@ public class FeedTests
         var title = label.GetAttribute("title")!;
 
         title.Should().StartWith(
-            "select last_value from the event store's mt_events_sequence",
+            "select last_value from the event store's mt_events_sequence (0 until it has handed one out)",
             "that is the branch every store without tenant-partitioned events takes");
         title.Should().Contain("tenant-partitioned events");
         title.Should().Contain("coalesce(max(seq_id), 0) from mt_events");

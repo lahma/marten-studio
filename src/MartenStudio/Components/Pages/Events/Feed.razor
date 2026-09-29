@@ -147,7 +147,8 @@
     /// <para>
     /// <c>IEventDataService.GetHighestSequenceAsync</c> runs
     /// <c>ProjectionProgressQueries.BuildHighWaterMark</c>, which is
-    /// <c>select last_value from "{event schema}"."mt_events_sequence"</c> - and only on a store with
+    /// <c>select case when is_called then last_value else 0 end from "{event schema}"."mt_events_sequence"</c>
+    /// (a fresh sequence reports <c>last_value = 1</c> before it has handed out anything) - and only on a store with
     /// <c>StoreOptions.Events.UseTenantPartitionedEvents</c>, where every tenant draws <c>seq_id</c> from a
     /// partition sequence of its own and the store-global sequence is never advanced,
     /// <c>select coalesce(max(seq_id), 0) from mt_events</c>. This tooltip used to name only the second
@@ -161,7 +162,7 @@
     /// </para>
     /// </remarks>
     private const string HighWaterTitle =
-        "select last_value from the event store's mt_events_sequence - or, on a store with "
+        "select last_value from the event store's mt_events_sequence (0 until it has handed one out) - or, on a store with "
         + "tenant-partitioned events, coalesce(max(seq_id), 0) from mt_events";
 
     private readonly CancellationTokenSource pageCancellation = new();

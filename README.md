@@ -611,6 +611,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   | 9218 | `StreamTimestampMissing` | A hand-migrated `mt_streams` has a row with a null timestamp |
   | 9219 | `TenantDiscoveryFailed` | The scope selector could not discover a store's tenants |
   | 9220 | `LiveUpdateHandlerFailed` | A page's own refresh-failure handler threw |
+  | 9221 | `TenantPolicyFailed` | The store policy threw while the scope selector filtered a database's tenants |
 
 - **What the studio never does:** start a second projection daemon, execute DDL on a read or navigation
   path, write document DML of its own, replace your `StoreOptions.Logger`, or show a connection string
