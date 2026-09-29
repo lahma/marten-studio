@@ -502,9 +502,10 @@ layer of the authorization contract does.
 | `--anonymous` | Map the studio with `AllowAnonymous()` instead of a policy, to show what an unauthenticated studio looks like. The landing page draws a red banner saying so. Never do this anywhere real. |
 | `--readonly` | Set `MartenStudioOptions.ReadOnly`, which turns every mutating capability off however they were configured. |
 | `--path /ops/marten` | Mount the studio somewhere other than `/marten`, which is what exercises the sub-path re-rooting. |
+| `--no-daemon` | Host no async daemon (`AddAsyncDaemon(DaemonMode.Disabled)`), the shape of a production host whose projections run elsewhere. The studio shows progress from the database and logs nothing about it above Debug. |
 
 > **Argument order does not matter.** The sample's boolean switches — `--anonymous`, `--readonly`,
-> `--allow-data-generation` — are switches, not `--key value` pairs: writing one means `true` and the
+> `--allow-data-generation`, `--no-daemon` — are switches, not `--key value` pairs: writing one means `true` and the
 > token after it is left alone, so `dotnet run -- --anonymous --urls http://localhost:5000` and
 > `dotnet run -- --urls http://localhost:5000 --anonymous` do the same thing. An explicit value is
 > still accepted where a script wants to pass a variable (`--readonly false`, `--readonly=false`), and
