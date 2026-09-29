@@ -62,16 +62,16 @@ public class SchemaDeclarationKindMapTests
     }
 
     /// <summary>
-    /// The Schema screen's outputs are untouched by the new map: extended objects are not managed tables,
-    /// and a sequence is not a function.
+    /// An <c>ExtendedSchemaObjects</c> table is a managed table - Marten yields the list as a feature of its
+    /// own, so an apply migrates it, drop index included (DB-7) - and a sequence is still not a function.
     /// </summary>
     [Fact]
-    public void The_Schema_screens_own_outputs_do_not_change()
+    public void An_extended_table_is_managed_and_a_sequence_is_not_a_function()
     {
         SchemaDeclarations declarations = SchemaDeclarationReader.Read(DefaultStore(), IsVisible);
 
-        declarations.ManagedTables.Should().NotContain(ReportingSchema + ".ef_things",
-            "ExtendedSchemaObjects are the browser's to know about, not the Schema screen's");
+        declarations.ManagedTables.Should().Contain(ReportingSchema + ".ef_things",
+            "an apply migrates ExtendedSchemaObjects like Marten's own tables");
         declarations.Functions.Should().NotContain(ReportingSchema + ".ext_touch");
         declarations.Functions.Should().NotContain(EventSchema + ".mt_events_sequence");
         declarations.ManagedTables.Should().Contain(EventSchema + ".mt_events");

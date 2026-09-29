@@ -127,6 +127,7 @@ public class CapabilityGatingMatrixTests
         new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.ListAsync), StudioCapability.BrowseDatabase),
         new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetObjectAsync), StudioCapability.BrowseDatabase),
         new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetDefinitionAsync), StudioCapability.BrowseDatabase),
+        new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetSequenceValueAsync), StudioCapability.BrowseDatabase),
 
         // DB-3: every row read is behind DatabaseAccess.RequireRowAccessAsync, refused as a value.
         new(typeof(ITableRowService), nameof(ITableRowService.ListRowsAsync), StudioCapability.BrowseDatabase),
@@ -177,7 +178,10 @@ public class CapabilityGatingMatrixTests
             "PreviewAsync", "TablesAsync",
         ],
         [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync"],
-        [typeof(IDatabaseObjectService)] = ["GetDefinitionAsync", "GetObjectAsync", "GetOverviewAsync", "ListAsync"],
+        [typeof(IDatabaseObjectService)] =
+        [
+            "GetDefinitionAsync", "GetObjectAsync", "GetOverviewAsync", "GetSequenceValueAsync", "ListAsync",
+        ],
         [typeof(ITableRowService)] = ["CountExactAsync", "GetCellAsync", "GetReferencesAsync", "GetRowAsync", "ListRowsAsync"],
     };
 

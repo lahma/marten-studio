@@ -33,10 +33,13 @@ internal enum CatalogParts
     /// <summary>Foreign keys with either end in the set.</summary>
     ForeignKeys = 32,
 
-    /// <summary>What the views in the set read.</summary>
+    /// <summary>
+    /// What the views in the set read - the relations, and (in <see cref="CatalogSnapshot.ViewReferences" />)
+    /// the functions, operators, sequences and types they refer to.
+    /// </summary>
     ViewDependencies = 64,
 
-    /// <summary>Everything the overview counts.</summary>
+    /// <summary>Every listing kind.</summary>
     Listings = Relations | Routines | Triggers | Sequences | Types,
 }
 
@@ -66,6 +69,13 @@ internal sealed record CatalogSnapshot(
         CatalogList<CatalogType>.Empty,
         CatalogList<CatalogForeignKey>.Empty,
         CatalogList<CatalogViewDependency>.Empty);
+
+    /// <summary>
+    /// The functions, operators, sequences and types the views in the set refer to - read with
+    /// <see cref="CatalogParts.ViewDependencies" />, and what decides whether a view calls code the studio
+    /// cannot see into.
+    /// </summary>
+    public CatalogList<CatalogViewReference> ViewReferences { get; init; } = CatalogList<CatalogViewReference>.Empty;
 }
 
 /// <summary>
@@ -83,10 +93,16 @@ internal sealed record CatalogSnapshot(
 /// </para>
 /// <para>
 /// <b>Cached for sixty seconds, shared by every circuit.</b> <see cref="CatalogCache{TValue}" />, keyed by
-/// the database's identity, the role, the part, the schema set and the name filter - never by the
-/// visitor. What differs per visitor is the gate, and the gate is applied <em>after</em> the cache: a
-/// cached answer is a fact about the database, filtered afresh for whoever asks. A failed read is not
-/// cached.
+/// the database's identity, the role, the part and the schema set - never by the visitor. What differs per
+/// visitor is the gate, and the gate is applied <em>after</em> the cache: a cached answer is a fact about
+/// the database, filtered afresh for whoever asks. A failed read is not cached, and neither is a
+/// name-filtered one: a filter is typed, one keystroke at a time, and each distinct string would otherwise
+/// be an entry of up to <see cref="ListCap" /> rows per kind, kept until the cache overflowed.
+/// </para>
+/// <para>
+/// <b>Every transaction pins the <c>search_path</c> to <c>pg_catalog</c> first</b>
+/// (<see cref="DatabaseCatalogQueries.PinSearchPathSql" />), so every deparsed name is printed with its
+/// schema and a withheld schema's name can be masked wherever it appears.
 /// </para>
 /// <para>
 /// <b>Nothing here migrates.</b> The connection comes from
@@ -99,7 +115,7 @@ internal sealed class DatabaseCatalog
 {
     /// <summary>
     /// How many objects of one kind a read takes before it stops and says there were more. A list shows
-    /// fewer; the overview's counts become floors past it.
+    /// fewer; the overview's counts are read by a count query of their own and never depend on it.
     /// </summary>
     internal const int ListCap = 5000;
 
@@ -115,12 +131,27 @@ internal sealed class DatabaseCatalog
     private readonly CatalogCache<CatalogList<CatalogType>> types = new();
     private readonly CatalogCache<CatalogList<CatalogForeignKey>> foreignKeys = new();
     private readonly CatalogCache<CatalogList<CatalogViewDependency>> viewDependencies = new();
+    private readonly CatalogCache<CatalogList<CatalogViewReference>> viewReferences = new();
+    private readonly CatalogCache<IReadOnlyList<CatalogObjectCount>> counts = new();
     private readonly CatalogCache<CatalogRelationDetail?> details = new();
 
     public DatabaseCatalog(IOptions<MartenStudioOptions> options)
     {
         this.options = options;
     }
+
+    /// <summary>
+    /// How many objects of one kind one list read takes: <see cref="ListCap" />, or a smaller number a
+    /// test sets to prove that nothing but the list itself depends on it.
+    /// </summary>
+    internal int ReadCap { get; set; } = ListCap;
+
+    /// <summary>
+    /// How many list reads the cache holds, over every kind. A test reads it to prove that a name-filtered
+    /// read is never cached.
+    /// </summary>
+    internal int CachedListEntries =>
+        relations.Count + routines.Count + triggers.Count + sequences.Count + types.Count;
 
     /// <summary>Every schema of the database, as the reading role sees them.</summary>
     public async Task<IReadOnlyList<CatalogSchema>> SchemasAsync(
@@ -170,25 +201,30 @@ internal sealed class DatabaseCatalog
         string[] ordered = [.. schemaSet.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
         string q = filter?.Trim() ?? string.Empty;
         string scope = string.Join('\u001e', ordered);
+        int cap = ReadCap;
 
         if (ordered.Length == 0 || parts == CatalogParts.None)
         {
             return CatalogSnapshot.Empty;
         }
 
-        Slot<CatalogRelation> relationSlot = new(relations, Key(database, "relations", scope, q), parts.HasFlag(CatalogParts.Relations));
-        Slot<CatalogRoutine> routineSlot = new(routines, Key(database, "routines", scope, q), parts.HasFlag(CatalogParts.Routines));
-        Slot<CatalogTrigger> triggerSlot = new(triggers, Key(database, "triggers", scope, q), parts.HasFlag(CatalogParts.Triggers));
-        Slot<CatalogSequence> sequenceSlot = new(sequences, Key(database, "sequences", scope, q), parts.HasFlag(CatalogParts.Sequences));
-        Slot<CatalogType> typeSlot = new(types, Key(database, "types", scope, q), parts.HasFlag(CatalogParts.Types));
+        // A name-filtered read goes to the database every time and is never remembered (see the remarks).
+        bool cacheable = q.Length == 0;
+
+        Slot<CatalogRelation> relationSlot = new(cacheable ? relations : null, Key(database, "relations", scope, Cap(cap)), parts.HasFlag(CatalogParts.Relations));
+        Slot<CatalogRoutine> routineSlot = new(cacheable ? routines : null, Key(database, "routines", scope, Cap(cap)), parts.HasFlag(CatalogParts.Routines));
+        Slot<CatalogTrigger> triggerSlot = new(cacheable ? triggers : null, Key(database, "triggers", scope, Cap(cap)), parts.HasFlag(CatalogParts.Triggers));
+        Slot<CatalogSequence> sequenceSlot = new(cacheable ? sequences : null, Key(database, "sequences", scope, Cap(cap)), parts.HasFlag(CatalogParts.Sequences));
+        Slot<CatalogType> typeSlot = new(cacheable ? types : null, Key(database, "types", scope, Cap(cap)), parts.HasFlag(CatalogParts.Types));
 
         // Keys and view dependencies are not name-filtered: they are what a list's rows are annotated
-        // with, whatever the list was filtered by.
-        Slot<CatalogForeignKey> foreignKeySlot = new(foreignKeys, Key(database, "fks", scope), parts.HasFlag(CatalogParts.ForeignKeys));
-        Slot<CatalogViewDependency> dependencySlot = new(viewDependencies, Key(database, "deps", scope), parts.HasFlag(CatalogParts.ViewDependencies));
+        // with, whatever the list was filtered by - so they are always cacheable.
+        Slot<CatalogForeignKey> foreignKeySlot = new(foreignKeys, Key(database, "fks", scope, Cap(cap)), parts.HasFlag(CatalogParts.ForeignKeys));
+        Slot<CatalogViewDependency> dependencySlot = new(viewDependencies, Key(database, "deps", scope, Cap(cap)), parts.HasFlag(CatalogParts.ViewDependencies));
+        Slot<CatalogViewReference> referenceSlot = new(viewReferences, Key(database, "refs", scope, Cap(cap)), parts.HasFlag(CatalogParts.ViewDependencies));
 
         bool missing = relationSlot.Missing || routineSlot.Missing || triggerSlot.Missing || sequenceSlot.Missing
-            || typeSlot.Missing || foreignKeySlot.Missing || dependencySlot.Missing;
+            || typeSlot.Missing || foreignKeySlot.Missing || dependencySlot.Missing || referenceSlot.Missing;
 
         if (missing)
         {
@@ -199,43 +235,49 @@ internal sealed class DatabaseCatalog
                         if (relationSlot.Missing)
                         {
                             relationSlot.Store(await DatabaseCatalogQueries.ReadRelationsAsync(
-                                connection, transaction, ordered, q, null, ListCap, timeout, token).ConfigureAwait(false));
+                                connection, transaction, ordered, q, null, cap, timeout, token).ConfigureAwait(false));
                         }
 
                         if (routineSlot.Missing)
                         {
                             routineSlot.Store(await DatabaseCatalogQueries.ReadRoutinesAsync(
-                                connection, transaction, ordered, q, null, ListCap, timeout, token).ConfigureAwait(false));
+                                connection, transaction, ordered, q, null, cap, timeout, token).ConfigureAwait(false));
                         }
 
                         if (triggerSlot.Missing)
                         {
                             triggerSlot.Store(await DatabaseCatalogQueries.ReadTriggersAsync(
-                                connection, transaction, ordered, q, null, null, ListCap, timeout, token).ConfigureAwait(false));
+                                connection, transaction, ordered, q, null, null, cap, timeout, token).ConfigureAwait(false));
                         }
 
                         if (sequenceSlot.Missing)
                         {
                             sequenceSlot.Store(await DatabaseCatalogQueries.ReadSequencesAsync(
-                                connection, transaction, ordered, q, null, ListCap, timeout, token).ConfigureAwait(false));
+                                connection, transaction, ordered, q, null, cap, timeout, token).ConfigureAwait(false));
                         }
 
                         if (typeSlot.Missing)
                         {
                             typeSlot.Store(await DatabaseCatalogQueries.ReadTypesAsync(
-                                connection, transaction, ordered, q, null, ListCap, timeout, token).ConfigureAwait(false));
+                                connection, transaction, ordered, q, null, cap, timeout, token).ConfigureAwait(false));
                         }
 
                         if (foreignKeySlot.Missing)
                         {
                             foreignKeySlot.Store(await DatabaseCatalogQueries.ReadForeignKeysAsync(
-                                connection, transaction, ordered, null, null, ListCap, timeout, token).ConfigureAwait(false));
+                                connection, transaction, ordered, null, null, cap, timeout, token).ConfigureAwait(false));
                         }
 
                         if (dependencySlot.Missing)
                         {
                             dependencySlot.Store(await DatabaseCatalogQueries.ReadViewDependenciesAsync(
-                                connection, transaction, ordered, null, ListCap, timeout, token).ConfigureAwait(false));
+                                connection, transaction, ordered, null, cap, timeout, token).ConfigureAwait(false));
+                        }
+
+                        if (referenceSlot.Missing)
+                        {
+                            referenceSlot.Store(await DatabaseCatalogQueries.ReadViewReferencesAsync(
+                                connection, transaction, ordered, null, cap, timeout, token).ConfigureAwait(false));
                         }
 
                         return true;
@@ -251,8 +293,96 @@ internal sealed class DatabaseCatalog
             sequenceSlot.Value,
             typeSlot.Value,
             foreignKeySlot.Value,
-            dependencySlot.Value);
+            dependencySlot.Value)
+        {
+            ViewReferences = referenceSlot.Value,
+        };
     }
+
+    /// <summary>
+    /// The exact per-kind, per-schema counts of what the lists would show within
+    /// <paramref name="schemaSet" /> - one small query, never bounded by <see cref="ListCap" />.
+    /// </summary>
+    /// <param name="database">The resolved database.</param>
+    /// <param name="schemaSet">The schemas the gate allows.</param>
+    /// <param name="hiddenTables">The hidden document types' tables, as <c>schema.table</c>.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public async Task<IReadOnlyList<CatalogObjectCount>> CountsAsync(
+        IMartenDatabase database,
+        IReadOnlyList<string> schemaSet,
+        IReadOnlyCollection<string> hiddenTables,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentNullException.ThrowIfNull(schemaSet);
+        ArgumentNullException.ThrowIfNull(hiddenTables);
+
+        string[] ordered = [.. schemaSet.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+
+        if (ordered.Length == 0)
+        {
+            return [];
+        }
+
+        string[] hidden = [.. hiddenTables.Select(static x => x.ToLowerInvariant()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+        string key = Key(database, "counts", string.Join('\u001e', ordered), string.Join('\u001e', hidden));
+
+        if (counts.TryGet(key, out IReadOnlyList<CatalogObjectCount> cached))
+        {
+            return cached;
+        }
+
+        IReadOnlyList<CatalogObjectCount> read = await RunAsync(
+                database,
+                (connection, transaction, timeout, token) =>
+                    DatabaseCatalogQueries.ReadObjectCountsAsync(connection, transaction, ordered, hidden, timeout, token),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        counts.Set(key, read);
+
+        return read;
+    }
+
+    /// <summary>
+    /// One sequence's list row, by exact name - its settings and its owner, never its value - or
+    /// <see langword="null" /> when <paramref name="schema" /> has no such sequence. Not cached.
+    /// </summary>
+    public async Task<CatalogSequence?> SequenceAsync(
+        IMartenDatabase database,
+        string schema,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentException.ThrowIfNullOrEmpty(schema);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+
+        CatalogList<CatalogSequence> found = await RunAsync(
+                database,
+                (connection, transaction, timeout, token) =>
+                    DatabaseCatalogQueries.ReadSequencesAsync(connection, transaction, [schema], null, name, 1, timeout, token),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return found.Items.Count == 0 ? null : found.Items[0];
+    }
+
+    /// <summary>
+    /// One sequence's last value, in a transaction of its own - the one read here that locks what it
+    /// reads (a <c>RowExclusiveLock</c> on that sequence, until the transaction ends a moment later). Never
+    /// cached: it is asked for one sequence at a time, on purpose.
+    /// </summary>
+    public Task<CatalogSequenceValue?> SequenceValueAsync(
+        IMartenDatabase database,
+        string schema,
+        string name,
+        CancellationToken cancellationToken = default) =>
+        RunAsync(
+            database,
+            (connection, transaction, timeout, token) =>
+                DatabaseCatalogQueries.ReadSequenceValueAsync(connection, transaction, schema, name, timeout, token),
+            cancellationToken);
 
     /// <summary>
     /// One relation's detail, or <see langword="null" /> when <paramref name="schema" /> has no such
@@ -337,6 +467,8 @@ internal sealed class DatabaseCatalog
         types.Clear();
         foreignKeys.Clear();
         viewDependencies.Clear();
+        viewReferences.Clear();
+        counts.Clear();
         details.Clear();
     }
 
@@ -363,7 +495,14 @@ internal sealed class DatabaseCatalog
         return await session
             .InTransactionAsync(
                 connection,
-                (transaction, token) => read(connection, transaction, commandTimeout, token),
+                async (transaction, token) =>
+                {
+                    // First, always: every deparsed name after this is printed with its schema.
+                    await DatabaseCatalogQueries.PinSearchPathAsync(connection, transaction, commandTimeout, token)
+                        .ConfigureAwait(false);
+
+                    return await read(connection, transaction, commandTimeout, token).ConfigureAwait(false);
+                },
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -376,13 +515,15 @@ internal sealed class DatabaseCatalog
         database.Id.Identity + Separator + (options.Value.SqlConsoleRole ?? string.Empty) + Separator
         + string.Join(Separator, parts);
 
-    /// <summary>One part of a snapshot: from the cache, or read and then remembered.</summary>
+    private static string Cap(int cap) => cap.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>One part of a snapshot: from the cache, or read and then remembered - or, with no cache, read.</summary>
     private sealed class Slot<T>
     {
-        private readonly CatalogCache<CatalogList<T>> cache;
+        private readonly CatalogCache<CatalogList<T>>? cache;
         private readonly string key;
 
-        public Slot(CatalogCache<CatalogList<T>> cache, string key, bool wanted)
+        public Slot(CatalogCache<CatalogList<T>>? cache, string key, bool wanted)
         {
             this.cache = cache;
             this.key = key;
@@ -391,7 +532,7 @@ internal sealed class DatabaseCatalog
             {
                 Value = CatalogList<T>.Empty;
             }
-            else if (cache.TryGet(key, out CatalogList<T> cached))
+            else if (cache is not null && cache.TryGet(key, out CatalogList<T> cached))
             {
                 Value = cached;
             }
@@ -409,7 +550,7 @@ internal sealed class DatabaseCatalog
         {
             Value = read;
             Missing = false;
-            cache.Set(key, read);
+            cache?.Set(key, read);
         }
     }
 }

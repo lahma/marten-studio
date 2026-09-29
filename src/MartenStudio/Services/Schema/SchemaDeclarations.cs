@@ -18,9 +18,11 @@ namespace MartenStudio.Services.Schema;
 /// <param name="Schemas">The schemas this store owns in this database, in a stable order.</param>
 /// <param name="Indexes">Every index the configuration asks for, on a table it manages.</param>
 /// <param name="ManagedTables">
-/// The qualified names of the tables Marten itself configures. An index on any other table in these
-/// schemas belongs to the host application and no migration will touch it, which is a materially
-/// different fact from "Marten does not declare it".
+/// The qualified names of the tables an apply from this store migrates: the document and event tables,
+/// the projections' tables, and every <c>StoreOptions.Storage.ExtendedSchemaObjects</c> table. An index on
+/// any other table in these schemas is not one the studio can see an apply dropping - which is not a
+/// promise that none will: a feature added with <c>StoreOptions.Storage.Add(...)</c> is migrated too, and
+/// cannot be listed without applying migrations (AGENTS.md hard rule 14).
 /// </param>
 /// <param name="IgnoredIndexes">
 /// The qualified index names the host told Marten's migration detection to leave alone
@@ -44,8 +46,8 @@ internal sealed record SchemaDeclarations(
     /// A wider net than <see cref="ManagedTables" />: it also holds the event store's sequences (which the
     /// Schema screen has never listed) and <c>StoreOptions.Storage.ExtendedSchemaObjects</c> (EF Core
     /// projection tables, PgVector, anything a host hands Marten to manage), and it says <em>what</em> each
-    /// one is rather than only that Marten manages it. The database browser classifies objects with it;
-    /// nothing on the Schema screen reads it yet, so adding to it changes nothing there.
+    /// one is rather than only that Marten manages it. The database browser classifies objects with it, and
+    /// so do the Schema screen's Tables and Indexes tabs (DB-7): adding to it changes what they show.
     /// </para>
     /// <para>
     /// Case-insensitive, like every other set on this record. Erring towards "this is Marten's" is the
@@ -320,7 +322,7 @@ internal static class SchemaDeclarationReader
 
         ReadEventStore(storeOptions, eventSchema, managedTables, ignoredIndexes, functions, indexes, objects, AddSchema);
 
-        string? objectsFailure = ReadExtendedObjects(storeOptions, objects);
+        string? objectsFailure = ReadExtendedObjects(storeOptions, objects, managedTables, indexes, ignoredIndexes);
 
         return new SchemaDeclarations(orderedSchemas, indexes, managedTables, ignoredIndexes, functions)
         {
@@ -389,7 +391,10 @@ internal static class SchemaDeclarationReader
     /// </remarks>
     private static string? ReadExtendedObjects(
         IReadOnlyStoreOptions storeOptions,
-        Dictionary<string, MartenDeclaredObject> objects)
+        Dictionary<string, MartenDeclaredObject> objects,
+        HashSet<string> managedTables,
+        List<DeclaredIndex> indexes,
+        HashSet<string> ignoredIndexes)
     {
         if (storeOptions is not StoreOptions concrete)
         {
@@ -423,6 +428,25 @@ internal static class SchemaDeclarationReader
                     : identifier.Schema;
 
                 objects.TryAdd(SchemaKey.For(schema, identifier.Name), new MartenDeclaredObject(kind));
+
+                // An apply migrates these like Marten's own tables - StorageFeatures yields itself as a
+                // feature whenever the list is not empty - so a table here is a managed table, its indexes
+                // are declared, and its ignored indexes are ignored. Without this the Indexes tab calls its
+                // declared indexes undeclared, and its hand-made ones safe (DB-7).
+                if (schemaObject is Table table)
+                {
+                    managedTables.Add(SchemaKey.For(schema, identifier.Name));
+
+                    foreach (string ignored in table.IgnoredIndexes)
+                    {
+                        ignoredIndexes.Add(SchemaKey.For(schema, identifier.Name, ignored));
+                    }
+
+                    foreach (IndexDefinition index in table.Indexes)
+                    {
+                        indexes.Add(Describe(index, table, ExtendedAlias, ExtendedAlias, schema, identifier.Name));
+                    }
+                }
             }
 
             return null;
@@ -569,6 +593,9 @@ internal static class SchemaDeclarationReader
 
     /// <summary>What the event store's tables are attributed to, where a document type would be named.</summary>
     internal const string EventStoreAlias = "event store";
+
+    /// <summary>What an <c>ExtendedSchemaObjects</c> table's indexes are attributed to (= <c>IndexAdvice.ManagedTableAlias</c>).</summary>
+    internal const string ExtendedAlias = "Marten-managed";
 
     private static DeclaredIndex Describe(
         IndexDefinition index,

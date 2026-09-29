@@ -55,6 +55,12 @@ public abstract class DatabaseBrowserFixture(PostgresFixture postgres) : IAsyncL
     /// <summary>The legacy schema, with one of everything.</summary>
     public string LegacySchema => prefix + "_legacy";
 
+    /// <summary>
+    /// A schema no studio here ever lists as browsable - withheld - whose names the store's own structure
+    /// and the legacy schema's objects refer to.
+    /// </summary>
+    public string HrSchema => prefix + "_hr";
+
     /// <summary>A role that may read everything here but <c>payroll</c>.</summary>
     public string Role => "ms_role_" + prefix;
 
@@ -77,7 +83,7 @@ public abstract class DatabaseBrowserFixture(PostgresFixture postgres) : IAsyncL
 
         await DropRoleAsync();
 
-        foreach (string schema in new[] { DocumentSchema, EventSchema, QuartzSchema, LegacySchema })
+        foreach (string schema in new[] { DocumentSchema, EventSchema, QuartzSchema, LegacySchema, HrSchema })
         {
             await Postgres.CreateSchemaAsync(schema);
         }
@@ -89,15 +95,42 @@ public abstract class DatabaseBrowserFixture(PostgresFixture postgres) : IAsyncL
 
             HiddenTable = setup.Store.Options.FindOrResolveDocumentType(typeof(BrowserSecret)).TableName.Name;
             VisibleTable = setup.Store.Options.FindOrResolveDocumentType(typeof(BrowserCustomer)).TableName.Name;
+
+            await InitializeStoreAsync(setup);
         }
 
-        await ExecuteAsync(FixtureSql
+        await ExecuteAsync(Bind(FixtureSql));
+
+        if (ExtraSql.Length > 0)
+        {
+            await ExecuteAsync(Bind(ExtraSql));
+        }
+
+        await InitializeExtrasAsync();
+    }
+
+    /// <summary>
+    /// More SQL for one test class, run after the shared objects - with the same placeholders, plus
+    /// <c>{e}</c> for the event schema and <c>{hr}</c> for the withheld one.
+    /// </summary>
+    protected virtual string ExtraSql => string.Empty;
+
+    /// <summary>More setup for one test class, with Marten's own setup store still open.</summary>
+    private protected virtual Task InitializeStoreAsync(BrowserHost setup) => Task.CompletedTask;
+
+    /// <summary>More setup for one test class, after every object exists.</summary>
+    protected virtual Task InitializeExtrasAsync() => Task.CompletedTask;
+
+    /// <summary>The fixture's placeholders, replaced with quoted identifiers.</summary>
+    protected string Bind(string sql) =>
+        sql
             .Replace("{d}", SqlIdentifier.Quote(DocumentSchema), StringComparison.Ordinal)
+            .Replace("{e}", SqlIdentifier.Quote(EventSchema), StringComparison.Ordinal)
             .Replace("{q}", SqlIdentifier.Quote(QuartzSchema), StringComparison.Ordinal)
             .Replace("{l}", SqlIdentifier.Quote(LegacySchema), StringComparison.Ordinal)
+            .Replace("{hr}", SqlIdentifier.Quote(HrSchema), StringComparison.Ordinal)
             .Replace("{hidden}", SqlIdentifier.Quote(HiddenTable), StringComparison.Ordinal)
-            .Replace("{role}", SqlIdentifier.Quote(Role), StringComparison.Ordinal));
-    }
+            .Replace("{role}", SqlIdentifier.Quote(Role), StringComparison.Ordinal);
 
     /// <inheritdoc />
     public virtual async ValueTask DisposeAsync()
@@ -117,13 +150,25 @@ public abstract class DatabaseBrowserFixture(PostgresFixture postgres) : IAsyncL
     /// <param name="configure">Studio options, applied after those defaults.</param>
     /// <param name="authorization">An authorization service of the test's own, for the policy tests.</param>
     /// <param name="autoCreate">Marten's <c>AutoCreate</c>; none, unless the fixture itself is building the schema.</param>
+    /// <param name="services">More registrations - a second store, for the cross-store tests.</param>
     internal BrowserHost Host(
         Action<MartenStudioOptions>? configure = null,
         IAuthorizationService? authorization = null,
-        AutoCreate autoCreate = AutoCreate.None)
+        AutoCreate autoCreate = AutoCreate.None,
+        Action<IServiceCollection>? services = null)
     {
-        var services = new ServiceCollection();
+        var collection = new ServiceCollection();
+        services?.Invoke(collection);
 
+        return Host(collection, configure, authorization, autoCreate);
+    }
+
+    private BrowserHost Host(
+        ServiceCollection services,
+        Action<MartenStudioOptions>? configure,
+        IAuthorizationService? authorization,
+        AutoCreate autoCreate)
+    {
         services.AddLogging(static builder => builder.SetMinimumLevel(LogLevel.Warning));
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, SignedInProvider>();
@@ -147,7 +192,9 @@ public abstract class DatabaseBrowserFixture(PostgresFixture postgres) : IAsyncL
 
         services.AddMartenStudio(options =>
         {
-            options.IsDocumentTypeVisible = static type => type != typeof(BrowserSecret);
+            // BrowserLateSecret is hidden too, and never registered with Schema.For: Marten learns it only
+            // when a session first touches it (the F7 case).
+            options.IsDocumentTypeVisible = static type => type != typeof(BrowserSecret) && type != typeof(BrowserLateSecret);
             options.Capabilities.BrowseDatabase = true;
             options.BrowsableSchemas.Add(quartz);
             options.BrowsableSchemas.Add(legacy);
@@ -266,6 +313,38 @@ public abstract class DatabaseBrowserFixture(PostgresFixture postgres) : IAsyncL
 
         create view {l}.secret_peek as select id from {d}.{hidden};
 
+        -- F2: named like Marten's own, in the store's own schema, over the hidden type's table.
+        create view {d}.mt_peek as select id from {d}.{hidden};
+
+        -- F3: a hidden table read through a function, directly and through an operator.
+        create function {l}.peek_secret() returns setof uuid language sql as $$ select id from {d}.{hidden} $$;
+        create view {l}.fn_peek as select * from {l}.peek_secret() as id;
+        create function {l}.secret_eq(uuid, uuid) returns boolean language sql
+            as $$ select exists (select 1 from {d}.{hidden}) $$;
+        create operator {l}.=== (leftarg = uuid, rightarg = uuid, function = {l}.secret_eq);
+        create view {l}.op_peek as
+            select '00000000-0000-0000-0000-000000000000'::uuid operator({l}.===) '00000000-0000-0000-0000-000000000001'::uuid as matched;
+
+        -- F1: a schema nobody here may see, and things that name it.
+        create table {hr}.salaries (id int primary key, amount numeric);
+        create sequence {hr}.refs_seq;
+        create function {hr}.is_ok(int) returns boolean language sql immutable as $$ select true $$;
+        create function {hr}.norm(int) returns int language sql immutable as $$ select $1 $$;
+        create function {hr}.audit() returns trigger language plpgsql as $$ begin return new; end $$;
+        create type {hr}.grade as enum ('a', 'b');
+
+        create table {d}.hr_refs (
+            id int not null default nextval('{hr}.refs_seq'::regclass) check ({hr}.is_ok(id)),
+            grade {hr}.grade);
+        create index hr_refs_norm on {d}.hr_refs ({hr}.norm(id));
+        create trigger hr_refs_audit before insert on {d}.hr_refs for each row execute function {hr}.audit();
+        comment on table {d}.hr_refs is 'A copy of {hr}.salaries.';
+
+        create view {l}.hr_view as select id from {hr}.salaries;
+        create function {l}.pay_of(who int) returns setof {hr}.salaries language sql
+            as $$ select * from {hr}.salaries where id = who $$;
+        create function {l}.pinned() returns int language sql set search_path = {hr}, public as $$ select 1 $$;
+
         create role {role} nologin;
         grant usage on schema {d}, {q}, {l} to {role};
         grant select on all tables in schema {d}, {q}, {l} to {role};
@@ -356,6 +435,16 @@ public class BrowserCustomer
 
 /// <summary>The document type the host hides.</summary>
 public class BrowserSecret
+{
+    /// <summary>The id.</summary>
+    public Guid Id { get; set; }
+}
+
+/// <summary>
+/// A document type the host hides and never registers: its table exists, but a fresh store does not know
+/// the type until a session touches it.
+/// </summary>
+public class BrowserLateSecret
 {
     /// <summary>The id.</summary>
     public Guid Id { get; set; }

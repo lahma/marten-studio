@@ -53,18 +53,28 @@ internal sealed class DatabaseObjectClassifier
     /// <summary>The event store's global sequence; its per-tenant siblings carry a tenant id after it.</summary>
     internal const string EventSequence = "mt_events_sequence";
 
+    /// <summary>The prefix of every Marten document table's name.</summary>
+    internal const string DocumentTablePrefix = "mt_doc_";
+
     private readonly Dictionary<string, (string StoreKey, MartenDeclaredObject Declared)> declared =
         new(StringComparer.OrdinalIgnoreCase);
 
     private readonly HashSet<string> hiddenTables = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly bool hidesDocumentTypes;
+
     /// <summary>Builds the classifier from every store's declarations.</summary>
     /// <param name="stores">Every registered store's declarations, the default store first.</param>
-    public DatabaseObjectClassifier(IReadOnlyList<StoreDeclarations> stores)
+    /// <param name="hidesDocumentTypes">
+    /// Whether the host set <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> at all - which means a
+    /// document type Marten has not learned yet may be one it hides (see <see cref="MayHideDocumentTypes" />).
+    /// </param>
+    public DatabaseObjectClassifier(IReadOnlyList<StoreDeclarations> stores, bool hidesDocumentTypes = false)
     {
         ArgumentNullException.ThrowIfNull(stores);
 
         Stores = stores;
+        this.hidesDocumentTypes = hidesDocumentTypes;
 
         foreach (StoreDeclarations store in stores)
         {
@@ -85,8 +95,33 @@ internal sealed class DatabaseObjectClassifier
     /// <summary>The stores it was built from.</summary>
     public IReadOnlyList<StoreDeclarations> Stores { get; }
 
+    /// <summary>Every hidden document type's table, as <c>schema.table</c>.</summary>
+    public IReadOnlyCollection<string> HiddenTables => hiddenTables;
+
+    /// <summary>
+    /// Whether any document type may be hidden from the studio: one is known to be, or the host set
+    /// <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> at all.
+    /// </summary>
+    /// <remarks>
+    /// The second half matters because Marten learns document types lazily: a type that was never
+    /// registered with <c>Schema.For&lt;T&gt;()</c> and that nothing in this process has touched yet is not
+    /// among <c>AllKnownDocumentTypes()</c>, so its table is not known to be hidden even when it is. Every
+    /// rule that exists only to protect hidden types - a view that calls a function, a view over a document
+    /// table nobody declared - applies whenever hiding is configured, and not only when a hidden type is
+    /// already known.
+    /// </remarks>
+    public bool MayHideDocumentTypes => hidesDocumentTypes || hiddenTables.Count > 0;
+
     /// <summary>Whether <paramref name="schema" />.<paramref name="name" /> is a hidden document type's table.</summary>
     public bool IsHiddenTable(string schema, string name) => hiddenTables.Contains(SchemaKey.For(schema, name));
+
+    /// <summary>
+    /// Whether <paramref name="schema" />.<paramref name="name" /> is named like a Marten document table
+    /// that no registered store declares - a stale table, or a type Marten has not learned yet.
+    /// </summary>
+    public bool IsUndeclaredDocumentTable(string schema, string name) =>
+        name.StartsWith(DocumentTablePrefix, StringComparison.OrdinalIgnoreCase)
+        && !declared.ContainsKey(SchemaKey.For(schema, name));
 
     /// <summary>
     /// Whose one relation is, or <see langword="null" /> when the browser must not show it at all.

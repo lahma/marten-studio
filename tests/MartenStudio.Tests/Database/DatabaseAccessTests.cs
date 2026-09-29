@@ -1,4 +1,5 @@
 using Marten;
+using Marten.Schema;
 
 using MartenStudio.Services;
 using MartenStudio.Services.Database;
@@ -7,6 +8,7 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace MartenStudio.Tests.Database;
 
@@ -118,7 +120,8 @@ public class DatabaseAccessTests
 
     /// <summary>
     /// The page's question asks exactly what the enforcement asks, so a control drawn enabled is one whose
-    /// service call passes - and a tenant-restricted handler says no to both.
+    /// service call passes - and a tenant-restricted handler says no to both, naming the same policy: the
+    /// store policy, which is asked first and refuses a resource with no tenant.
     /// </summary>
     [Fact]
     public async Task The_pages_question_and_the_enforcement_agree_for_a_tenant_restricted_visitor()
@@ -133,9 +136,121 @@ public class DatabaseAccessTests
         enabled.Should().BeTrue();
         authorized.Should().BeFalse();
 
+        DatabasePolicyAnswer answer = await harness.Access.EvaluatePoliciesAsync(TenantScope, Token);
+        answer.Refusal.Should().Be(DatabaseRefusal.StorePolicy);
+
         DatabaseBrowseGrant grant = await harness.Access.RequireBrowseAsync(TenantScope, "Test", "x.y", Token);
 
-        grant.Refusal.Should().Be(DatabaseRefusal.WritePolicy);
+        grant.Refusal.Should().Be(DatabaseRefusal.StorePolicy);
+        grant.Reason.Should().Be(DatabaseGate.StorePolicyDenial);
+    }
+
+    /// <summary>
+    /// F10: the two policies are asked one at a time, and the refusal - its value, its sentence, and the
+    /// policy event 9203 names - is the one that said no. Asking only through the resolver named the write
+    /// policy for both, which sends whoever reads the log to the wrong setting.
+    /// </summary>
+    [Theory]
+    [InlineData(false, nameof(DatabaseRefusal.StorePolicy), StorePolicy, "StoreAuthorizationPolicy")]
+    [InlineData(true, nameof(DatabaseRefusal.WritePolicy), WritePolicy, "WriteAuthorizationPolicy")]
+    public async Task A_refusal_names_the_policy_that_said_no(
+        bool storePolicyAllows,
+        string expectedRefusal,
+        string expectedPolicy,
+        string expectedSetting)
+    {
+        var logs = new CapturingLoggerProvider();
+
+        await using Harness harness = Harness.Create(
+            static options => options.Capabilities.BrowseDatabase = true,
+            services => services.AddSingleton<ILoggerProvider>(logs));
+
+        harness.Policies.Allow(resource => resource.Capability is null ? storePolicyAllows : false);
+
+        DatabaseBrowseGrant grant = await harness.Access.RequireBrowseAsync(TenantScope, "Test", "quartz.qrtz_triggers", Token);
+
+        grant.Refusal.Should().Be(Enum.Parse<DatabaseRefusal>(expectedRefusal));
+        grant.Reason.Should().Contain(expectedSetting);
+
+        CapturedLogEntry refused = logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9203).Which;
+        refused.Message.Should().EndWith("by policy " + expectedPolicy);
+
+        harness.Ring.GetLatest().Should().ContainSingle().Which.TenantId.Should().BeNull();
+
+        DatabasePolicyAnswer page = await harness.Access.EvaluatePoliciesAsync(TenantScope, Token);
+        page.Refusal.Should().Be(grant.Refusal, "the page names the same policy the enforcement named");
+    }
+
+    /// <summary>
+    /// F10: a read the capability refuses is refused before the visitor's tenant-bearing scope is ever
+    /// resolved - so tenant discovery, which can query the database, never runs for it. The visitor here has
+    /// a tenant the store cannot answer for: had the tenant been resolved first, every call would have come
+    /// back "not a tenant" instead of naming the capability.
+    /// </summary>
+    [Fact]
+    public async Task A_read_the_capability_refuses_never_resolves_the_visitors_tenant()
+    {
+        await using Harness harness = Harness.Create(static _ => { });
+
+        IDatabaseObjectService objects = harness.Resolve<IDatabaseObjectService>();
+
+        (await objects.ListAsync(TenantScope, new DatabaseObjectQuery(DatabaseObjectCategory.Tables, "quartz"), Token))
+            .Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
+        (await objects.GetObjectAsync(TenantScope, "quartz", "qrtz_triggers", Token))
+            .Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
+        (await objects.GetDefinitionAsync(TenantScope, new DatabaseObjectRef(DatabaseObjectKind.View, "quartz", "v"), Token))
+            .Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
+        (await objects.GetSequenceValueAsync(TenantScope, "quartz", "qrtz_seq", Token))
+            .Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
+
+        harness.Policies.Calls.Should().OnlyContain(static x => x.Resource.Capability == null,
+            "only the store policy for the visitor's own scope is asked before the capability refuses");
+
+        // The store's own structure needs no capability, so there the tenant is resolved - and refused.
+        DatabaseObjectDetail own = await objects.GetObjectAsync(TenantScope, "public", "orders", Token);
+        own.Refusal.Should().Be(DatabaseRefusal.Unavailable);
+        own.Reason.Should().Contain("'acme' is not a tenant");
+    }
+
+    /// <summary>
+    /// F7: a hidden type Marten learns after the circuit read the declarations is hidden on the very next
+    /// call - the remembered classification is checked against every store's count of known document
+    /// types, and read again when one has grown.
+    /// </summary>
+    /// <remarks>
+    /// <c>FindOrResolveDocumentType</c> is what a session's first touch of an unregistered type runs
+    /// (<c>StorageFeatures.FindMapping</c>); calling it directly teaches Marten the type without opening a
+    /// connection to this unreachable host.
+    /// </remarks>
+    [Fact]
+    public async Task A_hidden_type_Marten_learns_after_the_circuit_opened_is_hidden_on_the_next_call()
+    {
+        await using Harness harness = Harness.Create(
+            static options => options.IsDocumentTypeVisible = static type => type != typeof(LateSecret));
+
+        StudioScopeResolver resolver = harness.Resolve<StudioScopeResolver>();
+        ResolvedScope resolved = await resolver.ResolveAsync(new StudioScope("default", string.Empty, null), null, Token);
+
+        DatabaseDeclarations before = harness.Access.ReadDeclarations(resolved);
+        before.Succeeded.Should().BeTrue(before.Failure);
+        before.Classifier!.HiddenTables.Should().BeEmpty("nothing has touched LateSecret yet");
+        before.Classifier.MayHideDocumentTypes.Should().BeTrue("the host set IsDocumentTypeVisible");
+
+        harness.Access.ReadDeclarations(resolved).Should().BeSameAs(before, "nothing changed, so the circuit's read stands");
+
+        // A session's first touch of the type.
+        IDocumentType learned = resolved.Store.Options.FindOrResolveDocumentType(typeof(LateSecret));
+        string schema = learned.TableName.Schema;
+        string table = learned.TableName.Name;
+
+        before.Classifier.ClassifyRelation(schema, table)!.Owner.Should().Be(DatabaseObjectOwner.MartenInfrastructure,
+            "this is the stale answer: the table named by its mt_ prefix, not known to be hidden");
+
+        DatabaseDeclarations after = harness.Access.ReadDeclarations(resolved);
+
+        after.Should().NotBeSameAs(before);
+        after.Classifier!.IsHiddenTable(schema, table).Should().BeTrue();
+        after.Classifier.ClassifyRelation(schema, table).Should().BeNull("a hidden type's table is absent from every list");
     }
 
     [Fact]
@@ -270,6 +385,13 @@ public class DatabaseAccessTests
 
     /// <summary>A store an application registered that cannot be built.</summary>
     public interface IBrokenStore : IDocumentStore;
+
+    /// <summary>A document type the host hides, and never registers with <c>Schema.For</c>.</summary>
+    public class LateSecret
+    {
+        /// <summary>The id.</summary>
+        public Guid Id { get; set; }
+    }
 
     /// <summary>A real studio container over a store that never connects.</summary>
     private sealed class Harness : IAsyncDisposable

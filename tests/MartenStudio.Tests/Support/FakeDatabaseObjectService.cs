@@ -36,6 +36,12 @@ internal sealed class FakeDatabaseObjectService : IDatabaseObjectService
     /// </summary>
     public DatabaseObjectDefinition? Definition { get; set; }
 
+    /// <summary>
+    /// What <see cref="GetSequenceValueAsync" /> answers. <see langword="null" /> - the default - answers a
+    /// value of 42 for any sequence asked about.
+    /// </summary>
+    public DatabaseSequenceValue? SequenceValue { get; set; }
+
     /// <summary>What every method throws, when a test is about the failure frame.</summary>
     public Exception? Failure { get; set; }
 
@@ -53,6 +59,9 @@ internal sealed class FakeDatabaseObjectService : IDatabaseObjectService
 
     /// <summary>Every definition <see cref="GetDefinitionAsync" /> was asked for.</summary>
     public List<DatabaseObjectRef> DefinitionsAsked { get; } = [];
+
+    /// <summary>Every sequence <see cref="GetSequenceValueAsync" /> was asked about, as <c>schema.name</c>.</summary>
+    public List<string> SequenceValuesAsked { get; } = [];
 
     public Task<DatabaseBrowserOverview> GetOverviewAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
@@ -99,6 +108,21 @@ internal sealed class FakeDatabaseObjectService : IDatabaseObjectService
         return Failure is null
             ? Task.FromResult(Definition ?? FakeDatabaseObjects.Definition(reference))
             : Task.FromException<DatabaseObjectDefinition>(Failure);
+    }
+
+    public Task<DatabaseSequenceValue> GetSequenceValueAsync(
+        StudioScope scope,
+        string schema,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        Record(scope);
+        SequenceValuesAsked.Add(schema + "." + name);
+
+        return Failure is null
+            ? Task.FromResult(SequenceValue ?? new DatabaseSequenceValue(
+                new DatabaseObjectRef(DatabaseObjectKind.Sequence, schema, name), 42, DatabaseRefusal.None, null))
+            : Task.FromException<DatabaseSequenceValue>(Failure);
     }
 
     private void Record(StudioScope scope)

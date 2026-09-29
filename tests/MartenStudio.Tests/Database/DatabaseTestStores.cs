@@ -66,7 +66,13 @@ internal static class DatabaseTestStores
         return store.Options;
     }
 
-    /// <summary>A second store, with a document table of its own in its own schema.</summary>
+    /// <summary>The other store's Marten-managed relational table, whose rows are that store's data.</summary>
+    public const string OtherReportTable = "other_report";
+
+    /// <summary>
+    /// A second store, with a document table of its own in its own schema and a table handed to its
+    /// <c>ExtendedSchemaObjects</c> - Marten-managed, and relational.
+    /// </summary>
     public static IReadOnlyStoreOptions OtherStore()
     {
         IDocumentStore store = DocumentStore.For(options =>
@@ -74,6 +80,7 @@ internal static class DatabaseTestStores
             options.Connection(SqlTestStore.Unreachable);
             options.DatabaseSchemaName = OtherSchema;
             options.Schema.For<DbInvoice>();
+            options.Storage.ExtendedSchemaObjects.Add(new Table(Name(OtherSchema, OtherReportTable)));
         });
 
         return store.Options;
@@ -90,19 +97,26 @@ internal static class DatabaseTestStores
     public static bool IsVisible(Type type) => type != typeof(DbSecret);
 
     /// <summary>A classifier over both stores, the default one first, with <see cref="DbSecret" /> hidden.</summary>
-    public static DatabaseObjectClassifier Classifier()
+    public static DatabaseObjectClassifier Classifier() => Classifier(IsVisible);
+
+    /// <summary>
+    /// A classifier over both stores, the default one first, with what <paramref name="isVisible" /> says
+    /// hidden - and, when it is <see langword="null" />, nothing hidden and no hiding configured at all.
+    /// </summary>
+    public static DatabaseObjectClassifier Classifier(Func<Type, bool>? isVisible)
     {
-        SchemaDeclarationRead first = SchemaDeclarationReader.ReadForClassification(DefaultStore(), IsVisible);
-        SchemaDeclarationRead second = SchemaDeclarationReader.ReadForClassification(OtherStore(), IsVisible);
+        SchemaDeclarationRead first = SchemaDeclarationReader.ReadForClassification(DefaultStore(), isVisible);
+        SchemaDeclarationRead second = SchemaDeclarationReader.ReadForClassification(OtherStore(), isVisible);
 
         first.Succeeded.Should().BeTrue(first.Failure);
         second.Succeeded.Should().BeTrue(second.Failure);
 
         return new DatabaseObjectClassifier(
-        [
-            new StoreDeclarations("default", first.Declarations!),
-            new StoreDeclarations(OtherStoreKey, second.Declarations!),
-        ]);
+            [
+                new StoreDeclarations("default", first.Declarations!),
+                new StoreDeclarations(OtherStoreKey, second.Declarations!),
+            ],
+            hidesDocumentTypes: isVisible is not null);
     }
 
     /// <summary>The store's own schemas, as the reader declares them.</summary>

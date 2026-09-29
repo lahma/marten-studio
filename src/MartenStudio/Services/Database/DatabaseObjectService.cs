@@ -9,18 +9,23 @@ namespace MartenStudio.Services.Database;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The order, for anything past the store's own structure.</b> The visitor's scope is resolved as a read
-/// first - that is what finds the store and its declarations, which is how the service knows whether the
-/// schema asked about is one of the store's own. Past that, a request that needs <c>BrowseDatabase</c>
-/// goes through <see cref="DatabaseAccess.RequireBrowseAsync" /> - the capability, then the tenant-less
-/// scope with the capability named - and then the schema against
-/// <see cref="MartenStudioOptions.BrowsableSchemas" />, settled from the options alone wherever it can be,
-/// all before the database is asked anything about that schema. Every one of those refusals is audited.
+/// <b>The order, for anything past the store's own structure.</b> The store the scope names is found first
+/// (<see cref="DatabaseAccess.FindStoreAsync" />) - the store policy for the visitor's own scope, then the
+/// registration and its declarations, which is how the service knows whether the schema asked about is one
+/// of the store's own - and nothing about the database or the tenant is asked yet. A request that needs
+/// <c>BrowseDatabase</c> then goes through <see cref="DatabaseAccess.RequireBrowseAsync" /> - the capability,
+/// then the two policies for the database as a whole, then the scope resolved <em>with no tenant</em> - and
+/// the schema against <see cref="MartenStudioOptions.BrowsableSchemas" />, settled from the options alone
+/// wherever it can be, all before the database is asked anything about that schema. Every one of those
+/// refusals is audited. The visitor's own tenant-bearing scope is resolved only on the path that needs no
+/// capability - the store's own structure - so a request the capability refuses never runs tenant
+/// discovery, which can query the database.
 /// </para>
 /// <para>
 /// <b>Structure of the store's own schemas needs nothing</b>: it is what the Schema screen has always
-/// shown. Neither does a definition of Marten's own objects there. Everything else in
-/// <see cref="GetDefinitionAsync" /> is a <c>BrowseDatabase</c> read.
+/// shown. Neither does a definition of Marten's own objects there, nor the value of Marten's own
+/// sequences. Everything else in <see cref="GetDefinitionAsync" /> and <see cref="GetSequenceValueAsync" /> is
+/// a <c>BrowseDatabase</c> read.
 /// </para>
 /// <para>
 /// <b>Nothing is thrown at a page</b> but cancellation: refusals, unreadable configurations and failed
@@ -31,6 +36,9 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 {
     /// <summary>How many objects a list shows when the caller does not say.</summary>
     internal const int DefaultListLimit = 500;
+
+    /// <summary>What the audit ring calls reading a sequence's value.</summary>
+    internal const string SequenceValueAction = "Read database sequence value";
 
     private readonly StudioScopeResolver resolver;
     private readonly DatabaseAccess access;
@@ -73,11 +81,12 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
             DatabaseGate gate = gateRead.Gate;
 
-            CatalogSnapshot snapshot = await catalog
-                .SnapshotAsync(resolved.Database, gate.VisibleSchemas, CatalogParts.Listings, null, cancellationToken)
+            // Counted by a query of its own, grouped by schema - exact, whatever a list's cap is.
+            IReadOnlyList<CatalogObjectCount> counts = await catalog
+                .CountsAsync(resolved.Database, gate.VisibleSchemas, gate.Classifier.HiddenTables, cancellationToken)
                 .ConfigureAwait(false);
 
-            return DatabaseObjectAssembler.Overview(gate, snapshot);
+            return DatabaseObjectAssembler.Overview(gate, counts);
         }
         catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
         {
@@ -102,30 +111,26 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             NameFilter = string.IsNullOrWhiteSpace(query.NameFilter) ? null : query.NameFilter.Trim(),
         };
 
-        (ResolvedScope? resolved, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
-        if (resolved is null)
-        {
-            return DatabaseObjectList.Refused(clamped, DatabaseRefusal.Unavailable, refused!);
-        }
+        Route route = await RouteAsync(
+                scope,
+                clamped.Schema is { } asked
+                    ? declared => IsStoreSchema(declared, asked) ? RouteKind.Structure : RouteKind.Browse
+                    : static _ => RouteKind.Structure,
+                clamped.Schema,
+                null,
+                DatabaseAccess.ListAction,
+                clamped.Schema ?? string.Empty,
+                cancellationToken)
+            .ConfigureAwait(false);
 
-        DatabaseDeclarations declared = access.ReadDeclarations(resolved);
-        if (!declared.Succeeded)
+        if (!route.Allowed)
         {
-            return DatabaseObjectList.Refused(clamped, DatabaseRefusal.Unavailable, declared.Failure!);
-        }
-
-        if (clamped.Schema is { } asked && !IsStoreSchema(declared, asked))
-        {
-            if (await RefuseOutsideStoreAsync(scope, asked, DatabaseAccess.ListAction, asked, cancellationToken)
-                    .ConfigureAwait(false) is { } refusal)
-            {
-                return DatabaseObjectList.Refused(clamped, refusal.Refusal, refusal.Reason);
-            }
+            return DatabaseObjectList.Refused(clamped, route.Refusal, route.Reason!);
         }
 
         try
         {
-            DatabaseGateRead gateRead = await access.GateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+            DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
             if (!gateRead.Succeeded)
             {
                 return DatabaseObjectList.Refused(clamped, gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.");
@@ -144,7 +149,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             IReadOnlyList<string> schemas = clamped.Schema is { } one ? [one] : gate.VisibleSchemas;
 
             CatalogSnapshot snapshot = await catalog
-                .SnapshotAsync(resolved.Database, schemas, PartsFor(clamped.Category), clamped.NameFilter, cancellationToken)
+                .SnapshotAsync(route.Resolved.Database, schemas, PartsFor(clamped.Category), clamped.NameFilter, cancellationToken)
                 .ConfigureAwait(false);
 
             return DatabaseObjectAssembler.List(gate, snapshot, clamped, limit);
@@ -170,30 +175,26 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 DatabaseRefusal.NotFound, DatabaseObjectAssembler.NotFound(schema ?? string.Empty, name ?? string.Empty));
         }
 
-        (ResolvedScope? resolved, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
-        if (resolved is null)
-        {
-            return DatabaseObjectDetail.Unavailable(DatabaseRefusal.Unavailable, refused!);
-        }
-
-        DatabaseDeclarations declared = access.ReadDeclarations(resolved);
-        if (!declared.Succeeded)
-        {
-            return DatabaseObjectDetail.Unavailable(DatabaseRefusal.Unavailable, declared.Failure!);
-        }
-
         string target = DatabaseAccess.Target(schema, name);
 
-        if (!IsStoreSchema(declared, schema)
-            && await RefuseOutsideStoreAsync(scope, schema, DatabaseAccess.ObjectAction, target, cancellationToken)
-                .ConfigureAwait(false) is { } refusal)
+        Route route = await RouteAsync(
+                scope,
+                declared => IsStoreSchema(declared, schema) ? RouteKind.Structure : RouteKind.Browse,
+                schema,
+                name,
+                DatabaseAccess.ObjectAction,
+                target,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!route.Allowed)
         {
-            return DatabaseObjectDetail.Unavailable(refusal.Refusal, refusal.Reason);
+            return DatabaseObjectDetail.Unavailable(route.Refusal, route.Reason!);
         }
 
         try
         {
-            DatabaseGateRead gateRead = await access.GateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+            DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
             if (!gateRead.Succeeded)
             {
                 return DatabaseObjectDetail.Unavailable(gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.");
@@ -210,7 +211,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             }
 
             CatalogRelationDetail? detail = await catalog
-                .RelationAsync(resolved.Database, schema, name, cancellationToken)
+                .RelationAsync(route.Resolved.Database, schema, name, cancellationToken)
                 .ConfigureAwait(false);
 
             return detail is null
@@ -247,42 +248,42 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.NotApplicable, notApplicable);
         }
 
-        (ResolvedScope? resolved, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
-        if (resolved is null)
+        DatabaseObjectOwnership? ownership = null;
+
+        Route route = await RouteAsync(
+                scope,
+                declared =>
+                {
+                    // Whose it is, from the name alone - which is all that is needed to know whether this read
+                    // is the Schema screen's (Marten's own, in the store's own schemas) or a BrowseDatabase read.
+                    ownership = ClassifyByName(declared.Classifier!, reference);
+
+                    return ownership switch
+                    {
+                        // A hidden type's table, or a trigger on one: not there, as far as this visitor is
+                        // concerned - said from the name alone, before anything is asked.
+                        null => RouteKind.NotThere,
+                        { IsMarten: true } when IsStoreSchema(declared, schema) => RouteKind.Structure,
+                        _ => RouteKind.Browse,
+                    };
+                },
+                schema,
+                name,
+                DatabaseAccess.DefinitionAction,
+                target,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!route.Allowed || ownership is null)
         {
-            return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.Unavailable, refused!);
-        }
-
-        DatabaseDeclarations declared = access.ReadDeclarations(resolved);
-        if (!declared.Succeeded)
-        {
-            return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.Unavailable, declared.Failure!);
-        }
-
-        // Whose it is, from the name alone - which is all that is needed to know whether this read is the
-        // Schema screen's (Marten's own, in the store's own schemas) or a BrowseDatabase read.
-        DatabaseObjectOwnership? ownership = ClassifyByName(declared.Classifier, reference);
-
-        if (ownership is null)
-        {
-            // A hidden type's table, or a trigger on one: not there, as far as this visitor is concerned.
-            return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.NotFound, DatabaseObjectAssembler.NotFound(schema, name));
-        }
-
-        bool martensOwnInTheStore = IsStoreSchema(declared, schema) && ownership.IsMarten;
-
-        if (!martensOwnInTheStore
-            && await RefuseOutsideStoreAsync(scope, schema, DatabaseAccess.DefinitionAction, target, cancellationToken)
-                .ConfigureAwait(false) is { } refusal)
-        {
-            return DatabaseObjectDefinition.Unavailable(reference, refusal.Refusal, refusal.Reason);
+            return DatabaseObjectDefinition.Unavailable(reference, route.Refusal, route.Reason!);
         }
 
         StudioScope tenantless = scope with { TenantId = null };
 
         try
         {
-            DatabaseGateRead gateRead = await access.GateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+            DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
             if (!gateRead.Succeeded)
             {
                 return DatabaseObjectDefinition.Unavailable(reference, gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.");
@@ -308,11 +309,137 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 return DatabaseObjectDefinition.Unavailable(reference, allowed.Refusal, allowed.Reason ?? "Refused.");
             }
 
-            return await ReadDefinitionAsync(resolved, gate, reference, cancellationToken).ConfigureAwait(false);
+            DatabaseObjectDefinition definition = await ReadDefinitionAsync(route.Resolved, gate, reference, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (definition.Refusal is DatabaseRefusal.HiddenDependency or DatabaseRefusal.WithheldDependency)
+            {
+                audit.Record(DatabaseAccess.DefinitionAction, target, succeeded: false, definition.Reason, StudioCapability.BrowseDatabase, tenantless);
+            }
+
+            return definition;
         }
         catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
         {
             return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception));
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<DatabaseSequenceValue> GetSequenceValueAsync(
+        StudioScope scope,
+        string schema,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var reference = new DatabaseObjectRef(DatabaseObjectKind.Sequence, schema ?? string.Empty, name ?? string.Empty);
+        string target = DatabaseAccess.Target(schema, name);
+
+        if (string.IsNullOrEmpty(schema) || string.IsNullOrEmpty(name))
+        {
+            return DatabaseSequenceValue.Unavailable(
+                reference, DatabaseRefusal.NotFound, DatabaseObjectAssembler.NotFound(schema ?? string.Empty, name ?? string.Empty));
+        }
+
+        DatabaseObjectOwnership? byName = null;
+
+        Route route = await RouteAsync(
+                scope,
+                declared =>
+                {
+                    // By name, as the list's CanReadValue decides it: Marten's own sequences in the store's own
+                    // schemas are the Schema screen's; anybody else's value is a BrowseDatabase read; and a
+                    // per-tenant event sequence - its name is a tenant id - is never listed or read.
+                    byName = declared.Classifier!.ClassifySequence(schema, name, null, null);
+
+                    return byName switch
+                    {
+                        null => RouteKind.NotThere,
+                        { IsMarten: true } when IsStoreSchema(declared, schema) => RouteKind.Structure,
+                        _ => RouteKind.Browse,
+                    };
+                },
+                schema,
+                name,
+                SequenceValueAction,
+                target,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!route.Allowed || byName is null)
+        {
+            return DatabaseSequenceValue.Unavailable(reference, route.Refusal, route.Reason!);
+        }
+
+        StudioScope tenantless = scope with { TenantId = null };
+
+        DatabaseSequenceValue Refuse(DatabaseRefusal refusal, string reason, bool audited)
+        {
+            if (audited)
+            {
+                audit.Record(SequenceValueAction, target, succeeded: false, reason, StudioCapability.BrowseDatabase, tenantless);
+            }
+
+            return DatabaseSequenceValue.Unavailable(reference, refusal, reason);
+        }
+
+        try
+        {
+            DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
+            if (!gateRead.Succeeded)
+            {
+                return Refuse(gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.", audited: false);
+            }
+
+            DatabaseGate gate = gateRead.Gate;
+
+            if (!gate.CanSeeStructure(schema))
+            {
+                return Refuse(DatabaseRefusal.NotFound, DatabaseObjectAssembler.NotFound(schema, name), audited: true);
+            }
+
+            // The list row first: lock-free, and what says whose it is - a sequence one of a hidden type's
+            // columns owns is not there for this visitor.
+            CatalogSequence? sequence = await catalog
+                .SequenceAsync(route.Resolved.Database, schema, name, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (sequence is null
+                || gate.Classifier.ClassifySequence(sequence.Schema, sequence.Name, sequence.OwnerSchema, sequence.OwnerTable) is null)
+            {
+                return Refuse(DatabaseRefusal.NotFound, DatabaseObjectAssembler.NotFound(schema, name), audited: false);
+            }
+
+            DatabaseRowAccess allowed = gate.DefinitionAccess(sequence.Schema, DatabaseObjectAssembler.SequenceValueOwnership(gate, sequence));
+            if (!allowed.Allowed)
+            {
+                return Refuse(allowed.Refusal, allowed.Reason ?? "Refused.", audited: true);
+            }
+
+            if (!sequence.CanReadValue)
+            {
+                return Refuse(
+                    DatabaseRefusal.NoPrivilege,
+                    options.Value.SqlConsoleRole is { } role
+                        ? "The role '" + role + "' (MartenStudioOptions.SqlConsoleRole) has neither SELECT nor USAGE on it."
+                        : "The store's Postgres role has neither SELECT nor USAGE on it.",
+                    audited: false);
+            }
+
+            // Only now anything that locks: one sequence, briefly, in a transaction of its own.
+            CatalogSequenceValue? value = await catalog
+                .SequenceValueAsync(route.Resolved.Database, sequence.Schema, sequence.Name, cancellationToken)
+                .ConfigureAwait(false);
+
+            return value is { CanReadValue: true }
+                ? new DatabaseSequenceValue(reference, value.LastValue, DatabaseRefusal.None, null)
+                : Refuse(DatabaseRefusal.NotFound, DatabaseObjectAssembler.NotFound(schema, name), audited: false);
+        }
+        catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
+        {
+            return Refuse(DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception), audited: false);
         }
     }
 
@@ -331,8 +458,9 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             case DatabaseObjectKind.View:
             case DatabaseObjectKind.MaterializedView:
             {
-                // The view's own detail first: a view over a hidden type's table names that table in its
-                // query, so its text is refused for the same reason its rows are.
+                // The view's own detail first, and what it reads and calls judged directly - whatever it is
+                // called and whoever owns it. A view named mt_ over a hidden type's table is Marten's by name
+                // and needs no capability to ask about, and its query names that table all the same.
                 CatalogRelationDetail? detail = await catalog
                     .RelationAsync(resolved.Database, schema, name, cancellationToken)
                     .ConfigureAwait(false);
@@ -344,18 +472,14 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
                 DatabaseObjectDetail shown = DatabaseObjectAssembler.Detail(gate, detail);
 
-                if (shown.Relation is not { } relation)
+                if (shown.Relation is null)
                 {
                     return DatabaseObjectDefinition.Unavailable(reference, shown.Refusal, shown.Reason ?? notFound);
                 }
 
-                if (relation.Rows.Refusal is DatabaseRefusal.HiddenDependency || detail.Dependencies.Truncated)
+                if (DatabaseObjectAssembler.DefinitionRefusal(gate, detail) is { } refused)
                 {
-                    return DatabaseObjectDefinition.Unavailable(
-                        reference,
-                        DatabaseRefusal.HiddenDependency,
-                        "This view's query reads a table whose document type the host hides from the studio " +
-                        "(MartenStudioOptions.IsDocumentTypeVisible), so its definition is not shown.");
+                    return DatabaseObjectDefinition.Unavailable(reference, refused.Refusal, refused.Reason ?? notFound);
                 }
 
                 CatalogDefinition? view = await catalog
@@ -363,7 +487,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                     .ConfigureAwait(false);
 
                 return view?.Sql is { } sql
-                    ? new DatabaseObjectDefinition(reference, sql, null, DatabaseRefusal.None, null)
+                    ? new DatabaseObjectDefinition(reference, gate.Redact(sql), null, DatabaseRefusal.None, null)
                     : DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.NotFound, notFound);
             }
 
@@ -372,8 +496,13 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             case DatabaseObjectKind.WindowFunction:
             case DatabaseObjectKind.Aggregate:
             {
+                if (await IdentityArgumentsAsync(resolved, gate, reference, cancellationToken).ConfigureAwait(false) is not { } arguments)
+                {
+                    return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.NotFound, notFound);
+                }
+
                 CatalogDefinition? routine = await catalog
-                    .RoutineDefinitionAsync(resolved.Database, schema, name, reference.Arguments ?? string.Empty, cancellationToken)
+                    .RoutineDefinitionAsync(resolved.Database, schema, name, arguments, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (routine is null)
@@ -383,7 +512,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
                 return routine.RoutineKind == "a" || routine.Sql is null
                     ? DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.NotApplicable, AggregateHasNoBody)
-                    : new DatabaseObjectDefinition(reference, routine.Sql, null, DatabaseRefusal.None, null);
+                    : new DatabaseObjectDefinition(reference, gate.Redact(routine.Sql), null, DatabaseRefusal.None, null);
             }
 
             case DatabaseObjectKind.Trigger:
@@ -392,9 +521,22 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                     .TriggerDefinitionAsync(resolved.Database, schema, reference.Table!, name, cancellationToken)
                     .ConfigureAwait(false);
 
-                return trigger?.Sql is { } sql
-                    ? new DatabaseObjectDefinition(reference, sql, null, DatabaseRefusal.None, null)
-                    : DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.NotFound, notFound);
+                if (trigger?.Sql is not { } sql)
+                {
+                    return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.NotFound, notFound);
+                }
+
+                // The definition ends EXECUTE FUNCTION schema.name(): a function in a withheld schema is
+                // refused, not masked, because the list already blanks that function's name.
+                if (trigger.FunctionSchema is { } functionSchema && gate.IsWithheld(functionSchema))
+                {
+                    return DatabaseObjectDefinition.Unavailable(
+                        reference,
+                        DatabaseRefusal.WithheldDependency,
+                        "Its function is in a schema you cannot see, and the definition names it.");
+                }
+
+                return new DatabaseObjectDefinition(reference, gate.Redact(sql), null, DatabaseRefusal.None, null);
             }
 
             default:
@@ -416,6 +558,46 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         }
     }
 
+    /// <summary>
+    /// The real identity arguments of the overload <paramref name="reference" /> names, or
+    /// <see langword="null" /> when there is none this visitor could have been shown.
+    /// </summary>
+    /// <remarks>
+    /// A list shows a signature with every withheld schema masked, and a page asks for the definition with
+    /// what it was shown. So a masked signature is matched back to the one overload whose own signature
+    /// masks to it (two that mask alike are ambiguous, and neither is returned); and a signature that
+    /// itself names a withheld schema is one no list showed - somebody typed it to find out whether the
+    /// type exists - and is answered as not found.
+    /// </remarks>
+    private async Task<string?> IdentityArgumentsAsync(
+        ResolvedScope resolved,
+        DatabaseGate gate,
+        DatabaseObjectRef reference,
+        CancellationToken cancellationToken)
+    {
+        string asked = reference.Arguments ?? string.Empty;
+
+        if (!asked.Contains(WithheldNames.Token, StringComparison.Ordinal))
+        {
+            return string.Equals(gate.Redact(asked), asked, StringComparison.Ordinal) ? asked : null;
+        }
+
+        CatalogSnapshot overloads = await catalog
+            .SnapshotAsync(resolved.Database, [reference.Schema], CatalogParts.Routines, reference.Name, cancellationToken)
+            .ConfigureAwait(false);
+
+        string[] matching =
+        [
+            .. overloads.Routines.Items
+                .Where(x => string.Equals(x.Schema, reference.Schema, StringComparison.Ordinal)
+                    && string.Equals(x.Name, reference.Name, StringComparison.Ordinal)
+                    && string.Equals(gate.Redact(x.IdentityArguments), asked, StringComparison.Ordinal))
+                .Select(static x => x.IdentityArguments),
+        ];
+
+        return matching.Length == 1 ? matching[0] : null;
+    }
+
     /// <summary>What an aggregate's definition says.</summary>
     internal const string AggregateHasNoBody =
         "An aggregate has no body Postgres will print: pg_get_functiondef refuses aggregates (42809).";
@@ -431,36 +613,87 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     };
 
     /// <summary>
-    /// The shared front half of every read aimed at a schema that is not the store's own: the
-    /// capability, the tenant-less scope with the capability named, and the schema against the entry list
-    /// as far as the options alone can settle it. Audited; <see langword="null" /> when all three pass.
+    /// Which way a read goes, decided before the database is asked anything: the store's own structure,
+    /// resolved with the visitor's own scope, or a <c>BrowseDatabase</c> read, refused or resolved with no
+    /// tenant.
     /// </summary>
-    private async Task<(DatabaseRefusal Refusal, string Reason)?> RefuseOutsideStoreAsync(
+    /// <param name="scope">The visitor's scope.</param>
+    /// <param name="decide">
+    /// Given the declarations, which way this read goes. Called once, after the store is found and before
+    /// anything else.
+    /// </param>
+    /// <param name="schema">The schema asked about, to settle against the entry list; <see langword="null" /> for none.</param>
+    /// <param name="name">The object asked about, for a "not there" sentence; <see langword="null" /> for none.</param>
+    /// <param name="action">What the audit ring calls the read.</param>
+    /// <param name="target">What it was aimed at.</param>
+    /// <param name="cancellationToken">Cancels the resolution.</param>
+    private async Task<Route> RouteAsync(
         StudioScope scope,
-        string schema,
+        Func<DatabaseDeclarations, RouteKind> decide,
+        string? schema,
+        string? name,
         string action,
         string target,
         CancellationToken cancellationToken)
     {
+        // 1. The store, and its declarations - the store policy for the visitor's own scope, and no database.
+        DatabaseStoreLookup store = await access.FindStoreAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (!store.Found)
+        {
+            return Route.Refused(DatabaseRefusal.Unavailable, store.Refused ?? "The store could not be found.");
+        }
+
+        if (!store.Declarations.Succeeded)
+        {
+            return Route.Refused(DatabaseRefusal.Unavailable, store.Declarations.Failure!);
+        }
+
+        RouteKind kind = decide(store.Declarations);
+
+        if (kind == RouteKind.NotThere)
+        {
+            // Settled by the name alone - a hidden type's table, a per-tenant sequence - so nothing is asked
+            // and nothing is audited: the answer is the one a missing object gets.
+            return Route.Refused(DatabaseRefusal.NotFound, DatabaseObjectAssembler.NotFound(schema ?? string.Empty, name ?? string.Empty));
+        }
+
+        if (kind == RouteKind.Structure)
+        {
+            // 2a. The store's own structure: the visitor's own scope, tenant and all, as every other screen
+            //     resolves it. No capability is needed, so nothing is refused here that a capability would.
+            (ResolvedScope? resolved, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
+
+            return resolved is null
+                ? Route.Refused(DatabaseRefusal.Unavailable, refused!)
+                : new Route(resolved, DatabaseRefusal.None, null);
+        }
+
+        // 2b. A BrowseDatabase read: the capability, the two policies and the tenant-less scope, then the
+        //     schema against the entry list - before the database is asked anything, and never with the
+        //     visitor's tenant.
         DatabaseBrowseGrant grant = await access.RequireBrowseAsync(scope, action, target, cancellationToken)
             .ConfigureAwait(false);
 
         if (!grant.Allowed)
         {
-            return (grant.Refusal, grant.Reason ?? "Refused.");
+            return Route.Refused(grant.Refusal, grant.Reason ?? "Refused.");
         }
 
-        IReadOnlyList<string> entries = [.. options.Value.BrowsableSchemas];
-
-        if (!BrowsableSchemaMatcher.MightMatch(entries, schema))
+        if (schema is not null)
         {
-            string reason = DatabaseGate.SchemaDenial(schema, entries);
-            audit.Record(action, target, succeeded: false, reason, StudioCapability.BrowseDatabase, scope with { TenantId = null });
+            IReadOnlyList<string> entries = [.. options.Value.BrowsableSchemas];
 
-            return (DatabaseRefusal.SchemaNotBrowsable, reason);
+            if (!BrowsableSchemaMatcher.MightMatch(entries, schema))
+            {
+                string reason = DatabaseGate.SchemaDenial(schema, entries);
+                audit.Record(action, target, succeeded: false, reason, StudioCapability.BrowseDatabase, scope with { TenantId = null });
+
+                return Route.Refused(DatabaseRefusal.SchemaNotBrowsable, reason);
+            }
         }
 
-        return null;
+        return new Route(grant.Resolved, DatabaseRefusal.None, null);
     }
 
     private static DatabaseObjectOwnership? ClassifyByName(DatabaseObjectClassifier classifier, DatabaseObjectRef reference) =>
@@ -506,5 +739,30 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         {
             return (null, exception.Message);
         }
+    }
+
+    /// <summary>Which way a read goes, decided from the declarations alone.</summary>
+    private enum RouteKind
+    {
+        /// <summary>The store's own structure, or Marten's own objects in it: no capability needed.</summary>
+        Structure,
+
+        /// <summary>A <c>BrowseDatabase</c> read.</summary>
+        Browse,
+
+        /// <summary>Not there, as far as this visitor is concerned, from its name alone.</summary>
+        NotThere,
+    }
+
+    /// <summary>Where a read goes: a resolved scope, or the refusal.</summary>
+    /// <param name="Resolved">The scope - the visitor's own, or the tenant-less one a grant carries.</param>
+    /// <param name="Refusal">Which gate refused.</param>
+    /// <param name="Reason">The sentence.</param>
+    private sealed record Route(ResolvedScope? Resolved, DatabaseRefusal Refusal, string? Reason)
+    {
+        [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(Resolved))]
+        public bool Allowed => Resolved is not null;
+
+        public static Route Refused(DatabaseRefusal refusal, string reason) => new(null, refusal, reason);
     }
 }

@@ -19,10 +19,66 @@ namespace MartenStudio.Services.Database;
 /// relation outside the schemas shown here" is what the page says. A hidden type's table is different: it
 /// is dropped wherever it would appear, and a view over it is refused its rows.
 /// </para>
+/// <para>
+/// <b>Free text is masked, structure is blanked.</b> Every string Postgres deparsed - a column's type and
+/// default, a constraint's and an index's definition, a routine's signature, result and <c>SET</c>
+/// clauses, a type's description, a comment - goes through <see cref="DatabaseGate.Redact" /> on its way
+/// out, so a withheld schema named inside it becomes <see cref="WithheldNames.Token" />. Every ownership
+/// goes through <see cref="DatabaseGate.Present" />, so another store's identity is shown only to a visitor
+/// that store's policy passes. The gate's decisions are always taken on the unredacted values: a row
+/// grant is judged on the classifier's ownership, never on a presented copy.
+/// </para>
 /// </remarks>
 internal static class DatabaseObjectAssembler
 {
+    /// <summary>
+    /// The overview from exact counts: every visible schema with the number of objects of each kind this
+    /// visitor would be listed - independent of any list's cap.
+    /// </summary>
+    /// <param name="gate">The visitor's gate.</param>
+    /// <param name="counts">
+    /// <see cref="DatabaseCatalog.CountsAsync" />, read over <see cref="DatabaseGate.VisibleSchemas" /> with
+    /// the classifier's hidden tables.
+    /// </param>
+    public static DatabaseBrowserOverview Overview(DatabaseGate gate, IReadOnlyList<CatalogObjectCount> counts)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(counts);
+
+        Dictionary<(string Kind, string Schema), int> byKind = [];
+
+        foreach (CatalogObjectCount count in counts)
+        {
+            byKind[(count.Kind, count.Schema)] = count.Count;
+        }
+
+        int Count(string kind, string schema) => byKind.GetValueOrDefault((kind, schema));
+
+        List<DatabaseSchemaSummary> schemas = [];
+
+        foreach (string schema in gate.VisibleSchemas)
+        {
+            schemas.Add(new DatabaseSchemaSummary(
+                schema,
+                gate.IsStoreSchema(schema),
+                gate.DataAccess(schema).Allowed,
+                Count("tables", schema),
+                Count("views", schema),
+                Count("functions", schema),
+                Count("triggers", schema),
+                Count("sequences", schema),
+                Count("types", schema)));
+        }
+
+        return new DatabaseBrowserOverview(schemas, gate.State, false, DatabaseRefusal.None, null);
+    }
+
     /// <summary>The overview: every visible schema with its per-kind counts.</summary>
+    /// <remarks>
+    /// Counted from list reads, so a count is a floor wherever a kind hit the list's cap -
+    /// <see cref="DatabaseBrowserOverview.Truncated" /> says so. The service reads
+    /// <see cref="Overview(DatabaseGate, IReadOnlyList{CatalogObjectCount})" /> instead.
+    /// </remarks>
     public static DatabaseBrowserOverview Overview(DatabaseGate gate, CatalogSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(gate);
@@ -190,13 +246,11 @@ internal static class DatabaseObjectAssembler
         }
 
         List<DatabaseViewDependency> dependencies = [];
-        bool dependsOnHidden = false;
 
         foreach (CatalogViewDependency dependency in detail.Dependencies.Items)
         {
             if (gate.Classifier.IsHiddenTable(dependency.Schema, dependency.Name))
             {
-                dependsOnHidden = true;
                 dependencies.Add(new DatabaseViewDependency(
                     null, null, DatabaseObjectKinds.FromRelkind(dependency.Kind), dependency.Depth, false, null));
                 continue;
@@ -210,26 +264,31 @@ internal static class DatabaseObjectAssembler
                 DatabaseObjectKinds.FromRelkind(dependency.Kind),
                 dependency.Depth,
                 visible,
-                visible ? gate.Classifier.ClassifyRelation(dependency.Schema, dependency.Name) : null));
+                visible && gate.Classifier.ClassifyRelation(dependency.Schema, dependency.Name) is { } owner
+                    ? gate.Present(owner)
+                    : null));
         }
 
-        // A dependency read that hit its cap may have stopped before the hidden table: the answer then has
-        // to be "not shown", because "nothing hidden underneath" was not established.
+        // Everything the view reads and refers to, judged directly - whatever the view is called and
+        // whoever owns it. A read that hit its cap may have stopped before the table that mattered: the
+        // answer then has to be "not shown", because "nothing underneath" was not established.
+        DatabaseRowAccess? viewRefusal = gate.ViewRefusal(detail.Dependencies.Items, detail.References.Items);
+
         DatabaseRelationSummary summary = Relation(
             gate,
             relation,
             ownership,
             outbound.Count,
             inbound.Count,
-            dependsOnHidden,
-            dependenciesUnknown: detail.Dependencies.Truncated);
+            viewRefusal,
+            dependenciesUnknown: detail.Dependencies.Truncated || detail.References.Truncated);
 
-        List<DatabaseColumnInfo> columns = [.. detail.Columns.Select(static column => new DatabaseColumnInfo(
+        List<DatabaseColumnInfo> columns = [.. detail.Columns.Select(column => new DatabaseColumnInfo(
             column.Name,
             column.Position,
-            column.Type,
+            gate.Redact(column.Type) ?? column.Type,
             !column.NotNull,
-            column.Default,
+            gate.Redact(column.Default),
             column.Identity switch
             {
                 "a" => DatabaseIdentityKind.Always,
@@ -238,16 +297,17 @@ internal static class DatabaseObjectAssembler
             },
             !string.IsNullOrEmpty(column.Generated),
             column.Sortable,
-            column.Comment,
+            gate.RedactText(column.Comment),
             DatabaseCatalogQueries.IsQuotable(column.Name)))];
 
         return new DatabaseObjectDetail(
             summary,
             columns,
             RowKey(detail),
-            [.. detail.Constraints.Select(static x => new DatabaseConstraintInfo(x.Name, ConstraintKind(x.Kind), x.Definition))],
-            [.. detail.Indexes.Select(static x => new DatabaseIndexInfo(
-                x.Name, x.Definition, x.IsPrimary, x.IsUnique, x.IsValid, x.HasPredicate, x.KeyColumns))],
+            [.. detail.Constraints.Select(x => new DatabaseConstraintInfo(
+                x.Name, ConstraintKind(x.Kind), gate.Redact(x.Definition) ?? x.Definition))],
+            [.. detail.Indexes.Select(x => new DatabaseIndexInfo(
+                x.Name, gate.Redact(x.Definition) ?? x.Definition, x.IsPrimary, x.IsUnique, x.IsValid, x.HasPredicate, x.KeyColumns))],
             [.. Triggers(gate, detail.Triggers)],
             outbound,
             inbound,
@@ -255,6 +315,33 @@ internal static class DatabaseObjectAssembler
             gate.State,
             DatabaseRefusal.None,
             null);
+    }
+
+    /// <summary>
+    /// Why a view's query may not be shown to this visitor - everything it reads and refers to, judged
+    /// directly, and "unknown" when a read hit its cap - or <see langword="null" /> when it may.
+    /// </summary>
+    /// <remarks>
+    /// The same verdict as its rows', minus the facts that are only about rows (a foreign table, a role with
+    /// no <c>SELECT</c>): a view whose rows would show a hidden type's data, a withheld schema's data or
+    /// whatever a function returns has a query that names them.
+    /// </remarks>
+    public static DatabaseRowAccess? DefinitionRefusal(DatabaseGate gate, CatalogRelationDetail detail)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(detail);
+
+        if (gate.ViewRefusal(detail.Dependencies.Items, detail.References.Items) is { } refused)
+        {
+            return refused;
+        }
+
+        return detail.Dependencies.Truncated || detail.References.Truncated
+            ? DatabaseRowAccess.Refused(
+                DatabaseRefusal.HiddenDependency,
+                "This view reads more than the studio checks in one go, so it cannot say that nothing under it " +
+                "is hidden or withheld, and its query is not shown.")
+            : null;
     }
 
     /// <summary>
@@ -311,6 +398,33 @@ internal static class DatabaseObjectAssembler
         int foreignKeysOut,
         int foreignKeysIn,
         bool dependsOnHidden,
+        bool dependenciesUnknown) =>
+        Relation(
+            gate,
+            relation,
+            ownership,
+            foreignKeysOut,
+            foreignKeysIn,
+            dependsOnHidden
+                ? DatabaseRowAccess.Refused(DatabaseRefusal.HiddenDependency, DatabaseGate.HiddenDependencyDenial)
+                : null,
+            dependenciesUnknown);
+
+    /// <summary>One relation, summarised through the gate.</summary>
+    /// <param name="gate">The visitor's gate.</param>
+    /// <param name="relation">The relation, as the catalog has it.</param>
+    /// <param name="ownership">Whose it is, as the classifier has it; it is presented on the way out.</param>
+    /// <param name="foreignKeysOut">Its foreign keys this visitor may see.</param>
+    /// <param name="foreignKeysIn">Keys into it this visitor may see.</param>
+    /// <param name="viewRefusal">For a view, <see cref="DatabaseGate.ViewRefusal" />'s answer.</param>
+    /// <param name="dependenciesUnknown">Whether a read of what the views reference hit its cap.</param>
+    public static DatabaseRelationSummary Relation(
+        DatabaseGate gate,
+        CatalogRelation relation,
+        DatabaseObjectOwnership ownership,
+        int foreignKeysOut,
+        int foreignKeysIn,
+        DatabaseRowAccess? viewRefusal,
         bool dependenciesUnknown)
     {
         ArgumentNullException.ThrowIfNull(gate);
@@ -320,7 +434,8 @@ internal static class DatabaseObjectAssembler
         DatabaseObjectKind kind = DatabaseObjectKinds.FromRelkind(relation.Kind);
         bool isView = kind is DatabaseObjectKind.View or DatabaseObjectKind.MaterializedView;
 
-        DatabaseRowAccess rows = gate.RowsFor(relation, ownership, dependsOnHidden);
+        DatabaseRowAccess? refusal = isView ? viewRefusal : null;
+        DatabaseRowAccess rows = gate.RowsFor(relation, ownership, refusal);
 
         if (rows.Allowed && isView && dependenciesUnknown)
         {
@@ -334,22 +449,27 @@ internal static class DatabaseObjectAssembler
             kind,
             relation.Schema,
             relation.Name,
-            ownership,
-            relation.Comment,
+            gate.Present(ownership),
+            gate.RedactText(relation.Comment),
             DatabaseCatalogQueries.IsQuotable(relation.Schema) && DatabaseCatalogQueries.IsQuotable(relation.Name),
             relation.EstimatedRows,
             relation.SizeBytes,
             relation.HasPrimaryKey,
             foreignKeysOut,
             foreignKeysIn,
-            relation.PartitionCount,
+            // F9: the number of a per-tenant table's partitions is the number of tenants. The store's own
+            // schemas show structure without the capability; this number is not structure.
+            gate.IsOpen ? relation.PartitionCount : null,
             relation.Unlogged,
             relation.Populated,
             relation.RowSecurity,
             relation.ForeignServer,
             relation.Readable,
             rows,
-            isView && gate.DefinitionAccess(relation.Schema, ownership).Allowed);
+            isView
+                && refusal is not { Allowed: false }
+                && !dependenciesUnknown
+                && gate.DefinitionAccess(relation.Schema, ownership).Allowed);
     }
 
     private static IEnumerable<DatabaseObjectSummary> Relations(
@@ -373,15 +493,21 @@ internal static class DatabaseObjectAssembler
             }
         }
 
-        HashSet<(string, string)> hiddenUnderneath = [];
+        // Per view: what it reads and what it refers to, judged once each.
+        Dictionary<(string, string), List<CatalogViewDependency>> reads = [];
+        Dictionary<(string, string), List<CatalogViewReference>> refersTo = [];
 
         foreach (CatalogViewDependency dependency in snapshot.ViewDependencies.Items)
         {
-            if (gate.Classifier.IsHiddenTable(dependency.Schema, dependency.Name))
-            {
-                hiddenUnderneath.Add((dependency.ViewSchema, dependency.ViewName));
-            }
+            Add(reads, (dependency.ViewSchema, dependency.ViewName), dependency);
         }
+
+        foreach (CatalogViewReference reference in snapshot.ViewReferences.Items)
+        {
+            Add(refersTo, (reference.ViewSchema, reference.ViewName), reference);
+        }
+
+        bool unknown = snapshot.ViewDependencies.Truncated || snapshot.ViewReferences.Truncated;
 
         foreach (CatalogRelation relation in snapshot.Relations.Items)
         {
@@ -397,15 +523,34 @@ internal static class DatabaseObjectAssembler
                 continue;
             }
 
+            (string, string) key = (relation.Schema, relation.Name);
+
+            DatabaseRowAccess? viewRefusal = kind is DatabaseObjectKind.View or DatabaseObjectKind.MaterializedView
+                ? gate.ViewRefusal(
+                    reads.TryGetValue(key, out List<CatalogViewDependency>? read) ? read : [],
+                    refersTo.TryGetValue(key, out List<CatalogViewReference>? refers) ? refers : [])
+                : null;
+
             yield return Relation(
                 gate,
                 relation,
                 ownership,
-                outbound.GetValueOrDefault((relation.Schema, relation.Name)),
-                inbound.GetValueOrDefault((relation.Schema, relation.Name)),
-                hiddenUnderneath.Contains((relation.Schema, relation.Name)),
-                dependenciesUnknown: snapshot.ViewDependencies.Truncated);
+                outbound.GetValueOrDefault(key),
+                inbound.GetValueOrDefault(key),
+                viewRefusal,
+                dependenciesUnknown: unknown);
         }
+    }
+
+    private static void Add<T>(Dictionary<(string, string), List<T>> map, (string, string) key, T item)
+    {
+        if (!map.TryGetValue(key, out List<T>? items))
+        {
+            items = [];
+            map[key] = items;
+        }
+
+        items.Add(item);
     }
 
     private static IEnumerable<DatabaseObjectSummary> Routines(DatabaseGate gate, IReadOnlyList<CatalogRoutine> routines)
@@ -424,11 +569,14 @@ internal static class DatabaseObjectAssembler
                 kind,
                 routine.Schema,
                 routine.Name,
-                ownership,
-                routine.Comment,
+                gate.Present(ownership),
+                gate.RedactText(routine.Comment),
                 DatabaseCatalogQueries.IsQuotable(routine.Schema) && DatabaseCatalogQueries.IsQuotable(routine.Name),
-                routine.IdentityArguments,
-                routine.Result,
+                // The identity arguments are what a definition is asked for by (DatabaseObjectRef.Arguments),
+                // so the service matches a masked signature back to its overload rather than trusting text a
+                // page could have typed.
+                gate.Redact(routine.IdentityArguments) ?? routine.IdentityArguments,
+                gate.Redact(routine.Result),
                 routine.Language,
                 routine.Volatility switch
                 {
@@ -438,7 +586,7 @@ internal static class DatabaseObjectAssembler
                 },
                 routine.SecurityDefiner,
                 routine.Config.Any(static x => x.StartsWith("search_path=", StringComparison.OrdinalIgnoreCase)),
-                routine.Config,
+                gate.RedactConfig(routine.Config),
                 kind != DatabaseObjectKind.Aggregate && gate.DefinitionAccess(routine.Schema, ownership).Allowed);
         }
     }
@@ -454,20 +602,21 @@ internal static class DatabaseObjectAssembler
                 continue;
             }
 
-            bool functionVisible = gate.CanSeeStructure(trigger.FunctionSchema)
-                || BrowsableSchemaMatcher.IsSystemSchema(trigger.FunctionSchema);
+            // A trigger's definition names its function, schema and all: one in a withheld schema is not
+            // shown, and neither is the definition that would print it.
+            bool functionVisible = !gate.IsWithheld(trigger.FunctionSchema);
 
             yield return new DatabaseTriggerSummary(
                 DatabaseObjectKind.Trigger,
                 trigger.Schema,
                 trigger.Name,
-                ownership,
+                gate.Present(ownership),
                 null,
                 DatabaseCatalogQueries.IsQuotable(trigger.Schema)
                     && DatabaseCatalogQueries.IsQuotable(trigger.Table)
                     && DatabaseCatalogQueries.IsQuotable(trigger.Name),
                 trigger.Table,
-                tableOwnership,
+                gate.Present(tableOwnership),
                 TriggerTiming(trigger.Type),
                 TriggerEvents(trigger.Type),
                 (trigger.Type & RowBit) != 0,
@@ -476,7 +625,7 @@ internal static class DatabaseObjectAssembler
                 functionVisible ? trigger.FunctionSchema : null,
                 functionVisible ? trigger.FunctionName : null,
                 trigger.IsConstraintTrigger,
-                gate.DefinitionAccess(trigger.Schema, ownership).Allowed);
+                functionVisible && gate.DefinitionAccess(trigger.Schema, ownership).Allowed);
         }
     }
 
@@ -504,14 +653,18 @@ internal static class DatabaseObjectAssembler
 
             bool owned = sequence.OwnerSchema is not null && sequence.OwnerTable is not null;
             bool ownerVisible = owned && gate.CanSeeStructure(sequence.OwnerSchema!);
-            bool valueAllowed = sequence.CanReadValue && gate.DefinitionAccess(sequence.Schema, ownership).Allowed;
+
+            // Whether asking for the value (IDatabaseObjectService.GetSequenceValueAsync) would be answered -
+            // decided by name, exactly as that call decides it, so a control drawn enabled is one whose call
+            // passes. The value itself is never in a list: reading it locks the sequence.
+            bool valueAllowed = sequence.CanReadValue && gate.DefinitionAccess(sequence.Schema, SequenceValueOwnership(gate, sequence)).Allowed;
 
             yield return new DatabaseSequenceSummary(
                 DatabaseObjectKind.Sequence,
                 sequence.Schema,
                 sequence.Name,
-                ownership,
-                sequence.Comment,
+                gate.Present(ownership),
+                gate.RedactText(sequence.Comment),
                 DatabaseCatalogQueries.IsQuotable(sequence.Schema) && DatabaseCatalogQueries.IsQuotable(sequence.Name),
                 sequence.DataType,
                 sequence.Start,
@@ -520,14 +673,16 @@ internal static class DatabaseObjectAssembler
                 sequence.Maximum,
                 sequence.Cycles,
                 valueAllowed,
-                valueAllowed ? sequence.LastValue : null,
+                null,
                 ownerVisible ? sequence.OwnerSchema : null,
                 ownerVisible ? sequence.OwnerTable : null,
                 ownerVisible ? sequence.OwnerColumn : null,
                 owned && !ownerVisible,
-                string.Equals(sequence.Name, DatabaseObjectClassifier.EventSequence, StringComparison.OrdinalIgnoreCase)
-                    ? perTenant.GetValueOrDefault(sequence.Schema)
-                    : 0);
+                !gate.IsOpen
+                    ? null // F9: how many per-tenant sequences there are is how many tenants there are.
+                    : string.Equals(sequence.Name, DatabaseObjectClassifier.EventSequence, StringComparison.OrdinalIgnoreCase)
+                        ? perTenant.GetValueOrDefault(sequence.Schema)
+                        : 0);
         }
     }
 
@@ -558,17 +713,30 @@ internal static class DatabaseObjectAssembler
             type.Schema,
             type.Name,
             ownership,
-            type.Comment,
+            gate.RedactText(type.Comment),
             DatabaseCatalogQueries.IsQuotable(type.Schema) && DatabaseCatalogQueries.IsQuotable(type.Name),
-            described ? type.BaseType : null,
+            described ? gate.Redact(type.BaseType) : null,
             described && type.NotNull,
-            described ? type.Default : null,
+            described ? gate.Redact(type.Default) : null,
             described ? type.Labels : [],
-            described ? type.Checks : [],
-            described ? [.. type.Attributes.Select(static x => new DatabaseTypeAttribute(x.Name, x.Type))] : [],
-            described ? type.RangeSubtype : null,
+            described ? [.. type.Checks.Select(x => gate.Redact(x) ?? x)] : [],
+            described ? [.. type.Attributes.Select(x => new DatabaseTypeAttribute(x.Name, gate.Redact(x.Type) ?? x.Type))] : [],
+            described ? gate.Redact(type.RangeSubtype) : null,
             type.UsedByColumns,
             described);
+    }
+
+    /// <summary>
+    /// Whose a sequence is for the purpose of reading its value: by its name alone, which is all the
+    /// service has when the value is asked for - so the list's <c>CanReadValue</c> and the call agree.
+    /// </summary>
+    internal static DatabaseObjectOwnership SequenceValueOwnership(DatabaseGate gate, CatalogSequence sequence)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(sequence);
+
+        return gate.Classifier.ClassifySequence(sequence.Schema, sequence.Name, null, null)
+            ?? new DatabaseObjectOwnership(DatabaseObjectOwner.Other);
     }
 
     /// <summary>A key as its pointing table shows it, or <see langword="null" /> when it points into a hidden type.</summary>
@@ -592,7 +760,7 @@ internal static class DatabaseObjectAssembler
             visible ? key.LinkedTable : null,
             visible ? key.LinkedColumns : [],
             visible,
-            visible ? gate.Classifier.ClassifyRelation(key.LinkedSchema, key.LinkedTable) : null,
+            visible && gate.Classifier.ClassifyRelation(key.LinkedSchema, key.LinkedTable) is { } far ? gate.Present(far) : null,
             key.Validated,
             Action(key.OnDelete),
             Action(key.OnUpdate));
@@ -621,7 +789,7 @@ internal static class DatabaseObjectAssembler
             key.LinkedTable,
             key.LinkedColumns,
             true,
-            gate.Classifier.ClassifyRelation(key.Schema, key.Table),
+            gate.Classifier.ClassifyRelation(key.Schema, key.Table) is { } near ? gate.Present(near) : null,
             key.Validated,
             Action(key.OnDelete),
             Action(key.OnUpdate));

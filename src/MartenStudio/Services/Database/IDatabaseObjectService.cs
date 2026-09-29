@@ -71,4 +71,23 @@ internal interface IDatabaseObjectService
         StudioScope scope,
         DatabaseObjectRef reference,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// One sequence's last value, read when asked for and never as part of a list - reading it takes a
+    /// <c>RowExclusiveLock</c> on the sequence, so it is one sequence, in a short read-only transaction of
+    /// its own.
+    /// </summary>
+    /// <remarks>
+    /// Gated like a definition: Marten's own sequences (by name) in the store's own schemas need no
+    /// capability; anybody else's value is a <c>BrowseDatabase</c> read - the capability, both policies for
+    /// the database with no tenant, and a schema <c>BrowsableSchemas</c> admits - refused and audited in
+    /// that order, before anything is locked. A list's <see cref="DatabaseSequenceSummary.CanReadValue" />
+    /// answers exactly this question, and its <see cref="DatabaseSequenceSummary.LastValue" /> is always
+    /// <see langword="null" />. A per-tenant event sequence, or one a hidden type's column owns, is not there.
+    /// </remarks>
+    Task<DatabaseSequenceValue> GetSequenceValueAsync(
+        StudioScope scope,
+        string schema,
+        string name,
+        CancellationToken cancellationToken = default);
 }

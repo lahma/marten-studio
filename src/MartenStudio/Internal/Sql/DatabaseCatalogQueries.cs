@@ -97,7 +97,7 @@ internal sealed record CatalogTrigger(
     string FunctionName,
     bool IsConstraintTrigger);
 
-/// <summary>One sequence, with its value only when the reading role may see it.</summary>
+/// <summary>One sequence, as a list reads it: its settings, never its value.</summary>
 /// <param name="Schema">Its schema.</param>
 /// <param name="Name">Its name.</param>
 /// <param name="DataType">Its data type.</param>
@@ -107,7 +107,11 @@ internal sealed record CatalogTrigger(
 /// <param name="Maximum"><c>seqmax</c>.</param>
 /// <param name="Cycles"><c>seqcycle</c>.</param>
 /// <param name="CanReadValue">Whether the reading role has <c>SELECT</c> or <c>USAGE</c> on it.</param>
-/// <param name="LastValue"><c>pg_sequence_last_value</c>, or <see langword="null" /> - never called, or not readable.</param>
+/// <param name="LastValue">
+/// Always <see langword="null" /> from a list: <c>pg_sequence_last_value</c> takes a lock on the sequence it
+/// reads, so the value is read on demand, one sequence at a time
+/// (<see cref="DatabaseCatalogQueries.ReadSequenceValueAsync" />).
+/// </param>
 /// <param name="OwnerSchema">The owning table's schema, for an owned sequence.</param>
 /// <param name="OwnerTable">The owning table.</param>
 /// <param name="OwnerColumn">The owning column.</param>
@@ -201,6 +205,46 @@ internal sealed record CatalogViewDependency(
     string Kind,
     int Depth);
 
+/// <summary>
+/// One thing a view or materialized view refers to that is not a relation it reads rows from: a function,
+/// an operator, a sequence or a type - directly, or through another view.
+/// </summary>
+/// <param name="ViewSchema">The view's schema.</param>
+/// <param name="ViewName">The view's name.</param>
+/// <param name="Kind"><c>f</c> a function, <c>o</c> an operator, <c>S</c> a sequence, <c>t</c> a type.</param>
+/// <param name="Schema">Its schema - never <c>pg_catalog</c> or <c>information_schema</c>, which are not read.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="UserCode">
+/// For a function (called directly, or the one behind an operator): that it is not an extension's, so it
+/// is code somebody wrote and the studio cannot tell what it reads.
+/// </param>
+/// <param name="Depth">One when the view refers to it directly, more through another view.</param>
+internal sealed record CatalogViewReference(
+    string ViewSchema,
+    string ViewName,
+    string Kind,
+    string Schema,
+    string Name,
+    bool UserCode,
+    int Depth);
+
+/// <summary>How many objects of one kind one schema holds, as the browser would list them.</summary>
+/// <param name="Kind">
+/// <c>tables</c>, <c>views</c>, <c>functions</c>, <c>triggers</c>, <c>sequences</c> or <c>types</c> - one per
+/// browser tab.
+/// </param>
+/// <param name="Schema">The schema.</param>
+/// <param name="Count">The exact count.</param>
+internal sealed record CatalogObjectCount(string Kind, string Schema, int Count);
+
+/// <summary>A sequence's value, read on demand.</summary>
+/// <param name="CanReadValue">Whether the reading role has <c>SELECT</c> or <c>USAGE</c> on it.</param>
+/// <param name="LastValue">
+/// <c>pg_sequence_last_value</c>: <see langword="null" /> when the sequence has never been called, or when
+/// the role may not read it.
+/// </param>
+internal sealed record CatalogSequenceValue(bool CanReadValue, long? LastValue);
+
 /// <summary>One column of a relation.</summary>
 /// <param name="Name">The column name.</param>
 /// <param name="Position"><c>attnum</c>.</param>
@@ -265,12 +309,22 @@ internal sealed record CatalogRelationDetail(
     IReadOnlyList<CatalogIndex> Indexes,
     IReadOnlyList<CatalogTrigger> Triggers,
     CatalogList<CatalogForeignKey> ForeignKeys,
-    CatalogList<CatalogViewDependency> Dependencies);
+    CatalogList<CatalogViewDependency> Dependencies)
+{
+    /// <summary>
+    /// For a view or materialized view, the functions, operators, sequences and types it refers to,
+    /// followed through other views - what <see cref="Dependencies" /> does not hold, and what decides
+    /// whether the view calls code the studio cannot see into, or reaches into a schema the visitor may
+    /// not see.
+    /// </summary>
+    public CatalogList<CatalogViewReference> References { get; init; } = CatalogList<CatalogViewReference>.Empty;
+}
 
 /// <summary>A definition, as Postgres reconstructs it.</summary>
 /// <param name="Sql">The text, or <see langword="null" /> when there is none to show (an aggregate).</param>
 /// <param name="RoutineKind">For a routine, its <c>prokind</c>.</param>
-internal sealed record CatalogDefinition(string? Sql, string? RoutineKind);
+/// <param name="FunctionSchema">For a trigger, the schema of the function it executes.</param>
+internal sealed record CatalogDefinition(string? Sql, string? RoutineKind, string? FunctionSchema = null);
 
 /// <summary>
 /// The <c>pg_catalog</c> reads behind the database browser.
@@ -301,6 +355,32 @@ internal sealed record CatalogDefinition(string? Sql, string? RoutineKind);
 /// times, so sizes here are <c>relpages</c> times the block size - the planner's own figure.
 /// </para>
 /// <para>
+/// <b>A list locks nothing.</b> Every function a list statement calls reads the system catalogs or the
+/// statistics collector and takes no lock on the object it describes - measured on PG 17 against
+/// <c>pg_locks</c> for the calling backend (<c>DatabaseCatalogLockLiveTests</c>): <c>format_type</c>,
+/// <c>pg_get_constraintdef</c>, <c>pg_get_function_*</c>, <c>has_*_privilege</c>,
+/// <c>obj_description</c>, <c>pg_stat_get_*</c> and <c>to_regtype</c> leave none. Two that do were taken
+/// out, because a list reads every part in one transaction and its locks pile up until it ends:
+/// <c>pg_partition_tree</c> (through <c>find_all_inheritors</c>, one <c>AccessShareLock</c> per partition -
+/// 308 for a parent with 300, and a Marten store partitioned per tenant has thousands) is replaced by a
+/// recursive walk of <c>pg_inherits</c>; <c>pg_sequence_last_value</c> (one <c>RowExclusiveLock</c> per
+/// sequence, through <c>init_sequence</c>) is read on demand, for one sequence, by
+/// <see cref="SequenceValueSql" />. Enough of either overflows the shared lock table
+/// (<c>max_locks_per_transaction</c> times <c>max_connections</c>) with <c>53200</c> for every session in
+/// the cluster, queues behind partition DDL, and fails the whole list with <c>55P03</c> when a partition is
+/// dropped beside it. The detail reads of one object may lock that object briefly: <c>pg_get_viewdef</c>
+/// takes an <c>AccessShareLock</c> on every relation the view reads until its transaction ends, and
+/// <c>pg_get_expr</c> and <c>pg_get_triggerdef</c> take one and release it.
+/// </para>
+/// <para>
+/// <b>Deparsed text names every schema.</b> <c>format_type</c>, <c>pg_get_expr</c>, <c>pg_get_viewdef</c>,
+/// <c>pg_get_triggerdef</c>, <c>pg_get_indexdef</c> and <c>pg_get_constraintdef</c> qualify a name only when
+/// the <c>search_path</c> would not find it - so a withheld schema on the reading role's path would come
+/// out unqualified and could not be masked. <see cref="PinSearchPathSql" /> runs first in every catalog
+/// transaction and leaves <c>pg_catalog</c> alone on the path, so everything else is printed with its
+/// schema, and the database browser's redaction (<c>WithheldNames</c>) can find it.
+/// </para>
+/// <para>
 /// <b>A catalog is read while other people change it.</b> Every <c>has_*_privilege(oid, …)</c> answers
 /// <c>NULL</c> rather than raising for an object dropped between the scan and the call - a migration, or
 /// another application recreating its schema - so each one is <c>coalesce</c>d to <see langword="false" />:
@@ -320,6 +400,20 @@ internal sealed record CatalogDefinition(string? Sql, string? RoutineKind);
 /// </remarks>
 internal static class DatabaseCatalogQueries
 {
+    /// <summary>
+    /// Leaves <c>pg_catalog</c> alone on the <c>search_path</c> for the rest of the transaction, so every
+    /// deparsed name outside it is printed with its schema. A constant, with no parameter at all.
+    /// </summary>
+    /// <remarks>
+    /// Every statement here already qualifies every built-in function and table it names, which is what
+    /// makes this safe to run first: nothing below relies on the reading role's own path. The setting is
+    /// local to the transaction, which the read-only session always rolls back.
+    /// </remarks>
+    internal const string PinSearchPathSql =
+        """
+        select pg_catalog.set_config('search_path', 'pg_catalog', true)
+        """;
+
     /// <summary>
     /// Every schema, with <c>USAGE</c> and extension ownership. The one statement with no schema filter.
     /// </summary>
@@ -345,24 +439,53 @@ internal static class DatabaseCatalogQueries
 
     /// <summary>Tables, partitioned tables, views, materialized views and foreign tables.</summary>
     /// <remarks>
+    /// <para>
     /// <c>@exact</c> is empty for a list and a name for a lookup; <c>@q</c> is empty for "everything".
     /// Both are typed <c>text</c> parameters, so neither needs a second statement text.
+    /// </para>
+    /// <para>
+    /// A partitioned table's estimate and size are the sums over its partition tree, walked through
+    /// <c>pg_inherits</c> - catalog rows only. <c>pg_partition_tree</c> gives the same answer and takes an
+    /// <c>AccessShareLock</c> on every partition it visits (see the class remarks). The walk starts only from
+    /// the partitioned tables this read would list, so a lookup of one relation walks at most its own tree.
+    /// A leaf is a partition that is not itself partitioned: its <c>reltuples</c> count, and the sum is
+    /// <see langword="null" /> when none of them has an estimate, as <c>pg_partition_tree</c> made it.
+    /// </para>
     /// </remarks>
     internal const string RelationsSql =
         """
+        with recursive tree (root, relid) as (
+            select p.oid, i.inhrelid
+            from pg_catalog.pg_class p
+            join pg_catalog.pg_namespace pn on pn.oid = p.relnamespace
+            join pg_catalog.pg_inherits i on i.inhparent = p.oid
+            where p.relkind = 'p'
+              and not p.relispartition
+              and pn.nspname = any(@schemas)
+              and pg_catalog.strpos(pg_catalog.lower(p.relname::text), pg_catalog.lower(@q)) > 0
+              and (@exact = '' or p.relname::text = @exact)
+            union all
+            select tree.root, i.inhrelid
+            from tree
+            join pg_catalog.pg_inherits i on i.inhparent = tree.relid
+        ),
+        partitioned (root, estimated, pages) as (
+            select tree.root,
+                   case
+                       when pg_catalog.bool_and(x.reltuples < 0) filter (where x.relkind <> 'p') then null
+                       else (pg_catalog.sum(greatest(x.reltuples, 0)) filter (where x.relkind <> 'p'))::bigint
+                   end,
+                   pg_catalog.sum(x.relpages::bigint)
+            from tree
+            join pg_catalog.pg_class x on x.oid = tree.relid
+            group by tree.root
+        )
         select c.oid,
                n.nspname::text,
                c.relname::text,
                c.relkind::text,
                case
-                   when c.relkind = 'p' then (
-                       select case
-                                  when pg_catalog.bool_and(x.reltuples < 0) then null
-                                  else pg_catalog.sum(greatest(x.reltuples, 0))::bigint
-                              end
-                       from pg_catalog.pg_partition_tree(c.oid) pt
-                       join pg_catalog.pg_class x on x.oid = pt.relid
-                       where pt.isleaf)
+                   when c.relkind = 'p' then pt.estimated
                    when c.relkind in ('v', 'f') then null
                    when c.reltuples < 0 then null
                    when c.reltuples = 0
@@ -373,10 +496,7 @@ internal static class DatabaseCatalogQueries
                    else c.reltuples::bigint
                end,
                case
-                   when c.relkind = 'p' then (
-                       select coalesce(pg_catalog.sum(x.relpages::bigint), 0)
-                       from pg_catalog.pg_partition_tree(c.oid) pt
-                       join pg_catalog.pg_class x on x.oid = pt.relid)
+                   when c.relkind = 'p' then coalesce(pt.pages, 0)
                    else c.relpages::bigint
                end * pg_catalog.current_setting('block_size')::bigint,
                c.relrowsecurity,
@@ -395,6 +515,7 @@ internal static class DatabaseCatalogQueries
                exists (select 1 from pg_catalog.pg_index pk where pk.indrelid = c.oid and pk.indisprimary)
         from pg_catalog.pg_class c
         join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+        left join partitioned pt on pt.root = c.oid
         left join pg_catalog.pg_foreign_table ft on ft.ftrelid = c.oid
         left join pg_catalog.pg_foreign_server fs on fs.oid = ft.ftserver
         where c.relkind in ('r', 'p', 'v', 'm', 'f')
@@ -484,13 +605,14 @@ internal static class DatabaseCatalogQueries
         """;
 
     /// <summary>
-    /// Sequences, with the last value only where the role may read it and the owning column where there
-    /// is one (<c>pg_depend</c> <c>'a'</c> for <c>serial</c>, <c>'i'</c> for an identity column).
+    /// Sequences, with the owning column where there is one (<c>pg_depend</c> <c>'a'</c> for
+    /// <c>serial</c>, <c>'i'</c> for an identity column) - and never their values.
     /// </summary>
     /// <remarks>
-    /// <c>pg_sequence_last_value</c> raises for a role with neither <c>SELECT</c> nor <c>USAGE</c>, so it is
-    /// behind the same <c>has_sequence_privilege</c> test <c>pg_sequences</c> itself uses; the function is
-    /// volatile, so the <c>case</c> is not folded away.
+    /// <c>pg_sequence_last_value</c> opens the sequence through <c>init_sequence</c>, which takes a
+    /// <c>RowExclusiveLock</c> held to the end of the transaction - one per sequence a list read, and a
+    /// Marten store with per-tenant event sequences has one per tenant. So a list says only whether the role
+    /// could read the value, and <see cref="SequenceValueSql" /> reads it for one sequence when asked.
     /// </remarks>
     internal const string SequencesSql =
         """
@@ -503,10 +625,6 @@ internal static class DatabaseCatalogQueries
                s.seqmax,
                s.seqcycle,
                coalesce(pg_catalog.has_sequence_privilege(c.oid, 'SELECT,USAGE'), false),
-               case
-                   when pg_catalog.has_sequence_privilege(c.oid, 'SELECT,USAGE')
-                   then pg_catalog.pg_sequence_last_value(c.oid::pg_catalog.regclass)
-               end,
                own.nspname::text,
                oc.relname::text,
                a.attname::text,
@@ -535,6 +653,37 @@ internal static class DatabaseCatalogQueries
                 and d.deptype = 'e')
         order by n.nspname, c.relname
         limit @cap
+        """;
+
+    /// <summary>
+    /// One sequence's last value, asked for on its own: whether the role may read it, and the value when
+    /// it may.
+    /// </summary>
+    /// <remarks>
+    /// The only statement here that locks what it reads - <c>pg_sequence_last_value</c> takes a
+    /// <c>RowExclusiveLock</c> on the sequence - which is why it reads exactly one, by exact name, in a
+    /// transaction of its own that ends as soon as it has answered. The function raises for a role with
+    /// neither <c>SELECT</c> nor <c>USAGE</c>, so it is behind the same <c>has_sequence_privilege</c> test
+    /// <c>pg_sequences</c> itself uses; the function is volatile, so the <c>case</c> is not folded away.
+    /// </remarks>
+    internal const string SequenceValueSql =
+        """
+        select coalesce(pg_catalog.has_sequence_privilege(c.oid, 'SELECT,USAGE'), false),
+               case
+                   when pg_catalog.has_sequence_privilege(c.oid, 'SELECT,USAGE')
+                   then pg_catalog.pg_sequence_last_value(c.oid::pg_catalog.regclass)
+               end
+        from pg_catalog.pg_class c
+        join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+        where c.relkind = 'S'
+          and n.nspname = any(@schemas)
+          and c.relname::text = @exact
+          and not exists (
+              select 1
+              from pg_catalog.pg_depend d
+              where d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                and d.objid = c.oid
+                and d.deptype = 'e')
         """;
 
     /// <summary>
@@ -693,6 +842,246 @@ internal static class DatabaseCatalogQueries
         """;
 
     /// <summary>
+    /// What every view and materialized view in the schema set refers to besides the relations it reads:
+    /// the functions it calls, the operators it uses and the functions behind them, the sequences and the
+    /// types it names - through other views too, like <see cref="ViewDependenciesSql" />.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why.</b> <see cref="ViewDependenciesSql" /> follows only <c>pg_class</c> references, so a view that
+    /// reads a hidden document type's table <em>through a function</em> looked like a view over nothing:
+    /// its rows and its query were granted. A function's body is source text Postgres records no
+    /// dependency for, so the studio cannot tell what it reads - which is what
+    /// <see cref="CatalogViewReference.UserCode" /> says, for every function outside <c>pg_catalog</c> and
+    /// <c>information_schema</c> that no extension owns. An operator is recorded as the operator, not as the
+    /// function it runs, so both are returned. The rest - sequences, types, operators - are here for their
+    /// schema: a view that names one in a schema the visitor may not see is a view whose query and rows
+    /// reach into that schema.
+    /// </para>
+    /// <para>
+    /// References into <c>pg_catalog</c> and <c>information_schema</c> are never returned: they are
+    /// Postgres' own and say nothing about anybody's schema. The walk is the same as
+    /// <see cref="ViewDependenciesSql" />'s: every view in the set, then the relations its rule reads,
+    /// recursively to a depth of sixteen, and the rules of all of them.
+    /// </para>
+    /// </remarks>
+    internal const string ViewReferencesSql =
+        """
+        with recursive walk (view_oid, rel_oid, depth) as (
+            select v.oid, v.oid, 0
+            from pg_catalog.pg_class v
+            join pg_catalog.pg_namespace vn on vn.oid = v.relnamespace
+            where v.relkind in ('v', 'm')
+              and vn.nspname = any(@schemas)
+              and (@exact = '' or v.relname::text = @exact)
+            union
+            select walk.view_oid, d.refobjid, walk.depth + 1
+            from walk
+            join pg_catalog.pg_rewrite r on r.ev_class = walk.rel_oid
+            join pg_catalog.pg_depend d
+              on d.classid = 'pg_catalog.pg_rewrite'::pg_catalog.regclass
+             and d.objid = r.oid
+            where d.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
+              and d.refobjid <> walk.rel_oid
+              and walk.depth < 16
+        ),
+        refs (view_oid, depth, ref_class, ref_oid) as (
+            select walk.view_oid, walk.depth, d.refclassid, d.refobjid
+            from walk
+            join pg_catalog.pg_rewrite r on r.ev_class = walk.rel_oid
+            join pg_catalog.pg_depend d
+              on d.classid = 'pg_catalog.pg_rewrite'::pg_catalog.regclass
+             and d.objid = r.oid
+            where d.refclassid in (
+                'pg_catalog.pg_proc'::pg_catalog.regclass,
+                'pg_catalog.pg_operator'::pg_catalog.regclass,
+                'pg_catalog.pg_type'::pg_catalog.regclass,
+                'pg_catalog.pg_class'::pg_catalog.regclass)
+        ),
+        named (view_oid, depth, kind, schema_oid, name, user_code) as (
+            select refs.view_oid, refs.depth, 'f'::text, p.pronamespace, p.proname::text,
+                   not exists (
+                       select 1
+                       from pg_catalog.pg_depend e
+                       where e.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass
+                         and e.objid = p.oid
+                         and e.deptype = 'e')
+            from refs
+            join pg_catalog.pg_proc p on p.oid = refs.ref_oid
+            where refs.ref_class = 'pg_catalog.pg_proc'::pg_catalog.regclass
+            union all
+            select refs.view_oid, refs.depth, 'o'::text, o.oprnamespace, o.oprname::text, false
+            from refs
+            join pg_catalog.pg_operator o on o.oid = refs.ref_oid
+            where refs.ref_class = 'pg_catalog.pg_operator'::pg_catalog.regclass
+            union all
+            select refs.view_oid, refs.depth, 'f'::text, p.pronamespace, p.proname::text,
+                   not exists (
+                       select 1
+                       from pg_catalog.pg_depend e
+                       where e.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass
+                         and e.objid = p.oid
+                         and e.deptype = 'e')
+            from refs
+            join pg_catalog.pg_operator o on o.oid = refs.ref_oid
+            join pg_catalog.pg_proc p on p.oid = o.oprcode
+            where refs.ref_class = 'pg_catalog.pg_operator'::pg_catalog.regclass
+            union all
+            select refs.view_oid, refs.depth, 't'::text, t.typnamespace, t.typname::text, false
+            from refs
+            join pg_catalog.pg_type t on t.oid = refs.ref_oid
+            where refs.ref_class = 'pg_catalog.pg_type'::pg_catalog.regclass
+            union all
+            select refs.view_oid, refs.depth, 'S'::text, s.relnamespace, s.relname::text, false
+            from refs
+            join pg_catalog.pg_class s on s.oid = refs.ref_oid
+            where refs.ref_class = 'pg_catalog.pg_class'::pg_catalog.regclass
+              and s.relkind = 'S'
+        )
+        select vn.nspname::text,
+               v.relname::text,
+               named.kind,
+               n.nspname::text,
+               named.name,
+               pg_catalog.bool_or(named.user_code),
+               pg_catalog.min(named.depth + 1)::int
+        from named
+        join pg_catalog.pg_class v on v.oid = named.view_oid
+        join pg_catalog.pg_namespace vn on vn.oid = v.relnamespace
+        join pg_catalog.pg_namespace n on n.oid = named.schema_oid
+        where n.nspname <> 'pg_catalog'
+          and n.nspname <> 'information_schema'
+        group by vn.nspname, v.relname, named.kind, n.nspname, named.name
+        order by 1, 2, 7, 3, 4, 5
+        limit @cap
+        """;
+
+    /// <summary>
+    /// How many objects of each kind each schema in the set holds, exactly as the browser's lists would
+    /// show them - the overview's numbers, which a list's cap must never turn into floors.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One row per kind and schema, so the answer is as small as the schema set whatever the catalog
+    /// holds, and no <c>limit</c> is needed. Every branch applies the filter its list applies - partitions,
+    /// extension members, internal routines, internal and cloned triggers and a table's row type left out
+    /// the same way - and, like the lists, calls nothing that locks: no <c>pg_partition_*</c> function and
+    /// no <c>pg_sequence_last_value</c>.
+    /// </para>
+    /// <para>
+    /// <c>@hidden</c> is the lower-cased <c>schema.table</c> of every hidden document type's table, which a
+    /// list drops in C#: the table itself, the triggers on it, and a sequence one of its columns owns. The
+    /// per-tenant event sequences (<c>mt_events_sequence_&lt;tenant&gt;</c>) are rolled up rather than
+    /// listed, so they are not counted either.
+    /// </para>
+    /// </remarks>
+    internal const string ObjectCountsSql =
+        """
+        select k.kind, k.schema_name, k.total
+        from (
+            select 'tables'::text as kind, n.nspname::text as schema_name, pg_catalog.count(*)::int as total
+            from pg_catalog.pg_class c
+            join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+            where c.relkind in ('r', 'p', 'f')
+              and not c.relispartition
+              and n.nspname = any(@schemas)
+              and pg_catalog.lower(n.nspname::text || '.' || c.relname::text) <> all(@hidden)
+              and not exists (
+                  select 1
+                  from pg_catalog.pg_depend d
+                  where d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                    and d.objid = c.oid
+                    and d.deptype = 'e')
+            group by n.nspname
+            union all
+            select 'views'::text, n.nspname::text, pg_catalog.count(*)::int
+            from pg_catalog.pg_class c
+            join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+            where c.relkind in ('v', 'm')
+              and not c.relispartition
+              and n.nspname = any(@schemas)
+              and not exists (
+                  select 1
+                  from pg_catalog.pg_depend d
+                  where d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                    and d.objid = c.oid
+                    and d.deptype = 'e')
+            group by n.nspname
+            union all
+            select 'functions'::text, n.nspname::text, pg_catalog.count(*)::int
+            from pg_catalog.pg_proc p
+            join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = any(@schemas)
+              and not exists (
+                  select 1
+                  from pg_catalog.pg_depend d
+                  where d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass
+                    and d.objid = p.oid
+                    and d.deptype in ('e', 'i'))
+            group by n.nspname
+            union all
+            select 'triggers'::text, n.nspname::text, pg_catalog.count(*)::int
+            from pg_catalog.pg_trigger t
+            join pg_catalog.pg_class c on c.oid = t.tgrelid
+            join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+            where not t.tgisinternal
+              and t.tgparentid = 0
+              and not c.relispartition
+              and n.nspname = any(@schemas)
+              and pg_catalog.lower(n.nspname::text || '.' || c.relname::text) <> all(@hidden)
+              and not exists (
+                  select 1
+                  from pg_catalog.pg_depend d
+                  where d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                    and d.objid = c.oid
+                    and d.deptype = 'e')
+            group by n.nspname
+            union all
+            select 'sequences'::text, n.nspname::text, pg_catalog.count(*)::int
+            from pg_catalog.pg_class c
+            join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+            where c.relkind = 'S'
+              and n.nspname = any(@schemas)
+              and not (pg_catalog.starts_with(pg_catalog.lower(c.relname::text), 'mt_events_sequence_')
+                       and pg_catalog.length(c.relname::text) > 19)
+              and not exists (
+                  select 1
+                  from pg_catalog.pg_depend dep
+                  join pg_catalog.pg_class oc on oc.oid = dep.refobjid
+                  join pg_catalog.pg_namespace own on own.oid = oc.relnamespace
+                  where dep.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                    and dep.objid = c.oid
+                    and dep.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                    and dep.refobjsubid > 0
+                    and dep.deptype in ('a', 'i')
+                    and pg_catalog.lower(own.nspname::text || '.' || oc.relname::text) = any(@hidden))
+              and not exists (
+                  select 1
+                  from pg_catalog.pg_depend d
+                  where d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                    and d.objid = c.oid
+                    and d.deptype = 'e')
+            group by n.nspname
+            union all
+            select 'types'::text, n.nspname::text, pg_catalog.count(*)::int
+            from pg_catalog.pg_type t
+            join pg_catalog.pg_namespace n on n.oid = t.typnamespace
+            left join pg_catalog.pg_class tc on tc.oid = t.typrelid
+            where t.typtype in ('e', 'd', 'r', 'c')
+              and (t.typtype <> 'c' or tc.relkind = 'c')
+              and n.nspname = any(@schemas)
+              and not exists (
+                  select 1
+                  from pg_catalog.pg_depend d
+                  where d.classid = 'pg_catalog.pg_type'::pg_catalog.regclass
+                    and d.objid = t.oid
+                    and d.deptype = 'e')
+            group by n.nspname
+        ) k
+        order by 2, 1
+        """;
+
+    /// <summary>
     /// One relation's columns, by oid - with a "sortable" flag: the type (or a domain's base type) has a
     /// default btree operator class, directly, by binary coercion (<c>varchar</c> to <c>text</c>), or
     /// through the polymorphic array, enum and range classes.
@@ -814,13 +1203,21 @@ internal static class DatabaseCatalogQueries
                 and d.deptype in ('e', 'i'))
         """;
 
-    /// <summary>A trigger's definition, by its table and its name.</summary>
+    /// <summary>A trigger's definition, by its table and its name, with the schema of the function it runs.</summary>
+    /// <remarks>
+    /// The function's schema comes back beside the text because the text names it: a trigger whose
+    /// function lives in a schema the visitor may not see is refused its definition rather than printed
+    /// with that schema's name in it.
+    /// </remarks>
     internal const string TriggerDefinitionSql =
         """
-        select pg_catalog.pg_get_triggerdef(t.oid, true)
+        select pg_catalog.pg_get_triggerdef(t.oid, true),
+               fn.nspname::text
         from pg_catalog.pg_trigger t
         join pg_catalog.pg_class c on c.oid = t.tgrelid
         join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+        join pg_catalog.pg_proc p on p.oid = t.tgfoid
+        join pg_catalog.pg_namespace fn on fn.oid = p.pronamespace
         where n.nspname = any(@schemas)
           and c.relname::text = @table
           and t.tgname::text = @exact
@@ -842,13 +1239,25 @@ internal static class DatabaseCatalogQueries
     internal static IReadOnlyList<string> ListStatements { get; } =
     [
         RelationsSql, RoutinesSql, TriggersSql, SequencesSql, TypesSql, ForeignKeysSql, ViewDependenciesSql,
+        ViewReferencesSql,
     ];
+
+    /// <summary>
+    /// Every statement that must take no lock on anything it describes: the lists, and the overview's
+    /// counts. <c>DatabaseCatalogQueriesTests</c> holds them to the absence of every function that does,
+    /// and <c>DatabaseCatalogLockLiveTests</c> measures it.
+    /// </summary>
+    internal static IReadOnlyList<string> LockFreeStatements { get; } = [.. ListStatements, ObjectCountsSql];
 
     /// <summary>Every statement that reads within a schema set - all of them but <see cref="SchemasSql" />.</summary>
     internal static IReadOnlyList<string> ScopedStatements { get; } =
     [
-        .. ListStatements, ViewDefinitionSql, RoutineDefinitionSql, TriggerDefinitionSql,
+        .. ListStatements, ObjectCountsSql, ViewDefinitionSql, RoutineDefinitionSql, TriggerDefinitionSql,
+        SequenceValueSql,
     ];
+
+    /// <summary>The statements that set up the transaction rather than read anything.</summary>
+    internal static IReadOnlyList<string> SessionStatements { get; } = [PinSearchPathSql];
 
     /// <summary>The statements that read one relation by oid, which its lookup already proved in scope.</summary>
     internal static IReadOnlyList<string> ByOidStatements { get; } = [ColumnsSql, ConstraintsSql, IndexesSql];
@@ -1020,15 +1429,107 @@ internal static class DatabaseCatalogQueries
                 reader.GetInt64(6),
                 reader.GetBoolean(7),
                 reader.GetBoolean(8),
-                NullableInt64(reader, 9),
+                null,
+                NullableString(reader, 9),
                 NullableString(reader, 10),
                 NullableString(reader, 11),
-                NullableString(reader, 12),
-                NullableString(reader, 13)),
+                NullableString(reader, 12)),
             schemas,
             cap,
             commandTimeoutSeconds,
             cancellationToken);
+
+    /// <summary>
+    /// Reads one sequence's last value, or <see langword="null" /> when the schema has no such sequence.
+    /// </summary>
+    /// <remarks>
+    /// Takes a <c>RowExclusiveLock</c> on that one sequence until the transaction ends (see
+    /// <see cref="SequenceValueSql" />), so the caller runs it in a transaction of its own.
+    /// </remarks>
+    public static async Task<CatalogSequenceValue?> ReadSequenceValueAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string schema,
+        string name,
+        int commandTimeoutSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(schema);
+        ArgumentException.ThrowIfNullOrEmpty(name);
+
+        await using NpgsqlCommand command = Command(connection, transaction, SequenceValueSql, commandTimeoutSeconds);
+        BindSchemas(command, [schema]);
+        command.Parameters.Add(new NpgsqlParameter("exact", NpgsqlDbType.Text) { Value = name });
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? new CatalogSequenceValue(reader.GetBoolean(0), NullableInt64(reader, 1))
+            : null;
+    }
+
+    /// <summary>
+    /// Leaves <c>pg_catalog</c> alone on the transaction's <c>search_path</c> (see
+    /// <see cref="PinSearchPathSql" />). Run first in every catalog transaction.
+    /// </summary>
+    public static async Task PinSearchPathAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        int commandTimeoutSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
+        await using NpgsqlCommand command = Command(connection, transaction, PinSearchPathSql, commandTimeoutSeconds);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads the exact per-kind, per-schema counts of what the lists would show within the schema set.
+    /// </summary>
+    /// <param name="connection">The open connection.</param>
+    /// <param name="transaction">The read-only transaction.</param>
+    /// <param name="schemas">The schema set.</param>
+    /// <param name="hiddenTables">
+    /// The hidden document types' tables, as <c>schema.table</c>, in any case: compared lower-cased, the way
+    /// the classifier compares them.
+    /// </param>
+    /// <param name="commandTimeoutSeconds">The client-side timeout.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public static async Task<IReadOnlyList<CatalogObjectCount>> ReadObjectCountsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        IReadOnlyList<string> schemas,
+        IReadOnlyCollection<string> hiddenTables,
+        int commandTimeoutSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(schemas);
+        ArgumentNullException.ThrowIfNull(hiddenTables);
+
+        if (schemas.Count == 0)
+        {
+            return [];
+        }
+
+        await using NpgsqlCommand command = Command(connection, transaction, ObjectCountsSql, commandTimeoutSeconds);
+        BindSchemas(command, schemas);
+        command.Parameters.Add(new NpgsqlParameter("hidden", NpgsqlDbType.Array | NpgsqlDbType.Text)
+        {
+            Value = hiddenTables.Select(static x => x.ToLowerInvariant()).Distinct(StringComparer.Ordinal).ToArray(),
+        });
+
+        List<CatalogObjectCount> counts = [];
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            counts.Add(new CatalogObjectCount(reader.GetString(0), reader.GetString(1), reader.GetInt32(2)));
+        }
+
+        return counts;
+    }
 
     /// <summary>Reads types in the schema set, at most <paramref name="cap" />.</summary>
     public static Task<CatalogList<CatalogType>> ReadTypesAsync(
@@ -1150,6 +1651,41 @@ internal static class DatabaseCatalogQueries
             cancellationToken);
 
     /// <summary>
+    /// Reads the functions, operators, sequences and types the views in the schema set refer to,
+    /// recursively - or one view's, when <paramref name="view" /> is given.
+    /// </summary>
+    public static Task<CatalogList<CatalogViewReference>> ReadViewReferencesAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        IReadOnlyList<string> schemas,
+        string? view,
+        int cap,
+        int commandTimeoutSeconds,
+        CancellationToken cancellationToken = default) =>
+        ReadListAsync(
+            connection,
+            transaction,
+            ViewReferencesSql,
+            command =>
+            {
+                BindSchemas(command, schemas);
+                command.Parameters.Add(new NpgsqlParameter("exact", NpgsqlDbType.Text) { Value = view ?? string.Empty });
+                BindCap(command, cap);
+            },
+            static reader => new CatalogViewReference(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                !reader.IsDBNull(5) && reader.GetBoolean(5),
+                reader.GetInt32(6)),
+            schemas,
+            cap,
+            commandTimeoutSeconds,
+            cancellationToken);
+
+    /// <summary>
     /// Reads one relation and everything the detail view shows about it, or <see langword="null" /> when
     /// the schema set has no such relation.
     /// </summary>
@@ -1245,7 +1781,16 @@ internal static class DatabaseCatalogQueries
                 .ConfigureAwait(false)
             : CatalogList<CatalogViewDependency>.Empty;
 
-        return new CatalogRelationDetail(relation, columns, constraints, indexes, triggers.Items, foreignKeys, dependencies);
+        CatalogList<CatalogViewReference> references = relation.Kind is "v" or "m"
+            ? await ReadViewReferencesAsync(
+                    connection, transaction, schemas, name, MaxPerRelation, commandTimeoutSeconds, cancellationToken)
+                .ConfigureAwait(false)
+            : CatalogList<CatalogViewReference>.Empty;
+
+        return new CatalogRelationDetail(relation, columns, constraints, indexes, triggers.Items, foreignKeys, dependencies)
+        {
+            References = references,
+        };
     }
 
     /// <summary>How many triggers, keys or dependencies one relation's detail reads before it stops.</summary>
@@ -1311,7 +1856,7 @@ internal static class DatabaseCatalogQueries
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
-            ? new CatalogDefinition(NullableString(reader, 0), null)
+            ? new CatalogDefinition(NullableString(reader, 0), null, NullableString(reader, 1))
             : null;
     }
 

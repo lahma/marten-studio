@@ -159,6 +159,18 @@ internal enum DatabaseRefusal
 
     /// <summary>Something failed, and <c>Reason</c> says what.</summary>
     Unavailable,
+
+    /// <summary>
+    /// The store policy (<c>MartenStudioOptions.StoreAuthorizationPolicy</c>) refused this visitor the
+    /// store - the resolved one for the database as a whole, or another store whose object this is.
+    /// </summary>
+    StorePolicy,
+
+    /// <summary>
+    /// A view that reads from, or refers to something in, a schema this visitor may not see - so its query
+    /// and its rows would show what that schema holds.
+    /// </summary>
+    WithheldDependency,
 }
 
 /// <summary>Whose an object is, and what that lets the page link to.</summary>
@@ -218,8 +230,9 @@ internal sealed record DatabaseRowAccess(bool Allowed, DatabaseRefusal Refusal, 
 /// </param>
 /// <param name="ReadOnly"><c>MartenStudioOptions.ReadOnly</c>.</param>
 /// <param name="Authorized">
-/// Whether the write policy passes this visitor for the database with no tenant; <see langword="null" />
-/// when it was not asked because the capability is off.
+/// Whether the store policy and then the write policy pass this visitor for the database with no tenant;
+/// <see langword="null" /> when they were not asked because the capability is off. When it is
+/// <see langword="false" />, <paramref name="Refusal" /> names which of the two said no.
 /// </param>
 /// <param name="BrowsableSchemasConfigured">Whether <c>MartenStudioOptions.BrowsableSchemas</c> names anything.</param>
 /// <param name="StoreSchemas">The store's own schemas: structure visible without the capability.</param>
@@ -391,7 +404,11 @@ internal abstract record DatabaseObjectSummary(
 /// <param name="HasPrimaryKey">Whether it has a primary key.</param>
 /// <param name="ForeignKeysOut">Its foreign keys, those into a hidden type's table excepted.</param>
 /// <param name="ForeignKeysIn">Foreign keys pointing at it from tables this visitor may see.</param>
-/// <param name="PartitionCount">Its partitions, rolled up.</param>
+/// <param name="PartitionCount">
+/// Its partitions, rolled up - or <see langword="null" /> while the gate is shut: a per-tenant partition count
+/// is the number of tenants, so it is not structure the store's own schemas give away for free (DB-1 review
+/// F9). <paramref name="Kind" /> still says it is partitioned.
+/// </param>
 /// <param name="Unlogged">Whether it is unlogged.</param>
 /// <param name="Populated">For a materialized view, whether it has ever been refreshed.</param>
 /// <param name="RowSecurity">Whether row-level security is on.</param>
@@ -411,7 +428,7 @@ internal sealed record DatabaseRelationSummary(
     bool HasPrimaryKey,
     int ForeignKeysOut,
     int ForeignKeysIn,
-    int PartitionCount,
+    int? PartitionCount,
     bool Unlogged,
     bool Populated,
     bool RowSecurity,
@@ -519,17 +536,23 @@ internal sealed record DatabaseTriggerSummary(
 /// <param name="Maximum">Its maximum.</param>
 /// <param name="Cycles">Whether it wraps.</param>
 /// <param name="CanReadValue">
-/// Whether this visitor may see its value: the reading role has <c>SELECT</c> or <c>USAGE</c> on it, and the
-/// gate allows reading the object's data (always for Marten's own in the store's schemas).
+/// Whether this visitor may ask for its value (<c>IDatabaseObjectService.GetSequenceValueAsync</c>): the
+/// reading role has <c>SELECT</c> or <c>USAGE</c> on it, and the gate allows reading the object's data -
+/// always for Marten's own, by name, in the store's schemas.
 /// </param>
-/// <param name="LastValue">Its last value, when <paramref name="CanReadValue" /> and ever called.</param>
+/// <param name="LastValue">
+/// Always <see langword="null" /> in a list: reading a sequence's value locks it, so the value is asked for
+/// one sequence at a time. Kept for the shape's sake.
+/// </param>
 /// <param name="OwnerSchema">The owning column's table's schema, when owned and visible.</param>
 /// <param name="OwnerTable">The owning table, when owned and visible.</param>
 /// <param name="OwnerColumn">The owning column, when owned and visible.</param>
 /// <param name="OwnedOutsideView">Whether it is owned by a column of a table this visitor may not see.</param>
 /// <param name="RolledUp">
 /// For <c>mt_events_sequence</c>: how many per-tenant <c>mt_events_sequence_&lt;tenant&gt;</c> sequences
-/// were rolled into it rather than listed, since their names are the tenant list.
+/// were rolled into it rather than listed, since their names are the tenant list - or
+/// <see langword="null" /> while the gate is shut, since their number is the number of tenants (DB-1 review
+/// F9).
 /// </param>
 internal sealed record DatabaseSequenceSummary(
     DatabaseObjectKind Kind,
@@ -550,7 +573,7 @@ internal sealed record DatabaseSequenceSummary(
     string? OwnerTable,
     string? OwnerColumn,
     bool OwnedOutsideView,
-    int RolledUp)
+    int? RolledUp)
     : DatabaseObjectSummary(Kind, Schema, Name, Ownership, Comment, Quotable);
 
 /// <summary>One attribute of a composite type.</summary>
@@ -793,6 +816,48 @@ internal sealed record DatabaseObjectDefinition(
     /// <summary>Nothing to show, and this is why.</summary>
     public static DatabaseObjectDefinition Unavailable(DatabaseObjectRef reference, DatabaseRefusal refusal, string reason) =>
         new(reference, null, null, refusal, reason);
+}
+
+/// <summary>A sequence's last value, read on demand, or why it cannot be shown.</summary>
+/// <param name="Ref">The sequence asked about.</param>
+/// <param name="LastValue">
+/// Its last value, or <see langword="null" /> - with <see cref="Refusal" /> <see cref="DatabaseRefusal.None" />
+/// - when it has never been called.
+/// </param>
+/// <param name="Refusal">Why there is no value, or <see cref="DatabaseRefusal.None" />.</param>
+/// <param name="Reason">The sentence.</param>
+internal sealed record DatabaseSequenceValue(
+    DatabaseObjectRef Ref,
+    long? LastValue,
+    DatabaseRefusal Refusal,
+    string? Reason)
+{
+    /// <summary>Whether the value was read - it may still be <see langword="null" />, for a sequence never called.</summary>
+    public bool Found => Refusal == DatabaseRefusal.None;
+
+    /// <summary>No value, and this is why.</summary>
+    public static DatabaseSequenceValue Unavailable(DatabaseObjectRef reference, DatabaseRefusal refusal, string reason) =>
+        new(reference, null, refusal, reason);
+}
+
+/// <summary>
+/// What one visitor may know and read of another registered store's objects in the resolved database.
+/// </summary>
+/// <param name="IdentityVisible">
+/// Whether the visitor passes that store's store policy for the database with no tenant. When not, its
+/// objects are still classified as Marten's - so their rows are still never read raw - but its store key
+/// and collection aliases are blanked: the resolver answers a refused store and an unknown one alike, and
+/// an ownership badge must not tell them apart either.
+/// </param>
+/// <param name="Rows">
+/// Whether its Marten-managed relational tables (projections, <c>ExtendedSchemaObjects</c>) may have their
+/// rows read: that store's store policy, and the write policy with <c>BrowseDatabase</c> named, both for
+/// the database with no tenant.
+/// </param>
+internal sealed record DatabaseStoreAccess(bool IdentityVisible, DatabaseRowAccess Rows)
+{
+    /// <summary>Everything allowed - the answer for a host with no store policy.</summary>
+    public static DatabaseStoreAccess Open { get; } = new(true, DatabaseRowAccess.Granted);
 }
 
 /// <summary>Kind arithmetic, in one place.</summary>

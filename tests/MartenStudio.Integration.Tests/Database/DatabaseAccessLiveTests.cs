@@ -90,7 +90,8 @@ public class DatabaseAccessLiveTests(DatabaseAccessLiveTests.Fixture fixture) : 
     /// <summary>
     /// Acceptance 7, the last case: a handler that confines a visitor to their own tenant refuses
     /// <c>TenantId == null</c>, so it refuses the database browser's reads - and the refusal is in the
-    /// audit ring. The store's own structure, read with the visitor's tenant, is still theirs.
+    /// audit ring, naming the policy that said no: the store policy, asked first (F10). The store's own
+    /// structure, read with the visitor's tenant, is still theirs.
     /// </summary>
     [PostgresFact]
     public async Task A_tenant_restricted_policy_refuses_the_definition_read_and_the_audit_records_it()
@@ -112,7 +113,8 @@ public class DatabaseAccessLiveTests(DatabaseAccessLiveTests.Fixture fixture) : 
             acme, new DatabaseObjectRef(DatabaseObjectKind.View, fixture.LegacySchema, "job_summary")));
 
         definition.Found.Should().BeFalse();
-        definition.Refusal.Should().Be(DatabaseRefusal.WritePolicy);
+        definition.Refusal.Should().Be(DatabaseRefusal.StorePolicy, "the store policy is asked first, and refuses a resource with no tenant");
+        definition.Reason.Should().Contain("StoreAuthorizationPolicy");
         definition.Sql.Should().BeNull();
 
         StudioActionLogEntry entry = host.Ring.GetLatest().Should().ContainSingle().Which;
@@ -127,7 +129,7 @@ public class DatabaseAccessLiveTests(DatabaseAccessLiveTests.Fixture fixture) : 
         DatabaseRowAccessResult rows = await host.AccessAsync(x =>
             x.RequireRowAccessAsync(acme, fixture.QuartzSchema, "qrtz_triggers", cancellationToken: Token));
 
-        rows.Refusal.Should().Be(DatabaseRefusal.WritePolicy);
+        rows.Refusal.Should().Be(DatabaseRefusal.StorePolicy);
 
         DatabaseObjectDetail settings = await host.ObjectsAsync(x => x.GetObjectAsync(acme, fixture.DocumentSchema, "host_settings"));
         settings.Found.Should().BeTrue("the store's own structure is read with the visitor's own tenant: " + settings.Reason);

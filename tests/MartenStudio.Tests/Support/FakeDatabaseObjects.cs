@@ -56,7 +56,7 @@ internal static class FakeDatabaseObjects
             Authorized: refusal switch
             {
                 DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly => null,
-                DatabaseRefusal.WritePolicy => false,
+                DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy => false,
                 _ => true,
             },
             BrowsableSchemasConfigured: refusal != DatabaseRefusal.SchemaNotBrowsable,
@@ -70,6 +70,7 @@ internal static class FakeDatabaseObjects
                 DatabaseRefusal.ReadOnly => DatabaseGate.ReadOnlyDenial,
                 DatabaseRefusal.CapabilityOff => DatabaseGate.CapabilityDenial,
                 DatabaseRefusal.WritePolicy => DatabaseGate.WritePolicyDenial,
+                DatabaseRefusal.StorePolicy => DatabaseGate.StorePolicyDenial,
                 DatabaseRefusal.SchemaNotBrowsable => DatabaseGate.EmptyListDenial,
                 _ => "The database browser is unavailable.",
             });

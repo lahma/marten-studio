@@ -1,7 +1,12 @@
+using MartenStudio.Internal;
 using MartenStudio.Services;
 using MartenStudio.Services.Database;
 using MartenStudio.Tests.Support;
 
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -132,10 +137,10 @@ public class BrowseDatabaseOptionsTests
         var options = new MartenStudioOptions();
         options.BrowsableSchemas.Add("*");
 
-        var notice = new DatabaseBrowserConfigurationNotice(Options.Create(options), Logger(logs));
+        var notice = new DatabaseBrowserConfigurationNotice(Options.Create(options), Logger(logs), containerEndpoints: MappedStudio());
 
-        await notice.StartAsync(Token);
-        await notice.StartAsync(Token);
+        await notice.StartedAsync(Token);
+        await notice.StartedAsync(Token);
 
         CapturedLogEntry entry = logs.Entries.Should().ContainSingle().Which;
         entry.Level.Should().Be(LogLevel.Warning);
@@ -152,7 +157,8 @@ public class BrowseDatabaseOptionsTests
         var options = new MartenStudioOptions { SqlConsoleRole = role };
         options.BrowsableSchemas.Add(star ? "*" : "quartz");
 
-        await new DatabaseBrowserConfigurationNotice(Options.Create(options), Logger(logs)).StartAsync(Token);
+        await new DatabaseBrowserConfigurationNotice(Options.Create(options), Logger(logs), containerEndpoints: MappedStudio())
+            .StartedAsync(Token);
 
         logs.Entries.Should().BeEmpty();
     }
@@ -167,6 +173,7 @@ public class BrowseDatabaseOptionsTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddMartenStudio(static options => options.BrowsableSchemas.Add("bad\"one"));
+        services.AddSingleton<EndpointDataSource>(MappedStudio());
 
         await using ServiceProvider provider = services.BuildServiceProvider();
 
@@ -174,11 +181,117 @@ public class BrowseDatabaseOptionsTests
             .OfType<DatabaseBrowserConfigurationNotice>()
             .Should().ContainSingle().Which;
 
-        Func<Task> start = () => notice.StartAsync(Token);
+        Func<Task> start = async () =>
+        {
+            await notice.StartingAsync(Token);
+            await notice.StartAsync(Token);
+            await notice.StartedAsync(Token);
+        };
 
         await start.Should().NotThrowAsync();
     }
 
+    /// <summary>
+    /// F8: registering the studio and never mapping it changes nothing about how the host starts - the
+    /// notice builds no options (the configure callback is never run) and writes no line.
+    /// </summary>
+    [Fact]
+    public async Task A_host_that_registers_the_studio_and_never_maps_it_builds_no_options_and_logs_nothing()
+    {
+        var logs = new CapturingLoggerProvider();
+        int configured = 0;
+
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(logs);
+        builder.Services.AddMartenStudio(options =>
+        {
+            Interlocked.Increment(ref configured);
+            options.BrowsableSchemas.Add("*");
+        });
+
+        await using WebApplication app = builder.Build();
+        app.MapGet("/", static () => "the host's own endpoint");
+
+        await app.StartAsync(Token);
+        await app.StopAsync(Token);
+
+        configured.Should().Be(0, "nothing built MartenStudioOptions for a host that never mapped the studio");
+        logs.Entries.Should().NotContain(static x => x.EventId.Id == 9230);
+    }
+
+    /// <summary>
+    /// F8: a configure callback of the host's own that throws is not the notice's to surface - on a host
+    /// that never mapped the studio it is never run, and on one that did the notice swallows it and the
+    /// host starts exactly as it would have.
+    /// </summary>
+    [Fact]
+    public async Task A_throwing_configure_callback_does_not_change_how_the_host_starts()
+    {
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddMartenStudio(static _ => throw new InvalidOperationException("the host's own mistake"));
+
+        await using (WebApplication app = builder.Build())
+        {
+            Func<Task> unmapped = async () =>
+            {
+                await app.StartAsync(Token);
+                await app.StopAsync(Token);
+            };
+
+            await unmapped.Should().NotThrowAsync();
+        }
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddMartenStudio(static _ => throw new InvalidOperationException("the host's own mistake"));
+        services.AddSingleton<EndpointDataSource>(MappedStudio());
+
+        await using ServiceProvider provider = services.BuildServiceProvider();
+
+        DatabaseBrowserConfigurationNotice notice = provider.GetServices<Microsoft.Extensions.Hosting.IHostedService>()
+            .OfType<DatabaseBrowserConfigurationNotice>()
+            .Should().ContainSingle().Which;
+
+        Func<Task> mapped = () => notice.StartedAsync(Token);
+
+        await mapped.Should().NotThrowAsync("the notice reads the options only to decide whether to warn");
+    }
+
+    /// <summary>
+    /// The other half of F8: a host that maps the studio still hears about <c>"*"</c> without a role, once,
+    /// through the real mapping - which is what the notice looks for.
+    /// </summary>
+    [Fact]
+    public async Task A_host_that_maps_the_studio_with_star_and_no_role_hears_about_it_once()
+    {
+        var logs = new CapturingLoggerProvider();
+
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(logs);
+        builder.Services.AddMartenStudio(static options => options.BrowsableSchemas.Add("*"));
+
+        await using WebApplication app = builder.Build();
+        app.MapMartenStudio().AllowAnonymous();
+
+        await app.StartAsync(Token);
+        await app.StopAsync(Token);
+
+        logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9230);
+    }
+
     private static ILogger<DatabaseBrowserConfigurationNotice> Logger(CapturingLoggerProvider logs) =>
         logs.CreateFactory().CreateLogger<DatabaseBrowserConfigurationNotice>();
+
+    /// <summary>A host's endpoints with one studio endpoint among them, as a mapping leaves them.</summary>
+    private static DefaultEndpointDataSource MappedStudio() =>
+        new DefaultEndpointDataSource(
+            new Endpoint(
+                static _ => Task.CompletedTask,
+                new EndpointMetadataCollection(new MartenStudioEndpointMarker("the studio", "(test)", isPage: true)),
+                "studio page"));
 }
