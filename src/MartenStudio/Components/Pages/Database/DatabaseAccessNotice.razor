@@ -33,6 +33,7 @@
                         break;
 
                     case DatabaseRefusal.WritePolicy:
+                    case DatabaseRefusal.StorePolicy:
                         <text>
                             The structure of this store's own schemas is still shown. The policy is asked about
                             the database as a whole with no tenant selected, because nothing filters a table
@@ -63,7 +64,7 @@
     {
         DatabaseRefusal.ReadOnly => "The database browser is limited to this store's own schemas: the studio is read-only.",
         DatabaseRefusal.CapabilityOff => "Browsing beyond this store's own schemas is not enabled.",
-        DatabaseRefusal.WritePolicy => "Your account may not browse beyond this store's own schemas.",
+        DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy => "Your account may not browse beyond this store's own schemas.",
         DatabaseRefusal.SchemaNotBrowsable => "No schema is browsable yet.",
         _ => "The database browser is limited to this store's own schemas.",
     };

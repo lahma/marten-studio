@@ -495,7 +495,8 @@
         DatabaseRefusal.Unquotable => "Its name cannot be put into SQL safely",
         DatabaseRefusal.CapabilityOff => "Reading rows here needs Capabilities.BrowseDatabase",
         DatabaseRefusal.ReadOnly => "The studio is read-only",
-        DatabaseRefusal.WritePolicy => "Your account may not read rows here",
+        DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy => "Your account may not read rows here",
+        DatabaseRefusal.WithheldDependency => "This view reads from a schema you cannot see",
         DatabaseRefusal.SchemaNotBrowsable => "This schema is not in BrowsableSchemas",
         _ => "Its rows are not shown here",
     };

@@ -11,10 +11,20 @@
         @switch (relation.Kind)
         {
             case DatabaseObjectKind.PartitionedTable:
-                <span class="ms-db-badge"
-                      title="@($"Partitioned into {DatabasePresentation.Number(relation.PartitionCount)} partitions, rolled up here. Their names are never listed: per-tenant partitions would name every tenant.")">
-                    partitioned · @relation.PartitionCount
-                </span>
+                @if (relation.PartitionCount is { } partitions)
+                {
+                    <span class="ms-db-badge"
+                          title="@($"Partitioned into {DatabasePresentation.Number(partitions)} partitions, rolled up here. Their names are never listed: per-tenant partitions would name every tenant.")">
+                        partitioned · @partitions
+                    </span>
+                }
+                else
+                {
+                    <span class="ms-db-badge"
+                          title="Partitioned. How many partitions it has is shown only with MartenStudioOptions.Capabilities.BrowseDatabase: per-tenant partitions would count the tenants.">
+                        partitioned
+                    </span>
+                }
                 break;
 
             case DatabaseObjectKind.ForeignTable:
@@ -66,7 +76,12 @@
 
         @if (relation.Rows.Refusal == DatabaseRefusal.HiddenDependency)
         {
-            <span class="ms-db-badge ms-db-badge-warning" title="@relation.Rows.Reason">reads a hidden table</span>
+            <span class="ms-db-badge ms-db-badge-warning" title="@relation.Rows.Reason">may read a hidden table</span>
+        }
+
+        @if (relation.Rows.Refusal == DatabaseRefusal.WithheldDependency)
+        {
+            <span class="ms-db-badge ms-db-badge-warning" title="@relation.Rows.Reason">reads a withheld schema</span>
         }
     </span>
 }

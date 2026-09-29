@@ -306,7 +306,7 @@ public class DatabaseObjectsPageTests
         var page = DatabasePageData.RenderBrowser(context, "kind=views");
 
         Badges(Row(page, "order_stats")).Should().Contain("never refreshed");
-        Badges(Row(page, "secret_view")).Should().Contain("reads a hidden table");
+        Badges(Row(page, "secret_view")).Should().Contain("may read a hidden table");
         page.FindAll(".ms-db-relations thead th").Select(x => x.TextContent.Trim())
             .Should().NotContain("Key", "a view has no key to show");
     }
@@ -451,7 +451,18 @@ public class DatabaseObjectsPageTests
         var page = DatabasePageData.RenderBrowser(context, "kind=sequences");
 
         SequenceRow(page, "payroll_id_seq").QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("no privilege");
+
+        // A readable sequence's value is read only when asked: reading it takes a brief lock on the sequence,
+        // and a list must lock nothing it lists (the DB-1 review's B1).
+        SequenceRow(page, "unused_seq").QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("read");
+        context.DatabaseObjects.SequenceValuesAsked.Should().BeEmpty("nothing is read until somebody asks");
+
+        context.DatabaseObjects.SequenceValue = new DatabaseSequenceValue(
+            new DatabaseObjectRef(DatabaseObjectKind.Sequence, "legacy", "unused_seq"), null, DatabaseRefusal.None, null);
+        SequenceRow(page, "unused_seq").QuerySelector("button.ms-db-read-value")!.Click();
+
         SequenceRow(page, "unused_seq").QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("never used");
+        context.DatabaseObjects.SequenceValuesAsked.Should().Equal("legacy.unused_seq");
     }
 
     [Fact]
@@ -464,7 +475,12 @@ public class DatabaseObjectsPageTests
         IElement owned = SequenceRow(page, "orders_id_seq");
         owned.QuerySelector("a.ms-db-name")!.TextContent.Trim().Should().Be("legacy.orders.id");
         owned.QuerySelector("a.ms-db-name")!.GetAttribute("href").Should().StartWith("database/object?schema=legacy&name=orders&tab=columns");
-        owned.QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("50,000");
+        owned.QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("read");
+
+        context.DatabaseObjects.SequenceValue = new DatabaseSequenceValue(
+            new DatabaseObjectRef(DatabaseObjectKind.Sequence, "legacy", "orders_id_seq"), 50_000, DatabaseRefusal.None, null);
+        owned.QuerySelector("button.ms-db-read-value")!.Click();
+        SequenceRow(page, "orders_id_seq").QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("50,000");
 
         IElement events = SequenceRow(page, "mt_events_sequence");
         events.TextContent.Should().Contain("+2 per tenant");

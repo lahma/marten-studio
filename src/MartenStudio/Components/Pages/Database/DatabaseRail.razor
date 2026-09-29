@@ -323,7 +323,7 @@
     {
         DatabaseRefusal.ReadOnly => "the studio is read-only",
         DatabaseRefusal.CapabilityOff => "they need Capabilities.BrowseDatabase",
-        DatabaseRefusal.WritePolicy => "your account may not browse them",
+        DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy => "your account may not browse them",
         DatabaseRefusal.SchemaNotBrowsable => "BrowsableSchemas is empty",
         _ => "BrowsableSchemas does not list them",
     };

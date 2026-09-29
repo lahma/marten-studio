@@ -2,11 +2,14 @@
 @using MartenStudio.Services.Database
 @inject StudioState State
 @inject IOptions<MartenStudioOptions> Options
+@inject IDatabaseObjectService Data
 
 @*
     Sequences. The owning column is a link to its table, because "which serial is this" is the question a
-    sequence list is opened to answer. The last value is shown only where the reading role may read it and
-    the gate lets this visitor read the object's data; otherwise the cell says which of the two it was.
+    sequence list is opened to answer. The last value is read only when asked, one sequence at a time:
+    reading it takes a brief lock on the sequence, and a list must lock nothing it lists. It is offered only
+    where the reading role may read it and the gate lets this visitor read the object's data; otherwise the
+    cell says which of the two it was.
 
     Marten's per-tenant event sequences roll up into one row: their names are the tenant list, which no
     grid here ever prints.
@@ -39,11 +42,11 @@
                 <tr class="@(sequence.Ownership.IsMarten ? "ms-db-row-marten" : null)" @key="sequence.Schema + '\u001f' + sequence.Name">
                     <td class="ms-db-cell-name">
                         <span class="ms-db-name"><span class="ms-db-schema-prefix">@(ShowSchema ? sequence.Schema + "." : null)</span>@sequence.Name</span>
-                        @if (sequence.RolledUp > 0)
+                        @if (sequence.RolledUp is { } rolled && rolled > 0)
                         {
                             <span class="ms-db-badge"
-                                  title="@($"{DatabasePresentation.Number(sequence.RolledUp)} per-tenant sequences are rolled into this row. Their names are never listed: they would name every tenant.")">
-                                +@sequence.RolledUp per tenant
+                                  title="@($"{DatabasePresentation.Number(rolled)} per-tenant sequences are rolled into this row. Their names are never listed: they would name every tenant.")">
+                                +@rolled per tenant
                             </span>
                         }
                     </td>
@@ -68,13 +71,30 @@
                         {
                             <span class="ms-db-none" title="@WithheldTitle(sequence)">@(MayReadData(sequence) ? "no privilege" : "withheld")</span>
                         }
-                        else if (sequence.LastValue is { } last)
+                        else if (values.TryGetValue(KeyOf(sequence), out DatabaseSequenceValue? read))
                         {
-                            @DatabasePresentation.Number(last)
+                            @if (!read.Found)
+                            {
+                                <span class="ms-db-none" title="@read.Reason">unavailable</span>
+                            }
+                            else if (read.LastValue is { } last)
+                            {
+                                @DatabasePresentation.Number(last)
+                            }
+                            else
+                            {
+                                <span class="ms-db-none" title="nextval has never been called on it">never used</span>
+                            }
                         }
                         else
                         {
-                            <span class="ms-db-none" title="nextval has never been called on it">never used</span>
+                            <button type="button"
+                                    class="ms-btn ms-btn-sm ms-db-read-value"
+                                    title="Reading a sequence's value takes a brief lock on it, so it is read only when asked"
+                                    aria-label="@($"Read the last value of {sequence.Name}")"
+                                    @onclick="() => ReadValueAsync(sequence)">
+                                read
+                            </button>
                         }
                     </td>
                     <td class="ms-db-cell-number">@DatabasePresentation.Number(sequence.Increment)</td>
@@ -89,6 +109,7 @@
 </TableScroll>
 
 @code {
+    private readonly Dictionary<string, DatabaseSequenceValue> values = new(StringComparer.Ordinal);
     private string sortKey = "default";
     private bool descending;
 
@@ -127,6 +148,24 @@
 
         return (sequence.Ownership.IsMarten && access.StoreSchemas.Contains(sequence.Schema))
             || (access.IsOpen && access.BrowsableSchemas.Contains(sequence.Schema));
+    }
+
+    private static string KeyOf(DatabaseSequenceSummary sequence) => sequence.Schema + '' + sequence.Name;
+
+    private async Task ReadValueAsync(DatabaseSequenceSummary sequence)
+    {
+        string key = KeyOf(sequence);
+        try
+        {
+            if (State.ActiveScope is { } scope)
+            {
+                values[key] = await Data.GetSequenceValueAsync(scope, sequence.Schema, sequence.Name);
+            }
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            values[key] = DatabaseSequenceValue.Unavailable(sequence.Ref, DatabaseRefusal.Unavailable, exception.Message);
+        }
     }
 
     private string WithheldTitle(DatabaseSequenceSummary sequence) =>

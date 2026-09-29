@@ -390,6 +390,22 @@ declarations cannot be read, nothing is called "Other". Known limit: features ad
 rule 14 forbids, so they are classified by the `mt_` prefix alone. `BrowsableSchemas` limits what the
 screens show, not what `RunSql` can read: `SqlConsoleRole` is the real boundary, and `"*"` without it is
 event 9230 at startup.
+Free text is masked and structure is blanked: every catalog read pins `search_path` to `pg_catalog`, so
+every name Postgres deparses is printed with its schema, and `WithheldNames` masks a withheld schema's
+qualifier — in types, defaults, CHECK and index definitions, view, routine and trigger definitions,
+`SET search_path` and comments — as `‹withheld›`. A view that reads from or refers to anything in a
+withheld schema is refused its rows and its query; so is a trigger whose function is withheld, and, while
+any document type may be hidden, a view that calls user code or reads a document table no store declares.
+**A list locks nothing it lists** — no `pg_partition_*`, no `pg_sequence_last_value`, no size function —
+because a tenant-partitioned store has thousands of partitions and the lock table is shared; a sequence's
+value is read on demand, one at a time. Another store's key and alias are shown only to a visitor that
+store's store policy passes, and its Marten-managed rows need its store and write policies. Known limits: a
+routine's body is shown as its author wrote it (a name it resolves through its own `SET search_path` or
+dynamic SQL is not masked); a hidden type nothing in the process has touched, and that is not registered
+with `Schema.For`, is unknown to `AllKnownDocumentTypes()` and is listed by its `mt_` name as infrastructure
+until Marten learns it (its rows are never read, views over it are refused); a domain CHECK that calls a
+function is not followed; a schema created after the 60-second schema-list cache is masked only once the
+list is read again.
 
 ## Package budget
 

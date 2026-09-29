@@ -323,7 +323,7 @@ internal sealed class SchemaDataService : ISchemaDataService
     /// <remarks>
     /// <para>
     /// Classified by the database browser's own rules (<see cref="DatabaseObjectClassifier" />, read through
-    /// <see cref="DatabaseAccess.ReadDeclarations" /> over every registered store), and failing closed as the
+    /// <see cref="DatabaseAccess.ReadDeclarations(ResolvedScope)" /> over every registered store), and failing closed as the
     /// browser does: a configuration that cannot be read is a tab that says so, never a list in which a
     /// hidden type's table or another store's table passes for somebody else's.
     /// </para>
