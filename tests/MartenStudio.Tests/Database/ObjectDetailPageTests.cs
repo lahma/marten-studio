@@ -219,19 +219,22 @@ public class ObjectDetailPageTests
     }
 
     [Fact]
-    public void The_relationships_slot_lists_the_foreign_keys_both_ways_as_text()
+    public void The_relationships_tab_draws_the_relation_s_neighbourhood_and_its_edge_table()
     {
         using var context = DatabasePageData.Context();
+        context.RelationshipData.Graph = FakeRelationshipDataService.WithTables();
 
         var page = DatabasePageData.RenderObject(context, "quartz", "qrtz_triggers", "relationships");
 
         IElement slot = page.Find(".ms-db-relationships");
         slot.GetAttribute("data-name").Should().Be("qrtz_triggers");
 
-        List<IElement> groups = [.. slot.QuerySelectorAll(".ms-db-relationships-group")];
-        groups[0].QuerySelector("a.ms-db-name")!.TextContent.Trim().Should().Be("quartz.qrtz_job_details");
-        groups[1].QuerySelector("a.ms-db-name")!.TextContent.Trim().Should().Be("quartz.qrtz_simprop_triggers");
-        groups[1].TextContent.Should().Contain("on delete cascade");
+        // The neighbourhood graph is the tab: the relation emphasised, and every drawn edge listed beside the
+        // picture, which is the form that survives a phone and a screen reader.
+        slot.QuerySelectorAll(".ms-graph-svg .ms-graph-node-emphasis").Should().ContainSingle();
+        List<string> drawn = [.. slot.QuerySelectorAll(".ms-graph-svg .ms-graph-edge").Select(static x => x.GetAttribute("data-edge") ?? string.Empty)];
+        List<string> listed = [.. slot.QuerySelectorAll(".ms-graph-row").Select(static x => x.GetAttribute("data-edge") ?? string.Empty)];
+        drawn.Should().NotBeEmpty().And.BeEquivalentTo(listed);
     }
 
     [Fact]
