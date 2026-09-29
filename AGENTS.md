@@ -668,7 +668,7 @@ samples/MartenStudio.SampleDomain/Relational/  Non-Marten demo schemas beside th
 samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpoints, progress, daemon lag
 tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in
 docs/                                    Long-form documentation linked from README.md; never packed
-docs/screenshots/                        The eight README screenshots, from the P2 UI verification run
+docs/screenshots/                        The thirteen README screenshots (ScreenshotCaptureTests retakes them)
 src/MartenStudio/Services/Relationships/      The relationship graph service, its DTOs and the SVG layout
 src/MartenStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
 tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, page and panel - no database

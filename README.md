@@ -37,6 +37,10 @@ byte-for-byte the application it was.
 | Projections and the async daemon: shard state, progression and the high-water mark | Schema — what Marten would change, before anything is applied |
 | [![Relationships](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/relationships.png)](docs/screenshots/relationships.png) | |
 | Relationships — the foreign keys `StoreOptions` declares, cross-checked against the ones Postgres holds | |
+| [![Database browser](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/database-browser.png)](docs/screenshots/database-browser.png) | [![Table rows](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/database-rows.png)](docs/screenshots/database-rows.png) |
+| Database — every table, view, function, trigger, sequence and type beside the store, Marten's own told apart; here a Quartz.NET job store | A table's rows: a filter with its index verdict, keyset paging over a composite key, typed headers and "≈ date" hints |
+| [![Row detail](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/database-row-detail.png)](docs/screenshots/database-row-detail.png) | [![Relationships over tables](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/relationships-quartz.png)](docs/screenshots/relationships-quartz.png) |
+| One row: every column, what it points at and what points at it | Relationships over plain tables beside the document types |
 
 ## Install
 
@@ -357,13 +361,35 @@ drops. Saves are optimistically concurrent (`UpdateExpectedVersion` / `UpdateRev
 moved comes back as a conflict with nothing written. With `DeleteDocuments` you get delete (soft where
 the mapping says soft, hard otherwise), undelete, and a bulk delete over the selection.
 
+**Database** — everything else in the store's Postgres database, for a host that keeps a Quartz.NET job
+store, a legacy schema or another library's tables beside Marten. A schema rail, and kind tabs for
+tables, views, functions, triggers, sequences and types; Marten's own objects are quieter, sorted last and
+linked to where their data is really read, and a Quartz.NET, Wolverine, EF Core, Hangfire or Flyway object
+is hinted by name. Each object has a detail page — columns, keys and indexes, foreign keys both ways,
+triggers, a view's query, and its neighbourhood in the relationships diagram — and a table, view or
+materialized view that is not Marten's has a **Rows** tab: a `col = value` / `col ~ text` / `col is:null`
+filter with an index verdict (and "Run anyway" before an unindexed read of a large table), keyset paging
+over composite keys, typed and sortable headers, JSON and `bytea` cells opening in the viewer, a "≈ date"
+hint under `bigint` columns holding .NET ticks or epoch times, and row detail that follows foreign keys
+both ways. The structure of the store's own schemas is shown to every visitor, as the Schema screen always
+did; everything else — other schemas, definitions of what Marten does not own, and every row — needs
+`Capabilities.BrowseDatabase`, a schema `BrowsableSchemas` names (or `"*"`), and the write policy asked
+with `TenantId = null`, because nothing filters those tables by tenant. It is read-only, runs in the same
+read-only transaction as the SQL console as `SqlConsoleRole`, locks nothing it lists, and audits the first
+read of every relation. It never reads the rows of Marten's own document or event tables (they are read in
+Documents and Events, where tenancy, soft delete and the serializer apply), never reads a foreign table,
+directly or through a view, never shows a hidden document type or anything built on it, and masks the name
+of a schema the visitor may not see as `‹withheld›` wherever Postgres prints it.
+
 **Relationships** — the document types of the store as a graph: one node per registered type with its
 collection colour, its .NET type and a `reltuples` estimate, one arrow per foreign key. What
 `StoreOptions` declares and what `pg_constraint` actually holds are cross-checked, so an arrow is
 *declared and enforced*, *declared only* — configured, never applied, nothing enforcing it — or *in the
 database only*, which Marten does not know about and an apply under `CreateOrUpdate` would drop. Keys
-with an end outside the store's document types are listed rather than drawn, and a type hidden by
-`IsDocumentTypeVisible` appears nowhere at all. Clicking a node opens the collection; hovering an arrow
+into the database's other tables are drawn too, as square, schema-coloured nodes — a Documents / Tables /
+Both switch and schema chips narrow the picture, composite-key labels leave out the leading columns both
+primary keys share, and a `NOT VALID` key is dashed — while a key into a schema the visitor may not see is
+counted, never named, and a type hidden by `IsDocumentTypeVisible` appears nowhere at all. Clicking a node opens the collection; hovering an arrow
 names the column, the target and the delete action. Beside the picture — and, on a narrow screen,
 instead of it — a table carries the same relationships with the same links, which is also what a screen
 reader gets. There is no pan, no zoom and no JavaScript: the layout is computed on the server and is a
