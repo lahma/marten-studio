@@ -94,6 +94,12 @@ builder.Services.AddMartenStudio(options =>
     options.Capabilities = sample.ReadOnly ? new MartenStudioCapabilities() : MartenStudioCapabilities.All();
     options.ReadOnly = sample.ReadOnly;
 
+    // The database browser (Capabilities.BrowseDatabase, part of All()) may also show these schemas: the
+    // Quartz.NET job store and the legacy relational schema the sample seeds beside the store. "*" would
+    // open every schema the studio's role can use - fine for a scratch database, not for a shared one.
+    options.BrowsableSchemas.Add(RelationalDemoSchema.QuartzSchemaName);
+    options.BrowsableSchemas.Add(RelationalDemoSchema.LegacySchemaName);
+
     // The demo's invoices are conjoined multi-tenant. Naming the tenants here is the cheapest of the
     // three discovery tiers and the only one that can answer before any events have been written.
     foreach (string tenantId in SampleStore.TenantIds)
