@@ -93,8 +93,27 @@
   schema covering every catalog edge case — sets `BrowsableSchemas` to both, never writes into a `quartz`
   or `legacy` schema it did not create, and has a `--no-daemon` switch. The demo-data panel's Truncate no
   longer times out at the Large preset.
-- The capability chip counts ten and lists "Reads beyond the store" (`RunSql`, `BrowseDatabase`) apart from
-  "Mutating operations"; `ReadOnly` turns both off.
+- Security: a withheld schema's name is masked inside Postgres' own error text too — the database browser's
+  "What Postgres said", failed counts and reference checks, the Relationships panel and the Schema screen's
+  check, preview, DDL and tab notices — while the visitor's own typed value is echoed as typed. The
+  Activity screen and the Overview's recent activity show a database-browser read or a SQL console run only
+  to a visitor who may make it, a registered store that cannot be built or read is named only to a visitor
+  that store's policy passes, and other stores' databases are enumerated only when a policy will be asked.
+- The database browser's pages read nothing while prerendered, so a pasted link is one audit entry and a
+  refused link one 9202/9203 per page view, and using a page whose gate is closed logs nothing. A
+  "Referenced by" count past `QueryTimeout` reads "not counted" on its row instead of failing the panel
+  with a Warning.
+- The browser's rail is the filter, the schemas and the pins on the browser page, and adds the current
+  schema's tables and views on object detail with the open object scrolled into view; every count says what
+  it counts, and on a phone the rail starts closed and the tabs are one row that scrolls sideways. A link
+  to an object that is not there, or not shown to the visitor, reads "Not available here" either way. The
+  Relationships diagram is drawn at its natural size in a scroll region rather than shrunk, lists what has
+  no key as chips below it, and labels a key that is both tables' whole primary keys "primary key (1:1)".
+- Across the studio: the page heading focused after a navigation shows its focus ring only for a keyboard
+  user; notices and schema prefixes meet WCAG AA contrast in both themes; the SQL console's text cells are
+  table cells again; and the capability chip counts ten, lists "Reads beyond the store" (`RunSql`,
+  `BrowseDatabase`) apart from "Mutating operations", and says it describes the studio's configuration
+  rather than what the visitor's account may do. `ReadOnly` turns both groups off.
 
 # 0.2.0
 

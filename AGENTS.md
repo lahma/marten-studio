@@ -348,7 +348,10 @@ them starts. Measured, not assumed: the built asset manifest has no `js-initiali
 all. *The alternative that was rejected:* keeping the initializer and making it no-op outside the
 studio's circuit. It fixes nothing — the fetch, the redirect and the console error all happen before any
 of its code runs. `NoJsInitializerTests` is the regression, on both halves: no `*.lib.module.js` under
-`wwwroot`, and a shell that still asks for the script it replaced it with.
+`wwwroot`, and a shell that still asks for the script it replaced it with. Measured in 0.3.0: a studio
+navigation resets the `<html>` element's attributes even though the window survives, so state the script
+keeps there (the keyboard-or-pointer input modality behind the heading's focus ring) lives in JS and is
+re-applied by an observer.
 
 **D25 — Every data table sits in its own labelled scroll region, and the shell never scrolls sideways.**
 `.ms-main` hides horizontal overflow on purpose, so the studio never grows a page-level scrollbar inside
@@ -364,7 +367,9 @@ the element's painted output to its border box and the focus ring is painted out
 the ~20 tab stops the regions add were invisible. `TablesAreScrollableTests` walks every `.razor` in
 `src/` with a tag stack and fails on a bare table, with an anti-vacuity theory of its own. Where a table
 is wide because of what a column *prints* (an assembly-qualified type name, three constant scope
-columns, a wrapped timestamp), fix the column first — the region is the floor, not the answer.
+columns, a wrapped timestamp), fix the column first — the region is the floor, not the answer. The
+Relationships diagram and the database browser's tab rows use the same region and edge cue: the diagram is
+drawn at its natural size and scrolls sideways rather than shrinking until its labels are unreadable.
 
 **D26 — The stylesheet's UX sections are appended in cascade order, and later wins on purpose.** The
 0.2.0 pass landed five parallel packets in one file. Each put its new rules in a titled section at the
@@ -373,6 +378,9 @@ where its report says so; several sections deliberately re-declare an earlier se
 `.ms-projection-note`, `.ms-overview-list-stream`, `.ms-doc-detail-actions`) and win by source order.
 Keep that when touching those selectors: a rule added *before* the section that overrides it is a rule
 that does nothing, and `StylesheetTests` (plus its `.Shell` part) pins the ones that were measured.
+0.3.0 appended `DB-4`, `DB-6`, `DB-7`, `DB-5` and `UX-6` in that order under the same rule; `UX-6` re-declares a
+few earlier selectors on purpose (the notices' contrast, the heading's focus ring) and
+`StylesheetTests.DatabasePolish` pins them.
 
 **D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
 0.3.0 lets the studio show what else lives in the store's Postgres database — a Quartz.NET job store, a
@@ -423,7 +431,16 @@ under `"*"` with `SqlConsoleRole` narrowed, such a view is read, and what its fu
 that role alone; a definition naming a hidden type's table only through dynamic SQL is not detected; a
 foreign partition attached less than a minute ago may not yet be seen. Schemas an extension owns are
 neither browsable nor withheld for dependency purposes. Every first read of a relation's rows is audited
-by signature (filter, sort, paging mode — never the cursor), per store, database and relation.
+by signature (filter, sort, paging mode — never the cursor), per store, database and relation, and never
+from a static render: the browser's pages read only once interactive, so an explicit request the gate
+refuses is one 9202/9203 per page view and using a page whose gate is closed refuses nothing. On Activity
+and the Overview an entry under `BrowseDatabase` or `RunSql` is shown only while the capability is on and
+the write policy passes the reader for its scope. Postgres' own error text about a browser read is masked
+like everything else (qualifiers, and a schema named after the word *schema*), except a value the read
+bound, which is echoed as typed; row reads do not pin `search_path`, because a bare `=` must find
+`citext`'s own operator, and a name printed unqualified names no schema. The "could not be built" notice
+names another store only to a visitor that store's policy passes, and other stores' databases are
+enumerated only when a store policy — or a write policy, while `BrowseDatabase` is on — will be asked.
 **Reach, not scope.** An operation Marten runs over a whole database — a progression correction, a
 rebuild, a high-water restart, a store-global agent, cancelling a rebuild, the dead-letter "Rewind
 subscription", a schema apply — is authorized as `(store, database, null)` unless the database is

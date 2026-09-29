@@ -490,7 +490,7 @@ internal sealed class DatabaseCatalog
         int commandTimeout = (int) Math.Ceiling(value.QueryTimeout.TotalSeconds) + 5;
 
         await using NpgsqlConnection connection = database.CreateConnection(ConnectionUsage.Read);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
         return await session
             .InTransactionAsync(

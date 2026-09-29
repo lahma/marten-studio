@@ -622,7 +622,7 @@ internal sealed class QueryService : IQueryService
         }
         catch (StudioNotAuthorizedException denied)
         {
-            audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), action, target);
+            audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), action, target, StudioCapability.RunSql);
             logger.SqlRejected(
                 user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", statement);
             throw;
