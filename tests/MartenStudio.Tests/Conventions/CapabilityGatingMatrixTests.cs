@@ -4,6 +4,7 @@ using Marten;
 
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
+using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Projections;
@@ -105,6 +106,30 @@ public class CapabilityGatingMatrixTests
     ];
 
     /// <summary>
+    /// The reads that are gated like writes, and refuse with a value rather than an exception.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>BrowseDatabase</c> is a read treated as a write for authorization, like <c>RunSql</c> (D13), but
+    /// its service answers every refusal as a result a page can draw - "never an exception to the page" -
+    /// where <c>RunSqlAsync</c> throws. So its members are not in <see cref="Mutating" />, whose tests
+    /// require a throw, and they are not merely in <see cref="Reads" />, which would say nothing gates them.
+    /// They are here, and the three refusals below are asserted for them in their own shape: nothing
+    /// thrown, a <c>Refusal</c> on the result, and a failure in the audit ring.
+    /// </para>
+    /// <para>
+    /// Each is called with a schema that is not one of the store's own, which is what makes the call a
+    /// <c>BrowseDatabase</c> read at all - the store's own structure needs no capability.
+    /// </para>
+    /// </remarks>
+    private static readonly GatedCall[] GatedReads =
+    [
+        new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.ListAsync), StudioCapability.BrowseDatabase),
+        new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetObjectAsync), StudioCapability.BrowseDatabase),
+        new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetDefinitionAsync), StudioCapability.BrowseDatabase),
+    ];
+
+    /// <summary>
     /// Every member that reads, by interface.
     /// </summary>
     /// <remarks>
@@ -145,6 +170,7 @@ public class CapabilityGatingMatrixTests
             "PreviewAsync", "TablesAsync",
         ],
         [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync"],
+        [typeof(IDatabaseObjectService)] = ["GetDefinitionAsync", "GetObjectAsync", "GetOverviewAsync", "ListAsync"],
     };
 
     /// <summary>
@@ -232,10 +258,20 @@ public class CapabilityGatingMatrixTests
     [Fact]
     public void The_roster_covers_every_capability()
     {
-        Mutating.Select(static x => x.Capability).Distinct().Order().Should().Equal(
+        Mutating.Concat(GatedReads).Select(static x => x.Capability).Distinct().Order().Should().Equal(
             Enum.GetValues<StudioCapability>().Order(),
             "a capability no method requires is a capability nothing enforces, and one this roster has "
             + "forgotten is a set of methods nothing here tests");
+    }
+
+    [Fact]
+    public void Every_gated_read_is_also_classified_as_a_read()
+    {
+        foreach (GatedCall call in GatedReads)
+        {
+            Reads[call.Service].Should().Contain(call.Method,
+                "a gated read is a read the capability model gates, not a mutating member");
+        }
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -277,6 +313,104 @@ public class CapabilityGatingMatrixTests
         harness.Policies.Allow(static resource => resource.Capability is null);
 
         await AssertEveryCallRefusedAsync<StudioNotAuthorizedException>(harness, checkCapabilityOnEntry: false);
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // The three refusals, for every gated read
+    // -------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_capability_that_is_off_refuses_every_gated_read_as_a_value_and_audits_it()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities());
+
+        await AssertEveryGatedReadRefusedAsync(harness, DatabaseRefusal.CapabilityOff);
+    }
+
+    [Fact]
+    public async Task ReadOnly_refuses_every_gated_read_as_a_value_and_audits_it()
+    {
+        await using Harness harness = Harness.Create(static options =>
+        {
+            options.Capabilities = MartenStudioCapabilities.All();
+            options.ReadOnly = true;
+        });
+
+        await AssertEveryGatedReadRefusedAsync(harness, DatabaseRefusal.ReadOnly);
+    }
+
+    [Fact]
+    public async Task A_write_policy_that_refuses_the_visitor_refuses_every_gated_read_as_a_value_and_audits_it()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+
+        harness.Policies.Allow(static resource => resource.Capability is null);
+
+        await AssertEveryGatedReadRefusedAsync(harness, DatabaseRefusal.WritePolicy);
+
+        harness.Policies.Calls.Where(static x => x.Resource.Capability is not null)
+            .Should().OnlyContain(static x => x.Resource.TenantId == null,
+                "BrowseDatabase is always asked of the database as a whole");
+    }
+
+    private static async Task AssertEveryGatedReadRefusedAsync(Harness harness, DatabaseRefusal expected)
+    {
+        List<string> problems = [];
+
+        foreach (GatedCall call in GatedReads)
+        {
+            int before = harness.Ring.GetLatest().Count;
+            string what = call.Service.Name + "." + call.Method;
+
+            object service = harness.Resolve(call.Service);
+            MethodInfo method = call.Service.GetMethod(call.Method)
+                ?? throw new InvalidOperationException(what + " does not exist.");
+
+            object?[] arguments = [.. method.GetParameters().Select(Argument)];
+            object? result;
+
+            try
+            {
+                object? returned = method.Invoke(service, arguments);
+                result = returned is Task task ? await AwaitResultAsync(task) : returned;
+            }
+            catch (Exception exception)
+            {
+                Exception thrown = exception is TargetInvocationException { InnerException: { } inner } ? inner : exception;
+                problems.Add(what + " threw " + thrown.GetType().Name + " where a refusal value was required: " + thrown.Message);
+                continue;
+            }
+
+            object? refusal = result?.GetType().GetProperty("Refusal")?.GetValue(result);
+
+            if (!Equals(refusal, expected))
+            {
+                problems.Add(what + " answered " + (refusal ?? "nothing") + " where " + expected + " was required");
+            }
+
+            IReadOnlyList<StudioActionLogEntry> after = harness.Ring.GetLatest();
+
+            if (after.Count <= before)
+            {
+                problems.Add(what + " was refused and wrote nothing to the audit");
+                continue;
+            }
+
+            if (after[0].Succeeded)
+            {
+                problems.Add(what + " audited its refusal as a success");
+            }
+        }
+
+        problems.Should().BeEmpty(
+            "a read gated like a write is refused in the service layer and audited, as a value a page can "
+            + "draw: " + string.Join(" | ", problems));
+    }
+
+    private static async Task<object?> AwaitResultAsync(Task task)
+    {
+        await task;
+        return task.GetType().GetProperty("Result")?.GetValue(task);
     }
 
     private static async Task AssertEveryCallRefusedAsync<TException>(Harness harness, bool checkCapabilityOnEntry)
@@ -412,6 +546,19 @@ public class CapabilityGatingMatrixTests
         if (type == typeof(SqlConsoleRequest))
         {
             return new SqlConsoleRequest("select 1");
+        }
+
+        // A schema that is not the store's own, which is what makes a database-browser call a
+        // BrowseDatabase read rather than the structure every visitor may see.
+        if (type == typeof(DatabaseObjectQuery))
+        {
+            return new DatabaseObjectQuery(DatabaseObjectCategory.Tables, Schema: "8f1d5a6e-1a2b-4c3d-9e8f-000000000001");
+        }
+
+        if (type == typeof(DatabaseObjectRef))
+        {
+            return new DatabaseObjectRef(
+                DatabaseObjectKind.View, "8f1d5a6e-1a2b-4c3d-9e8f-000000000001", "8f1d5a6e-1a2b-4c3d-9e8f-000000000001");
         }
 
         throw new NotSupportedException(

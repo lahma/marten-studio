@@ -1,10 +1,12 @@
 namespace MartenStudio;
 
 /// <summary>
-/// The mutating operations Marten Studio is allowed to perform. Every property defaults to
-/// <see langword="false"/>: a freshly mapped studio is a read-only browser until the host enables
-/// what it needs, one switch at a time, or calls <see cref="All"/>.
-/// <see cref="MartenStudioOptions.ReadOnly"/> overrides every property here.
+/// The operations Marten Studio is allowed to perform beyond browsing the store: the mutating ones, and
+/// the two reads that reach past the store's own documents and events (<see cref="RunSql"/> and
+/// <see cref="BrowseDatabase"/>). Every property defaults to <see langword="false"/>: a freshly mapped
+/// studio is a read-only browser of the store until the host enables what it needs, one switch at a
+/// time, or calls <see cref="All"/>. <see cref="MartenStudioOptions.ReadOnly"/> overrides every property
+/// here.
 /// </summary>
 public sealed class MartenStudioCapabilities
 {
@@ -39,6 +41,17 @@ public sealed class MartenStudioCapabilities
     /// </summary>
     public bool RunSql { get; set; }
 
+    /// <summary>
+    /// Read the rows and the definitions (view SQL, function bodies, trigger definitions) of the
+    /// database objects Marten does not own, in the schemas <see cref="MartenStudioOptions.BrowsableSchemas"/>
+    /// names, and see those schemas' structure at all. Like <see cref="RunSql"/> it is a read that is
+    /// treated as a write for authorization: <see cref="MartenStudioOptions.WriteAuthorizationPolicy"/> is
+    /// asked, against the database as a whole with no tenant, and <see cref="MartenStudioOptions.ReadOnly"/>
+    /// turns it off with everything else. Rows of Marten's own document and event tables are never read
+    /// this way; they are browsed where tenancy, soft delete and the serializer apply.
+    /// </summary>
+    public bool BrowseDatabase { get; set; }
+
     /// <summary>Every capability enabled. Still subject to <see cref="MartenStudioOptions.ReadOnly"/>.</summary>
     public static MartenStudioCapabilities All() => new()
     {
@@ -51,5 +64,6 @@ public sealed class MartenStudioCapabilities
         CorrectProgression = true,
         ApplySchemaChanges = true,
         RunSql = true,
+        BrowseDatabase = true,
     };
 }

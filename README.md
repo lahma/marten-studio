@@ -209,16 +209,18 @@ public sealed class MartenStudioHandler
         MartenStudioRequirement requirement,
         MartenStoreResource resource)
     {
-        // Reads: the tenant has to be one this user owns.
+        // Reads: the tenant has to be one this user owns - and a resource with no tenant is every
+        // tenant at once, so it takes an explicit all-tenants claim rather than passing for everyone.
         bool mayRead = resource.TenantId is null
-            || context.User.HasClaim("tenant", resource.TenantId);
+            ? context.User.HasClaim("tenant", "*")
+            : context.User.HasClaim("tenant", resource.TenantId);
 
         // Writes: the capability name arrives on the resource, so one handler can be as coarse or as
         // fine as you like - "ops may rebuild, nobody but me may run SQL".
         bool mayWrite = resource.Capability switch
         {
             null => true,
-            "RunSql" => context.User.IsInRole("dba"),
+            "RunSql" or "BrowseDatabase" => context.User.IsInRole("dba"),
             _ => context.User.IsInRole("ops"),
         };
 
@@ -231,6 +233,11 @@ public sealed class MartenStudioHandler
     }
 }
 ```
+
+A `null` tenant is not "no tenant to check" but every tenant at once — the all-tenants view, and every
+`BrowseDatabase` read, which is always asked with `TenantId = null` because nothing filters a non-Marten
+table by tenant — so a handler that let it through for everybody would hand a user scoped to one tenant
+all of them.
 
 Register it the usual way and name the policy:
 

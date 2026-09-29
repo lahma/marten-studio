@@ -54,6 +54,16 @@ One `AuthorizationHandler<TRequirement, MartenStoreResource>` answers for the sc
 frame and every data call. `Capability` is `null` for a read and carries the capability's own name for a
 write, so a single handler can be as coarse or as fine as you want.
 
+`TenantId = null` means every tenant at once, so a handler must require an explicit all-tenants claim for
+it rather than let it through. Anything that is not tenant-scoped is asked that way whatever tenant the
+visitor has selected: `BrowseDatabase` is always authorized against `TenantId = null` (with
+`Capability = "BrowseDatabase"`), because no tenant filters a Quartz or legacy table, and a handler that
+confines people to their own tenant therefore refuses them the database browser — which is the point.
+
+`BrowsableSchemas` limits what the database browser's screens show, not what can be read: the SQL console
+reads whatever the connection's role can, in any schema. `SqlConsoleRole` is the real boundary for both,
+since every console statement and every browser read runs under `SET LOCAL ROLE` to it.
+
 ### The startup guard
 
 An application that maps the studio and says nothing about authorization **does not start**. The check

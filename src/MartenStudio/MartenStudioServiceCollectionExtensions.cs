@@ -4,6 +4,7 @@ using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
+using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Live;
@@ -94,7 +95,12 @@ public static partial class MartenStudioServiceCollectionExtensions
                 "MartenStudioOptions.Capabilities cannot be null: use new MartenStudioCapabilities() for none, or MartenStudioCapabilities.All()")
             .Validate(
                 static options => options.KnownTenantIds.All(static tenantId => !string.IsNullOrWhiteSpace(tenantId)),
-                "MartenStudioOptions.KnownTenantIds cannot contain an empty or whitespace tenant id");
+                "MartenStudioOptions.KnownTenantIds cannot contain an empty or whitespace tenant id")
+            .Validate(
+                static options => options.BrowsableSchemas.All(BrowsableSchemaMatcher.IsValidEntry),
+                "MartenStudioOptions.BrowsableSchemas entries must each be \"*\" or a Postgres schema name: not " +
+                "empty or whitespace, at most 63 bytes in UTF-8, and with no double quote (\") and no NUL - a " +
+                "name the studio could never quote is a name no schema it can read has");
 
         if (configure is not null)
         {
@@ -175,6 +181,15 @@ public static partial class MartenStudioServiceCollectionExtensions
         // The sidebar's badges. Scoped like the pages they point at, and reading through the same
         // services, so a badge is subject to the same store, database and tenant policies as the screen.
         services.TryAddScoped<INavIndicatorService, NavIndicatorService>();
+
+        // DB-1: database browser. The catalog is a singleton for the same reason ColumnCatalog is: what it
+        // caches is a fact about the database, the same for every circuit, and the per-visitor gate is
+        // applied after the cache. The gate and the service are about one circuit's visitor, so scoped.
+        // The notice logs event 9230 once at host start and changes nothing else about startup.
+        services.TryAddSingleton<DatabaseCatalog>();
+        services.TryAddScoped<DatabaseAccess>();
+        services.TryAddScoped<IDatabaseObjectService, DatabaseObjectService>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, DatabaseBrowserConfigurationNotice>());
 
         return services;
     }

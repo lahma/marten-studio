@@ -16,18 +16,22 @@ else
         @Capabilities.EnabledCount / @StudioCapabilityGuard.All.Count capabilities
     </button>
 
-    @* Native popover: no positioning library, no third-party menu component (AGENTS.md hard rule 3). *@
+    @* Native popover: no positioning library, no third-party menu component (AGENTS.md hard rule 3).
+       Two groups, because two kinds of switch: the reads that reach past the store's own documents and
+       events (the SQL console, the database browser) change nothing, and are still authorized as writes. *@
     <div id="ms-capability-popover" popover="auto" class="ms-popover">
-        <p class="ms-popover-title">Mutating operations</p>
-        <ul class="ms-capability-list">
-            @foreach (StudioCapability capability in StudioCapabilityGuard.All)
+        <p class="ms-popover-title">Reads beyond the store</p>
+        <ul class="ms-capability-list" aria-label="Reads beyond the store">
+            @foreach (StudioCapability capability in StudioCapabilityGuard.ReadsBeyondTheStore)
             {
-                bool enabled = Capabilities.IsEnabled(capability);
-                <li class="ms-capability @(enabled ? "ms-capability-on" : "ms-capability-off")" @key="capability">
-                    <span class="ms-capability-state" aria-hidden="true">@(enabled ? "on" : "off")</span>
-                    <span class="ms-capability-name">@capability</span>
-                    <code class="ms-capability-option">@StudioCapabilityGuard.OptionName(capability)</code>
-                </li>
+                @Row(capability)
+            }
+        </ul>
+        <p class="ms-popover-title">Mutating operations</p>
+        <ul class="ms-capability-list" aria-label="Mutating operations">
+            @foreach (StudioCapability capability in StudioCapabilityGuard.Mutating)
+            {
+                @Row(capability)
             }
         </ul>
         <p class="ms-popover-footnote">
@@ -35,4 +39,16 @@ else
             turns them all on; <code>MartenStudioOptions.ReadOnly</code> turns them all off again.
         </p>
     </div>
+}
+
+@code {
+    private RenderFragment Row(StudioCapability capability) => __builder =>
+    {
+        bool enabled = Capabilities.IsEnabled(capability);
+        <li class="ms-capability @(enabled ? "ms-capability-on" : "ms-capability-off")" @key="capability">
+            <span class="ms-capability-state" aria-hidden="true">@(enabled ? "on" : "off")</span>
+            <span class="ms-capability-name">@capability</span>
+            <code class="ms-capability-option">@StudioCapabilityGuard.OptionName(capability)</code>
+        </li>
+    };
 }

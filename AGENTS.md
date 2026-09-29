@@ -607,6 +607,10 @@ tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both w
 tests/MartenStudio.Integration.Tests/Database/  Live Postgres, a database per fixture: the relational demo
                                          schemas, their idempotency and the demo-data flows beside them
 tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: six scenarios, the D19 gate, the large-data pass
+src/MartenStudio/Services/Database/       The database browser: the per-visitor gate, the schema matcher, the
+                                         ownership classifier, the catalog cache and the object service
+tests/MartenStudio.Tests/Database/        Gate, matcher, classifier, catalog SQL shape, options - no database
+tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, the gate and its audit, no DDL
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),

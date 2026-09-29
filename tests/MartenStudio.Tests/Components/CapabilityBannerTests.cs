@@ -12,28 +12,28 @@ namespace MartenStudio.Tests.Components;
 public class CapabilityBannerTests
 {
     [Fact]
-    public void A_fresh_studio_reads_as_none_of_nine()
+    public void A_fresh_studio_reads_as_none_of_ten()
     {
         using var context = new StudioComponentContext();
 
         var banner = context.Render<CapabilityBanner>();
 
-        banner.Find(".ms-chip").TextContent.Trim().Should().Be("0 / 9 capabilities");
+        banner.Find(".ms-chip").TextContent.Trim().Should().Be("0 / 10 capabilities");
     }
 
     [Fact]
-    public void All_reads_as_nine_of_nine()
+    public void All_reads_as_ten_of_ten()
     {
         using var context = new StudioComponentContext().WithAllCapabilities();
 
         var banner = context.Render<CapabilityBanner>();
 
-        banner.Find(".ms-chip").TextContent.Trim().Should().Be("9 / 9 capabilities");
+        banner.Find(".ms-chip").TextContent.Trim().Should().Be("10 / 10 capabilities");
     }
 
     /// <summary>
-    /// The master switch is its own chip rather than "0 / 9": a read-only studio is a deliberate state,
-    /// not nine switches that happen to be off.
+    /// The master switch is its own chip rather than "0 / 10": a read-only studio is a deliberate state,
+    /// not ten switches that happen to be off.
     /// </summary>
     [Fact]
     public void ReadOnly_is_an_amber_chip_of_its_own_and_there_is_no_popover()
@@ -63,9 +63,10 @@ public class CapabilityBannerTests
 
         var banner = context.Render<CapabilityBanner>();
 
-        banner.FindAll(".ms-capability").Should().HaveCount(9);
+        banner.FindAll(".ms-capability").Should().HaveCount(10);
         banner.TextOfAll(".ms-capability-option").Should().Equal(
-            StudioCapabilityGuard.All.Select(x => "MartenStudioOptions.Capabilities." + x));
+            StudioCapabilityGuard.ReadsBeyondTheStore.Concat(StudioCapabilityGuard.Mutating)
+                .Select(x => "MartenStudioOptions.Capabilities." + x));
 
         var edit = banner.FindAll(".ms-capability").Single(x =>
             x.QuerySelector(".ms-capability-name")!.TextContent.Trim() == nameof(StudioCapability.EditDocuments));
@@ -73,7 +74,31 @@ public class CapabilityBannerTests
         edit.ClassList.Should().Contain("ms-capability-on");
         edit.QuerySelector(".ms-capability-state")!.TextContent.Trim().Should().Be("on");
 
-        banner.FindAll(".ms-capability-off").Should().HaveCount(8);
+        banner.FindAll(".ms-capability-off").Should().HaveCount(9);
+    }
+
+    /// <summary>
+    /// Two groups, because two kinds of switch: the console and the database browser change nothing, and
+    /// a list headed "Mutating operations" that held them would describe a narrower switch than the host set.
+    /// </summary>
+    [Fact]
+    public void The_popover_groups_the_reads_beyond_the_store_apart_from_the_mutating_operations()
+    {
+        using var context = new StudioComponentContext();
+
+        var banner = context.Render<CapabilityBanner>();
+
+        banner.TextOfAll(".ms-popover-title").Should().Equal("Reads beyond the store", "Mutating operations");
+
+        var groups = banner.FindAll(".ms-capability-list");
+        groups.Should().HaveCount(2);
+
+        groups[0].QuerySelectorAll(".ms-capability-name").Select(static x => x.TextContent.Trim())
+            .Should().Equal(nameof(StudioCapability.RunSql), nameof(StudioCapability.BrowseDatabase));
+
+        groups[1].QuerySelectorAll(".ms-capability-name").Select(static x => x.TextContent.Trim())
+            .Should().HaveCount(8).And.NotContain(nameof(StudioCapability.RunSql))
+            .And.NotContain(nameof(StudioCapability.BrowseDatabase));
     }
 
     /// <summary>The popover is the platform's, not a menu library's (AGENTS.md hard rule 3).</summary>

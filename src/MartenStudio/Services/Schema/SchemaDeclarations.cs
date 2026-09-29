@@ -33,7 +33,117 @@ internal sealed record SchemaDeclarations(
     IReadOnlyList<DeclaredIndex> Indexes,
     IReadOnlySet<string> ManagedTables,
     IReadOnlySet<string> IgnoredIndexes,
-    IReadOnlySet<string> Functions);
+    IReadOnlySet<string> Functions)
+{
+    /// <summary>
+    /// Every object the configuration declares, keyed by <see cref="SchemaKey.For(string, string)" />, with
+    /// what Marten means it to be.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A wider net than <see cref="ManagedTables" />: it also holds the event store's sequences (which the
+    /// Schema screen has never listed) and <c>StoreOptions.Storage.ExtendedSchemaObjects</c> (EF Core
+    /// projection tables, PgVector, anything a host hands Marten to manage), and it says <em>what</em> each
+    /// one is rather than only that Marten manages it. The database browser classifies objects with it;
+    /// nothing on the Schema screen reads it yet, so adding to it changes nothing there.
+    /// </para>
+    /// <para>
+    /// Case-insensitive, like every other set on this record. Erring towards "this is Marten's" is the
+    /// safe direction for a map whose job is to keep Marten's rows from being read raw.
+    /// </para>
+    /// <para>
+    /// <b>Not everything Marten creates can be here.</b> Features added with
+    /// <c>StoreOptions.Storage.Add(IFeatureSchema)</c> - TimescaleDB's hypertable and continuous-aggregate
+    /// objects, a host's own feature - are reachable only through Marten's internal
+    /// <c>StorageFeatures.AllActiveFeatures(database)</c>, which applies migrations on the way (AGENTS.md hard
+    /// rule 14), and the HiLo <c>SequenceFactory</c> is internal. Those objects are known here only when
+    /// their name starts with <c>mt_</c>, which is the database browser's own rule for "Marten
+    /// infrastructure" in any schema; anything else they create reads as the host's own.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyDictionary<string, MartenDeclaredObject> Objects { get; init; } =
+        new Dictionary<string, MartenDeclaredObject>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Why <see cref="Objects" /> is incomplete, or <see langword="null" /> when it is not.
+    /// </summary>
+    /// <remarks>
+    /// Recorded rather than thrown so that <see cref="SchemaDeclarationReader.Read" />'s existing callers -
+    /// the Schema screen, which reads <see cref="Schemas" />, <see cref="Indexes" /> and
+    /// <see cref="Functions" /> - behave exactly as they did before the map existed.
+    /// <see cref="SchemaDeclarationReader.ReadForClassification" /> turns it into a failure.
+    /// </remarks>
+    public string? ObjectsFailure { get; init; }
+}
+
+/// <summary>What Marten declares one database object to be.</summary>
+internal enum MartenObjectKind
+{
+    /// <summary>A document type's table. See <see cref="MartenDeclaredObject.Visible" />.</summary>
+    DocumentTable,
+
+    /// <summary>One of the event store's own tables: <c>mt_events</c>, <c>mt_streams</c> and their kin.</summary>
+    EventTable,
+
+    /// <summary>
+    /// A relational object Marten manages on the host's behalf and whose rows are the host's own data: a
+    /// flat-table projection's table, an <c>EventProjection.SchemaObjects</c> table, anything in
+    /// <c>ExtendedSchemaObjects</c> that is not a function or a sequence.
+    /// </summary>
+    ProjectionOrExtendedTable,
+
+    /// <summary>Marten's own bookkeeping table (<c>mt_hilo</c>).</summary>
+    Infrastructure,
+
+    /// <summary>A function Marten installs or was handed to manage.</summary>
+    Function,
+
+    /// <summary>A sequence Marten creates or was handed to manage.</summary>
+    Sequence,
+}
+
+/// <summary>One object a store's configuration declares, by what it is.</summary>
+/// <param name="Kind">What Marten means it to be.</param>
+/// <param name="Alias">
+/// The collection alias of a document table whose type is visible; <see langword="null" /> for everything
+/// else, including a hidden type's table - its alias is exactly what a hidden type must not show.
+/// </param>
+/// <param name="Visible">
+/// <see langword="false" /> only for a document table whose type
+/// <c>MartenStudioOptions.IsDocumentTypeVisible</c> hides.
+/// </param>
+internal sealed record MartenDeclaredObject(MartenObjectKind Kind, string? Alias = null, bool Visible = true);
+
+/// <summary>
+/// What <see cref="SchemaDeclarationReader.ReadForClassification" /> answers: the declarations, or why
+/// they could not be read - never an empty map standing in for a failure.
+/// </summary>
+internal sealed record SchemaDeclarationRead
+{
+    private SchemaDeclarationRead(SchemaDeclarations? declarations, string? failure)
+    {
+        Declarations = declarations;
+        Failure = failure;
+    }
+
+    /// <summary>The declarations, when the read succeeded.</summary>
+    public SchemaDeclarations? Declarations { get; }
+
+    /// <summary>Why it did not, in the configuration's own words.</summary>
+    public string? Failure { get; }
+
+    /// <summary>Whether the declarations are complete.</summary>
+    [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(Declarations))]
+    public bool Succeeded => Declarations is not null;
+
+    /// <summary>A complete read.</summary>
+    public static SchemaDeclarationRead Success(SchemaDeclarations declarations) =>
+        new(declarations ?? throw new ArgumentNullException(nameof(declarations)), null);
+
+    /// <summary>A read that failed, and why.</summary>
+    public static SchemaDeclarationRead Failed(string reason) =>
+        new(null, string.IsNullOrWhiteSpace(reason) ? "The store's configuration could not be read." : reason);
+}
 
 /// <summary>
 /// Reads what a store's configuration declares, without asking the database anything.
@@ -122,6 +232,7 @@ internal static class SchemaDeclarationReader
         HashSet<string> ignoredIndexes = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> functions = new(StringComparer.OrdinalIgnoreCase);
         List<DeclaredIndex> indexes = [];
+        Dictionary<string, MartenDeclaredObject> objects = new(StringComparer.OrdinalIgnoreCase);
 
         void AddSchema(string? name)
         {
@@ -140,7 +251,13 @@ internal static class SchemaDeclarationReader
         foreach (string name in DocumentSchemaFunctions)
         {
             functions.Add(SchemaKey.For(documentSchema, name));
+            objects.TryAdd(SchemaKey.For(documentSchema, name), new MartenDeclaredObject(MartenObjectKind.Function));
         }
+
+        // The HiLo table beside its function. The SequenceFactory that declares it is internal and is only
+        // reachable through the migrating feature walk (hard rule 14), so it is named here - an entry for a
+        // table that is not there yet classifies nothing and costs nothing.
+        objects.TryAdd(SchemaKey.For(documentSchema, HiloTable), new MartenDeclaredObject(MartenObjectKind.Infrastructure));
 
         foreach (IDocumentType documentType in storeOptions.AllKnownDocumentTypes())
         {
@@ -154,6 +271,10 @@ internal static class SchemaDeclarationReader
             managedTables.Add(SchemaKey.For(schema, table));
 
             bool visible = isDocumentTypeVisible is null || isDocumentTypeVisible(documentType.DocumentType);
+
+            objects.TryAdd(
+                SchemaKey.For(schema, table),
+                new MartenDeclaredObject(MartenObjectKind.DocumentTable, visible ? documentType.Alias : null, visible));
             string alias = visible ? documentType.Alias : table;
             string typeName = visible ? SchemaTypeName.Of(documentType.DocumentType) : table;
 
@@ -197,9 +318,119 @@ internal static class SchemaDeclarationReader
             }
         }
 
-        ReadEventStore(storeOptions, eventSchema, managedTables, ignoredIndexes, functions, indexes, AddSchema);
+        ReadEventStore(storeOptions, eventSchema, managedTables, ignoredIndexes, functions, indexes, objects, AddSchema);
 
-        return new SchemaDeclarations(orderedSchemas, indexes, managedTables, ignoredIndexes, functions);
+        string? objectsFailure = ReadExtendedObjects(storeOptions, objects);
+
+        return new SchemaDeclarations(orderedSchemas, indexes, managedTables, ignoredIndexes, functions)
+        {
+            Objects = objects,
+            ObjectsFailure = objectsFailure,
+        };
+    }
+
+    /// <summary>
+    /// Reads one store's declarations for <em>classification</em>, failing closed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The database browser asks this whose each table is, and a table nobody claims is shown as the
+    /// host's own - with its rows readable once the host has turned the browser on. So a read that throws
+    /// cannot become an empty map here the way <see cref="SchemaNames" /> becomes two schema names: an
+    /// empty map would label every Marten table "Other" and hand its rows to a raw reader that knows
+    /// nothing of tenancy or soft delete. The caller gets the failure, with the configuration's own
+    /// message, and shows it instead of a classification.
+    /// </para>
+    /// <para>
+    /// Touches no connection, like <see cref="Read" />: <c>IReadOnlyStoreOptions</c>, <c>IDocumentType</c>,
+    /// the event store's feature objects and <c>StoreOptions.Storage.ExtendedSchemaObjects</c> are all
+    /// in-memory object graphs.
+    /// </para>
+    /// </remarks>
+    /// <param name="storeOptions">The store's read-only options.</param>
+    /// <param name="isDocumentTypeVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>.</param>
+    public static SchemaDeclarationRead ReadForClassification(
+        IReadOnlyStoreOptions storeOptions,
+        Func<Type, bool>? isDocumentTypeVisible = null)
+    {
+        ArgumentNullException.ThrowIfNull(storeOptions);
+
+        try
+        {
+            SchemaDeclarations declarations = Read(storeOptions, isDocumentTypeVisible);
+
+            return declarations.ObjectsFailure is { } failure
+                ? SchemaDeclarationRead.Failed(failure)
+                : SchemaDeclarationRead.Success(declarations);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return SchemaDeclarationRead.Failed(exception.Message);
+        }
+    }
+
+    /// <summary>The HiLo bookkeeping table Marten creates in the document schema.</summary>
+    internal const string HiloTable = "mt_hilo";
+
+    /// <summary>
+    /// Adds <c>StoreOptions.Storage.ExtendedSchemaObjects</c> to the map, or says why it could not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>IReadOnlyStoreOptions</c> has no <c>Storage</c>; the list lives on the concrete
+    /// <c>StoreOptions</c>, which is the only implementation Marten has. A different implementation is
+    /// therefore a map that cannot be completed, and it is reported as one rather than treated as "no
+    /// extended objects".
+    /// </para>
+    /// <para>
+    /// Caught and recorded here, not thrown, so that the Schema screen's callers of <see cref="Read" /> -
+    /// which never needed this - are not newly exposed to it.
+    /// </para>
+    /// </remarks>
+    private static string? ReadExtendedObjects(
+        IReadOnlyStoreOptions storeOptions,
+        Dictionary<string, MartenDeclaredObject> objects)
+    {
+        if (storeOptions is not StoreOptions concrete)
+        {
+            return "The store's options are not a Marten StoreOptions, so its ExtendedSchemaObjects cannot be read.";
+        }
+
+        try
+        {
+            foreach (ISchemaObject schemaObject in concrete.Storage.ExtendedSchemaObjects)
+            {
+                if (schemaObject is Weasel.Postgresql.Extension)
+                {
+                    // An extension's own objects are excluded from the browser wholesale (pg_depend
+                    // deptype 'e'), so there is nothing to classify.
+                    continue;
+                }
+
+                MartenObjectKind kind = schemaObject switch
+                {
+                    Function => MartenObjectKind.Function,
+                    Weasel.Postgresql.Sequence => MartenObjectKind.Sequence,
+
+                    // A table, a view, or an ISchemaObject of the host's own: relational, Marten-managed,
+                    // and the host's data - the same standing as a flat-table projection's table.
+                    _ => MartenObjectKind.ProjectionOrExtendedTable,
+                };
+
+                DbObjectName identifier = schemaObject.Identifier;
+                string schema = string.IsNullOrWhiteSpace(identifier.Schema)
+                    ? storeOptions.DatabaseSchemaName
+                    : identifier.Schema;
+
+                objects.TryAdd(SchemaKey.For(schema, identifier.Name), new MartenDeclaredObject(kind));
+            }
+
+            return null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return "StoreOptions.Storage.ExtendedSchemaObjects could not be read: " + exception.Message;
+        }
     }
 
     /// <summary>
@@ -239,6 +470,15 @@ internal static class SchemaDeclarationReader
     /// <c>mt_archive_stream</c> and <c>mt_quick_append_events</c> functions. Nothing there opens a
     /// connection, which is the whole reason this reaches the event store this way instead of through
     /// <c>AllObjects()</c>: the sequence feature is what ran DDL, and it is not in here.
+    /// <para>
+    /// For the kind map, a table is the event store's own when its type is one of Marten's
+    /// (<c>StreamsTable</c>, <c>EventsTable</c>, <c>EventProgressionTable</c>, <c>NaturalKeyTable</c>,
+    /// <c>EventTagTable</c>, <c>DcbTagVersionTable</c> - all internal to the Marten assembly), and a
+    /// projection's when it is anything else: a flat-table projection's <c>Table</c> and an
+    /// <c>EventProjection.SchemaObjects</c> table are plain Weasel tables the host shaped, holding the host's
+    /// own data. The assembly is the test rather than a list of names so that a table Marten adds in a
+    /// later version is classified as Marten's without anyone updating a list.
+    /// </para>
     /// </remarks>
     private static void ReadEventStore(
         IReadOnlyStoreOptions storeOptions,
@@ -247,6 +487,7 @@ internal static class SchemaDeclarationReader
         HashSet<string> ignoredIndexes,
         HashSet<string> functions,
         List<DeclaredIndex> indexes,
+        Dictionary<string, MartenDeclaredObject> objects,
         Action<string?> addSchema)
     {
         if (storeOptions.Events is not IFeatureSchema feature)
@@ -273,17 +514,46 @@ internal static class SchemaDeclarationReader
             if (schemaObject is Function)
             {
                 functions.Add(SchemaKey.For(schemaObject.Identifier.Schema, schemaObject.Identifier.Name));
+                objects.TryAdd(
+                    SchemaKey.For(schemaObject.Identifier.Schema, schemaObject.Identifier.Name),
+                    new MartenDeclaredObject(MartenObjectKind.Function));
+                continue;
+            }
+
+            if (schemaObject is Weasel.Postgresql.Sequence)
+            {
+                // mt_events_sequence. Never on the Schema screen's lists, which is why nothing but the kind
+                // map records it. The per-tenant sequences (PerTenantEventSequences) are a wrapper with a
+                // placeholder identifier and are skipped: their real names carry tenant ids.
+                objects.TryAdd(
+                    SchemaKey.For(schemaObject.Identifier.Schema, schemaObject.Identifier.Name),
+                    new MartenDeclaredObject(MartenObjectKind.Sequence));
                 continue;
             }
 
             if (schemaObject is not Table table)
             {
+                if (schemaObject is Weasel.Postgresql.Views.View)
+                {
+                    // A projection that declares a view: relational, the host's data, Marten-managed.
+                    objects.TryAdd(
+                        SchemaKey.For(schemaObject.Identifier.Schema, schemaObject.Identifier.Name),
+                        new MartenDeclaredObject(MartenObjectKind.ProjectionOrExtendedTable));
+                }
+
                 continue;
             }
 
             string schema = table.Identifier.Schema;
             string name = table.Identifier.Name;
             managedTables.Add(SchemaKey.For(schema, name));
+
+            objects.TryAdd(
+                SchemaKey.For(schema, name),
+                new MartenDeclaredObject(
+                    table.GetType().Assembly == typeof(StoreOptions).Assembly
+                        ? MartenObjectKind.EventTable
+                        : MartenObjectKind.ProjectionOrExtendedTable));
 
             foreach (string ignored in table.IgnoredIndexes)
             {

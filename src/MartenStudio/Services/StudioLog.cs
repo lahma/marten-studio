@@ -139,4 +139,20 @@ internal static partial class StudioLog
     /// </remarks>
     [LoggerMessage(EventId = 9220, Message = "A Marten Studio page failed to handle a live update failure")]
     public static partial void LiveUpdateHandlerFailed(this ILogger logger, LogLevel level, Exception exception);
+
+    /// <remarks>
+    /// <para>
+    /// Warning, once per host start, from <c>DatabaseBrowserConfigurationNotice</c>. <c>"*"</c> in
+    /// <c>BrowsableSchemas</c> is a legitimate development setting, and it is also the one line that makes
+    /// every table the store's own Postgres role can select from browsable - including other applications'
+    /// tables in a shared database. <c>SqlConsoleRole</c> is what narrows that, as it narrows the SQL
+    /// console, so the combination of the first without the second is said out loud where an operator
+    /// reads the startup log rather than discovered on a screen.
+    /// </para>
+    /// <para>
+    /// Event ids <c>9230-9234</c> belong to the database browser; <c>9231-9234</c> are unassigned.
+    /// </para>
+    /// </remarks>
+    [LoggerMessage(EventId = 9230, Level = LogLevel.Warning, Message = "Marten Studio's database browser may show every schema (MartenStudioOptions.BrowsableSchemas contains \"*\") and MartenStudioOptions.SqlConsoleRole is not set, so it reads the catalog and rows as the store's own Postgres role: every table that role can select from is browsable by anyone granted MartenStudioOptions.Capabilities.BrowseDatabase. Set SqlConsoleRole to a role that can read only what the browser should show.")]
+    public static partial void DatabaseBrowserOpenToEverySchemaWithoutRole(this ILogger logger);
 }

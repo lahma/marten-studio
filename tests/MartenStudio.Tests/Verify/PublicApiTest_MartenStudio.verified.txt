@@ -13,6 +13,7 @@ namespace MartenStudio
         public MartenStudioCapabilities() { }
         public bool ApplySchemaChanges { get; set; }
         public bool ArchiveStreams { get; set; }
+        public bool BrowseDatabase { get; set; }
         public bool ControlDaemon { get; set; }
         public bool CorrectProgression { get; set; }
         public bool DeleteDocuments { get; set; }
@@ -31,6 +32,7 @@ namespace MartenStudio
     {
         public MartenStudioOptions() { }
         public string? AuthorizationPolicy { get; set; }
+        public System.Collections.Generic.IList<string> BrowsableSchemas { get; }
         public MartenStudio.MartenStudioCapabilities Capabilities { get; set; }
         public int DefaultPageSize { get; set; }
         public bool DiscoverTenantIds { get; set; }

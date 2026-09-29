@@ -1408,6 +1408,93 @@ public class MartenApiSurfaceTest
     }
 
     // --------------------------------------------------------------------------------------------
+    // The database browser (DB-1)
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>StoreOptions.Storage.ExtendedSchemaObjects</c> is how a host hands Marten tables, functions and
+    /// sequences to manage - EF Core projection tables, PgVector - and the classifier reads it so they are
+    /// never labelled "Other".
+    /// </summary>
+    /// <remarks>
+    /// <b><c>IReadOnlyStoreOptions</c> has no <c>Storage</c></b> (verified at <c>V9.31.0</c>): the list is a
+    /// plain public <c>List&lt;ISchemaObject&gt;</c> on <c>StorageFeatures</c>, reached through the concrete
+    /// <c>StoreOptions</c> - Marten's only implementation - so the reader casts. Features added with
+    /// <c>Storage.Add(IFeatureSchema)</c> are reachable only through <c>AllActiveFeatures</c>, which is
+    /// internal and applies migrations (hard rule 14); the classifier knows those only by the <c>mt_</c>
+    /// prefix, and this pins that the door stays shut rather than silently opening.
+    /// </remarks>
+    [Fact]
+    public void ExtendedSchemaObjects_is_a_plain_list_on_the_concrete_StoreOptions_Storage()
+    {
+        typeof(IReadOnlyStoreOptions).GetProperty("Storage", MemberFlags).Should().BeNull(
+            "the read-only interface has no Storage, which is why the reader casts to StoreOptions");
+        typeof(IReadOnlyStoreOptions).IsAssignableFrom(typeof(StoreOptions)).Should().BeTrue();
+
+        RequireProperty(typeof(StoreOptions), "Storage").PropertyType.Should().Be<StorageFeatures>();
+        RequireProperty(typeof(StorageFeatures), "ExtendedSchemaObjects").PropertyType
+            .Should().Be<List<Weasel.Core.ISchemaObject>>();
+
+        new StoreOptions().Storage.ExtendedSchemaObjects.Should().BeEmpty();
+
+        typeof(StorageFeatures).GetMethod("AllActiveFeatures", MemberFlags).Should().BeNull(
+            "it is internal - a feature added with Storage.Add(IFeatureSchema) is known only by its mt_ name");
+    }
+
+    /// <summary>
+    /// A document can point a foreign key at any table by name - the overload that makes an edge between
+    /// a Marten document and a plain table, which the database browser's foreign-key lists show.
+    /// </summary>
+    /// <remarks>
+    /// Verified at <c>V9.31.0</c>: <c>ForeignKey(Expression&lt;Func&lt;T, object&gt;&gt;, string schemaName,
+    /// string tableName, string columnName, Action&lt;ForeignKey&gt;? foreignKeyConfiguration = null)</c>. It
+    /// adds a duplicated field for the member and a plain Weasel <c>ForeignKey</c> named
+    /// <c>{table}_{column}_fkey</c>; a null schema means the document's own.
+    /// </remarks>
+    [Fact]
+    public void A_document_foreign_key_can_point_at_any_table_by_schema_table_and_column()
+    {
+        RequireMethod(
+                typeof(MartenRegistry.DocumentMappingExpression<SampleDocument>),
+                "ForeignKey",
+                typeof(Expression<Func<SampleDocument, object>>),
+                typeof(string),
+                typeof(string),
+                typeof(string),
+                typeof(Action<ForeignKey>))
+            .ReturnType.Should().Be<MartenRegistry.DocumentMappingExpression<SampleDocument>>();
+    }
+
+    /// <summary>
+    /// The event store's own tables are types of the Marten assembly and a flat-table projection's table is
+    /// a plain Weasel <c>Table</c> - which is exactly the test the reader uses to tell "event store" from
+    /// "Marten-managed projection data".
+    /// </summary>
+    [Fact]
+    public void The_event_stores_own_tables_are_Marten_types_and_a_projections_table_is_Weasels()
+    {
+        foreach (string name in new[]
+                 {
+                     "Marten.Events.Schema.StreamsTable", "Marten.Events.Schema.EventsTable",
+                     "Marten.Events.Schema.EventProgressionTable", "Marten.Events.Schema.NaturalKeyTable",
+                     "Marten.Events.Schema.EventTagTable", "Marten.Events.Schema.DcbTagVersionTable",
+                 })
+        {
+            Type table = MartenType(name);
+
+            table.Should().BeAssignableTo<Table>();
+            table.Assembly.Should().BeSameAs(typeof(StoreOptions).Assembly);
+        }
+
+        RequireProperty(typeof(global::Marten.Events.Projections.Flattened.FlatTableProjection), "Table")
+            .PropertyType.Should().Be<Table>();
+        typeof(Table).Assembly.Should().NotBeSameAs(typeof(StoreOptions).Assembly);
+
+        RequireProperty(typeof(global::Marten.Events.Projections.EventProjection), "SchemaObjects")
+            .PropertyType.Should().Be<IList<Weasel.Core.ISchemaObject>>();
+    }
+
+    // --------------------------------------------------------------------------------------------
     // The compile-time half
     // --------------------------------------------------------------------------------------------
 
@@ -1456,6 +1543,15 @@ public class MartenApiSurfaceTest
         _ = (documentType.ForeignKeys, documentType.IsHierarchy());
         _ = documentType.AliasFor(typeof(SampleDocument));
         _ = documentType.TypeFor("sample_document");
+
+        // --- the database browser's classifier (DB-1) -------------------------------------------------
+        List<Weasel.Core.ISchemaObject> extended = ((StoreOptions) options).Storage.ExtendedSchemaObjects;
+        _ = extended.Count;
+
+        MartenRegistry.DocumentMappingExpression<SampleDocument> pointing = new StoreOptions().Schema
+            .For<SampleDocument>()
+            .ForeignKey(x => x.Id, "quartz", "qrtz_job_details", "job_id", static key => _ = key.Name);
+        _ = pointing;
 
         DocumentMetadataCollection metadata = documentType.Metadata;
         MetadataColumn[] everyMetadataColumn =
