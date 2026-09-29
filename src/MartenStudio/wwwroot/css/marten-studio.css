@@ -8091,7 +8091,6 @@ a.ms-db-name:hover {
 }
 
 .ms-db-keys-section + .ms-db-keys-section,
-.ms-db-relationships-group + .ms-db-relationships-group,
 .ms-db-dependencies {
     margin-top: var(--ms-space-lg);
 }

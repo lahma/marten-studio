@@ -6,13 +6,10 @@
     the form that works at every width and in a screen reader. A far end this visitor may not see is
     counted there and never named.
 
-    The contract is the parameters:
+    The contract is the parameters, and the graph reads everything else for itself:
 
       Schema  - the relation's schema, as the catalog spells it
       Name    - the relation's name, likewise
-      Detail  - the DatabaseObjectDetail the page already read, typed object for the reason
-                DocumentComponentModel gives. The graph reads its own neighbourhood; the parameter stays so the
-                page's call does not change shape.
 *@
 
 <div class="ms-db-relationships" data-schema="@Schema" data-name="@Name">
@@ -27,8 +24,4 @@
     /// <summary>The relation's name.</summary>
     [Parameter]
     public string Name { get; set; } = string.Empty;
-
-    /// <summary>The relation's <c>DatabaseObjectDetail</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
-    [Parameter]
-    public object? Detail { get; set; }
 }

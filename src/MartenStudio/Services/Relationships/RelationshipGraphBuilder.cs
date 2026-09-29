@@ -479,7 +479,11 @@ internal static class RelationshipGraphBuilder
                             "unknown",
                             Declared: true,
                             Physical: false,
-                            "The configuration declares this key without naming a table to link to."));
+                            "The configuration declares this key without naming a table to link to.")
+                        {
+                            FromSchema = source.TableName.Schema,
+                            FromTable = source.TableName.Name,
+                        });
 
                         continue;
                     }
@@ -540,7 +544,13 @@ internal static class RelationshipGraphBuilder
                         Physical: false,
                         end.Kind == EndKind.Table
                             ? "It points at a table the studio does not find in the database."
-                            : "It points at a table no document type of this store maps."));
+                            : "It points at a table no document type of this store maps.")
+                    {
+                        FromSchema = source.TableName.Schema,
+                        FromTable = source.TableName.Name,
+                        ToSchema = linked.Schema,
+                        ToTable = linked.Name,
+                    });
                 }
             }
         }
@@ -598,7 +608,13 @@ internal static class RelationshipGraphBuilder
                         Physical: true,
                         from.Kind == EndKind.Unplaced
                             ? "It is on a table no document type of this store maps."
-                            : "It points at a table no document type of this store maps."));
+                            : "It points at a table no document type of this store maps.")
+                    {
+                        FromSchema = key.Schema,
+                        FromTable = key.Table,
+                        ToSchema = key.LinkedSchema,
+                        ToTable = key.LinkedTable,
+                    });
 
                     continue;
                 }
@@ -655,7 +671,27 @@ internal static class RelationshipGraphBuilder
             string toKey = to.NodeKey!;
             bool toIsTable = to.Kind == EndKind.Table;
 
-            var edgeKey = EdgeKey(key.Schema, key.Table, key.Columns, key.LinkedSchema, key.LinkedTable);
+            // The key its declared half was filed under, if the configuration declares one.
+            var declaredKey = EdgeKey(key.Schema, key.Table, key.Columns, key.LinkedSchema, key.LinkedTable);
+            var edgeKey = declaredKey;
+
+            if (toIsTable)
+            {
+                // A key into somebody else's table is filed by the constraint itself, ordinally, as a key on
+                // one is: EdgeKey folds case, and two tables whose quoted names differ only by case - legacy.Foo
+                // and legacy.foo - are two tables, whose keys must not overwrite each other. The declared half
+                // it merges with is the one filed under the folded key that resolved to this very node.
+                edgeKey = string.Join(KeySeparator, "d", key.Schema, key.Table, key.Name);
+
+                if (edges.TryGetValue(declaredKey, out RelationshipEdge? candidate)
+                    && candidate is { Declared: true, Physical: false, ToIsTable: true }
+                    && string.Equals(candidate.ToAlias, toKey, StringComparison.Ordinal))
+                {
+                    edges.Remove(declaredKey);
+                    edges[edgeKey] = candidate;
+                }
+            }
+
             var primary = PrimaryColumn(key.Columns);
             var label = toIsTable
                 ? LabelFor(key.Columns, key.LinkedColumns, key.PrimaryKey, key.LinkedPrimaryKey)

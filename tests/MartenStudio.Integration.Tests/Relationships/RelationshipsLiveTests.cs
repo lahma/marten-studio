@@ -485,7 +485,6 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
             scope.ServiceProvider.GetRequiredService<MartenStudio.Services.Database.DatabaseAccess>(),
             scope.ServiceProvider.GetRequiredService<MartenStudio.Services.Database.DatabaseCatalog>(),
             scope.ServiceProvider.GetRequiredService<StudioCapabilityGuard>(),
-            scope.ServiceProvider.GetRequiredService<StudioActionLog>(),
             TimeProvider.System);
 
     [PostgresFact]

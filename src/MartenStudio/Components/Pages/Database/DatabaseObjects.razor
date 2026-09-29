@@ -19,7 +19,7 @@
     about the gate is what the service said about it.
 *@
 
-<PageTitle>@(Schema is { Length: > 0 } ? Schema + " — Database" : "Database")</PageTitle>
+<PageTitle>@(FoundSchema is { Length: > 0 } found ? found + " — Database" : "Database")</PageTitle>
 
 <div class="ms-page ms-doc-page ms-db-page">
     <div class="ms-doc-layout ms-db-layout">
@@ -27,7 +27,7 @@
             <DatabaseRail Overview="overview"
                           Tables="railTables"
                           Views="railViews"
-                          Schema="@Schema"
+                          Schema="@FoundSchema"
                           Kind="@DatabaseLinks.KindToken(Category)" />
         </div>
 
@@ -35,7 +35,7 @@
             <div class="ms-page-header">
                 <h1 class="ms-page-title">
                     Database
-                    @if (Schema is { Length: > 0 } schema)
+                    @if (FoundSchema is { Length: > 0 } schema)
                     {
                         <span class="ms-db-title-schema">@schema</span>
                     }
@@ -71,7 +71,7 @@
                         <a class="@TabClass(category, count)"
                            href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, Schema, category, Owner, Filter)"
                            aria-current="@(category == Category ? "page" : null)"
-                           title="@(count == 0 ? "None " + (Schema is null ? "in the schemas shown" : "in " + Schema) : null)"
+                           title="@(count == 0 ? EmptyTabTitle : null)"
                            @key="category">
                             @DatabasePresentation.CategoryLabel(category)
                             <span class="ms-tab-count">@(overview is null ? "…" : DatabasePresentation.Number(count))</span>
@@ -195,6 +195,23 @@
     public string? TenantId { get; set; }
 
     private string? Schema => string.IsNullOrWhiteSpace(SchemaParameter) ? null : SchemaParameter;
+
+    /// <summary>
+    /// The schema the title, the heading and the rail are about: <see cref="Schema" />, but only once the
+    /// overview has listed it. A <c>?schema=</c> is whatever somebody typed into a link, and one the overview
+    /// did not return - absent, or withheld from this visitor - must not be repeated back as if it were a
+    /// schema they may browse; the list below says, in the service's own words, that there is no such
+    /// schema to show. Object detail does the same with its <c>FoundSchema</c>.
+    /// </summary>
+    private string? FoundSchema =>
+        Schema is { } schema && overview?.Schemas.Any(x => string.Equals(x.Name, schema, StringComparison.Ordinal)) == true
+            ? schema
+            : null;
+
+    /// <summary>An empty tab's tooltip - nothing at all for a schema the overview did not list.</summary>
+    private string? EmptyTabTitle => Schema is null
+        ? "None in the schemas shown"
+        : FoundSchema is { } shown ? "None in " + shown : null;
 
     private DatabaseObjectCategory Category => DatabaseLinks.ParseKind(KindParameter);
 

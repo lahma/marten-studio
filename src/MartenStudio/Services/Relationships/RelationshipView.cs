@@ -154,8 +154,19 @@ internal static class RelationshipViews
 
     /// <summary>
     /// The neighbourhood of one object: the object, every node one key away from it, and those keys -
-    /// or why there is nothing to draw.
+    /// its keys that cannot be drawn, listed - or why there is nothing to show.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A key with an end nothing can place is still the object's key.</b> A table whose only key points
+    /// at another store's document table, or at an <c>mt_doc_</c> table no store registers, has no edge to
+    /// draw - and without its <see cref="RelationshipGraph.Unmatched" /> rows the tab said "no foreign keys"
+    /// while the Keys tab beside it listed one. So the object's unmatched rows are kept, whether or not the
+    /// object is itself a node (such a table is not, when the key is on it). They name nothing the visitor
+    /// may not see: an unmatched row has both ends in visible schemas by construction, and a key with an end
+    /// in a withheld one is a <see cref="WithheldForeignKey" />, counted and never named.
+    /// </para>
+    /// </remarks>
     /// <param name="graph">The whole graph, as the service answered it for this visitor.</param>
     /// <param name="schema">The object's schema, as the catalog has it.</param>
     /// <param name="name">The object's name, as the catalog has it.</param>
@@ -191,21 +202,20 @@ internal static class RelationshipViews
 
         int withheld = centre is null ? 0 : graph.Withheld.Count(x => string.Equals(x.VisibleEnd, centre, StringComparison.Ordinal));
 
-        if (centre is null)
-        {
-            return RelationshipNeighbourhood.Empty(0);
-        }
+        List<UnmatchedForeignKey> unmatched = [.. graph.Unmatched.Where(x => x.Touches(schema, name))];
 
-        List<RelationshipEdge> edges = [.. graph.Edges.Where(x =>
-            string.Equals(x.FromAlias, centre, StringComparison.Ordinal)
-            || string.Equals(x.ToAlias, centre, StringComparison.Ordinal))];
+        List<RelationshipEdge> edges = centre is null
+            ? []
+            : [.. graph.Edges.Where(x =>
+                string.Equals(x.FromAlias, centre, StringComparison.Ordinal)
+                || string.Equals(x.ToAlias, centre, StringComparison.Ordinal))];
 
-        if (edges.Count == 0)
+        if (edges.Count == 0 && unmatched.Count == 0)
         {
             return RelationshipNeighbourhood.Empty(withheld);
         }
 
-        HashSet<string> ends = new(StringComparer.Ordinal) { centre };
+        HashSet<string> ends = new(StringComparer.Ordinal);
         foreach (RelationshipEdge edge in edges)
         {
             ends.Add(edge.FromAlias);
@@ -217,8 +227,8 @@ internal static class RelationshipViews
             Nodes = [.. graph.Nodes.Where(x => ends.Contains(x.Alias))],
             Tables = [.. graph.Tables.Where(x => ends.Contains(x.Key))],
             Edges = edges,
-            Unmatched = [],
-            Withheld = [.. graph.Withheld.Where(x => string.Equals(x.VisibleEnd, centre, StringComparison.Ordinal))],
+            Unmatched = unmatched,
+            Withheld = centre is null ? [] : [.. graph.Withheld.Where(x => string.Equals(x.VisibleEnd, centre, StringComparison.Ordinal))],
         };
 
         return new RelationshipNeighbourhood(NeighbourhoodState.Loaded, cut, centre, withheld, null);

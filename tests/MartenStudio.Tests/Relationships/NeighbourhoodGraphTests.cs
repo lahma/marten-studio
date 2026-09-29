@@ -65,6 +65,46 @@ public class NeighbourhoodGraphTests
         tab.FindAll("table").Should().BeEmpty();
     }
 
+    /// <summary>
+    /// A table whose only key has an end nothing can place lists that key, where it used to say "No foreign
+    /// keys" beside a Keys tab that had one.
+    /// </summary>
+    [Fact]
+    public void A_table_whose_only_key_cannot_be_drawn_lists_it_rather_than_saying_it_has_none()
+    {
+        using var context = NewContext(out FakeRelationshipDataService relationships);
+        relationships.Graph = RelationshipViewTests.WithUnmatched();
+
+        var tab = Render(context, "legacy", "audit_log");
+
+        tab.FindAll(".ms-neighbourhood-empty").Should().BeEmpty();
+        tab.FindAll("svg.ms-graph-svg").Should().BeEmpty("there is no edge to draw");
+        tab.FindAll(".ms-graph-legend").Should().BeEmpty("a legend of no lines says nothing");
+
+        var row = tab.Find(".ms-neighbourhood-unmatched tbody tr");
+        row.TextContent.Should().Contain("audit_log_ref_fkey")
+            .And.Contain("legacy.audit_log")
+            .And.Contain("studio_sample.mt_doc_discovered")
+            .And.Contain("no document type of this store maps");
+        tab.Find(".ms-neighbourhood-unmatched").TextContent.Should().Contain("Its foreign keys have");
+        tab.ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
+    [Fact]
+    public void A_table_with_drawn_keys_lists_its_undrawable_one_under_the_picture()
+    {
+        using var context = NewContext(out FakeRelationshipDataService relationships);
+        relationships.Graph = RelationshipViewTests.WithUnmatched();
+
+        var tab = Render(context, "quartz", "qrtz_triggers");
+
+        tab.FindAll(".ms-graph-svg .ms-graph-edge").Should().HaveCount(2);
+        tab.FindAll(".ms-neighbourhood-unmatched tbody tr").Should().ContainSingle()
+            .Which.TextContent.Should().Contain("qrtz_triggers_owner_fkey");
+        tab.Markup.Should().NotContain("audit_log_ref_fkey", "another table's unmatched key is not this one's");
+        tab.ShouldPutEveryTableInALabelledScrollRegion();
+    }
+
     [Fact]
     public void A_graph_that_could_not_be_read_is_an_error_with_a_retry()
     {

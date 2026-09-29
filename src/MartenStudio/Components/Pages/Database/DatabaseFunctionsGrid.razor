@@ -1,14 +1,19 @@
+@using Microsoft.Extensions.Options
 @using MartenStudio.Services.Database
 @implements IDisposable
 @inject IDatabaseObjectService Data
 @inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
 
 @*
     Functions, procedures, aggregates and window functions, one row per overload - the identity arguments
     are what tell recalculate(bigint) from recalculate(bigint, boolean), so they are part of the name.
 
     A body is read only when its row is opened, and once: see DatabaseDefinitionLoader. The studio never
-    executes a function; it reads pg_get_functiondef and nothing else.
+    executes a function; it reads pg_get_functiondef and nothing else. A body the list already says is not
+    available - an aggregate's, which Postgres will not print, or one the gate withholds - is never asked
+    for: its row opens on the reason instead (DatabaseDefinitionWithheld), because asking would be a refused
+    BrowseDatabase read, audited and logged as a security Warning, for a click the page itself offered.
 
     SECURITY DEFINER is the one badge here that is a warning, and only when search_path is not pinned: such
     a function runs with its owner's rights and resolves unqualified names through the caller's
@@ -41,6 +46,7 @@
             {
                 DatabaseObjectRef reference = routine.Ref;
                 bool open = expanded.Contains(reference);
+                bool available = routine.DefinitionAvailable;
                 string rowKey = Key(routine);
 
                 <tr class="@(routine.Ownership.IsMarten ? "ms-db-row-marten" : null)" @key="rowKey">
@@ -49,8 +55,9 @@
                                 class="ms-doc-expander ms-db-expander"
                                 aria-expanded="@(open ? "true" : "false")"
                                 aria-controls="@DefinitionId(rowKey)"
-                                aria-label="@((open ? "Hide the definition of " : "Show the definition of ") + Signature(routine))"
-                                @onclick="() => ToggleAsync(reference)">@(open ? "▾" : "▸")</button>
+                                aria-label="@(DatabaseDefinitionWithheld.ExpanderLabel(open, available) + Signature(routine))"
+                                data-definition="@(available ? null : "withheld")"
+                                @onclick="() => ToggleAsync(reference, available)">@(open ? "▾" : "▸")</button>
                     </td>
                     <td class="ms-db-cell-name">
                         <span class="ms-db-name ms-db-signature" title="@(DatabaseLinks.QualifiedName(routine.Schema, routine.Name) + "(" + routine.IdentityArguments + ")")"><span class="ms-db-schema-prefix">@(ShowSchema ? routine.Schema + "." : null)</span>@routine.Name<span class="ms-db-arguments">(@routine.IdentityArguments)</span></span>
@@ -81,12 +88,19 @@
                 {
                     <tr class="ms-doc-preview-row ms-db-definition-row" id="@DefinitionId(rowKey)" @key="@(rowKey + "\u001fdefinition")">
                         <td class="ms-doc-preview-cell" colspan="@ColumnSpan">
-                            <DatabaseDefinitionBody Model="definitions.Find(reference)"
-                                                    Loading="definitions.IsLoading(reference)"
-                                                    Error="@definitions.FailureOf(reference)"
-                                                    OnRetry="() => LoadAsync(reference)"
-                                                    Label="@("Definition of " + Signature(routine))"
-                                                    FileName="@(routine.Name + ".sql")" />
+                            @if (available)
+                            {
+                                <DatabaseDefinitionBody Model="definitions.Find(reference)"
+                                                        Loading="definitions.IsLoading(reference)"
+                                                        Error="@definitions.FailureOf(reference)"
+                                                        OnRetry="() => LoadAsync(reference)"
+                                                        Label="@("Definition of " + Signature(routine))"
+                                                        FileName="@(routine.Name + ".sql")" />
+                            }
+                            else
+                            {
+                                <p class="ms-db-refusal" role="note">@DatabaseDefinitionWithheld.For(routine, Access, Options.Value.BrowsableSchemas)</p>
+                            }
                         </td>
                     </tr>
                 }
@@ -121,6 +135,9 @@
     public string EmptyText { get; set; } = "Nothing here.";
 
     private List<DatabaseRoutineSummary> Routines => [.. ((Model as DatabaseObjectList)?.Items ?? []).OfType<DatabaseRoutineSummary>()];
+
+    /// <summary>The gate, as the service described it with the list.</summary>
+    private DatabaseAccessState? Access => (Model as DatabaseObjectList)?.Access;
 
     protected override void OnParametersSet()
     {
@@ -160,7 +177,7 @@
         return descending ? ordered.Reverse() : ordered;
     }
 
-    private async Task ToggleAsync(DatabaseObjectRef reference)
+    private async Task ToggleAsync(DatabaseObjectRef reference, bool available)
     {
         if (expanded.Remove(reference))
         {
@@ -168,7 +185,12 @@
         }
 
         expanded.Add(reference);
-        await LoadAsync(reference);
+
+        // Never for a body the list says is not available: the open row draws the reason instead.
+        if (available)
+        {
+            await LoadAsync(reference);
+        }
     }
 
     private async Task LoadAsync(DatabaseObjectRef reference)

@@ -17,7 +17,9 @@
     scope from StudioState, so the page that hosts it needs nothing but the names it already has.
 
     Loading, failure, "not in a schema you are shown" and "no keys" are all states of its own, so the tab
-    can host it without knowing anything about what it reads.
+    can host it without knowing anything about what it reads. A key of the object's that cannot be drawn -
+    into another store's collection, or an mt_doc_ table no store registers - is listed under the picture
+    as the Relationships screen lists it, so "no foreign keys" is only ever said when there are none.
 *@
 
 <section class="ms-neighbourhood" aria-label="@($"Foreign keys of {Schema}.{Name}")">
@@ -49,30 +51,34 @@
     }
     else
     {
-        <RelationshipLegend Styles="@styles" />
+        @if (neighbourhood.Graph.Edges.Count > 0)
+        {
+            <RelationshipLegend Styles="@styles" />
 
-        @if (neighbourhood.Graph.Nodes.Count + neighbourhood.Graph.Tables.Count > RelationshipViews.NodeCap)
-        {
-            <div class="ms-graph-toomany" role="status">
-                <p class="ms-graph-toomany-title">
-                    @(neighbourhood.Graph.Nodes.Count + neighbourhood.Graph.Tables.Count) objects are too many to draw.
-                </p>
-                <p class="ms-graph-toomany-description">Every foreign key is still in the table below.</p>
-            </div>
-        }
-        else
-        {
-            <RelationshipGraph Model="@neighbourhood.Graph"
+            @if (neighbourhood.Graph.Nodes.Count + neighbourhood.Graph.Tables.Count > RelationshipViews.NodeCap)
+            {
+                <div class="ms-graph-toomany" role="status">
+                    <p class="ms-graph-toomany-title">
+                        @(neighbourhood.Graph.Nodes.Count + neighbourhood.Graph.Tables.Count) objects are too many to draw.
+                    </p>
+                    <p class="ms-graph-toomany-description">Every foreign key is still in the table below.</p>
+                </div>
+            }
+            else
+            {
+                <RelationshipGraph Model="@neighbourhood.Graph"
+                                   HrefFor="@CollectionHref"
+                                   TableHrefFor="@TableHref"
+                                   Centre="@neighbourhood.Centre" />
+            }
+
+            <RelationshipTable Model="@neighbourhood.Graph"
                                HrefFor="@CollectionHref"
                                TableHrefFor="@TableHref"
-                               Centre="@neighbourhood.Centre" />
+                               Compact="true" />
         }
 
-        <RelationshipTable Model="@neighbourhood.Graph"
-                           HrefFor="@CollectionHref"
-                           TableHrefFor="@TableHref"
-                           Compact="true" />
-
+        @Unmatched()
         @Withheld()
     }
 </section>
@@ -148,6 +154,57 @@
             await InvokeAsync(StateHasChanged);
         }
     }
+
+    /// <summary>
+    /// The object's keys with an end that is not a node - into another store's collection, an unregistered
+    /// document table, or a table the database does not have - listed as the Relationships screen lists
+    /// them, so the tab never says "no foreign keys" beside a Keys tab that has one.
+    /// </summary>
+    private RenderFragment Unmatched() => __builder =>
+    {
+        IReadOnlyList<UnmatchedForeignKey> keys = neighbourhood.Graph.Unmatched;
+
+        if (keys.Count == 0)
+        {
+            return;
+        }
+
+        <div class="ms-graph-unmatched ms-neighbourhood-unmatched">
+            <h3 class="ms-section-title">Not on the diagram</h3>
+            <p class="ms-schema-note">
+                @(neighbourhood.Graph.Edges.Count == 0 ? "Its foreign keys have" : "These foreign keys have")
+                an end that is not a document type of this store or a table the studio can place, so there is
+                nothing to draw them between.
+            </p>
+            <TableScroll Label="@($"Foreign keys of {Schema}.{Name} not on the diagram")">
+                <table class="ms-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Constraint</th>
+                            <th scope="col">From</th>
+                            <th scope="col">Columns</th>
+                            <th scope="col">Points at</th>
+                            <th scope="col">Why</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (int i = 0; i < keys.Count; i++)
+                        {
+                            UnmatchedForeignKey key = keys[i];
+
+                            <tr class="ms-table-row" @key="i">
+                                <td class="ms-table-cell ms-table-cell-mono">@key.Name</td>
+                                <td class="ms-table-cell ms-table-cell-mono">@key.From</td>
+                                <td class="ms-table-cell ms-table-cell-mono">@key.Columns</td>
+                                <td class="ms-table-cell ms-table-cell-mono">@key.To</td>
+                                <td class="ms-table-cell">@key.Reason</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        </div>
+    };
 
     private RenderFragment Withheld() => __builder =>
     {

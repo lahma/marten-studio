@@ -289,6 +289,80 @@ public class RelationshipTablesBuilderTests
         graph.Edges.Select(static x => x.FromAlias).Should().OnlyHaveUniqueItems();
     }
 
+    /// <summary>
+    /// DB-6 review F6: a document's keys into <c>legacy.Accounts</c> and <c>legacy.accounts</c> were filed under
+    /// one case-folded key, so one overwrote the other. A key into a table is filed by its constraint,
+    /// ordinally, as a key on one always was.
+    /// </summary>
+    [Fact]
+    public void A_documents_keys_into_two_tables_whose_names_differ_only_by_case_are_two_edges()
+    {
+        RelationshipGraph graph = Build(
+            [
+                Key(Doc, CustomerTable, ["account_code"], "legacy", "Accounts", linkedColumns: ["code"], name: "customer_upper_fkey"),
+                Key(Doc, CustomerTable, ["account_code"], "legacy", "accounts", linkedColumns: ["code"], name: "customer_lower_fkey"),
+            ],
+            Open("legacy"));
+
+        graph.Edges.Should().HaveCount(2, "legacy.Accounts and legacy.accounts are two tables");
+        graph.Edges.Select(static x => x.ToAlias).Should().BeEquivalentTo(
+            [RelationshipTableNode.KeyFor("legacy", "Accounts"), RelationshipTableNode.KeyFor("legacy", "accounts")]);
+        graph.Edges.Select(static x => x.ConstraintName).Should().BeEquivalentTo(["customer_upper_fkey", "customer_lower_fkey"]);
+        graph.Edges.Should().OnlyContain(static x => x.FromAlias == "dbcustomer" && x.ToIsTable);
+    }
+
+    /// <summary>
+    /// The ordinal filing must not cost the declared half its merge: the declared key joins the constraint
+    /// into the very table it resolved to, and only that one - in either order the constraints arrive.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_declared_key_merges_with_the_constraint_into_its_own_table_and_not_the_one_differing_by_case(bool upperFirst)
+    {
+        IReadOnlyStoreOptions options = DatabaseTestStores.DefaultStore(static o =>
+            o.Schema.For<DbCustomer>().ForeignKey(x => x.Name, "legacy", "accounts", "code"));
+
+        PhysicalForeignKey upper = Key(Doc, CustomerTable, ["name"], "legacy", "Accounts", linkedColumns: ["code"], name: "customer_upper_fkey");
+        PhysicalForeignKey lower = Key(Doc, CustomerTable, ["name"], "legacy", "accounts", linkedColumns: ["code"], name: CustomerTable + "_name_fkey");
+
+        RelationshipGraph graph = Build(upperFirst ? [upper, lower] : [lower, upper], Open("legacy"), storeOptions: options);
+
+        graph.Edges.Should().HaveCount(2);
+        graph.Edges.Single(static x => x.ToAlias == RelationshipTableNode.KeyFor("legacy", "accounts"))
+            .State.Should().Be("declared and physical");
+        graph.Edges.Single(static x => x.ToAlias == RelationshipTableNode.KeyFor("legacy", "Accounts"))
+            .State.Should().Be("physical only", "nothing declares a key into the upper-case table");
+    }
+
+    /// <summary>
+    /// An unmatched row carries both of its ends as the catalog or the configuration spells them, so the object
+    /// page's neighbourhood can keep the rows of the table it is about - on either end, compared ordinally.
+    /// </summary>
+    [Fact]
+    public void An_unmatched_row_carries_both_its_ends()
+    {
+        RelationshipGraph physical = Build(
+            [Key(Doc, "mt_doc_discovered", ["customer_id"], Doc, CustomerTable, name: "discovered_customer_fkey")],
+            Closed());
+
+        UnmatchedForeignKey key = physical.Unmatched.Should().ContainSingle().Subject;
+
+        (key.FromSchema, key.FromTable, key.ToSchema, key.ToTable).Should().Be((Doc, "mt_doc_discovered", Doc, CustomerTable));
+        key.Touches(Doc, "mt_doc_discovered").Should().BeTrue();
+        key.Touches(Doc, CustomerTable).Should().BeTrue();
+        key.Touches(Doc, "MT_DOC_DISCOVERED").Should().BeFalse("two quoted names that differ by case are two tables");
+        key.Touches("legacy", "mt_doc_discovered").Should().BeFalse();
+
+        IReadOnlyStoreOptions options = DatabaseTestStores.DefaultStore(static o =>
+            o.Schema.For<DbCustomer>().ForeignKey(x => x.Name, "legacy", "accounts", "code"));
+
+        UnmatchedForeignKey declared = Build([], Open("legacy"), storeOptions: options).Unmatched.Should().ContainSingle().Subject;
+
+        (declared.FromSchema, declared.FromTable, declared.ToSchema, declared.ToTable)
+            .Should().Be((Doc, CustomerTable, "legacy", "accounts"), "a declared key's ends are the configuration's");
+    }
+
     [Fact]
     public void A_table_node_carries_its_estimate_and_its_schemas_colour()
     {

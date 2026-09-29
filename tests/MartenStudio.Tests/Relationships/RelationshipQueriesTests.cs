@@ -1,4 +1,5 @@
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Relationships;
 using MartenStudio.Tests.Sql;
 
 using NpgsqlTypes;
@@ -185,30 +186,36 @@ public class RelationshipQueriesTests
             "the store-schema read DB-3's inbound counts use keeps its meaning: the pointing end only");
     }
 
+    /// <summary>
+    /// DB-6 review F5: a pointing table's rows are counted with the database browser's own statement - the
+    /// one row detail's "referenced by" runs - rather than a second builder of the relationships screen's
+    /// that said <c>count(*)</c> unqualified.
+    /// </summary>
     [Fact]
-    public void The_table_count_quotes_the_catalogs_names_and_binds_every_value_untyped()
+    public void The_table_count_is_the_row_browsers_own_statement_capped_where_every_inbound_count_is()
     {
-        string sql = RelationshipQueries.TableInboundCountSql("legacy", "Customer Credit", ["customer_id", "tenant_id"]);
+        string[] columns = ["customer_id", "tenant_id"];
+        string[] values = ["6f9619ff-8b86-d011-b42d-00cf4fc964ff", "acme"];
 
-        sql.Should().Be(
-            "select count(*) from (select 1 from \"legacy\".\"Customer Credit\" where \"customer_id\" = @k0 " +
-            "and \"tenant_id\" = @k1 limit @cap) as bounded");
+        TableRowStatement statement = RelationshipDataService.TableInboundCount("legacy", "Customer Credit", columns, values);
+        TableRowStatement browsers = TableRowQueryBuilder.BuildInboundCount("legacy", "Customer Credit", columns, values);
 
-        using var command = RelationshipQueries.BuildTableInboundCount(
-            "legacy", "customer_credit", ["customer_id"], ["6f9619ff-8b86-d011-b42d-00cf4fc964ff"], 1001, 35);
+        statement.Should().BeEquivalentTo(browsers, "one statement, so the two screens can never count differently");
 
-        command.Parameters.Should().HaveCount(2);
-        command.Parameters["k0"].NpgsqlDbType.Should().Be(NpgsqlDbType.Unknown,
+        statement.Sql.Should().Contain("pg_catalog.count(*)", "a count of somebody else's on the search path cannot answer");
+        statement.Sql.Should().Contain("\"legacy\".\"Customer Credit\"").And.Contain("\"customer_id\"").And.Contain("\"tenant_id\"");
+        statement.Sql.Should().NotContain("6f9619ff").And.NotContain("acme", "values are parameters, never text");
+
+        statement.Parameters.Where(static x => x.Name != "cap").Should().OnlyContain(static x => x.Type == NpgsqlDbType.Unknown,
             "Postgres applies the column's own input function, so no type name is ever written into the SQL");
-        command.Parameters["k0"].Value.Should().Be("6f9619ff-8b86-d011-b42d-00cf4fc964ff");
-        command.Parameters["cap"].Value.Should().Be(1001);
-        command.CommandTimeout.Should().Be(35);
+        statement.Parameters.Should().ContainSingle(static x => x.Name == "cap")
+            .Which.Value.Should().Be(RelationshipQueries.DefaultInboundCap);
     }
 
     [Fact]
     public void The_table_count_refuses_a_column_without_a_value()
     {
-        Action build = () => RelationshipQueries.BuildTableInboundCount("legacy", "t", ["a", "b"], ["1"], 10, 5);
+        Action build = () => RelationshipDataService.TableInboundCount("legacy", "t", ["a", "b"], ["1"]);
 
         build.Should().Throw<ArgumentException>();
     }

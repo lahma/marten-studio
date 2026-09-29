@@ -45,6 +45,14 @@ namespace MartenStudio.Services.Relationships;
 /// <see cref="DatabaseAccess.RequireRowAccessAsync" />, then runs in front of the read itself.
 /// </para>
 /// <para>
+/// <b>Opening a document writes nothing to the audit ring or above Debug in the log.</b> The count is a
+/// passive read the page makes on every load - twice for a pasted link, because of prerendering - so an
+/// entry per referencing table would push the mutations the 500-entry ring exists for out of it while
+/// somebody paged through customers. The row gate is asked with <c>record: false</c> for the same reason: a
+/// role with no <c>SELECT</c> on the pointing table is a "not counted" on the row, not a refusal of anything
+/// the visitor did. The database browser's own row-detail counts are not audited either, so the two agree.
+/// </para>
+/// <para>
 /// Failures are values. A page that draws a diagram cannot afford an exception on the circuit for a
 /// database that went away mid-read, so every method here catches and returns "cannot report" (plan
 /// §4.8) — and each of the inbound counts carries its own error, so one collection whose count timed out
@@ -53,7 +61,10 @@ namespace MartenStudio.Services.Relationships;
 /// </remarks>
 internal sealed class RelationshipDataService : IRelationshipDataService
 {
-    /// <summary>What the audit ring calls counting the rows of a non-Marten table that reference a document.</summary>
+    /// <summary>
+    /// What the row gate calls counting the rows of a non-Marten table that reference a document, should it
+    /// ever record a refusal of it (only when the capability or a policy changed its answer mid-read).
+    /// </summary>
     internal const string ReferencesAction = "Count referencing rows";
 
     private readonly IOptions<MartenStudioOptions> options;
@@ -64,7 +75,6 @@ internal sealed class RelationshipDataService : IRelationshipDataService
     private readonly DatabaseAccess access;
     private readonly DatabaseCatalog catalog;
     private readonly StudioCapabilityGuard capabilities;
-    private readonly StudioActionLog audit;
     private readonly TimeProvider timeProvider;
 
     public RelationshipDataService(
@@ -75,9 +85,8 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         ILogger<RelationshipDataService> logger,
         DatabaseAccess access,
         DatabaseCatalog catalog,
-        StudioCapabilityGuard capabilities,
-        StudioActionLog audit)
-        : this(options, resolver, columnCatalog, cache, logger, access, catalog, capabilities, audit, TimeProvider.System)
+        StudioCapabilityGuard capabilities)
+        : this(options, resolver, columnCatalog, cache, logger, access, catalog, capabilities, TimeProvider.System)
     {
     }
 
@@ -90,7 +99,6 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         DatabaseAccess access,
         DatabaseCatalog catalog,
         StudioCapabilityGuard capabilities,
-        StudioActionLog audit,
         TimeProvider timeProvider)
     {
         this.options = options;
@@ -101,7 +109,6 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         this.access = access;
         this.catalog = catalog;
         this.capabilities = capabilities;
-        this.audit = audit;
         this.timeProvider = timeProvider;
     }
 
@@ -145,7 +152,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
                     StringComparer.Ordinal);
             }
 
-            PhysicalForeignKeyRead keys = await ForeignKeysAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+            PhysicalForeignKeyRead keys = await ForeignKeysAsync(resolved, cancellationToken).ConfigureAwait(false);
 
             RelationshipGraph graph = RelationshipGraphBuilder.Build(
                 resolved.Store.Options,
@@ -194,7 +201,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             (RelationshipDatabaseView? view, _) = await ViewAsync(scope, resolved, withRelations: false, cancellationToken)
                 .ConfigureAwait(false);
 
-            PhysicalForeignKeyRead keys = await ForeignKeysAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+            PhysicalForeignKeyRead keys = await ForeignKeysAsync(resolved, cancellationToken).ConfigureAwait(false);
 
             // The same graph the screen draws, filtered for this visitor, so the two can never disagree
             // about what points where - or about what may be named.
@@ -222,8 +229,9 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             {
                 // Nothing points here, so there is nothing to count and no connection to open. Most
                 // document types are in this state, and every one of their detail pages used to pay for a
-                // connection and a bounded count loop to find it out.
-                return ReferencedBy.None;
+                // connection and a bounded count loop to find it out. A key read that stopped at its cap
+                // still says so: "nothing points here" is then only "nothing that was read".
+                return keys.Truncated ? ReferencedBy.None with { Truncated = true } : ReferencedBy.None;
             }
 
             // Built from the graph's own nodes rather than from AllKnownDocumentTypes(): the builder
@@ -302,7 +310,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
                 return byFrom != 0 ? byFrom : string.CompareOrdinal(left.Column, right.Column);
             });
 
-            return new ReferencedBy([.. documents, .. tables]) { Withheld = withheld };
+            return new ReferencedBy([.. documents, .. tables]) { Withheld = withheld, Truncated = keys.Truncated };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -376,14 +384,13 @@ internal sealed class RelationshipDataService : IRelationshipDataService
     /// </para>
     /// </remarks>
     private async Task<PhysicalForeignKeyRead> ForeignKeysAsync(
-        StudioScope scope,
         ResolvedScope resolved,
         CancellationToken cancellationToken)
     {
         string[] schemas = await SchemaSetAsync(resolved, cancellationToken).ConfigureAwait(false);
 
         return await cache
-            .GetAsync(CacheKey(scope, schemas), token => ReadForeignKeysAsync(resolved.Database, schemas, token), cancellationToken)
+            .GetAsync(CacheKey(resolved, schemas), token => ReadForeignKeysAsync(resolved.Database, schemas, token), cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -444,12 +451,17 @@ internal sealed class RelationshipDataService : IRelationshipDataService
     }
 
     /// <summary>
-    /// One key per database and schema set, in the shape the other services use so that the cache's prefix
-    /// invalidation reaches it when anything in that scope is changed.
+    /// One key per store, database and schema set, in the <c>store|database|…</c> shape the other services
+    /// use, so a prefix invalidation of that store reaches it.
     /// </summary>
-    private string CacheKey(StudioScope scope, IReadOnlyList<string> schemas) =>
-        scope.StoreKey + "|" + scope.DatabaseId + "|relationship-keys|" + (options.Value.SqlConsoleRole ?? string.Empty)
-        + "|" + string.Join('\u001e', schemas);
+    /// <remarks>
+    /// Built from what the resolver settled on - the registration's key and the database's own identity -
+    /// never from the scope as the URL spelled it: an empty <c>?db=</c> and the default database named
+    /// outright are one database, and keyed on the request they were two cache entries and two key reads.
+    /// </remarks>
+    private string CacheKey(ResolvedScope resolved, IReadOnlyList<string> schemas) =>
+        resolved.Registration.Key + "|" + resolved.Database.Id.Identity + "|relationship-keys|"
+        + (options.Value.SqlConsoleRole ?? string.Empty) + "|" + string.Join('\u001e', schemas);
 
     /// <summary>
     /// How many of one collection's documents point at one id, bounded by the cap.
@@ -551,8 +563,17 @@ internal sealed class RelationshipDataService : IRelationshipDataService
     /// recorded as refused for it; the row says why it is not counted instead. Only a visitor the gate
     /// admits reaches <see cref="DatabaseAccess.RequireRowAccessAsync" /> - capability, the write policy
     /// with no tenant, the schema, the catalog's own row for the table, whose it is and whether the role
-    /// may select from it - which refuses and audits on its own if any of that changed in between. The
-    /// count names the catalog's schema and table, never a string from the page.
+    /// may select from it - asked with <c>record: false</c>, so what it says about the table itself (no
+    /// <c>SELECT</c> for <c>SqlConsoleRole</c>, most often) is a "not counted" on the row and a Debug line,
+    /// never a refusal in the ring; the capability and the policies it still records, since they can only
+    /// refuse there if their answer changed since the gate was read. The count names the catalog's schema
+    /// and table, never a string from the page, and goes through the database browser's own inbound count
+    /// (<see cref="TableRowQueryBuilder.BuildInboundCount" />), so "referenced by" here and on a row's detail
+    /// are one statement.
+    /// </para>
+    /// <para>
+    /// <b>Nothing is audited when it succeeds.</b> It is a read the page makes on every load, not one the
+    /// visitor asked for; see the class remarks.
     /// </para>
     /// <para>
     /// <b>Bound from the document, or not counted.</b> A key into a document table references its
@@ -635,11 +656,20 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         string qualified = DatabaseAccess.Target(table.Schema, table.Name);
 
         DatabaseRowAccessResult grant = await access
-            .RequireRowAccessAsync(scope, table.Schema, table.Name, ReferencesAction, cancellationToken)
+            .RequireRowAccessAsync(scope, table.Schema, table.Name, ReferencesAction, cancellationToken, record: false)
             .ConfigureAwait(false);
 
         if (!grant.Allowed)
         {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    "Marten Studio did not count the rows of {Table} that reference a {Alias} document: {Reason}",
+                    qualified,
+                    target.Alias,
+                    grant.Reason);
+            }
+
             return Entry(notCounted: grant.Reason ?? "This studio does not let you read that table's rows.");
         }
 
@@ -655,16 +685,8 @@ internal sealed class RelationshipDataService : IRelationshipDataService
                     connection,
                     async (transaction, token) =>
                     {
-                        await using NpgsqlCommand command = RelationshipQueries.BuildTableInboundCount(
-                            relation.Schema,
-                            relation.Name,
-                            columns,
-                            values,
-                            RelationshipQueries.DefaultInboundCap,
-                            SessionCommandTimeoutSeconds);
-
-                        command.Connection = connection;
-                        command.Transaction = transaction;
+                        await using NpgsqlCommand command = TableInboundCount(relation.Schema, relation.Name, columns, values)
+                            .CreateCommand(connection, transaction, SessionCommandTimeoutSeconds);
 
                         object? result = await command.ExecuteScalarAsync(token).ConfigureAwait(false);
 
@@ -677,16 +699,15 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
             bool capped = count >= RelationshipQueries.DefaultInboundCap;
 
-            // The row gate's grant is not audited - the caller knows what it then read and records it. The
-            // document's id is not in the entry: a value somebody filtered on belongs in the log, never the
-            // ring (plan §1, Audit).
-            audit.Record(
-                ReferencesAction,
-                qualified,
-                succeeded: true,
-                $"Counted the rows that reference one {target.Alias} document.",
-                StudioCapability.BrowseDatabase,
-                scope with { TenantId = null });
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    "Marten Studio counted {Count}{Capped} rows of {Table} that reference a {Alias} document",
+                    capped ? RelationshipQueries.DefaultInboundCap - 1 : count,
+                    capped ? "+" : string.Empty,
+                    qualified,
+                    target.Alias);
+            }
 
             return Entry(capped ? RelationshipQueries.DefaultInboundCap - 1 : count, capped);
         }
@@ -700,6 +721,22 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             return Entry(error: $"{exception.SqlState}: {exception.MessageText}");
         }
     }
+
+    /// <summary>
+    /// The bounded count of a pointing table's rows that carry these values in these columns - the database
+    /// browser's own statement (DB-3), capped where every inbound count is.
+    /// </summary>
+    /// <remarks>
+    /// Names from the catalog, quoted by the builder; values bound untyped, so Postgres applies the column's
+    /// own input function and a uuid, a bigint or a domain compares correctly with no type name written into
+    /// the text; <c>pg_catalog.count</c>, so a <c>count</c> of somebody else's on the path cannot answer.
+    /// </remarks>
+    internal static TableRowStatement TableInboundCount(
+        string schema,
+        string table,
+        IReadOnlyList<string> columns,
+        IReadOnlyList<string> values) =>
+        TableRowQueryBuilder.BuildInboundCount(schema, table, columns, values, RelationshipQueries.DefaultInboundCap);
 
     /// <summary>
     /// The read-only session every read of an object Marten does not own runs in: read-only transaction,

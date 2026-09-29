@@ -2,12 +2,21 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using Marten;
+
 using MartenStudio.Components;
+using MartenStudio.Components.Pages.Database;
+using MartenStudio.Services;
 using MartenStudio.Services.Database;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using BrowserPage = MartenStudio.Components.Pages.Database.DatabaseObjects;
 
@@ -388,8 +397,141 @@ public class DatabaseObjectsPageTests
             .Which.Should().Be(new DatabaseObjectRef(DatabaseObjectKind.Procedure, "legacy", "archive_orders", "before date"));
     }
 
+    /// <summary>
+    /// DB-4 review F1: a function in the store's own schema that Marten does not own, with the gate shut. The
+    /// list says its body is not available, so opening its row draws the gate's sentence and asks nothing -
+    /// the ask would be a refused <c>BrowseDatabase</c> read, audited and logged as a 9202 security Warning,
+    /// for a click the page itself offered.
+    /// </summary>
     [Fact]
-    public async Task A_refused_definition_shows_the_gate_s_sentence()
+    public async Task A_definition_the_list_withholds_is_never_asked_for_and_its_row_says_why()
+    {
+        using var context = DatabasePageData.Context();
+        context.DatabaseObjects.List = DatabasePageData.ListOf(
+            DatabaseObjectCategory.Functions,
+            [WithheldRoutine(FakeDatabaseObjects.StoreSchema, "host_fn")],
+            refusal: DatabaseRefusal.CapabilityOff);
+
+        var page = DatabasePageData.RenderBrowser(context, "kind=functions");
+
+        IElement expander = Expander(page, "host_fn");
+        expander.GetAttribute("data-definition").Should().Be("withheld");
+        expander.GetAttribute("aria-label").Should().Be("Show why there is no definition of studio_sample.host_fn()");
+
+        await expander.ClickAsync(new MouseEventArgs());
+
+        page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim().Should().Be(DatabaseGate.CapabilityDenial);
+        page.FindAll(".ms-db-definition-row .ms-sql").Should().BeEmpty();
+        Expander(page, "host_fn").GetAttribute("aria-expanded").Should().Be("true");
+
+        await Expander(page, "host_fn").ClickAsync(new MouseEventArgs());
+        await Expander(page, "host_fn").ClickAsync(new MouseEventArgs());
+
+        context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty("a definition the list withholds is never asked for, however often it is opened");
+    }
+
+    [Fact]
+    public async Task With_the_gate_open_a_schema_BrowsableSchemas_does_not_list_is_named_in_the_withheld_rows_sentence()
+    {
+        using var context = DatabasePageData.Context();
+        context.Options.BrowsableSchemas.Add(FakeDatabaseObjects.Legacy);
+        context.Options.BrowsableSchemas.Add(FakeDatabaseObjects.Quartz);
+        context.DatabaseObjects.List = DatabasePageData.ListOf(
+            DatabaseObjectCategory.Functions,
+            [WithheldRoutine(FakeDatabaseObjects.StoreSchema, "host_fn")]);
+
+        var page = DatabasePageData.RenderBrowser(context, "kind=functions");
+
+        await Expander(page, "host_fn").ClickAsync(new MouseEventArgs());
+
+        page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim()
+            .Should().Be(DatabaseGate.SchemaDenial(FakeDatabaseObjects.StoreSchema, [FakeDatabaseObjects.Legacy, FakeDatabaseObjects.Quartz]));
+        context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task An_aggregate_says_it_has_no_body_without_asking()
+    {
+        using var context = DatabasePageData.Context();
+
+        var page = DatabasePageData.RenderBrowser(context, "kind=functions&schema=legacy");
+
+        await Expander(page, "sum_amounts").ClickAsync(new MouseEventArgs());
+
+        page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim().Should().Be(DatabaseObjectService.AggregateHasNoBody);
+        context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty("the list already says an aggregate has none");
+    }
+
+    [Fact]
+    public async Task A_trigger_whose_definition_is_withheld_is_never_asked_for()
+    {
+        using var context = DatabasePageData.Context();
+        context.DatabaseObjects.List = DatabasePageData.ListOf(
+            DatabaseObjectCategory.Triggers,
+            [WithheldTrigger(FakeDatabaseObjects.Legacy, "orders", "orders_hr_sync")]);
+
+        var page = DatabasePageData.RenderBrowser(context, "kind=triggers");
+
+        IElement expander = page.FindAll(".ms-db-triggers tbody tr").First(x => x.TextContent.Contains("orders_hr_sync", StringComparison.Ordinal))
+            .QuerySelector(".ms-db-expander")!;
+        expander.GetAttribute("data-definition").Should().Be("withheld");
+
+        await expander.ClickAsync(new MouseEventArgs());
+
+        page.Find(".ms-db-triggers .ms-db-definition-row .ms-db-refusal").TextContent.Trim()
+            .Should().Be(DatabaseDefinitionWithheld.TriggerFunctionWithheld);
+        context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The regression the review asked for, through the real <c>DatabaseObjectService</c> and a real
+    /// <c>StudioActionLog</c>: opening withheld definitions on the page writes no Warning and no ring entry -
+    /// and the same definition asked for directly does both, so the capture is proved to be listening.
+    /// </summary>
+    [Theory]
+    [InlineData("functions")]
+    [InlineData("triggers")]
+    public async Task Opening_a_withheld_definition_logs_no_security_warning_and_audits_nothing(string kind)
+    {
+        await using RealDefinitionService real = RealDefinitionService.Create();
+
+        FakeDatabaseObjectService fake = new()
+        {
+            List = kind == "functions"
+                ? DatabasePageData.ListOf(DatabaseObjectCategory.Functions, [WithheldRoutine(FakeDatabaseObjects.StoreSchema, "host_fn")], refusal: DatabaseRefusal.CapabilityOff)
+                : DatabasePageData.ListOf(DatabaseObjectCategory.Triggers, [WithheldTrigger(FakeDatabaseObjects.StoreSchema, "host_settings", "host_settings_audit")], refusal: DatabaseRefusal.CapabilityOff),
+        };
+
+        using var context = new StudioComponentContext(services => services.AddSingleton<IDatabaseObjectService>(real.Over(fake)));
+        context.WithStores("default");
+
+        var page = DatabasePageData.RenderBrowser(context, "kind=" + kind);
+
+        foreach (IElement expander in page.FindAll(".ms-db-expander[data-definition=withheld]"))
+        {
+            await expander.ClickAsync(new MouseEventArgs());
+        }
+
+        page.FindAll(".ms-db-definition-row .ms-db-refusal").Should().ContainSingle();
+        real.DefinitionsAsked.Should().Be(0);
+        real.Logs.Entries.Should().NotContain(static x => x.Level >= LogLevel.Warning);
+        real.Ring.GetLatest().Should().BeEmpty();
+
+        // Anti-vacuity: had the page asked, this is what it would have caused.
+        DatabaseObjectSummary item = fake.List!.Items.Single();
+        DatabaseObjectDefinition refused = await real.Service.GetDefinitionAsync(context.State.ActiveScope!, item.Ref, Xunit.TestContext.Current.CancellationToken);
+
+        refused.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
+        real.Logs.Entries.Should().Contain(static x => x.Level == LogLevel.Warning && x.EventId.Id == 9202);
+        real.Ring.GetLatest().Should().ContainSingle(static x => !x.Succeeded);
+    }
+
+    /// <summary>
+    /// A definition the list said was available can still be refused when it is read - the gate may have
+    /// changed in between - and the refusal is then drawn in the service's own words.
+    /// </summary>
+    [Fact]
+    public async Task A_refusal_the_service_gives_after_the_list_was_read_is_drawn_as_its_sentence()
     {
         using var context = DatabasePageData.Context();
         context.DatabaseObjects.Definition = DatabaseObjectDefinition.Unavailable(
@@ -404,6 +546,7 @@ public class DatabaseObjectsPageTests
         page.WaitForAssertion(() => page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim()
             .Should().Be(DatabaseGate.CapabilityDenial));
         page.FindAll(".ms-db-definition-row .ms-sql").Should().BeEmpty();
+        context.DatabaseObjects.DefinitionsAsked.Should().ContainSingle("the list said this one was available");
     }
 
     [Fact]
@@ -617,6 +760,113 @@ public class DatabaseObjectsPageTests
         context.DatabaseObjects.Queries.Should().Contain(x => x.Schema == "quartz" && x.Category == DatabaseObjectCategory.Tables);
     }
 
+    /// <summary>
+    /// DB-4 review F4: a <c>?schema=</c> is whatever somebody typed into a link. One the overview did not
+    /// return is not repeated back in the title, the heading or the rail as if it were a schema to browse;
+    /// the list says, in the service's words, that there is no such schema.
+    /// </summary>
+    [Fact]
+    public void A_schema_the_overview_did_not_return_is_not_echoed_as_if_it_were_one()
+    {
+        const string Typed = "not_a_schema_of_yours";
+
+        using var context = DatabasePageData.Context();
+        context.DatabaseObjects.List = DatabaseObjectList.Refused(
+            new DatabaseObjectQuery(DatabaseObjectCategory.Tables, Typed),
+            DatabaseRefusal.NotFound,
+            "There is no schema '" + Typed + "' among the schemas this studio shows you.",
+            FakeDatabaseObjects.Access());
+
+        var page = DatabasePageData.RenderBrowser(context, "schema=" + Typed);
+
+        PageTitleText(context, page).Should().Be("Database");
+        page.FindAll(".ms-db-title-schema").Should().BeEmpty();
+        page.Find(".ms-page-header").TextContent.Should().NotContain(Typed);
+        page.Find(".ms-db-rail-summary").TextContent.Trim().Should().StartWith("All schemas");
+        page.Find(".ms-db-rail").TextContent.Should().NotContain(Typed);
+        page.FindAll(".ms-db-kind-tabs a").Select(static x => x.GetAttribute("title") ?? string.Empty)
+            .Should().NotContain(x => x.Contains(Typed, StringComparison.Ordinal));
+
+        page.Find(".ms-db-refused").TextContent.Should().Contain("There is no schema",
+            "the service's own sentence is where the page says what happened to the link");
+    }
+
+    [Fact]
+    public void A_schema_the_overview_did_return_is_the_title_the_heading_and_the_rail()
+    {
+        using var context = DatabasePageData.Context();
+
+        var page = DatabasePageData.RenderBrowser(context, "schema=" + FakeDatabaseObjects.Quartz);
+
+        PageTitleText(context, page).Should().Be("quartz — Database");
+        page.Find(".ms-db-title-schema").TextContent.Trim().Should().Be("quartz");
+        page.Find(".ms-db-rail-summary").TextContent.Trim().Should().StartWith("quartz · ");
+    }
+
+    /// <summary>
+    /// A sequence value is keyed by schema and name, which say nothing about the database it was read in:
+    /// after a switch of database (one per tenant, say) a value read in the old one sat against the
+    /// same-named sequence of the new one.
+    /// </summary>
+    [Fact]
+    public async Task A_sequence_value_read_in_one_database_is_not_shown_against_the_same_name_in_another()
+    {
+        using var context = DatabasePageData.Context();
+        context.Catalog.Databases["default"].Add(new DatabaseListing("tenant_b", "tenant_b", "localhost"));
+        context.DatabaseObjects.List = DatabasePageData.ListOf(
+            DatabaseObjectCategory.Sequences,
+            [DatabasePageData.Sequence("legacy", "invoice_seq", canReadValue: true)]);
+        context.DatabaseObjects.SequenceValue = new DatabaseSequenceValue(
+            new DatabaseObjectRef(DatabaseObjectKind.Sequence, "legacy", "invoice_seq"), 4210, DatabaseRefusal.None, null);
+
+        var page = DatabasePageData.RenderBrowser(context, "kind=sequences");
+
+        await SequenceRow(page, "invoice_seq").QuerySelector("button.ms-db-read-value")!.ClickAsync(new MouseEventArgs());
+        SequenceRow(page, "invoice_seq").QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("4,210");
+
+        // The same list object comes back for the new database, as a fake's fixed answer does: the scope is
+        // what changed, and it alone has to be enough to forget the value.
+        await page.InvokeAsync(() => context.State.SetScopeAsync("default", "tenant_b", null));
+
+        page.WaitForAssertion(() => context.DatabaseObjects.LastScope!.DatabaseId.Should().Be("tenant_b"));
+        page.WaitForAssertion(() => SequenceRow(page, "invoice_seq").QuerySelectorAll("td")[2].TextContent.Trim()
+            .Should().Be("read", "the value on screen was read in the other database"));
+    }
+
+    [Fact]
+    public async Task A_new_list_forgets_the_values_read_for_the_old_one()
+    {
+        using var context = DatabasePageData.Context();
+        await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
+        context.DatabaseObjects.SequenceValue = new DatabaseSequenceValue(
+            new DatabaseObjectRef(DatabaseObjectKind.Sequence, "legacy", "invoice_seq"), 7, DatabaseRefusal.None, null);
+
+        DatabaseObjectList first = DatabasePageData.ListOf(
+            DatabaseObjectCategory.Sequences, [DatabasePageData.Sequence("legacy", "invoice_seq", canReadValue: true)]);
+
+        var grid = context.Render<DatabaseSequencesGrid>(parameters => parameters.Add(x => x.Model, first));
+
+        await grid.Find("button.ms-db-read-value").ClickAsync(new MouseEventArgs());
+        grid.Find(".ms-db-sequences tbody tr").QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("7");
+
+        grid.Render(parameters => parameters.Add(x => x.Model, first));
+        grid.Find(".ms-db-sequences tbody tr").QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("7",
+            "the same list, re-rendered, is the same question");
+
+        DatabaseObjectList second = DatabasePageData.ListOf(
+            DatabaseObjectCategory.Sequences, [DatabasePageData.Sequence("legacy", "invoice_seq", canReadValue: true)]);
+
+        grid.Render(parameters => parameters.Add(x => x.Model, second));
+        grid.Find(".ms-db-sequences tbody tr").QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("read");
+    }
+
+    /// <summary>What the page's <c>PageTitle</c> says - its content renders into the head, not the page.</summary>
+    private static string PageTitleText(StudioComponentContext context, IRenderedComponent<BrowserPage> page)
+    {
+        RenderFragment content = page.FindComponent<PageTitle>().Instance.ChildContent!;
+        return context.Render(content).Markup.Trim();
+    }
+
     private static IElement Row<T>(IRenderedComponent<T> page, string name)
         where T : Microsoft.AspNetCore.Components.IComponent =>
         page.FindAll(".ms-db-relations tbody tr").First(x => Names(x.QuerySelector(".ms-db-name")!, name));
@@ -644,4 +894,135 @@ public class DatabaseObjectsPageTests
 
     private static List<string> Badges(IElement row) =>
         [.. row.QuerySelectorAll(".ms-db-badge").Select(x => System.Text.RegularExpressions.Regex.Replace(x.TextContent.Trim(), @"\s+", " "))];
+
+    /// <summary>A function Marten does not own whose body the gate withholds.</summary>
+    internal static DatabaseRoutineSummary WithheldRoutine(string schema, string name) =>
+        new(
+            DatabaseObjectKind.Function,
+            schema,
+            name,
+            new DatabaseObjectOwnership(DatabaseObjectOwner.Other),
+            null,
+            true,
+            string.Empty,
+            "integer",
+            "sql",
+            "volatile",
+            false,
+            false,
+            [],
+            DefinitionAvailable: false);
+
+    /// <summary>A trigger whose function is in a schema this visitor is not shown, so its definition is withheld.</summary>
+    internal static DatabaseTriggerSummary WithheldTrigger(string schema, string table, string name) =>
+        new(
+            DatabaseObjectKind.Trigger,
+            schema,
+            name,
+            new DatabaseObjectOwnership(DatabaseObjectOwner.Other),
+            null,
+            true,
+            table,
+            new DatabaseObjectOwnership(DatabaseObjectOwner.Other),
+            "BEFORE",
+            ["INSERT"],
+            true,
+            true,
+            "O",
+            null,
+            null,
+            false,
+            DefinitionAvailable: false);
+}
+
+/// <summary>
+/// The real <see cref="IDatabaseObjectService" /> over a store that never connects, with a real
+/// <see cref="StudioActionLog" /> and every line the studio logs captured - and a way to hand a page lists
+/// from a fake while its definition reads go to the real service.
+/// </summary>
+/// <remarks>
+/// <c>BrowseDatabase</c> is off, as it is by default (D4), so a definition read of anything Marten does not
+/// own is refused at the capability - before a connection could be opened - with a ring entry and event
+/// 9202 at Warning. That is exactly what the page must never cause by itself, and exactly what a page test
+/// with a fake service cannot see.
+/// </remarks>
+internal sealed class RealDefinitionService : IAsyncDisposable
+{
+    private const string DummyConnectionString =
+        "Host=marten-studio-db46-definitions.invalid;Database=none;Username=none;Password=none";
+
+    private readonly ServiceProvider provider;
+    private readonly IServiceScope scope;
+    private int asked;
+
+    private RealDefinitionService(ServiceProvider provider, IServiceScope scope, CapturingLoggerProvider logs)
+    {
+        this.provider = provider;
+        this.scope = scope;
+        Logs = logs;
+    }
+
+    /// <summary>Everything the real studio logged, at every level.</summary>
+    public CapturingLoggerProvider Logs { get; }
+
+    /// <summary>The real studio's audit ring.</summary>
+    public StudioActionLogService Ring => provider.GetRequiredService<StudioActionLogService>();
+
+    /// <summary>The real service.</summary>
+    public IDatabaseObjectService Service => scope.ServiceProvider.GetRequiredService<IDatabaseObjectService>();
+
+    /// <summary>How many definition reads a page handed to the real service.</summary>
+    public int DefinitionsAsked => Volatile.Read(ref asked);
+
+    public static RealDefinitionService Create()
+    {
+        var logs = new CapturingLoggerProvider();
+        var users = new TestAuthenticationStateProvider();
+        users.SignIn("tester");
+
+        var services = new ServiceCollection();
+        services.AddLogging(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Trace);
+            builder.AddProvider(logs);
+        });
+        services.AddMarten(static options => options.Connection(DummyConnectionString));
+        services.AddMartenStudio();
+        services.AddSingleton<IAuthorizationService>(new TestStoreAuthorizationService());
+        services.AddScoped<AuthenticationStateProvider>(_ => users);
+
+        ServiceProvider provider = services.BuildServiceProvider();
+
+        return new RealDefinitionService(provider, provider.CreateScope(), logs);
+    }
+
+    /// <summary>A service that answers from <paramref name="lists" /> and reads definitions through the real one.</summary>
+    public IDatabaseObjectService Over(IDatabaseObjectService lists) => new Split(lists, this);
+
+    public async ValueTask DisposeAsync()
+    {
+        scope.Dispose();
+        await provider.DisposeAsync();
+    }
+
+    private sealed class Split(IDatabaseObjectService lists, RealDefinitionService real) : IDatabaseObjectService
+    {
+        public Task<DatabaseBrowserOverview> GetOverviewAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+            lists.GetOverviewAsync(scope, cancellationToken);
+
+        public Task<DatabaseObjectList> ListAsync(StudioScope scope, DatabaseObjectQuery query, CancellationToken cancellationToken = default) =>
+            lists.ListAsync(scope, query, cancellationToken);
+
+        public Task<DatabaseObjectDetail> GetObjectAsync(StudioScope scope, string schema, string name, CancellationToken cancellationToken = default) =>
+            lists.GetObjectAsync(scope, schema, name, cancellationToken);
+
+        public Task<DatabaseObjectDefinition> GetDefinitionAsync(StudioScope scope, DatabaseObjectRef reference, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref real.asked);
+            return real.Service.GetDefinitionAsync(scope, reference, cancellationToken);
+        }
+
+        public Task<DatabaseSequenceValue> GetSequenceValueAsync(StudioScope scope, string schema, string name, CancellationToken cancellationToken = default) =>
+            lists.GetSequenceValueAsync(scope, schema, name, cancellationToken);
+    }
 }

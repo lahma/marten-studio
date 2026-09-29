@@ -8,6 +8,8 @@ using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using DetailPage = MartenStudio.Components.Pages.Database.ObjectDetail;
 
@@ -270,6 +272,120 @@ public class ObjectDetailPageTests
         var page = DatabasePageData.RenderObject(context, FakeDatabaseObjects.Legacy, "secret_view", "definition");
 
         page.WaitForAssertion(() => page.Find(".ms-db-dependencies").TextContent.Should().Contain("a relation you cannot see"));
+    }
+
+    /// <summary>
+    /// DB-4 review F1: the Definition tab used to read a view's query by the view's kind alone, so opening the
+    /// tab on a view whose query the gate withholds was a refused, audited read with a security Warning.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(DatabaseRefusal.CapabilityOff))]
+    [InlineData(nameof(DatabaseRefusal.HiddenDependency))]
+    public void A_view_whose_query_is_withheld_says_why_and_never_asks_for_it(string why)
+    {
+        using var context = DatabasePageData.Context();
+        DatabaseObjectDetail detail = FakeDatabaseObjects.Detail(FakeDatabaseObjects.Legacy, "order_totals");
+
+        (DatabaseAccessState access, DatabaseRowAccess rows, string expected) = why == nameof(DatabaseRefusal.CapabilityOff)
+            ? (FakeDatabaseObjects.Access(DatabaseRefusal.CapabilityOff),
+                DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, DatabaseGate.CapabilityDenial),
+                DatabaseGate.CapabilityDenial)
+            : (FakeDatabaseObjects.Access(),
+                DatabaseRowAccess.Refused(DatabaseRefusal.HiddenDependency, DatabaseGate.HiddenDependencyDenial),
+                DatabaseGate.HiddenDependencyDenial);
+
+        context.DatabaseObjects.Detail = detail with
+        {
+            Relation = detail.Relation! with { Rows = rows, DefinitionAvailable = false },
+            Access = access,
+        };
+
+        var page = DatabasePageData.RenderObject(context, FakeDatabaseObjects.Legacy, "order_totals", "definition");
+
+        page.Find(".ms-db-definition-tab .ms-db-refusal").TextContent.Trim().Should().Be(expected);
+        page.FindAll(".ms-db-definition-tab .ms-sql").Should().BeEmpty();
+        context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty("the detail already said the query may not be shown");
+    }
+
+    [Fact]
+    public async Task A_withheld_view_query_on_the_real_service_logs_no_warning_and_audits_nothing()
+    {
+        await using RealDefinitionService real = RealDefinitionService.Create();
+
+        DatabaseObjectDetail detail = FakeDatabaseObjects.Detail(FakeDatabaseObjects.Legacy, "order_totals");
+        FakeDatabaseObjectService fake = new()
+        {
+            Detail = detail with
+            {
+                Relation = detail.Relation! with
+                {
+                    Schema = FakeDatabaseObjects.StoreSchema,
+                    Rows = DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, DatabaseGate.CapabilityDenial),
+                    DefinitionAvailable = false,
+                },
+                Access = FakeDatabaseObjects.Access(DatabaseRefusal.CapabilityOff),
+            },
+        };
+
+        using var context = new StudioComponentContext(services => services.AddSingleton<IDatabaseObjectService>(real.Over(fake)));
+        context.WithStores("default");
+
+        var page = DatabasePageData.RenderObject(context, FakeDatabaseObjects.StoreSchema, "order_totals", "definition");
+
+        page.Find(".ms-db-definition-tab .ms-db-refusal").TextContent.Trim().Should().Be(DatabaseGate.CapabilityDenial);
+        real.DefinitionsAsked.Should().Be(0);
+        real.Logs.Entries.Should().NotContain(static x => x.Level >= LogLevel.Warning);
+        real.Ring.GetLatest().Should().BeEmpty();
+
+        // Anti-vacuity: the read the tab used to make is refused, audited and logged as a Warning.
+        await real.Service.GetDefinitionAsync(
+            context.State.ActiveScope!,
+            new DatabaseObjectRef(DatabaseObjectKind.View, FakeDatabaseObjects.StoreSchema, "order_totals"),
+            Xunit.TestContext.Current.CancellationToken);
+
+        real.Logs.Entries.Should().Contain(static x => x.Level == LogLevel.Warning && x.EventId.Id == 9202);
+        real.Ring.GetLatest().Should().ContainSingle(static x => !x.Succeeded);
+    }
+
+    [Fact]
+    public async Task A_trigger_on_the_triggers_tab_whose_definition_is_withheld_says_why_from_the_details_gate()
+    {
+        using var context = DatabasePageData.Context();
+        DatabaseObjectDetail detail = FakeDatabaseObjects.Detail(FakeDatabaseObjects.StoreSchema, "host_settings");
+        DatabaseTriggerSummary trigger = DatabaseObjectsPageTests.WithheldTrigger(FakeDatabaseObjects.StoreSchema, "host_settings", "host_settings_audit")
+            with { FunctionSchema = FakeDatabaseObjects.StoreSchema, FunctionName = "audit" };
+
+        context.DatabaseObjects.Detail = detail with
+        {
+            Triggers = [trigger],
+            Access = FakeDatabaseObjects.Access(DatabaseRefusal.WritePolicy),
+        };
+
+        var page = DatabasePageData.RenderObject(context, FakeDatabaseObjects.StoreSchema, "host_settings", "triggers");
+
+        await page.Find(".ms-db-triggers .ms-db-expander").ClickAsync(new MouseEventArgs());
+
+        page.Find(".ms-db-triggers .ms-db-definition-row .ms-db-refusal").TextContent.Trim().Should().Be(DatabaseGate.WritePolicyDenial,
+            "the grid is handed the detail's own gate, which names the policy that said no");
+        context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The Relationships tab has no count: its body is the relationship graph's neighbourhood, which the tab
+    /// reads itself, and a number from this page's own catalog read disagreed with what it drew.
+    /// </summary>
+    [Fact]
+    public void The_relationships_tab_carries_no_count_that_could_disagree_with_its_picture()
+    {
+        using var context = DatabasePageData.Context();
+
+        var page = DatabasePageData.RenderObject(context, "quartz", "qrtz_triggers", "keys");
+
+        IElement relationships = page.FindAll(".ms-db-object-tabs a.ms-tab").Single(static x => x.TextContent.Trim() == "Relationships");
+        relationships.QuerySelector(".ms-tab-count").Should().BeNull();
+
+        page.FindAll(".ms-db-object-tabs a.ms-tab").Single(static x => x.TextContent.Trim().StartsWith("Keys", StringComparison.Ordinal))
+            .QuerySelector(".ms-tab-count").Should().NotBeNull("the structure tabs still count what they list");
     }
 
     [Fact]

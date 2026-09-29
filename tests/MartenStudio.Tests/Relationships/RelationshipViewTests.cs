@@ -169,6 +169,48 @@ public class RelationshipViewTests
             .State.Should().Be(NeighbourhoodState.Empty);
     }
 
+    /// <summary>
+    /// The integration review of 74c9bb0: a table whose only key points at an <c>mt_doc_</c> table no store
+    /// registers said "No foreign keys" on its Relationships tab while its Keys tab listed the key.
+    /// </summary>
+    [Fact]
+    public void A_table_whose_only_key_cannot_be_drawn_keeps_that_key_in_its_neighbourhood()
+    {
+        RelationshipNeighbourhood neighbourhood = RelationshipViews.Neighbourhood(WithUnmatched(), "legacy", "audit_log");
+
+        neighbourhood.State.Should().Be(NeighbourhoodState.Loaded);
+        neighbourhood.Graph.Edges.Should().BeEmpty();
+        neighbourhood.Graph.Nodes.Should().BeEmpty();
+        neighbourhood.Graph.Tables.Should().BeEmpty("there is nothing to draw, so nothing is drawn");
+        neighbourhood.Graph.Unmatched.Should().ContainSingle().Which.Name.Should().Be("audit_log_ref_fkey");
+    }
+
+    [Fact]
+    public void The_far_end_of_an_unmatched_key_finds_it_too_though_it_is_no_node()
+    {
+        RelationshipNeighbourhood neighbourhood = RelationshipViews.Neighbourhood(WithUnmatched(), "studio_sample", "mt_doc_discovered");
+
+        neighbourhood.State.Should().Be(NeighbourhoodState.Loaded);
+        neighbourhood.Centre.Should().BeNull("an unregistered document table is no node of the picture");
+        neighbourhood.Graph.Unmatched.Select(static x => x.Name).Should().Equal("audit_log_ref_fkey");
+    }
+
+    [Fact]
+    public void A_neighbourhood_with_edges_keeps_its_own_unmatched_rows_and_nobody_elses()
+    {
+        RelationshipNeighbourhood neighbourhood = RelationshipViews.Neighbourhood(WithUnmatched(), "quartz", "qrtz_triggers");
+
+        neighbourhood.State.Should().Be(NeighbourhoodState.Loaded);
+        neighbourhood.Graph.Edges.Should().HaveCount(2);
+        neighbourhood.Graph.Unmatched.Select(static x => x.Name).Should().Equal("qrtz_triggers_owner_fkey");
+    }
+
+    [Fact]
+    public void A_name_that_differs_only_by_case_is_another_table_with_no_keys()
+    {
+        RelationshipViews.Neighbourhood(WithUnmatched(), "legacy", "Audit_Log").State.Should().Be(NeighbourhoodState.Empty);
+    }
+
     [Fact]
     public void An_object_in_a_schema_the_visitor_is_not_shown_is_refused_without_saying_whether_it_exists()
     {
@@ -179,6 +221,36 @@ public class RelationshipViewTests
         neighbourhood.Reason.Should().Contain("not one of the schemas this studio shows you");
         neighbourhood.Graph.Edges.Should().BeEmpty();
     }
+
+    /// <summary>
+    /// <see cref="FakeRelationshipDataService.WithTables" /> with two keys that cannot be drawn: the only key
+    /// of <c>legacy.audit_log</c>, into a document table no store registers, and one of
+    /// <c>quartz.qrtz_triggers</c>' besides its two drawn ones, into another store's collection.
+    /// </summary>
+    internal static GraphModel WithUnmatched() => FakeRelationshipDataService.WithTables() with
+    {
+        Unmatched =
+        [
+            new UnmatchedForeignKey(
+                "audit_log_ref_fkey", "legacy.audit_log", "ref", "studio_sample.mt_doc_discovered", false, true,
+                "It points at a table no document type of this store maps.")
+            {
+                FromSchema = "legacy",
+                FromTable = "audit_log",
+                ToSchema = "studio_sample",
+                ToTable = "mt_doc_discovered",
+            },
+            new UnmatchedForeignKey(
+                "qrtz_triggers_owner_fkey", "quartz.qrtz_triggers", "owner_id", "studio_sample.mt_doc_billing_owner", false, true,
+                "It points at a table no document type of this store maps.")
+            {
+                FromSchema = "quartz",
+                FromTable = "qrtz_triggers",
+                ToSchema = "studio_sample",
+                ToTable = "mt_doc_billing_owner",
+            },
+        ],
+    };
 
     /// <summary>
     /// A chain of document → table → table → … keys, long enough to pass the cap.

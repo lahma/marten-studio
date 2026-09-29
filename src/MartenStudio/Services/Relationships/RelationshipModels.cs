@@ -189,7 +189,30 @@ internal sealed record UnmatchedForeignKey(
     string To,
     bool Declared,
     bool Physical,
-    string Reason);
+    string Reason)
+{
+    /// <summary>The pointing table's schema, as the catalog or the configuration spells it.</summary>
+    public string? FromSchema { get; init; }
+
+    /// <summary>The pointing table, likewise.</summary>
+    public string? FromTable { get; init; }
+
+    /// <summary>The referenced table's schema, or <see langword="null" /> when the key names no table.</summary>
+    public string? ToSchema { get; init; }
+
+    /// <summary>The referenced table, or <see langword="null" /> when the key names no table.</summary>
+    public string? ToTable { get; init; }
+
+    /// <summary>
+    /// Whether this key is on, or points at, one table - compared ordinally, because two tables whose quoted
+    /// names differ only by case are two tables. What the object page's neighbourhood keeps its rows by.
+    /// </summary>
+    /// <param name="schema">The table's schema, as the catalog has it.</param>
+    /// <param name="table">The table, as the catalog has it.</param>
+    public bool Touches(string schema, string table) =>
+        (string.Equals(FromSchema, schema, StringComparison.Ordinal) && string.Equals(FromTable, table, StringComparison.Ordinal))
+        || (string.Equals(ToSchema, schema, StringComparison.Ordinal) && string.Equals(ToTable, table, StringComparison.Ordinal));
+}
 
 /// <summary>
 /// A foreign key with one end in a schema the visitor is not shown: counted, and deliberately anonymous.
@@ -415,6 +438,12 @@ internal sealed record ReferencedBy(
     /// </summary>
     public int Withheld { get; init; }
 
+    /// <summary>
+    /// Whether the foreign-key read stopped at <see cref="RelationshipQueries.DefaultForeignKeyCap" />, so a
+    /// key that points here may be missing from <see cref="Entries" /> and from <see cref="Withheld" />.
+    /// </summary>
+    public bool Truncated { get; init; }
+
     /// <summary>Whether there is nothing at all to say.</summary>
     public bool IsEmpty => Entries.Count == 0 && Withheld == 0 && Error is null;
 
@@ -422,17 +451,25 @@ internal sealed record ReferencedBy(
     public static ReferencedBy Failed(string error) => new([], RelationshipQueries.DefaultInboundCap, error);
 
     /// <summary>
-    /// The one sentence a hard delete's confirmation adds, or <see langword="null" />: which rows of
-    /// tables the studio does not map a delete of this document would delete or change through an
-    /// <c>ON DELETE</c> action.
+    /// What a hard delete's confirmation adds, or <see langword="null" /> when there is nothing to add: which
+    /// rows elsewhere a delete of this document deletes or changes through an <c>ON DELETE</c> action - and,
+    /// just as plainly, what it may delete or change that the studio did not count or may not name.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Only from counts that were made and are known, and only for tables: a document table's inbound
-    /// count leaves out soft-deleted rows and other tenants' rows on purpose - it describes the list it
-    /// links to - so it is not a count of the rows Postgres would cascade into, and saying it were would be
-    /// a precise-looking number that is wrong. A non-Marten table's count is a raw count of exactly the rows
-    /// the constraint covers, bounded at the cap.
+    /// <b>A number only where one was made and means that.</b> A non-Marten table's count is a raw count of
+    /// exactly the rows the constraint covers, bounded at the cap, so it is said as a number. A document
+    /// table's inbound count leaves out soft-deleted rows and other tenants' rows on purpose - it describes
+    /// the list it links to - so it is not a count of the rows Postgres would cascade into; the cascade is
+    /// still real, so it is said without one, as something the delete <em>may</em> do.
+    /// </para>
+    /// <para>
+    /// <b>Silence is not an answer.</b> A table whose rows this visitor may not count, or whose count failed,
+    /// still has its <c>ON DELETE</c> action fired by the delete, so it is named with "not counted" rather
+    /// than left out - a visitor who may delete documents but not browse the database would otherwise delete
+    /// a customer and cascade into <c>legacy.customer_credit</c> without a word. A key from a schema the
+    /// visitor is not shown is counted and never named, as everywhere else (D27). A key read that stopped at
+    /// its cap, or failed, says so, because either means the list above is not the whole story.
     /// </para>
     /// <para>
     /// A soft delete is an update and fires no <c>ON DELETE</c> action at all, which is why the caller asks
@@ -442,37 +479,92 @@ internal sealed record ReferencedBy(
     /// </remarks>
     public string? DeleteConsequence()
     {
-        List<string> parts = [];
+        List<string> certain = [];
+        List<string> possible = [];
 
         foreach (ReferencedByEntry entry in Entries)
         {
-            if (!entry.IsTable || !entry.IsCounted || entry.Count <= 0)
+            // What the action does to a pointing row: removes it, or sets its key columns to something.
+            (bool Deletes, string SetTo, string Clause)? action = entry.OnDelete switch
+            {
+                "Cascade" => (true, string.Empty, "ON DELETE CASCADE"),
+                "SetNull" => (false, "null", "ON DELETE SET NULL"),
+                "SetDefault" => (false, "its default", "ON DELETE SET DEFAULT"),
+                _ => null,
+            };
+
+            if (action is not { } known)
+            {
+                continue;
+            }
+
+            (bool deletes, string setTo, string clause) = known;
+            string columns = entry.AllColumns ?? entry.Column;
+
+            if (!entry.IsTable)
+            {
+                possible.Add(deletes
+                    ? $"delete the {entry.FromAlias} documents that point at it ({clause})"
+                    : $"set {columns} to {setTo} in the {entry.FromAlias} documents that point at it ({clause})");
+
+                continue;
+            }
+
+            string table = entry.Schema + "." + entry.Table;
+
+            if (!entry.IsCounted)
+            {
+                possible.Add(deletes
+                    ? $"delete rows in {table} ({clause}, not counted)"
+                    : $"set {columns} to {setTo} in rows of {table} ({clause}, not counted)");
+
+                continue;
+            }
+
+            if (entry.Count <= 0)
             {
                 continue;
             }
 
             string rows = RowsText(entry);
-            string table = entry.Schema + "." + entry.Table;
 
-            switch (entry.OnDelete)
-            {
-                case "Cascade":
-                    parts.Add($"deletes {rows} in {table} (ON DELETE CASCADE)");
-                    break;
-
-                case "SetNull":
-                    parts.Add($"sets {entry.AllColumns ?? entry.Column} to null in {rows} of {table} (ON DELETE SET NULL)");
-                    break;
-
-                case "SetDefault":
-                    parts.Add($"sets {entry.AllColumns ?? entry.Column} to its default in {rows} of {table} (ON DELETE SET DEFAULT)");
-                    break;
-            }
+            certain.Add(deletes
+                ? $"deletes {rows} in {table} ({clause})"
+                : $"sets {columns} to {setTo} in {rows} of {table} ({clause})");
         }
 
-        return parts.Count == 0
-            ? null
-            : "Deleting this document also " + string.Join(", and ", parts) + ".";
+        List<string> sentences = [];
+
+        if (certain.Count > 0)
+        {
+            sentences.Add("Deleting this document also " + string.Join(", and ", certain) + ".");
+        }
+
+        if (possible.Count > 0)
+        {
+            sentences.Add((certain.Count > 0 ? "It may also " : "Deleting this document may also ") + string.Join(", and ", possible) + ".");
+        }
+
+        if (Withheld > 0)
+        {
+            sentences.Add(Withheld == 1
+                ? "1 foreign key from a schema you are not shown points at this document; deleting it may delete or change rows there."
+                : $"{Withheld.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} foreign keys from schemas you are not shown " +
+                  "point at this document; deleting it may delete or change rows there.");
+        }
+
+        if (Error is not null)
+        {
+            sentences.Add("What points at this document could not be read, so this cannot say what else deleting it would delete or change.");
+        }
+        else if (Truncated)
+        {
+            sentences.Add(
+                $"The studio stopped reading foreign keys at {RelationshipQueries.DefaultForeignKeyCap.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)}, " +
+                "so a key that points at this document may be missing from what is said here.");
+        }
+
+        return sentences.Count == 0 ? null : string.Join(" ", sentences);
     }
 
     private static string RowsText(ReferencedByEntry entry)

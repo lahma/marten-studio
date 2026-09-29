@@ -606,20 +606,44 @@ internal sealed class DatabaseAccess
     /// The row gate, for a reader of one relation's rows: the capability, the tenant-less scope with the
     /// capability named, the schema against <see cref="MartenStudioOptions.BrowsableSchemas" />, then the
     /// relation looked up in the catalog and judged - whose it is, what it is, what it reads, whether the
-    /// role may select from it. Every refusal is audited under <paramref name="action" />; a grant is not,
-    /// because the caller knows what it then read and records that.
+    /// role may select from it. Every refusal is audited under <paramref name="action" /> unless
+    /// <paramref name="record" /> says otherwise; a grant is not, because the caller knows what it then read
+    /// and records that.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="record" /> is <see langword="false" /> only for a read nobody asked for: a count a page
+    /// makes on its own while it draws something else, such as how many rows of a table point at the
+    /// document on screen. "The reading role has no <c>SELECT</c> on it" is then an answer the page shows
+    /// beside the row, not a refusal of anything the visitor did, and recording it would put an entry in the
+    /// ring and a line in the log every time somebody opened a document.
+    /// </para>
+    /// <para>
+    /// It covers the relation-level answers only - not found, not browsable, whose it is, what it reads,
+    /// the role's privilege. The capability and the two policies are still recorded by
+    /// <see cref="RequireBrowseAsync" /> whatever it says, because they are security events: a caller passing
+    /// <see langword="false" /> asks the page's own gate first, unaudited, so those can only refuse here when
+    /// the answer changed in between. It is the last parameter, after the token, so that every existing call
+    /// that passes the token by position keeps its meaning.
+    /// </para>
+    /// </remarks>
     /// <param name="scope">The visitor's scope.</param>
     /// <param name="schema">The schema, as the URL had it. Only compared, never quoted.</param>
     /// <param name="name">The relation, as the URL had it. Only compared, never quoted.</param>
     /// <param name="action">What the audit ring calls the read.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
+    /// <param name="record">Whether a refusal of the relation itself is audited; <see langword="true" /> unless the read is passive.</param>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1068:CancellationToken parameters must come last",
+        Justification = "Callers already pass the token by position, so record before it would change what they mean; an overload would make every cref to this method ambiguous (CS0419).")]
     public async Task<DatabaseRowAccessResult> RequireRowAccessAsync(
         StudioScope scope,
         string schema,
         string name,
         string action = RowsAction,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool record = true)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -637,7 +661,11 @@ internal sealed class DatabaseAccess
 
         DatabaseRowAccessResult Refuse(DatabaseRefusal refusal, string reason)
         {
-            audit.Record(action, target, succeeded: false, reason, StudioCapability.BrowseDatabase, tenantless);
+            if (record)
+            {
+                audit.Record(action, target, succeeded: false, reason, StudioCapability.BrowseDatabase, tenantless);
+            }
+
             return DatabaseRowAccessResult.Refused(refusal, reason);
         }
 

@@ -106,17 +106,108 @@ public class ReferencedByTablesTests
     }
 
     [Fact]
-    public void Nothing_that_is_not_known_or_not_a_table_is_a_delete_consequence()
+    public void A_counted_table_with_no_row_or_a_key_that_changes_nothing_is_no_delete_consequence()
     {
         new ReferencedBy([Credit(count: 0)]).DeleteConsequence().Should().BeNull("no row points here");
-        new ReferencedBy([Credit(count: 4) with { NotCounted = "the gate says no" }]).DeleteConsequence().Should().BeNull(
-            "a count this visitor may not read is not said in a sentence either");
-        new ReferencedBy([Credit(count: 4, error: "57014: canceling statement")]).DeleteConsequence().Should().BeNull();
         new ReferencedBy([Credit(count: 4) with { OnDelete = "NoAction" }]).DeleteConsequence().Should().BeNull(
             "NO ACTION changes no row - Postgres refuses the delete instead, and says so");
+        new ReferencedBy([Credit(count: 4) with { OnDelete = "Restrict" }]).DeleteConsequence().Should().BeNull();
+        ReferencedBy.None.DeleteConsequence().Should().BeNull();
+    }
+
+    /// <summary>
+    /// DB-6 review F2: a visitor who may delete documents but may not count the pointing table's rows used to
+    /// delete a customer and cascade into <c>legacy.customer_credit</c> without a word, although the panel
+    /// beside the button listed the key.
+    /// </summary>
+    [Fact]
+    public void A_cascade_the_studio_could_not_count_is_said_as_something_the_delete_may_do()
+    {
+        new ReferencedBy([Credit(count: 0) with { NotCounted = "the gate says no" }]).DeleteConsequence().Should().Be(
+            "Deleting this document may also delete rows in legacy.customer_credit (ON DELETE CASCADE, not counted).");
+
+        new ReferencedBy([Credit(count: 0, error: "57014: canceling statement")]).DeleteConsequence().Should().Be(
+            "Deleting this document may also delete rows in legacy.customer_credit (ON DELETE CASCADE, not counted).",
+            "a count that failed is as uncounted as one that was not allowed");
+
+        new ReferencedBy([Credit(count: 0) with { NotCounted = "no", OnDelete = "SetNull" }]).DeleteConsequence().Should().Be(
+            "Deleting this document may also set customer_id to null in rows of legacy.customer_credit (ON DELETE SET NULL, not counted).");
+
+        new ReferencedBy([Credit(count: 0) with { NotCounted = "no", OnDelete = "SetDefault" }]).DeleteConsequence().Should().Be(
+            "Deleting this document may also set customer_id to its default in rows of legacy.customer_credit " +
+            "(ON DELETE SET DEFAULT, not counted).");
+
+        new ReferencedBy([Credit(count: 0) with { NotCounted = "no", OnDelete = "NoAction" }]).DeleteConsequence().Should().BeNull(
+            "an uncounted key that changes no row is still no consequence");
+    }
+
+    [Fact]
+    public void Counted_and_uncounted_cascades_are_two_sentences_the_certain_one_first()
+    {
+        new ReferencedBy(
+            [
+                Credit(count: 2),
+                Credit(count: 0) with { Table = "reminders", NotCounted = "no", OnDelete = "SetNull" },
+            ])
+            .DeleteConsequence().Should().Be(
+                "Deleting this document also deletes 2 rows in legacy.customer_credit (ON DELETE CASCADE). " +
+                "It may also set customer_id to null in rows of legacy.reminders (ON DELETE SET NULL, not counted).");
+    }
+
+    [Fact]
+    public void A_cascading_collection_is_said_without_a_number()
+    {
         new ReferencedBy([new ReferencedByEntry("order", "customer_id", "CustomerId", 1, 5, false, true, true) { OnDelete = "Cascade" }])
-            .DeleteConsequence().Should().BeNull(
-                "a collection's count leaves out soft-deleted and other tenants' rows, so it is not a count of what a cascade deletes");
+            .DeleteConsequence().Should().Be(
+                "Deleting this document may also delete the order documents that point at it (ON DELETE CASCADE).",
+                "a collection's count leaves out soft-deleted and other tenants' rows, so it is not a count of what a " +
+                "cascade deletes - but the cascade is real");
+
+        new ReferencedBy([new ReferencedByEntry("order", "customer_id", "CustomerId", 1, 5, false, true, true) { OnDelete = "NoAction" }])
+            .DeleteConsequence().Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(1, "1 foreign key from a schema you are not shown points at this document; deleting it may delete or change rows there.")]
+    [InlineData(3, "3 foreign keys from schemas you are not shown point at this document; deleting it may delete or change rows there.")]
+    public void Keys_from_schemas_the_visitor_is_not_shown_are_said_and_named_nowhere(int withheld, string expected)
+    {
+        string? consequence = new ReferencedBy([]) { Withheld = withheld }.DeleteConsequence();
+
+        consequence.Should().Be(expected);
+        consequence!.Count(static x => x == '.').Should().Be(1, "one full stop, at the end: no schema.table is named");
+    }
+
+    [Fact]
+    public void A_key_read_that_stopped_at_its_cap_or_failed_says_the_list_is_not_the_whole_story()
+    {
+        new ReferencedBy([]) { Truncated = true }.DeleteConsequence().Should().Be(
+            "The studio stopped reading foreign keys at 20,000, so a key that points at this document may be missing from what is said here.");
+
+        new ReferencedBy([Credit(count: 1)]) { Truncated = true }.DeleteConsequence().Should()
+            .StartWith("Deleting this document also deletes 1 row in legacy.customer_credit (ON DELETE CASCADE). ")
+            .And.EndWith("may be missing from what is said here.");
+
+        ReferencedBy.Failed("57014: canceling statement").DeleteConsequence().Should().Be(
+            "What points at this document could not be read, so this cannot say what else deleting it would delete or change.");
+    }
+
+    [Fact]
+    public void The_hard_delete_dialog_says_what_a_cascade_it_could_not_count_may_delete()
+    {
+        using var context = new DocumentsComponentContext();
+        context.WithAllCapabilities();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail(softDelete: false));
+        context.RelationshipData.Referenced = new ReferencedBy([Credit(count: 0) with { NotCounted = "The gate is shut." }]) { Withheld = 1 };
+
+        var page = RenderDetail(context);
+        page.Find(".ms-doc-delete-btn").Click();
+
+        string message = page.Find(".ms-confirm-dialog p").TextContent;
+
+        message.Should().Contain("There is no undo.");
+        message.Should().Contain("may also delete rows in legacy.customer_credit (ON DELETE CASCADE, not counted).");
+        message.Should().Contain("1 foreign key from a schema you are not shown points at this document");
     }
 
     [Fact]

@@ -110,6 +110,9 @@
 
 @code {
     private readonly Dictionary<string, DatabaseSequenceValue> values = new(StringComparer.Ordinal);
+    private object? shownModel;
+    private string? shownScope;
+    private int generation;
     private string sortKey = "default";
     private bool descending;
 
@@ -150,21 +153,55 @@
             || (access.IsOpen && access.BrowsableSchemas.Contains(sequence.Schema));
     }
 
-    private static string KeyOf(DatabaseSequenceSummary sequence) => sequence.Schema + '' + sequence.Name;
+    /// <summary>
+    /// Forgets every value read when the list or the scope changes under the grid.
+    /// </summary>
+    /// <remarks>
+    /// A value is keyed by schema and name, which say nothing about the database it was read in: after a
+    /// switch of database - one per tenant, say - a value read in the old one would otherwise sit against
+    /// the same-named sequence of the new one as if it were its own. A read still in flight when this happens
+    /// belongs to the old list too, and is dropped when it lands (<c>generation</c>).
+    /// </remarks>
+    protected override void OnParametersSet()
+    {
+        StudioScope? scope = State.ActiveScope;
+        string scopeKey = string.Join('\u001f', scope?.StoreKey, scope?.DatabaseId, scope?.TenantId);
+
+        if (!ReferenceEquals(shownModel, Model) || !string.Equals(shownScope, scopeKey, StringComparison.Ordinal))
+        {
+            shownModel = Model;
+            shownScope = scopeKey;
+            values.Clear();
+            generation++;
+        }
+    }
+
+    private static string KeyOf(DatabaseSequenceSummary sequence) => sequence.Schema + '\u001f' + sequence.Name;
 
     private async Task ReadValueAsync(DatabaseSequenceSummary sequence)
     {
         string key = KeyOf(sequence);
+        int asked = generation;
+        DatabaseSequenceValue value;
+
         try
         {
-            if (State.ActiveScope is { } scope)
+            if (State.ActiveScope is not { } scope)
             {
-                values[key] = await Data.GetSequenceValueAsync(scope, sequence.Schema, sequence.Name);
+                return;
             }
+
+            value = await Data.GetSequenceValueAsync(scope, sequence.Schema, sequence.Name);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            values[key] = DatabaseSequenceValue.Unavailable(sequence.Ref, DatabaseRefusal.Unavailable, exception.Message);
+            value = DatabaseSequenceValue.Unavailable(sequence.Ref, DatabaseRefusal.Unavailable, exception.Message);
+        }
+
+        // Asked about a list that has since been replaced: the answer is about another database's sequence.
+        if (asked == generation)
+        {
+            values[key] = value;
         }
     }
 

@@ -14,6 +14,10 @@
     Enabled is tgenabled, spelled out: a disabled trigger is exactly the thing somebody is looking for when
     "the audit row never appears", and "replica only" is the one that surprises people after a logical
     replication setup.
+
+    A definition the list says is not available - the gate withholds it, or it would name a function in a
+    schema this visitor may not see - is never asked for: the row opens on the reason instead
+    (DatabaseDefinitionWithheld), since asking would be a refused, audited read the page itself caused.
 *@
 
 <TableScroll Label="@Label">
@@ -46,6 +50,7 @@
             {
                 DatabaseObjectRef reference = trigger.Ref;
                 bool open = expanded.Contains(reference);
+                bool available = trigger.DefinitionAvailable;
                 string rowKey = trigger.Schema + '\u001f' + trigger.Table + '\u001f' + trigger.Name;
 
                 <tr class="@(trigger.Ownership.IsMarten ? "ms-db-row-marten" : null)" @key="rowKey">
@@ -53,8 +58,9 @@
                         <button type="button"
                                 class="ms-doc-expander ms-db-expander"
                                 aria-expanded="@(open ? "true" : "false")"
-                                aria-label="@((open ? "Hide the definition of " : "Show the definition of ") + trigger.Name)"
-                                @onclick="() => ToggleAsync(reference)">@(open ? "▾" : "▸")</button>
+                                aria-label="@(DatabaseDefinitionWithheld.ExpanderLabel(open, available) + trigger.Name)"
+                                data-definition="@(available ? null : "withheld")"
+                                @onclick="() => ToggleAsync(reference, available)">@(open ? "▾" : "▸")</button>
                     </td>
                     <td class="ms-db-cell-name">
                         <span class="ms-db-name">@trigger.Name</span>
@@ -94,12 +100,19 @@
                 {
                     <tr class="ms-doc-preview-row ms-db-definition-row" @key="@(rowKey + "\u001fdefinition")">
                         <td class="ms-doc-preview-cell" colspan="@ColumnSpan">
-                            <DatabaseDefinitionBody Model="definitions.Find(reference)"
-                                                    Loading="definitions.IsLoading(reference)"
-                                                    Error="@definitions.FailureOf(reference)"
-                                                    OnRetry="() => LoadAsync(reference)"
-                                                    Label="@("Definition of trigger " + trigger.Name)"
-                                                    FileName="@(trigger.Name + ".sql")" />
+                            @if (available)
+                            {
+                                <DatabaseDefinitionBody Model="definitions.Find(reference)"
+                                                        Loading="definitions.IsLoading(reference)"
+                                                        Error="@definitions.FailureOf(reference)"
+                                                        OnRetry="() => LoadAsync(reference)"
+                                                        Label="@("Definition of trigger " + trigger.Name)"
+                                                        FileName="@(trigger.Name + ".sql")" />
+                            }
+                            else
+                            {
+                                <p class="ms-db-refusal" role="note">@DatabaseDefinitionWithheld.For(trigger, AccessState, Options.Value.BrowsableSchemas)</p>
+                            }
                         </td>
                     </tr>
                 }
@@ -123,6 +136,14 @@
     [Parameter]
     public object? Model { get; set; }
 
+    /// <summary>
+    /// The gate as a <c>DatabaseAccessState</c>, for a <see cref="Model" /> that is a bare list of triggers - a
+    /// table's detail hands over its own; a <c>DatabaseObjectList</c> carries one already. Typed
+    /// <see cref="object" /> - see <c>DocumentComponentModel</c>.
+    /// </summary>
+    [Parameter]
+    public object? Access { get; set; }
+
     /// <summary>Whether the table column is drawn; not on the table's own detail page.</summary>
     [Parameter]
     public bool ShowTable { get; set; } = true;
@@ -140,6 +161,9 @@
     public string EmptyText { get; set; } = "Nothing here.";
 
     private int ColumnSpan => ShowTable ? 9 : 8;
+
+    /// <summary>The gate: the list's own, or the one the page handed over.</summary>
+    private DatabaseAccessState? AccessState => (Model as DatabaseObjectList)?.Access ?? Access as DatabaseAccessState;
 
     private List<DatabaseTriggerSummary> Triggers => Model switch
     {
@@ -196,7 +220,7 @@
         _ => "Enabled: it fires in an ordinary session",
     };
 
-    private async Task ToggleAsync(DatabaseObjectRef reference)
+    private async Task ToggleAsync(DatabaseObjectRef reference, bool available)
     {
         if (expanded.Remove(reference))
         {
@@ -204,7 +228,12 @@
         }
 
         expanded.Add(reference);
-        await LoadAsync(reference);
+
+        // Never for a definition the list says is not available: the open row draws the reason instead.
+        if (available)
+        {
+            await LoadAsync(reference);
+        }
     }
 
     private async Task LoadAsync(DatabaseObjectRef reference)

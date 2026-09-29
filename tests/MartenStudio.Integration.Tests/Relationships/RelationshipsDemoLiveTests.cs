@@ -6,6 +6,7 @@ using Marten;
 
 using MartenStudio.Integration.Tests.Browser;
 using MartenStudio.Integration.Tests.Database;
+using MartenStudio.Integration.Tests.Logging;
 using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.Services;
@@ -258,12 +259,8 @@ public class RelationshipsDemoLiveTests(RelationshipsDemoFixture fixture) : ICla
             "Deleting this document also deletes 1 row in legacy.customer_credit (ON DELETE CASCADE).");
 
         fixture.Open.Services.GetRequiredService<StudioActionLogService>().GetLatest()
-            .Should().Contain(static x => x.Action == RelationshipDataService.ReferencesAction
-                                          && x.Target == "legacy.customer_credit"
-                                          && x.Succeeded,
-                "a read of a non-Marten table's rows is recorded, as the row gate leaves to its caller")
-            .And.NotContain(x => x.Message != null && x.Message.Contains(fixture.CreditedCustomerId.ToString(), StringComparison.Ordinal),
-                "the document's id is a filter value, which belongs in the log and never in the ring");
+            .Should().NotContain(static x => x.Action == RelationshipDataService.ReferencesAction,
+                "the count is a read the page makes on every load, not one the visitor asked for, and the ring is for what they did");
     }
 
     [PostgresTheory]
@@ -282,7 +279,112 @@ public class RelationshipsDemoLiveTests(RelationshipsDemoFixture fixture) : ICla
         referenced.Entries.Should().NotContain(static x => x.IsTable);
         referenced.Entries.Should().NotContain(static x => x.FromAlias.Contains("legacy", StringComparison.Ordinal));
         referenced.Withheld.Should().Be(1, "legacy.customer_credit's key is there, and this visitor is told only that");
-        referenced.DeleteConsequence().Should().BeNull("a sentence about rows this visitor may not see would name them");
+
+        // The cascade still happens when this visitor deletes the customer, so the dialog says that it may -
+        // naming neither the table nor its schema (D27).
+        string? consequence = referenced.DeleteConsequence();
+
+        consequence.Should().Be(
+            "1 foreign key from a schema you are not shown points at this document; deleting it may delete or change rows there.");
+        consequence.Should().NotContain("legacy").And.NotContain("customer_credit");
+    }
+
+    /// <summary>
+    /// DB-6 review F1: opening a document again and again - with the rows countable, and with a
+    /// <c>SqlConsoleRole</c> that may not select from the pointing table - writes nothing to the audit ring
+    /// and nothing at Information or above to the log.
+    /// </summary>
+    /// <remarks>
+    /// Before the fix, every open wrote a ring entry and a 9200 Information line per referencing table, and
+    /// with the role lacking <c>SELECT</c> every open recorded a refusal - so a viewer paging through
+    /// customers evicted real mutation audits from the 500-entry ring. The capture is proved to be listening:
+    /// the service's own Debug line for the count is in it, and a direct, recorded row-gate ask for the same
+    /// table does reach the ring.
+    /// </remarks>
+    [PostgresTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Opening_a_document_again_and_again_writes_no_audit_entry_and_no_information_line(bool roleMaySelect)
+    {
+        const string Role = "ms_relationships_demo_reader";
+        const int Opens = 5;
+
+        await ExecuteAsync(
+            $$"""
+            do $$
+            begin
+                if exists (select 1 from pg_roles where rolname = '{{Role}}') then
+                    execute 'drop owned by {{Role}}';
+                    execute 'drop role {{Role}}';
+                end if;
+            end
+            $$;
+            create role {{Role}} nologin;
+            grant usage on schema studio_sample, quartz, legacy to {{Role}};
+            grant select on all tables in schema studio_sample, quartz, legacy to {{Role}};
+            {{(roleMaySelect ? string.Empty : $"revoke select on legacy.customer_credit from {Role};")}}
+            """);
+
+        try
+        {
+            LogCapture logs = new();
+
+            await using ServiceProvider provider = Visitor(mayBrowse: true, role: Role, logs: logs);
+            StudioActionLogService ring = provider.GetRequiredService<StudioActionLogService>();
+
+            ReferencedBy? last = null;
+
+            for (int i = 0; i < Opens; i++)
+            {
+                // A scope per open, as a circuit per page load would have.
+                using IServiceScope scope = provider.CreateScope();
+
+                last = await scope.ServiceProvider.GetRequiredService<IRelationshipDataService>()
+                    .GetReferencedByAsync(Scope, "customer", fixture.CreditedCustomerId.ToString(), Token);
+            }
+
+            last!.Error.Should().BeNull();
+            ReferencedByEntry credit = last.Entries.Should().ContainSingle(static x => x.IsTable).Subject;
+
+            if (roleMaySelect)
+            {
+                credit.IsCounted.Should().BeTrue(credit.NotCounted ?? credit.Error);
+                credit.Count.Should().Be(1);
+            }
+            else
+            {
+                credit.IsCounted.Should().BeFalse("the role may not select from it");
+                credit.NotCounted.Should().NotBeNull().And.Contain(Role, "the row says why, naming the role");
+                last.DeleteConsequence().Should().Be(
+                    "Deleting this document may also delete rows in legacy.customer_credit (ON DELETE CASCADE, not counted).");
+            }
+
+            ring.GetLatest().Should().BeEmpty($"{Opens} opens of a document are not {Opens} things somebody did");
+            logs.Lines.Where(static x => x.Level >= LogLevel.Information).Should().BeEmpty(
+                "expected states never log above Debug, and page use must not flood the log");
+
+            // The capture is listening: the count's own Debug line is there, once per open.
+            logs.Lines.Count(static x => x.Level == LogLevel.Debug
+                                         && x.Category.EndsWith(nameof(RelationshipDataService), StringComparison.Ordinal)
+                                         && x.Message.Contains("legacy.customer_credit", StringComparison.Ordinal))
+                .Should().Be(Opens);
+
+            if (!roleMaySelect)
+            {
+                // And the ring is too: the same refusal asked for by somebody - recorded - is in it.
+                using IServiceScope scope = provider.CreateScope();
+
+                DatabaseRowAccessResult asked = await scope.ServiceProvider.GetRequiredService<DatabaseAccess>()
+                    .RequireRowAccessAsync(Scope, "legacy", "customer_credit", cancellationToken: Token);
+
+                asked.Refusal.Should().Be(DatabaseRefusal.NoPrivilege);
+                ring.GetLatest().Should().ContainSingle(static x => !x.Succeeded && x.Target == "legacy.customer_credit");
+            }
+        }
+        finally
+        {
+            await ExecuteAsync($"drop owned by {Role}; drop role {Role};");
+        }
     }
 
     /// <summary>
@@ -338,6 +440,52 @@ public class RelationshipsDemoLiveTests(RelationshipsDemoFixture fixture) : ICla
         }
     }
 
+    /// <summary>
+    /// DB-6 review F7: the key read is cached under the database the resolver settled on, so an empty
+    /// <c>?db=</c> and the same database named outright share one entry - proved as the per-visitor test
+    /// proves sharing, with a key added between the two reads that only a read of its own would see.
+    /// </summary>
+    [PostgresFact]
+    public async Task An_empty_db_and_the_same_database_named_outright_share_one_cached_key_read()
+    {
+        StudioSnapshotCache shared = new(TimeProvider.System, TimeSpan.FromMinutes(5));
+
+        await using ServiceProvider visitor = Visitor(mayBrowse: true);
+        using IServiceScope scope = visitor.CreateScope();
+
+        string identity = (await scope.ServiceProvider.GetRequiredService<StudioScopeResolver>().ResolveAsync(Scope, null, Token))
+            .Database.Id.Identity;
+
+        identity.Should().NotBeNullOrEmpty();
+        Scope.DatabaseId.Should().BeEmpty("the premise: the first read names no database");
+
+        RelationshipGraph unnamed = await Build(scope, shared).GetGraphAsync(Scope, Token);
+        unnamed.Error.Should().BeNull();
+
+        const string Probe = "relationships_db_key_probe";
+
+        await ExecuteAsync($"create table legacy.{Probe} (customer_id uuid references studio_sample.mt_doc_customer (id))");
+
+        try
+        {
+            RelationshipGraph named = await Build(scope, shared).GetGraphAsync(Scope with { DatabaseId = identity }, Token);
+
+            named.Error.Should().BeNull();
+            named.Edges.Should().NotContain(static x => x.ConstraintName == Probe + "_customer_id_fkey",
+                "the database named outright is the one the first read was cached under, so this is that read");
+
+            RelationshipGraph fresh = await Build(scope, new StudioSnapshotCache(TimeProvider.System, TimeSpan.FromMinutes(5)))
+                .GetGraphAsync(Scope with { DatabaseId = identity }, Token);
+
+            fresh.Edges.Should().Contain(static x => x.ConstraintName == Probe + "_customer_id_fkey",
+                "a read of its own sees the probe's key - so the one above really was served from the cache");
+        }
+        finally
+        {
+            await ExecuteAsync($"drop table legacy.{Probe}");
+        }
+    }
+
     // ----------------------------------------------------------------------------------------------
 
     private static async Task<RelationshipGraph> GraphAsync(MartenFixture studio)
@@ -361,11 +509,26 @@ public class RelationshipsDemoLiveTests(RelationshipsDemoFixture fixture) : ICla
     /// A studio over the fixture's database whose write policy says yes or no to <c>BrowseDatabase</c>,
     /// and yes to everything else - so two of them share every option and differ only in the visitor.
     /// </summary>
-    private ServiceProvider Visitor(bool mayBrowse)
+    /// <param name="mayBrowse">What the write policy says to <c>BrowseDatabase</c>.</param>
+    /// <param name="role"><c>SqlConsoleRole</c>, or <see langword="null" /> to read as the store's own role.</param>
+    /// <param name="logs">Where the studio's log goes, at every level; <see langword="null" /> for Warning and up, nowhere.</param>
+    private ServiceProvider Visitor(bool mayBrowse, string? role = null, LogCapture? logs = null)
     {
         var services = new ServiceCollection();
 
-        services.AddLogging(static builder => builder.SetMinimumLevel(LogLevel.Warning));
+        services.AddLogging(builder =>
+        {
+            if (logs is null)
+            {
+                builder.SetMinimumLevel(LogLevel.Warning);
+            }
+            else
+            {
+                builder.SetMinimumLevel(LogLevel.Trace);
+                builder.AddProvider(logs);
+            }
+        });
+
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, SignedIn>();
 
@@ -379,13 +542,14 @@ public class RelationshipsDemoLiveTests(RelationshipsDemoFixture fixture) : ICla
             options.AutoCreateSchemaObjects = AutoCreate.None;
         });
 
-        services.AddMartenStudio(static options =>
+        services.AddMartenStudio(options =>
         {
             options.ReadOnly = false;
             options.Capabilities = MartenStudioCapabilities.All();
             options.BrowsableSchemas.Add("quartz");
             options.BrowsableSchemas.Add("legacy");
             options.WriteAuthorizationPolicy = "writers";
+            options.SqlConsoleRole = role;
         });
 
         services.AddSingleton<IAuthorizationService>(new ResourcePolicy(resource =>
@@ -404,7 +568,6 @@ public class RelationshipsDemoLiveTests(RelationshipsDemoFixture fixture) : ICla
             scope.ServiceProvider.GetRequiredService<DatabaseAccess>(),
             scope.ServiceProvider.GetRequiredService<DatabaseCatalog>(),
             scope.ServiceProvider.GetRequiredService<StudioCapabilityGuard>(),
-            scope.ServiceProvider.GetRequiredService<StudioActionLog>(),
             TimeProvider.System);
 
     private async Task ExecuteAsync(string sql)

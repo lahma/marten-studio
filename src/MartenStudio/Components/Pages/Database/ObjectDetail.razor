@@ -105,13 +105,14 @@
 
                         case DatabaseObjectTab.Triggers:
                             <DatabaseTriggersGrid Model="found.Triggers"
+                                                  Access="found.Access"
                                                   ShowTable="false"
                                                   Label="@($"Triggers on {relation.Name}")"
                                                   EmptyText="No triggers on it." />
                             break;
 
                         case DatabaseObjectTab.Relationships:
-                            <DatabaseRelationshipsSlot Schema="@relation.Schema" Name="@relation.Name" Detail="found" />
+                            <DatabaseRelationshipsSlot Schema="@relation.Schema" Name="@relation.Name" />
                             break;
 
                         case DatabaseObjectTab.Definition:
@@ -305,13 +306,17 @@
 
     /// <summary>
     /// Reads a view's query when the Definition tab is on screen, once per object. Never for a table,
-    /// which has none; never before the tab is opened, because it is a gated - and audited - read.
+    /// which has none; never before the tab is opened, because it is a gated - and audited - read; and
+    /// never for a view the service already said may not have its query shown (<c>DefinitionAvailable</c>),
+    /// which the tab explains instead - asking would be a refused read, audited and logged as a security
+    /// Warning, caused by nothing but opening the tab.
     /// </summary>
     private async Task LoadDefinitionIfShownAsync()
     {
         if (ActiveTab != DatabaseObjectTab.Definition
             || detail?.Relation is not { } relation
             || !HasStoredDefinition(relation.Kind)
+            || !relation.DefinitionAvailable
             || State.ActiveScope is not { } scope)
         {
             return;
@@ -515,16 +520,23 @@
             {
                 @if (relation.Kind == DatabaseObjectKind.View)
                 {
-                    <p class="ms-muted ms-db-view-note">A view keeps no rows: every read of it runs this query.</p>
+                    <p class="ms-muted ms-db-view-note">A view keeps no rows: every read of it runs @(relation.DefinitionAvailable ? "this query" : "its query").</p>
                 }
 
-                <DatabaseDefinitionBody Model="definition"
-                                        Loading="definitionLoading"
-                                        Error="@definitionError"
-                                        OnRetry="RetryDefinitionAsync"
-                                        Label="@($"Definition of {relation.Name}")"
-                                        FileName="@(relation.Name + ".sql")"
-                                        ShowLineNumbers="true" />
+                @if (relation.DefinitionAvailable)
+                {
+                    <DatabaseDefinitionBody Model="definition"
+                                            Loading="definitionLoading"
+                                            Error="@definitionError"
+                                            OnRetry="RetryDefinitionAsync"
+                                            Label="@($"Definition of {relation.Name}")"
+                                            FileName="@(relation.Name + ".sql")"
+                                            ShowLineNumbers="true" />
+                }
+                else
+                {
+                    <p class="ms-db-refusal" role="note">@DatabaseDefinitionWithheld.For(relation, found.Access, Options.Value.BrowsableSchemas)</p>
+                }
 
                 @if (found.Dependencies.Count > 0)
                 {
@@ -570,12 +582,19 @@
         _ => "Columns",
     };
 
+    /// <summary>A tab's count badge, or <see langword="null" /> for a tab that has none.</summary>
+    /// <remarks>
+    /// Relationships has none. Its body is the relationship graph's neighbourhood - declared-only keys,
+    /// keys it cannot draw, keys reaching schemas the visitor is not shown - read by the tab itself, and a
+    /// number from this page's own catalog read disagreed with it: a self-referencing key counted twice, and
+    /// keys into out-of-view tables counted beside a picture that does not draw them. Counting what is drawn
+    /// would mean the graph read on every load of every tab of this page, for a badge.
+    /// </remarks>
     private static string? TabCount(DatabaseObjectTab tab, DatabaseObjectDetail found) => tab switch
     {
         DatabaseObjectTab.Columns => DatabasePresentation.Number(found.Columns.Count),
         DatabaseObjectTab.Keys => DatabasePresentation.Number(found.Constraints.Count + found.Indexes.Count + found.ForeignKeysOut.Count),
         DatabaseObjectTab.Triggers => DatabasePresentation.Number(found.Triggers.Count),
-        DatabaseObjectTab.Relationships => DatabasePresentation.Number(found.ForeignKeysOut.Count + found.ForeignKeysIn.Count),
         _ => null,
     };
 
