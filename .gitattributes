@@ -24,6 +24,7 @@ LICENSE        text eol=lf
 *.razor        text eol=lf
 *.css          text eol=lf
 *.js           text eol=lf
+*.sql          text eol=lf
 
 # Verify baselines are compared byte for byte. A CRLF checkout on Windows makes every snapshot
 # test fail on a machine that did nothing wrong.

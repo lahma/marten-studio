@@ -1,4 +1,0 @@
-# The root .gitattributes has no rule for .sql, and `* text=auto` checks a text file out with the platform's
-# line endings. These scripts are embedded as resources, so pin them to LF like every other source file
-# (AGENTS.md hard rule 9). A root-level `*.sql text eol=lf` would make this file redundant.
-*.sql text eol=lf
