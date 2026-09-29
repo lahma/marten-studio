@@ -74,7 +74,7 @@ builder.Services
     .UseLightweightSessions()
     // --no-daemon: Disabled registers no coordinator, which is a host whose projections run elsewhere.
     .AddAsyncDaemon(sample.NoDaemon ? DaemonMode.Disabled : DaemonMode.Solo)
-    .InitializeWith(new SampleDataSeeder());
+    .InitializeWith<SampleDataSeeder>();
 
 builder.Services.AddMartenStudio(options =>
 {
