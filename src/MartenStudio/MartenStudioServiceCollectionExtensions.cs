@@ -191,6 +191,10 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<IDatabaseObjectService, DatabaseObjectService>();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, DatabaseBrowserConfigurationNotice>());
 
+        // DB-3: table rows. Scoped, like the gate it stands behind: it remembers, for this circuit only,
+        // which first page of a relation it has already audited, so a refresh is not a second opening.
+        services.TryAddScoped<ITableRowService, TableRowService>();
+
         return services;
     }
 

@@ -127,6 +127,13 @@ public class CapabilityGatingMatrixTests
         new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.ListAsync), StudioCapability.BrowseDatabase),
         new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetObjectAsync), StudioCapability.BrowseDatabase),
         new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetDefinitionAsync), StudioCapability.BrowseDatabase),
+
+        // DB-3: every row read is behind DatabaseAccess.RequireRowAccessAsync, refused as a value.
+        new(typeof(ITableRowService), nameof(ITableRowService.ListRowsAsync), StudioCapability.BrowseDatabase),
+        new(typeof(ITableRowService), nameof(ITableRowService.GetRowAsync), StudioCapability.BrowseDatabase),
+        new(typeof(ITableRowService), nameof(ITableRowService.GetReferencesAsync), StudioCapability.BrowseDatabase),
+        new(typeof(ITableRowService), nameof(ITableRowService.CountExactAsync), StudioCapability.BrowseDatabase),
+        new(typeof(ITableRowService), nameof(ITableRowService.GetCellAsync), StudioCapability.BrowseDatabase),
     ];
 
     /// <summary>
@@ -171,6 +178,7 @@ public class CapabilityGatingMatrixTests
         ],
         [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync"],
         [typeof(IDatabaseObjectService)] = ["GetDefinitionAsync", "GetObjectAsync", "GetOverviewAsync", "ListAsync"],
+        [typeof(ITableRowService)] = ["CountExactAsync", "GetCellAsync", "GetReferencesAsync", "GetRowAsync", "ListRowsAsync"],
     };
 
     /// <summary>
@@ -559,6 +567,23 @@ public class CapabilityGatingMatrixTests
         {
             return new DatabaseObjectRef(
                 DatabaseObjectKind.View, "8f1d5a6e-1a2b-4c3d-9e8f-000000000001", "8f1d5a6e-1a2b-4c3d-9e8f-000000000001");
+        }
+
+        // A row read with everything a page would send: a filter, a sort, a cursor - so a gate that ran
+        // after the request was looked at would be caught looking.
+        if (type == typeof(TableRowRequest))
+        {
+            return new TableRowRequest
+            {
+                Filter = "status = approved",
+                SortColumn = "total",
+                Cursor = new TableRowCursor("total", false, "1", ["1"]),
+            };
+        }
+
+        if (type == typeof(IReadOnlyDictionary<string, string>))
+        {
+            return new Dictionary<string, string> { ["id"] = "8f1d5a6e-1a2b-4c3d-9e8f-000000000001" };
         }
 
         throw new NotSupportedException(

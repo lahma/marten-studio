@@ -168,4 +168,35 @@ internal static partial class StudioLog
     /// </remarks>
     [LoggerMessage(EventId = 9230, Level = LogLevel.Warning, Message = "Marten Studio's database browser may show every schema (MartenStudioOptions.BrowsableSchemas contains \"*\") and MartenStudioOptions.SqlConsoleRole is not set, so it reads the catalog and rows as the store's own Postgres role: every table that role can select from is browsable by anyone granted MartenStudioOptions.Capabilities.BrowseDatabase. Set SqlConsoleRole to a role that can read only what the browser should show.")]
     public static partial void DatabaseBrowserOpenToEverySchemaWithoutRole(this ILogger logger);
+
+    // --------------------------------------------------------------------------------------------------
+    // 9235-9239: the database browser's row reads (DB-3)
+    // --------------------------------------------------------------------------------------------------
+
+    /// <remarks>
+    /// The other half of the ring entry for opening a relation's rows or changing its filter. The ring is
+    /// readable by anyone with the read policy, so it names the relation and the sort and never a value;
+    /// this line carries the filter as typed - values included - to wherever the application logs, which
+    /// is the record an operator reconstructs "who looked for what" from. Information, never above: a
+    /// visitor reading rows they were granted is not an anomaly.
+    /// </remarks>
+    [LoggerMessage(EventId = 9235, Level = LogLevel.Information, Message = "Marten Studio user {User} performed {Action} on {Relation} in store {StoreKey}, database {DatabaseId} with filter {Filter} and sort {Sort}")]
+    public static partial void TableRowsRead(this ILogger logger, string user, string action, string relation, string storeKey, string databaseId, string filter, string sort);
+
+    /// <remarks>
+    /// The key values of a row the visitor opened, expanded a cell of, or followed the references of -
+    /// values the ring never holds, for the same reason as 9235.
+    /// </remarks>
+    [LoggerMessage(EventId = 9236, Level = LogLevel.Information, Message = "Marten Studio user {User} performed {Action} on {Relation} in store {StoreKey}, database {DatabaseId} for the row with key {Key}")]
+    public static partial void TableRowOpened(this ILogger logger, string user, string action, string relation, string storeKey, string databaseId, string key);
+
+    /// <remarks>
+    /// A row read Postgres or the connection refused. The visitor's own statement timeout, an unrefreshed
+    /// materialized view, a privilege <c>SqlConsoleRole</c> lacks, row-level security and a filter value
+    /// that does not fit its column are what the page already says in words, and are Debug. Anything else
+    /// - a connection failure, an unexpected SQLSTATE - is an anomaly, and a visitor who pages on through it
+    /// repeats it, so the level comes from <see cref="StudioLogThrottle" />.
+    /// </remarks>
+    [LoggerMessage(EventId = 9237, Message = "Marten Studio's {Action} on {Relation} in store {StoreKey}, database {DatabaseId} failed: {SqlState}")]
+    public static partial void TableRowReadFailed(this ILogger logger, LogLevel level, Exception exception, string action, string relation, string storeKey, string databaseId, string? sqlState);
 }

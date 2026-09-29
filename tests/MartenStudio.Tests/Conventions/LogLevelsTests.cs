@@ -158,6 +158,8 @@ public class LogLevelsTests
             "Tenant discovery failed; the header asks on every scope change in every circuit."),
         ["src/MartenStudio/Services/StudioLog.cs : 9220 LiveUpdateHandlerFailed"] = (Verdict.Throttled,
             "A page's own refresh-failure handler threw: a studio bug, on a loop that runs every RefreshInterval."),
+        ["src/MartenStudio/Services/StudioLog.cs : 9237 TableRowReadFailed"] = (Verdict.Throttled,
+            "A row read failed by connection or an unexpected SQLSTATE; a timeout, privilege, RLS or unrefreshed view is Debug, and page turns repeat it."),
 
         // ---- Visitor-started reads and writes, one line per action ------------------------------------
         ["src/MartenStudio/Services/Configuration/ConfigurationService.cs : Marten Studio could not describe the databases of store {StoreKey}"] = (Verdict.VisitorAction,

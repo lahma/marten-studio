@@ -95,6 +95,7 @@ internal class StudioComponentContext : BunitContext
         // The database browser's pages read through this one; a test that needs other answers sets them on
         // the fake rather than registering its own.
         Services.AddSingleton<MartenStudio.Services.Database.IDatabaseObjectService>(DatabaseObjects);
+        Services.AddSingleton<MartenStudio.Services.Database.ITableRowService>(new FakeTableRowService());
 
         // Every live page builds its own loop from this, so the circuit's container never tracks one.
         Services.AddScoped<StudioLiveUpdatesFactory>();

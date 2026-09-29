@@ -217,9 +217,11 @@ public class StudioActionLogTest
             .Order()
             .ToArray();
 
-        // 9212-9220 are DB-0's throttled anomalies; 9230 is the database browser's startup warning (DB-1, 9230-9234).
+        // 9212-9220 are DB-0's throttled anomalies; 9230 is the database browser's startup warning (DB-1, 9230-9234);
+        // 9235-9237 are its row reads (DB-3, 9235-9239): the filter and key values the ring never holds, and
+        // the throttled read failure.
         declared.Should().Equal(
             9200, 9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211,
-            9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9230);
+            9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9230, 9235, 9236, 9237);
     }
 }
