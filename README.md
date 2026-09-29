@@ -411,7 +411,10 @@ the page says so — that is a value, not an error, and the studio never starts 
 **Schema** — five tabs: *Drift* (what Marten would change), *Tables*, *Indexes*, *Functions* and *DDL*.
 Nothing here executes DDL on a read path: schema names, declared indexes, managed tables and installed
 functions come from `StoreOptions` and Marten's own feature schemas, and `Check`, `Preview` and `DDL`
-sit behind buttons that say on the button what they may create.
+sit behind buttons that say on the button what they may create. *Tables* says whose each table is by the
+database browser's rules, rolls partitions into their parent without listing them, and leaves hidden
+document types out. *Functions* reads a body when you open its row: Marten's own for everybody, the
+application's own only with `Capabilities.BrowseDatabase` and a schema `BrowsableSchemas` admits.
 
 > **An apply runs under `AutoCreate.CreateOrUpdate`, and `CreateOrUpdate` is not additive.** Weasel's
 > update path emits `drop index` for every physical index your configuration does not declare,
@@ -421,9 +424,10 @@ sit behind buttons that say on the button what they may create.
 > back. The preview is rendered under the same mode so what you read is what would run, and the
 > destructive statements are listed in the dialog before a typed confirmation. **A hand-made index is
 > dropped by the next apply** unless you declare it, or name it in
-> `opts.Schema.For<T>().IgnoreIndex("…")` — or `opts.Events.IgnoreIndex("…")` on an event table — which
-> takes it off both sides so it is neither created nor dropped. The Indexes and Drift tabs say this on
-> screen, and name the index.
+> `opts.Schema.For<T>().IgnoreIndex("…")` — or `opts.Events.IgnoreIndex("…")` on an event table, and
+> `table.IgnoreIndex("…")` on a projection's or an `ExtendedSchemaObjects` table, which an apply migrates
+> just the same — which takes it off both sides so it is neither created nor dropped. The Indexes and
+> Drift tabs say this on screen, and name the index.
 
 **Configuration** — everything your application told Marten, read back out: serializer, tenancy, schema
 names, metadata columns, projections, the databases. Never a connection string and never a credential; a
