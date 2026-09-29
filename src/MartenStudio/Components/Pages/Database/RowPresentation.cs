@@ -212,7 +212,8 @@ internal static class RowPresentation
     {
         DatabaseRefusal.CapabilityOff => "Reading rows here needs Capabilities.BrowseDatabase",
         DatabaseRefusal.ReadOnly => "The studio is read-only",
-        DatabaseRefusal.WritePolicy => "Your account may not read rows here",
+        DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy => "Your account may not read rows here",
+        DatabaseRefusal.WithheldDependency => "This view reads from a schema you cannot see",
         DatabaseRefusal.SchemaNotBrowsable => "This schema is not in BrowsableSchemas",
         DatabaseRefusal.NoPrivilege => "The reading role may not select from it",
         DatabaseRefusal.ForeignTable => "A foreign table is listed, never read",
@@ -223,7 +224,8 @@ internal static class RowPresentation
 
     /// <summary>Whether a refusal names a gate - an option or the account - rather than a fact about the object.</summary>
     public static bool IsGate(DatabaseRefusal refusal) =>
-        refusal is DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly or DatabaseRefusal.WritePolicy;
+        refusal is DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly or DatabaseRefusal.WritePolicy
+            or DatabaseRefusal.StorePolicy;
 
     /// <summary>
     /// A row as indented JSON for the clipboard: a NULL as <c>null</c>, a number and a boolean as themselves,
