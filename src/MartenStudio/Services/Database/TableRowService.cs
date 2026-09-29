@@ -1037,8 +1037,16 @@ internal sealed class TableRowService : ITableRowService
 
             TableRowError error = Describe(exception, null, Options);
 
-            // The per-check limit fired, not QueryTimeout: the sentence names the limit that did.
-            return (false, default!, exception.SqlState == "57014" ? error with { Sentence = budget.TimeoutSentence } : error);
+            if (exception.SqlState != "57014")
+            {
+                return (false, default!, error);
+            }
+
+            // The per-check limit fired, not QueryTimeout: the sentence names the limit that did, and the
+            // check is charged its whole limit - Postgres' timer can fire a hair before this process's
+            // clock agrees that the time is up.
+            budget.ChargeTimeout();
+            return (false, default!, error with { Sentence = budget.TimeoutSentence });
         }
     }
 
@@ -2085,8 +2093,16 @@ internal sealed class TableRowService : ITableRowService
         /// <summary>All of them together.</summary>
         public TimeSpan Total { get; } = total;
 
-        /// <summary>Whether the budget is gone, so no further check starts.</summary>
-        public bool Spent => clock.IsRunning && clock.Elapsed >= Total;
+        private TimeSpan charged;
+
+        /// <summary>
+        /// Whether the budget is gone, so no further check starts: the time the checks took, or the time
+        /// their timeouts are charged, whichever is more.
+        /// </summary>
+        public bool Spent => clock.IsRunning && (clock.Elapsed >= Total || charged >= Total);
+
+        /// <summary>Charges a check Postgres cancelled on its <c>statement_timeout</c> its whole limit.</summary>
+        public void ChargeTimeout() => charged += PerStatement;
 
         /// <summary>What a check left unchecked for want of time says.</summary>
         public string Sentence =>
