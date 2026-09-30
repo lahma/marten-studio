@@ -145,10 +145,7 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
             await Fixture.UseAsync(service => service.ResumeDaemonAsync(Fixture.Scope, Token));
         }
 
-        await ProjectionsFixture.WaitForAsync(
-            async () => (await CurrentAgentsAsync()).Count > 0,
-            "the resumed coordinator to bring its agents back",
-            cancellationToken: Token);
+        await WaitForEveryAsyncAgentAsync("the resumed coordinator to bring every agent back");
 
         Fixture.ControlState.Find(Fixture.Scope.StoreKey).Should().BeNull("resuming forgets the pause");
 
@@ -222,10 +219,7 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
             await Fixture.UseAsync(service => service.ResumeDaemonAsync(Fixture.Scope, Token));
         }
 
-        await ProjectionsFixture.WaitForAsync(
-            async () => (await CurrentAgentsAsync()).Count > 0,
-            "the resumed coordinator to bring its agents back",
-            cancellationToken: Token);
+        await WaitForEveryAsyncAgentAsync("the resumed coordinator to bring every agent back");
     }
 
     /// <summary>
@@ -238,12 +232,11 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
         string shard = await ShardOfAsync(DailySalesName);
         TimeSpan poll = Fixture.ConfiguredLeadershipPollingTime;
 
-        await ProjectionsFixture.WaitForAsync(
-            () => HasAgentAsync(shard),
-            $"the coordinator to be running the agent for {shard}",
-            cancellationToken: Token);
-
-        IReadOnlyList<string> before = await CurrentAgentsAsync();
+        // Every agent, not just this one: xunit v3 orders by test-case id, the test before this one may have
+        // just resumed the daemon, and a resumed coordinator brings its agents back one at a time - a set read
+        // while the second is still starting "changes" a moment later with no control involved.
+        IReadOnlyList<string> before = await WaitForEveryAsyncAgentAsync($"the coordinator to be running the agent for {shard} and every other");
+        before.Should().Contain(shard);
 
         DaemonControlResult stop = await Fixture.UseAsync(
             service => service.StopAgentAsync(Fixture.Scope, shard, Token));
@@ -557,6 +550,28 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
     {
         ProjectionsView view = await Fixture.UseAsync(service => service.GetProjectionsAsync(Fixture.Scope, Token));
         return [.. view.Daemon.Agents.Select(x => x.ShardName)];
+    }
+
+    /// <summary>
+    /// Waits until the coordinator runs an agent for every shard of every async projection, and returns that set.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> WaitForEveryAsyncAgentAsync(string what)
+    {
+        ProjectionsView view = await Fixture.UseAsync(service => service.GetProjectionsAsync(Fixture.Scope, Token));
+        string[] expected = [.. view.Projections.Where(static x => x.IsAsync).SelectMany(static x => x.ShardNames)];
+        expected.Should().NotBeEmpty("the sample domain registers async projections");
+
+        IReadOnlyList<string> agents = [];
+        await ProjectionsFixture.WaitForAsync(
+            async () =>
+            {
+                agents = await CurrentAgentsAsync();
+                return expected.All(shard => agents.Contains(shard, StringComparer.OrdinalIgnoreCase));
+            },
+            what,
+            cancellationToken: Token);
+
+        return agents;
     }
 
     private async Task<bool> HasAgentAsync(string shardName) =>
