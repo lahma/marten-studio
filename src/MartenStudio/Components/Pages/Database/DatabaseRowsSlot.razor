@@ -1,0 +1,39 @@
+@*
+    The Rows tab's slot. ObjectDetail renders this only when the service said the relation's rows may be
+    read (DatabaseRelationSummary.Rows.Allowed); every refusal - Marten's own tables, a foreign table, a view
+    over a hidden type, a gate that is shut - is drawn by the page before it gets here, and the row service
+    refuses again on its own if anything changed in between.
+
+    A component with a fixed signature rather than markup inline in the page, so the page does not change
+    when what is behind it does. The parameters below are the whole contract between the two:
+
+      Schema  - the relation's schema, as the catalog spells it
+      Name    - the relation's name, likewise
+      Detail  - the DatabaseObjectDetail the page already read (columns, row key, keys both ways), typed
+                object for the reason DocumentComponentModel gives; its foreign keys are what a cell follows
+      Ready   - whether the tab may read: false while the page is still applying the scope its address
+                names, or reading the next object, so rows are never read for an address and a scope that
+                are not the object's on screen
+*@
+
+<div class="ms-db-rows-slot" data-schema="@Schema" data-name="@Name">
+    <TableRowsTab Schema="@Schema" Name="@Name" Detail="Detail" Ready="Ready" />
+</div>
+
+@code {
+    /// <summary>The relation's schema.</summary>
+    [Parameter]
+    public string Schema { get; set; } = string.Empty;
+
+    /// <summary>The relation's name.</summary>
+    [Parameter]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>The relation's <c>DatabaseObjectDetail</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    [Parameter]
+    public object? Detail { get; set; }
+
+    /// <summary>Whether the tab may read now; see <c>TableRowsTab.Ready</c>.</summary>
+    [Parameter]
+    public bool Ready { get; set; } = true;
+}

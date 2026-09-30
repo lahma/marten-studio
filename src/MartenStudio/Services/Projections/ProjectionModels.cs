@@ -145,7 +145,20 @@ internal enum DaemonHostingState
     /// <c>store.BuildProjectionDaemonAsync()</c>, which starts a second daemon beside the host's own and
     /// the two then fight over the same advisory locks until one hangs.
     /// </remarks>
-    NotHostedInThisProcess
+    NotHostedInThisProcess,
+
+    /// <summary>
+    /// The store's <c>Projections.AsyncMode</c> is <c>DaemonMode.ExternallyManaged</c>: an external
+    /// system - Wolverine's managed event-subscription distribution, typically - runs its async
+    /// projections, and the studio never asks that system's coordinator anything.
+    /// </summary>
+    /// <remarks>
+    /// Its own state rather than a flavour of <see cref="NotHostedInThisProcess" />, because the card says
+    /// something different - "External", and that starting, stopping and rebuilding belong to that
+    /// system - and because the projections page hides the daemon controls outright instead of disabling
+    /// them: there is no option a host could set to make them work here.
+    /// </remarks>
+    ExternallyManaged
 }
 
 /// <summary>One running agent, as the daemon reports it.</summary>
@@ -269,7 +282,7 @@ internal static class DaemonControlMessages
 /// </summary>
 /// <param name="Hosting">Whether a daemon is reachable from this process.</param>
 /// <param name="IsRunning">Whether that daemon is running. Meaningless when it is not hosted here.</param>
-/// <param name="Mode">The configured <c>DaemonMode</c> - Disabled, Solo or HotCold.</param>
+/// <param name="Mode">The configured <c>DaemonMode</c> - Disabled, Solo, HotCold or ExternallyManaged.</param>
 /// <param name="Agents">The agents the daemon currently has, when it could be asked.</param>
 /// <param name="HasAnyPaused">Whether the daemon reports any paused shard.</param>
 /// <param name="HighWaterLastPolledAt">When the high-water agent last polled, when the daemon says.</param>
@@ -310,6 +323,12 @@ internal sealed record DaemonStatus(
 {
     /// <summary>Whether this process can be asked to start, stop or rebuild anything.</summary>
     public bool IsHostedHere => Hosting == DaemonHostingState.Hosted;
+
+    /// <summary>
+    /// Whether an external system runs this store's async projections, so that starting, stopping and
+    /// rebuilding belong to it and are not offered here at all.
+    /// </summary>
+    public bool IsExternallyManaged => Hosting == DaemonHostingState.ExternallyManaged;
 
     /// <summary>Whether Marten Studio is the reason this store's agents are not running.</summary>
     public bool IsPausedByStudio => PausedByStudio is not null;
@@ -410,12 +429,23 @@ internal sealed record ProjectionsView(
     /// Whether to warn that nothing anywhere appears to be running these projections.
     /// </summary>
     /// <remarks>
-    /// Three things have to be true at once: the store has async projections, no daemon is hosted in this
-    /// process, and no shard has ever advanced. Any one of them alone is ordinary - a host that runs its
-    /// daemon in another process is a supported deployment, and the studio must not call it broken.
+    /// <para>
+    /// Four things have to be true at once: the store has async projections, no daemon is hosted in this
+    /// process, no shard has ever advanced - and there is something to have advanced over. Any one of
+    /// them alone is ordinary - a host that runs its daemon in another process is a supported deployment,
+    /// and the studio must not call it broken.
+    /// </para>
+    /// <para>
+    /// The last one is <see cref="HighWaterMark" /> above zero. A store that has never appended an event
+    /// has projections that have never advanced because there has been nothing to project, and a banner
+    /// with <c>role="alert"</c> saying nothing appears to be running them - or, for an externally managed
+    /// store, that the external system "has not processed anything yet" - was an alarm about a fresh
+    /// install. The page has the progress rows and the high-water tile to say the rest.
+    /// </para>
     /// </remarks>
     public bool NoDaemonAnywhere =>
         !Daemon.IsHostedHere
+        && HighWaterMark > 0
         && Projections.Any(static x => x.IsAsync)
         && !Progress.Any(static x => x.HasProgressRow && x.Sequence > 0);
 

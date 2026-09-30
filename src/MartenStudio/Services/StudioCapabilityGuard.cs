@@ -3,9 +3,14 @@ using Microsoft.Extensions.Options;
 namespace MartenStudio.Services;
 
 /// <summary>
-/// The mutating operations, as an enum, so a service method can name the one it is about and the guard
-/// can answer for it. Mirrors <see cref="MartenStudioCapabilities" /> property for property.
+/// The capabilities - the mutating operations and the two reads beyond the store - as an enum, so a
+/// service method can name the one it is about and the guard can answer for it. Mirrors
+/// <see cref="MartenStudioCapabilities" /> property for property.
 /// </summary>
+/// <remarks>
+/// New members go at the end: the numeric values are not persisted anywhere, but the declaration order is
+/// the order the capability chip lists them in.
+/// </remarks>
 internal enum StudioCapability
 {
     /// <inheritdoc cref="MartenStudioCapabilities.EditDocuments" />
@@ -33,7 +38,10 @@ internal enum StudioCapability
     ApplySchemaChanges,
 
     /// <inheritdoc cref="MartenStudioCapabilities.RunSql" />
-    RunSql
+    RunSql,
+
+    /// <inheritdoc cref="MartenStudioCapabilities.BrowseDatabase" />
+    BrowseDatabase
 }
 
 /// <summary>Why a capability was refused.</summary>
@@ -99,6 +107,27 @@ internal sealed class StudioCapabilityGuard
     /// <summary>Every capability, in declaration order - what the capability chip counts and lists.</summary>
     public static IReadOnlyList<StudioCapability> All { get; } = Enum.GetValues<StudioCapability>();
 
+    /// <summary>
+    /// The capabilities that change nothing but read beyond the store's own documents and events - what
+    /// the capability chip lists under "Reads beyond the store" rather than under "Mutating operations".
+    /// </summary>
+    /// <remarks>
+    /// Both are reads treated as writes for authorization (D13): the service asks
+    /// <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> with the capability named, and
+    /// <see cref="MartenStudioOptions.ReadOnly" /> turns them off with everything else. A page that told a
+    /// host "every mutating operation is off" when the console and the database browser were off too would
+    /// be describing a narrower switch than the one they set.
+    /// </remarks>
+    public static IReadOnlyList<StudioCapability> ReadsBeyondTheStore { get; } =
+        [StudioCapability.RunSql, StudioCapability.BrowseDatabase];
+
+    /// <summary>
+    /// Every capability that changes something - <see cref="All" /> without
+    /// <see cref="ReadsBeyondTheStore" />, in declaration order.
+    /// </summary>
+    public static IReadOnlyList<StudioCapability> Mutating { get; } =
+        [.. All.Where(static x => !ReadsBeyondTheStore.Contains(x))];
+
     /// <summary>Whether the master switch is on, which turns every capability off.</summary>
     public bool ReadOnly => options.Value.ReadOnly;
 
@@ -153,7 +182,17 @@ internal sealed class StudioCapabilityGuard
     public static string OptionName(StudioCapability capability) =>
         "MartenStudioOptions.Capabilities." + capability;
 
-    private static bool IsConfigured(MartenStudioCapabilities capabilities, StudioCapability capability) =>
+    /// <summary>
+    /// The property behind <paramref name="capability" />.
+    /// </summary>
+    /// <remarks>
+    /// The default arm throws rather than answering <see langword="false" />. A <c>_ =&gt; false</c> arm is
+    /// how a capability added to the enum and forgotten here becomes a switch a host sets to
+    /// <see langword="true" /> and the studio silently goes on refusing: the page names the option, the
+    /// host sets it, and nothing changes. <c>StudioCapabilityGuardTests</c> walks <see cref="All" /> so the
+    /// omission fails a test rather than a support ticket.
+    /// </remarks>
+    internal static bool IsConfigured(MartenStudioCapabilities capabilities, StudioCapability capability) =>
         capability switch
         {
             StudioCapability.EditDocuments => capabilities.EditDocuments,
@@ -165,6 +204,10 @@ internal sealed class StudioCapabilityGuard
             StudioCapability.CorrectProgression => capabilities.CorrectProgression,
             StudioCapability.ApplySchemaChanges => capabilities.ApplySchemaChanges,
             StudioCapability.RunSql => capabilities.RunSql,
-            _ => false
+            StudioCapability.BrowseDatabase => capabilities.BrowseDatabase,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(capability),
+                capability,
+                "No MartenStudioCapabilities property is mapped to this capability."),
         };
 }

@@ -43,7 +43,7 @@ public class SchemaWritePolicyTests
 
         IElement apply = page.WaitForElement(".ms-schema-apply");
         apply.HasAttribute("disabled").Should().BeTrue();
-        apply.GetAttribute("title").Should().Contain("may not apply schema changes here");
+        apply.GetAttribute("title").Should().Contain("may not apply schema changes to this database as a whole");
 
         page.Find(".ms-write-refusal").TextContent
             .Should().Be(WritePolicyRefusal.For(StudioCapability.ApplySchemaChanges));

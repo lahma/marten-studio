@@ -183,8 +183,15 @@ internal interface IEventDataService
     /// way - so the record being looked at disappears whether or not the replay succeeds.
     /// </para>
     /// <para>
-    /// <paramref name="projectionName" /> is checked against the store's own async projections before
-    /// anything else happens, and an unknown one is refused with a
+    /// <b>It is not limited to the tenant in <paramref name="scope" />.</b> Marten rewrites every shard's
+    /// progression row of the projection and deletes its dead letters at or above the floor for every
+    /// tenant, and the daemon re-runs every tenant's events from there. So a scope with a tenant is also
+    /// authorized for its database as a whole - <c>(store, database, null)</c> - unless the database is
+    /// exclusively that tenant's, and a refusal carries that tenant-less scope.
+    /// </para>
+    /// <para>
+    /// <paramref name="projectionName" /> is checked against the store's own async projections once the
+    /// scope is authorized and before anything is touched, and an unknown one is refused with a
     /// <see cref="KeyNotFoundException" /> that repeats only the name it was given. Marten's own check
     /// names every projection the store has in its message, and that message would reach the audit entry
     /// and the screen.
@@ -198,7 +205,9 @@ internal interface IEventDataService
     /// </param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <exception cref="StudioCapabilityDeniedException">The capability is not enabled.</exception>
-    /// <exception cref="StudioNotAuthorizedException">The write policy refused this scope.</exception>
+    /// <exception cref="StudioNotAuthorizedException">
+    /// A policy refused this scope, or the database as a whole that the rewind reaches.
+    /// </exception>
     /// <exception cref="MartenStudio.Services.Projections.StudioDaemonNotHostedException">
     /// No async daemon is hosted in this process.
     /// </exception>

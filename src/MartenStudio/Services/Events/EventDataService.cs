@@ -83,7 +83,9 @@ internal sealed class EventDataService : IEventDataService
     private readonly DaemonAccessor daemons;
     private readonly ColumnCatalog catalog;
     private readonly IOptions<MartenStudioOptions> options;
+    private readonly StudioLogThrottle throttle;
     private readonly ILogger<EventDataService> logger;
+    private readonly DatabaseReachAuthorization reach;
 
     public EventDataService(
         StudioScopeResolver resolver,
@@ -93,6 +95,7 @@ internal sealed class EventDataService : IEventDataService
         DaemonAccessor daemons,
         ColumnCatalog catalog,
         IOptions<MartenStudioOptions> options,
+        StudioLogThrottle throttle,
         ILogger<EventDataService> logger)
     {
         this.resolver = resolver;
@@ -102,7 +105,9 @@ internal sealed class EventDataService : IEventDataService
         this.daemons = daemons;
         this.catalog = catalog;
         this.options = options;
+        this.throttle = throttle;
         this.logger = logger;
+        reach = new DatabaseReachAuthorization(authorization, logger);
     }
 
     private int CommandTimeoutSeconds => (int) Math.Ceiling(options.Value.QueryTimeout.TotalSeconds);
@@ -134,7 +139,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return EventStoreShape.Unavailable(Describe(exception, "describe the event store"));
+            return EventStoreShape.Unavailable(Describe(scope, exception, "describe the event store"));
         }
     }
 
@@ -220,10 +225,9 @@ internal sealed class EventDataService : IEventDataService
                     // "Next" link that goes nowhere, which is worse than stopping one page early.
                     hasMore = false;
 
-                    logger.LogWarning(
-                        "Marten Studio stopped paging the stream list: {Schema}.mt_streams has a row with a null "
-                        + "timestamp, which no Marten-created schema has and which a keyset cannot page past.",
-                        table.Schema);
+                    string schema = table.Schema;
+                    LogLevel level = throttle.WarningOrDebug("EventDataService.StreamTimestamp", scope.StoreKey, scope.DatabaseId, kind: null);
+                    logger.StreamTimestampMissing(level, schema);
                 }
             }
 
@@ -231,7 +235,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return StreamPage.Failed(Describe(exception, "list the streams"));
+            return StreamPage.Failed(Describe(scope, exception, "list the streams"));
         }
     }
 
@@ -324,7 +328,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return EventPage.Failed(Describe(exception, "read the stream's events"));
+            return EventPage.Failed(Describe(scope, exception, "read the stream's events"));
         }
     }
 
@@ -388,7 +392,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return EventPage.Failed(Describe(exception, "read the event feed"));
+            return EventPage.Failed(Describe(scope, exception, "read the event feed"));
         }
     }
 
@@ -407,7 +411,8 @@ internal sealed class EventDataService : IEventDataService
             // tick create an event store, on a timer, on a database that has none (hard rule 14, and see
             // ProjectionProgressQueries for where that was verified in Marten 9.35).
             //
-            // Be clear about what the number is: `select last_value from <schema>.mt_events_sequence`,
+            // Be clear about what the number is: the sequence's last_value from <schema>.mt_events_sequence
+            // (0 until it has handed one out - a fresh sequence reports 1 with is_called false),
             // or on a store with UseTenantPartitionedEvents `select coalesce(max(seq_id), 0) from
             // mt_events`. So it is neither the daemon's high-water mark nor a count of committed events -
             // a sequence's last_value runs ahead of what is visible, because numbers are handed out
@@ -485,7 +490,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return EventStoreCounts.Failed(Describe(exception, "count the event store"));
+            return EventStoreCounts.Failed(Describe(scope, exception, "count the event store"));
         }
 
         // The last arm is the never-analysed store that was small enough to count: an exact number, drawn
@@ -548,7 +553,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return RecentStreams.Failed(Describe(exception, "read the newest streams"));
+            return RecentStreams.Failed(Describe(scope, exception, "read the newest streams"));
         }
     }
 
@@ -643,7 +648,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return EventTypeList.Failed(Describe(exception, "list the event types"));
+            return EventTypeList.Failed(Describe(scope, exception, "list the event types"));
         }
     }
 
@@ -742,7 +747,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return AggregateSnapshot.Failed(typeName, version, Describe(exception, "replay the stream"));
+            return AggregateSnapshot.Failed(typeName, version, Describe(scope, exception, "replay the stream"));
         }
     }
 
@@ -900,7 +905,7 @@ internal sealed class EventDataService : IEventDataService
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
-            return DeadLetterPage.Failed(Describe(exception, "list the dead letters"));
+            return DeadLetterPage.Failed(Describe(scope, exception, "list the dead letters"));
         }
     }
 
@@ -1204,6 +1209,19 @@ internal sealed class EventDataService : IEventDataService
             projectionName + " to #" + eventSequence.ToString(CultureInfo.InvariantCulture),
             async (resolved, token) =>
             {
+                // First, what the rewind reaches, which is not the tenant in the scope. Marten 9.31's
+                // RewindSubscriptionProgressAsync opens its session with AllowAnyTenant = true, rewrites
+                // every shard's progression row of the projection and deletes the projection's dead
+                // letters at or above the floor with no tenant predicate; the daemon then restarts every
+                // agent of the subscription from there (DatabaseReach). So a visitor scoped to one tenant of
+                // a shared database is asked about the database as a whole - (store, database, null) -
+                // unless the database is exclusively that tenant's. The daemon is the one the accessor
+                // proves is this database's, so this database is the one reached. Before this, a policy
+                // allowing only (db, acme) let an acme visitor delete globex's dead letters and re-apply
+                // globex's poison event.
+                await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, StudioCapability.ManageDeadLetters, token)
+                    .ConfigureAwait(false);
+
                 // The name is checked here rather than left to Marten, and the message is the whole
                 // reason. Marten's IEventStore.RewindSubscriptionProgressAsync (DocumentStore.EventStore.cs,
                 // 9.35) throws ArgumentOutOfRangeException with "Unknown subscription name 'x'. Available
@@ -1225,7 +1243,9 @@ internal sealed class EventDataService : IEventDataService
                 // SingleTenanted, and the rewind reaches an API that applies no tenant predicate of its
                 // own. So a visitor scoped to one tenant has to be shown to be able to see the event
                 // before it is used, exactly as Skip event does - and the refusal says nothing about
-                // whose event it is (D5).
+                // whose event it is (D5). This no longer narrows what the rewind does - the check above
+                // is what authorizes that - but a rewind started from a tenant's dead-letter page is
+                // still started from an event that tenant can see.
                 await using (NpgsqlConnection connection = await OpenAsync(resolved, token).ConfigureAwait(false))
                 {
                     EventTableInfo table = await DescribeTablesAsync(resolved, connection, token).ConfigureAwait(false);
@@ -1360,7 +1380,8 @@ internal sealed class EventDataService : IEventDataService
     /// <c>sequenceFloor: 0</c>, which is a full replay of the projection rather than a rewind to one
     /// event. There is also a five-argument overload that takes a tenant id; its default implementation
     /// throws for a non-null tenant, and projection progression is per shard rather than per tenant, so
-    /// the studio uses the store-global one and the dialog says so.
+    /// the studio uses the store-global one, authorizes it for the database as a whole
+    /// (<see cref="DatabaseReachAuthorization.RequireWholeDatabaseAsync" />), and the dialog says so.
     /// </remarks>
     internal static Task RewindToFloorAsync(
         IProjectionDaemon daemon,
@@ -1399,9 +1420,9 @@ internal sealed class EventDataService : IEventDataService
         {
             resolved = await resolver.ResolveAsync(scope, capability.ToString(), cancellationToken).ConfigureAwait(false);
         }
-        catch (StudioNotAuthorizedException)
+        catch (StudioNotAuthorizedException denied)
         {
-            audit.RecordScopeDenied(scope, options.Value.WriteAuthorizationPolicy ?? "(none)", action, target);
+            audit.RecordScopeDenied(denied.Scope, options.Value.WriteAuthorizationPolicy ?? "(none)", action, target);
             throw;
         }
 
@@ -1410,13 +1431,17 @@ internal sealed class EventDataService : IEventDataService
             string outcome = await operation(resolved, cancellationToken).ConfigureAwait(false);
             audit.Record(action, target, succeeded: true, outcome, capability, scope);
         }
-        catch (StudioNotAuthorizedException)
+        catch (StudioNotAuthorizedException denied)
         {
             // A refusal the operation itself raised - the target turned out not to be in this scope after
             // the resolution had already passed, which is how "skip event 4711" behaves on a conjoined
-            // store when 4711 is another tenant's event. It is a scope denial and is audited as one (9203)
-            // rather than as an ordinary failed action, so the log says what it was.
-            audit.RecordScopeDenied(scope, options.Value.WriteAuthorizationPolicy ?? "(none)", action, target);
+            // store when 4711 is another tenant's event, or the operation reaches more than the scope and
+            // that wider question was refused, which is how a rewind from a tenant scope behaves on a
+            // shared database. It is a scope denial and is audited as one (9203) rather than as an
+            // ordinary failed action, so the log says what it was - and against the scope the refusal
+            // names rather than the one that was asked for: for the rewind that is (store, database,
+            // null), the database as a whole, which is the one fact the requested scope does not carry.
+            audit.RecordScopeDenied(denied.Scope, options.Value.WriteAuthorizationPolicy ?? "(none)", action, target);
             throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -1432,7 +1457,9 @@ internal sealed class EventDataService : IEventDataService
 
         try
         {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            // Through PostgresFailure, so that a pool that ran dry or a connect that timed out - which
+            // Npgsql spells exactly like a statement timeout - is never logged as one (LogReadFailure).
+            await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
             return connection;
         }
         catch
@@ -1591,11 +1618,11 @@ internal sealed class EventDataService : IEventDataService
     private static bool IsReadFailure(Exception exception) => exception is not OperationCanceledException;
 
     /// <summary>Renders a failure the way plan §4.8 asks: SQLSTATE, message, and whether to offer Retry.</summary>
-    private EventDataError Describe(Exception exception, string what)
+    private EventDataError Describe(StudioScope scope, Exception exception, string what)
     {
         if (exception is PostgresException postgres)
         {
-            logger.LogWarning(exception, "Marten Studio could not {What}: {SqlState}", what, postgres.SqlState);
+            LogReadFailure(scope, exception, what, postgres.SqlState);
             return new EventDataError(postgres.MessageText, postgres.SqlState, EventDataError.IsRetryable(postgres.SqlState));
         }
 
@@ -1612,13 +1639,71 @@ internal sealed class EventDataService : IEventDataService
 
         if (exception is NpgsqlException)
         {
-            logger.LogWarning(exception, "Marten Studio could not {What}", what);
+            LogReadFailure(scope, exception, what, sqlState: null);
             return new EventDataError(exception.Message, null, true);
         }
 
-        logger.LogWarning(exception, "Marten Studio could not {What}", what);
+        LogReadFailure(scope, exception, what, sqlState: null);
         return new EventDataError(exception.Message, null, false);
     }
+
+    /// <summary>
+    /// The log line for one failed event-store read, at the level the failure deserves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every read here renders its failure as a value, and several of them are polled - the Overview's
+    /// counts, feed and newest streams, the feed page, the navigation badges - so the level is decided
+    /// rather than assumed.
+    /// </para>
+    /// <para>
+    /// <b>Debug:</b> a statement that ran past <c>QueryTimeout</c> or was cancelled - the budget the studio
+    /// set doing its job, on a read the page is already showing as "timed out, retry" - in either of the
+    /// spellings it arrives in (<see cref="PostgresFailure.IsTimeout" />: <c>57014</c>, or Npgsql's own
+    /// client-side timeout when the backend was too busy to answer the cancel); and a store or database
+    /// the URL named that does not exist (<see cref="KeyNotFoundException" />), which is a stale link
+    /// rather than a fault.
+    /// </para>
+    /// <para>
+    /// <b>Warning, throttled:</b> everything else - a connection that failed, a permission the role lacks,
+    /// an SQLSTATE nobody expected. Event 9217, once per read, store, database and kind of failure
+    /// (<see cref="StudioLogThrottle.KindOf" />, so a 42501 does not silence a 53300) per
+    /// <see cref="StudioLogThrottle.Window" />, and Debug in between.
+    /// </para>
+    /// <para>
+    /// <b>A missing table or schema (42P01, 3F000) is on this side too.</b> It is not how an event store
+    /// that has not been created yet shows up: every read here asks the column catalog first
+    /// (<c>DescribeTablesAsync</c>), and the dead-letter reads <c>DeadLetterTableExistsAsync</c>, and
+    /// answers "empty" when the tables are not there - so the expected state never reaches Postgres at
+    /// all. One of those SQLSTATEs therefore means the catalog said a table exists and the statement found
+    /// none: a table dropped from under a running studio, a search path that changed, a schema a role
+    /// cannot see. That is worth one line, and being Debug hid it.
+    /// </para>
+    /// </remarks>
+    private void LogReadFailure(StudioScope scope, Exception exception, string what, string? sqlState)
+    {
+        string storeKey = scope.StoreKey;
+        string databaseId = scope.DatabaseId;
+
+        LogLevel level = IsExpectedReadFailure(exception)
+            ? LogLevel.Debug
+            : throttle.WarningOrDebug("EventDataService." + what, storeKey, databaseId, StudioLogThrottle.KindOf(exception));
+
+        logger.EventReadFailed(level, exception, what, storeKey, databaseId, sqlState);
+    }
+
+    /// <summary>
+    /// Whether a failed event-store read is one of the expected answers <see cref="LogReadFailure" />
+    /// writes at Debug: a statement timeout in either spelling, or a stale link.
+    /// </summary>
+    /// <remarks>
+    /// Separate so the classification can be tested without a database. A connection that could not be
+    /// opened is never expected here, however Npgsql spells it: <see cref="OpenAsync" /> opens through
+    /// <see cref="PostgresFailure.OpenAsync" />, which is what keeps a pool that ran dry off this list.
+    /// </remarks>
+    /// <param name="exception">What the read threw.</param>
+    internal static bool IsExpectedReadFailure(Exception exception) =>
+        PostgresFailure.IsTimeout(exception) || exception is KeyNotFoundException;
 
     /// <summary>
     /// The reader's columns by name, so a select list that changes with the store's column set can still

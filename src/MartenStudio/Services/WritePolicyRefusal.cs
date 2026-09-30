@@ -52,8 +52,9 @@ internal static class WritePolicyRefusal
         nameof(StudioCapability.ControlDaemon) => "Your account may not control the daemon here.",
         nameof(StudioCapability.RebuildProjections) => "Your account may not rebuild projections here.",
         nameof(StudioCapability.CorrectProgression) => "Your account may not correct projection progress here.",
-        nameof(StudioCapability.ApplySchemaChanges) => "Your account may not apply schema changes here.",
+        nameof(StudioCapability.ApplySchemaChanges) => "Your account may not apply schema changes to this database as a whole.",
         nameof(StudioCapability.RunSql) => "Your account may not run SQL here.",
+        nameof(StudioCapability.BrowseDatabase) => "Your account may not browse the database here.",
         _ => "Your account may not do this here.",
     };
 }

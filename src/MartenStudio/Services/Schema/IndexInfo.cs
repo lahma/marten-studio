@@ -19,9 +19,12 @@ namespace MartenStudio.Services.Schema;
 /// <param name="CollectionAlias">The document type whose table this index is on, when it is one.</param>
 /// <param name="Suggestion">What the studio has to say about it, or <see langword="null" />.</param>
 /// <param name="OnMartenTable">
-/// Whether the table this index is on is one Marten configures. A host's own table can live in the same
-/// schema, and no migration from here touches it - so "undeclared" means something quite different there
-/// and must not carry the same warning.
+/// Whether the table this index is on is one an apply from here migrates: a document or event table, a
+/// projection's or an <c>ExtendedSchemaObjects</c> table, Marten's own bookkeeping. A table the store's
+/// configuration does not declare can live in the same schema, and the studio cannot see an apply dropping
+/// its indexes - so "undeclared" means something different there and does not carry the same warning. It
+/// is not a promise either way: a feature added with <c>StoreOptions.Storage.Add(...)</c> is migrated too,
+/// and the studio cannot list its tables (AGENTS.md hard rule 14).
 /// </param>
 /// <param name="IgnoredByConfiguration">
 /// Whether the host called <c>IgnoreIndex</c> for this name. Weasel drops such an index from both sides
@@ -92,7 +95,10 @@ internal sealed record UnindexedCollection(
 }
 
 /// <summary>The Indexes tab's answer for one database.</summary>
-/// <param name="Indexes">Every index that exists in the store's schemas.</param>
+/// <param name="Indexes">
+/// Every index that exists in the store's schemas - but none on a partition (rolled into its parent index)
+/// and none on a hidden document type's table.
+/// </param>
 /// <param name="Missing">Every index the configuration declares that is not there.</param>
 /// <param name="Unindexed">Every document collection whose table has only its primary key.</param>
 /// <param name="Reason">Why nothing could be read, or <see langword="null" />.</param>
@@ -107,6 +113,18 @@ internal sealed record SchemaIndexes(
 
     /// <summary>The read failed, and this is why.</summary>
     public static SchemaIndexes Unavailable(string reason) => new([], [], [], reason);
+
+    /// <summary>An index was locked, and the read gave up rather than queue behind the lock (<c>55P03</c>).</summary>
+    public static SchemaIndexes Locked(string reason) => new([], [], [], reason) { Busy = true };
+
+    /// <summary>Whether the read gave up on a lock rather than failing. <see cref="Reason" /> says so.</summary>
+    public bool Busy { get; init; }
+
+    /// <summary>
+    /// What the list leaves out, and why, while a registered Marten store cannot be read - or
+    /// <see langword="null" /> when every store could be (<see cref="SchemaClassification" />).
+    /// </summary>
+    public string? ClassificationNotice { get; init; }
 
     /// <summary>How many indexes Postgres has recorded no scan of.</summary>
     public int NeverUsedCount

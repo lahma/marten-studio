@@ -1,0 +1,496 @@
+@page "/marten/database"
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Database
+@implements IAsyncDisposable
+@inject IDatabaseObjectService Data
+@inject StudioState State
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    The database browser: everything in the store's Postgres database this visitor may see, and whose it
+    is. Built for somebody debugging a Quartz.NET scheduler or a legacy schema beside their Marten store,
+    which is why what Marten does not own sorts first and Marten's own is drawn quieter, with a link to
+    where its data is really read.
+
+    All of the page's state is in the URL (D9) - the schema, the kind tab, the owner filter and the name
+    filter, and the scope - so a link somebody pastes reopens the same list. Every read goes through
+    IDatabaseObjectService, which is where the gate lives (AGENTS.md hard rule 5, D27); what this page draws
+    about the gate is what the service said about it.
+*@
+
+<PageTitle>@(FoundSchema is { Length: > 0 } found ? found + " — Database" : "Database")</PageTitle>
+
+<div class="ms-page ms-doc-page ms-db-page">
+    <div class="ms-doc-layout ms-db-layout">
+        <div class="ms-doc-rail">
+            @* The schemas and the pins only: this page's grid is the schema's list of tables and views, and
+               the rail's bands for them are object detail's, where they are the way to the next table. *@
+            <DatabaseRail Overview="overview"
+                          Schema="@FoundSchema"
+                          Kind="@DatabaseLinks.KindToken(Category)" />
+        </div>
+
+        <div class="ms-doc-main">
+            <div class="ms-page-header">
+                <h1 class="ms-page-title">
+                    Database
+                    @if (FoundSchema is { Length: > 0 } schema)
+                    {
+                        <span class="ms-db-title-schema">@schema</span>
+                    }
+                </h1>
+            </div>
+
+            @if (State.ActiveScope is null && !loading)
+            {
+                <div class="ms-empty">
+                    <p class="ms-empty-title">No Marten store to show</p>
+                    <p class="ms-empty-description">
+                        This application registered no Marten store that you are authorized to see.
+                    </p>
+                </div>
+            }
+            else if (loadError is { Length: > 0 } error)
+            {
+                <ErrorAlert Message="@error" OnRetry="ReloadAsync" />
+            }
+            else if (overview is { Refusal: not DatabaseRefusal.None } refused)
+            {
+                <ErrorAlert Message="@(refused.Reason ?? "The database browser is unavailable.")" OnRetry="ReloadAsync" />
+            }
+            else
+            {
+                <DatabaseAccessNotice Model="overview?.Access" />
+
+                <nav class="ms-tabs ms-db-kind-tabs" aria-label="Kinds of object">
+                    @foreach (DatabaseObjectCategory category in DatabasePresentation.Categories)
+                    {
+                        int count = CountOf(category);
+
+                        <a class="@TabClass(category, count)"
+                           href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, Schema, category, Owner, Filter)"
+                           aria-current="@(category == Category ? "page" : null)"
+                           title="@(count == 0 ? EmptyTabTitle : null)"
+                           @key="category">
+                            @DatabasePresentation.CategoryLabel(category)
+                            <span class="ms-tab-count">@(overview is null ? "…" : DatabasePresentation.Number(count))</span>
+                        </a>
+                    }
+                </nav>
+
+                <div class="ms-doc-toolbar ms-db-toolbar">
+                    <div class="ms-segmented ms-db-owner-filter" role="group" aria-label="Whose objects to show">
+                        @foreach (DatabaseOwnerFilter owner in OwnerFilters)
+                        {
+                            bool on = owner == Owner;
+
+                            <button type="button"
+                                    class="ms-segmented-option @(on ? "ms-segmented-option-on" : null)"
+                                    aria-pressed="@(on ? "true" : "false")"
+                                    title="@OwnerTitle(owner)"
+                                    @key="owner"
+                                    @onclick="() => OwnerChangedAsync(owner)">
+                                @OwnerLabel(owner)
+                                <span class="ms-db-owner-count">@OwnerCount(owner)</span>
+                            </button>
+                        }
+                    </div>
+
+                    <DatabaseNameFilter Value="@Filter"
+                                        Placeholder="@($"Filter {DatabasePresentation.CategoryLabel(Category).ToLowerInvariant()} by name")"
+                                        OnFilterChanged="FilterChangedAsync" />
+                </div>
+
+                @if (loading || list is null)
+                {
+                    <LoadingSpinner />
+                }
+                else if (list.Refusal != DatabaseRefusal.None)
+                {
+                    <div class="ms-empty ms-db-refused" role="status">
+                        <p class="ms-empty-title">Nothing to list here</p>
+                        <p class="ms-empty-description">@(list.Reason ?? "This list could not be read.")</p>
+                        @if (DatabasePresentation.StructureStillShown(list.Refusal) is { } stillShown)
+                        {
+                            <p class="ms-empty-description ms-db-still-shown">@stillShown</p>
+                        }
+                        <p class="ms-empty-description">
+                            <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, null, Category)">Show every schema you can see</a>
+                        </p>
+                    </div>
+                }
+                else
+                {
+                    @switch (Category)
+                    {
+                        case DatabaseObjectCategory.Functions:
+                            <DatabaseFunctionsGrid Model="list" ShowSchema="ShowSchema" Label="@GridLabel" EmptyText="@EmptyText" />
+                            break;
+
+                        case DatabaseObjectCategory.Triggers:
+                            <DatabaseTriggersGrid Model="list" ShowSchema="ShowSchema" Label="@GridLabel" EmptyText="@EmptyText" />
+                            break;
+
+                        case DatabaseObjectCategory.Sequences:
+                            <DatabaseSequencesGrid Model="list" ShowSchema="ShowSchema" Label="@GridLabel" EmptyText="@EmptyText" />
+                            break;
+
+                        case DatabaseObjectCategory.Types:
+                            <DatabaseTypesGrid Model="list" ShowSchema="ShowSchema" Label="@GridLabel" EmptyText="@EmptyText" />
+                            break;
+
+                        default:
+                            <DatabaseRelationsGrid Model="list" ShowSchema="ShowSchema" Label="@GridLabel" EmptyText="@EmptyText" />
+                            break;
+                    }
+
+                    @if (list.Truncated)
+                    {
+                        <p class="ms-db-truncated" role="status">
+                            Showing the first @DatabasePresentation.Number(list.Items.Count) — refine the filter to see the rest.
+                        </p>
+                    }
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private static readonly DatabaseOwnerFilter[] OwnerFilters =
+        [DatabaseOwnerFilter.All, DatabaseOwnerFilter.Marten, DatabaseOwnerFilter.Other];
+
+    private CancellationTokenSource? cts;
+    private DatabaseBrowserOverview? overview;
+    private DatabaseObjectList? list;
+    private string? loadError;
+    private bool loading = true;
+    private string? loadedSignature;
+
+    /// <summary>One schema, or none for every schema this visitor may see.</summary>
+    [SupplyParameterFromQuery(Name = "schema")]
+    public string? SchemaParameter { get; set; }
+
+    /// <summary>The kind tab.</summary>
+    [SupplyParameterFromQuery(Name = "kind")]
+    public string? KindParameter { get; set; }
+
+    /// <summary>The owner filter.</summary>
+    [SupplyParameterFromQuery(Name = "owner")]
+    public string? OwnerParameter { get; set; }
+
+    /// <summary>The name filter.</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? FilterParameter { get; set; }
+
+    /// <summary>The store key, so a pasted link reopens the same store (D9).</summary>
+    [SupplyParameterFromQuery(Name = "store")]
+    public string? StoreKey { get; set; }
+
+    /// <summary>The database identity.</summary>
+    [SupplyParameterFromQuery(Name = "db")]
+    public string? DatabaseId { get; set; }
+
+    /// <summary>The tenant, or empty for all of them.</summary>
+    [SupplyParameterFromQuery(Name = "tenant")]
+    public string? TenantId { get; set; }
+
+    private string? Schema => string.IsNullOrWhiteSpace(SchemaParameter) ? null : SchemaParameter;
+
+    /// <summary>
+    /// The schema the title, the heading and the rail are about: <see cref="Schema" />, but only once the
+    /// overview has listed it. A <c>?schema=</c> is whatever somebody typed into a link, and one the overview
+    /// did not return - absent, or withheld from this visitor - must not be repeated back as if it were a
+    /// schema they may browse; the list below says, in the service's own words, that there is no such
+    /// schema to show. Object detail does the same with its <c>FoundSchema</c>.
+    /// </summary>
+    private string? FoundSchema =>
+        Schema is { } schema && overview?.Schemas.Any(x => string.Equals(x.Name, schema, StringComparison.Ordinal)) == true
+            ? schema
+            : null;
+
+    /// <summary>An empty tab's tooltip - nothing at all for a schema the overview did not list.</summary>
+    private string? EmptyTabTitle => Schema is null
+        ? "None in the schemas shown"
+        : FoundSchema is { } shown ? "None in " + shown : null;
+
+    private DatabaseObjectCategory Category => DatabaseLinks.ParseKind(KindParameter);
+
+    private DatabaseOwnerFilter Owner => DatabaseLinks.ParseOwner(OwnerParameter);
+
+    private string? Filter => string.IsNullOrWhiteSpace(FilterParameter) ? null : FilterParameter.Trim();
+
+    private bool ShowSchema => Schema is null;
+
+    private string GridLabel => DatabasePresentation.CategoryLabel(Category) + (Schema is null ? string.Empty : " in " + Schema);
+
+    private string EmptyText => Filter is { } filter
+        ? "No " + DatabasePresentation.CategoryLabel(Category).ToLowerInvariant() + " match '" + filter + "'."
+        : Owner != DatabaseOwnerFilter.All
+            ? "None of these belong to " + (Owner == DatabaseOwnerFilter.Marten ? "Marten." : "anyone but Marten.")
+            : "No " + DatabasePresentation.CategoryLabel(Category).ToLowerInvariant() + (Schema is null ? " in the schemas you can see." : " in " + Schema + ".");
+
+    /// <summary>
+    /// Whether this render is the circuit's: set by the first <see cref="OnAfterRenderAsync" />, which static
+    /// rendering never calls. The lists are read only then.
+    /// </summary>
+    private bool interactive;
+
+    /// <summary>
+    /// Whether the scope the address names has been applied - set at the end of <see cref="OnParametersSetAsync" />,
+    /// cleared at its start. The first interactive render reads only when it is.
+    /// </summary>
+    private bool scopeSettled;
+
+    /// <summary>Which <see cref="OnParametersSetAsync" /> is the latest, so an overtaken one does not read.</summary>
+    private int parameterPass;
+
+    protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
+
+    /// <remarks>
+    /// <para>
+    /// Nothing is read while prerendering, nor in any other static render: a <c>?schema=</c> the visitor's gate
+    /// refuses is one refusal per page view, and a read in each of the prerender, the circuit and the static
+    /// re-render the layout's scope navigation costs recorded it three times (the object page's rule, for the
+    /// same reason).
+    /// </para>
+    /// <para>
+    /// Nor before the address's scope is the studio's: applying it can query the database, the first
+    /// interactive render happens while it is awaited, and a Back or Forward to an entry of another database
+    /// read - and audited - the previous one's list first (the object page's rule again).
+    /// </para>
+    /// </remarks>
+    protected override async Task OnParametersSetAsync()
+    {
+        int pass = ++parameterPass;
+        scopeSettled = false;
+
+        await State.EnsureInitializedAsync();
+        await ApplyScopeFromUrlAsync();
+
+        if (pass != parameterPass)
+        {
+            return;
+        }
+
+        scopeSettled = true;
+
+        if (!interactive)
+        {
+            return;
+        }
+
+        await LoadIfChangedAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        interactive = true;
+
+        // Otherwise the pass still applying the address's scope reads, once it has.
+        if (scopeSettled)
+        {
+            await LoadIfChangedAsync();
+        }
+    }
+
+    private async Task LoadIfChangedAsync()
+    {
+        string signature = Signature();
+        if (string.Equals(signature, loadedSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        loadedSignature = signature;
+        await LoadAsync();
+    }
+
+    private string Signature() => string.Join(
+        '\u001f',
+        State.ActiveScope?.StoreKey,
+        State.ActiveScope?.DatabaseId,
+        State.ActiveScope?.TenantId,
+        Schema,
+        DatabaseLinks.KindToken(Category),
+        DatabaseLinks.OwnerToken(Owner),
+        Filter);
+
+    /// <summary>
+    /// Points the studio at the scope the URL names, when it names one. The listing validates it, so a
+    /// pasted link to a store the visitor may not see quietly stays on the one they are allowed.
+    /// </summary>
+    private async Task ApplyScopeFromUrlAsync()
+    {
+        if (StoreKey is null && DatabaseId is null && TenantId is null)
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+
+        bool differs = (StoreKey is not null && !string.Equals(StoreKey, active?.StoreKey, StringComparison.OrdinalIgnoreCase))
+            || (DatabaseId is not null && !string.Equals(DatabaseId, active?.DatabaseId, StringComparison.OrdinalIgnoreCase))
+            || (TenantId is not null && !string.Equals(NullIfBlank(TenantId), active?.TenantId, StringComparison.Ordinal));
+
+        if (differs)
+        {
+            await State.SetScopeAsync(StoreKey ?? active?.StoreKey, DatabaseId ?? active?.DatabaseId, TenantId);
+        }
+    }
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            loading = false;
+            return;
+        }
+
+        CancellationToken token = ResetCancellation();
+
+        loading = true;
+        loadError = null;
+        StateHasChanged();
+
+        try
+        {
+            // One after the other rather than together: each resolves the scope and asks the policy, and a
+            // scoped authorization service is not something to drive from two threads at once. The catalog
+            // behind them is cached, so the second is cheap.
+            overview = await Data.GetOverviewAsync(scope, token);
+
+            if (overview.Refusal == DatabaseRefusal.None)
+            {
+                list = await Data.ListAsync(scope, new DatabaseObjectQuery(Category, Schema, Owner, Filter), token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer load replaced this one; its result is the one that matters.
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            loadError = "You are not authorized for this store, database or tenant.";
+        }
+        catch (Exception exception)
+        {
+            loadError = exception.Message;
+        }
+        finally
+        {
+            loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private CancellationToken ResetCancellation()
+    {
+        CancellationTokenSource? previous = cts;
+        cts = new CancellationTokenSource();
+        previous?.Cancel();
+        previous?.Dispose();
+        return cts.Token;
+    }
+
+    private Task OnScopeChangedAsync() => InvokeAsync(async () =>
+    {
+        try
+        {
+            loadedSignature = null;
+            await OnParametersSetAsync();
+        }
+        catch (Exception exception)
+        {
+            loadError = exception.Message;
+            StateHasChanged();
+        }
+    });
+
+    private Task ReloadAsync()
+    {
+        loadedSignature = null;
+        return LoadAsync();
+    }
+
+    private int CountOf(DatabaseObjectCategory category)
+    {
+        if (overview is null)
+        {
+            return 0;
+        }
+
+        return Schema is { } schema
+            ? overview.Schemas.FirstOrDefault(x => string.Equals(x.Name, schema, StringComparison.Ordinal))?.CountOf(category) ?? 0
+            : overview.Schemas.Sum(x => x.CountOf(category));
+    }
+
+    private string TabClass(DatabaseObjectCategory category, int count) =>
+        "ms-tab"
+        + (category == Category ? " ms-tab-active" : string.Empty)
+        + (count == 0 && overview is not null ? " ms-db-tab-empty" : string.Empty);
+
+    private static string OwnerLabel(DatabaseOwnerFilter owner) => owner switch
+    {
+        DatabaseOwnerFilter.Marten => "Marten",
+        DatabaseOwnerFilter.Other => "Other",
+        _ => "All",
+    };
+
+    private static string OwnerTitle(DatabaseOwnerFilter owner) => owner switch
+    {
+        DatabaseOwnerFilter.Marten => "Only what Marten owns: document tables, the event store, projections and its own bookkeeping",
+        DatabaseOwnerFilter.Other => "Only what Marten does not own: this application's own objects, and other libraries'",
+        _ => "Everything",
+    };
+
+    private string OwnerCount(DatabaseOwnerFilter owner)
+    {
+        if (list is null || list.Refusal != DatabaseRefusal.None)
+        {
+            return "…";
+        }
+
+        int count = owner switch
+        {
+            DatabaseOwnerFilter.Marten => list.Counts.Marten,
+            DatabaseOwnerFilter.Other => list.Counts.Other,
+            _ => list.Counts.All,
+        };
+
+        return DatabasePresentation.Number(count);
+    }
+
+    private Task OwnerChangedAsync(DatabaseOwnerFilter owner)
+    {
+        Navigation.NavigateTo(DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, Schema, Category, owner, Filter));
+        return Task.CompletedTask;
+    }
+
+    private Task FilterChangedAsync(string value)
+    {
+        Navigation.NavigateTo(DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, Schema, Category, Owner, value));
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        if (cts is { } source)
+        {
+            await source.CancelAsync();
+            source.Dispose();
+            cts = null;
+        }
+    }
+}

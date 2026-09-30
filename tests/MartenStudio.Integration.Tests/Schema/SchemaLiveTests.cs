@@ -1,5 +1,8 @@
 using MartenStudio.Services;
+using MartenStudio.Services.Database;
 using MartenStudio.Services.Schema;
+
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MartenStudio.Integration.Tests.Schema;
 
@@ -328,12 +331,22 @@ public class SchemaLiveTests(PostgresFixture fixture)
         customer.CollectionAlias.Should().Be("customer");
         customer.DocumentTypeName.Should().Be(nameof(SchemaCustomer));
         customer.TotalBytes.Should().BeGreaterThan(0);
+        customer.Ownership.Owner.Should().Be(DatabaseObjectOwner.MartenDocument);
+        customer.OwnedByThisStore.Should().BeTrue();
+        customer.IsPartitioned.Should().BeFalse();
 
         // reltuples is -1 until the table has been analyzed, which is a value and not an error (D8).
         customer.EstimatedRows.Should().BeGreaterThanOrEqualTo(-1);
 
         tables.Tables.Should().Contain(x => x.Table == "mt_doc_order" && x.CollectionAlias == "order");
-        tables.Tables.Should().Contain(x => x.IsEventTable, "the event store's tables live in their own schema");
+
+        // The event store's tables, by the database browser's classification rather than by the schema
+        // they live in (DB-7).
+        tables.Tables.Where(x => x.Table is "mt_events" or "mt_streams").Should().HaveCount(2)
+            .And.OnlyContain(x => x.Ownership.Owner == DatabaseObjectOwner.MartenEventStore && x.IsEventTable);
+
+        // No capability, so nothing past the store's own structure - and nothing here is anybody else's.
+        tables.Tables.Should().OnlyContain(x => x.Ownership.IsMarten);
 
         // Sorted by total size, largest first.
         tables.Tables.Select(x => x.TotalBytes).Should().BeInDescendingOrder();
@@ -409,11 +422,23 @@ public class SchemaLiveTests(PostgresFixture fixture)
         FunctionInfo appendEvents = functions.Functions.First(x => x.Name == "mt_quick_append_events");
         appendEvents.Schema.Should().Be(schema.EventSchema);
         appendEvents.DeclaredByMarten.Should().BeTrue();
-        appendEvents.Definition.Should().Contain("CREATE OR REPLACE FUNCTION");
         appendEvents.Signature.Should().StartWith("mt_quick_append_events(");
 
+        // Marten's own bodies need no capability (DB-7): offered to everybody, and read on demand through
+        // the database browser's definition read, which is where the gate lives.
+        appendEvents.Ownership.IsMarten.Should().BeTrue();
+        appendEvents.DefinitionAvailable.Should().BeTrue(appendEvents.DefinitionRefusal);
+        functions.Functions.Should().OnlyContain(x => x.DefinitionAvailable,
+            "every function here is Marten's, in the store's own schemas");
+
+        DatabaseObjectDefinition definition = await schema.Studio.InScopeAsync(services =>
+            services.GetRequiredService<IDatabaseObjectService>().GetDefinitionAsync(SchemaFixture.Scope, appendEvents.Ref));
+
+        definition.Found.Should().BeTrue(definition.Reason);
+        definition.Sql.Should().Contain("CREATE OR REPLACE FUNCTION");
+
         // And the tokenizer makes sense of the dollar-quoted body rather than swallowing the file.
-        SqlDocument document = SqlTokenizer.Tokenize(appendEvents.Definition);
+        SqlDocument document = SqlTokenizer.Tokenize(definition.Sql!);
         document.Lines.Should().NotBeEmpty();
         document.Lines.SelectMany(x => x.Tokens).Should()
             .Contain(x => x.Kind == SqlTokenKind.String && x.Text.Contains("$function$", StringComparison.Ordinal));

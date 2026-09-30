@@ -43,7 +43,24 @@ public class SampleOptionsTests
         options.Anonymous.Should().BeFalse();
         options.ReadOnly.Should().BeFalse();
         options.AllowDataGeneration.Should().BeFalse();
+        options.NoDaemon.Should().BeFalse("the sample hosts its daemon unless told not to");
         options.Path.Should().BeNull();
+    }
+
+    /// <summary>
+    /// <c>--no-daemon</c> is a bare switch like the others: it consumes nothing, and the host is handed
+    /// the <c>--key=value</c> form so its own parser does not swallow the next token either.
+    /// </summary>
+    [Fact]
+    public void No_daemon_is_a_bare_switch_that_consumes_nothing()
+    {
+        string[] args = ["--no-daemon", "--urls", "http://localhost:5210"];
+
+        SampleOptions.Parse(args).NoDaemon.Should().BeTrue();
+        SampleOptions.Parse(["--no-daemon", "false"]).NoDaemon.Should().BeFalse();
+        SampleOptions.Parse(["/No-Daemon"]).NoDaemon.Should().BeTrue();
+
+        SampleOptions.HostArguments(args).Should().Equal("--no-daemon=true", "--urls", "http://localhost:5210");
     }
 
     /// <summary>

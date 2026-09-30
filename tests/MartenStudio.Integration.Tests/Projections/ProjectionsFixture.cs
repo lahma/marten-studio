@@ -111,12 +111,21 @@ internal sealed class ProjectionsFixture : IAsyncDisposable
     /// runs somewhere else, which the studio has to render honestly rather than treat as a fault.
     /// </param>
     /// <param name="capabilities">The capabilities the host granted. Defaults to all of them.</param>
+    /// <param name="configureStore">Extra Marten configuration, applied after the sample domain's.</param>
+    /// <param name="configureServices">Extra registrations, applied after the studio's.</param>
+    /// <param name="logs">
+    /// A provider that sees everything the host logs, at every level - for a test about what the studio
+    /// writes to the application's log rather than about what it renders.
+    /// </param>
     /// <param name="cancellationToken">Cancels the start.</param>
     public static async Task<ProjectionsFixture> StartAsync(
         PostgresFixture postgres,
         string schema,
         bool withDaemon = true,
         MartenStudioCapabilities? capabilities = null,
+        Action<StoreOptions>? configureStore = null,
+        Action<IServiceCollection>? configureServices = null,
+        ILoggerProvider? logs = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(postgres);
@@ -127,7 +136,12 @@ internal sealed class ProjectionsFixture : IAsyncDisposable
         await postgres.CreateSchemaAsync(eventSchema, cancellationToken);
 
         HostApplicationBuilder builder = Host.CreateApplicationBuilder();
-        builder.Logging.SetMinimumLevel(LogLevel.Warning);
+        builder.Logging.SetMinimumLevel(logs is null ? LogLevel.Warning : LogLevel.Trace);
+
+        if (logs is not null)
+        {
+            builder.Logging.AddProvider(logs);
+        }
 
         MartenServiceCollectionExtensions.MartenConfigurationExpression marten = builder.Services
             .AddMarten(options =>
@@ -144,6 +158,8 @@ internal sealed class ProjectionsFixture : IAsyncDisposable
                 // seconds of wall clock. The tests read the number back off the store rather than
                 // repeating it, so changing it here changes the waits and nothing else.
                 options.Projections.LeadershipPollingTime = (int) LeadershipPollingTime.TotalMilliseconds;
+
+                configureStore?.Invoke(options);
             })
             .UseLightweightSessions();
 
@@ -158,6 +174,8 @@ internal sealed class ProjectionsFixture : IAsyncDisposable
         builder.Services.AddSingleton<AuthenticationStateProvider, AnonymousAuthenticationStateProvider>();
 
         builder.Services.AddMartenStudio(options => options.Capabilities = capabilities ?? MartenStudioCapabilities.All());
+
+        configureServices?.Invoke(builder.Services);
 
         IHost host = builder.Build();
 
@@ -355,10 +373,29 @@ public abstract class ProjectionsTestBase : IAsyncLifetime
     protected virtual bool WithDaemon => true;
 
     /// <summary>
+    /// The shared container, for a test that has to reach the database without the studio - taking a
+    /// lock, altering a table's storage parameters.
+    /// </summary>
+    private protected PostgresFixture Postgres => postgres;
+
+    /// <summary>
     /// What the host granted. <see langword="null" /> means every capability, which is what the other
     /// classes need; a class about a refusal states something smaller.
     /// </summary>
     private protected virtual MartenStudioCapabilities? Capabilities => null;
+
+    /// <summary>What sees this host's log, for a class about what the studio logs.</summary>
+    private protected virtual ILoggerProvider? Logs => null;
+
+    /// <summary>Extra Marten configuration for this class's host.</summary>
+    private protected virtual void ConfigureStore(StoreOptions options)
+    {
+    }
+
+    /// <summary>Extra registrations for this class's host, after the studio's.</summary>
+    private protected virtual void ConfigureServices(IServiceCollection services)
+    {
+    }
 
     public async ValueTask InitializeAsync()
     {
@@ -372,6 +409,9 @@ public abstract class ProjectionsTestBase : IAsyncLifetime
             GetType().Name.ToLowerInvariant(),
             WithDaemon,
             Capabilities,
+            ConfigureStore,
+            ConfigureServices,
+            Logs,
             TestContext.Current.CancellationToken);
     }
 

@@ -311,18 +311,20 @@ public class StudioLayoutTests
         using var context = new StudioComponentContext();
         var layout = RenderLayout(context);
 
-        layout.TextOfAll(".ms-sidebar-section").Should().Equal("Data", "Events", "Operations", "System");
+        layout.TextOfAll(".ms-sidebar-section").Should().Equal("Data", "Database", "Events", "Operations", "System");
 
         // Only the pages that have an @page yet are links; the rest are visible and disabled, so the
         // information architecture is legible from the first version. This list grows one packet at a
         // time - Projections joined it in P5, the four Events screens in P4, Schema and Configuration
-        // in P7, Documents in P2, Query in P6.
+        // in P7, Documents in P2, Query in P6, and the database browser's Tables in DB-4, which also
+        // moved Relationships out of Data and under it.
         layout.TextOfAll(".ms-nav-link:not(.ms-nav-link-disabled) .ms-nav-link-text")
             .Should().Equal(
                 "Overview",
                 "Documents",
-                "Relationships",
                 "Query",
+                "Tables",
+                "Relationships",
                 "Streams",
                 "Feed",
                 "Event types",
@@ -349,8 +351,9 @@ public class StudioLayoutTests
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
             "",
             "documents",
-            "relationships",
             "query",
+            "database",
+            "relationships",
             "events/streams",
             "events/feed",
             "events/types",
@@ -375,8 +378,9 @@ public class StudioLayoutTests
         layout.FindAll("a.ms-nav-link").Select(x => x.GetAttribute("href")).Should().Equal(
             "",
             "documents",
-            "relationships",
             "query",
+            "database",
+            "relationships",
             "events/streams",
             "events/feed",
             "events/types",
@@ -385,6 +389,47 @@ public class StudioLayoutTests
             "schema",
             "config",
             "activity");
+    }
+
+    /// <summary>
+    /// "Tables" is one word for six kinds of object, and below 1024 px the label is hidden and the tooltip
+    /// is all a sighted mouse user has. The tooltip adds to the name; it never replaces it, because the
+    /// label is the link's accessible name.
+    /// </summary>
+    [Fact]
+    public void The_tables_entry_says_in_its_tooltip_what_else_it_lists()
+    {
+        using var context = new StudioComponentContext();
+
+        var layout = RenderLayout(context);
+
+        IElement tables = layout.FindAll("a.ms-nav-link").Single(x => x.GetAttribute("href") == "database");
+        tables.GetAttribute("title").Should().Be("Tables, views, functions, triggers, sequences and types");
+        tables.QuerySelector(".ms-nav-link-text")!.TextContent.Trim().Should().Be("Tables");
+
+        layout.FindAll("a.ms-nav-link").Single(x => x.GetAttribute("href") == "relationships")
+            .GetAttribute("title").Should().Be("Relationships", "an entry with no tooltip of its own is titled with its label");
+    }
+
+    /// <summary>
+    /// The browser, object detail and row detail are all one place in the navigation. The prefix match is
+    /// what does it, and a row page that a later packet builds is covered before it exists.
+    /// </summary>
+    [Theory]
+    [InlineData("marten/database", "database")]
+    [InlineData("marten/database?schema=quartz&kind=views", "database")]
+    [InlineData("marten/database/object?schema=quartz&name=qrtz_triggers&tab=keys", "database")]
+    [InlineData("marten/database/row?schema=quartz&name=qrtz_triggers&key.sched_name=QRTZ", "database")]
+    [InlineData("marten/relationships", "relationships")]
+    public void The_database_entry_stays_lit_on_every_page_below_it(string uri, string active)
+    {
+        using var context = new StudioComponentContext();
+        context.Navigate(uri);
+
+        var layout = RenderLayout(context);
+
+        layout.FindAll("a.ms-nav-link.ms-nav-active").Select(x => x.GetAttribute("href"))
+            .Should().Equal(active);
     }
 
     // -------------------------------------------------------------------------------------------
@@ -501,7 +546,7 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.FindAll(".ms-nav-badge").Should().BeEmpty();
-        layout.FindAll("a.ms-nav-link").Should().HaveCount(12);
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(13);
         layout.Markup.Should().Contain(BodyMarker);
     }
 

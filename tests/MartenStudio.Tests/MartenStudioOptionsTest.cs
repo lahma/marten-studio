@@ -48,10 +48,11 @@ public class MartenStudioOptionsTest
         options.IsDocumentTypeVisible.Should().BeNull();
         options.IncludeAncillaryStores.Should().BeTrue();
         options.KnownTenantIds.Should().BeEmpty();
+        options.BrowsableSchemas.Should().BeEmpty();
         options.DiscoverTenantIds.Should().BeTrue();
 
         // D4: every capability is off until the host says otherwise.
-        StudioCapabilityGuard.All.Should().HaveCount(9);
+        StudioCapabilityGuard.All.Should().HaveCount(10);
         foreach (var capability in StudioCapabilityGuard.All)
         {
             new StudioCapabilityGuard(Options.Create(options)).IsEnabled(capability).Should().BeFalse();

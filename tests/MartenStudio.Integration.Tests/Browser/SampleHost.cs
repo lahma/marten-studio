@@ -121,11 +121,16 @@ internal sealed class SampleHost : IAsyncDisposable
     /// <param name="connectionString">The Postgres the sample store is pointed at.</param>
     /// <param name="studioPath"><c>--path</c>, or <see langword="null" /> for the default <c>/marten</c>.</param>
     /// <param name="allowDataGeneration">Whether to map the demo-data endpoints outside Development.</param>
+    /// <param name="noDaemon">
+    /// <c>--no-daemon</c>: host no async daemon, the shape of a production host whose projections run
+    /// elsewhere - the configuration whose log a UI validation run reads for warnings.
+    /// </param>
     /// <param name="cancellationToken">Cancels the wait.</param>
     public static async Task<SampleHost> StartAsync(
         string connectionString,
         string? studioPath = null,
         bool allowDataGeneration = false,
+        bool noDaemon = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -156,6 +161,11 @@ internal sealed class SampleHost : IAsyncDisposable
         if (allowDataGeneration)
         {
             startInfo.ArgumentList.Add("--allow-data-generation");
+        }
+
+        if (noDaemon)
+        {
+            startInfo.ArgumentList.Add("--no-daemon");
         }
 
         // Explicit rather than inherited: a suite whose behaviour depends on what was exported in the
@@ -228,6 +238,12 @@ internal sealed class SampleHost : IAsyncDisposable
     /// table's physical columns per database for the life of the process, so a page opened before the
     /// event store existed can keep answering "no event storage" long after it does.
     /// </para>
+    /// <para>
+    /// <b>And the relational demo.</b> The seeder applies the <c>quartz</c> and <c>legacy</c> schemas
+    /// last, in one transaction, after the documents; <c>quartz.qrtz_triggers</c> having rows is the
+    /// sign that transaction committed, so a scenario that browses those schemas never meets them half
+    /// made - or, before the commit, not there at all.
+    /// </para>
     /// </remarks>
     /// <param name="connectionString">The Postgres the sample store is pointed at.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
@@ -236,7 +252,7 @@ internal sealed class SampleHost : IAsyncDisposable
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(StartTimeout);
 
-        string[] tables = ["studio_sample.mt_doc_customer", "studio_sample_events.mt_events"];
+        string[] tables = ["studio_sample.mt_doc_customer", "studio_sample_events.mt_events", "quartz.qrtz_triggers"];
 
         foreach (string table in tables)
         {

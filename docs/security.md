@@ -54,6 +54,19 @@ One `AuthorizationHandler<TRequirement, MartenStoreResource>` answers for the sc
 frame and every data call. `Capability` is `null` for a read and carries the capability's own name for a
 write, so a single handler can be as coarse or as fine as you want.
 
+`TenantId = null` means every tenant at once, so a handler must require an explicit all-tenants claim for
+it rather than let it through. Anything that is not tenant-scoped is asked that way whatever tenant the
+visitor has selected: `BrowseDatabase` is always authorized against `TenantId = null` (with
+`Capability = "BrowseDatabase"`), because no tenant filters a Quartz or legacy table, and a handler that
+confines people to their own tenant therefore refuses them the database browser — which is the point.
+`RunSql`, the dead-letter rewind, the progression corrections, rebuilds and a schema apply are asked the
+same way, because each of them reaches every tenant in the database (the operations are narrowed to the
+tenant only when the database holds that tenant alone).
+
+`BrowsableSchemas` limits what the database browser's screens show, not what can be read: the SQL console
+reads whatever the connection's role can, in any schema. `SqlConsoleRole` is the real boundary for both,
+since every console statement and every browser read runs under `SET LOCAL ROLE` to it.
+
 ### The startup guard
 
 An application that maps the studio and says nothing about authorization **does not start**. The check
@@ -75,13 +88,16 @@ application is being built.
 
 ## The capability model
 
-Nine flags on `MartenStudioCapabilities`, every one `false` by default:
+Ten flags on `MartenStudioCapabilities`, every one `false` by default:
 
 `EditDocuments`, `DeleteDocuments`, `ArchiveStreams`, `ManageDeadLetters`, `ControlDaemon`,
-`RebuildProjections`, `CorrectProgression`, `ApplySchemaChanges`, `RunSql`.
+`RebuildProjections`, `CorrectProgression`, `ApplySchemaChanges`, `RunSql`, `BrowseDatabase`.
+
+Two of them are reads rather than writes — `RunSql` and `BrowseDatabase` read beyond what Marten declares —
+and they are treated as writes for authorization, because they are the dangerous reads.
 
 `MartenStudioCapabilities.All()` is the one-line, greppable opt-in. `MartenStudioOptions.ReadOnly`
-overrides all nine whatever they say.
+overrides all ten whatever they say.
 
 This is Hangfire's [GHSA-7rq6-7gv8-c37h](https://github.com/advisories/GHSA-7rq6-7gv8-c37h) applied to
 the write axis: the dashboard that is dangerous by default is the one somebody maps without reading the
@@ -276,8 +292,8 @@ Six rules, all structural rather than semantic:
 6. **Without `RunSql`:** no word that reaches another relation (`select`, `from`, `union`, `intersect`,
    `except`, `join`, `into`, `with`, `lateral`, `returning`, `copy`, `do`, `call`, `execute`).
 
-A visitor who *may* run SQL — `RunSql` enabled **and** allowed by the write policy against this very
-scope — gets rule 6 lifted, and only rule 6, because everything it refuses they could type into the
+A visitor who *may* run SQL — `RunSql` enabled **and** allowed by the store policy and the write policy
+against this scope's database as a whole (`TenantId = null`) — gets rule 6 lifted, and only rule 6, because everything it refuses they could type into the
 console instead. Asking only the capability and not the policy would hand subqueries to somebody the
 write policy refuses the console to, which is the hole the policy exists to close.
 

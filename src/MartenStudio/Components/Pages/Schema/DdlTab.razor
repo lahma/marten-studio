@@ -13,6 +13,11 @@
     HiLo Sequences feature, whose initialiser applies a migration under the database's own AutoCreate -
     so producing this script can create mt_hilo and mt_get_next_hi in a schema that did not have them.
     Navigating to a tab must never do that (packet P7-fix, finding B1).
+
+    The script spans the whole database: every tenant's partition by name, every document type's table,
+    the hidden ones included. The service answers only a visitor who may see all of it (SchemaScriptGate)
+    and hands anybody else the refusal as a value, which this draws as a note naming the option - not as an
+    error with a retry, because pressing the button again changes nothing.
 *@
 
 <div class="ms-schema-toolbar">
@@ -34,6 +39,14 @@
 @if (loading)
 {
     <LoadingSpinner />
+}
+else if (script.Withheld is { } withheld)
+{
+    <div class="ms-alert ms-alert-info ms-schema-refusal" role="note">
+        <div class="ms-alert-content">
+            <p>@withheld.Reason</p>
+        </div>
+    </div>
 }
 else if (script.Reason is { Length: > 0 } reason)
 {

@@ -88,12 +88,55 @@ public class RelationshipsNoDdlLiveTests(PostgresFixture fixture)
         (await host.ReadObjectsAsync()).Should().Be(before, "reading the relationships creates nothing");
     }
 
-    private async Task<Host> StartAsync(string name)
+    /// <summary>
+    /// The same with the database browser open: a third schema <c>BrowsableSchemas</c> admits, holding a
+    /// plain table whose key points into a document table - so the read spans every schema, the gate and
+    /// the catalog are consulted, and a non-Marten table's rows are counted. Still nothing is created,
+    /// anywhere.
+    /// </summary>
+    [PostgresFact]
+    public async Task Reading_the_relationships_with_the_database_browser_open_creates_nothing()
+    {
+        await using Host host = await StartAsync("browse", browse: true);
+
+        await host.ApplyAsync();
+        await host.ExecuteAsync(
+            $"create table \"{host.Extra}\".\"notes\" (id uuid primary key, " +
+            $"thing_id bigint references \"{host.Schema}\".\"mt_doc_numbered\" (id) on delete cascade)");
+
+        SchemaObjects before = await host.ReadObjectsAsync();
+        before.Tables.Should().Contain("notes");
+
+        RelationshipGraph graph = await host.RelationshipsAsync(x => x.GetGraphAsync(Scope));
+
+        graph.Error.Should().BeNull();
+        graph.TablesUnavailable.Should().BeNull();
+        graph.Edges.Should().ContainSingle(x => x.FromIsTable && x.ToAlias == "numbered")
+            .Which.OnDelete.Should().Be("Cascade");
+
+        ReferencedBy referenced = await host.RelationshipsAsync(
+            x => x.GetReferencedByAsync(Scope, "numbered", "1"));
+
+        referenced.Error.Should().BeNull();
+        referenced.Entries.Should().ContainSingle(x => x.IsTable)
+            .Which.IsCounted.Should().BeTrue("the capability is on and the schema is browsable");
+
+        (await host.ReadObjectsAsync()).Should().Be(before,
+            "reading the relationships around the store, across schemas, creates nothing in any of them");
+    }
+
+    private async Task<Host> StartAsync(string name, bool browse = false)
     {
         string schema = "p10n_" + name;
+        string extra = schema + "_legacy";
 
         await fixture.CreateSchemaAsync(schema);
         await fixture.CreateSchemaAsync(schema + "_events");
+
+        if (browse)
+        {
+            await fixture.CreateSchemaAsync(extra);
+        }
 
         var services = new ServiceCollection();
 
@@ -117,9 +160,18 @@ public class RelationshipsNoDdlLiveTests(PostgresFixture fixture)
             options.Schema.For<NumberedNote>().ForeignKey<NumberedThing>(x => x.ThingId);
         });
 
-        services.AddMartenStudio(options => options.AuthorizationPolicy = null);
+        services.AddMartenStudio(options =>
+        {
+            options.AuthorizationPolicy = null;
 
-        return new Host(services.BuildServiceProvider(), fixture.ConnectionString, schema);
+            if (browse)
+            {
+                options.Capabilities = MartenStudioCapabilities.All();
+                options.BrowsableSchemas.Add(extra);
+            }
+        });
+
+        return new Host(services.BuildServiceProvider(), fixture.ConnectionString, schema, browse ? extra : null);
     }
 
     /// <summary>A document type with a numeric id, so Marten's HiLo sequence feature is active.</summary>
@@ -165,12 +217,24 @@ public class RelationshipsNoDdlLiveTests(PostgresFixture fixture)
             $"sequences [{string.Join(", ", Sequences)}]";
     }
 
-    /// <summary>One built studio over one pair of schemas.</summary>
-    private sealed class Host(ServiceProvider provider, string connectionString, string schema) : IAsyncDisposable
+    /// <summary>One built studio over one pair of schemas, and a third one it may browse when there is one.</summary>
+    private sealed class Host(ServiceProvider provider, string connectionString, string schema, string? extra) : IAsyncDisposable
     {
         public string Schema => schema;
 
         public string EventSchema => schema + "_events";
+
+        /// <summary>The browsable schema beside the store's, or <see langword="null" />.</summary>
+        public string? Extra => extra;
+
+        /// <summary>Runs SQL on a connection of the test's own - the host's own DBA, not the studio.</summary>
+        public async Task ExecuteAsync(string sql)
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+            await using var command = new NpgsqlCommand(sql, connection);
+            await command.ExecuteNonQueryAsync();
+        }
 
         internal async Task<T> RelationshipsAsync<T>(Func<IRelationshipDataService, Task<T>> action)
         {
@@ -207,7 +271,7 @@ public class RelationshipsNoDdlLiveTests(PostgresFixture fixture)
         private async Task<IReadOnlyList<string>> ReadAsync(NpgsqlConnection connection, string sql)
         {
             await using var command = new NpgsqlCommand(sql, connection);
-            command.Parameters.AddWithValue("schemas", new[] { Schema, EventSchema });
+            command.Parameters.AddWithValue("schemas", extra is null ? new[] { Schema, EventSchema } : new[] { Schema, EventSchema, extra });
 
             List<string> names = [];
             await using NpgsqlDataReader reader = await command.ExecuteReaderAsync();

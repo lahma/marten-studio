@@ -73,14 +73,21 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
     private readonly TenantDiscovery tenantDiscovery;
     private readonly IServiceProvider provider;
     private readonly ILogger<StudioScopeCatalog> logger;
+    private readonly StudioLogThrottle? throttle;
 
+    /// <remarks>
+    /// <paramref name="throttle" /> is optional so that a test can build a catalog by hand; the container
+    /// always supplies it, and without one every failure is simply a Warning
+    /// (<see cref="StudioLogThrottle.LevelOrWarning" />).
+    /// </remarks>
     public StudioScopeCatalog(
         IOptions<MartenStudioOptions> options,
         MartenStoreRegistry registry,
         StudioAuthorization authorization,
         TenantDiscovery tenantDiscovery,
         IServiceProvider provider,
-        ILogger<StudioScopeCatalog> logger)
+        ILogger<StudioScopeCatalog> logger,
+        StudioLogThrottle? throttle = null)
     {
         this.options = options;
         this.registry = registry;
@@ -88,6 +95,7 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         this.tenantDiscovery = tenantDiscovery;
         this.provider = provider;
         this.logger = logger;
+        this.throttle = throttle;
     }
 
     /// <inheritdoc />
@@ -158,30 +166,118 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
             return new StoreScopeFacts(cardinality, showTenants, TenantList.Unavailable, null);
         }
 
+        TenantList discovered;
+        string identity;
+
         try
         {
-            foreach (IMartenDatabase database in await store.Storage.AllDatabases().ConfigureAwait(false))
+            IMartenDatabase? database = null;
+            foreach (IMartenDatabase candidate in await store.Storage.AllDatabases().ConfigureAwait(false))
             {
-                if (string.Equals(database.Id.Identity, databaseId, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(candidate.Id.Identity, databaseId, StringComparison.OrdinalIgnoreCase))
                 {
-                    TenantList tenants = await tenantDiscovery
-                        .DiscoverAsync(registration.Key, store, database, cancellationToken)
-                        .ConfigureAwait(false);
-
-                    return new StoreScopeFacts(cardinality, showTenants, tenants, null);
+                    database = candidate;
+                    break;
                 }
             }
+
+            if (database is null)
+            {
+                return new StoreScopeFacts(cardinality, showTenants, TenantList.Unavailable, null);
+            }
+
+            identity = database.Id.Identity;
+            discovered = await tenantDiscovery
+                .DiscoverAsync(registration.Key, store, database, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not discover the tenants of store {StoreKey}", storeKey);
+            // Warning the first time in a window, Debug after: the header asks this on every scope change
+            // in every circuit, so one unreachable database would otherwise be a Warning per click.
+            LogLevel level = StudioLogThrottle.LevelOrWarning(
+                throttle, "Store.Tenants", storeKey, null, StudioLogThrottle.KindOf(exception));
+            logger.TenantDiscoveryFailed(level, exception, storeKey);
+
+            return new StoreScopeFacts(cardinality, showTenants, TenantList.Unavailable, null);
         }
 
-        return new StoreScopeFacts(cardinality, showTenants, TenantList.Unavailable, null);
+        try
+        {
+            TenantList tenants = await FilterTenantsAsync(registration.Key, identity, discovered, cancellationToken)
+                .ConfigureAwait(false);
+
+            return new StoreScopeFacts(cardinality, showTenants, tenants, null);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Discovery worked and the host's own policy threw while it was being asked about the tenants
+            // it found - which is not "could not discover the tenants", and filing it under 9219 sent
+            // whoever read the log to the database instead of to their authorization handler. Its own
+            // event, throttled the same way and for the same reason. Nothing is listed: a policy that could
+            // not answer has not said yes to anything.
+            LogLevel level = StudioLogThrottle.LevelOrWarning(
+                throttle, "Store.TenantPolicy", storeKey, identity, StudioLogThrottle.KindOf(exception));
+            logger.TenantPolicyFailed(level, exception, storeKey, identity);
+
+            return new StoreScopeFacts(cardinality, showTenants, TenantList.Unavailable, null);
+        }
     }
 
     /// <inheritdoc />
     public void Invalidate() => tenantDiscovery.Invalidate();
+
+    /// <summary>
+    /// The tenants of <paramref name="tenants" /> the visitor may address, in the order discovery found
+    /// them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The tenant selector is a listing like the store and database pickers, and it is filtered like them
+    /// (plan section 4.2: authorization-filtered listings, and the count of tenants is itself withheld).
+    /// Discovery answers for the whole database - the host's <c>KnownTenantIds</c>, Marten's descriptors,
+    /// or the tenant columns themselves - so without this a visitor whose policy allows one tenant was
+    /// shown every tenant's name, and could pick one only for the layout to refuse the page. Each id is
+    /// asked about exactly as <see cref="StudioScopeResolver" /> would ask when that scope is resolved:
+    /// the store policy, with this store, this database and that tenant, and no capability.
+    /// </para>
+    /// <para>
+    /// <b>A filtered listing is never claimed to be complete</b> (DB-0-fix-2, F7). Under a policy the
+    /// answer is always marked <see cref="TenantList.IsTruncated" />, whether or not discovery hit its cap:
+    /// "there may be tenants this list does not show" is true for every visitor a policy filters, and
+    /// saying it only when discovery found more than two hundred told them that it had. It is also what
+    /// lets <c>ScopeSelector</c> offer the filtered list with an "Other…" entry beside it - the way to reach
+    /// an allowed tenant past the cap - and have <see cref="StudioState.SetScopeAsync" /> accept what is
+    /// typed there, the same way whatever the store holds. What is typed is resolved like any other scope,
+    /// so a tenant the policy refuses is refused by the layout and by every data call; the list the
+    /// visitor is <em>shown</em> still names only the ones it allows.
+    /// </para>
+    /// <para>
+    /// A handler that throws is not answered here; <see cref="DescribeAsync" /> logs it as event 9221 and
+    /// lists nothing.
+    /// </para>
+    /// </remarks>
+    private async Task<TenantList> FilterTenantsAsync(
+        string storeKey,
+        string databaseId,
+        TenantList tenants,
+        CancellationToken cancellationToken)
+    {
+        if (!authorization.IsEnabled || tenants.Ids.Count == 0)
+        {
+            return tenants;
+        }
+
+        List<string> allowed = await authorization
+            .FilterAsync(
+                tenants.Ids,
+                tenantId => new StudioScope(storeKey, databaseId, tenantId),
+                take: null,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return tenants with { Ids = allowed, IsTruncated = true };
+    }
 
     private async Task<IReadOnlyList<DatabaseListing>> ListDatabasesAsync(
         string storeKey,
@@ -198,7 +294,10 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not list the databases of store {StoreKey}", storeKey);
+            // The same event, and the same throttle key, as the Overview's store card (9213).
+            LogLevel level = StudioLogThrottle.LevelOrWarning(
+                throttle, "Store.Databases", storeKey, null, StudioLogThrottle.KindOf(exception));
+            logger.StoreDatabasesUnreadable(level, exception, storeKey);
             return [];
         }
 

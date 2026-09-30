@@ -1,4 +1,5 @@
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Query;
 
@@ -33,19 +34,19 @@ public class DocumentCountFailureTests
     /// <summary>Postgres' <c>query_canceled</c> is a timeout, whatever raised it.</summary>
     [Fact]
     public void A_57014_is_a_timeout() =>
-        DocumentDataService.IsTimeout(Postgres("57014")).Should().BeTrue();
+        PostgresFailure.IsTimeout(Postgres("57014")).Should().BeTrue();
 
     /// <summary>Npgsql's client-side timeout is the same answer wearing a different exception.</summary>
     [Fact]
     public void And_so_is_Npgsqls_own_command_timeout() =>
-        DocumentDataService.IsTimeout(
+        PostgresFailure.IsTimeout(
                 new NpgsqlException("Exception while reading from stream", new TimeoutException()))
             .Should().BeTrue();
 
     /// <summary>A bare <see cref="TimeoutException" />, for the paths that do not wrap it.</summary>
     [Fact]
     public void And_a_bare_TimeoutException() =>
-        DocumentDataService.IsTimeout(new TimeoutException()).Should().BeTrue();
+        PostgresFailure.IsTimeout(new TimeoutException()).Should().BeTrue();
 
     /// <summary>
     /// Everything else is a fault, and has to stay one.
@@ -61,14 +62,14 @@ public class DocumentCountFailureTests
     [InlineData("55P03")] // lock_not_available
     [InlineData("53300")] // too_many_connections
     public void But_an_ordinary_Postgres_failure_is_not(string sqlState) =>
-        DocumentDataService.IsTimeout(Postgres(sqlState)).Should().BeFalse();
+        PostgresFailure.IsTimeout(Postgres(sqlState)).Should().BeFalse();
 
     /// <summary>And neither is a plain programming error.</summary>
     [Fact]
     public void And_neither_is_anything_else()
     {
-        DocumentDataService.IsTimeout(new InvalidOperationException()).Should().BeFalse();
-        DocumentDataService.IsTimeout(new NpgsqlException("the socket went away")).Should().BeFalse();
+        PostgresFailure.IsTimeout(new InvalidOperationException()).Should().BeFalse();
+        PostgresFailure.IsTimeout(new NpgsqlException("the socket went away")).Should().BeFalse();
     }
 
     private static PostgresException Postgres(string sqlState) =>

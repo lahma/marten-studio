@@ -352,6 +352,74 @@ public class MultiDatabaseDaemonLiveTests(PostgresFixture postgres) : IAsyncLife
     }
 
     /// <summary>
+    /// DB-0-fix, item 9, live: a progression correction without a tenant reaches every database of the
+    /// store, so a visitor who may not reach one of them may not run it.
+    /// </summary>
+    /// <remarks>
+    /// Marten 9.31's <c>AdvanceHighWaterMarkToLatestAsync(token)</c> and
+    /// <c>TryCorrectProgressInDatabaseAsync(token)</c> loop over <c>Tenancy.BuildDatabases()</c> - both of
+    /// this store's databases - and there is no per-database form. The studio authorized only the scope in
+    /// the URL, so a visitor allowed only the primary could advance the secondary's high-water mark. The
+    /// second half runs the same call with both databases allowed and proves it goes through, against the
+    /// real store: the refusal is the check's, not everything's.
+    /// </remarks>
+    [PostgresTheory]
+    [InlineData("AdvanceHighWaterMark")]
+    [InlineData("CorrectProgression")]
+    public async Task A_correction_without_a_tenant_is_refused_unless_the_visitor_may_reach_every_database(string action)
+    {
+        IReadOnlyList<IMartenDatabase> databases = await Store.Storage.AllDatabases();
+        databases.Should().HaveCount(2);
+
+        string visible = databases[0].Id.Identity;
+        string hidden = databases[1].Id.Identity;
+
+        var asked = new StudioScope(MartenStoreRegistry.DefaultStoreKey, visible, null);
+
+        var restrictive = new FakeStoreAuthorizationService();
+        restrictive.Allow(resource => !string.Equals(resource.DatabaseIdentifier, hidden, StringComparison.Ordinal));
+
+        var logs = new CapturingLogs();
+
+        await using (ServiceProvider restricted = BuildRestrictedStudio(restrictive, logs))
+        {
+            using IServiceScope scope = restricted.CreateScope();
+            var service = scope.ServiceProvider.GetRequiredService<IProjectionDataService>();
+
+            Func<Task> correcting = () => RunCorrectionAsync(service, action, asked);
+
+            await correcting.Should().ThrowAsync<StudioNotAuthorizedException>(
+                "Marten would run this against the secondary too, and this visitor may not address it");
+
+            StudioActionLogEntry refusal = restricted.GetRequiredService<StudioActionLogService>().GetLatest()
+                .Should().ContainSingle(x => x.Action == action && !x.Succeeded).Subject;
+
+            refusal.DatabaseId.Should().Be(hidden, "the audit names the database that was refused");
+            logs.EventIds.Should().Contain(9203, "a scope denial is logged as one");
+        }
+
+        var permissive = new FakeStoreAuthorizationService();
+
+        await using (ServiceProvider allowed = BuildRestrictedStudio(permissive, new CapturingLogs()))
+        {
+            using IServiceScope scope = allowed.CreateScope();
+            var service = scope.ServiceProvider.GetRequiredService<IProjectionDataService>();
+
+            await RunCorrectionAsync(service, action, asked);
+
+            allowed.GetRequiredService<StudioActionLogService>().GetLatest()
+                .Should().Contain(x => x.Action == action && x.Succeeded, "with every database allowed, the correction runs");
+        }
+    }
+
+    private static Task RunCorrectionAsync(IProjectionDataService service, string action, StudioScope scope) => action switch
+    {
+        "AdvanceHighWaterMark" => service.AdvanceHighWaterMarkAsync(scope, Token),
+        "CorrectProgression" => service.CorrectProgressionAsync(scope, Token),
+        _ => throw new ArgumentOutOfRangeException(nameof(action), action, "not a correction"),
+    };
+
+    /// <summary>
     /// A second studio over the <em>same</em> store and the same running coordinator, with a store policy
     /// that refuses one of the two databases.
     /// </summary>

@@ -10,4 +10,14 @@
     <PackageReference Include="Marten" />
   </ItemGroup>
 
+  <!--
+    The relational demo schemas (Quartz.NET's job store and a hand-made "legacy" schema) that
+    RelationalDemoSchema applies. Embedded under a fixed logical name, so the resource name does not
+    depend on how the SDK derives one from a folder path.
+  -->
+  <ItemGroup>
+    <None Remove="Relational/*.sql" />
+    <EmbeddedResource Include="Relational/*.sql" LogicalName="MartenStudio.SampleDomain.Relational.%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

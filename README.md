@@ -37,6 +37,10 @@ byte-for-byte the application it was.
 | Projections and the async daemon: shard state, progression and the high-water mark | Schema — what Marten would change, before anything is applied |
 | [![Relationships](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/relationships.png)](docs/screenshots/relationships.png) | |
 | Relationships — the foreign keys `StoreOptions` declares, cross-checked against the ones Postgres holds | |
+| [![Database browser](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/database-browser.png)](docs/screenshots/database-browser.png) | [![Table rows](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/database-rows.png)](docs/screenshots/database-rows.png) |
+| Database — every table, view, function, trigger, sequence and type beside the store, Marten's own told apart; here a Quartz.NET job store | A table's rows: a filter with its index verdict, keyset paging over a composite key, typed headers and "≈ date" hints |
+| [![Row detail](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/database-row-detail.png)](docs/screenshots/database-row-detail.png) | [![Relationships over tables](https://raw.githubusercontent.com/lahma/marten-studio/main/docs/screenshots/relationships-quartz.png)](docs/screenshots/relationships-quartz.png) |
+| One row: every column, what it points at and what points at it | Relationships over plain tables beside the document types |
 
 ## Install
 
@@ -72,8 +76,9 @@ drift:
 builder.Services
     .AddMarten(options => SampleStore.Configure(options, connectionString))
     .UseLightweightSessions()
-    .AddAsyncDaemon(JasperFx.Events.Daemon.DaemonMode.Solo)
-    .InitializeWith(new SampleDataSeeder());
+    // --no-daemon: Disabled registers no coordinator, which is a host whose projections run elsewhere.
+    .AddAsyncDaemon(sample.NoDaemon ? DaemonMode.Disabled : DaemonMode.Solo)
+    .InitializeWith<SampleDataSeeder>();
 
 builder.Services.AddMartenStudio(options =>
 {
@@ -92,6 +97,12 @@ builder.Services.AddMartenStudio(options =>
     // opt-in; `ReadOnly` overrides it whatever it says.
     options.Capabilities = sample.ReadOnly ? new MartenStudioCapabilities() : MartenStudioCapabilities.All();
     options.ReadOnly = sample.ReadOnly;
+
+    // The database browser (Capabilities.BrowseDatabase, part of All()) may also show these schemas: the
+    // Quartz.NET job store and the legacy relational schema the sample seeds beside the store. "*" would
+    // open every schema the studio's role can use - fine for a scratch database, not for a shared one.
+    options.BrowsableSchemas.Add(RelationalDemoSchema.QuartzSchemaName);
+    options.BrowsableSchemas.Add(RelationalDemoSchema.LegacySchemaName);
 
     // The demo's invoices are conjoined multi-tenant. Naming the tenants here is the cheapest of the
     // three discovery tiers and the only one that can answer before any events have been written.
@@ -208,16 +219,18 @@ public sealed class MartenStudioHandler
         MartenStudioRequirement requirement,
         MartenStoreResource resource)
     {
-        // Reads: the tenant has to be one this user owns.
+        // Reads: the tenant has to be one this user owns - and a resource with no tenant is every
+        // tenant at once, so it takes an explicit all-tenants claim rather than passing for everyone.
         bool mayRead = resource.TenantId is null
-            || context.User.HasClaim("tenant", resource.TenantId);
+            ? context.User.HasClaim("tenant", "*")
+            : context.User.HasClaim("tenant", resource.TenantId);
 
         // Writes: the capability name arrives on the resource, so one handler can be as coarse or as
         // fine as you like - "ops may rebuild, nobody but me may run SQL".
         bool mayWrite = resource.Capability switch
         {
             null => true,
-            "RunSql" => context.User.IsInRole("dba"),
+            "RunSql" or "BrowseDatabase" => context.User.IsInRole("dba"),
             _ => context.User.IsInRole("ops"),
         };
 
@@ -230,6 +243,12 @@ public sealed class MartenStudioHandler
     }
 }
 ```
+
+A `null` tenant is not "no tenant to check" but every tenant at once — the all-tenants view, and every
+`BrowseDatabase` read, every SQL console run and every operation that reaches a whole shared database (a
+dead-letter rewind, a progression correction, a rebuild, a schema apply), which are always asked with
+`TenantId = null` because nothing narrows them to a tenant — so a handler that let it through for everybody would hand a user scoped to one tenant
+all of them.
 
 Register it the usual way and name the policy:
 
@@ -252,19 +271,20 @@ application that never set the option exactly as it was.
 
 ## Capabilities
 
-Nine booleans, **all `false` by default**. A freshly mapped studio is a read-only browser.
+Ten booleans, **all `false` by default**. A freshly mapped studio is a read-only browser of Marten's own data.
 
 | Capability | What it allows |
 |---|---|
 | `EditDocuments` | Edit a document's JSON and save it through the store's own serializer and session |
 | `DeleteDocuments` | Delete, soft-delete and undelete documents, one at a time or a selection |
 | `ArchiveStreams` | Archive an event stream |
-| `ManageDeadLetters` | Discard dead-letter records, mark events as skipped, and rewind a subscription to the event that failed |
+| `ManageDeadLetters` | Discard dead-letter records, mark events as skipped, and rewind a subscription to the event that failed (a rewind reaches every tenant in the database, so it is asked with `TenantId = null` unless the database holds only the selected tenant) |
 | `ControlDaemon` | Pause and resume the async daemon hosted in this process, start and stop individual projection agents while it is paused, and restart the high-water agent |
 | `RebuildProjections` | Rebuild a projection |
 | `CorrectProgression` | Advance the high-water mark, or correct projection progression in the database |
 | `ApplySchemaChanges` | Apply pending schema migrations |
-| `RunSql` | Run read-only SQL from the Query page's console |
+| `RunSql` | Run read-only SQL from the Query page's console. Authorized like a write and always with `TenantId = null` — the console is not limited to a tenant — which also governs the Mode A `EXPLAIN` and the subquery lift |
+| `BrowseDatabase` | Browse the rows and definitions of non-Marten tables, views, functions, triggers, sequences and types in the schemas `BrowsableSchemas` names. A read, authorized like `RunSql` as a write, and always with `TenantId = null` |
 
 ```csharp
 options.Capabilities = MartenStudioCapabilities.All();   // everything: the one-line, greppable opt-in
@@ -279,7 +299,8 @@ Every disabled control says the exact property you would set, spelled the way yo
 
 and with the master switch on:
 
-> `MartenStudioOptions.ReadOnly` is `true`, which turns every mutating operation off.
+> `MartenStudioOptions.ReadOnly` is `true`, which turns every capability off: the mutating operations,
+> and the reads beyond the store (`RunSql` and `BrowseDatabase`).
 
 Hiding a button is a convenience. The refusal itself lives in the service layer, where the operation
 does, because a Blazor circuit is a long-lived object a client can drive — and every refusal is written
@@ -298,7 +319,7 @@ fails the host with a message that names the option.
 | `StoreAuthorizationPolicy` | `null` | Policy evaluated against `MartenStoreResource` before a store, database or tenant is listed, framed or read. |
 | `WriteAuthorizationPolicy` | `null` | Policy evaluated against `MartenStoreResource` with the capability named, before every mutation. Falls back to `StoreAuthorizationPolicy`. |
 | `ReadOnly` | `false` | Master switch: every capability off, mutating controls not rendered, services refuse. |
-| `Capabilities` | all off | Which mutating operations are enabled. |
+| `Capabilities` | all off | Which mutating operations, and which reads beyond the store (`RunSql`, `BrowseDatabase`), are enabled. |
 | `DefaultPageSize` | `50` | Rows per page when a list is first shown. 1 … `MaxPageSize`. |
 | `MaxPageSize` | `500` | The largest page a user may pick. 1 … 5000. |
 | `QueryTimeout` | 30 seconds | How long a studio query may run. It is a server-side `statement_timeout` where the studio owns a transaction — the SQL console, the Marten `where` clause, the recent-documents scan — and Npgsql's client-side `CommandTimeout` everywhere else. 1 second … 10 minutes. |
@@ -312,6 +333,7 @@ fails the host with a message that names the option.
 | `IncludeAncillaryStores` | `true` | Whether stores registered with `AddMartenStore<T>()` appear beside the default `IDocumentStore`. |
 | `KnownTenantIds` | empty | Tenant ids to offer in the selector. When non-empty, discovery is skipped. |
 | `DiscoverTenantIds` | `true` | When `KnownTenantIds` is empty, whether to discover tenants from Marten's descriptors and then from a bounded query. |
+| `BrowsableSchemas` | empty | Schemas beyond the store's own that the database browser may show, and whose non-Marten rows and definitions it may read (with `Capabilities.BrowseDatabase`). Exact schema names, or `"*"` for every schema the studio's role has `USAGE` on except Postgres' own and extensions'. It limits what the screens show, not what `RunSql` can read — `SqlConsoleRole` is the real boundary. |
 
 > **`RebuildShardTimeout` is not a nicety.** A rebuild tears the projection's tables down *before* the
 > timeout starts applying to the replay, so a rebuild that exceeds it stops with the tables already
@@ -339,13 +361,35 @@ drops. Saves are optimistically concurrent (`UpdateExpectedVersion` / `UpdateRev
 moved comes back as a conflict with nothing written. With `DeleteDocuments` you get delete (soft where
 the mapping says soft, hard otherwise), undelete, and a bulk delete over the selection.
 
+**Database** — everything else in the store's Postgres database, for a host that keeps a Quartz.NET job
+store, a legacy schema or another library's tables beside Marten. A schema rail, and kind tabs for
+tables, views, functions, triggers, sequences and types; Marten's own objects are quieter, sorted last and
+linked to where their data is really read, and a Quartz.NET, Wolverine, EF Core, Hangfire or Flyway object
+is hinted by name. Each object has a detail page — columns, keys and indexes, foreign keys both ways,
+triggers, a view's query, and its neighbourhood in the relationships diagram — and a table, view or
+materialized view that is not Marten's has a **Rows** tab: a `col = value` / `col ~ text` / `col is:null`
+filter with an index verdict (and "Run anyway" before an unindexed read of a large table), keyset paging
+over composite keys, typed and sortable headers, JSON and `bytea` cells opening in the viewer, a "≈ date"
+hint under `bigint` columns holding .NET ticks or epoch times, and row detail that follows foreign keys
+both ways. The structure of the store's own schemas is shown to every visitor, as the Schema screen always
+did; everything else — other schemas, definitions of what Marten does not own, and every row — needs
+`Capabilities.BrowseDatabase`, a schema `BrowsableSchemas` names (or `"*"`), and the write policy asked
+with `TenantId = null`, because nothing filters those tables by tenant. It is read-only, runs in the same
+read-only transaction as the SQL console as `SqlConsoleRole`, locks nothing it lists, and audits the first
+read of every relation. It never reads the rows of Marten's own document or event tables (they are read in
+Documents and Events, where tenancy, soft delete and the serializer apply), never reads a foreign table,
+directly or through a view, never shows a hidden document type or anything built on it, and masks the name
+of a schema the visitor may not see as `‹withheld›` wherever Postgres prints it.
+
 **Relationships** — the document types of the store as a graph: one node per registered type with its
 collection colour, its .NET type and a `reltuples` estimate, one arrow per foreign key. What
 `StoreOptions` declares and what `pg_constraint` actually holds are cross-checked, so an arrow is
 *declared and enforced*, *declared only* — configured, never applied, nothing enforcing it — or *in the
 database only*, which Marten does not know about and an apply under `CreateOrUpdate` would drop. Keys
-with an end outside the store's document types are listed rather than drawn, and a type hidden by
-`IsDocumentTypeVisible` appears nowhere at all. Clicking a node opens the collection; hovering an arrow
+into the database's other tables are drawn too, as square, schema-coloured nodes — a Documents / Tables /
+Both switch and schema chips narrow the picture, composite-key labels leave out the leading columns both
+primary keys share, and a `NOT VALID` key is dashed — while a key into a schema the visitor may not see is
+counted, never named, and a type hidden by `IsDocumentTypeVisible` appears nowhere at all. Clicking a node opens the collection; hovering an arrow
 names the column, the target and the delete action. Beside the picture — and, on a narrow screen,
 instead of it — a table carries the same relationships with the same links, which is also what a screen
 reader gets. There is no pan, no zoom and no JavaScript: the layout is computed on the server and is a
@@ -393,8 +437,20 @@ the page says so — that is a value, not an error, and the studio never starts 
 
 **Schema** — five tabs: *Drift* (what Marten would change), *Tables*, *Indexes*, *Functions* and *DDL*.
 Nothing here executes DDL on a read path: schema names, declared indexes, managed tables and installed
-functions come from `StoreOptions` and Marten's own feature schemas, and `Check`, `Preview` and `DDL`
-sit behind buttons that say on the button what they may create.
+functions come from `StoreOptions` and Marten's own feature schemas, and `Check`, `Preview` and `DDL` sit
+behind buttons that say on the button what they may create. What those three show spans the whole
+database — every tenant's partition by name, every document type's table — so they answer only a visitor
+the store policy allows for the database with no tenant selected, and, while `IsDocumentTypeVisible`
+hides a document type, one past the database browser's gate (`Capabilities.BrowseDatabase` and the write
+policy). An apply migrates the whole database, every tenant, whichever tenant is selected, so both
+policies are asked about the database as a whole. *Tables* says whose each table is by the database
+browser's rules, rolls partitions into their parent without listing them, leaves hidden document types
+out, and shows a partition count or a Marten tenancy table's row count only past that gate, because
+either is the number of tenants. *Functions* reads a body when you open its row: Marten's own for
+everybody, the application's own only with `Capabilities.BrowseDatabase` and a schema `BrowsableSchemas`
+admits. A name in a schema you may not see reads `‹withheld›`, as in the browser. If a registered store
+cannot be built, the tabs keep what the other stores declare and withhold, and say, what that store could
+own. The reads give up after three seconds behind a migration's lock rather than wait for it.
 
 > **An apply runs under `AutoCreate.CreateOrUpdate`, and `CreateOrUpdate` is not additive.** Weasel's
 > update path emits `drop index` for every physical index your configuration does not declare,
@@ -404,9 +460,10 @@ sit behind buttons that say on the button what they may create.
 > back. The preview is rendered under the same mode so what you read is what would run, and the
 > destructive statements are listed in the dialog before a typed confirmation. **A hand-made index is
 > dropped by the next apply** unless you declare it, or name it in
-> `opts.Schema.For<T>().IgnoreIndex("…")` — or `opts.Events.IgnoreIndex("…")` on an event table — which
-> takes it off both sides so it is neither created nor dropped. The Indexes and Drift tabs say this on
-> screen, and name the index.
+> `opts.Schema.For<T>().IgnoreIndex("…")` — or `opts.Events.IgnoreIndex("…")` on an event table, and
+> `table.IgnoreIndex("…")` on a projection's or an `ExtendedSchemaObjects` table, which an apply migrates
+> just the same — which takes it off both sides so it is neither created nor dropped. The Indexes and
+> Drift tabs say this on screen, and name the index.
 
 **Configuration** — everything your application told Marten, read back out: serializer, tenancy, schema
 names, metadata columns, projections, the databases. Never a connection string and never a credential; a
@@ -501,9 +558,10 @@ layer of the authorization contract does.
 | `--anonymous` | Map the studio with `AllowAnonymous()` instead of a policy, to show what an unauthenticated studio looks like. The landing page draws a red banner saying so. Never do this anywhere real. |
 | `--readonly` | Set `MartenStudioOptions.ReadOnly`, which turns every mutating capability off however they were configured. |
 | `--path /ops/marten` | Mount the studio somewhere other than `/marten`, which is what exercises the sub-path re-rooting. |
+| `--no-daemon` | Host no async daemon (`AddAsyncDaemon(DaemonMode.Disabled)`), the shape of a production host whose projections run elsewhere. The studio shows progress from the database and logs nothing about it above Debug. |
 
 > **Argument order does not matter.** The sample's boolean switches — `--anonymous`, `--readonly`,
-> `--allow-data-generation` — are switches, not `--key value` pairs: writing one means `true` and the
+> `--allow-data-generation`, `--no-daemon` — are switches, not `--key value` pairs: writing one means `true` and the
 > token after it is left alone, so `dotnet run -- --anonymous --urls http://localhost:5000` and
 > `dotnet run -- --urls http://localhost:5000 --anonymous` do the same thing. An explicit value is
 > still accepted where a script wants to pass a variable (`--readonly false`, `--readonly=false`), and
@@ -567,6 +625,30 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   `ScopeAuthorizationDenied`, 9204 `SqlExecuted`, 9205 `SqlRejected`, 9206 `SchemaChangeApplied`, 9207
   `ProjectionRebuildStarted`, 9208 `ProjectionRebuildFinished`, 9209 `DaemonControlRequested`, 9210
   `StoreUnavailable`, 9211 `DocumentWriteRoundTripDropped`. The range 9200–9299 is reserved.
+- **Log levels.** A state the host configured is not a warning. No async daemon in this process, a
+  daemon run by an external system (`AsyncMode = ExternallyManaged`, which Wolverine's managed
+  distribution sets), event tables that do not exist yet, a speculative count or a query of your own
+  running out of its budget — each is a value the page already shows, logged at `Debug` at most. A real
+  anomaly on a path the studio polls every `RefreshInterval` is logged at `Warning` **once per store,
+  database and exception type per ten minutes**, and at `Debug` in between, so filter on the event id
+  rather than muting the category:
+
+  | Id | Event | Logged when |
+  |---|---|---|
+  | 9202, 9203 | `CapabilityDenied`, `ScopeAuthorizationDenied` | Always `Warning`: a capability or policy refused an action |
+  | 9210 | `StoreUnavailable` | A registered store will not build |
+  | 9211 | `DocumentWriteRoundTripDropped` | Always `Warning`: an edit was saved and the round trip dropped properties |
+  | 9212 | `DaemonUnreachable` | A registered coordinator answered with something other than a daemon for this database, or could not be constructed for a reason other than Wolverine's unknown-store shape |
+  | 9213 | `StoreDatabasesUnreadable` | A store's databases could not be listed |
+  | 9214 | `PostgresVersionUnreadable` | The server version could not be read |
+  | 9215 | `ShardTrackerUnobservable` | The in-process shard tracker could not be observed |
+  | 9216 | `ProjectionSummaryUnreadable` | The Overview's or the navigation's projection summary failed |
+  | 9217 | `EventReadFailed` | An event-store read failed for a reason other than a statement timeout |
+  | 9218 | `StreamTimestampMissing` | A hand-migrated `mt_streams` has a row with a null timestamp |
+  | 9219 | `TenantDiscoveryFailed` | The scope selector could not discover a store's tenants |
+  | 9220 | `LiveUpdateHandlerFailed` | A page's own refresh-failure handler threw |
+  | 9221 | `TenantPolicyFailed` | The store policy threw while the scope selector filtered a database's tenants |
+
 - **What the studio never does:** start a second projection daemon, execute DDL on a read or navigation
   path, write document DML of its own, replace your `StoreOptions.Logger`, or show a connection string
   or a credential anywhere.

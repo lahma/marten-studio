@@ -2,7 +2,9 @@
 
    "Not hosted in this process" is a value, not a failure (AGENTS.md hard rule 11): an application whose
    daemon runs elsewhere is a supported deployment, and the page still renders every progress row out of
-   the database. Only the buttons go away. *@
+   the database. Only the buttons go away. "External" is the same kind of value with a different owner:
+   the store's AsyncMode is ExternallyManaged, so another system - Wolverine's managed distribution,
+   typically - runs these projections, and starting, stopping and rebuilding are that system's. *@
 
 <section class="ms-daemon-card ms-daemon-@StateClass" aria-label="Async daemon">
     <header class="ms-daemon-card-header">
@@ -18,7 +20,7 @@
     <div class="ms-kv ms-daemon-facts">
         <div class="ms-kv-row">
             <span class="ms-kv-key">Hosting</span>
-            <span class="ms-kv-value">@(IsHostedHere ? "This process" : "Not this process")</span>
+            <span class="ms-kv-value ms-daemon-hosting">@HostingText</span>
         </div>
         @if (IsHostedHere)
         {
@@ -89,7 +91,14 @@
     [Parameter]
     public bool IsRunning { get; set; }
 
-    /// <summary>The configured daemon mode - Disabled, Solo or HotCold.</summary>
+    /// <summary>
+    /// Whether an external system runs this store's async projections (<c>AsyncMode</c> is
+    /// <c>ExternallyManaged</c>). Never true together with <see cref="IsHostedHere" />.
+    /// </summary>
+    [Parameter]
+    public bool IsExternallyManaged { get; set; }
+
+    /// <summary>The configured daemon mode - Disabled, Solo, HotCold or ExternallyManaged.</summary>
     [Parameter]
     public string Mode { get; set; } = "Unknown";
 
@@ -152,8 +161,13 @@
     /// </remarks>
     private bool PauseNoLongerInEffect => IsHostedHere && IsPausedByStudio && IsRunning;
 
+    private string HostingText => IsHostedHere
+        ? "This process"
+        : IsExternallyManaged ? "External" : "Not this process";
+
     private string Headline => (IsHostedHere, IsPausedByStudio, IsRunning, HasAnyPaused) switch
     {
+        (false, _, _, _) when IsExternallyManaged => "External: run by another system",
         (false, _, _, _) => "Not hosted in this process",
         (true, true, true, _) => "Hosted and running - the studio's pause is no longer in effect",
         (true, true, false, _) => "Hosted, paused by Marten Studio",

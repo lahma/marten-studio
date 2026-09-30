@@ -1,0 +1,27 @@
+@using MartenStudio.Components.Pages.Relationships
+
+@*
+    The Relationships tab: the relation and its direct neighbours, drawn by the relationships screen's own
+    neighbourhood graph, which reads the same per-visitor gate and keeps its edge table beside the picture -
+    the form that works at every width and in a screen reader. A far end this visitor may not see is
+    counted there and never named.
+
+    The contract is the parameters, and the graph reads everything else for itself:
+
+      Schema  - the relation's schema, as the catalog spells it
+      Name    - the relation's name, likewise
+*@
+
+<div class="ms-db-relationships" data-schema="@Schema" data-name="@Name">
+    <NeighbourhoodGraph Schema="@Schema" Name="@Name" />
+</div>
+
+@code {
+    /// <summary>The relation's schema.</summary>
+    [Parameter]
+    public string Schema { get; set; } = string.Empty;
+
+    /// <summary>The relation's name.</summary>
+    [Parameter]
+    public string Name { get; set; } = string.Empty;
+}

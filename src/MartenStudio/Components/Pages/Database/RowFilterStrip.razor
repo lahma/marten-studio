@@ -1,0 +1,187 @@
+@using MartenStudio.Components.Pages.Documents
+@using MartenStudio.Services.Database
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Query
+
+@*
+    The row filter as the studio understood it: one chip per term, coloured by whether an index serves it,
+    each removable; the terms that did not parse, with a caret under the place in the filter they are about;
+    "Run anyway" when the read was withheld; and Show SQL. The documents list's strip, for a table - the same
+    classes, so the two read as one control.
+
+    Like SearchGrammarStrip it is about the filter and nothing else. The sort's index verdict is drawn beside
+    the column header it is about, because a strip that goes red for an unindexed sort goes red on pages
+    nobody typed a filter into, and a banner that is always there is a banner nobody reads.
+
+    A chip is removed by cutting its term's span out of the filter text as typed, so every other term keeps
+    its spelling - quotes, escapes and all - rather than coming back rewritten.
+*@
+
+@{
+    RowFilterVerdict verdict = Verdict;
+    IReadOnlyList<SearchChip> predicates = Predicates(verdict);
+    string level = Level(verdict);
+}
+
+<div class="ms-search-strip ms-verdict-@level ms-row-filter-strip" role="status">
+    <div class="ms-search-strip-row">
+        <span class="ms-verdict-badge ms-verdict-badge-@level" title="@VerdictTitle(verdict, predicates.Count)">@VerdictText(verdict, predicates.Count)</span>
+
+        @* Keyed by position, never by the chip: two identical terms are equal records, and a duplicate @key
+           takes the circuit down. *@
+        @for (int index = 0; index < predicates.Count; index++)
+        {
+            int termIndex = index;
+            SearchChip chip = predicates[index];
+            string chipLevel = chip.Level.ToString().ToLowerInvariant();
+
+            <span class="ms-search-chip ms-search-chip-predicate ms-verdict-@chipLevel ms-row-chip" title="@chip.Reason" @key="index">
+                <span class="ms-row-chip-text">@chip.Text</span>
+                @if (termIndex < verdict.Terms.Count)
+                {
+                    <button type="button"
+                            class="ms-row-chip-remove"
+                            aria-label="@($"Remove the term {chip.Text}")"
+                            title="Remove this term"
+                            @onclick="() => RemoveAsync(termIndex)">×</button>
+                }
+            </span>
+        }
+
+        @if (verdict.Errors.Count > 0)
+        {
+            <span class="ms-search-chip ms-search-chip-error">@(verdict.Errors.Count == 1 ? "1 term not understood" : $"{verdict.Errors.Count} terms not understood")</span>
+        }
+
+        @if (predicates.Count == 0 && verdict.Errors.Count == 0)
+        {
+            <span class="ms-search-chip ms-search-chip-empty">no filter - every row</span>
+        }
+        else
+        {
+            <button type="button" class="ms-btn ms-btn-sm ms-row-filter-clear" @onclick="ClearAsync">Clear filter</button>
+        }
+    </div>
+
+    @if (predicates.Any(static x => x.Level != IndexVerdictLevel.Green))
+    {
+        <ul class="ms-verdict-reasons">
+            @for (int index = 0; index < predicates.Count; index++)
+            {
+                SearchChip chip = predicates[index];
+
+                @if (chip.Level != IndexVerdictLevel.Green)
+                {
+                    <li class="ms-verdict-reason ms-verdict-@chip.Level.ToString().ToLowerInvariant()" @key="index">
+                        <span class="ms-verdict-reason-text">@chip.Text: @chip.Reason</span>
+                    </li>
+                }
+            }
+        </ul>
+    }
+
+    @if (verdict.Errors.Count > 0)
+    {
+        <div class="ms-row-filter-errors" role="alert">
+            @for (int index = 0; index < verdict.Errors.Count; index++)
+            {
+                SearchGrammarError error = verdict.Errors[index];
+
+                <div class="ms-row-filter-error" @key="index">
+                    @* One string, so the line break between the filter and its caret is the component's and
+                       never at the mercy of the compiler's whitespace trimming. *@
+                    <pre class="ms-row-filter-caret" aria-hidden="true">@(RowPresentation.CaretText(Filter) + "\n" + RowPresentation.Caret(error.Position, error.Length))</pre>
+                    <p class="ms-row-filter-error-text">
+                        @error.Message
+                        <span class="ms-row-filter-error-at">at character @((error.Position + 1).ToString(System.Globalization.CultureInfo.InvariantCulture))</span>
+                    </p>
+                </div>
+            }
+        </div>
+    }
+
+    @if (Withheld)
+    {
+        <div class="ms-verdict-blocked ms-row-withheld">
+            <span>@(Reason ?? "This read would scan every row of a large table, so the studio has not run it.")</span>
+            <button type="button" class="ms-btn ms-btn-primary ms-btn-sm" @onclick="RunAnywayAsync">Run anyway</button>
+        </div>
+    }
+
+    <SqlDisclosure Sql="@Sql" ParameterNames="ParameterNames" />
+</div>
+
+@code {
+    /// <summary>The verdict, as a <c>RowFilterVerdict</c>; typed <see cref="object" /> for the reason <c>DocumentComponentModel</c> gives.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>The filter exactly as it is in the URL - what the caret line is drawn under.</summary>
+    [Parameter]
+    public string? Filter { get; set; }
+
+    /// <summary>Whether the service withheld the read until "Run anyway".</summary>
+    [Parameter]
+    public bool Withheld { get; set; }
+
+    /// <summary>The service's sentence for a withheld read.</summary>
+    [Parameter]
+    public string? Reason { get; set; }
+
+    /// <summary>The statement that ran, or would have run.</summary>
+    [Parameter]
+    public string? Sql { get; set; }
+
+    /// <summary>Its parameter names - never their values.</summary>
+    [Parameter]
+    public IReadOnlyList<string> ParameterNames { get; set; } = [];
+
+    /// <summary>Removes the term at this index of <c>RowFilterVerdict.Terms</c>.</summary>
+    [Parameter]
+    public EventCallback<int> OnRemoveTerm { get; set; }
+
+    /// <summary>Clears the whole filter.</summary>
+    [Parameter]
+    public EventCallback OnClear { get; set; }
+
+    /// <summary>Reads despite the verdict.</summary>
+    [Parameter]
+    public EventCallback OnRunAnyway { get; set; }
+
+    private RowFilterVerdict Verdict => DocumentComponentModel.Read(Model, RowFilterVerdict.Empty);
+
+    /// <summary>The term chips, in the order typed - the same order as <c>RowFilterVerdict.Terms</c>.</summary>
+    private static IReadOnlyList<SearchChip> Predicates(RowFilterVerdict verdict) =>
+        [.. verdict.Chips.Where(static x => x.Kind == SearchChipKind.Predicate)];
+
+    private static string Level(RowFilterVerdict verdict) =>
+        (verdict.HasErrors ? IndexVerdictLevel.Red : verdict.FilterLevel).ToString().ToLowerInvariant();
+
+    private static string VerdictText(RowFilterVerdict verdict, int terms) => verdict.HasErrors
+        ? "cannot parse"
+        : terms == 0
+            ? "no filter"
+            : verdict.FilterLevel switch
+            {
+                IndexVerdictLevel.Green => "indexed",
+                IndexVerdictLevel.Amber => "partly indexed",
+                _ => "full scan",
+            };
+
+    private static string VerdictTitle(RowFilterVerdict verdict, int terms) => verdict.HasErrors
+        ? "Part of this filter could not be understood; the marked terms say why."
+        : terms == 0
+            ? "Nothing is filtered: this is one page of the relation, in order."
+            : verdict.FilterLevel switch
+            {
+                IndexVerdictLevel.Green => "An index leads with every column this filter compares.",
+                IndexVerdictLevel.Amber => "An index has a column of this filter, but not first, so it may not be used.",
+                _ => "No index serves this filter: every row is read.",
+            };
+
+    private async Task RemoveAsync(int index) => await OnRemoveTerm.InvokeAsync(index);
+
+    private async Task ClearAsync() => await OnClear.InvokeAsync();
+
+    private async Task RunAnywayAsync() => await OnRunAnyway.InvokeAsync();
+}

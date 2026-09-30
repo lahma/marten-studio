@@ -16,18 +16,26 @@ else
         @Capabilities.EnabledCount / @StudioCapabilityGuard.All.Count capabilities
     </button>
 
-    @* Native popover: no positioning library, no third-party menu component (AGENTS.md hard rule 3). *@
-    <div id="ms-capability-popover" popover="auto" class="ms-popover">
-        <p class="ms-popover-title">Mutating operations</p>
-        <ul class="ms-capability-list">
-            @foreach (StudioCapability capability in StudioCapabilityGuard.All)
+    @* Native popover: no positioning library, no third-party menu component (AGENTS.md hard rule 3).
+       Two groups, because two kinds of switch: the reads that reach past the store's own documents and
+       events (the SQL console, the database browser) change nothing, and are still authorized as writes. *@
+    <div id="ms-capability-popover" popover="auto" class="ms-popover ms-capability-popover">
+        @* The chip counts the studio's switches, not the visitor's rights: a viewer the write policy refuses
+           everything still sees "10 / 10". Said once, here, rather than computed per visitor - the policies
+           answer per call and per scope, and a number that tried to sum them would be a guess. *@
+        <p class="ms-popover-lead">What this studio allows. Your account's policies decide what you may do.</p>
+        <p class="ms-popover-title">Reads beyond the store</p>
+        <ul class="ms-capability-list" aria-label="Reads beyond the store">
+            @foreach (StudioCapability capability in StudioCapabilityGuard.ReadsBeyondTheStore)
             {
-                bool enabled = Capabilities.IsEnabled(capability);
-                <li class="ms-capability @(enabled ? "ms-capability-on" : "ms-capability-off")" @key="capability">
-                    <span class="ms-capability-state" aria-hidden="true">@(enabled ? "on" : "off")</span>
-                    <span class="ms-capability-name">@capability</span>
-                    <code class="ms-capability-option">@StudioCapabilityGuard.OptionName(capability)</code>
-                </li>
+                @Row(capability)
+            }
+        </ul>
+        <p class="ms-popover-title">Mutating operations</p>
+        <ul class="ms-capability-list" aria-label="Mutating operations">
+            @foreach (StudioCapability capability in StudioCapabilityGuard.Mutating)
+            {
+                @Row(capability)
             }
         </ul>
         <p class="ms-popover-footnote">
@@ -35,4 +43,36 @@ else
             turns them all on; <code>MartenStudioOptions.ReadOnly</code> turns them all off again.
         </p>
     </div>
+}
+
+@code {
+    private RenderFragment Row(StudioCapability capability) => __builder =>
+    {
+        bool enabled = Capabilities.IsEnabled(capability);
+        <li class="ms-capability @(enabled ? "ms-capability-on" : "ms-capability-off")" @key="capability">
+            <span class="ms-capability-state" aria-hidden="true">@(enabled ? "on" : "off")</span>
+            <span class="ms-capability-name">@capability</span>
+            <code class="ms-capability-option">@OptionName(capability)</code>
+        </li>
+    };
+
+    /// <summary>
+    /// The option's name with a line-break opportunity after each dot, so a popover narrower than the name - a
+    /// phone - wraps it between its parts rather than cutting it off or splitting a word. <c>&lt;wbr&gt;</c>
+    /// adds no character: the name reads, and copies, exactly as it is written.
+    /// </summary>
+    private static RenderFragment OptionName(StudioCapability capability) => __builder =>
+    {
+        string[] parts = StudioCapabilityGuard.OptionName(capability).Split('.');
+
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (i > 0)
+            {
+                <text>.</text><wbr />
+            }
+
+            <text>@parts[i]</text>
+        }
+    };
 }

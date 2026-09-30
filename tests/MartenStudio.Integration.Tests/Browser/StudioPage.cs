@@ -123,7 +123,19 @@ internal sealed class StudioPage : IAsyncDisposable
     /// theme, the time zone and the pinned collections there) and the recorded console never leak from
     /// one scenario into the next.
     /// </remarks>
-    public static async Task<StudioPage> SignInAsync(IBrowser browser, SampleHost host, string user)
+    public static Task<StudioPage> SignInAsync(IBrowser browser, SampleHost host, string user) =>
+        SignInAsync(browser, host, user, SignInTimeout);
+
+    /// <summary>How long each sign-in step may take in a scenario: generous, because a CI runner is slow.</summary>
+    internal static readonly TimeSpan SignInTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>How long the fixture's warm-up may take: the first request to a cold host.</summary>
+    internal static readonly TimeSpan WarmUpTimeout = TimeSpan.FromSeconds(180);
+
+    /// <summary>
+    /// Signs in with an explicit per-step timeout, and says which step ran out of it.
+    /// </summary>
+    internal static async Task<StudioPage> SignInAsync(IBrowser browser, SampleHost host, string user, TimeSpan timeout)
     {
         ArgumentNullException.ThrowIfNull(browser);
         ArgumentNullException.ThrowIfNull(host);
@@ -140,13 +152,34 @@ internal sealed class StudioPage : IAsyncDisposable
         IPage page = await context.NewPageAsync();
         var studio = new StudioPage(context, page, host);
 
-        await page.GotoAsync(host.Url("/login"), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
-        await page.FillAsync("#username", user);
-        await page.FillAsync("#password", user);
-        await page.ClickAsync("form[action='/login'] button[type=submit]");
-        await page.WaitForURLAsync(host.Url("/"), new PageWaitForURLOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+        float ms = (float) timeout.TotalMilliseconds;
+
+        await Step("open /login", () => page.GotoAsync(
+            host.Url("/login"), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = ms }));
+        await Step("fill the form", async () =>
+        {
+            await page.FillAsync("#username", user, new PageFillOptions { Timeout = ms });
+            await page.FillAsync("#password", user, new PageFillOptions { Timeout = ms });
+        });
+        await Step("submit", () => page.ClickAsync("form[action='/login'] button[type=submit]", new PageClickOptions { Timeout = ms }));
+        await Step("land on /", () => page.WaitForURLAsync(
+            host.Url("/"), new PageWaitForURLOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = ms }));
 
         return studio;
+
+        async Task Step(string name, Func<Task> action)
+        {
+            try
+            {
+                await action();
+            }
+            catch (TimeoutException exception)
+            {
+                throw new TimeoutException(
+                    $"Signing in as '{user}' at {host.BaseAddress} timed out at step '{name}' after {timeout.TotalSeconds:0} s.",
+                    exception);
+            }
+        }
     }
 
     /// <summary>
@@ -322,6 +355,51 @@ internal sealed class StudioPage : IAsyncDisposable
         await Page.EvaluateAsync("() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur()");
 
         await Page.ScreenshotAsync(new PageScreenshotOptions { Path = path, FullPage = fullPage });
+    }
+
+    /// <summary>
+    /// How far the studio's content column is wider than itself: <c>.ms-content</c>'s
+    /// <c>scrollWidth - clientWidth</c>, the 0.2.0 UX pass's metric.
+    /// </summary>
+    /// <remarks>
+    /// Anything above zero is a page the shell cuts off on the right (D25): <c>.ms-main</c> hides horizontal
+    /// overflow on purpose, so a wide table that is not in its own scroll region is not scrollable at all,
+    /// and the only symptom is this number. <c>-1</c> means there is no <c>.ms-content</c>, which is a page
+    /// that is not the studio's.
+    /// </remarks>
+    public Task<int> ContentOverflowAsync() =>
+        Page.EvaluateAsync<int>(
+            "() => { const c = document.querySelector('.ms-content'); return c === null ? -1 : c.scrollWidth - c.clientWidth; }");
+
+    /// <summary>Fails the scenario if the content column scrolls sideways - see <see cref="ContentOverflowAsync" />.</summary>
+    /// <param name="where">Which page this is, for the failure message.</param>
+    public async Task AssertNoSidewaysScrollAsync(string where)
+    {
+        int overflow = await ContentOverflowAsync();
+
+        overflow.Should().Be(
+            0,
+            "the shell never scrolls sideways (D25): a wide table sits in its own scroll region, so .ms-content's "
+            + "scrollWidth - clientWidth has to be 0 on " + where + ", and it was " + overflow);
+    }
+
+    /// <summary>
+    /// Where a link really goes: its <c>href</c> resolved against the document's base, the way the browser
+    /// resolves it when it is clicked.
+    /// </summary>
+    /// <remarks>
+    /// The studio's links are relative to a studio-rooted <c>&lt;base href&gt;</c> (D11), so the attribute on
+    /// its own says nothing about a mount path. The attribute rather than the <c>href</c> property, because
+    /// the diagram's nodes are SVG <c>&lt;a&gt;</c> elements, whose <c>href</c> is an animated string rather
+    /// than a URL.
+    /// </remarks>
+    /// <param name="link">An <c>&lt;a&gt;</c>, HTML or SVG.</param>
+    public static Task<string> ResolvedHrefAsync(ILocator link)
+    {
+        ArgumentNullException.ThrowIfNull(link);
+
+        return link.EvaluateAsync<string>(
+            "a => new URL(a.getAttribute('href') ?? a.getAttribute('xlink:href') ?? '', document.baseURI).href");
     }
 
     /// <summary>

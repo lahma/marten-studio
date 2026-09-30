@@ -220,7 +220,7 @@ internal static class DemoDataEndpoints
 /// <param name="RunId">The run marker, which is also what truncation looks for.</param>
 /// <param name="Size">The preset name.</param>
 /// <param name="Phase">What the job is doing.</param>
-/// <param name="Documents">Documents written.</param>
+/// <param name="Documents">Documents written, or for a truncation, deleted.</param>
 /// <param name="DocumentTarget">Documents the plan asks for.</param>
 /// <param name="Events">Events appended.</param>
 /// <param name="EventTarget">Events the plan asks for.</param>

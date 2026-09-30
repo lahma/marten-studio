@@ -26,16 +26,22 @@ internal sealed class StudioLiveUpdatesFactory
 {
     private readonly IJSRuntime jsRuntime;
     private readonly ILoggerFactory loggerFactory;
+    private readonly StudioLogThrottle? throttle;
 
-    public StudioLiveUpdatesFactory(IJSRuntime jsRuntime, ILoggerFactory loggerFactory)
+    /// <remarks>
+    /// <paramref name="throttle" /> is optional so that a component test's container, which registers
+    /// this factory without the rest of the studio, still resolves it.
+    /// </remarks>
+    public StudioLiveUpdatesFactory(IJSRuntime jsRuntime, ILoggerFactory loggerFactory, StudioLogThrottle? throttle = null)
     {
         this.jsRuntime = jsRuntime;
         this.loggerFactory = loggerFactory;
+        this.throttle = throttle;
     }
 
     /// <summary>
     /// A polling loop for one page. The caller disposes it from its own <c>DisposeAsync</c>.
     /// </summary>
     public StudioLiveUpdates Create() =>
-        new(jsRuntime, loggerFactory.CreateLogger<StudioLiveUpdates>());
+        new(jsRuntime, loggerFactory.CreateLogger<StudioLiveUpdates>(), throttle);
 }

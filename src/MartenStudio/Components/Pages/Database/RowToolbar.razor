@@ -1,0 +1,211 @@
+@using MartenStudio.Services.Database
+
+@*
+    The row above the grid: the filter box and its Syntax popover, the column chooser, the page size and - where
+    the relation can be walked by key - the paging mode. The documents toolbar's shape and classes, so the two
+    screens read as one studio; the grammar in the popover is the row grammar, which has no JSON paths and never
+    reinterprets a value.
+
+    The popover is the platform's own (popover="auto"), for the reason DocumentToolbar gives: it opens in the
+    top layer, outside the flex row, so the filter box keeps its width whether the help is open or not.
+*@
+
+<div class="ms-doc-toolbar ms-row-toolbar">
+    <form class="ms-doc-search ms-row-filter" @onsubmit="SubmitAsync" @onsubmit:preventDefault="true">
+        <label class="ms-sr-only" for="ms-row-filter-input">Filter the rows of @Label</label>
+        <input id="ms-row-filter-input"
+               class="ms-input ms-doc-search-input"
+               type="search"
+               placeholder="Filter rows: col = value · col ~ text · col is:null"
+               autocomplete="off"
+               spellcheck="false"
+               @bind="draft"
+               @bind:event="onchange" />
+        <button type="submit" class="ms-btn ms-btn-primary ms-btn-sm">Filter</button>
+        @if (!string.IsNullOrEmpty(Filter))
+        {
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="ClearAsync">Clear</button>
+        }
+        <button type="button"
+                class="ms-btn ms-btn-sm ms-doc-syntax-button"
+                popovertarget="@HelpId"
+                aria-controls="@HelpId"
+                aria-expanded="@(helpOpen ? "true" : "false")"
+                title="What this filter box understands">Syntax</button>
+
+        <div id="@HelpId"
+             popover="auto"
+             class="ms-doc-syntax-popover ms-row-syntax-popover"
+             role="note"
+             aria-label="Row filter syntax"
+             @ontoggle="ToggleHelp">
+            <p class="ms-doc-syntax-title">Row filter syntax</p>
+            <dl class="ms-doc-syntax-list">
+                <dt><code>col = value</code>, <code>!=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code></dt>
+                <dd>a comparison in the column's own type: an enum label, a date, <code>007</code> in a text column all mean what they would in psql</dd>
+
+                <dt><code>col ~ text</code></dt>
+                <dd>contains, case-insensitive, over the value's text - no index serves it</dd>
+
+                <dt><code>col is:null</code>, <code>col is:notnull</code></dt>
+                <dd>a missing value, or any value at all</dd>
+
+                <dt><code>col = "two words"</code>, <code>'it''s'</code></dt>
+                <dd>quote a value with spaces, an empty string or the word null; double the quote inside, or escape it with <code>\</code></dd>
+
+                <dt><code>"Mixed Case" = x</code></dt>
+                <dd>a quoted column name matches exactly; a bare one ignores case</dd>
+
+                <dt><code>state = WAITING next_fire_time &gt; 0</code></dt>
+                <dd>terms separated by spaces must all hold</dd>
+            </dl>
+        </div>
+    </form>
+
+    <div class="ms-doc-toolbar-controls">
+        <div class="ms-header-control">
+            <label class="ms-header-control-label" for="ms-row-page-size">Rows</label>
+            <select id="ms-row-page-size" class="ms-select" value="@PageSize" @onchange="PageSizeChangedAsync">
+                @foreach (int size in PageSizes())
+                {
+                    <option value="@size">@size</option>
+                }
+            </select>
+        </div>
+
+        @if (KeysetAvailable)
+        {
+            <div class="ms-segmented" role="group" aria-label="Paging mode">
+                <button type="button"
+                        class="ms-segmented-option @(OffsetPaging ? null : "ms-segmented-option-on")"
+                        aria-pressed="@(OffsetPaging ? "false" : "true")"
+                        title="Keyset paging: the next page starts after the last row, which stays correct while rows are being written"
+                        @onclick="() => PagingChangedAsync(false)">Keyset</button>
+                <button type="button"
+                        class="ms-segmented-option @(OffsetPaging ? "ms-segmented-option-on" : null)"
+                        aria-pressed="@(OffsetPaging ? "true" : "false")"
+                        title="@("Numbered pages, capped at " + MaxOffset.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + " rows in")"
+                        @onclick="() => PagingChangedAsync(true)">Pages</button>
+            </div>
+        }
+
+        @if (AvailableModel is not null)
+        {
+            <RowColumnChooser AvailableModel="AvailableModel"
+                              SelectedModel="SelectedModel"
+                              OnChanged="OnColumnsChanged" />
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>The DOM id the Syntax button's <c>popovertarget</c> points at; there is one toolbar on the page.</summary>
+    internal const string HelpId = "ms-row-filter-help-popover";
+
+    private static readonly int[] StandardSizes = [25, 50, 100, 200, 500];
+
+    private string draft = string.Empty;
+    private string? lastFilter;
+    private bool helpOpen;
+
+    /// <summary>The relation, <c>schema.name</c>, for labels.</summary>
+    [Parameter]
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>The filter currently in the URL.</summary>
+    [Parameter]
+    public string? Filter { get; set; }
+
+    /// <summary>Rows per page.</summary>
+    [Parameter]
+    public int PageSize { get; set; }
+
+    /// <summary>The largest page the host allows.</summary>
+    [Parameter]
+    public int MaxPageSize { get; set; } = 500;
+
+    /// <summary>The offset cap, named in the paging tooltip.</summary>
+    [Parameter]
+    public int MaxOffset { get; set; }
+
+    /// <summary>Whether the visitor asked for numbered pages.</summary>
+    [Parameter]
+    public bool OffsetPaging { get; set; }
+
+    /// <summary>Whether the relation can be walked by key or ctid at all; a view cannot, and gets no switch.</summary>
+    [Parameter]
+    public bool KeysetAvailable { get; set; }
+
+    /// <summary>Every column, as an <c>IReadOnlyList&lt;TableRowColumn&gt;</c>, or <see langword="null" /> before the first read.</summary>
+    [Parameter]
+    public object? AvailableModel { get; set; }
+
+    /// <summary>The columns on screen, in the same shape.</summary>
+    [Parameter]
+    public object? SelectedModel { get; set; }
+
+    /// <summary>Submits a new filter; <see langword="null" /> clears it.</summary>
+    [Parameter]
+    public EventCallback<string?> OnSearch { get; set; }
+
+    /// <summary>Changes the page size.</summary>
+    [Parameter]
+    public EventCallback<int> OnPageSizeChanged { get; set; }
+
+    /// <summary>Switches between keyset and numbered pages.</summary>
+    [Parameter]
+    public EventCallback<bool> OnPagingChanged { get; set; }
+
+    /// <summary>Changes the columns shown; an empty list is "back to every column".</summary>
+    [Parameter]
+    public EventCallback<IReadOnlyList<string>> OnColumnsChanged { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        // Replaced only when the URL's filter itself changed, so a re-render while somebody types does not
+        // reset the box under their cursor.
+        if (!string.Equals(lastFilter, Filter, StringComparison.Ordinal))
+        {
+            lastFilter = Filter;
+            draft = Filter ?? string.Empty;
+        }
+    }
+
+    private IEnumerable<int> PageSizes()
+    {
+        foreach (int size in StandardSizes)
+        {
+            if (size <= MaxPageSize)
+            {
+                yield return size;
+            }
+        }
+
+        if (PageSize > 0 && PageSize <= MaxPageSize && !StandardSizes.Contains(PageSize))
+        {
+            yield return PageSize;
+        }
+    }
+
+    /// <summary>Keeps the Syntax button's <c>aria-expanded</c> in step with the popover the browser opens and closes.</summary>
+    private void ToggleHelp() => helpOpen = !helpOpen;
+
+    private async Task SubmitAsync() => await OnSearch.InvokeAsync(string.IsNullOrWhiteSpace(draft) ? null : draft);
+
+    private async Task ClearAsync()
+    {
+        draft = string.Empty;
+        await OnSearch.InvokeAsync(null);
+    }
+
+    private async Task PagingChangedAsync(bool offset) => await OnPagingChanged.InvokeAsync(offset);
+
+    private async Task PageSizeChangedAsync(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int size))
+        {
+            await OnPageSizeChanged.InvokeAsync(size);
+        }
+    }
+}

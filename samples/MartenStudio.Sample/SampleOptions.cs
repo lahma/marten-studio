@@ -5,8 +5,8 @@ namespace MartenStudio.Sample;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>A bare boolean switch is true and consumes nothing.</b> <c>--anonymous</c>, <c>--readonly</c> and
-/// <c>--allow-data-generation</c> are switches, not <c>--key value</c> pairs: writing one means
+/// <b>A bare boolean switch is true and consumes nothing.</b> <c>--anonymous</c>, <c>--readonly</c>,
+/// <c>--allow-data-generation</c> and <c>--no-daemon</c> are switches, not <c>--key value</c> pairs: writing one means
 /// <see langword="true" /> and the next token is left entirely alone, so
 /// <c>dotnet run -- --anonymous --urls http://localhost:5000</c> starts an anonymous studio on port 5000
 /// and the order of the two does not matter. An explicit value is still accepted where a script wants to
@@ -59,19 +59,26 @@ namespace MartenStudio.Sample;
 /// Generating a million documents is a write, and a long one, so outside a developer's own machine it
 /// has to be asked for on the command line rather than implied by being signed in as an admin.
 /// </param>
-internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path, bool AllowDataGeneration)
+/// <param name="NoDaemon">
+/// <c>--no-daemon</c>: register the store without hosting its async daemon here, the shape of a
+/// production host whose projections run in another process - or nowhere, on purpose. The studio shows
+/// progress read from the database, says there is no daemon in this process, and logs nothing about it
+/// above Debug.
+/// </param>
+internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path, bool AllowDataGeneration, bool NoDaemon = false)
 {
     /// <summary>The boolean switches, in the spelling the command line uses.</summary>
     private const string AnonymousSwitch = "--anonymous";
     private const string ReadOnlySwitch = "--readonly";
     private const string AllowDataGenerationSwitch = "--allow-data-generation";
+    private const string NoDaemonSwitch = "--no-daemon";
 
     /// <summary>The one switch that really is a <c>--key value</c> pair.</summary>
     private const string PathSwitch = "--path";
 
     /// <summary>Every switch this record understands, in the canonical spelling <c>Normalize</c> maps to.</summary>
     private static readonly string[] Switches =
-        [AnonymousSwitch, ReadOnlySwitch, AllowDataGenerationSwitch, PathSwitch];
+        [AnonymousSwitch, ReadOnlySwitch, AllowDataGenerationSwitch, NoDaemonSwitch, PathSwitch];
 
     /// <summary>
     /// Whether the demo-data endpoints are mapped at all.
@@ -98,6 +105,7 @@ internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path
         bool readOnly = false;
         string? path = null;
         bool allowDataGeneration = false;
+        bool noDaemon = false;
 
         foreach (Argument argument in Read(args))
         {
@@ -112,6 +120,9 @@ internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path
                 case AllowDataGenerationSwitch:
                     allowDataGeneration = argument.Flag;
                     break;
+                case NoDaemonSwitch:
+                    noDaemon = argument.Flag;
+                    break;
                 case PathSwitch when argument.Value is { Length: > 0 } value:
                     path = value;
                     break;
@@ -120,7 +131,7 @@ internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path
             }
         }
 
-        return new SampleOptions(anonymous, readOnly, path, allowDataGeneration);
+        return new SampleOptions(anonymous, readOnly, path, allowDataGeneration, noDaemon);
     }
 
     /// <summary>
@@ -202,6 +213,7 @@ internal sealed record SampleOptions(bool Anonymous, bool ReadOnly, string? Path
                 case AnonymousSwitch:
                 case ReadOnlySwitch:
                 case AllowDataGenerationSwitch:
+                case NoDaemonSwitch:
                     if (inline is not null)
                     {
                         // An inline value is an explicit claim that this token is the whole argument, so

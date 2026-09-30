@@ -3,6 +3,8 @@ using Bunit;
 using MartenStudio.Components.Pages;
 using MartenStudio.Services;
 
+using Microsoft.Extensions.DependencyInjection;
+
 namespace MartenStudio.Tests.Components;
 
 /// <summary>
@@ -176,6 +178,171 @@ public class ActivityTests
         actions.Should().Contain("MineAction");
         actions.Should().NotContain("TheirsAction");
     }
+
+    /// <summary>
+    /// SEC-fix F2: a database-browser read names a non-Marten table and the columns a filter was on, and a SQL
+    /// console run carries two hundred characters of its statement. The store policy says nothing about who may
+    /// learn those, so a visitor the store policy allows and the write policy refuses read here what operators
+    /// browsed. They are shown only to a visitor who may make that read: the capability on, and the write
+    /// policy's yes with the capability named, against the entry's own scope.
+    /// </summary>
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    public void A_read_beyond_the_store_is_listed_only_for_a_visitor_who_may_make_it(bool capabilities, bool writePolicyAllows, bool listed)
+    {
+        using var context = ReadsBeyondTheStore(capabilities, writePolicyAllows);
+
+        var cells = context.Render<Activity>().TextOfAll("tbody tr td");
+
+        cells.Should().Contain("DeleteDocument", "an entry that is no read beyond the store is the store policy's alone");
+
+        if (listed)
+        {
+            cells.Should().Contain("quartz.qrtz_triggers").And.Contain("select * from legacy.payroll");
+            cells.Should().Contain("hr.salaries", "a store-policy refusal of a browser read is shown to a visitor who may browse");
+        }
+        else
+        {
+            cells.Should().NotContain("quartz.qrtz_triggers", "a browser read names a table the visitor may not browse")
+                .And.NotContain("select * from legacy.payroll", "a console run carries the statement");
+            cells.Should().NotContain(static x => x.Contains("grade", StringComparison.Ordinal), "nor the column the filter was on");
+            cells.Should().NotContain("hr.salaries",
+                "POLISH P2: a browser read the store policy refused names what was asked for, so it is under the capability too");
+        }
+    }
+
+    /// <summary>
+    /// The Overview's recent activity is the same filter over the same ring (<see cref="StudioActionLog.GetVisibleAsync" />):
+    /// a visitor the write policy refuses the browser does not see an operator's reads there either.
+    /// </summary>
+    [Fact]
+    public async Task The_overview_filters_reads_beyond_the_store_the_way_Activity_does()
+    {
+        using var context = ReadsBeyondTheStore(capabilities: true, writePolicyAllows: false);
+        context.StoreInfo.WithStore();
+        await context.ReadyAsync();
+
+        var page = context.Render<Overview>();
+
+        page.WaitForAssertion(() => page.TextOfAll(".ms-overview-activity .ms-overview-list-name").Should().Equal("DeleteDocument"));
+    }
+
+    /// <summary>
+    /// A ring holding a database-browser read and a SQL console run by an operator, and a document delete, read
+    /// by a visitor the store policy allows everywhere - and the write policy as <paramref name="writePolicyAllows" /> says.
+    /// </summary>
+    private static StudioComponentContext ReadsBeyondTheStore(bool capabilities, bool writePolicyAllows)
+    {
+        var context = new StudioComponentContext();
+        context.Options.StoreAuthorizationPolicy = StudioComponentContext.StorePolicyName;
+        context.Options.WriteAuthorizationPolicy = "MartenStudioWrite";
+        context.Options.Capabilities.BrowseDatabase = capabilities;
+        context.Options.Capabilities.RunSql = capabilities;
+        context.Options.Capabilities.DeleteDocuments = true;
+
+        context.AuthenticationState.SignIn("ops");
+        var wholeDatabase = new StudioScope("default", "localhost.marten", null);
+
+        context.ActionLog.Record(
+            "Browse database rows", "quartz.qrtz_triggers", succeeded: true,
+            "Rows read with 1 filter term(s) on grade, sorted by (key) asc.", StudioCapability.BrowseDatabase, wholeDatabase);
+        context.ActionLog.Record(
+            "Run SQL", "select * from legacy.payroll", succeeded: true, "12 rows", StudioCapability.RunSql, wholeDatabase);
+        context.ActionLog.Record(
+            "DeleteDocument", "customer/42", succeeded: true, "deleted", StudioCapability.DeleteDocuments, wholeDatabase);
+
+        // POLISH P2: what DatabaseAccess records when the store policy refuses a browser read - the refused
+        // name as the target, under BrowseDatabase (DatabaseAccessTests pins that it is recorded so).
+        context.ActionLog.RecordScopeDenied(
+            wholeDatabase, StudioComponentContext.StorePolicyName, "Open database object", "hr.salaries", StudioCapability.BrowseDatabase);
+
+        context.AuthenticationState.SignIn("viewer");
+        context.AuthorizationService.Allow(resource => resource.Capability is null || writePolicyAllows);
+
+        return context;
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // POLISH P5 - one policy question per scope and capability per sweep, not two per entry
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A full ring of browser reads about one database, read by a visitor behind both policies: the store
+    /// policy and the write policy are each asked once for the sweep - two evaluations, where it was a
+    /// thousand - and every entry is still kept.
+    /// </summary>
+    [Fact]
+    public async Task A_full_ring_of_one_scope_costs_one_question_per_policy()
+    {
+        using var context = ReadsOfOneScope(entries: StudioActionLogService.MaxEntries, scopes: 1);
+        context.AuthorizationService.Calls.Clear();
+
+        List<StudioActionLogEntry> visible = await VisibleAsync(context);
+
+        visible.Should().HaveCount(StudioActionLogService.MaxEntries);
+        context.AuthorizationService.Calls.Should().HaveCount(2, "one store-policy question and one write-policy question");
+        context.AuthorizationService.Calls.Select(static x => x.Resource.Capability).Should()
+            .BeEquivalentTo([null, nameof(StudioCapability.BrowseDatabase)]);
+    }
+
+    /// <summary>
+    /// The memory is per question, never per sweep alone: entries about three databases cost three questions of
+    /// each policy, and a database the write policy refuses is still refused on every one of its entries.
+    /// </summary>
+    [Fact]
+    public async Task Each_scope_is_asked_once_and_answered_for_itself()
+    {
+        using var context = ReadsOfOneScope(entries: 300, scopes: 3);
+        context.AuthorizationService.Allow(static resource => resource.Capability is null || resource.DatabaseIdentifier != "db-1");
+        context.AuthorizationService.Calls.Clear();
+
+        List<StudioActionLogEntry> visible = await VisibleAsync(context);
+
+        context.AuthorizationService.Calls.Should().HaveCount(6, "three scopes, two policies each");
+        visible.Should().HaveCount(200).And.OnlyContain(static x => x.DatabaseId != "db-1");
+    }
+
+    /// <summary>And the next sweep asks again: a policy's answer may have changed, and nothing outlives the sweep.</summary>
+    [Fact]
+    public async Task A_second_sweep_asks_again()
+    {
+        using var context = ReadsOfOneScope(entries: 50, scopes: 1);
+        context.AuthorizationService.Calls.Clear();
+
+        (await VisibleAsync(context)).Should().HaveCount(50);
+
+        context.AuthorizationService.DenyEverything();
+
+        (await VisibleAsync(context)).Should().BeEmpty("the refusal is read on the next sweep, not remembered past the last one");
+        context.AuthorizationService.Calls.Should().HaveCount(3, "two questions for the first sweep, then the store policy's no");
+    }
+
+    private static StudioComponentContext ReadsOfOneScope(int entries, int scopes)
+    {
+        var context = new StudioComponentContext();
+        context.Options.StoreAuthorizationPolicy = StudioComponentContext.StorePolicyName;
+        context.Options.WriteAuthorizationPolicy = "MartenStudioWrite";
+        context.Options.Capabilities.BrowseDatabase = true;
+        context.AuthenticationState.SignIn("ops");
+
+        for (int i = 0; i < entries; i++)
+        {
+            context.ActionLog.Record(
+                "Browse database rows", "quartz.qrtz_triggers", succeeded: true, "Rows read.", StudioCapability.BrowseDatabase,
+                new StudioScope("default", "db-" + (i % scopes), null));
+        }
+
+        context.AuthenticationState.SignIn("viewer");
+        return context;
+    }
+
+    private static ValueTask<List<StudioActionLogEntry>> VisibleAsync(StudioComponentContext context) =>
+        context.ActionLog.GetVisibleAsync(
+            context.Services.GetRequiredService<StudioAuthorization>(),
+            context.Services.GetRequiredService<StudioCapabilityGuard>(),
+            cancellationToken: Xunit.TestContext.Current.CancellationToken);
 
     [Fact]
     public void With_no_store_policy_configured_nothing_is_filtered_out()

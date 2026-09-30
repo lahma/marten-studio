@@ -5735,15 +5735,17 @@ a.ms-event-chip:focus-visible {
     vertical-align: bottom;
 }
 
-.ms-query-cell-number .ms-query-cell-text,
-.ms-query-cell-timestamp .ms-query-cell-text,
-.ms-query-cell-uuid .ms-query-cell-text,
-.ms-query-cell-binary .ms-query-cell-text {
+/* The cell's kind is on the <td> as ms-query-kind-*, never ms-query-cell-*: ms-query-cell-text is the span
+   above, and a td that took its inline-block stopped being a table cell (UX-6, U7). */
+.ms-query-kind-number .ms-query-cell-text,
+.ms-query-kind-timestamp .ms-query-cell-text,
+.ms-query-kind-uuid .ms-query-cell-text,
+.ms-query-kind-binary .ms-query-cell-text {
     font-family: var(--ms-font-mono);
     font-variant-numeric: tabular-nums;
 }
 
-.ms-query-cell-number {
+.ms-query-kind-number {
     text-align: right;
 }
 
@@ -7387,4 +7389,2330 @@ a.ms-event-chip:focus-visible {
         overflow: hidden;
         text-overflow: ellipsis;
     }
+}
+
+/* ==========================================================================
+   DB-4. Database browser
+
+   The DATABASE section's screens: the browser (/marten/database), its rail,
+   the kind tabs and the five grids, and object detail
+   (/marten/database/object). Appended after UX-5 on purpose (D26): nothing
+   here re-declares an earlier selector, and the layout, rail, tabs,
+   segmented control, table and menu-item rules are the existing ones - what
+   is below is only what is new, prefixed ms-db-.
+
+   Marten's own rows are quieter by text colour and a tinted row, never by
+   opacity: opacity takes every badge and link in the row down with it, and
+   --ms-color-text-secondary keeps better than 6:1 against the surface in
+   both themes. Warning badges keep the body text colour on the warning
+   tint for the same reason - the warning hue alone is under 3:1 on its own
+   background in the light theme.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The page and the rail
+   -------------------------------------------------------------------------- */
+
+.ms-db-title-schema {
+    margin-left: var(--ms-space-sm);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-medium);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-db-rail-collapse {
+    display: block;
+}
+
+.ms-db-rail-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    min-width: 0;
+}
+
+/* The narrow-screen summary: "quartz · 14 tables", with a chevron that turns when it is open. */
+.ms-db-rail-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    list-style: none;
+    cursor: pointer;
+}
+
+.ms-db-rail-summary::-webkit-details-marker {
+    display: none;
+}
+
+.ms-db-rail-summary::after {
+    content: "\25BE";
+    color: var(--ms-color-text-muted);
+    transition: transform var(--ms-transition-fast);
+}
+
+.ms-db-rail-collapse[open] > .ms-db-rail-summary {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-db-rail-collapse[open] > .ms-db-rail-summary::after {
+    transform: rotate(180deg);
+}
+
+.ms-db-rail-summary:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+}
+
+/*
+   Above the rail breakpoint the rail is always the rail: no summary, and the content shown even when the
+   <details> is closed - object detail renders it closed so a phone opens on the object. Only where
+   ::details-content exists; a browser without it keeps the summary on the desktop too, so a closed rail is
+   one click from open rather than simply gone.
+*/
+@supports selector(::details-content) {
+    @media (min-width: 901px) {
+        .ms-db-rail-summary {
+            display: none;
+        }
+
+        .ms-db-rail-collapse::details-content {
+            content-visibility: visible;
+        }
+    }
+}
+
+.ms-db-rail-filter .ms-db-name-filter {
+    width: 100%;
+}
+
+.ms-db-rail-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-db-rail-link-marten .ms-db-rail-name {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-db-flag-marten {
+    color: var(--ms-color-primary);
+}
+
+.ms-db-rail-withheld {
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-db-rail-hint,
+.ms-db-rail-error {
+    padding: 0 var(--ms-space-xs);
+}
+
+.ms-db-rail-error {
+    color: var(--ms-color-warning);
+}
+
+.ms-db-schema-prefix {
+    color: var(--ms-color-text-muted);
+    font-weight: var(--ms-font-weight-normal);
+}
+
+/* Below the breakpoint the rail stacks above the list: nothing to stick to, and no box to scroll in. */
+@media (max-width: 900px) {
+    .ms-db-rail.ms-rail {
+        position: static;
+        max-height: none;
+        overflow: visible;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Kind tabs and the toolbar
+   -------------------------------------------------------------------------- */
+
+/* An empty kind stays a link - "there are none" is an answer worth one click - but reads as quiet. */
+.ms-db-tab-empty {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-db-toolbar {
+    align-items: center;
+}
+
+.ms-db-owner-filter {
+    flex-wrap: wrap;
+}
+
+.ms-db-owner-filter .ms-segmented-option {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    min-height: 32px;
+    padding: var(--ms-space-xs) var(--ms-space-md);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-db-owner-filter .ms-segmented-option:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+.ms-db-owner-count {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-db-toolbar .ms-db-name-filter {
+    flex: 0 1 320px;
+    min-width: 0;
+}
+
+.ms-db-truncated {
+    margin: var(--ms-space-sm) 0 0;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   The grids
+   -------------------------------------------------------------------------- */
+
+/*
+   Positioned so that it is the containing block of the visually hidden text inside it (".ms-sr-only" is
+   absolute). Without it that text is placed against the initial containing block, escapes the scroll
+   region the grid sits in, and widened the whole document by 46 px at 390 px - measured, on the owner
+   badge's ", open in Documents".
+*/
+.ms-db-table,
+.ms-db-relationships {
+    position: relative;
+}
+
+/* Baseline rather than top: a name is a step larger than the cells beside it, and top alignment drew
+   each row's text on two different lines. */
+.ms-db-table td {
+    vertical-align: baseline;
+}
+
+.ms-db-table tbody tr.ms-db-row-marten {
+    background-color: var(--ms-color-surface-alt);
+}
+
+.ms-db-table tbody tr.ms-db-row-marten:hover {
+    background-color: var(--ms-color-surface-hover);
+}
+
+/* Quieter text, but a link stays a link: a.ms-db-name keeps the primary colour it sets for itself. */
+.ms-db-table tbody tr.ms-db-row-marten td,
+.ms-db-table tbody tr.ms-db-row-marten span.ms-db-name {
+    color: var(--ms-color-text-secondary);
+}
+
+/* An identifier is one token and never breaks inside itself; a grid wider than its column scrolls in
+   its region instead (D25). */
+.ms-db-name {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text);
+    white-space: nowrap;
+}
+
+a.ms-db-name {
+    color: var(--ms-color-primary);
+    text-decoration: none;
+}
+
+a.ms-db-name:hover {
+    text-decoration: underline;
+}
+
+/* A routine's signature may break between its arguments - at their spaces - and nowhere else. */
+.ms-db-signature {
+    white-space: normal;
+}
+
+.ms-db-arguments {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-db-cell-number,
+.ms-db-col-number {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-db-cell-type,
+.ms-db-cell-range {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+.ms-db-cell-key,
+.ms-db-cell-fk,
+.ms-db-cell-owner,
+.ms-db-cell-null {
+    white-space: nowrap;
+}
+
+/* Top rather than baseline: the baseline of a block that clips its overflow is its bottom edge, which
+   pushed every row with a long comment a line taller than the rest. */
+.ms-db-cell-comment {
+    vertical-align: top;
+}
+
+/*
+   Truncated to one line; the whole comment is in the title. The cap is on the span, not the cell: an
+   auto-layout table ignores max-width on a cell and sizes the column to the nowrap text, which squeezed
+   every name in the grid to make room for one long comment.
+*/
+.ms-db-comment {
+    display: block;
+    max-width: 20rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-db-cell-default {
+    vertical-align: top;
+}
+
+/* A column default, capped on the span for the same reason as a comment; the whole of it is in the title. */
+.ms-db-code {
+    display: block;
+    max-width: 18rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-db-cell-sql {
+    min-width: 20rem;
+}
+
+.ms-db-none {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-db-sep {
+    margin: 0 var(--ms-space-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-db-col-expand,
+.ms-db-cell-expand {
+    width: 1.5rem;
+    padding-right: 0;
+}
+
+.ms-db-expander {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: var(--ms-radius-sm);
+}
+
+.ms-db-expander:hover {
+    background: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-db-expander:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+/* --------------------------------------------------------------------------
+   Badges, owners and hints
+   -------------------------------------------------------------------------- */
+
+.ms-db-badges {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    margin-left: var(--ms-space-xs);
+    vertical-align: middle;
+}
+
+.ms-db-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    line-height: 1.4;
+    white-space: nowrap;
+    cursor: help;
+}
+
+.ms-db-badge-warning {
+    border-color: var(--ms-color-warning);
+    background-color: var(--ms-color-warning-bg);
+    color: var(--ms-color-text);
+}
+
+.ms-db-badge-key {
+    border-color: var(--ms-color-info);
+    background-color: var(--ms-color-info-bg);
+    color: var(--ms-color-text);
+}
+
+.ms-db-badge-kind {
+    cursor: default;
+}
+
+.ms-db-badge-icon {
+    width: 11px;
+    height: 11px;
+    flex: none;
+}
+
+.ms-db-owner {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 1px 8px;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-full);
+    font-size: var(--ms-font-size-xs);
+    line-height: 1.5;
+    white-space: nowrap;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-db-owner-link {
+    color: var(--ms-color-primary);
+    text-decoration: none;
+}
+
+.ms-db-owner-link:hover {
+    border-color: var(--ms-color-primary);
+    text-decoration: underline;
+}
+
+.ms-db-owner-link:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+/* A document table's owner is its collection chip, which brings its own shape. */
+.ms-db-owner-document {
+    padding: 0;
+    border: 0;
+}
+
+.ms-db-owner-managed {
+    border-style: dashed;
+}
+
+.ms-db-owner-other {
+    border-color: transparent;
+    color: var(--ms-color-text-muted);
+}
+
+/* "Recognised by name": neutral grey, never a colour that would read as Marten's or as a warning. */
+.ms-db-hint {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-full);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    line-height: 1.5;
+    white-space: nowrap;
+    cursor: help;
+}
+
+.ms-db-state {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border: 1px solid var(--ms-color-success);
+    border-radius: var(--ms-radius-full);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+    color: var(--ms-color-text);
+    cursor: help;
+}
+
+.ms-db-state-disabled,
+.ms-db-state-replica {
+    border-color: var(--ms-color-warning);
+    background-color: var(--ms-color-warning-bg);
+}
+
+/* --------------------------------------------------------------------------
+   Types, definitions and access notices
+   -------------------------------------------------------------------------- */
+
+.ms-db-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-db-chip {
+    padding: 1px 8px;
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-full);
+    background-color: var(--ms-color-surface);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text);
+}
+
+.ms-db-attributes {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-db-attribute-name {
+    color: var(--ms-color-text);
+}
+
+.ms-db-attribute-type {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-db-domain {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-db-domain-default,
+.ms-db-checks {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-db-checks {
+    margin-top: var(--ms-space-xs);
+}
+
+.ms-db-definition-row > .ms-doc-preview-cell {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+}
+
+.ms-db-definition {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-db-definition-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-db-refusal {
+    margin: 0;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-left: 3px solid var(--ms-color-border-strong);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-db-access {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-db-access-title {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-db-access p + p {
+    margin-top: var(--ms-space-xs);
+}
+
+/* --------------------------------------------------------------------------
+   Object detail
+   -------------------------------------------------------------------------- */
+
+.ms-db-breadcrumb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    margin-bottom: var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-db-breadcrumb a {
+    color: var(--ms-color-primary);
+    text-decoration: none;
+}
+
+.ms-db-breadcrumb a:hover {
+    text-decoration: underline;
+}
+
+.ms-db-breadcrumb-sep {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-db-object-header {
+    margin-bottom: var(--ms-space-lg);
+}
+
+.ms-db-object-heading {
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-db-object-name {
+    font-family: var(--ms-font-mono);
+    overflow-wrap: anywhere;
+}
+
+.ms-db-object-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-db-object-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-db-object-meta .ms-db-badges {
+    margin-left: 0;
+}
+
+.ms-db-object-fact {
+    font-size: var(--ms-font-size-sm);
+    font-variant-numeric: tabular-nums;
+    color: var(--ms-color-text-secondary);
+    white-space: nowrap;
+}
+
+.ms-db-object-comment {
+    margin: var(--ms-space-sm) 0 0;
+    max-width: 72ch;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-db-copy-menu {
+    display: inline-flex;
+}
+
+.ms-db-copy-menu-button {
+    anchor-name: --ms-db-copy-anchor;
+}
+
+/* The object's copy menu, and the look a MenuButton gets when its caller names no classes of its own. */
+.ms-db-copy-popover,
+.ms-menu-popover {
+    min-width: 16rem;
+    max-width: min(28rem, calc(100vw - 2rem));
+    padding: var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-lg);
+    background-color: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    box-shadow: var(--ms-shadow-lg);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-db-copy-popover::backdrop,
+.ms-menu-popover::backdrop {
+    background-color: transparent;
+}
+
+.ms-menu-button {
+    display: inline-flex;
+}
+
+@supports (anchor-name: --ms-supported) {
+    .ms-db-copy-popover:popover-open {
+        position: fixed;
+        inset: auto;
+        margin: 0;
+        position-anchor: --ms-db-copy-anchor;
+        top: anchor(bottom);
+        right: anchor(right);
+        margin-top: var(--ms-space-xs);
+        position-try-fallbacks: flip-block;
+    }
+}
+
+.ms-db-section-title {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-db-keys-section + .ms-db-keys-section,
+.ms-db-dependencies {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-db-rowkey {
+    margin: 0;
+}
+
+.ms-db-fk-action {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+/* A cascade, a set null or a set default reaches rows somewhere else: said in the body colour, bolder. */
+.ms-db-fk-action-strong {
+    font-weight: var(--ms-font-weight-bold);
+    color: var(--ms-color-text);
+}
+
+.ms-db-fk-link {
+    display: inline-block;
+    margin-left: var(--ms-space-xs);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-primary);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.ms-db-fk-link:hover {
+    text-decoration: underline;
+}
+
+.ms-db-fk-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-db-fk-list > li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+}
+
+.ms-db-fk-columns {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.ms-db-fk-arrow {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-db-fk-meta {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+/* The Rows tab when the rows are read somewhere else, or not at all: a note with the way out, not an error. */
+.ms-db-rows-card {
+    padding: var(--ms-space-md) var(--ms-space-lg);
+    border: 1px solid var(--ms-color-border);
+    border-left: 3px solid var(--ms-color-primary);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+}
+
+.ms-db-rows-card p {
+    margin: 0 0 var(--ms-space-sm);
+}
+
+/* The card's explanation is the point of it, so it is secondary text rather than muted: muted is under
+   4.5:1 against the surface in the dark theme. */
+.ms-db-rows-card .ms-muted {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-db-rows-card-title {
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text);
+}
+
+.ms-db-rows-card-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-db-rows-card .ms-db-rows-card-foot {
+    margin-bottom: 0;
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-db-view-note {
+    margin-bottom: var(--ms-space-sm);
+}
+
+/* On a phone the object header is a column: the name, then its actions, then the facts. */
+@media (max-width: 640px) {
+    .ms-db-object-actions {
+        width: 100%;
+    }
+
+    .ms-db-toolbar .ms-db-name-filter {
+        flex: 1 1 100%;
+    }
+}
+
+/* ==========================================================================
+   DB-6. Relationships over tables
+
+   The relationships diagram draws the database's other tables beside the
+   document types: square boxes coloured by their schema, solid arrows for a
+   key on somebody else's table and dashed ones for a key Postgres added NOT
+   VALID, labels on those arrows, a Documents / Tables / Both switch, schema
+   chips, and the "too many to draw" panel that replaces a picture past sixty
+   boxes. Appended last on purpose (D26): nothing here overrides a rule of an
+   earlier section except by adding to it.
+   -------------------------------------------------------------------------- */
+
+/* --- The view switch and the schema chips --- */
+
+.ms-graph-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    margin: var(--ms-space-md) 0 var(--ms-space-sm);
+}
+
+.ms-graph-view-count {
+    margin-left: var(--ms-space-xs);
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-graph-schemas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+}
+
+.ms-graph-schema-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    padding: 2px var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text-secondary);
+    font-family: inherit;
+    font-size: var(--ms-font-size-xs);
+    cursor: pointer;
+}
+
+.ms-graph-schema-chip:hover {
+    background: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-graph-schema-chip[aria-pressed="true"] {
+    border-color: var(--ms-color-primary);
+    background: var(--ms-color-primary-light);
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+/* A schema's colour is a square, where a collection's is a circle: the same rule the diagram's boxes
+   follow, so a chip, a box and a table cell of one schema read as one thing. */
+.ms-graph-schema-chip-dot,
+.ms-graph-table-chip-dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    background: hsl(var(--ms-collection-hue, 210) 60% 50%);
+}
+
+@supports (color: oklch(50% 0.1 200)) {
+    .ms-graph-schema-chip-dot,
+    .ms-graph-table-chip-dot {
+        background: oklch(var(--ms-collection-lightness) var(--ms-collection-chroma) var(--ms-collection-hue, 210));
+    }
+}
+
+/* --- Table nodes, the neighbourhood's centre, and the new line styles --- */
+
+.ms-graph-node-table .ms-graph-node-box {
+    stroke: hsl(var(--ms-collection-hue, 210) 30% 55%);
+}
+
+.ms-graph-node-emphasis .ms-graph-node-box {
+    stroke: var(--ms-color-primary);
+    stroke-width: 2.5;
+}
+
+.ms-graph-edge-table .ms-graph-edge-line {
+    /* A key on somebody else's table: Postgres enforces it and Marten has no say in it, so it is drawn as
+       plainly as a declared-and-enforced key. */
+    stroke: var(--ms-color-border-strong);
+}
+
+.ms-graph-edge-table .ms-graph-edge-arrow {
+    fill: var(--ms-color-border-strong);
+}
+
+.ms-graph-edge-notvalid .ms-graph-edge-line {
+    /* Added NOT VALID: checked for every row written since, never for the rows already there. Dashed and
+       muted - distinct from the warning-coloured "declared only" dash, which means nothing enforces it. */
+    stroke: var(--ms-color-text-muted);
+    stroke-dasharray: 5 4;
+}
+
+.ms-graph-edge-notvalid .ms-graph-edge-arrow {
+    fill: var(--ms-color-text-muted);
+}
+
+.ms-graph-edge-label {
+    fill: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-mono);
+    font-size: 11px;
+    /* A halo in the diagram's own background, so a label stays readable where it crosses a line. */
+    paint-order: stroke;
+    stroke: var(--ms-color-surface);
+    stroke-width: 4px;
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+
+/* --- Too many boxes to draw --- */
+
+.ms-graph-toomany {
+    margin-top: var(--ms-space-md);
+    padding: var(--ms-space-lg);
+    border: 1px dashed var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-lg);
+    background: var(--ms-color-surface);
+    text-align: center;
+}
+
+.ms-graph-toomany-title {
+    margin: 0;
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-graph-toomany-description {
+    margin: var(--ms-space-xs) 0 0;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-sm);
+}
+
+/* --- A table's name as a chip, in the table, the isolated list and "referenced by" --- */
+
+.ms-graph-table-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 2px var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-surface-alt);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    white-space: nowrap;
+}
+
+.ms-graph-table-chip-small {
+    padding: 1px 6px;
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-graph-table-chip-text {
+    min-width: 0;
+}
+
+.ms-graph-table-chip-schema {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-graph-table-chip-name {
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-graph-row-link:hover .ms-graph-table-chip-name,
+.ms-referenced-link:hover .ms-graph-table-chip-name {
+    text-decoration: underline;
+}
+
+/* --- The table's rows for a key with a table at either end --- */
+
+.ms-graph-row-label {
+    display: block;
+}
+
+/* A composite key's cell holds a label and every column on both sides. Squeezed to the width of a phone
+   it became a column one word wide and rows ten lines tall; with a floor it stays readable and the
+   table's own scroll region (D25) takes the width instead. */
+.ms-graph-row-keycell {
+    min-width: 16rem;
+}
+
+/* "→ schema.table" is one thing: the arrow never wraps onto a line of its own above the chip. */
+.ms-graph-table .ms-table-cell:nth-child(2) {
+    white-space: nowrap;
+}
+
+.ms-graph-row-columns {
+    display: block;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-graph-row-notvalid {
+    box-shadow: inset 3px 0 0 var(--ms-color-text-muted);
+}
+
+.ms-graph-table-compact .ms-table-cell {
+    padding-top: var(--ms-space-xs);
+    padding-bottom: var(--ms-space-xs);
+}
+
+/* --- Isolated tables, and what the picture leaves out --- */
+
+.ms-graph-isolated {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-graph-isolated-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    margin: var(--ms-space-sm) 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-graph-withheld {
+    margin: var(--ms-space-md) 0 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+/* --- The object detail page's neighbourhood --- */
+
+.ms-neighbourhood {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    min-width: 0;
+}
+
+.ms-neighbourhood .ms-graph {
+    margin-top: 0;
+}
+
+/* --- Referenced by: tables, ON DELETE, and keys from schemas not shown --- */
+
+.ms-referenced-ondelete {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+.ms-referenced-notcounted {
+    border: 1px solid var(--ms-color-border);
+    background: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-referenced-withheld {
+    margin: var(--ms-space-sm) 0 0;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* Below 900px the picture goes away and the table is the screen (see the diagram's own section); the
+   "too many to draw" panel is about the picture, so it goes with it. */
+@media (max-width: 899px) {
+    .ms-graph-toomany {
+        display: none;
+    }
+}
+
+/* ==========================================================================
+   DB-7. The Schema screen, in line with the database browser
+   ========================================================================== */
+
+/* A table's name on the Tables tab opens it in the database browser: the collection link's look, since
+   it is the same kind of hop, under a name of its own so the two are never mistaken for each other. */
+.ms-schema-object-link {
+    color: var(--ms-color-primary);
+    text-decoration: none;
+    font-family: var(--ms-font-mono);
+}
+
+.ms-schema-object-link:hover {
+    text-decoration: underline;
+}
+
+/* The owner cell: one badge, and for somebody else's table the name-based hint beside it. */
+.ms-schema-owner {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+/* The event store's badge is also its link to Streams: a badge first, a link on hover. */
+a.ms-index-flag {
+    text-decoration: none;
+}
+
+a.ms-index-flag:hover {
+    text-decoration: underline;
+}
+
+/* "Quartz.NET, recognised by name" - a guess, said quietly beside the badge. */
+.ms-schema-hint {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+/* ==========================================================================
+   DB-5. Rows
+
+   The object page's Rows tab (TableRowsTab: the toolbar, the filter strip,
+   the paging note, the grid and its pager) and row detail
+   (/marten/database/row). Appended after DB-7 on purpose (D26). The
+   toolbar, the syntax popover, the strip, the verdict chips, the column
+   chooser, the pager and the JSON panel are the documents list's and the
+   SQL console's own rules, reused by class; what is below is only what is
+   new, prefixed ms-row-, plus the one re-declaration the grid needs - the
+   D25 edge mask on its region, which must fade only the right-hand edge
+   because the key column on the left is sticky and a left-hand fade would
+   fade the one column that never scrolls away.
+
+   Identifiers are never uppercased (a column called "Order" is not a
+   column called "ORDER"), secondary text is --ms-color-text-secondary
+   rather than muted wherever it carries meaning (muted is under 4.5:1 on
+   the dark surface), and nothing here sets a width that can widen the page:
+   the grid scrolls in its region and the page never scrolls sideways.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The tab: notes, states and the paging note
+   -------------------------------------------------------------------------- */
+
+.ms-row-tab {
+    min-width: 0;
+}
+
+.ms-row-note {
+    margin: 0 0 var(--ms-space-sm);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-left: 3px solid var(--ms-color-info);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-info-bg);
+    color: var(--ms-color-text);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-row-paging-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+/* One phrase that may break between its parts but never inside a column name. */
+.ms-row-paging-parts {
+    min-width: 0;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+
+.ms-row-count-button {
+    min-width: 2rem;
+    font-family: var(--ms-font-mono);
+}
+
+.ms-row-count {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--ms-color-text);
+}
+
+.ms-row-count-refused {
+    font-family: var(--ms-font-family);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-paging-why {
+    flex-basis: 100%;
+    font-size: var(--ms-font-size-xs);
+}
+
+/* What the service said instead of rows: a note with a way on, not an error box. */
+.ms-row-state {
+    margin: 0 0 var(--ms-space-sm);
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left: 3px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+}
+
+.ms-row-state-failed {
+    border-left-color: var(--ms-color-danger);
+}
+
+.ms-row-state-refused,
+.ms-row-state-invalid {
+    border-left-color: var(--ms-color-warning);
+}
+
+.ms-row-state p {
+    margin: 0 0 var(--ms-space-sm);
+}
+
+.ms-row-state-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text);
+}
+
+.ms-row-state-code {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-state-text {
+    max-width: 72ch;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-state-detail {
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-state-detail summary {
+    cursor: pointer;
+}
+
+.ms-row-state-detail p {
+    margin: var(--ms-space-xs) 0 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-row-empty .ms-code-inline {
+    overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   The filter strip: removable chips and the caret under an error
+   -------------------------------------------------------------------------- */
+
+.ms-row-chip {
+    gap: 2px;
+    max-width: 100%;
+    padding-right: 2px;
+}
+
+.ms-row-chip-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-row-chip-remove {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    min-height: 1.25rem;
+    padding: 0;
+    border: 0;
+    border-radius: var(--ms-radius-full);
+    background: transparent;
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-sm);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.ms-row-chip-remove:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-row-chip-remove:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+.ms-row-filter-clear {
+    margin-left: auto;
+}
+
+.ms-row-filter-errors {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+}
+
+.ms-row-filter-error {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-danger-bg);
+}
+
+/* The filter and a caret under the place it is about: the same monospaced line, so the two line up. It
+   scrolls on its own when the filter is wider than the strip, rather than widening the page. */
+.ms-row-filter-caret {
+    max-width: 100%;
+    margin: 0;
+    overflow-x: auto;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    line-height: 1.4;
+    white-space: pre;
+    color: var(--ms-color-text);
+}
+
+.ms-row-filter-error-text {
+    margin: 2px 0 0;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text);
+}
+
+.ms-row-filter-error-at {
+    margin-left: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   The grid
+   -------------------------------------------------------------------------- */
+
+/* A container, so an opened row's content can be exactly as wide as the visible region (cqi, below). */
+.ms-row-grid-scroll {
+    container-type: inline-size;
+    transition: opacity var(--ms-transition-base);
+
+    /* A cell or header that takes the focus is scrolled clear of the sticky key column, not under it. The
+       column's width is the data's, so this is a generous guess rather than a measurement. */
+    scroll-padding-left: min(40%, 16rem);
+}
+
+/* The page being replaced: still there, still readable, visibly not current. */
+.ms-row-grid-busy {
+    opacity: 0.55;
+    cursor: progress;
+}
+
+/*
+   D25, the one re-declaration. The region fades whichever edge has more to scroll to - but this grid's
+   left edge is the sticky key column, which never scrolls away, so a fade there would only dim the row's
+   name. The right-hand fade stays; the left one is never drawn. Specificity above the UX-1 rules on
+   purpose, and the focus rule after these so the mask still gives way to the focus ring.
+*/
+.ms-row-grid-scroll.ms-table-scroll[data-scroll-start="true"] {
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+.ms-row-grid-scroll.ms-table-scroll[data-scroll-start="true"][data-scroll-end="true"] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+    mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+}
+
+.ms-row-grid-scroll.ms-table-scroll[data-scroll-start="true"][data-scroll-end="true"]:focus-visible,
+.ms-row-grid-scroll.ms-table-scroll:focus-visible {
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+/*
+   `clip` rather than the base table's `hidden`: `hidden` makes the table a scroll container of its own,
+   and a sticky cell sticks to its nearest scroll container - so the key column would have stuck to a
+   table that never scrolls, and scrolled away with it. `clip` still rounds the corners.
+*/
+.ms-table.ms-row-grid {
+    /* Positioned so it is the containing block of the visually hidden text in its headers (the sort
+       verdict's sentence is .ms-sr-only, which is absolute): without it that text is placed against the
+       initial containing block, escapes the region, and widened the whole document - measured at 357 px
+       on a sorted grid, 759 px on a phone. */
+    position: relative;
+    width: auto;
+    min-width: 100%;
+    overflow: clip;
+}
+
+/* A header's marks may go onto a second line (its name never breaks): a column is only as wide as its
+   widest cell, rather than as wide as "text PK 1 → qrtz_job_details" on one line. */
+.ms-row-grid thead th {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    vertical-align: bottom;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: normal;
+}
+
+.ms-row-grid td {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    vertical-align: top;
+}
+
+.ms-row-head {
+    display: flex;
+    align-items: baseline;
+    gap: 2px;
+    white-space: nowrap;
+}
+
+.ms-row-sort {
+    appearance: none;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 2px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.ms-row-sort:hover .ms-row-col-name {
+    text-decoration: underline;
+}
+
+.ms-row-sort:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+    border-radius: var(--ms-radius-sm);
+}
+
+.ms-row-col-name {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text);
+}
+
+.ms-row-sort-on .ms-row-col-name {
+    color: var(--ms-color-primary);
+}
+
+.ms-row-sort-arrow {
+    font-size: 9px;
+    color: var(--ms-color-primary);
+}
+
+.ms-row-col-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px var(--ms-space-xs);
+    margin-top: 2px;
+}
+
+.ms-row-col-type {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-secondary);
+    white-space: nowrap;
+}
+
+.ms-row-pk {
+    padding: 0 4px;
+    border: 1px solid var(--ms-color-info);
+    border-radius: var(--ms-radius-sm);
+    background-color: var(--ms-color-info-bg);
+    color: var(--ms-color-text);
+    font-family: var(--ms-font-family);
+    font-size: 10px;
+    font-weight: var(--ms-font-weight-bold);
+    line-height: 1.4;
+    white-space: nowrap;
+    cursor: help;
+}
+
+.ms-row-fk-marker {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-primary);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+a.ms-row-fk-marker:hover {
+    text-decoration: underline;
+}
+
+.ms-row-date-toggle {
+    appearance: none;
+    padding: 0 6px;
+    border: 1px dashed var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-full);
+    background: transparent;
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-family);
+    font-size: 10px;
+    font-weight: var(--ms-font-weight-medium);
+    line-height: 1.5;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.ms-row-date-toggle-on {
+    border-style: solid;
+    border-color: var(--ms-color-primary);
+    color: var(--ms-color-primary);
+}
+
+.ms-row-date-toggle:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+/* The expander and the key's first column stay put while the rest scrolls under them. Opaque, so what
+   scrolls under is hidden rather than drawn through; the hairline on the key column's right is the edge. */
+.ms-row-grid .ms-row-col-expand,
+.ms-row-grid .ms-row-cell-expand {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    box-sizing: border-box;
+    width: 2rem;
+    min-width: 2rem;
+    max-width: 2rem;
+    padding-right: 0;
+    padding-left: var(--ms-space-xs);
+}
+
+.ms-row-grid .ms-row-sticky {
+    position: sticky;
+    left: 2rem;
+    z-index: 1;
+    box-shadow: inset -1px 0 0 var(--ms-color-border);
+}
+
+.ms-row-grid thead .ms-row-col-expand,
+.ms-row-grid thead .ms-row-sticky {
+    background-color: var(--ms-color-surface-alt);
+}
+
+.ms-row-grid tbody .ms-row-cell-expand,
+.ms-row-grid tbody .ms-row-sticky {
+    background-color: var(--ms-color-surface);
+}
+
+.ms-row-grid tbody .ms-row-item:hover > td,
+.ms-row-grid tbody .ms-row-item:focus-visible > td {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-row-grid tbody .ms-row-item:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+.ms-row-grid tbody .ms-row-open > td {
+    border-bottom-color: transparent;
+}
+
+.ms-row-expander {
+    appearance: none;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border: 0;
+    border-radius: var(--ms-radius-sm);
+    background: transparent;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.ms-row-expander:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-text);
+}
+
+.ms-row-expander:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+/* A cell is one line, cut with an ellipsis; the whole value is a Space away. */
+.ms-row-cell {
+    max-width: 24rem;
+    white-space: nowrap;
+}
+
+.ms-row-cell .ms-query-cell-text {
+    max-width: 24rem;
+}
+
+/* What a cell is, by its kind: numbers line up on the right, in figures of one width; the other scalars
+   that are read digit by digit are monospaced. */
+.ms-row-kind-number {
+    text-align: right;
+}
+
+.ms-row-kind-number .ms-query-cell-text,
+.ms-row-kind-timestamp .ms-query-cell-text,
+.ms-row-kind-uuid .ms-query-cell-text,
+.ms-row-kind-binary .ms-query-cell-text {
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-row-open-link,
+.ms-row-fk-link {
+    display: inline-block;
+    max-width: 20rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-primary);
+    text-decoration: none;
+}
+
+.ms-row-open-link {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-row-open-link:hover,
+.ms-row-fk-link:hover {
+    text-decoration: underline;
+}
+
+.ms-row-time {
+    font-family: var(--ms-font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-row-notz {
+    margin-left: var(--ms-space-xs);
+    padding: 0 4px;
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-sm);
+    color: var(--ms-color-text-secondary);
+    font-size: 10px;
+    white-space: nowrap;
+    cursor: help;
+}
+
+/* The "≈ date" under a bigint: the number above stays the value, this is the reading of it. */
+.ms-row-date-hint {
+    display: block;
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    cursor: help;
+}
+
+.ms-row-bytes {
+    display: inline-block;
+    padding: 0 6px;
+    border: 1px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-full);
+    background-color: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+.ms-row-bytes-preview {
+    display: inline-block;
+    max-width: 16rem;
+    margin-left: var(--ms-space-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-hex {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-json-panel {
+    margin-bottom: var(--ms-space-sm);
+}
+
+/* The row opened in place: every column, name above value, as many side by side as fit. */
+.ms-row-preview {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 18rem), 1fr));
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    margin: 0;
+    white-space: normal;
+}
+
+.ms-row-preview-item {
+    min-width: 0;
+}
+
+.ms-row-preview-name {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+    margin: 0 0 2px;
+}
+
+.ms-row-preview-value {
+    min-width: 0;
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+.ms-row-preview-foot {
+    margin: var(--ms-space-sm) 0 0;
+    font-size: var(--ms-font-size-xs);
+}
+
+/*
+   The opened row spans every column, so its cell is as wide as the whole grid - on a phone, many screens
+   wide. Its content is not: it sticks to the region's left edge and is as wide as the region, measured in
+   container units (the region is the container, see .ms-row-grid-scroll), so it reads without scrolling
+   sideways however wide the table behind it is.
+*/
+.ms-row-preview,
+.ms-row-preview-foot {
+    position: sticky;
+    left: var(--ms-space-sm);
+    box-sizing: border-box;
+    max-width: calc(100cqi - 2 * var(--ms-space-sm));
+}
+
+/* --------------------------------------------------------------------------
+   One value, whole: row detail and the grid's expansion
+   -------------------------------------------------------------------------- */
+
+.ms-row-kv-name {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    color: var(--ms-color-text);
+    overflow-wrap: anywhere;
+}
+
+/* In row detail the name is a line of its own, and the type and the key marker share the one under it. */
+.ms-row-kv-key .ms-row-kv-name {
+    display: block;
+}
+
+.ms-row-kv-type {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-kv-key .ms-row-pk,
+.ms-row-preview-name .ms-row-pk {
+    margin-left: var(--ms-space-xs);
+}
+
+/* A value read whole wraps: the grid's one-line ellipsis is for a cell, not for the place the whole
+   value is shown. */
+.ms-row-kv-value .ms-query-cell-text,
+.ms-row-preview-value .ms-query-cell-text {
+    display: inline;
+    max-width: none;
+    overflow: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-row-value-text {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* Long text: six lines and a way to the rest. */
+.ms-row-value-clamped {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 6;
+    line-clamp: 6;
+    overflow: hidden;
+}
+
+.ms-row-show-all {
+    margin-top: var(--ms-space-xs);
+}
+
+.ms-row-value-note,
+.ms-row-value-error {
+    margin: var(--ms-space-xs) 0 0;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-value-error {
+    color: var(--ms-color-danger);
+}
+
+.ms-row-json {
+    max-height: 24rem;
+    overflow: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Row detail
+   -------------------------------------------------------------------------- */
+
+.ms-row-breadcrumb-key {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-detail-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-row-detail-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-row-detail-key {
+    font-size: var(--ms-font-size-base);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.ms-row-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-row-detail-meta {
+    margin-bottom: var(--ms-space-md);
+}
+
+/* The key's description may be long - five column names - and breaks between them on a phone. */
+.ms-row-detail-meta .ms-db-object-fact {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.ms-row-copy-menu {
+    display: inline-flex;
+}
+
+.ms-row-detail-split {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: var(--ms-space-lg);
+    align-items: start;
+}
+
+.ms-row-kv .ms-kv-row {
+    grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
+    gap: var(--ms-space-sm) var(--ms-space-md);
+}
+
+.ms-row-kv-value {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-row-kv-cell {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* "Filter by this value": quiet until it is wanted. */
+.ms-row-filter-by {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: var(--ms-radius-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-row-filter-by:hover {
+    background-color: var(--ms-color-surface-hover);
+    color: var(--ms-color-primary);
+}
+
+.ms-row-filter-by:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 1px;
+}
+
+.ms-row-filter-glyph {
+    width: 14px;
+    height: 14px;
+}
+
+.ms-row-refs + .ms-row-refs {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-row-refs-none {
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-row-ref-list > li {
+    align-items: center;
+}
+
+.ms-row-ref-table,
+.ms-row-ref-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+}
+
+.ms-row-ref-link:hover .ms-referenced-count,
+a.ms-row-ref-key:hover {
+    text-decoration: underline;
+}
+
+.ms-row-ref-key {
+    min-width: 0;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-primary);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+
+/* Below the split breakpoint the panes stack; on a phone a value goes under its name. */
+@media (max-width: 1024px) {
+    .ms-row-detail-split {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 640px) {
+    .ms-row-kv .ms-kv-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--ms-space-xs);
+    }
+
+    .ms-row-filter-clear {
+        margin-left: 0;
+    }
+
+    .ms-row-cell,
+    .ms-row-cell .ms-query-cell-text {
+        max-width: 14rem;
+    }
+
+    .ms-row-open-link,
+    .ms-row-fk-link {
+        max-width: 10rem;
+    }
+}
+
+/* ==========================================================================
+   UX-6. Database browser polish
+
+   What the 0.3.0 UI validation found on the database browser, the
+   Relationships diagram and the notices they share with the rest of the
+   studio. Appended after DB-5 on purpose (D26): several rules below
+   re-declare an earlier selector and win by source order -
+   .ms-db-schema-prefix, .ms-graph-table-chip-schema, .ms-graph-svg and
+   .ms-graph-readat. One earlier rule was edited in place and says so where
+   it stands: the SQL console's cell kinds, now ms-query-kind-* on the <td>.
+
+   Contrast, computed from the tokens (WCAG AA wants 4.5:1 for this text):
+   muted on the info tint is 2.10:1 light and 2.42:1 dark, and muted on the
+   surface 2.56:1 and 3.07:1 - so nothing here that has to be read is drawn
+   in --ms-color-text-muted any more. Body text on the info tint is 14.6:1
+   and 10.5:1; secondary on the surface 7.58:1 and 5.71:1, on the page
+   background 7.24:1 and 6.96:1; primary on the page background 4.94:1 and
+   4.85:1.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The rail
+   -------------------------------------------------------------------------- */
+
+/* "SCHEMAS · tables": what each schema's number counts, in the case it is written in. */
+.ms-db-rail-counting {
+    color: var(--ms-color-text-secondary);
+    font-weight: var(--ms-font-weight-normal);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+/* The phone summary is one line whatever the schema is called; its chevron stays in view. */
+.ms-db-rail-summary-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* "1 other schema not shown: …" is the rail's one explanation of what it leaves out. */
+.ms-db-rail .ms-rail-empty {
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   The neutral panel and its way back
+   -------------------------------------------------------------------------- */
+
+.ms-db-not-found .ms-empty-description,
+.ms-row-not-found .ms-empty-description,
+.ms-db-refused .ms-empty-description {
+    color: var(--ms-color-text-secondary);
+}
+
+/* A studio link, not the user agent's underlined blue. */
+.ms-db-back-link {
+    color: var(--ms-color-primary);
+    font-weight: var(--ms-font-weight-medium);
+    text-decoration: none;
+}
+
+.ms-db-back-link:hover {
+    text-decoration: underline;
+}
+
+.ms-db-back-link:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+    border-radius: var(--ms-radius-sm);
+}
+
+/* --------------------------------------------------------------------------
+   The page heading's focus ring
+
+   The shell's `.ms-studio h1:focus-visible` rule draws a ring round the heading
+   FocusOnNavigate focused - for a keyboard focus. Chromium counts a script's
+   focus as one whenever the page has had no pointer input yet, which is every
+   page opened from the address bar, a bookmark or a reload, so every such page
+   drew a box round its whole title row for a mouse user, the database pages
+   among them. marten-studio.js writes `data-ms-keyboard` on the document
+   element while the visitor's last input was a key; without it there is no
+   ring. A keyboard user who opens a link with Enter still gets one.
+   -------------------------------------------------------------------------- */
+
+.ms-studio h1:focus-visible:not(:root[data-ms-keyboard] *) {
+    outline: none;
+}
+
+/* --------------------------------------------------------------------------
+   Names and tabs on a phone
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+    /* One row that scrolls sideways, rather than six tabs wrapped onto three. The line under the tabs is
+       an inset shadow here, because a scroll box clips the border the active tab used to sit on. */
+    .ms-db-kind-tabs,
+    .ms-db-object-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin;
+        border-bottom: 0;
+        box-shadow: inset 0 -1px 0 var(--ms-color-border);
+    }
+
+    .ms-db-kind-tabs .ms-tab,
+    .ms-db-object-tabs .ms-tab {
+        flex: none;
+        white-space: nowrap;
+    }
+
+    .ms-db-kind-tabs .ms-tab-active,
+    .ms-db-object-tabs .ms-tab-active {
+        margin-bottom: 0;
+        padding-bottom: var(--ms-space-sm);
+    }
+
+    /* The tables' edge cue (UX-1), for the tabs past the edge: marten-studio.js stamps the same two
+       attributes on these rows. The row itself takes no focus - its tabs do - so it has no ring of its
+       own for the mask to hide, and needs no focus exception. */
+    .ms-db-kind-tabs[data-scroll-end="true"],
+    .ms-db-object-tabs[data-scroll-end="true"] {
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+        mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent 100%);
+    }
+
+    .ms-db-kind-tabs[data-scroll-start="true"],
+    .ms-db-object-tabs[data-scroll-start="true"] {
+        -webkit-mask-image: linear-gradient(to right, transparent 0, #000 2.5rem);
+        mask-image: linear-gradient(to right, transparent 0, #000 2.5rem);
+    }
+
+    .ms-db-kind-tabs[data-scroll-start="true"][data-scroll-end="true"],
+    .ms-db-object-tabs[data-scroll-start="true"][data-scroll-end="true"] {
+        -webkit-mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
+        mask-image: linear-gradient(to right, transparent 0, #000 2.5rem, #000 calc(100% - 2.5rem), transparent 100%);
+    }
+}
+
+@media (max-width: 640px) {
+    /* A long qualified name is cut with an ellipsis where it would otherwise run off the screen; its whole
+       name is the element's title. */
+    .ms-db-table .ms-db-name-cut {
+        display: inline-block;
+        max-width: 14rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: bottom;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Contrast
+   -------------------------------------------------------------------------- */
+
+/* The capability and database-access notices: body text on the info tint, not muted grey or the info blue
+   (4.24:1 light, 3.13:1 dark). The border and the tint still say "information". */
+.ms-capability-disabled,
+.ms-capability-disabled .ms-muted {
+    color: var(--ms-color-text);
+}
+
+/* The "legacy." in front of a name: quieter than the name, and still readable in both themes. */
+.ms-db-schema-prefix,
+.ms-graph-table-chip-schema {
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   The Relationships diagram
+   -------------------------------------------------------------------------- */
+
+/* Its natural size, never scaled down to the column: the frame is a labelled scroll region (D25). */
+.ms-graph-svg {
+    max-width: none;
+}
+
+/* The legend, and Read … / Refresh, on the diagram's own top edge. */
+.ms-graph-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+}
+
+.ms-graph-bar .ms-graph-legend {
+    flex: 1 1 24rem;
+    min-width: 0;
+}
+
+.ms-graph-bar .ms-graph-actions {
+    flex: none;
+    margin-left: auto;
+}
+
+.ms-graph-readat {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-graph-bar + .ms-graph,
+.ms-graph-bar + .ms-graph-toomany {
+    margin-top: 0;
+}
+
+/* --------------------------------------------------------------------------
+   A bytea that holds text, opened under the grid
+   -------------------------------------------------------------------------- */
+
+.ms-row-text-panel {
+    max-height: 24rem;
+    overflow: auto;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-row-text-panel:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: -2px;
+}
+
+.ms-row-text-panel-body {
+    margin: 0;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--ms-color-text);
+}
+
+/* --------------------------------------------------------------------------
+   The capability chip's popover
+   -------------------------------------------------------------------------- */
+
+.ms-popover-lead {
+    margin: 0 0 var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+/* ==========================================================================
+   UX-7. Final polish
+
+   The last real-browser pass before 0.3.0. Appended after UX-6 on purpose
+   (D26): the capability popover's width re-declares .ms-popover's
+   max-width for that one popover, and wins by source order at the same
+   specificity as the preferences popover's own override.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The capability chip's popover
+
+   Each option's full name - "MartenStudioOptions.Capabilities.ApplySchemaChanges"
+   - is the thing a host has to type, and at 420 px it was cut off at the
+   popover's edge in both themes. The popover is as wide as its longest line
+   up to 40rem, and never wider than the viewport; a name that still does not
+   fit wraps after one of its dots (the markup puts a <wbr> there), and only
+   then anywhere, so a phone reads it whole on two lines. On a phone the
+   popover is as wide as the space left of the chip it hangs from, and it sat
+   flush against the screen's left edge; the margin keeps the 16 px gutter
+   there, and on a wider screen, where the popover is narrower than that
+   space, it changes nothing.
+   -------------------------------------------------------------------------- */
+
+.ms-popover.ms-capability-popover {
+    max-width: min(40rem, calc(100vw - 2 * var(--ms-space-md)));
+}
+
+.ms-popover.ms-capability-popover:popover-open {
+    margin-left: var(--ms-space-md);
+}
+
+.ms-capability-popover .ms-capability-option {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   Relationships: the description belongs to the title
+
+   The page header's own margin and the page's flex gap added up to 40 px
+   between "Relationships" and the sentence that says what the screen is,
+   which read as two unrelated blocks. The gap alone is what separates them now.
+   -------------------------------------------------------------------------- */
+
+.ms-rel-page > .ms-page-header {
+    margin-bottom: 0;
+}
+
+/* --------------------------------------------------------------------------
+   The neutral panel's second note
+
+   "The structure of this store's own schemas is still shown" - under a
+   policy's refusal - is an aside to the refusal, not a second refusal.
+   -------------------------------------------------------------------------- */
+
+.ms-db-still-shown {
+    font-size: var(--ms-font-size-sm);
 }

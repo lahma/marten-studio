@@ -3,6 +3,7 @@ using Bunit;
 using JasperFx.Events.Projections;
 
 using MartenStudio.Components.Pages.Events;
+using MartenStudio.Services;
 using MartenStudio.Services.Events;
 using MartenStudio.Tests.Components;
 
@@ -271,6 +272,56 @@ public class DeadLettersTests
         // row it starts from is one of forty that look alike.
         page.Find(".ms-confirm-input").Should().NotBeNull();
         page.Find(".ms-confirm-label").TextContent.Should().Contain("OrderSummary");
+    }
+
+    /// <summary>
+    /// DB-0-fix-3, R1: Marten's rewind rewrites every shard's progression row of the projection and deletes
+    /// its dead letters at or above the floor for every tenant, and the daemon re-runs every tenant's
+    /// events. The dialog says so before the name is typed, rather than letting a list filtered to one
+    /// tenant suggest the rewind is too.
+    /// </summary>
+    [Fact]
+    public async Task Rewinding_says_it_reaches_every_tenant_in_the_database()
+    {
+        using StudioComponentContext context = await RewindableAsync();
+
+        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
+        await RewindButton(page).ClickAsync(new());
+
+        string dialog = page.Find(".ms-confirm-dialog").TextContent;
+
+        dialog.Should().Contain("every agent of 'OrderSummary' in this database");
+        dialog.Should().Contain("for every tenant in this database, not only the one on screen");
+        dialog.Should().Contain("every tenant's, not only the ones listed here");
+        page.FindAll(".ms-rewind-tenant-reach").Should().BeEmpty("no tenant is selected, so there is none to say it does not narrow");
+    }
+
+    /// <summary>
+    /// With a tenant selected, the dialog says the tenant does not narrow the rewind and why the visitor's
+    /// account has to be allowed the database as a whole - which is what the service now asks
+    /// (<c>DatabaseReachAuthorization.RequireWholeDatabaseAsync</c>).
+    /// </summary>
+    [Fact]
+    public async Task Rewinding_with_a_tenant_selected_says_the_tenant_does_not_narrow_it()
+    {
+        using StudioComponentContext context = await RewindableAsync();
+        context.Catalog.WithTenants("default", new TenantList(["acme"], IsTruncated: false, TenantListSource.Configured));
+
+        // The context settled its scope before the tenants existed; re-read, then pick acme.
+        await context.State.RefreshScopeListingsAsync(Xunit.TestContext.Current.CancellationToken);
+        await context.State.SetScopeAsync("default", "localhost.marten", "acme", Xunit.TestContext.Current.CancellationToken);
+        context.State.ActiveScope!.TenantId.Should().Be("acme");
+
+        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
+        await RewindButton(page).ClickAsync(new());
+
+        // Markup text keeps its line breaks and indentation; what a person reads is single-spaced.
+        string reach = string.Join(' ', page.Find(".ms-rewind-tenant-reach").TextContent
+            .Split((char[]) [' ', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries));
+
+        reach.Should().Contain("Selecting acme does not narrow this rewind");
+        reach.Should().Contain("for every tenant in this database");
+        reach.Should().Contain("allowed to manage dead letters for this database as a whole, not only for acme");
     }
 
     [Fact]

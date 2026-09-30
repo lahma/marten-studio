@@ -445,9 +445,11 @@ public class OverviewTests
     /// </summary>
     /// <remarks>
     /// <c>GetLatest()</c> hands back the whole ring, and the per-store policy decides entry by entry - one
-    /// <c>IAuthorizationService.AuthorizeAsync</c> each. Filtering all of it to render fifteen rows would
-    /// be five hundred policy evaluations per refresh interval per circuit. The ring is newest first, so
-    /// the fifteenth entry the visitor may see is the last one worth asking about.
+    /// <c>IAuthorizationService.AuthorizeAsync</c> per scope an entry is about. Filtering all of it to render
+    /// fifteen rows would be up to five hundred policy evaluations per refresh interval per circuit. The ring
+    /// is newest first, so the fifteenth entry the visitor may see is the last one worth asking about. Each
+    /// entry here is about a scope of its own - a tenant each - because entries about one scope share one
+    /// answer for the sweep (POLISH P5, <c>ActivityTests</c>), and the bound is what this test is about.
     /// </remarks>
     [Fact]
     public async Task The_activity_ring_is_only_authorized_as_far_as_the_fifteen_rows_it_draws()
@@ -457,7 +459,10 @@ public class OverviewTests
 
         for (int index = 0; index < 40; index++)
         {
-            context.ActionLog.Record("Archive stream", "order-" + index.ToString(CultureInfo.InvariantCulture), succeeded: true);
+            string number = index.ToString(CultureInfo.InvariantCulture);
+            context.ActionLog.Record(
+                "Archive stream", "order-" + number, succeeded: true, message: null, capability: null,
+                scope: new StudioScope("default", "localhost.marten", "tenant-" + number));
         }
 
         // Writing the ring reads the visitor too - the audit entry records who did it - so the panel's
@@ -516,9 +521,14 @@ public class OverviewTests
             context.ActionLog.Record("Archive stream", "older-" + index.ToString(CultureInfo.InvariantCulture), succeeded: true);
         }
 
+        // A tenant each, so that every entry is a question of its own: entries about one scope share one
+        // answer for the sweep (POLISH P5), and the bound is what this test counts.
         for (int index = 0; index < 15; index++)
         {
-            context.ActionLog.Record("Archive stream", "mine-" + index.ToString(CultureInfo.InvariantCulture), succeeded: true);
+            string number = index.ToString(CultureInfo.InvariantCulture);
+            context.ActionLog.Record(
+                "Archive stream", "mine-" + number, succeeded: true, message: null, capability: null,
+                scope: new StudioScope("default", "localhost.marten", "tenant-" + number));
         }
 
         for (int index = 0; index < 20; index++)
@@ -529,7 +539,7 @@ public class OverviewTests
                 succeeded: true,
                 message: null,
                 capability: null,
-                scope: new StudioScope("IInvoicingStore", "localhost.invoicing", null));
+                scope: new StudioScope("IInvoicingStore", "localhost.invoicing", "tenant-" + index.ToString(CultureInfo.InvariantCulture)));
         }
 
         var page = context.Render<Overview>();

@@ -12,6 +12,7 @@
 @inject StudioState State
 @inject StudioActionLog ActionLog
 @inject StudioAuthorization Authorization
+@inject StudioCapabilityGuard Capabilities
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IOptions<MartenStudioOptions> Options
 
@@ -409,6 +410,12 @@
     /// <summary>What the daemon tile says when no coordinator is registered here.</summary>
     private const string NotHostedHere = "not hosted in this process";
 
+    /// <summary>
+    /// What the daemon tile says when an external system (Wolverine's managed distribution, typically)
+    /// runs this store's async projections.
+    /// </summary>
+    private const string External = "external";
+
     private readonly CancellationTokenSource pageCancellation = new();
 
     private PageRegion countsRegion = null!;
@@ -476,7 +483,8 @@
     /// <remarks>
     /// "Not hosted in this process" is a value and not a fault (hard rule 11): an application whose
     /// daemon runs elsewhere is a supported deployment, and a tile that coloured it red would be telling
-    /// an operator to fix something that is not broken.
+    /// an operator to fix something that is not broken. "External" is the same, for a store whose
+    /// <c>AsyncMode</c> says another system runs its projections.
     /// </remarks>
     private string DaemonValue
     {
@@ -485,6 +493,11 @@
             if (projectionsRegion.Error is not null || projections.Error is not null)
             {
                 return "unknown";
+            }
+
+            if (projections.Daemon.IsExternallyManaged)
+            {
+                return External;
             }
 
             if (!projections.Daemon.IsHostedHere)
@@ -505,6 +518,7 @@
     {
         "unknown" => "warning",
         NotHostedHere => "info",
+        External => "info",
         "running" => "success",
         _ => "warning",
     };
@@ -768,25 +782,19 @@
     /// the sweep.
     /// </para>
     /// <para>
-    /// <b>Through <see cref="StudioAuthorization.FilterAsync{T}" />, which is where that rule lives.</b>
-    /// The bound is its <c>take</c> argument rather than a loop here, because the per-entry overload
-    /// fetches the authentication state on every call and a sweep wants it once - and because the
-    /// Activity screen filters the same ring and the two must not drift. With no per-store policy
-    /// configured nothing is asked at all, which is the reason an application that never set the option
-    /// pays nothing for this panel.
+    /// <b>Through <see cref="StudioActionLog.GetVisibleAsync" />, which is where that rule lives.</b>
+    /// The bound is its <c>take</c> argument rather than a loop here, because a sweep wants the
+    /// authentication state once - and because the Activity screen filters the same ring and the two must
+    /// not drift: a database-browser read or a SQL console run is shown only to a visitor who may make
+    /// one. With no policy configured nothing is asked at all, which is the reason an application that
+    /// never set the option pays nothing for this panel.
     /// </para>
     /// </remarks>
     private async Task<List<StudioActionLogEntry>> ReadActivityAsync(CancellationToken cancellationToken)
     {
-        IReadOnlyList<StudioActionLogEntry> entries = ActionLog.GetLatest();
-
         cancellationToken.ThrowIfCancellationRequested();
 
-        return await Authorization.FilterAsync(
-            entries,
-            static entry => new StudioScope(entry.StoreKey, entry.DatabaseId, entry.TenantId),
-            RecentCount,
-            cancellationToken);
+        return await ActionLog.GetVisibleAsync(Authorization, Capabilities, RecentCount, cancellationToken);
     }
 
     private string Link(string route) => EventLinks.To(Options.Value, route, State.ActiveScope);

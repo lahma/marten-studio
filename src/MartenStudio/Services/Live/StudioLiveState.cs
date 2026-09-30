@@ -32,18 +32,21 @@ namespace MartenStudio.Services.Live;
 internal sealed class StudioLiveState : IDisposable
 {
     private readonly ILogger<StudioLiveState> logger;
+    private readonly StudioLogThrottle throttle;
     private readonly TimeProvider timeProvider;
     private readonly Dictionary<string, Watch> watches = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock gate = new();
     private bool disposed;
 
-    public StudioLiveState(ILogger<StudioLiveState> logger) : this(logger, TimeProvider.System)
+    public StudioLiveState(ILogger<StudioLiveState> logger, StudioLogThrottle throttle)
+        : this(logger, throttle, TimeProvider.System)
     {
     }
 
-    public StudioLiveState(ILogger<StudioLiveState> logger, TimeProvider timeProvider)
+    public StudioLiveState(ILogger<StudioLiveState> logger, StudioLogThrottle throttle, TimeProvider timeProvider)
     {
         this.logger = logger;
+        this.throttle = throttle;
         this.timeProvider = timeProvider;
     }
 
@@ -93,12 +96,12 @@ internal sealed class StudioLiveState : IDisposable
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
                     // A tracker that will not be observed costs the page nothing: it falls back to the
-                    // database rows it was already reading.
-                    logger.LogWarning(
-                        exception,
-                        "Marten Studio could not observe the shard state tracker of store {StoreKey}, database {DatabaseId}",
-                        storeKey,
-                        database.Id.Identity);
+                    // database rows it was already reading. Asked again by every visit to the page, so
+                    // event 9215 is a Warning once per store, database and kind of failure per window.
+                    string databaseId = database.Id.Identity;
+                    LogLevel level = throttle.WarningOrDebug(
+                        "LiveState.Tracker", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
+                    logger.ShardTrackerUnobservable(level, exception, storeKey, databaseId);
                 }
             }
 

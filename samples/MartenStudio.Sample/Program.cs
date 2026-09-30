@@ -1,6 +1,8 @@
 using System.Net;
 using System.Security.Claims;
 
+using JasperFx.Events.Daemon;
+
 using Marten;
 
 using MartenStudio;
@@ -8,6 +10,7 @@ using MartenStudio.Sample;
 using MartenStudio.Sample.Auth;
 using MartenStudio.Sample.Generation;
 using MartenStudio.SampleDomain;
+using MartenStudio.SampleDomain.Relational;
 
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -50,8 +53,9 @@ builder.Services.AddHostedService(static services => services.GetRequiredService
 builder.Services
     .AddMarten(options => SampleStore.Configure(options, connectionString))
     .UseLightweightSessions()
-    .AddAsyncDaemon(JasperFx.Events.Daemon.DaemonMode.Solo)
-    .InitializeWith(new SampleDataSeeder());
+    // --no-daemon: Disabled registers no coordinator, which is a host whose projections run elsewhere.
+    .AddAsyncDaemon(sample.NoDaemon ? DaemonMode.Disabled : DaemonMode.Solo)
+    .InitializeWith<SampleDataSeeder>();
 
 builder.Services.AddMartenStudio(options =>
 {
@@ -70,6 +74,12 @@ builder.Services.AddMartenStudio(options =>
     // opt-in; `ReadOnly` overrides it whatever it says.
     options.Capabilities = sample.ReadOnly ? new MartenStudioCapabilities() : MartenStudioCapabilities.All();
     options.ReadOnly = sample.ReadOnly;
+
+    // The database browser (Capabilities.BrowseDatabase, part of All()) may also show these schemas: the
+    // Quartz.NET job store and the legacy relational schema the sample seeds beside the store. "*" would
+    // open every schema the studio's role can use - fine for a scratch database, not for a shared one.
+    options.BrowsableSchemas.Add(RelationalDemoSchema.QuartzSchemaName);
+    options.BrowsableSchemas.Add(RelationalDemoSchema.LegacySchemaName);
 
     // The demo's invoices are conjoined multi-tenant. Naming the tenants here is the cheapest of the
     // three discovery tiers and the only one that can answer before any events have been written.
@@ -105,6 +115,12 @@ else
 #endregion
 
 app.MapLogin();
+
+// The sample has no icon, and says so rather than answering 404: a browser asks for /favicon.ico on the
+// first page that names no icon of its own - the studio's pages name none, since the icon is the host's to
+// choose - and a 404 there was a console error on every demo run. The sample's own two pages name an empty
+// data: icon and never ask at all.
+app.MapGet("/favicon.ico", static () => Results.NoContent()).AllowAnonymous();
 
 // Development, or --allow-data-generation, and nothing else. Outside that the endpoints are not mapped
 // at all, so a POST is a 404 rather than a 403 - there is nothing there to refuse.
@@ -158,6 +174,7 @@ app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthoriza
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <title>Marten Studio sample</title>
+          <link rel="icon" href="data:," />
           <style>
             body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 48rem; line-height: 1.5; padding: 0 1rem; }
             code { background: #f1f5f9; padding: .1rem .3rem; border-radius: 3px; }
@@ -177,7 +194,7 @@ app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthoriza
             <button type="submit">Sign out</button>
           </form>
           <p>Switches: <code>--anonymous</code>, <code>--readonly</code>, <code>--path /ops/marten</code>,
-            <code>--allow-data-generation</code>.</p>
+            <code>--allow-data-generation</code>, <code>--no-daemon</code>.</p>
           {{demoData}}
         </body>
         </html>

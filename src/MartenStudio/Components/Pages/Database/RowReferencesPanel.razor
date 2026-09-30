@@ -1,0 +1,259 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Components.Pages.Documents
+@using MartenStudio.Components.Pages.Relationships
+@using MartenStudio.Services.Database
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Relationships
+@inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    What one row points at, and what points at it - row detail's right-hand pane, the relational side of a
+    document's Related and Referenced by.
+
+    References (outbound) follow each foreign key out of the row: to the parent row itself when the key
+    references the parent's row key, to the parent's rows filtered on the values when it references another
+    unique key, and to the document in Documents when the parent is a Marten document table, where tenancy
+    and soft delete apply. A key that points at nothing - a NOT VALID key, one whose check was deferred or
+    disabled - is shown with its values and a "missing" badge, because a dangling reference is a fact about
+    the data and hiding it hides the one thing worth finding. A NULL references nothing and says so. A parent
+    in a schema this visitor may not see is neither read nor named.
+
+    Referenced by (inbound) counts, for each key into this relation from a table the visitor may see, how many
+    rows point at this one - bounded, so a table with a million children says "1,000+" rather than paying for
+    a scan - and links to those rows, filtered on this row's values, with what deleting this row would do to
+    them.
+*@
+
+@{
+    TableRowReferences references = Model;
+}
+
+@if (references.Error is { } error)
+{
+    <p class="ms-db-refusal" role="alert">@error.Sentence</p>
+}
+else if (references.Refusal != DatabaseRefusal.None)
+{
+    <p class="ms-db-refusal" role="note">@(references.Reason ?? "This row's references are not read here.")</p>
+}
+else
+{
+    <section class="ms-row-refs" aria-label="References">
+        <h2 class="ms-db-section-title">References <span class="ms-tab-count">@references.Outbound.Count</span></h2>
+
+        @if (references.Outbound.Count == 0)
+        {
+            <p class="ms-muted ms-row-refs-none">No foreign key goes out of this table.</p>
+        }
+        else
+        {
+            <ul class="ms-db-fk-list ms-row-ref-list">
+                @for (int index = 0; index < references.Outbound.Count; index++)
+                {
+                    RowOutboundReference reference = references.Outbound[index];
+
+                    <li class="ms-row-ref ms-row-ref-@reference.State.ToString().ToLowerInvariant()" @key="index" title="@reference.ForeignKey">
+                        <span class="ms-db-fk-columns">(@string.Join(", ", reference.Columns))</span>
+                        <span class="ms-db-fk-arrow" aria-hidden="true">→</span>
+                        @RenderOutbound(reference)
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    <section class="ms-row-refs" aria-label="Referenced by">
+        <h2 class="ms-db-section-title">Referenced by <span class="ms-tab-count">@references.Inbound.Count</span></h2>
+
+        @if (references.Inbound.Count == 0)
+        {
+            <p class="ms-muted ms-row-refs-none">No foreign key from a table you can see points at this table.</p>
+        }
+        else
+        {
+            <ul class="ms-db-fk-list ms-row-ref-list">
+                @for (int index = 0; index < references.Inbound.Count; index++)
+                {
+                    RowInboundReference reference = references.Inbound[index];
+
+                    <li class="ms-row-ref ms-row-ref-in-@reference.State.ToString().ToLowerInvariant()" @key="index" title="@reference.ForeignKey">
+                        @RenderInbound(reference)
+                        <span class="ms-db-fk-columns">(@string.Join(", ", reference.Columns))</span>
+                        <span class="ms-referenced-ondelete @(Strong(reference.OnDelete) ? "ms-db-fk-action-strong" : null)"
+                              title="What deleting this row would do to those rows">on delete @reference.OnDelete</span>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+}
+
+@code {
+    /// <summary>The references, as a <c>TableRowReferences</c>; typed <see cref="object" /> for the reason <c>DocumentComponentModel</c> gives.</summary>
+    [Parameter]
+    public object? References { get; set; }
+
+    private TableRowReferences Model => DocumentComponentModel.Read(References, Empty);
+
+    private static readonly TableRowReferences Empty = new() { Found = true };
+
+    private static bool Strong(string action) => action is "cascade" or "set null" or "set default";
+
+    private RenderFragment RenderOutbound(RowOutboundReference reference) => __builder =>
+    {
+        switch (reference.State)
+        {
+            case RowReferenceState.NotVisible:
+                <span class="ms-db-none">a table you cannot see</span>
+                break;
+
+            case RowReferenceState.MartenDocument when reference is { DocumentAlias: { } alias, DocumentId: { } id }:
+                <CollectionChip Alias="@alias" Hue="@CollectionColorizer.HueFor(alias)" Small="true" />
+                <a class="ms-row-ref-key ms-doc-id" href="@DocumentHref(reference, alias, id)" title="Open this document in Documents, where tenancy and soft delete apply">@id</a>
+                break;
+
+            case RowReferenceState.NoReference:
+                @Parent(reference)
+                <span class="ms-query-null" title="A column of this key is NULL, so the row references nothing through it">NULL</span>
+                break;
+
+            case RowReferenceState.Present when reference is { TargetsRowKey: true, ParentKey: { } parentKey, Schema: { } schema, Table: { } table }:
+                @Parent(reference)
+                <a class="ms-row-ref-key ms-mono" href="@DatabaseLinks.ToRow(Options.Value, State.ActiveScope, schema, table, Ordered(parentKey, reference.LinkedColumns))" title="Open the row this points at">@RowPresentation.KeyTuple(Ordered(parentKey, reference.LinkedColumns))</a>
+                @NotValid(reference)
+                break;
+
+            case RowReferenceState.Present when reference is { Schema: { } schema, Table: { } table }:
+                @Parent(reference)
+                <a class="ms-row-ref-key ms-mono" href="@DatabaseLinks.ToRows(Options.Value, State.ActiveScope, schema, table, reference.ParentFilter)" title="The key references a unique key other than the row key: show the parent's rows that match">@Values(reference)</a>
+                @NotValid(reference)
+                break;
+
+            case RowReferenceState.Missing:
+                @Parent(reference)
+                <span class="ms-mono ms-related-missing" title="No row with these values exists in the parent table">@Values(reference)</span>
+                <span class="ms-badge ms-badge-warning" title="@(reference.Validated ? "The parent row is gone - the key's check was deferred or disabled" : "A NOT VALID key: Postgres never checked the rows that were there when it was added")">missing</span>
+                break;
+
+            case RowReferenceState.NotChecked:
+                @Parent(reference)
+                <span class="ms-mono">@Values(reference)</span>
+                <span class="ms-badge" title="@reference.Reason">not checked</span>
+                break;
+
+            default:
+                @Parent(reference)
+                <span class="ms-mono">@Values(reference)</span>
+                <span class="ms-badge ms-badge-warning" title="@reference.Reason">check failed</span>
+                break;
+        }
+    };
+
+    private RenderFragment Parent(RowOutboundReference reference) => __builder =>
+    {
+        if (reference is { Schema: { } schema, Table: { } table })
+        {
+            <a class="ms-row-ref-table" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, table)">
+                <TableChip Schema="@schema" Name="@table" Hue="@RelationshipTableNode.SchemaHue(schema)" Small="true" />
+            </a>
+        }
+    };
+
+    private static RenderFragment NotValid(RowOutboundReference reference) => __builder =>
+    {
+        if (!reference.Validated)
+        {
+            <span class="ms-db-badge ms-db-badge-warning" title="Added NOT VALID: Postgres never checked the rows that were there before">not valid</span>
+        }
+    };
+
+    private RenderFragment RenderInbound(RowInboundReference reference) => __builder =>
+    {
+        switch (reference.State)
+        {
+            case RowInboundState.Counted when reference.ChildFilter is { Length: > 0 } filter:
+                <a class="ms-row-ref-link" href="@DatabaseLinks.ToRows(Options.Value, State.ActiveScope, reference.Schema, reference.Table, filter)" title="@CountTitle(reference)">
+                    <TableChip Schema="@reference.Schema" Name="@reference.Table" Hue="@RelationshipTableNode.SchemaHue(reference.Schema)" Small="true" />
+                    <span class="ms-referenced-count">@CountText(reference)</span>
+                </a>
+                break;
+
+            case RowInboundState.Counted:
+                <span class="ms-row-ref-link" title="@CountTitle(reference)">
+                    <TableChip Schema="@reference.Schema" Name="@reference.Table" Hue="@RelationshipTableNode.SchemaHue(reference.Schema)" Small="true" />
+                    <span class="ms-referenced-count">@CountText(reference)</span>
+                </span>
+                break;
+
+            case RowInboundState.MartenDocument when reference.DocumentAlias is { } alias:
+                <a class="ms-row-ref-link" href="@DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias)" title="A Marten document table: its rows are counted and browsed in Documents">
+                    <CollectionChip Alias="@alias" Hue="@CollectionColorizer.HueFor(alias)" Small="true" />
+                </a>
+                break;
+
+            case RowInboundState.NoReference:
+                <TableChip Schema="@reference.Schema" Name="@reference.Table" Hue="@RelationshipTableNode.SchemaHue(reference.Schema)" Small="true" />
+                <span class="ms-muted" title="A column this key references is NULL on this row, so nothing can point at it through the key">none can</span>
+                break;
+
+            case RowInboundState.NotChecked:
+                <TableChip Schema="@reference.Schema" Name="@reference.Table" Hue="@RelationshipTableNode.SchemaHue(reference.Schema)" Small="true" />
+                <span class="ms-badge ms-referenced-notcounted" title="@reference.Reason">not counted</span>
+                break;
+
+            default:
+                <TableChip Schema="@reference.Schema" Name="@reference.Table" Hue="@RelationshipTableNode.SchemaHue(reference.Schema)" Small="true" />
+                <span class="ms-badge ms-badge-warning" title="@reference.Reason">not counted</span>
+                break;
+        }
+    };
+
+    /// <summary>"3", or "1,000+" when the count stopped at the cap.</summary>
+    private static string CountText(RowInboundReference reference) =>
+        DatabasePresentation.Number(reference.Count ?? 0) + (reference.More ? "+" : string.Empty);
+
+    private static string CountTitle(RowInboundReference reference) =>
+        (reference.More ? "More than " : string.Empty) + DatabasePresentation.Number(reference.Count ?? 0) +
+        " rows of " + reference.Schema + "." + reference.Table + " point at this one through " + string.Join(", ", reference.Columns) + ".";
+
+    private static string Values(RowOutboundReference reference) =>
+        "(" + string.Join(", ", reference.Values.Select(static x => x ?? "NULL")) + ")";
+
+    /// <summary>A parent key in the order the key names its columns - the order its values were read in.</summary>
+    private static IReadOnlyList<KeyValuePair<string, string>> Ordered(IReadOnlyDictionary<string, string> key, IReadOnlyList<string> order)
+    {
+        List<KeyValuePair<string, string>> pairs = [];
+
+        foreach (string column in order)
+        {
+            if (key.TryGetValue(column, out string? value))
+            {
+                pairs.Add(new KeyValuePair<string, string>(column, value));
+            }
+        }
+
+        foreach (KeyValuePair<string, string> pair in key)
+        {
+            if (!order.Contains(pair.Key, StringComparer.Ordinal))
+            {
+                pairs.Add(pair);
+            }
+        }
+
+        return pairs;
+    }
+
+    /// <summary>A Marten document parent, in Documents - in the store that declares it when that is not this one.</summary>
+    private string DocumentHref(RowOutboundReference reference, string alias, string id)
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (reference.StoreKey is { Length: > 0 } store && !string.Equals(store, scope?.StoreKey, StringComparison.OrdinalIgnoreCase))
+        {
+            scope = new StudioScope(store, string.Empty, null);
+        }
+
+        return DocumentLinks.ToDocument(Options.Value, scope, alias, id);
+    }
+}

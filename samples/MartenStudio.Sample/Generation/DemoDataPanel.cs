@@ -151,13 +151,18 @@ internal static class DemoDataPanel
                   if (!r.ok) { return; }
                   const s = await r.json();
                   document.getElementById('demo-bar').style.width = (s.fraction * 100).toFixed(1) + '%';
+                  // A truncation has no targets to count towards: it deletes whatever carries the marker.
+                  const counts = s.kind === 'Truncate'
+                    ? fmt(s.documents) + ' documents deleted, ' + fmt(s.streamsArchived) + ' streams archived' +
+                      ' - elapsed ' + secs(s.elapsedSeconds)
+                    : fmt(s.documents) + '/' + fmt(s.documentTarget) + ' documents, ' +
+                      fmt(s.events) + '/' + fmt(s.eventTarget) + ' events, ' +
+                      fmt(s.streams) + ' streams' + (s.streamsArchived ? ', ' + fmt(s.streamsArchived) + ' archived' : '') +
+                      ' - ' + fmt(s.rowsPerSecond) + ' rows/s, elapsed ' + secs(s.elapsedSeconds) +
+                      ', eta ' + secs(s.etaSeconds);
                   document.getElementById('demo-status').textContent =
                     s.state + (s.kind === 'None' ? '' : ' (' + s.kind + ')') + ' - ' + s.phase +
-                    ' - ' + fmt(s.documents) + '/' + fmt(s.documentTarget) + ' documents, ' +
-                    fmt(s.events) + '/' + fmt(s.eventTarget) + ' events, ' +
-                    fmt(s.streams) + ' streams' + (s.streamsArchived ? ', ' + fmt(s.streamsArchived) + ' archived' : '') +
-                    ' - ' + fmt(s.rowsPerSecond) + ' rows/s, elapsed ' + secs(s.elapsedSeconds) +
-                    ', eta ' + secs(s.etaSeconds) + (s.error ? ' - ' + s.error : '') +
+                    ' - ' + counts + (s.error ? ' - ' + s.error : '') +
                     (s.runId ? ' - run ' + s.runId : '');
                   document.getElementById('demo-daemon').textContent = s.daemonAvailable
                     ? 'Async daemon: high-water ' + fmt(s.highWaterMark) + ', worst shard ' + fmt(s.maxProjectionLag) +

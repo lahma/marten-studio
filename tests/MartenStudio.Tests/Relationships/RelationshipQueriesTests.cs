@@ -1,4 +1,5 @@
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Relationships;
 using MartenStudio.Tests.Sql;
 
 using NpgsqlTypes;
@@ -140,6 +141,83 @@ public class RelationshipQueriesTests
     {
         RelationshipQueries.DefaultInboundCap.Should().Be(1001,
             "the panel says '1000+', which needs one row beyond the thousand to know there is a beyond");
+    }
+
+    /// <summary>
+    /// The read the graph shares between visitors takes a key if <em>either</em> end is in the schema set -
+    /// a key from <c>legacy</c> into the document schema is exactly the one that must be counted for a
+    /// visitor who may not see <c>legacy</c> - and it is bounded, and never has a partition at either end.
+    /// </summary>
+    [Fact]
+    public void The_shared_read_takes_a_key_by_either_end_bounded_and_never_a_partition()
+    {
+        string sql = RelationshipQueries.ForeignKeysTouchingSql;
+
+        sql.Should().Contain("(ns.nspname = any(@schemas) or fns.nspname = any(@schemas))");
+        sql.Should().Contain("con.conparentid = 0");
+        sql.Should().Contain("not cl.relispartition");
+        sql.Should().Contain("not fcl.relispartition");
+        sql.Should().Contain("limit @cap");
+        sql.Should().Contain("with ordinality");
+
+        foreach (string forbidden in new[] { "AllObjects", "DocumentTables", "mt_hilo", "create ", "alter ", "information_schema" })
+        {
+            sql.Should().NotContain(forbidden);
+        }
+    }
+
+    /// <summary>
+    /// Both reads carry what the graph needs beyond the names: whether Postgres validated the key, and
+    /// both ends' primary keys - the key columns only, never an <c>INCLUDE</c> column.
+    /// </summary>
+    [Fact]
+    public void Both_reads_carry_validation_and_both_primary_keys()
+    {
+        foreach (string sql in new[] { RelationshipQueries.ForeignKeysSql, RelationshipQueries.ForeignKeysTouchingSql })
+        {
+            sql.Should().Contain("con.convalidated");
+            sql.Should().Contain("i.indisprimary");
+            sql.Should().Contain("u.ord <= i.indnkeyatts");
+            sql.Should().Contain("i.indrelid = con.conrelid");
+            sql.Should().Contain("i.indrelid = con.confrelid");
+        }
+
+        RelationshipQueries.ForeignKeysSql.Should().NotContain("fns.nspname = any(@schemas)",
+            "the store-schema read DB-3's inbound counts use keeps its meaning: the pointing end only");
+    }
+
+    /// <summary>
+    /// DB-6 review F5: a pointing table's rows are counted with the database browser's own statement - the
+    /// one row detail's "referenced by" runs - rather than a second builder of the relationships screen's
+    /// that said <c>count(*)</c> unqualified.
+    /// </summary>
+    [Fact]
+    public void The_table_count_is_the_row_browsers_own_statement_capped_where_every_inbound_count_is()
+    {
+        string[] columns = ["customer_id", "tenant_id"];
+        string[] values = ["6f9619ff-8b86-d011-b42d-00cf4fc964ff", "acme"];
+
+        TableRowStatement statement = RelationshipDataService.TableInboundCount("legacy", "Customer Credit", columns, values);
+        TableRowStatement browsers = TableRowQueryBuilder.BuildInboundCount("legacy", "Customer Credit", columns, values);
+
+        statement.Should().BeEquivalentTo(browsers, "one statement, so the two screens can never count differently");
+
+        statement.Sql.Should().Contain("pg_catalog.count(*)", "a count of somebody else's on the search path cannot answer");
+        statement.Sql.Should().Contain("\"legacy\".\"Customer Credit\"").And.Contain("\"customer_id\"").And.Contain("\"tenant_id\"");
+        statement.Sql.Should().NotContain("6f9619ff").And.NotContain("acme", "values are parameters, never text");
+
+        statement.Parameters.Where(static x => x.Name != "cap").Should().OnlyContain(static x => x.Type == NpgsqlDbType.Unknown,
+            "Postgres applies the column's own input function, so no type name is ever written into the SQL");
+        statement.Parameters.Should().ContainSingle(static x => x.Name == "cap")
+            .Which.Value.Should().Be(RelationshipQueries.DefaultInboundCap);
+    }
+
+    [Fact]
+    public void The_table_count_refuses_a_column_without_a_value()
+    {
+        Action build = () => RelationshipDataService.TableInboundCount("legacy", "t", ["a", "b"], ["1"]);
+
+        build.Should().Throw<ArgumentException>();
     }
 
     [Theory]

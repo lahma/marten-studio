@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net.Sockets;
 using System.Reflection;
 
 using Marten.Schema;
@@ -50,10 +51,11 @@ namespace MartenStudio.Services.Query;
 /// <b>Mode B - the SQL console - is the one that is gated</b>, in this order, and the order is the
 /// security property: <see cref="StudioCapabilityGuard.Require" /> for
 /// <see cref="StudioCapability.RunSql" />, then <see cref="StudioScopeResolver.ResolveAsync" /> with the
-/// capability named so <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> is the policy asked,
-/// then <see cref="ReadOnlySqlGuard" /> for a nicer message, and only then the statement - inside
-/// <see cref="ReadOnlySqlSession" />'s read-only transaction, which is what actually makes it safe (D13).
-/// Every outcome is audited, failures included (hard rule 5).
+/// capability named so <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> is the policy asked -
+/// against the scope's database as a whole, never its tenant (<see cref="SqlScope" />), because nothing
+/// narrows a typed statement to a tenant - then <see cref="ReadOnlySqlGuard" /> for a nicer message, and
+/// only then the statement - inside <see cref="ReadOnlySqlSession" />'s read-only transaction, which is
+/// what actually makes it safe (D13). Every outcome is audited, failures included (hard rule 5).
 /// </para>
 /// <para>
 /// The plan for a Mode A clause is Mode B work: fetching it means sending a statement to Postgres, so it
@@ -81,6 +83,18 @@ internal sealed class QueryService : IQueryService
 
     /// <summary>How much of a statement goes into the audit ring's target column.</summary>
     internal const int AuditTargetLength = 200;
+
+    /// <summary>
+    /// What a visitor the policies refuse the console is told - by the plan panel here and by the Query
+    /// page's console tab alike.
+    /// </summary>
+    /// <remarks>
+    /// It names the database rather than the store or the tenant, because that is the question that was
+    /// asked (<see cref="SqlScope" />): a visitor allowed one tenant is refused because the console is not
+    /// limited to one, and "this store" would send them to ask for the wrong thing.
+    /// </remarks>
+    internal const string SqlRefusedMessage =
+        "Your account may not run SQL against this database as a whole, and the SQL console is not limited to one tenant.";
 
     private const string Unknown = "(unknown)";
 
@@ -425,14 +439,56 @@ internal sealed class QueryService : IQueryService
     }
 
     /// <summary>
-    /// Whether this visitor may run SQL against this scope, which is what lifts the clause guard's
-    /// nested-read rules.
+    /// The scope <c>RunSql</c> is authorized against: <paramref name="scope" /> with no tenant - the
+    /// database as a whole.
     /// </summary>
     /// <remarks>
-    /// Both halves, in the order the rest of the studio asks them: the process-wide capability (D4), and
-    /// then the per-visitor write policy against this very scope. Asking only the first would hand
-    /// subqueries to somebody the <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> refuses the
-    /// console to, which is the hole the policy exists to close.
+    /// <para>
+    /// <b>A tenant does not narrow the SQL console, so it does not narrow what the console is authorized
+    /// for.</b> A statement somebody typed is sent as it is: nothing puts a <c>tenant_id</c> predicate
+    /// into it, and <c>select * from mt_doc_order</c> from a scope on <c>acme</c> returns every tenant's
+    /// orders. Authorizing <c>(store, database, acme)</c> for that let a host whose policy grants one
+    /// tenant hand the whole database to anyone it granted a tenant - the same shape as the rewind and the
+    /// progression corrections (<see cref="DatabaseReach" />), and the rule D27 already applies to the
+    /// database browser: a read nothing filters by tenant is asked with <c>TenantId = null</c>.
+    /// </para>
+    /// <para>
+    /// There is no "exclusively this tenant's database" exception here, as there is for a daemon
+    /// operation. A console statement is bounded by the connection's role and not by the tenants a
+    /// database lists - it reads every schema and table that role can, the store's own and everything
+    /// else, and <c>SqlConsoleRole</c> is the boundary for that (D13) - so the question is about what the
+    /// console is, not about which tenants the database happens to hold.
+    /// </para>
+    /// <para>
+    /// Every <c>RunSql</c> question is asked against this one scope: the console run, the <c>EXPLAIN</c>
+    /// fetch for a Mode A clause, and <see cref="MayRunSqlAsync" />, which lifts the clause guard's
+    /// nested-read rules and so also reads beyond the tenant - a subquery against another table carries
+    /// no tenant predicate either. The Query page asks the same two questions of the same scope, so the
+    /// console it shows and the console the service runs never disagree.
+    /// </para>
+    /// </remarks>
+    internal static StudioScope SqlScope(StudioScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        return scope.TenantId is null ? scope : scope with { TenantId = null };
+    }
+
+    /// <summary>
+    /// Whether this visitor may run SQL against this scope's database, which is what lifts the clause
+    /// guard's nested-read rules.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same three questions the console's own gate asks, in the same order, against the same
+    /// tenant-less scope (<see cref="SqlScope" />): the process-wide capability (D4), then the store
+    /// policy and the write policy with <c>RunSql</c> on the resource - which is exactly what
+    /// <see cref="StudioScopeResolver.ResolveAsync" /> asks when <see cref="ExecuteStatementAsync" />
+    /// resolves it. Asking only the capability would hand subqueries to somebody the
+    /// <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> refuses the console to; asking only the
+    /// write policy would hand them to somebody the store policy allows one tenant of the database and not
+    /// the database - and a subquery reads beyond the tenant exactly as the console does.
+    /// </para>
     /// </remarks>
     private async Task<bool> MayRunSqlAsync(StudioScope scope, CancellationToken cancellationToken)
     {
@@ -441,9 +497,12 @@ internal sealed class QueryService : IQueryService
             return false;
         }
 
-        return await authorization
-            .IsAuthorizedAsync(scope, nameof(StudioCapability.RunSql), cancellationToken)
-            .ConfigureAwait(false);
+        StudioScope sqlScope = SqlScope(scope);
+
+        return await authorization.IsAuthorizedAsync(sqlScope, capability: null, cancellationToken).ConfigureAwait(false)
+            && await authorization
+                .IsAuthorizedAsync(sqlScope, nameof(StudioCapability.RunSql), cancellationToken)
+                .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -460,8 +519,13 @@ internal sealed class QueryService : IQueryService
     /// and <c>@limit</c>, so the explain has to bind them too - otherwise Postgres answers "there is no
     /// parameter $1" and the page would be showing a plan for something other than what ran.
     /// </para>
+    /// <para>
+    /// Internal rather than private for <c>SqlConsoleReachTests</c> alone: the page reaches it only after a
+    /// Mode A read has run, which takes a database, and the gate it asks is the one thing about it a test
+    /// with none can prove.
+    /// </para>
     /// </remarks>
-    private async Task<ExplainResult> TryExplainAsync(
+    internal async Task<ExplainResult> TryExplainAsync(
         StudioScope scope,
         ComposedQuery composed,
         CancellationToken cancellationToken)
@@ -505,7 +569,10 @@ internal sealed class QueryService : IQueryService
         }
         catch (StudioNotAuthorizedException)
         {
-            return ExplainResult.Unavailable("No plan: you are not authorized to run SQL against this store.");
+            // The plan is fetched through the console's gate, which asks about the database as a whole
+            // (SqlScope): a visitor allowed one tenant and not the database gets the clause's rows and no
+            // plan, which is the same answer the console tab would give them.
+            return ExplainResult.Unavailable("No plan: fetching one runs EXPLAIN through the SQL console. " + SqlRefusedMessage);
         }
     }
 
@@ -546,19 +613,23 @@ internal sealed class QueryService : IQueryService
         }
 
         // 2. The scope, with the capability named so the write policy is the one asked. It is a read, but
-        //    it is the dangerous read, and D13 is explicit that it is treated as a write.
+        //    it is the dangerous read, and D13 is explicit that it is treated as a write. And it is asked
+        //    without the tenant: nothing narrows a statement to one, so the database as a whole is what
+        //    it reads and what it is authorized for (SqlScope). The audit and the log name that scope too,
+        //    success and refusal alike, because it is what was asked and what ran.
+        StudioScope sqlScope = SqlScope(scope);
         ResolvedScope resolved;
         try
         {
             resolved = await resolver
-                .ResolveAsync(scope, nameof(StudioCapability.RunSql), cancellationToken)
+                .ResolveAsync(sqlScope, nameof(StudioCapability.RunSql), cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (StudioNotAuthorizedException)
+        catch (StudioNotAuthorizedException denied)
         {
-            audit.RecordScopeDenied(scope, WritePolicyName(value), action, target);
+            audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), action, target, StudioCapability.RunSql);
             logger.SqlRejected(
-                user, scope.StoreKey, scope.DatabaseId, "not authorized for this scope", statement);
+                user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", statement);
             throw;
         }
 
@@ -569,13 +640,13 @@ internal sealed class QueryService : IQueryService
         {
             SqlRejection rejection = SqlRejection.FromGuard(guard);
 
-            audit.Record(action, target, succeeded: false, rejection.Message, StudioCapability.RunSql, scope);
-            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, rejection.Reason, statement);
+            audit.Record(action, target, succeeded: false, rejection.Message, StudioCapability.RunSql, sqlScope);
+            logger.SqlRejected(user, sqlScope.StoreKey, sqlScope.DatabaseId, rejection.Reason, statement);
 
             return SqlConsoleResult.Refused(rejection, value.MaxSqlConsoleRows);
         }
 
-        return await RunAsync(resolved, scope, statement, action, value, user, bind, cancellationToken)
+        return await RunAsync(resolved, sqlScope, statement, action, value, user, bind, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -647,10 +718,11 @@ internal sealed class QueryService : IQueryService
                 result.Error,
                 null);
         }
-        catch (NpgsqlException exception) when (exception is not PostgresException)
+        catch (Exception exception) when (exception is (NpgsqlException and not PostgresException) or SocketException)
         {
             // The connection itself, rather than the statement: nothing ran, and the page says so with the
-            // same shape it uses for a SQLSTATE.
+            // same shape it uses for a SQLSTATE. A host name that does not resolve reaches here as the
+            // SocketException itself - Npgsql 9.0.4 does not wrap it - and used to escape unaudited.
             audit.Record(action, target, succeeded: false, exception.Message, StudioCapability.RunSql, scope);
             logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, exception.Message, statement);
 

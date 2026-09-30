@@ -185,6 +185,36 @@ public sealed class MartenStudioOptions
     public IList<string> KnownTenantIds { get; } = [];
 
     /// <summary>
+    /// The Postgres schemas beyond the store's own whose objects the database browser may show, and whose
+    /// non-Marten rows and definitions it may read, once <see cref="MartenStudioCapabilities.BrowseDatabase"/>
+    /// is on. Empty by default. Each entry is an exact schema name, compared case-sensitively as Postgres
+    /// stores it, or <c>"*"</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>"*"</c> means every schema the studio's role has <c>USAGE</c> on, except the system schemas
+    /// (<c>pg_*</c>, <c>information_schema</c>) and the schemas an extension owns (TimescaleDB's, pg_cron's).
+    /// It is meant for a development or QA setup that wants everything in one line. A system schema is never
+    /// browsable, even by exact name.
+    /// </para>
+    /// <para>
+    /// The store's own schemas show their structure without the capability, as the Schema screen always
+    /// has; the rows and definitions of the non-Marten objects in them follow this list like any other
+    /// schema's.
+    /// </para>
+    /// <para>
+    /// <b>This limits what the screens show, not what can be read.</b> The SQL console reads whatever the
+    /// connection's role can read; <see cref="SqlConsoleRole"/> is the boundary for both. A <c>"*"</c> with
+    /// no <see cref="SqlConsoleRole"/> is logged as a warning at startup.
+    /// </para>
+    /// <para>
+    /// Validated at startup: every entry must be <c>"*"</c> or a schema name of at most 63 bytes with no
+    /// double quote and no NUL.
+    /// </para>
+    /// </remarks>
+    public IList<string> BrowsableSchemas { get; } = [];
+
+    /// <summary>
     /// When <see cref="KnownTenantIds"/> is empty, whether to discover tenant ids from Marten's database
     /// descriptors and, failing that, a bounded query.
     /// </summary>

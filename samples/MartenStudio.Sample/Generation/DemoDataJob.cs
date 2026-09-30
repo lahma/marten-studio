@@ -100,7 +100,7 @@ internal sealed class DemoDataJob : IHostedService, IDisposable
         {
             State = DemoDataJobState.Running,
             Kind = DemoDataJobKind.Truncate,
-            Phase = deleteAllEventData ? "DeletingAllEventData" : "DeletingDocuments",
+            Phase = nameof(DemoDataTruncationPhase.DeletingDocuments),
         };
 
         return TryStart(initial, (token) => RunTruncateAsync(deleteAllEventData, token), out error);
@@ -260,12 +260,16 @@ internal sealed class DemoDataJob : IHostedService, IDisposable
         long ticks = Stopwatch.GetTimestamp();
         var truncator = new DemoDataTruncator(store);
 
+        // Documents carries the documents deleted so far during a truncation: the delete goes a bounded
+        // batch at a time, and at the Large preset it is most of a minute that would otherwise show as a
+        // phase name and nothing moving.
         DemoDataTruncation result = await truncator.TruncateAsync(
             deleteAllEventData,
-            archived => progress = progress with
+            step => progress = progress with
             {
-                Phase = "ArchivingStreams",
-                StreamsArchived = archived,
+                Phase = step.Phase.ToString(),
+                Documents = step.DocumentsDeleted,
+                StreamsArchived = step.StreamsArchived,
                 Elapsed = Stopwatch.GetElapsedTime(ticks),
             },
             token).ConfigureAwait(false);
@@ -273,6 +277,7 @@ internal sealed class DemoDataJob : IHostedService, IDisposable
         progress = progress with
         {
             Phase = deleteAllEventData ? "DeletedAllEventData" : "Done",
+            Documents = result.DocumentsDeleted,
             StreamsArchived = result.StreamsArchived,
             Elapsed = Stopwatch.GetElapsedTime(ticks),
         };

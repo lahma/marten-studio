@@ -26,6 +26,13 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
     /// <summary>How many times the refresh button asked for everything again.</summary>
     public int InvalidateCount { get; private set; }
 
+    /// <summary>
+    /// A gate a test can hold shut to keep <see cref="DescribeAsync" /> pending - which is what
+    /// <see cref="StudioState.SetScopeAsync" /> awaits when the database changes, so it is how a test holds a
+    /// scope change half way, the way a real catalog that queries for tenants does.
+    /// </summary>
+    public TaskCompletionSource? DescribeGate { get; set; }
+
     /// <summary>Adds one available store with the databases named.</summary>
     public FakeStudioScopeCatalog WithStore(
         string key,
@@ -66,8 +73,15 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
         Task.FromResult<IReadOnlyList<DatabaseListing>>(
             Databases.TryGetValue(storeKey, out List<DatabaseListing>? databases) ? databases : []);
 
-    public Task<StoreScopeFacts> DescribeAsync(string storeKey, string databaseId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Facts.TryGetValue(storeKey, out StoreScopeFacts? facts) ? facts : StoreScopeFacts.None);
+    public async Task<StoreScopeFacts> DescribeAsync(string storeKey, string databaseId, CancellationToken cancellationToken = default)
+    {
+        if (DescribeGate is { } gate)
+        {
+            await gate.Task;
+        }
+
+        return Facts.TryGetValue(storeKey, out StoreScopeFacts? facts) ? facts : StoreScopeFacts.None;
+    }
 
     public void Invalidate() => InvalidateCount++;
 }

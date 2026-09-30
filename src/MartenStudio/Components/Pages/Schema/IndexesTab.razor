@@ -13,7 +13,29 @@
 
     Nothing on this tab asks the database for anything but pg_catalog rows: the declarations come from
     StoreOptions through SchemaDeclarationReader, never from AllObjects().
+
+    "A table Marten manages" is wider than the document and event tables (DB-7): a flat-table projection's
+    table and every StoreOptions.Storage.ExtendedSchemaObjects table are migrated by an apply too - Marten
+    yields ExtendedSchemaObjects as a feature of its own - so their undeclared indexes are dropped like any
+    other, and this tab says so. It used to call them "not a Marten table" that "no migration from here
+    touches", which is exactly the wording hard rule 14 forbids. A table this store does not declare is
+    "unmanaged" - a statement about what the studio can see, never a promise that an apply leaves it alone.
+
+    An index on a partition is never listed (it is named after the partition, and a Marten partition is
+    named after its tenant), and neither is anything on a hidden document type's table. A definition that
+    names a schema this visitor may not see - an expression index calling a function there - reads
+    ‹withheld› in its place, as the database browser's object detail does. A registered store that cannot
+    be read withholds the indexes of every table it could own, with a notice, rather than blanking the tab.
 *@
+
+@if (!loading && indexes.ClassificationNotice is { Length: > 0 } notice)
+{
+    <div class="ms-alert ms-alert-warning ms-schema-degraded" role="status">
+        <div class="ms-alert-content">
+            <p>@notice</p>
+        </div>
+    </div>
+}
 
 @if (loading)
 {
@@ -21,7 +43,7 @@
 }
 else if (indexes.Reason is { Length: > 0 } reason)
 {
-    <ErrorAlert Message="@reason" OnRetry="LoadAsync" />
+    <ErrorAlert Message="@reason" OnRetry="LoadAsync" RetryText="@(indexes.Busy ? "Try again" : "Retry")" />
 }
 else
 {
@@ -38,11 +60,13 @@ else
             <div class="ms-alert-content">
                 <p>
                     <strong>@DroppedHeadline</strong>
-                    They exist on tables Marten manages and <code>StoreOptions</code> does not declare
-                    them, so Weasel writes <code>drop index</code> for each - under
-                    <code>AutoCreate.CreateOrUpdate</code>, not only under <code>All</code>. Declare them,
-                    or name each one in <code>opts.Schema.For&lt;T&gt;().IgnoreIndex("...")</code> (or
-                    <code>opts.Events.IgnoreIndex("...")</code> on an event table).
+                    They exist on tables Marten manages - its document and event tables, and the
+                    projections' and <code>ExtendedSchemaObjects</code>' tables it migrates for the
+                    application - and nothing declares them, so Weasel writes <code>drop index</code> for
+                    each - under <code>AutoCreate.CreateOrUpdate</code>, not only under <code>All</code>.
+                    Declare them, or name each one in <code>opts.Schema.For&lt;T&gt;().IgnoreIndex("...")</code>
+                    (<code>opts.Events.IgnoreIndex("...")</code> on an event table, and
+                    <code>table.IgnoreIndex("...")</code> on a projection's or an extended table).
                 </p>
             </div>
         </div>
@@ -165,7 +189,8 @@ else
                                 }
                                 else if (!index.DeclaredByMarten && !index.OnMartenTable)
                                 {
-                                    <span class="ms-index-flag ms-index-flag-info">not a Marten table</span>
+                                    <span class="ms-index-flag ms-index-flag-info"
+                                          title="This store's configuration does not declare the table, as far as the studio can see.">unmanaged table</span>
                                 }
                                 @if (index.NeverUsed && !index.IsConstraint)
                                 {

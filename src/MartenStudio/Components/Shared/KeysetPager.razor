@@ -9,15 +9,19 @@
     Offset paging is still offered, because numbered pages are what people reach for and "page 7" is a
     thing they can say to each other. It is capped, and the cap says so out loud rather than silently
     returning nothing.
+
+    Shared since the database browser's row grid pages the same way: the documents list keeps every default
+    below, and the row grid names itself "Row pages" and leaves out the jump box - a row is opened by its
+    key, which is a link in the grid, not an id typed into a field.
 *@
 
-<div class="ms-pager" role="navigation" aria-label="Document pages">
+<div class="ms-pager" role="navigation" aria-label="@AriaLabel">
     @if (OffsetPaging)
     {
-        <button type="button" class="ms-btn ms-btn-sm" disabled="@(Page <= 1)" @onclick="() => GoToPageAsync(1)">First</button>
-        <button type="button" class="ms-btn ms-btn-sm" disabled="@(Page <= 1)" @onclick="() => GoToPageAsync(Page - 1)">Prev</button>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(Busy || Page <= 1)" @onclick="() => GoToPageAsync(1)">First</button>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(Busy || Page <= 1)" @onclick="() => GoToPageAsync(Page - 1)">Prev</button>
         <span class="ms-pager-position">Page @Page</span>
-        <button type="button" class="ms-btn ms-btn-sm" disabled="@(!HasMore || AtOffsetCap)" @onclick="() => GoToPageAsync(Page + 1)">Next</button>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(Busy || !HasMore || AtOffsetCap)" @onclick="() => GoToPageAsync(Page + 1)">Next</button>
 
         @if (AtOffsetCap)
         {
@@ -29,29 +33,48 @@
     }
     else
     {
-        <button type="button" class="ms-btn ms-btn-sm" disabled="@(!HasPrevious)" @onclick="FirstAsync">First</button>
-        <button type="button" class="ms-btn ms-btn-sm" disabled="@(!HasPrevious)" @onclick="PreviousAsync">Prev</button>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(Busy || !HasPrevious)" @onclick="FirstAsync">First</button>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(Busy || !HasPrevious)" @onclick="PreviousAsync">Prev</button>
         <span class="ms-pager-position">@PositionText</span>
-        <button type="button" class="ms-btn ms-btn-sm" disabled="@(!HasMore)" @onclick="NextAsync">Next</button>
+        <button type="button" class="ms-btn ms-btn-sm" disabled="@(Busy || !HasMore)" @onclick="NextAsync">Next</button>
     }
 
-    <form class="ms-pager-jump" @onsubmit="JumpAsync" @onsubmit:preventDefault="true">
-        <label class="ms-sr-only" for="ms-pager-jump-input">Jump to id</label>
-        <input id="ms-pager-jump-input"
-               class="ms-input ms-input-mono ms-pager-jump-input"
-               type="text"
-               placeholder="Jump to id"
-               @bind="jump"
-               @bind:event="onchange" />
-        @* The button is not disabled on `jump.Length`: with `onchange` the field only reaches the server on
-           blur, so a disabled-until-typed button would still be disabled when it was pressed. An empty jump
-           is refused in the handler instead, where the check can be right. *@
-        <button type="submit" class="ms-btn ms-btn-sm">Go</button>
-    </form>
+    @if (ShowJump)
+    {
+        <form class="ms-pager-jump" @onsubmit="JumpAsync" @onsubmit:preventDefault="true">
+            <label class="ms-sr-only" for="ms-pager-jump-input">@JumpLabel</label>
+            <input id="ms-pager-jump-input"
+                   class="ms-input ms-input-mono ms-pager-jump-input"
+                   type="text"
+                   placeholder="@JumpLabel"
+                   @bind="jump"
+                   @bind:event="onchange" />
+            @* The button is not disabled on `jump.Length`: with `onchange` the field only reaches the server on
+               blur, so a disabled-until-typed button would still be disabled when it was pressed. An empty jump
+               is refused in the handler instead, where the check can be right. *@
+            <button type="submit" class="ms-btn ms-btn-sm">Go</button>
+        </form>
+    }
 </div>
 
 @code {
     private string jump = string.Empty;
+
+    /// <summary>The navigation landmark's accessible name.</summary>
+    [Parameter]
+    public string AriaLabel { get; set; } = "Document pages";
+
+    /// <summary>The jump box's label and placeholder.</summary>
+    [Parameter]
+    public string JumpLabel { get; set; } = "Jump to id";
+
+    /// <summary>Whether to draw the jump box at all.</summary>
+    [Parameter]
+    public bool ShowJump { get; set; } = true;
+
+    /// <summary>Whether a page is being read, which holds every button until it has been.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
 
     /// <summary>Whether the page is in offset mode.</summary>
     [Parameter]

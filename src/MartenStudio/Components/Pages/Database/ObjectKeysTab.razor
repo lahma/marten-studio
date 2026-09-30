@@ -1,0 +1,239 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Database
+@using MartenStudio.Components.Pages.Schema
+@inject IOptions<MartenStudioOptions> Options
+@inject StudioState State
+
+@*
+    Everything that identifies a row or ties it to another: the row key and where it came from, the
+    constraints and indexes as Postgres prints them (pg_get_constraintdef, pg_get_indexdef, coloured by
+    SqlText on the server), and the foreign keys both ways with their far ends linked - or said to be out of
+    view, never named - and what a delete or an update does to them.
+*@
+
+@if (DetailModel is { } detail)
+{
+    string relationName = detail.Relation?.Name ?? "this relation";
+
+    <section class="ms-db-keys-section">
+        <h2 class="ms-db-section-title">Row key</h2>
+        @if (detail.RowKey is { } key)
+        {
+            <p class="ms-db-rowkey">
+                Rows are identified by <code>(@string.Join(", ", key.Columns))</code>:
+                @(key.Source == DatabaseRowKeySource.PrimaryKey
+                    ? "the primary key, " + key.IndexName + "."
+                    : "the unique index " + key.IndexName + ", a valid unconditional index over NOT NULL columns - there is no primary key.")
+            </p>
+        }
+        else
+        {
+            <p class="ms-db-rowkey ms-muted">
+                No row key: there is no primary key and no valid, unconditional unique index over NOT NULL
+                columns, so a single row cannot be named.
+            </p>
+        }
+    </section>
+
+    <section class="ms-db-keys-section">
+        <h2 class="ms-db-section-title">Constraints <span class="ms-tab-count">@detail.Constraints.Count</span></h2>
+        @if (detail.Constraints.Count == 0)
+        {
+            <p class="ms-muted">No constraints besides foreign keys.</p>
+        }
+        else
+        {
+            <TableScroll Label="@($"Constraints of {relationName}")">
+                <table class="ms-table ms-db-table ms-db-constraints">
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Kind</th>
+                            <th scope="col">Definition</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (DatabaseConstraintInfo constraint in detail.Constraints)
+                        {
+                            <tr @key="constraint.Name">
+                                <td class="ms-db-cell-name"><span class="ms-db-name">@constraint.Name</span></td>
+                                <td>@ConstraintKind(constraint.Kind)</td>
+                                <td class="ms-db-cell-sql"><SqlText Sql="@constraint.Definition" Label="@($"Definition of {constraint.Name}")" Wrap="true" ShowLineNumbers="false" /></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+    </section>
+
+    <section class="ms-db-keys-section">
+        <h2 class="ms-db-section-title">Indexes <span class="ms-tab-count">@detail.Indexes.Count</span></h2>
+        @if (detail.Indexes.Count == 0)
+        {
+            <p class="ms-muted">No indexes: every read of it is a sequential scan.</p>
+        }
+        else
+        {
+            <TableScroll Label="@($"Indexes of {relationName}")">
+                <table class="ms-table ms-db-table ms-db-indexes">
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Definition</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (DatabaseIndexInfo index in detail.Indexes)
+                        {
+                            <tr @key="index.Name">
+                                <td class="ms-db-cell-name">
+                                    <span class="ms-db-name">@index.Name</span>
+                                    <span class="ms-db-badges">
+                                        @if (index.IsPrimary)
+                                        {
+                                            <span class="ms-db-badge ms-db-badge-key" title="Backs the primary key">primary</span>
+                                        }
+                                        else if (index.IsUnique)
+                                        {
+                                            <span class="ms-db-badge" title="Unique">unique</span>
+                                        }
+                                        @if (index.IsPartial)
+                                        {
+                                            <span class="ms-db-badge" title="Partial: it covers only the rows its WHERE clause admits">partial</span>
+                                        }
+                                        @if (!index.IsValid)
+                                        {
+                                            <span class="ms-db-badge ms-db-badge-warning" title="Invalid: a CREATE INDEX CONCURRENTLY that failed. Postgres keeps it up to date and never uses it; drop it and build it again.">invalid</span>
+                                        }
+                                    </span>
+                                </td>
+                                <td class="ms-db-cell-sql"><SqlText Sql="@index.Definition" Label="@($"Definition of {index.Name}")" Wrap="true" ShowLineNumbers="false" /></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+    </section>
+
+    <section class="ms-db-keys-section">
+        <h2 class="ms-db-section-title">Foreign keys out <span class="ms-tab-count">@detail.ForeignKeysOut.Count</span></h2>
+        @if (detail.ForeignKeysOut.Count == 0)
+        {
+            <p class="ms-muted">It points at nothing.</p>
+        }
+        else
+        {
+            <TableScroll Label="@($"Foreign keys from {relationName}")">
+                <table class="ms-table ms-db-table ms-db-fks-out">
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Columns</th>
+                            <th scope="col">References</th>
+                            <th scope="col">On delete</th>
+                            <th scope="col">On update</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (DatabaseForeignKeyInfo key in detail.ForeignKeysOut)
+                        {
+                            <tr @key="key.Name">
+                                <td class="ms-db-cell-name">
+                                    <span class="ms-db-name">@key.Name</span>
+                                    @if (!key.Validated)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-warning" title="NOT VALID: rows that were there when it was added were never checked, so a pointed-at row may be missing">NOT VALID</span>
+                                    }
+                                </td>
+                                <td class="ms-db-cell-type">@string.Join(", ", key.Columns)</td>
+                                <td class="ms-db-cell-name">
+                                    @if (key is { LinkedVisible: true, LinkedSchema: { } schema, LinkedTable: { } table })
+                                    {
+                                        <a class="ms-db-name" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, table)">@DatabaseLinks.QualifiedName(schema, table)</a>
+                                        <span class="ms-db-fk-columns">(@string.Join(", ", key.LinkedColumns))</span>
+                                        @if (key.OtherEndOwnership is { IsMarten: true } owner)
+                                        {
+                                            <DatabaseOwnerBadge Model="owner" />
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="ms-db-none" title="The table it references is in a schema this studio does not show you">not visible</span>
+                                    }
+                                </td>
+                                <td class="@ActionClass(key.OnDelete)">@key.OnDelete</td>
+                                <td class="@ActionClass(key.OnUpdate)">@key.OnUpdate</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+    </section>
+
+    <section class="ms-db-keys-section">
+        <h2 class="ms-db-section-title">Foreign keys in <span class="ms-tab-count">@detail.ForeignKeysIn.Count</span></h2>
+        @if (detail.ForeignKeysIn.Count == 0)
+        {
+            <p class="ms-muted">Nothing you can see points at it.</p>
+        }
+        else
+        {
+            <TableScroll Label="@($"Foreign keys into {relationName}")">
+                <table class="ms-table ms-db-table ms-db-fks-in">
+                    <thead>
+                        <tr>
+                            <th scope="col">From</th>
+                            <th scope="col">Columns</th>
+                            <th scope="col">To columns</th>
+                            <th scope="col">On delete</th>
+                            <th scope="col">On update</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (DatabaseForeignKeyInfo key in detail.ForeignKeysIn)
+                        {
+                            <tr @key="key.Schema + '\u001f' + key.Table + '\u001f' + key.Name">
+                                <td class="ms-db-cell-name">
+                                    <a class="ms-db-name" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, key.Schema, key.Table)" title="@key.Name">@DatabaseLinks.QualifiedName(key.Schema, key.Table)</a>
+                                    @if (!key.Validated)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-warning" title="NOT VALID: rows that were there when it was added were never checked">NOT VALID</span>
+                                    }
+                                </td>
+                                <td class="ms-db-cell-type">@string.Join(", ", key.Columns)</td>
+                                <td class="ms-db-cell-type">@string.Join(", ", key.LinkedColumns)</td>
+                                <td class="@ActionClass(key.OnDelete)" title="@(key.OnDelete == "cascade" ? "Deleting a row here deletes the rows that point at it" : null)">@key.OnDelete</td>
+                                <td class="@ActionClass(key.OnUpdate)">@key.OnUpdate</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+    </section>
+}
+
+@code {
+    /// <summary>The relation's <c>DatabaseObjectDetail</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    [Parameter]
+    public object? Detail { get; set; }
+
+    private DatabaseObjectDetail? DetailModel => Detail as DatabaseObjectDetail;
+
+    private static string ConstraintKind(DatabaseConstraintKind kind) => kind switch
+    {
+        DatabaseConstraintKind.PrimaryKey => "primary key",
+        DatabaseConstraintKind.Unique => "unique",
+        DatabaseConstraintKind.Check => "check",
+        DatabaseConstraintKind.Exclusion => "exclusion",
+        DatabaseConstraintKind.ConstraintTrigger => "constraint trigger",
+        _ => "other",
+    };
+
+    /// <summary>A cascade is the action that surprises people, so it is the one drawn so it is seen.</summary>
+    private static string ActionClass(string action) =>
+        action is "cascade" or "set null" or "set default" ? "ms-db-fk-action ms-db-fk-action-strong" : "ms-db-fk-action";
+}

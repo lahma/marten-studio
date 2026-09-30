@@ -138,7 +138,16 @@ model, the phased delivery plan — lives in the approved plan at
     alone. Apply runs under `CreateOrUpdate` and never `AutoCreate.All`, the preview is rendered under the
     same mode so what is read is what is run, `MigrationRisk` lists the destructive statements in the
     dialog before the typed confirmation, and the typed string travels to the service rather than being
-    re-supplied by the page.
+    re-supplied by the page. `Check`, `Preview` and `DDL` print the whole database — every tenant's
+    partition by name, every document type's table — so they answer only a visitor the store policy
+    allows for the database with `TenantId = null`, and, while any document type is hidden, one past the
+    database browser's gate too; an apply is authorized as `(db, null, ApplySchemaChanges)` whatever tenant
+    is selected, because `CreateOrUpdate` reaches every tenant.
+    **The database browser reads the catalog, never Weasel.** Every list and description of a non-Marten
+    object comes from `pg_catalog` (never `information_schema`, which hides what the role cannot touch),
+    filtered by `nspname = any(@schemas)`, and runs inside `ReadOnlySqlSession` — so `lock_timeout` keeps
+    it off a migration's lock queue and `has_*_privilege` answers for `SqlConsoleRole`. What Marten owns is
+    read from `SchemaDeclarationReader`'s kind map, which touches no connection either (D27).
 15. **Open Marten sessions only with `SessionOptions.ForDatabase(resolved.TenantId, resolved.Database)`**
     (or `ForDatabase(resolved.Database)` where the scope has no tenant), never
     `Store.QuerySession(tenantId)` / `LightweightSession(tenantId)` — those ignore the selected database
@@ -159,7 +168,7 @@ model, the phased delivery plan — lives in the approved plan at
     that disposal with it, leaving the `DotNetObjectReference` that pins the component undisposed and the
     page's `CancellationTokenSource` uncancelled. A filter still rethrows anything that is a real bug.
 
-## Design decisions (D1–D24)
+## Design decisions (D1–D27)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the
 rationale is not.
@@ -339,7 +348,10 @@ them starts. Measured, not assumed: the built asset manifest has no `js-initiali
 all. *The alternative that was rejected:* keeping the initializer and making it no-op outside the
 studio's circuit. It fixes nothing — the fetch, the redirect and the console error all happen before any
 of its code runs. `NoJsInitializerTests` is the regression, on both halves: no `*.lib.module.js` under
-`wwwroot`, and a shell that still asks for the script it replaced it with.
+`wwwroot`, and a shell that still asks for the script it replaced it with. Measured in 0.3.0: a studio
+navigation resets the `<html>` element's attributes even though the window survives, so state the script
+keeps there (the keyboard-or-pointer input modality behind the heading's focus ring) lives in JS and is
+re-applied by an observer.
 
 **D25 — Every data table sits in its own labelled scroll region, and the shell never scrolls sideways.**
 `.ms-main` hides horizontal overflow on purpose, so the studio never grows a page-level scrollbar inside
@@ -355,7 +367,9 @@ the element's painted output to its border box and the focus ring is painted out
 the ~20 tab stops the regions add were invisible. `TablesAreScrollableTests` walks every `.razor` in
 `src/` with a tag stack and fails on a bare table, with an anti-vacuity theory of its own. Where a table
 is wide because of what a column *prints* (an assembly-qualified type name, three constant scope
-columns, a wrapped timestamp), fix the column first — the region is the floor, not the answer.
+columns, a wrapped timestamp), fix the column first — the region is the floor, not the answer. The
+Relationships diagram and the database browser's tab rows use the same region and edge cue: the diagram is
+drawn at its natural size and scrolls sideways rather than shrinking until its labels are unreadable.
 
 **D26 — The stylesheet's UX sections are appended in cascade order, and later wins on purpose.** The
 0.2.0 pass landed five parallel packets in one file. Each put its new rules in a titled section at the
@@ -364,6 +378,86 @@ where its report says so; several sections deliberately re-declare an earlier se
 `.ms-projection-note`, `.ms-overview-list-stream`, `.ms-doc-detail-actions`) and win by source order.
 Keep that when touching those selectors: a rule added *before* the section that overrides it is a rule
 that does nothing, and `StylesheetTests` (plus its `.Shell` part) pins the ones that were measured.
+0.3.0 appended `DB-4`, `DB-6`, `DB-7`, `DB-5`, `UX-6` and `UX-7` in that order under the same rule; `UX-6`
+re-declares a few earlier selectors on purpose (the notices' contrast, the heading's focus ring) and
+`StylesheetTests.DatabasePolish` pins them, as `StylesheetTests.FinalPolish` pins `UX-7`.
+
+**D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
+0.3.0 lets the studio show what else lives in the store's Postgres database — a Quartz.NET job store, a
+legacy schema, another library's tables — as tables, views, functions, triggers, sequences and types.
+Reading them is gated like `RunSql`, because it is the same power: `Capabilities.BrowseDatabase` (off by
+default, off under `ReadOnly`) and `BrowsableSchemas` (exact names, or `"*"` for every schema the role has
+`USAGE` on except Postgres' own and extensions'). Structure — names, columns, keys, indexes, trigger
+names, estimates — is visible without either for the store's *own* schemas, because the Schema screen
+already showed it; everything else, every non-Marten definition and every row needs both, plus the write
+policy asked **with `TenantId = null`**, since nothing filters a non-Marten table by tenant. Marten's own
+document and event tables and every `mt_`-prefixed object are never read raw — the browser links to
+Documents and Events, where tenancy, soft delete and the serializer apply — while flat-table projections
+and `ExtendedSchemaObjects` are Marten-managed *relational* data and their rows are browsable. A hidden
+document type (`IsDocumentTypeVisible`) is absent from every list together with its indexes, keys,
+triggers and partitions, and a view over its table is refused; per-tenant partitions and sequences roll
+up, because their names are the tenant list. Classification fails closed: if a registered store's
+declarations cannot be read, nothing is called "Other". Known limit: features added with
+`Storage.Add(IFeatureSchema)` are reachable only through Marten's internal `AllActiveFeatures`, which hard
+rule 14 forbids, so they are classified by the `mt_` prefix alone. `BrowsableSchemas` limits what the
+screens show, not what `RunSql` can read: `SqlConsoleRole` is the real boundary, and `"*"` without it is
+event 9230 at startup.
+Free text is masked and structure is blanked: every catalog read pins `search_path` to `pg_catalog`, so
+every name Postgres deparses is printed with its schema, and `WithheldNames` masks a withheld schema's
+qualifier — in types, defaults, CHECK and index definitions, view, routine and trigger definitions,
+`SET search_path` and comments — as `‹withheld›`. A view that reads from or refers to anything in a
+withheld schema is refused its rows and its query; so is a trigger whose function is withheld, and, while
+any document type may be hidden, a view that calls user code or reads a document table no store declares.
+**A list locks nothing it lists** — no `pg_partition_*`, no `pg_sequence_last_value`, no size function —
+because a tenant-partitioned store has thousands of partitions and the lock table is shared; a sequence's
+value is read on demand, one at a time. Another store's key and alias are shown only to a visitor that
+store's store policy passes, and its Marten-managed rows need its store and write policies. Known limits: a
+routine's body is shown as its author wrote it (a name it resolves through its own `SET search_path` or
+dynamic SQL is not masked); a hidden type nothing in the process has touched, and that is not registered
+with `Schema.For`, is unknown to `AllKnownDocumentTypes()` and is listed by its `mt_` name as infrastructure
+until Marten learns it (its rows are never read, views over it are refused); a domain CHECK that calls a
+function is not followed; a schema created after the 60-second schema-list cache is masked only once the
+list is read again.
+Rows are never read from a foreign table — nor from a partitioned table with a foreign partition, a table
+with a foreign inheritance child, or a view reading any of them (a materialized view's rows are local and
+are read). A view over Marten's own tables, or over another store's whose policies refuse the visitor, is
+refused its rows, and so is a table or view whose partitions or children sit in a withheld schema. A view
+is judged on what it reaches through other views and through functions with SQL-standard bodies (Postgres
+records their dependencies), and on the schemas it names as values, its collations and its text search
+objects. A function whose body is source text cannot be followed: a view calling one is refused its rows
+while any schema the reading role may read is withheld (for `SECURITY DEFINER`, while any schema is
+withheld) — which is why the sample writes `legacy.format_employee_name` with a `RETURN` body. Residual:
+under `"*"` with `SqlConsoleRole` narrowed, such a view is read, and what its function reads is bounded by
+that role alone; a definition naming a hidden type's table only through dynamic SQL is not detected; a
+foreign partition attached less than a minute ago may not yet be seen. A schema an extension owns is
+never admitted by `"*"` — only an exact `BrowsableSchemas` entry admits one — and one not admitted is
+masked like any withheld schema but does not count as withheld for dependency purposes. Every first read
+of a relation's rows is audited by signature (filter, sort, paging mode — never the cursor), per store,
+database and relation, and never from a static render: the browser's pages read only once interactive and
+once the scope their address names has been applied (an in-circuit Back or Forward to another database
+reads nothing against the previous one), so an explicit request the gate refuses is one 9202/9203 per
+page view and using a page whose gate is closed refuses nothing. On Activity and the Overview an entry
+under `BrowseDatabase` or `RunSql` is shown only while the capability is on and the write policy passes
+the reader for its scope; a browser read the store policy refused is recorded under `BrowseDatabase` too,
+and each policy is asked once per scope per sweep. Postgres' own error text about a browser read is
+masked like everything else (qualifiers, and every whole token that spells a withheld schema — whatever
+word precedes it, in any server language, a name with a space or a hyphen matched whole), except a value
+the read bound, which is echoed as typed; the Schema screen withholds a failure's text outright when the
+schema list it would be checked against cannot be read, and a failed apply's Activity entry carries its
+SQLSTATE, not Postgres' words, which stay in event 9206; row reads do not pin `search_path`, because a
+bare `=` must find `citext`'s own operator, and a name printed unqualified names no schema. The "could
+not be built" notice names another store only to a visitor that store's policy passes, and other stores'
+databases are enumerated only when a store policy — or a write policy, while `BrowseDatabase` is on —
+will be asked.
+**Reach, not scope.** An operation Marten runs over a whole database — a progression correction, a
+rebuild, a high-water restart, a store-global agent, cancelling a rebuild, the dead-letter "Rewind
+subscription", a schema apply — is authorized as `(store, database, null)` unless the database is
+exclusively the selected tenant's (never on a sharded tenancy, which pools tenants by design); the SQL
+console, the Mode A subquery lift and `EXPLAIN` are always asked with `TenantId = null`, because nothing
+narrows a typed statement to a tenant. A tenant's database is found without asking a dynamic tenancy for a
+tenant it does not have (`DatabaseReach.FindTenantDatabaseAsync`). Master-table and sharded tenancies run
+their pool or master-table `CreateOrUpdate` once per process on the first `AllDatabases()`, under the
+host's own `AutoCreate`, and the studio can be that first caller — a known limit, not a per-poll cost.
 
 ## Package budget
 
@@ -575,6 +669,7 @@ src/MartenStudio/Components/Pages/Projections/  The projections screen and its p
 samples/MartenStudio.SampleDomain/Events/ The demo events and the three projections
 tests/MartenStudio.Tests/Projections/     Daemon accessor, snapshot cache, live updates, operation tracker, page
 tests/MartenStudio.Integration.Tests/Projections/  Live Postgres + a real Solo daemon
+tests/MartenStudio.Integration.Tests/Logging/  Live hosts with no daemon and an externally managed one: no Warning from polling
 src/MartenStudio/Services/Events/         Event data service, aggregate invoker, event DTOs and links
 src/MartenStudio/Components/Pages/Events/ Streams, stream detail, feed, event types, dead letters
 tests/MartenStudio.Tests/Events/          Event builder cases, links, and the five page tests - no database
@@ -592,15 +687,25 @@ tests/MartenStudio.Tests/Query/            Composer, guard, export, saved querie
 tests/MartenStudio.Integration.Tests/Query/  Live Postgres: Marten where-clause mode and the SQL console
 samples/MartenStudio.SampleDomain/Generation/  The demo data generator: size presets, the generator,
                                          truncation, the word lists and the run marker
+samples/MartenStudio.SampleDomain/Relational/  Non-Marten demo schemas beside the store: Quartz.NET's job
+                                         store (vendored, Apache-2.0), the "legacy" catalog edge-case
+                                         schema, studio_sample.app_settings, and their idempotent seeding
 samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpoints, progress, daemon lag
 tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in
 docs/                                    Long-form documentation linked from README.md; never packed
-docs/screenshots/                        The eight README screenshots, from the P2 UI verification run
+docs/screenshots/                        The thirteen README screenshots (ScreenshotCaptureTests retakes them)
 src/MartenStudio/Services/Relationships/      The relationship graph service, its DTOs and the SVG layout
 src/MartenStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
 tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, page and panel - no database
 tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both ways, visibility, bounded counts
-tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: six scenarios, the D19 gate, the large-data pass
+tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: ten scenarios, the D19 gate, the large-data passes
+src/MartenStudio/Services/Database/       The database browser: the per-visitor gate, the schema matcher, the
+                                         ownership classifier, the catalog cache and the object service
+src/MartenStudio/Components/Pages/Database/  The database browser's screens: the rail, the kind tabs and grids,
+                                         object detail and its tabs, the Rows and Relationships slots
+tests/MartenStudio.Tests/Database/        Gate, matcher, classifier, catalog SQL shape, options - no database
+tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, the gate and its audit, no DDL,
+                                         and the relational demo schemas' idempotency and demo-data flows
 ```
 
 Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),

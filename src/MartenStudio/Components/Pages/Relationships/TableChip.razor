@@ -1,0 +1,34 @@
+@*
+    A table's name as a chip: square-cornered where a collection's chip is round, coloured by its schema, and
+    carrying the schema in front of the name so two tables of the same name in two schemas never read alike.
+*@
+
+<span class="ms-graph-table-chip @(Small ? "ms-graph-table-chip-small" : null)"
+      style="--ms-collection-hue: @Hue"
+      title="@(Title ?? Schema + "." + Name)">
+    <span class="ms-graph-table-chip-dot" aria-hidden="true"></span>
+    @* One flex item for the whole name, so the chip's gap sits after the marker and never inside "schema.name". *@
+    <span class="ms-graph-table-chip-text"><span class="ms-graph-table-chip-schema">@(Schema).</span><span class="ms-graph-table-chip-name">@Name</span></span>
+</span>
+
+@code {
+    /// <summary>The table's schema.</summary>
+    [Parameter]
+    public string Schema { get; set; } = string.Empty;
+
+    /// <summary>The table's name.</summary>
+    [Parameter]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>The schema's colour.</summary>
+    [Parameter]
+    public int Hue { get; set; } = 210;
+
+    /// <summary>The tooltip, when it should say more than the qualified name.</summary>
+    [Parameter]
+    public string? Title { get; set; }
+
+    /// <summary>The compact size tables and lists use.</summary>
+    [Parameter]
+    public bool Small { get; set; }
+}

@@ -8,6 +8,7 @@
 @inject IQueryService Queries
 @inject StudioState State
 @inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
 @inject ToastService Toasts
 @inject NavigationManager Navigation
 @inject IJSRuntime JsRuntime
@@ -27,8 +28,10 @@
     still apply.
 
     The SQL console is arbitrary SQL against the whole database, so it is gated on RunSql, resolved with
-    write-policy semantics, checked by the statement guard, run inside a read-only transaction and audited
-    statement by statement (D13). The README says it plainly: grant RunSql to people you would give psql to.
+    write-policy semantics against the database as a whole - never the tenant on screen, which nothing puts
+    into a typed statement (QueryService.SqlScope) - checked by the statement guard, run inside a read-only
+    transaction and audited statement by statement (D13). The README says it plainly: grant RunSql to
+    people you would give psql to.
 *@
 
 <PageTitle>Query</PageTitle>
@@ -228,6 +231,20 @@
                     }
                     else
                     {
+                        @* The page's own question, asked of the same tenant-less scope the service resolves
+                           (QueryService.SqlScope), so the console shown and the console run never disagree.
+                           Said, not enforced: the service refuses regardless (hard rule 5). *@
+                        <WriteRefusal Refused="@(!mayRunSql)" Capability="@nameof(StudioCapability.RunSql)" />
+
+                        @if (State.ActiveScope?.TenantId is { Length: > 0 } sqlTenant)
+                        {
+                            <p class="ms-muted ms-query-note ms-query-sql-tenant">
+                                The console is not limited to <code>@sqlTenant</code>: nothing adds a tenant to a
+                                statement you type, so it reads every tenant's rows, and it is authorized for
+                                this database as a whole.
+                            </p>
+                        }
+
                         <QueryEditor EditorId="ms-query-sql"
                                      Label="SQL statement"
                                      Placeholder="select count(*) from …"
@@ -332,6 +349,16 @@
     private bool running;
     private long elapsedMilliseconds;
     private bool loaded;
+
+    /// <summary>
+    /// Whether the policies let <em>this</em> visitor run SQL against the database on screen.
+    /// </summary>
+    /// <remarks>
+    /// Asked once per load, never memoised, and fail-open by default: the common case is a host with no
+    /// policy at all, and this is not the enforcement - <c>IQueryService.RunSqlAsync</c> resolves the same
+    /// scope and throws (AGENTS.md hard rule 5).
+    /// </remarks>
+    private bool mayRunSql = true;
 
     private string? appliedMode;
     private string? appliedType;
@@ -481,12 +508,17 @@
         {
             documentTypes = [];
             examples = QueryExamples.None;
+            mayRunSql = true;
             loaded = true;
             return;
         }
 
         try
         {
+            // First, before anything that can fail: a read that throws must not leave the console showing
+            // the previous scope's answer.
+            mayRunSql = await MayRunSqlAsync(scope, pageCts.Token);
+
             documentTypes = await Queries.ListDocumentTypesAsync(scope, pageCts.Token);
             examples = await Queries.BuildExamplesAsync(scope, pageCts.Token);
 
@@ -521,6 +553,26 @@
         {
             loaded = true;
         }
+    }
+
+    /// <summary>
+    /// The console's gate, asked the way the service asks it: the store policy, then the write policy
+    /// with <c>RunSql</c> on the resource, both against the scope's database as a whole.
+    /// </summary>
+    /// <remarks>
+    /// Nobody is asked about a capability the process does not have; <c>CapabilityDisabled</c> says that.
+    /// </remarks>
+    private async Task<bool> MayRunSqlAsync(StudioScope scope, CancellationToken token)
+    {
+        if (!SqlEnabled)
+        {
+            return true;
+        }
+
+        StudioScope sqlScope = QueryService.SqlScope(scope);
+
+        return await Authorization.IsAuthorizedAsync(sqlScope, null, token)
+            && await Authorization.IsAuthorizedAsync(sqlScope, StudioCapability.RunSql, token);
     }
 
     private async Task SwitchModeAsync(QueryMode next)
@@ -769,7 +821,7 @@
         }
         catch (StudioNotAuthorizedException)
         {
-            sqlError = "You are not authorized to run SQL against this store.";
+            sqlError = QueryService.SqlRefusedMessage;
         }
         catch (Exception exception)
         {

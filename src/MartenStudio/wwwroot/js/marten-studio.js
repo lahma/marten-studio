@@ -565,8 +565,10 @@
         }
     };
 
-    window.martenStudio.scroll = window.martenStudio.scroll || {
-        intoView: function (elementId, block) {
+    window.martenStudio.scroll = window.martenStudio.scroll || {};
+
+    if (typeof window.martenStudio.scroll.intoView !== "function") {
+        window.martenStudio.scroll.intoView = function (elementId, block) {
             try {
                 const element = document.getElementById(elementId);
                 if (element) {
@@ -576,6 +578,132 @@
             } catch (e) {
                 // Nothing to do: scrolling is a courtesy.
             }
+            return false;
+        };
+    }
+
+    /*
+     * Brings the first element inside `container` that matches `selector` into view within that container's
+     * own scroll box, and moves nothing else - the database browser's rail marks the open table this way.
+     * `scrollIntoView` is not used because it scrolls every scrolling ancestor too, the page among them. A
+     * container that does not scroll (a phone's rail, which is a plain block), an element that is not drawn
+     * (inside a closed <details>), or one already in view is left alone, so a second call changes nothing.
+     *
+     * As far as is needed and no further - `block: 'nearest'` - with a few pixels to spare, so the entry is
+     * not flush with the edge. It used to centre the entry, which scrolled the rail's own top - the SCHEMAS
+     * header and "All schemas" - out of view for any table low in the list, even one that would have fitted
+     * with the header still showing (UX-7).
+     */
+    if (typeof window.martenStudio.scroll.revealWithin !== "function") {
+        window.martenStudio.scroll.revealWithin = function (container, selector) {
+            try {
+                if (!container || typeof container.querySelector !== "function") {
+                    return false;
+                }
+
+                const element = container.querySelector(selector);
+                if (!element || element.getClientRects().length === 0 || container.scrollHeight <= container.clientHeight) {
+                    return false;
+                }
+
+                // The scroll box's own visible area: inside the border, above a horizontal scrollbar.
+                const box = container.getBoundingClientRect();
+                const top = box.top + container.clientTop;
+                const bottom = top + container.clientHeight;
+                const item = element.getBoundingClientRect();
+                const spare = 8;
+
+                if (item.top >= top && item.bottom <= bottom) {
+                    return true;
+                }
+
+                if (item.top < top) {
+                    container.scrollTop -= (top - item.top) + spare;
+                } else {
+                    container.scrollTop += (item.bottom - bottom) + spare;
+                }
+
+                return true;
+            } catch (e) {
+                return false;
+            }
+        };
+    }
+
+    // Whether the visitor is using the keyboard, for the page heading's focus ring.
+    //
+    // `<FocusOnNavigate Selector="h1" />` puts focus on the page's heading after every navigation, which is
+    // right for a screen reader, and the stylesheet draws a ring round a heading only for a keyboard focus.
+    // But whether a *script's* focus counts as a keyboard one is the browser's guess, and Chromium guesses
+    // yes whenever the page has seen no pointer input yet - which is every page opened from the address bar,
+    // a bookmark or a reload. So every such page drew a 2 px box round the whole title row for a mouse user.
+    // This records what the visitor last actually did - a key, or a pointer - as `data-ms-keyboard` on the
+    // document element, and the stylesheet only draws the heading's ring while it is there. A keyboard user
+    // who presses Enter on a link still gets the ring on the heading of the page it opened.
+    //
+    // The state lives here and the attribute is only its reflection, because a navigation inside the studio
+    // brings the document element's attributes back in line with the page the server sent - which has none
+    // of this - measured: an attribute set on <html> was gone after every link. So an observer on exactly
+    // that one attribute puts it back whenever it goes while the visitor is still on the keyboard; it
+    // changes nothing when the value is already right, so its own writes do not wake it. Idempotent: the
+    // listeners are added once however often the script runs.
+    window.martenStudio.inputModality = window.martenStudio.inputModality || (function () {
+        const root = document.documentElement;
+        const name = "data-ms-keyboard";
+        let keyboard = false;
+
+        function reflect() {
+            if (keyboard) {
+                if (root.getAttribute(name) !== "true") {
+                    root.setAttribute(name, "true");
+                }
+            }
+            else if (root.hasAttribute(name)) {
+                root.removeAttribute(name);
+            }
+        }
+
+        document.addEventListener("keydown", function (event) {
+            if (event.ctrlKey || event.altKey || event.metaKey) {
+                return;
+            }
+
+            keyboard = true;
+            reflect();
+        }, { capture: true, passive: true });
+
+        document.addEventListener("pointerdown", function () {
+            keyboard = false;
+            reflect();
+        }, { capture: true, passive: true });
+
+        if (typeof window.MutationObserver === "function") {
+            new window.MutationObserver(reflect).observe(root, { attributes: true, attributeFilter: [name] });
+        }
+
+        return {
+            /* Whether the visitor's last input was a key - for a caller that needs to know rather than style. */
+            isKeyboard: function () {
+                return keyboard;
+            }
+        };
+    })();
+
+    // Closes a <details> without drawing it again, for the database browser's rail on a phone: a page it
+    // leads to opens with it shut. Blazor cannot say "closed" to an element a visitor opened - it only writes
+    // an attribute whose rendered value changed - and re-creating the element to close it took the keyboard
+    // focus away with the link that had it. A <details> that is already shut is left alone.
+    window.martenStudio.disclosure = window.martenStudio.disclosure || {
+        close: function (element) {
+            try {
+                if (element && element.open === true) {
+                    element.open = false;
+                    return true;
+                }
+            }
+            catch {
+            }
+
             return false;
         }
     };
@@ -596,7 +724,9 @@
     // learn something the browser already knows. Nothing here talks to .NET, so nothing here can hold a
     // DotNetObjectReference open after a circuit closes.
     window.martenStudio.tableScroll = window.martenStudio.tableScroll || (function () {
-        const selector = ".ms-table-scroll, .ms-table-wrap";
+        // The database browser's two tab rows are here too: on a phone they are one row that scrolls
+        // sideways (UX-6), and the same edge cue is what says there are more tabs past the edge.
+        const selector = ".ms-table-scroll, .ms-table-wrap, .ms-db-kind-tabs, .ms-db-object-tabs";
 
         // region -> the child element observed with it (a table's own width is what changes when rows
         // arrive, and the region's box does not move when it does).
@@ -744,5 +874,26 @@
              */
             refresh: schedule
         };
+    })();
+
+    // The database browser's row grid (DB-5): a focused row opens in place on Space, which the circuit
+    // hears through the row's own @onkeydown. What it cannot do is stop the browser's own Space - scrolling
+    // the page by a screen - because Razor decides `@onkeydown:preventDefault` when the component renders,
+    // not per key, and preventing every key would take Tab away from the row. So this stops Space and
+    // nothing else, and only when the row itself has the focus: a link, a button or a field inside a row
+    // keeps every key it had. One capture-free listener on the document, idempotent like everything here.
+    window.martenStudio.rowKeys = window.martenStudio.rowKeys || (function () {
+        document.addEventListener("keydown", function (event) {
+            if (event.key !== " " && event.key !== "Spacebar") {
+                return;
+            }
+
+            const target = event.target;
+            if (target && target.nodeType === 1 && typeof target.matches === "function" && target.matches("tr[data-ms-row]")) {
+                event.preventDefault();
+            }
+        });
+
+        return {};
     })();
 })();

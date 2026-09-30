@@ -1,0 +1,594 @@
+@page "/marten/database/row"
+@using Microsoft.Extensions.Options
+@using MartenStudio.Components.Pages.Documents
+@using MartenStudio.Internal.Sql
+@using MartenStudio.Services.Database
+@using MartenStudio.Services.Live
+@implements IAsyncDisposable
+@inject ITableRowService Rows
+@inject DatabaseBrowserState Browser
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+@inject IJSRuntime JsRuntime
+@inject ToastService Toasts
+
+@*
+    One row of a non-Marten table, by its key: every column on the left, and on the right what the row points
+    at and what points at it - document detail, for a relational row.
+
+    The key travels as one readable parameter per key column (?key.sched_name=…&key.trigger_name=…, D9), so a
+    link pasted into a chat reopens the same row and a person can edit it to the next one by hand. The list the
+    visitor came from travels as ?from=, checked against the same allow-list SafeReturnLink applies to the
+    documents list's, and the rows that were on it give the previous and next arrows.
+
+    A link to a row that is not there, to a relation outside the gate, or to one the visitor may not read all
+    get the same neutral panel, which names a gate only where the gate is an option or the account - never
+    whether the row or the table exists. A relation with no key has no row page at all: its rows are opened
+    in place in the grid, and a link that asks for one says so.
+
+    The Copy menu's WHERE clause is written in Internal/Sql (hard rule 4) from the catalog's column names and
+    the key's values as quoted literals - text for an editor or a ticket, never run by the studio.
+*@
+
+<PageTitle>@(Name is { Length: > 0 } name ? name + " row — Database" : "Row — Database")</PageTitle>
+
+<div class="ms-page ms-db-page ms-row-detail-page">
+    <nav class="ms-db-breadcrumb" aria-label="Breadcrumb">
+        <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Database</a>
+        @if (detail is { Found: true } && Schema is { Length: > 0 } schema && Name is { Length: > 0 } table)
+        {
+            <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
+            <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, schema, DatabaseObjectCategory.Tables)">@schema</a>
+            <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
+            <a href="@BackHref">@table</a>
+            <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
+            <span class="ms-mono ms-row-breadcrumb-key" title="@RowPresentation.KeyTitle(key)">@RowPresentation.KeyTuple(key)</span>
+        }
+    </nav>
+
+    @if (string.IsNullOrWhiteSpace(Schema) || string.IsNullOrWhiteSpace(Name))
+    {
+        <div class="ms-empty ms-row-not-found" role="status">
+            <p class="ms-empty-title">No row asked for</p>
+            <p class="ms-empty-description">
+                This page opens one row of a table, named in the query string
+                (<code>?schema=&amp;name=&amp;key.&lt;column&gt;=</code>). Open one from a table's Rows tab in
+                <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">the database browser</a>.
+            </p>
+        </div>
+    }
+    else if (key.Count == 0)
+    {
+        @RenderKeyless(null)
+    }
+    else if (loading && detail is null)
+    {
+        <LoadingSpinner />
+    }
+    else if (loadError is { Length: > 0 } error)
+    {
+        <ErrorAlert Message="@error" OnRetry="ReloadAsync" />
+    }
+    else if (detail is { Refusal: DatabaseRefusal.NotApplicable } keyless)
+    {
+        @RenderKeyless(keyless.Reason)
+    }
+    else if (detail is { Error: { } failure })
+    {
+        <div class="ms-row-state ms-row-state-failed" role="alert" data-sqlstate="@failure.SqlState">
+            <p class="ms-row-state-title">@RowPresentation.FailureTitle(failure, detail.RowSecurity)</p>
+            <p class="ms-row-state-text">@failure.Sentence</p>
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="ReloadAsync">Try again</button>
+        </div>
+    }
+    else if (detail is not { Found: true } found)
+    {
+        @RenderNotFound()
+    }
+    else
+    {
+        @RenderRow(found)
+    }
+</div>
+
+@code {
+    /// <summary>The previous-row glyph. Constant markup only - no icon library, ever (hard rule 3).</summary>
+    private static readonly MarkupString ChevronLeft = new(
+        """<svg class="ms-btn-glyph" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="11,3 5,9 11,15" /></svg>""");
+
+    /// <summary>The next-row glyph.</summary>
+    private static readonly MarkupString ChevronRight = new(
+        """<svg class="ms-btn-glyph" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="7,3 13,9 7,15" /></svg>""");
+
+    /// <summary>The "filter by this value" glyph: a funnel.</summary>
+    private static readonly MarkupString FilterGlyph = new(
+        """<svg class="ms-row-filter-glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3h11l-4.25 5v4.5l-2.5 1.25V8z" /></svg>""");
+
+    private CancellationTokenSource? cts;
+    private TableRowDetail? detail;
+    private TableRowReferences? references;
+    private IReadOnlyList<KeyValuePair<string, string>> key = [];
+    private IReadOnlyList<KeyValuePair<string, string>>? previousKey;
+    private IReadOnlyList<KeyValuePair<string, string>>? nextKey;
+    private string? loadError;
+    private bool loading = true;
+    private bool mayRunSql;
+    private string? loadedSignature;
+
+    /// <summary>The relation's schema.</summary>
+    [SupplyParameterFromQuery(Name = "schema")]
+    public string? Schema { get; set; }
+
+    /// <summary>The relation's name.</summary>
+    [SupplyParameterFromQuery(Name = "name")]
+    public string? Name { get; set; }
+
+    /// <summary>The Rows tab URL this row was opened from, so "back" returns to the same page of it.</summary>
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? From { get; set; }
+
+    /// <summary>The store key, so a pasted link reopens the same store (D9).</summary>
+    [SupplyParameterFromQuery(Name = "store")]
+    public string? StoreKey { get; set; }
+
+    /// <summary>The database identity.</summary>
+    [SupplyParameterFromQuery(Name = "db")]
+    public string? DatabaseId { get; set; }
+
+    /// <summary>The tenant - which filters nothing here, and is carried so the header keeps it.</summary>
+    [SupplyParameterFromQuery(Name = "tenant")]
+    public string? TenantId { get; set; }
+
+    /// <summary>The <c>?from=</c> the link carried, but only when it is a return link into the database browser's object page.</summary>
+    private string? SafeFrom => SafeReturnLink.Sanitize(From, Options.Value, DatabaseLinks.ObjectRoute);
+
+    private string BackHref => SafeFrom ?? DatabaseLinks.ToObject(Options.Value, State.ActiveScope, Schema ?? string.Empty, Name ?? string.Empty, DatabaseObjectTab.Rows);
+
+    private IReadOnlyDictionary<string, string> KeyDictionary =>
+        key.GroupBy(static x => x.Key, StringComparer.Ordinal).ToDictionary(static x => x.Key, static x => x.First().Value, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Whether this render is the circuit's: set by the first <see cref="OnAfterRenderAsync" />, which static
+    /// rendering never calls. The row is read only then.
+    /// </summary>
+    private bool interactive;
+
+    /// <summary>
+    /// Whether the scope the address names has been applied - set at the end of <see cref="OnParametersSetAsync" />,
+    /// cleared at its start. The first interactive render reads only when it is.
+    /// </summary>
+    private bool scopeSettled;
+
+    /// <summary>Which <see cref="OnParametersSetAsync" /> is the latest, so an overtaken one does not read.</summary>
+    private int parameterPass;
+
+    protected override void OnInitialized() => State.ScopeChanged += OnScopeChangedAsync;
+
+    /// <remarks>
+    /// <para>
+    /// No row is read while prerendering, nor in any other static render: opening a row is audited, and the
+    /// prerender's DI scope and the circuit's would each have recorded it - a pasted link written to the ring
+    /// twice, and refused twice as a Warning when the gate says no. The static render draws the loading state;
+    /// the circuit's first render reads (the same rule as the Rows tab, for the same reason).
+    /// </para>
+    /// <para>
+    /// Nor before the address's scope is the studio's: applying it can query the database, the first
+    /// interactive render happens while it is awaited, and a Back or Forward to a row of another database
+    /// opened - and audited - the key against the previous database first (the object page's rule).
+    /// </para>
+    /// </remarks>
+    protected override async Task OnParametersSetAsync()
+    {
+        int pass = ++parameterPass;
+        scopeSettled = false;
+
+        // The key first: it is the address's alone, and a render while the scope is applied draws the loading
+        // state for it rather than "no key".
+        key = DatabaseLinks.ReadKey(Navigation.Uri);
+
+        await State.EnsureInitializedAsync();
+        await ApplyScopeFromUrlAsync();
+
+        if (pass != parameterPass)
+        {
+            return;
+        }
+
+        scopeSettled = true;
+
+        if (!interactive)
+        {
+            return;
+        }
+
+        await LoadIfChangedAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        interactive = true;
+
+        // Otherwise the pass still applying the address's scope reads, once it has.
+        if (scopeSettled)
+        {
+            await LoadIfChangedAsync();
+        }
+    }
+
+    private async Task LoadIfChangedAsync()
+    {
+        string signature = string.Join(
+            '\u001f',
+            State.ActiveScope?.StoreKey,
+            State.ActiveScope?.DatabaseId,
+            Schema,
+            Name,
+            string.Join('\u001e', key.Select(static x => x.Key + "=" + x.Value)));
+
+        if (string.Equals(signature, loadedSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        loadedSignature = signature;
+        await LoadAsync();
+    }
+
+    /// <summary>Points the studio at the scope the URL names, when it names one; the listing validates it.</summary>
+    private async Task ApplyScopeFromUrlAsync()
+    {
+        if (StoreKey is null && DatabaseId is null && TenantId is null)
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+
+        bool differs = (StoreKey is not null && !string.Equals(StoreKey, active?.StoreKey, StringComparison.OrdinalIgnoreCase))
+            || (DatabaseId is not null && !string.Equals(DatabaseId, active?.DatabaseId, StringComparison.OrdinalIgnoreCase))
+            || (TenantId is not null && !string.Equals(string.IsNullOrWhiteSpace(TenantId) ? null : TenantId, active?.TenantId, StringComparison.Ordinal));
+
+        if (differs)
+        {
+            await State.SetScopeAsync(StoreKey ?? active?.StoreKey, DatabaseId ?? active?.DatabaseId, TenantId);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || string.IsNullOrWhiteSpace(Schema) || string.IsNullOrWhiteSpace(Name) || key.Count == 0)
+        {
+            loading = false;
+            return;
+        }
+
+        CancellationToken token = ResetCancellation();
+
+        loading = true;
+        loadError = null;
+        references = null;
+        StateHasChanged();
+
+        try
+        {
+            detail = await Rows.GetRowAsync(scope, Schema, Name, KeyDictionary, token);
+            (previousKey, nextKey) = Browser.Neighbours(Schema, Name, key);
+
+            if (detail.Found)
+            {
+                mayRunSql = Capabilities.IsEnabled(StudioCapability.RunSql)
+                    && await Authorization.IsAuthorizedAsync(scope, StudioCapability.RunSql, token);
+
+                references = await Rows.GetReferencesAsync(scope, Schema, Name, KeyDictionary, token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            loadError = "You are not authorized for this store, database or tenant.";
+        }
+        catch (Exception exception)
+        {
+            loadError = exception.Message;
+        }
+        finally
+        {
+            loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private CancellationToken ResetCancellation()
+    {
+        CancellationTokenSource? previous = cts;
+        cts = new CancellationTokenSource();
+        previous?.Cancel();
+        previous?.Dispose();
+        return cts.Token;
+    }
+
+    private Task OnScopeChangedAsync() => InvokeAsync(async () =>
+    {
+        try
+        {
+            loadedSignature = null;
+            await OnParametersSetAsync();
+        }
+        catch (Exception exception)
+        {
+            loadError = exception.Message;
+            StateHasChanged();
+        }
+    });
+
+    private Task ReloadAsync()
+    {
+        loadedSignature = null;
+        return OnParametersSetAsync();
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Rendering
+    // ------------------------------------------------------------------------------------------------
+
+    private RenderFragment RenderRow(TableRowDetail row) => __builder =>
+    {
+        IReadOnlyList<KeyValuePair<string, string>> shown = row.Key is { Count: > 0 } read ? RowPresentation.KeyPairs(read, row.RowKey) : key;
+
+        <div class="ms-page-header ms-row-detail-header">
+            <h1 class="ms-page-title ms-row-detail-title">
+                <span class="ms-db-object-name">@row.Name</span>
+                <span class="ms-row-detail-key ms-mono" title="@RowPresentation.KeyTitle(shown)">@RowPresentation.KeyTuple(shown)</span>
+            </h1>
+
+            <div class="ms-row-detail-actions">
+                <span class="ms-doc-detail-nav">
+                    <a class="ms-btn ms-btn-sm ms-btn-icon @(previousKey is null ? "ms-btn-disabled" : null)"
+                       href="@(previousKey is null ? "#" : NeighbourHref(previousKey))"
+                       aria-disabled="@(previousKey is null ? "true" : "false")"
+                       aria-label="Previous row"
+                       title="The previous row on the page you came from">@ChevronLeft</a>
+                    <a class="ms-btn ms-btn-sm ms-btn-icon @(nextKey is null ? "ms-btn-disabled" : null)"
+                       href="@(nextKey is null ? "#" : NeighbourHref(nextKey))"
+                       aria-disabled="@(nextKey is null ? "true" : "false")"
+                       aria-label="Next row"
+                       title="The next row on the page you came from">@ChevronRight</a>
+                </span>
+
+                <a class="ms-btn ms-btn-sm" href="@BackHref">Back to the rows</a>
+
+                @if (mayRunSql && SqlLiteralText.RowStatement(row.Schema ?? Schema!, row.Name ?? Name!, KeyLiterals(shown)) is { } statement)
+                {
+                    <a class="ms-btn ms-btn-sm" href="@DatabaseLinks.ToQueryConsole(Options.Value, State.ActiveScope, statement)" title="Open the SQL console with a SELECT of this row written into it">Open in Query</a>
+                }
+
+                <MenuButton WrapperClass="ms-db-copy-menu ms-row-copy-menu"
+                            ButtonClass="ms-btn ms-btn-sm ms-db-copy-menu-button"
+                            PopoverClass="ms-db-copy-popover"
+                            ElementId="ms-row-copy-menu"
+                            Text="Copy"
+                            Title="Copy this row as JSON, its key, or a WHERE clause that finds it"
+                            Label="@($"Copy from row {RowPresentation.KeyTuple(shown)}")"
+                            Items="CopyItems(row, shown)" />
+            </div>
+        </div>
+
+        <div class="ms-db-object-meta ms-row-detail-meta">
+            <CopyBadge Value="@DatabaseLinks.QualifiedName(row.Schema ?? Schema!, row.Name ?? Name!)" />
+            @if (row.Ownership is { } ownership)
+            {
+                <DatabaseOwnerBadge Model="ownership" />
+            }
+            @if (row.RowKey is { } rowKey)
+            {
+                <span class="ms-db-object-fact" title="@rowKey.IndexName">key: @(rowKey.Source == DatabaseRowKeySource.PrimaryKey ? "primary key" : "unique index") (@string.Join(", ", rowKey.Columns))</span>
+            }
+        </div>
+
+        @if (row.RowSecurity)
+        {
+            <p class="ms-row-note" role="note">Row-level security is on for this table: what the reading role's policies hide is not shown.</p>
+        }
+
+        <div class="ms-split ms-row-detail-split">
+            <div class="ms-split-pane ms-row-detail-values">
+                <div class="ms-kv ms-row-kv" role="list" aria-label="@($"Every column of {row.Name}")">
+                    @for (int index = 0; index < row.Columns.Count; index++)
+                    {
+                        TableRowColumn column = row.Columns[index];
+                        Internal.Sql.SqlCell cell = index < row.Cells.Count ? row.Cells[index] : Internal.Sql.SqlCell.Null;
+
+                        <div class="ms-kv-row ms-row-kv-row" role="listitem" @key="index">
+                            <div class="ms-kv-key ms-row-kv-key">
+                                <span class="ms-row-kv-name">@column.Name</span>
+                                <span class="ms-row-kv-type">@column.Type</span>
+                                @if (column.KeyPosition is not null)
+                                {
+                                    <span class="ms-row-pk" title="Part of the row key">PK</span>
+                                }
+                            </div>
+                            <div class="ms-kv-value ms-row-kv-value">
+                                <div class="ms-row-kv-cell">
+                                    <RowValue Schema="@(row.Schema ?? Schema!)"
+                                              Name="@(row.Name ?? Name!)"
+                                              CellKey="KeyDictionary"
+                                              Column="@column.Name"
+                                              Type="@column.Type"
+                                              Kind="@RowPresentation.KindToken(cell.Kind)"
+                                              Text="@cell.Text"
+                                              IsTruncated="cell.IsTruncated"
+                                              FullLength="cell.FullLength" />
+                                </div>
+                                @if (FilterHref(column, cell) is { } filter)
+                                {
+                                    <a class="ms-row-filter-by"
+                                       href="@filter.Href"
+                                       title="@($"Show the rows where {filter.Filter}")"
+                                       aria-label="@($"Show the rows where {filter.Filter}")">@FilterGlyph</a>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <SqlDisclosure Sql="@row.Sql" ParameterNames="row.ParameterNames" />
+            </div>
+
+            <div class="ms-split-pane ms-row-detail-references">
+                @if (references is null)
+                {
+                    <LoadingSpinner />
+                }
+                else
+                {
+                    <RowReferencesPanel References="references" />
+                }
+            </div>
+        </div>
+    };
+
+    private RenderFragment RenderKeyless(string? reason) => __builder =>
+    {
+        <div class="ms-empty ms-row-keyless" role="status">
+            <p class="ms-empty-title">This row cannot be opened on its own</p>
+            <p class="ms-empty-description">@(reason ?? "This table has no key, so a row cannot be linked; expand it in the grid.")</p>
+            <p class="ms-empty-description">
+                <a class="ms-btn ms-btn-sm" href="@BackHref">Back to the rows</a>
+            </p>
+        </div>
+    };
+
+    /// <summary>
+    /// The neutral panel: the same words for a row that is not there and for one outside the gate, so the
+    /// page is not a way to find out what exists. A gate that is an option or the account is named - in place
+    /// of "it may have been deleted", which is not what happened when a gate refused. The heading fits both,
+    /// as object detail's does.
+    /// </summary>
+    private RenderFragment RenderNotFound() => __builder =>
+    {
+        <div class="ms-empty ms-row-not-found" role="status">
+            <p class="ms-empty-title">Not available here</p>
+            @if (detail is { Refusal: var refusal, Reason: { Length: > 0 } reason } && RowPresentation.IsGate(refusal))
+            {
+                <p class="ms-empty-description">There is no row with this key here that this studio shows you.</p>
+                <p class="ms-empty-description">@reason</p>
+                @if (DatabasePresentation.StructureStillShown(refusal) is { } stillShown)
+                {
+                    <p class="ms-empty-description ms-db-still-shown">@stillShown</p>
+                }
+            }
+            else
+            {
+                <p class="ms-empty-description">There is no row with this key here that this studio shows you. It may have been deleted, or its key changed.</p>
+            }
+            <p class="ms-empty-description">
+                <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Back to the database browser</a>
+            </p>
+        </div>
+    };
+
+    private string NeighbourHref(IReadOnlyList<KeyValuePair<string, string>> neighbour) =>
+        DatabaseLinks.ToRow(
+            Options.Value,
+            State.ActiveScope,
+            Schema ?? string.Empty,
+            Name ?? string.Empty,
+            neighbour,
+            SafeFrom is { } from ? [new KeyValuePair<string, string?>(DatabaseLinks.FromParameter, from)] : null);
+
+    /// <summary>
+    /// "Filter by this value": the rows of this relation with the same value in this column - for a NULL,
+    /// the ones with none. Not for a value cut on the server (it is not the value) or a column with no
+    /// ordering to compare with.
+    /// </summary>
+    private (string Href, string Filter)? FilterHref(TableRowColumn column, Internal.Sql.SqlCell cell)
+    {
+        if (cell.IsTruncated || !column.Shown)
+        {
+            return null;
+        }
+
+        bool isNull = cell.Kind == Internal.Sql.SqlCellKind.Null;
+
+        if (!isNull && (!column.Sortable || cell.Kind is Internal.Sql.SqlCellKind.Binary or Internal.Sql.SqlCellKind.Json or Internal.Sql.SqlCellKind.Array))
+        {
+            return null;
+        }
+
+        string? raw = isNull ? null : column.KeyPosition is not null && KeyDictionary.TryGetValue(column.Name, out string? keyed) ? keyed : cell.Text;
+        string filter = RowPresentation.FilterFor(column.Name, raw);
+
+        return (DatabaseLinks.ToRows(Options.Value, State.ActiveScope, Schema ?? string.Empty, Name ?? string.Empty, filter), filter);
+    }
+
+    private static IReadOnlyList<KeyValuePair<string, string?>> KeyLiterals(IReadOnlyList<KeyValuePair<string, string>> key) =>
+        [.. key.Select(static x => new KeyValuePair<string, string?>(x.Key, x.Value))];
+
+    // ------------------------------------------------------------------------------------------------
+    // Copy
+    // ------------------------------------------------------------------------------------------------
+
+    private IReadOnlyList<(string Label, string? Detail, Func<Task> OnSelect)> CopyItems(TableRowDetail row, IReadOnlyList<KeyValuePair<string, string>> shown)
+    {
+        string json = RowPresentation.RowJson(row.Columns, row.Cells);
+        string keyText = RowPresentation.KeyFilter(shown);
+
+        List<(string Label, string? Detail, Func<Task> OnSelect)> items =
+        [
+            ("Copy row as JSON", "every column, as read", () => CopyAsync(json, "row as JSON")),
+            ("Copy key", keyText, () => CopyAsync(keyText, "key")),
+        ];
+
+        if (SqlLiteralText.WhereClause(KeyLiterals(shown)) is { } where)
+        {
+            items.Add(("Copy WHERE clause", where.ReplaceLineEndings(" "), () => CopyAsync(where, "WHERE clause")));
+        }
+
+        return items;
+    }
+
+    private async Task CopyAsync(string text, string what)
+    {
+        try
+        {
+            bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
+
+            if (copied)
+            {
+                await Toasts.Success("Copied the " + what + ".");
+            }
+            else
+            {
+                await Toasts.Error("This browser refused the clipboard.");
+            }
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            await Toasts.Error("This browser refused the clipboard.");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        if (cts is { } source)
+        {
+            await source.CancelAsync();
+            source.Dispose();
+            cts = null;
+        }
+    }
+}

@@ -149,6 +149,39 @@ public class SchemaDeclarationReaderTests
         declarations.ManagedTables.Should().Contain("elsewhere.mt_doc_sqltestnote");
     }
 
+    /// <summary>
+    /// DB-7-fix, item 5: an <c>ExtendedSchemaObjects</c> table's declared and ignored indexes are the reader's
+    /// own, attributed as the Indexes tab attributes a Marten-managed table - which is what made the Schema
+    /// service's second walk over the same list redundant, and why it is gone. The live half is
+    /// <c>SchemaAlignmentLiveTests</c>: the extended table's declared index is declared and its hand-made one
+    /// would be dropped, told in the managed-table wording.
+    /// </summary>
+    [Fact]
+    public void An_extended_tables_declared_and_ignored_indexes_are_declared_by_the_reader_itself()
+    {
+        SchemaDeclarations declarations = Read(options =>
+        {
+            var table = new Weasel.Postgresql.Tables.Table(
+                new Weasel.Postgresql.PostgresqlObjectName("reporting", "ext_things", Weasel.Postgresql.SchemaUtils.IdentifierUsage.General));
+            table.AddColumn<int>("id").AsPrimaryKey();
+            table.AddColumn<string>("name");
+            table.Indexes.Add(new Weasel.Postgresql.Tables.IndexDefinition("ext_things_idx_name") { Columns = ["name"] });
+            table.IgnoredIndexes.Add("ext_things_kept_by_hand");
+            options.Storage.ExtendedSchemaObjects.Add(table);
+        });
+
+        declarations.ManagedTables.Should().Contain("reporting.ext_things");
+        declarations.IgnoredIndexes.Should().Contain("reporting.ext_things.ext_things_kept_by_hand");
+
+        DeclaredIndex index = declarations.Indexes.Should().ContainSingle(static x => x.Name == "ext_things_idx_name").Subject;
+        index.Schema.Should().Be("reporting");
+        index.Table.Should().Be("ext_things");
+        index.CollectionAlias.Should().Be(IndexAdvice.ManagedTableAlias, "the Indexes tab names a relational Marten-managed table's indexes so");
+        index.Definition.Should().Contain("ext_things_idx_name").And.Contain("reporting.ext_things");
+
+        declarations.Objects["reporting.ext_things"].Kind.Should().Be(MartenObjectKind.ProjectionOrExtendedTable);
+    }
+
     private static SchemaDeclarations Read(Action<StoreOptions>? configure = null) =>
         SchemaDeclarationReader.Read(Options(configure));
 

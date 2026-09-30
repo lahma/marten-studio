@@ -1,0 +1,897 @@
+@using System.Globalization
+@using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.Extensions.Options
+@using Microsoft.Extensions.Primitives
+@using MartenStudio.Internal.Sql
+@using MartenStudio.Services.Database
+@using MartenStudio.Services.Live
+@using MartenStudio.Services.Query
+@implements IAsyncDisposable
+@inject ITableRowService Rows
+@inject IDatabaseObjectService Objects
+@inject DatabaseBrowserState Browser
+@inject StudioState State
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+@inject IJSRuntime JsRuntime
+
+@*
+    The Rows tab: a non-Marten table's, view's or materialized view's rows, read through ITableRowService -
+    read-only, bounded, as SqlConsoleRole, and refused by the service itself wherever the gate says no.
+
+    Every piece of state is in the URL (D9) - the filter, the sort, the cursor, the page size, the columns,
+    the paging mode and the page number - through DatabaseLinks, so a link pasted into a chat reopens the same
+    rows. The tab is not a routed page, so it reads the address itself; the object page re-renders it on every
+    navigation, and a new signature is a new read. A read that is still running when the next one starts is
+    cancelled.
+
+    While a current is read the rows already on screen stay, dimmed and aria-busy, so the grid does not collapse
+    to a spinner and back on every Next. What the service answers instead of rows is said in words: withheld
+    until "Run anyway", a filter that did not parse (with a caret under the place), a refusal, a Postgres
+    failure named by its SQLSTATE (a never-refreshed materialized view, a role with no privilege, the
+    QueryTimeout, row-level security), an empty relation, or no row that matches.
+*@
+
+<div class="ms-row-tab"
+     data-state="@(current?.State.ToString().ToLowerInvariant() ?? "loading")"
+     aria-busy="@(busy ? "true" : "false")">
+    <RowToolbar Label="@Qualified"
+                Filter="@url.Filter"
+                PageSize="PageSize"
+                MaxPageSize="Options.Value.MaxPageSize"
+                MaxOffset="TableRowQueryBuilder.MaxOffset"
+                OffsetPaging="OffsetPreferred"
+                KeysetAvailable="KeysetAvailable"
+                AvailableModel="@(current is { AvailableColumns.Count: > 0 } ? current.AvailableColumns : null)"
+                SelectedModel="@current?.Columns"
+                OnSearch="SearchAsync"
+                OnPageSizeChanged="PageSizeChangedAsync"
+                OnPagingChanged="PagingChangedAsync"
+                OnColumnsChanged="ColumnsChangedAsync" />
+
+    @if (State.ActiveScope?.TenantId is { Length: > 0 } tenant)
+    {
+        <p class="ms-row-note ms-row-tenant-note" role="note">
+            The tenant selected in the header (<span class="ms-mono">@tenant</span>) does not filter these rows:
+            the studio applies tenancy where Marten does, in Documents and Events, and this is not a Marten table.
+        </p>
+    }
+
+    @if (current is null)
+    {
+        @if (loadError is { Length: > 0 } failure)
+        {
+            <ErrorAlert Message="@failure" OnRetry="RetryAsync" />
+        }
+        else
+        {
+            <LoadingSpinner />
+        }
+    }
+    else if (loadError is { Length: > 0 } failure)
+    {
+        <ErrorAlert Message="@failure" OnRetry="RetryAsync" />
+    }
+    else if (current.State == TableRowPageState.Refused)
+    {
+        <div class="ms-row-state ms-row-state-refused" role="status">
+            <p class="ms-row-state-title">@RowPresentation.RefusalTitle(current.Refusal)</p>
+            <p class="ms-row-state-text">@(current.Reason ?? "These rows cannot be read here.")</p>
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="RetryAsync">Try again</button>
+        </div>
+    }
+    else
+    {
+        @if (current.State is TableRowPageState.Loaded or TableRowPageState.Withheld or TableRowPageState.Invalid or TableRowPageState.Failed)
+        {
+            <RowFilterStrip Model="current.Verdict"
+                            Filter="@url.Filter"
+                            Withheld="@(current.State == TableRowPageState.Withheld)"
+                            Reason="@current.Reason"
+                            Sql="@current.Sql"
+                            ParameterNames="current.ParameterNames"
+                            OnRemoveTerm="RemoveTermAsync"
+                            OnClear="ClearFilterAsync"
+                            OnRunAnyway="RunAnywayAsync" />
+        }
+
+        @if (current.RowSecurity)
+        {
+            <p class="ms-row-note" role="note">
+                Row-level security is on for this table: rows the reading role's policies hide are not here, and
+                nothing on this page says how many there are.
+            </p>
+        }
+
+        @switch (current.State)
+        {
+            case TableRowPageState.Failed:
+                @RenderFailure(current)
+                break;
+
+            case TableRowPageState.Invalid when !current.Verdict.HasErrors:
+                <div class="ms-row-state ms-row-state-invalid" role="status">
+                    <p class="ms-row-state-text">@(current.Reason ?? "This page cannot be read as asked.")</p>
+                    <button type="button" class="ms-btn ms-btn-sm" @onclick="StartOverAsync">First page, in key order</button>
+                </div>
+                break;
+
+            case TableRowPageState.Loaded:
+                @RenderPagingNote(current)
+                @RenderRows(current)
+                break;
+        }
+    }
+</div>
+
+@code {
+    private CancellationTokenSource? cts;
+    private TableRowPage? current;
+    private string? loadError;
+    private bool busy;
+    private string? loadedSignature;
+    private RowsUrl url = RowsUrl.Empty;
+    private bool preferencesLoaded;
+    private bool dateHints = true;
+    private TableRowCount? count;
+
+    /// <summary>The filter <see cref="count" /> answered: a page turn keeps the answer, a new filter drops it.</summary>
+    private string? countedFilter;
+    private bool counting;
+    private IReadOnlyList<RowForeignKey> foreignKeys = [];
+
+    /// <summary>What the object page already read about each parent a foreign key points at: its row key, or none.</summary>
+    private readonly Dictionary<string, IReadOnlyList<string>?> parentKeys = new(StringComparer.Ordinal);
+
+    /// <summary>The relation's schema, as the catalog spells it.</summary>
+    [Parameter]
+    public string Schema { get; set; } = string.Empty;
+
+    /// <summary>The relation's name, likewise.</summary>
+    [Parameter]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>The <c>DatabaseObjectDetail</c> the object page read - its foreign keys are what a cell follows.</summary>
+    [Parameter]
+    public object? Detail { get; set; }
+
+    /// <summary>
+    /// Whether the object page says the tab may read: <see langword="false" /> while it is still applying the
+    /// scope its address names, or reading the next object after a navigation. The tab keeps the address it was
+    /// given meanwhile and reads when this turns <see langword="true" /> - once, for the scope and the object
+    /// the address is about, and never for the previous scope under the next address.
+    /// </summary>
+    [Parameter]
+    public bool Ready { get; set; } = true;
+
+    private DatabaseObjectDetail? DetailModel => Detail as DatabaseObjectDetail;
+
+    private string Qualified => DatabaseLinks.QualifiedName(Schema, Name);
+
+    private int PageSize => Math.Clamp(url.Size ?? Options.Value.DefaultPageSize, 1, Math.Max(1, Options.Value.MaxPageSize));
+
+    private int CurrentPage => Math.Max(1, url.Page ?? 1);
+
+    private bool OffsetPreferred => string.Equals(url.Paging, "offset", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether this relation can be walked by key or ctid - a view cannot, so it gets no paging switch.</summary>
+    private bool KeysetAvailable =>
+        (current?.RowKey ?? DetailModel?.RowKey) is not null
+        || (current?.Kind ?? DetailModel?.Relation?.Kind) is DatabaseObjectKind.Table or DatabaseObjectKind.PartitionedTable or DatabaseObjectKind.MaterializedView;
+
+    private string PreferenceScope => (State.ActiveScope?.StoreKey ?? "default") + "_" + Schema + "." + Name;
+
+    private string ColumnsPreference => "ms_db_cols_" + PreferenceScope;
+
+    private string DateHintPreference => "ms_db_datehint_" + PreferenceScope;
+
+    /// <summary>
+    /// Whether this render is the circuit's: set by the first <see cref="OnAfterRenderAsync" />, which static
+    /// rendering never calls, once it has read the browser's preferences. Rows are read only then (see
+    /// <see cref="OnParametersSetAsync" />).
+    /// </summary>
+    private bool interactive;
+
+    /// <summary>
+    /// The address the stored column set was applied over, until the browser confirms the replacement that
+    /// writes it into the address bar; <see langword="null" /> once it has, or when nothing was applied.
+    /// </summary>
+    private string? columnsAppliedOver;
+
+    /// <summary>The stored column set, while <see cref="columnsAppliedOver" /> is the address.</summary>
+    private string? appliedColumns;
+
+    /// <remarks>
+    /// <para>
+    /// <b>No rows are read while prerendering.</b> The route prerenders, and a DI scope of its own is a ledger of
+    /// its own (<c>TableRowAuditLedger</c>): a read in the prerender and the same read again in the circuit was
+    /// two ring entries, event 9235 twice, and for a link the gate refuses event 9203 - a Warning - twice, for one
+    /// pasted link or one refresh. So a static render draws the loading state and reads nothing, and the circuit's
+    /// first render reads. It is also what keeps a static re-render of the page - the layout writing the scope
+    /// into the address bar can cost one - from reading and recording the same rows a third time.
+    /// </para>
+    /// <para>
+    /// "Is this render interactive" is asked the way <c>StudioLayout</c> asks it, by whether
+    /// <see cref="OnAfterRenderAsync" /> has run, rather than through <c>RendererInfo</c>: the framework calls it
+    /// for an interactive render and never for a static one, and a test host that supplies no renderer
+    /// information - bUnit throws for it unless a test sets one - needs nothing to say so.
+    /// </para>
+    /// <para>
+    /// Nor while the object page says it is not <see cref="Ready" />: it is then still applying the scope its
+    /// address names, or reading the next object, and a read now would be of the object on screen under an
+    /// address and a scope that are not its own.
+    /// </para>
+    /// </remarks>
+    protected override async Task OnParametersSetAsync()
+    {
+        url = ReadUrl();
+
+        if (!interactive || !Ready)
+        {
+            return;
+        }
+
+        await LoadIfChangedAsync();
+    }
+
+    /// <summary>
+    /// The address as the tab reads it: <see cref="NavigationManager.Uri" />, with the stored column set in it
+    /// for as long as the address is still the one that set was applied over (see <see cref="OnAfterRenderAsync" />).
+    /// </summary>
+    private RowsUrl ReadUrl()
+    {
+        string uri = Navigation.Uri;
+        RowsUrl read = RowsUrl.Read(uri);
+
+        if (columnsAppliedOver is not null)
+        {
+            if (string.Equals(uri, columnsAppliedOver, StringComparison.Ordinal) && read.Columns is null)
+            {
+                return read with { Columns = appliedColumns };
+            }
+
+            // The address has moved on - the replacement arrived, or the visitor went somewhere else - and says
+            // what it says from here.
+            columnsAppliedOver = null;
+            appliedColumns = null;
+        }
+
+        return read;
+    }
+
+    private async Task LoadIfChangedAsync()
+    {
+        string signature = Signature();
+        if (string.Equals(signature, loadedSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        loadedSignature = signature;
+        await LoadAsync();
+    }
+
+    /// <remarks>
+    /// <para>
+    /// <b>One read for a stored column set.</b> The set is applied to the address the tab reads from straight
+    /// away, from the preference's own value, and written into the address bar with a replacing navigation. It
+    /// cannot be applied by reading <see cref="NavigationManager.Uri" /> back after navigating: on Blazor
+    /// Server a navigation is a round trip - the circuit asks the browser, and <c>Uri</c> changes only when the
+    /// browser calls back - so the first read went out without the columns and the callback's re-render read
+    /// the page again with them. Until the address bar catches up, <see cref="ReadUrl" /> keeps the set; the
+    /// re-render the callback brings then reads the same signature and nothing more.
+    /// </para>
+    /// <para>
+    /// <see cref="interactive" /> is set only after the two preference reads, so a re-render of the object
+    /// page while they are in flight does not read the rows without them.
+    /// </para>
+    /// </remarks>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || preferencesLoaded)
+        {
+            return;
+        }
+
+        preferencesLoaded = true;
+
+        string? hints = await ReadPreferenceAsync(DateHintPreference);
+        if (string.Equals(hints, "off", StringComparison.Ordinal))
+        {
+            dateHints = false;
+            StateHasChanged();
+        }
+
+        // Through the URL rather than straight into the request, so the address bar always says what is on
+        // screen: a column set that lived only in local storage would make a pasted link show another table.
+        url = ReadUrl();
+        if (url.Columns is null && await ReadPreferenceAsync(ColumnsPreference) is { Length: > 0 } stored)
+        {
+            url = ReadUrl();
+
+            if (url.Columns is null)
+            {
+                columnsAppliedOver = Navigation.Uri;
+                appliedColumns = stored;
+                url = url with { Columns = stored };
+                Navigate(url, replace: true);
+            }
+        }
+
+        interactive = true;
+
+        // The first read, after the preferences: a stored column set is part of it, rather than a second read.
+        if (Ready)
+        {
+            await LoadIfChangedAsync();
+        }
+    }
+
+    private string Signature() => string.Join(
+        '\u001f',
+        Schema,
+        Name,
+        State.ActiveScope?.StoreKey,
+        State.ActiveScope?.DatabaseId,
+        url.Filter,
+        url.Sort,
+        url.Direction,
+        url.Cursor,
+        url.Size?.ToString(CultureInfo.InvariantCulture),
+        url.Columns,
+        url.Paging,
+        url.Page?.ToString(CultureInfo.InvariantCulture),
+        Accepted ? "run" : "hold");
+
+    private bool Accepted => Browser.HasAcceptedRead(Schema, Name, url.Filter, url.Sort, url.Direction);
+
+    private async Task LoadAsync()
+    {
+        if (State.ActiveScope is not { } scope || string.IsNullOrWhiteSpace(Schema) || string.IsNullOrWhiteSpace(Name))
+        {
+            return;
+        }
+
+        CancellationToken token = ResetCancellation();
+
+        busy = true;
+        loadError = null;
+
+        if (!string.Equals(countedFilter, url.Filter, StringComparison.Ordinal))
+        {
+            count = null;
+        }
+
+        StateHasChanged();
+
+        try
+        {
+            TableRowPage read = await Rows.ListRowsAsync(scope, Schema, Name, BuildRequest(), token);
+
+            if (read.State == TableRowPageState.Loaded)
+            {
+                Browser.RememberPage(
+                    Schema,
+                    Name,
+                    [.. read.Rows.Where(static x => x.Key is { Count: > 0 }).Select(x => RowPresentation.KeyPairs(x.Key!, read.RowKey))],
+                    CurrentRelativeUrl());
+
+                foreignKeys = await ForeignKeysAsync(scope, read, token);
+            }
+
+            current = read;
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer read replaced this one; its answer is the one that matters.
+        }
+        catch (Exception exception)
+        {
+            loadError = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private TableRowRequest BuildRequest() => new()
+    {
+        Filter = string.IsNullOrWhiteSpace(url.Filter) ? null : url.Filter,
+        SortColumn = string.IsNullOrWhiteSpace(url.Sort) ? null : url.Sort,
+        Direction = RowPresentation.ParseDirection(url.Direction),
+        Cursor = TableRowCursor.Decode(url.Cursor),
+        Offset = Math.Max(0, (CurrentPage - 1) * PageSize),
+        Paging = OffsetPreferred ? TableRowPagingPreference.Offset : TableRowPagingPreference.Keyset,
+        PageSize = PageSize,
+        Columns = DatabaseLinks.ParseColumns(url.Columns) is { Count: > 0 } columns ? columns : null,
+        RunAnyway = Accepted,
+    };
+
+    /// <summary>
+    /// The foreign keys a cell on this page can be followed through, each with its parent's row key when the
+    /// catalog says what it is - read once per parent for as long as the tab is open, and only for a parent
+    /// this visitor may see.
+    /// </summary>
+    private async Task<IReadOnlyList<RowForeignKey>> ForeignKeysAsync(StudioScope scope, TableRowPage read, CancellationToken token)
+    {
+        if (DetailModel is not { } detail || !read.Columns.Any(static x => x.References.Count > 0))
+        {
+            return [];
+        }
+
+        List<RowForeignKey> keys = [];
+
+        foreach (DatabaseForeignKeyInfo key in detail.ForeignKeysOut)
+        {
+            if (key is not { LinkedVisible: true, LinkedSchema: { } schema, LinkedTable: { } table } || key.LinkedColumns.Count != key.Columns.Count)
+            {
+                continue;
+            }
+
+            string parent = DatabaseBrowserState.RelationKey(schema, table);
+
+            if (!parentKeys.TryGetValue(parent, out IReadOnlyList<string>? parentKey))
+            {
+                try
+                {
+                    DatabaseObjectDetail parentDetail = await Objects.GetObjectAsync(scope, schema, table, token);
+                    parentKey = parentDetail.RowKey?.Columns;
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // Only a link's shape rides on this: without the parent's key a cell links to the parent's
+                    // rows filtered on its value, which is still the right rows.
+                    parentKey = null;
+                }
+
+                parentKeys[parent] = parentKey;
+            }
+
+            keys.Add(new RowForeignKey(key.Name, key.Columns, schema, table, key.LinkedColumns, parentKey));
+        }
+
+        return keys;
+    }
+
+    private CancellationToken ResetCancellation()
+    {
+        CancellationTokenSource? previous = cts;
+        cts = new CancellationTokenSource();
+        previous?.Cancel();
+        previous?.Dispose();
+        return cts.Token;
+    }
+
+    private Task RetryAsync()
+    {
+        loadedSignature = null;
+        return OnParametersSetAsync();
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Rendering
+    // ------------------------------------------------------------------------------------------------
+
+    private RenderFragment RenderPagingNote(TableRowPage shown) => __builder =>
+    {
+        <div class="ms-row-paging-note">
+            <span class="ms-row-paging-parts" title="@(shown.EstimatedRows is null ? null : "Estimated from pg_class.reltuples, not counted (D8)")">@string.Join(" · ", RowPresentation.PagingNote(shown))</span>
+
+            @if (shown.Kind != DatabaseObjectKind.View)
+            {
+                <button type="button"
+                        class="ms-btn ms-btn-sm ms-row-count-button"
+                        disabled="@counting"
+                        title="@(string.IsNullOrWhiteSpace(url.Filter) ? "Count the rows exactly, within MartenStudioOptions.ExactCountThreshold" : "Count the rows this filter matches, up to MartenStudioOptions.ExactCountThreshold")"
+                        aria-label="Count exactly"
+                        @onclick="CountAsync">=</button>
+            }
+
+            @if (CountText() is { } counted)
+            {
+                <span class="@(counted.Refused ? "ms-row-count ms-row-count-refused" : "ms-row-count")" role="status">@counted.Text</span>
+            }
+
+            @if (shown.Paging?.Note is { Length: > 0 } note)
+            {
+                <span class="ms-row-paging-why">@note</span>
+            }
+        </div>
+    };
+
+    private RenderFragment RenderRows(TableRowPage shown) => __builder =>
+    {
+        if (shown.Rows.Count == 0)
+        {
+            @RenderEmpty(shown)
+            return;
+        }
+
+        <RowGrid Model="shown"
+                 ForeignKeys="foreignKeys"
+                 Schema="@Schema"
+                 Name="@Name"
+                 Busy="busy"
+                 ShowDateHints="dateHints"
+                 From="@CurrentRelativeUrl()"
+                 OnSort="SortAsync"
+                 OnToggleDateHints="ToggleDateHintsAsync" />
+
+        <KeysetPager OffsetPaging="@(shown.Paging?.Mode == TableRowPagingMode.Offset)"
+                     Page="CurrentPage"
+                     PageSize="PageSize"
+                     MaxOffset="TableRowQueryBuilder.MaxOffset"
+                     HasMore="shown.HasMore"
+                     HasPrevious="@(url.Cursor is not null)"
+                     RowCount="shown.Rows.Count"
+                     Busy="busy"
+                     AriaLabel="Row pages"
+                     ShowJump="false"
+                     OnFirst="FirstPageAsync"
+                     OnPrevious="PreviousPageAsync"
+                     OnNext="NextPageAsync"
+                     OnPage="GoToPageAsync" />
+    };
+
+    private RenderFragment RenderEmpty(TableRowPage shown) => __builder =>
+    {
+        if (!string.IsNullOrWhiteSpace(url.Filter))
+        {
+            <div class="ms-empty ms-row-empty ms-row-empty-nomatch" role="status">
+                <p class="ms-empty-title">No rows match <code class="ms-code-inline">@url.Filter</code></p>
+                <p class="ms-empty-description">The filter ran and found nothing. A comparison is in the column's own type, so check the value's spelling and case.</p>
+                <p class="ms-empty-description"><button type="button" class="ms-btn ms-btn-sm" @onclick="ClearFilterAsync">Clear the filter</button></p>
+            </div>
+        }
+        else if (url.Cursor is not null || CurrentPage > 1)
+        {
+            <div class="ms-empty ms-row-empty" role="status">
+                <p class="ms-empty-title">No more rows</p>
+                <p class="ms-empty-description">This is past the last row - it may have been deleted since the page before was read.</p>
+                <p class="ms-empty-description"><button type="button" class="ms-btn ms-btn-sm" @onclick="FirstPageAsync">First page</button></p>
+            </div>
+        }
+        else
+        {
+            <div class="ms-empty ms-row-empty ms-row-empty-none" role="status">
+                <p class="ms-empty-title">Empty (0 rows)</p>
+                <p class="ms-empty-description">@(shown.Kind == DatabaseObjectKind.View ? "This view returns no rows." : Qualified + " has no rows" + (shown.RowSecurity ? " this role may see." : "."))</p>
+            </div>
+        }
+    };
+
+    private RenderFragment RenderFailure(TableRowPage shown) => __builder =>
+    {
+        TableRowError error = shown.Error ?? new TableRowError(string.Empty, "The read failed.", null);
+
+        <div class="ms-row-state ms-row-state-failed" role="alert" data-sqlstate="@error.SqlState">
+            <p class="ms-row-state-title">
+                @RowPresentation.FailureTitle(error, shown.RowSecurity)
+                @if (error.SqlState.Length > 0)
+                {
+                    <span class="ms-row-state-code" title="SQLSTATE">@error.SqlState</span>
+                }
+            </p>
+            <p class="ms-row-state-text">@error.Sentence</p>
+            @if (error.PostgresMessage is { Length: > 0 } message)
+            {
+                <details class="ms-row-state-detail">
+                    <summary>What Postgres said</summary>
+                    <p class="ms-mono">@message</p>
+                </details>
+            }
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="RetryAsync">Try again</button>
+        </div>
+    };
+
+    private (string Text, bool Refused)? CountText()
+    {
+        if (counting)
+        {
+            return ("counting…", false);
+        }
+
+        if (count is not { } result)
+        {
+            return null;
+        }
+
+        if (result.Refusal != DatabaseRefusal.None || (result.Reason is { Length: > 0 } && result.Error is null && result.Count.IsUnavailable))
+        {
+            return (result.Reason ?? "Not counted.", true);
+        }
+
+        if (result.Error is { } error)
+        {
+            return (error.Sentence, true);
+        }
+
+        if (result.Count.IsExactRefused)
+        {
+            return (result.Count.Reason ?? "Estimate only.", true);
+        }
+
+        if (result.Count.IsUnavailable)
+        {
+            return ("Not counted.", true);
+        }
+
+        string rows = DatabasePresentation.Number(result.Count.Value);
+        bool filtered = result.Cap is not null;
+
+        return result.Bounded
+            ? ("more than " + rows + " match", false)
+            : ("= " + rows + (filtered ? " match" : result.Count.Value == 1 ? " row" : " rows"), false);
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Navigation
+    // ------------------------------------------------------------------------------------------------
+
+    private string CurrentRelativeUrl() => Navigation.ToBaseRelativePath(Navigation.Uri);
+
+    private void Navigate(RowsUrl next, bool replace = false) =>
+        Navigation.NavigateTo(
+            DatabaseLinks.ToObject(Options.Value, State.ActiveScope, Schema, Name, DatabaseObjectTab.Rows, next.Pairs()),
+            replace: replace);
+
+    private List<string?> History => Browser.CursorHistory(Schema, Name);
+
+    /// <summary>A new question: a new walk, from the first page.</summary>
+    private void NavigateFromTheTop(RowsUrl next)
+    {
+        History.Clear();
+        Navigate(next with { Cursor = null, Page = null });
+    }
+
+    private Task SearchAsync(string? text)
+    {
+        NavigateFromTheTop(url with { Filter = string.IsNullOrWhiteSpace(text) ? null : text.Trim() });
+        return Task.CompletedTask;
+    }
+
+    private Task ClearFilterAsync()
+    {
+        NavigateFromTheTop(url with { Filter = null });
+        return Task.CompletedTask;
+    }
+
+    private Task RemoveTermAsync(int index)
+    {
+        if (current is { } shown && index >= 0 && index < shown.Verdict.Terms.Count)
+        {
+            RowFilterTerm term = shown.Verdict.Terms[index];
+            NavigateFromTheTop(url with { Filter = RowPresentation.RemoveTerm(url.Filter, term.Position, term.Length) });
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task StartOverAsync()
+    {
+        NavigateFromTheTop(url with { Sort = null, Direction = null });
+        return Task.CompletedTask;
+    }
+
+    private Task SortAsync(string column)
+    {
+        TableRowPaging? paging = current?.Paging;
+
+        // The key order has no sort column: its header is the key's first column, and clicking it again
+        // turns the key order round rather than switching to a sort on that one column.
+        bool keyOrderHeader = paging is { SortColumn: null }
+            && current?.RowKey is { Columns.Count: > 0 } key
+            && string.Equals(key.Columns[0], column, StringComparison.Ordinal);
+
+        bool same = keyOrderHeader || string.Equals(paging?.SortColumn, column, StringComparison.Ordinal);
+        SortDirection direction = same && paging?.Direction == SortDirection.Ascending
+            ? SortDirection.Descending
+            : SortDirection.Ascending;
+
+        NavigateFromTheTop(url with
+        {
+            Sort = keyOrderHeader ? null : column,
+            Direction = RowPresentation.DirectionToken(direction),
+        });
+
+        return Task.CompletedTask;
+    }
+
+    private Task PageSizeChangedAsync(int size)
+    {
+        NavigateFromTheTop(url with { Size = size });
+        return Task.CompletedTask;
+    }
+
+    private Task PagingChangedAsync(bool offset)
+    {
+        NavigateFromTheTop(url with { Paging = offset ? "offset" : null });
+        return Task.CompletedTask;
+    }
+
+    private async Task ColumnsChangedAsync(IReadOnlyList<string> columns)
+    {
+        string? value = columns.Count == 0 ? null : DatabaseLinks.FormatColumns(columns);
+
+        await WritePreferenceAsync(ColumnsPreference, value ?? string.Empty);
+        Navigate(url with { Columns = value });
+    }
+
+    private Task FirstPageAsync()
+    {
+        History.Clear();
+        Navigate(url with { Cursor = null, Page = null });
+        return Task.CompletedTask;
+    }
+
+    private Task PreviousPageAsync()
+    {
+        List<string?> history = History;
+
+        if (history.Count == 0)
+        {
+            return FirstPageAsync();
+        }
+
+        string? previous = history[^1];
+        history.RemoveAt(history.Count - 1);
+        Navigate(url with { Cursor = previous });
+        return Task.CompletedTask;
+    }
+
+    private Task NextPageAsync()
+    {
+        if (current?.NextCursor is not { } next)
+        {
+            return Task.CompletedTask;
+        }
+
+        History.Add(url.Cursor);
+        Navigate(url with { Cursor = TableRowCursor.Encode(next) });
+        return Task.CompletedTask;
+    }
+
+    private Task GoToPageAsync(int number)
+    {
+        Navigate(url with { Page = number <= 1 ? null : number, Cursor = null });
+        return Task.CompletedTask;
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Actions
+    // ------------------------------------------------------------------------------------------------
+
+    private Task RunAnywayAsync()
+    {
+        Browser.AcceptRead(Schema, Name, url.Filter, url.Sort, url.Direction);
+        return RetryAsync();
+    }
+
+    private async Task CountAsync()
+    {
+        if (State.ActiveScope is not { } scope || counting)
+        {
+            return;
+        }
+
+        counting = true;
+
+        try
+        {
+            countedFilter = url.Filter;
+            count = await Rows.CountExactAsync(scope, Schema, Name, string.IsNullOrWhiteSpace(url.Filter) ? null : url.Filter, cts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            count = new TableRowCount { Reason = exception.Message };
+        }
+        finally
+        {
+            counting = false;
+        }
+    }
+
+    private async Task ToggleDateHintsAsync()
+    {
+        dateHints = !dateHints;
+        await WritePreferenceAsync(DateHintPreference, dateHints ? "auto" : "off");
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Browser preferences
+    // ------------------------------------------------------------------------------------------------
+
+    private async Task<string?> ReadPreferenceAsync(string key)
+    {
+        try
+        {
+            return await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { key });
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // Prerendering, a closed circuit or a browser that refused: none of them is a preference.
+            return null;
+        }
+    }
+
+    private async Task WritePreferenceAsync(string key, string value)
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", new object?[] { key, value });
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (cts is { } source)
+        {
+            await source.CancelAsync();
+            source.Dispose();
+            cts = null;
+        }
+    }
+
+    /// <summary>The Rows tab's part of the address bar, read and written as one value.</summary>
+    private sealed record RowsUrl(
+        string? Filter,
+        string? Sort,
+        string? Direction,
+        string? Cursor,
+        int? Size,
+        string? Columns,
+        string? Paging,
+        int? Page)
+    {
+        public static RowsUrl Empty { get; } = new(null, null, null, null, null, null, null, null);
+
+        public static RowsUrl Read(string uri)
+        {
+            int start = uri.IndexOf('?', StringComparison.Ordinal);
+            if (start < 0)
+            {
+                return Empty;
+            }
+
+            int end = uri.IndexOf('#', start);
+            Dictionary<string, StringValues> query = QueryHelpers.ParseQuery(end < 0 ? uri[start..] : uri[start..end]);
+
+            string? Text(string key) =>
+                query.TryGetValue(key, out StringValues value) && !string.IsNullOrEmpty(value.ToString()) ? value[0] : null;
+
+            int? Number(string key) =>
+                int.TryParse(Text(key), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) && value > 0 ? value : null;
+
+            return new RowsUrl(
+                Text(DatabaseLinks.FilterParameter),
+                Text(DatabaseLinks.SortParameter),
+                Text(DatabaseLinks.DirectionParameter),
+                Text(DatabaseLinks.CursorParameter),
+                Number(DatabaseLinks.SizeParameter),
+                Text(DatabaseLinks.ColumnsParameter),
+                Text(DatabaseLinks.PagingParameter),
+                Number(DatabaseLinks.PageParameter));
+        }
+
+        /// <summary>The parameters, in the order a person reads them; a blank one is left out by the link builder.</summary>
+        public IReadOnlyList<KeyValuePair<string, string?>> Pairs() =>
+        [
+            new(DatabaseLinks.FilterParameter, Filter),
+            new(DatabaseLinks.SortParameter, Sort),
+            new(DatabaseLinks.DirectionParameter, Direction),
+            new(DatabaseLinks.CursorParameter, Cursor),
+            new(DatabaseLinks.SizeParameter, Size?.ToString(CultureInfo.InvariantCulture)),
+            new(DatabaseLinks.ColumnsParameter, Columns),
+            new(DatabaseLinks.PagingParameter, Paging),
+            new(DatabaseLinks.PageParameter, Page?.ToString(CultureInfo.InvariantCulture)),
+        ];
+    }
+}

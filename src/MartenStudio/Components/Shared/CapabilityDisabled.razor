@@ -11,8 +11,9 @@
         @if (Capabilities.ReadOnly)
         {
             <p class="ms-muted">
-                <code>MartenStudioOptions.ReadOnly</code> is <code>true</code>, which turns every mutating
-                operation off.
+                <code>MartenStudioOptions.ReadOnly</code> is <code>true</code>, which turns every capability
+                off: the mutating operations, and the reads beyond the store (<code>RunSql</code> and
+                <code>BrowseDatabase</code>).
             </p>
         }
         else

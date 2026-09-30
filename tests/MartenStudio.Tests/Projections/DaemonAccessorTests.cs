@@ -92,6 +92,7 @@ public class DaemonAccessorTests
 
         var accessor = new DaemonAccessor(
             provider,
+            new StudioLogThrottle(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<DaemonAccessor>>());
 
         accessor.ResolveCoordinator(new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)))

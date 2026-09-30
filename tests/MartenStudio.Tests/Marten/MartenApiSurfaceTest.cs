@@ -27,6 +27,8 @@ using Weasel.Postgresql.Tables;
 
 using JasperFxCoordinator = JasperFx.Events.Daemon.IProjectionCoordinator;
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using MartensCoordinator = Marten.Events.Daemon.Coordination.ProjectionCoordinator;
+using MartensExplicitCoordinator = Marten.Events.Daemon.Coordination.ExplicitProjectionCoordinator;
 using ProjectionOptions = Marten.Events.Projections.ProjectionOptions;
 using MartenEventStoreOperations = Marten.Events.IEventStoreOperations;
 using MartenMetadataConfig = Marten.Events.IReadonlyMetadataConfig;
@@ -659,6 +661,132 @@ public class MartenApiSurfaceTest
             "Marten 9.35 has only the async form; the plan's DeleteDocumentsByType(Type) does not exist");
     }
 
+    /// <summary>
+    /// DB-0-fix, item 9: the two progression corrections have no per-database form at the floor, so the
+    /// studio authorizes every database they reach instead - and this is what says so, member by member.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read at tag <c>V9.31.0</c> (<c>git -C D:\Work\marten show V9.31.0:src/Marten/AdvancedOperations.cs</c>,
+    /// 2026-09-29): <c>AdvanceHighWaterMarkToLatestAsync(CancellationToken)</c> and
+    /// <c>TryCorrectProgressInDatabaseAsync(CancellationToken)</c> loop over <c>Tenancy.BuildDatabases()</c>
+    /// and run a <c>HighWaterDetector</c> against <em>every</em> database; the <c>(string tenantId,
+    /// CancellationToken)</c> overloads run one against
+    /// <c>Tenancy.GetTenantAsync(TenantIdStyle.MaybeCorrectTenantId(tenantId)).Database</c>. The detector,
+    /// <c>Marten.Events.Daemon.HighWater.HighWaterDetector</c>, is internal. <c>IMartenStorage.AllDatabases()</c>
+    /// is <c>Tenancy.BuildDatabases().OfType&lt;IMartenDatabase&gt;()</c> in <c>DocumentStore.IMartenStorage.cs</c>,
+    /// which is why the studio's every-database check enumerates exactly the set the correction walks.
+    /// </para>
+    /// <para>
+    /// The overload lists are asserted <em>whole</em>. A Marten that grows a per-database overload - one
+    /// taking an <c>IMartenDatabase</c> or a <c>DatabaseId</c> - fails here, and that is the moment for
+    /// <c>ProjectionDataService.AdvancedAsync</c> to call it and stop asking about databases the visitor
+    /// did not select.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_progression_corrections_reach_every_database_and_have_no_per_database_form()
+    {
+        var advanced = typeof(AdvancedOperations);
+
+        foreach (string name in new[] { "AdvanceHighWaterMarkToLatestAsync", "TryCorrectProgressInDatabaseAsync" })
+        {
+            advanced.GetMethods(MemberFlags).Where(x => x.Name == name).Select(Describe).Should().BeEquivalentTo(
+                ["(CancellationToken)", "(String, CancellationToken)"],
+                "{0} has a store-wide and a tenant form and nothing narrower; a per-database overload is the signal to use it",
+                name);
+        }
+
+        Type? detector = advanced.Assembly.GetType("Marten.Events.Daemon.HighWater.HighWaterDetector");
+        detector.Should().NotBeNull("the per-database type the corrections are built on");
+        detector!.IsPublic.Should().BeFalse("if it became public, the studio could run it against the one database it authorized");
+
+        // What the tenant form reaches, spelled the way the studio asks it.
+        RequireProperty(typeof(IReadOnlyStoreOptions), "TenantIdStyle").PropertyType.Should().Be<TenantIdStyle>();
+        RequireProperty(typeof(IReadOnlyStoreOptions), "Tenancy").PropertyType.Should().Be<ITenancy>();
+        RequireMethod(typeof(ITenancy), "GetTenantAsync", typeof(string)).ReturnType.Should().Be<ValueTask<Tenant>>();
+        RequireProperty(typeof(Tenant), "Database").PropertyType.Should().Be<IMartenDatabase>();
+        RequireMethod(typeof(TenantIdStyleExtensions), "MaybeCorrectTenantId", typeof(TenantIdStyle), typeof(string))
+            .ReturnType.Should().Be<string>();
+    }
+
+    /// <summary>
+    /// DB-0-fix-2, B1: a tenant correction reaches the tenant's whole database unless that database is
+    /// exclusively the tenant's - and <c>DatabaseReach.IsExclusivelyTenantsAsync</c> decides that from these
+    /// members.
+    /// </summary>
+    /// <remarks>
+    /// <c>IDatabase.TenantIds</c> is the list every tenancy fills for a database (<c>ForTenants</c>, the
+    /// master table, a shard's assignments); <c>ITenancy.Default</c> is where untenanted writes land;
+    /// <c>DatabaseId.Identity</c> is how two <c>MartenDatabase</c> objects over one physical database are
+    /// told to be one. <c>ShardName.TryParse</c> and <c>ShardName.TenantId</c> are what say whether an
+    /// agent is one tenant's (<c>DatabaseReach.TenantOfShard</c>).
+    /// </remarks>
+    [Fact]
+    public void What_decides_whether_a_database_is_exclusively_one_tenants_is_there()
+    {
+        RequireProperty(typeof(IMartenDatabase), "TenantIds").PropertyType.Should().Be<List<string>>();
+        RequireProperty(typeof(IMartenDatabase), "Id").PropertyType.Should().Be<DatabaseId>();
+        RequireProperty(typeof(DatabaseId), "Server").PropertyType.Should().Be<string>();
+        RequireProperty(typeof(DatabaseId), "Name").PropertyType.Should().Be<string>();
+        RequireProperty(typeof(ITenancy), "Default").PropertyType.Should().Be<Tenant>();
+        RequireProperty(typeof(ITenancy), "Cardinality").PropertyType.Should().Be<DatabaseCardinality>();
+
+        ShardName.TryParse("Orders:All:acme", out ShardName? tenanted).Should().BeTrue();
+        tenanted!.TenantId.Should().Be("acme");
+        ShardName.TryParse("Orders:All", out ShardName? global).Should().BeTrue();
+        global!.TenantId.Should().BeNull("a store-global shard processes every tenant's events");
+    }
+
+    /// <summary>
+    /// DB-0-fix-2, F2 and F3: the two coordinators Marten ships, and the two tenancies whose
+    /// <c>Default</c> is a <c>NotSupportedException</c> whatever their database count.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read at tag <c>V9.31.0</c>: <c>ProjectionCoordinator.DaemonForMainDatabase()</c> is
+    /// <c>findDaemonForDatabase(Store.Tenancy.Default.Database)</c>, <c>DaemonForDatabase(id)</c> is
+    /// <c>findDaemonForDatabase(await Store.Storage.FindOrCreateDatabase(id))</c>, and
+    /// <c>AllDaemonsAsync()</c> is <c>Store.Storage.AllDatabases()</c> through the same cache, keyed on
+    /// <c>IDatabase.Identifier</c>; <c>ExplicitProjectionCoordinator</c> (what
+    /// <c>MartenDaemonModeIsSolo()</c> registers) has the same three bodies. So on Marten's own
+    /// coordinator the studio matches the set by tracker (<c>DaemonAccessor.IsMartensOwn</c>) and never
+    /// asks the lookup that goes through <c>FindOrCreateDatabase</c> - on <c>ShardedTenancy</c> that call
+    /// corrects the id with <c>TenantIdStyle</c> before it looks in its pool, and provisions a tenant for a
+    /// pool id it then misses.
+    /// </para>
+    /// <para>
+    /// Neither tenancy is connected to here: both take their data source lazily.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Martens_own_coordinators_and_the_tenancies_with_no_default_are_what_the_accessor_expects()
+    {
+        typeof(MartenCoordinator).IsAssignableFrom(typeof(MartensCoordinator)).Should().BeTrue();
+        typeof(MartenCoordinator).IsAssignableFrom(typeof(MartensExplicitCoordinator)).Should().BeTrue();
+        typeof(global::Marten.Events.Daemon.Coordination.ProjectionCoordinator<>).BaseType
+            .Should().Be<MartensCoordinator>("an ancillary store's coordinator is Marten's own too");
+        typeof(global::Marten.Events.Daemon.Coordination.ExplicitProjectionCoordinator<>).BaseType
+            .Should().Be<MartensExplicitCoordinator>();
+
+        var registered = new ServiceCollection();
+        registered.AddMarten(x => x.Connection(DummyConnectionString)).AddAsyncDaemon(DaemonMode.Solo);
+        registered.Should().Contain(
+            x => x.ServiceType == typeof(MartenCoordinator) && x.ImplementationType == typeof(MartensCoordinator),
+            "AddAsyncDaemon registers Marten's own coordinator");
+
+        var masterTable = new StoreOptions();
+        masterTable.MultiTenantedDatabasesWithMasterDatabaseTable(DummyConnectionString, "tenants");
+        masterTable.Tenancy.Cardinality.Should().Be(DatabaseCardinality.DynamicMultiple);
+        FluentActions.Invoking(() => masterTable.Tenancy.Default).Should().Throw<NotSupportedException>(
+            "so DaemonForMainDatabase throws on a master-table store with one tenant database as surely as with ten");
+
+        var sharded = new StoreOptions();
+        sharded.MultiTenantedWithShardedDatabases(x => x.ConnectionString = DummyConnectionString);
+        sharded.Tenancy.Cardinality.Should().Be(DatabaseCardinality.DynamicMultiple);
+        FluentActions.Invoking(() => sharded.Tenancy.Default).Should().Throw<NotSupportedException>();
+    }
+
     // --------------------------------------------------------------------------------------------
     // The async daemon
     // --------------------------------------------------------------------------------------------
@@ -804,6 +932,77 @@ public class MartenApiSurfaceTest
         daemon.Should().BeOfType<ProjectionOptions>(
             "IReadOnlyEventStoreOptions.Daemon is implemented as the store's own ProjectionOptions");
         ((DaemonSettings)daemon).LeadershipPollingTime.Should().Be(1234);
+    }
+
+    /// <summary>
+    /// DB-0: the two facts the daemon card's log hygiene reads off a store without asking a coordinator -
+    /// whether an external system runs its projections, and whether it has any async work at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>DaemonMode.ExternallyManaged</c> is in the JasperFx.Events Marten 9.31 brings (2.60.0), reached
+    /// from a store through <c>IReadOnlyDaemonSettings.AsyncMode</c>. Wolverine's managed event-subscription
+    /// distribution sets it and registers a coordinator whose <c>DaemonForMainDatabase()</c> and
+    /// <c>DaemonForDatabase()</c> always throw <c>NotSupportedException</c> - so the studio reads the mode
+    /// first and never asks. <c>AddAsyncDaemon(ExternallyManaged)</c> registers no coordinator of Marten's
+    /// own (verified in <c>MartenServiceCollectionExtensions</c> at <c>V9.31.0</c>: only Solo and HotCold
+    /// do), which is the second half of why the mode, and not a registration, is what decides.
+    /// </para>
+    /// <para>
+    /// <c>ProjectionGraph.HasAnyAsyncProjections()</c> rather than <c>IReadOnlyEventStoreOptions.Projections()</c>:
+    /// the latter is <c>Projections.All.OfType&lt;ISubscriptionSource&gt;()</c>, and a subscription added
+    /// with <c>Events.Subscribe(...)</c> lives in a separate list it never reads. A store with a subscription
+    /// and nothing else is a store with a daemon to host, and the card must not tell it otherwise.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ExternallyManaged_and_HasAnyAsyncProjections_are_readable_from_the_store()
+    {
+        Enum.GetNames<DaemonMode>().Should().Contain(
+            ["Disabled", "Solo", "HotCold", "ExternallyManaged"],
+            "the studio's DaemonHostingState.ExternallyManaged is keyed on the last one");
+
+        RequireProperty(typeof(IReadOnlyDaemonSettings), "AsyncMode").PropertyType.Should().Be<DaemonMode>();
+        RequireMethod(typeof(ProjectionOptions), "HasAnyAsyncProjections").ReturnType.Should().Be<bool>();
+
+        // Marten registers its coordinator only for the two modes that host a daemon here.
+        var external = new ServiceCollection();
+        external.AddMarten(x => x.Connection(DummyConnectionString)).AddAsyncDaemon(DaemonMode.ExternallyManaged);
+        external.Should().NotContain(x => x.ServiceType == typeof(MartenCoordinator),
+            "an externally managed store's coordinator, when there is one, is the external system's");
+
+        using (IDocumentStore store = DocumentStore.For(x =>
+               {
+                   x.Connection(DummyConnectionString);
+                   x.Projections.AsyncMode = DaemonMode.ExternallyManaged;
+               }))
+        {
+            store.Options.Events.Daemon.AsyncMode.Should().Be(DaemonMode.ExternallyManaged);
+            ((ProjectionOptions) store.Options.Events.Daemon).HasAnyAsyncProjections().Should().BeFalse();
+        }
+
+        using (IDocumentStore store = DocumentStore.For(x =>
+               {
+                   x.Connection(DummyConnectionString);
+                   x.Events.Subscribe(new SurfaceSubscription());
+               }))
+        {
+            store.Options.Events.Projections().Should().BeEmpty(
+                "Projections() never lists a subscription, which is why the studio does not ask it");
+            ((ProjectionOptions) store.Options.Events.Daemon).HasAnyAsyncProjections().Should().BeTrue(
+                "a subscription is async work, and HasAnyAsyncProjections() counts it");
+        }
+    }
+
+    /// <summary>A subscription that does nothing, so a store can have one and nothing else.</summary>
+    private sealed class SurfaceSubscription : global::Marten.Subscriptions.SubscriptionBase
+    {
+        public override Task<IChangeListener> ProcessEventsAsync(
+            EventRange page,
+            ISubscriptionController controller,
+            IDocumentOperations operations,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(NullChangeListener.Instance);
     }
 
     /// <summary>
@@ -1337,6 +1536,93 @@ public class MartenApiSurfaceTest
     }
 
     // --------------------------------------------------------------------------------------------
+    // The database browser (DB-1)
+    // --------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>StoreOptions.Storage.ExtendedSchemaObjects</c> is how a host hands Marten tables, functions and
+    /// sequences to manage - EF Core projection tables, PgVector - and the classifier reads it so they are
+    /// never labelled "Other".
+    /// </summary>
+    /// <remarks>
+    /// <b><c>IReadOnlyStoreOptions</c> has no <c>Storage</c></b> (verified at <c>V9.31.0</c>): the list is a
+    /// plain public <c>List&lt;ISchemaObject&gt;</c> on <c>StorageFeatures</c>, reached through the concrete
+    /// <c>StoreOptions</c> - Marten's only implementation - so the reader casts. Features added with
+    /// <c>Storage.Add(IFeatureSchema)</c> are reachable only through <c>AllActiveFeatures</c>, which is
+    /// internal and applies migrations (hard rule 14); the classifier knows those only by the <c>mt_</c>
+    /// prefix, and this pins that the door stays shut rather than silently opening.
+    /// </remarks>
+    [Fact]
+    public void ExtendedSchemaObjects_is_a_plain_list_on_the_concrete_StoreOptions_Storage()
+    {
+        typeof(IReadOnlyStoreOptions).GetProperty("Storage", MemberFlags).Should().BeNull(
+            "the read-only interface has no Storage, which is why the reader casts to StoreOptions");
+        typeof(IReadOnlyStoreOptions).IsAssignableFrom(typeof(StoreOptions)).Should().BeTrue();
+
+        RequireProperty(typeof(StoreOptions), "Storage").PropertyType.Should().Be<StorageFeatures>();
+        RequireProperty(typeof(StorageFeatures), "ExtendedSchemaObjects").PropertyType
+            .Should().Be<List<Weasel.Core.ISchemaObject>>();
+
+        new StoreOptions().Storage.ExtendedSchemaObjects.Should().BeEmpty();
+
+        typeof(StorageFeatures).GetMethod("AllActiveFeatures", MemberFlags).Should().BeNull(
+            "it is internal - a feature added with Storage.Add(IFeatureSchema) is known only by its mt_ name");
+    }
+
+    /// <summary>
+    /// A document can point a foreign key at any table by name - the overload that makes an edge between
+    /// a Marten document and a plain table, which the database browser's foreign-key lists show.
+    /// </summary>
+    /// <remarks>
+    /// Verified at <c>V9.31.0</c>: <c>ForeignKey(Expression&lt;Func&lt;T, object&gt;&gt;, string schemaName,
+    /// string tableName, string columnName, Action&lt;ForeignKey&gt;? foreignKeyConfiguration = null)</c>. It
+    /// adds a duplicated field for the member and a plain Weasel <c>ForeignKey</c> named
+    /// <c>{table}_{column}_fkey</c>; a null schema means the document's own.
+    /// </remarks>
+    [Fact]
+    public void A_document_foreign_key_can_point_at_any_table_by_schema_table_and_column()
+    {
+        RequireMethod(
+                typeof(MartenRegistry.DocumentMappingExpression<SampleDocument>),
+                "ForeignKey",
+                typeof(Expression<Func<SampleDocument, object>>),
+                typeof(string),
+                typeof(string),
+                typeof(string),
+                typeof(Action<ForeignKey>))
+            .ReturnType.Should().Be<MartenRegistry.DocumentMappingExpression<SampleDocument>>();
+    }
+
+    /// <summary>
+    /// The event store's own tables are types of the Marten assembly and a flat-table projection's table is
+    /// a plain Weasel <c>Table</c> - which is exactly the test the reader uses to tell "event store" from
+    /// "Marten-managed projection data".
+    /// </summary>
+    [Fact]
+    public void The_event_stores_own_tables_are_Marten_types_and_a_projections_table_is_Weasels()
+    {
+        foreach (string name in new[]
+                 {
+                     "Marten.Events.Schema.StreamsTable", "Marten.Events.Schema.EventsTable",
+                     "Marten.Events.Schema.EventProgressionTable", "Marten.Events.Schema.NaturalKeyTable",
+                     "Marten.Events.Schema.EventTagTable", "Marten.Events.Schema.DcbTagVersionTable",
+                 })
+        {
+            Type table = MartenType(name);
+
+            table.Should().BeAssignableTo<Table>();
+            table.Assembly.Should().BeSameAs(typeof(StoreOptions).Assembly);
+        }
+
+        RequireProperty(typeof(global::Marten.Events.Projections.Flattened.FlatTableProjection), "Table")
+            .PropertyType.Should().Be<Table>();
+        typeof(Table).Assembly.Should().NotBeSameAs(typeof(StoreOptions).Assembly);
+
+        RequireProperty(typeof(global::Marten.Events.Projections.EventProjection), "SchemaObjects")
+            .PropertyType.Should().Be<IList<Weasel.Core.ISchemaObject>>();
+    }
+
+    // --------------------------------------------------------------------------------------------
     // The compile-time half
     // --------------------------------------------------------------------------------------------
 
@@ -1386,6 +1672,15 @@ public class MartenApiSurfaceTest
         _ = documentType.AliasFor(typeof(SampleDocument));
         _ = documentType.TypeFor("sample_document");
 
+        // --- the database browser's classifier (DB-1) -------------------------------------------------
+        List<Weasel.Core.ISchemaObject> extended = ((StoreOptions) options).Storage.ExtendedSchemaObjects;
+        _ = extended.Count;
+
+        MartenRegistry.DocumentMappingExpression<SampleDocument> pointing = new StoreOptions().Schema
+            .For<SampleDocument>()
+            .ForeignKey(x => x.Id, "quartz", "qrtz_job_details", "job_id", static key => _ = key.Name);
+        _ = pointing;
+
         DocumentMetadataCollection metadata = documentType.Metadata;
         MetadataColumn[] everyMetadataColumn =
         [
@@ -1410,6 +1705,11 @@ public class MartenApiSurfaceTest
         IReadOnlyList<ISubscriptionSource> projections = events.Projections();
         IReadOnlyList<IEventType> eventTypes = events.AllKnownEventTypes();
         _ = (events.StreamIdentity, events.TenancyStyle, events.DatabaseSchemaName, events.AppendMode, events.Daemon);
+
+        // DB-0: the daemon card's two questions, answered without a coordinator.
+        bool externallyManaged = events.Daemon.AsyncMode == DaemonMode.ExternallyManaged;
+        bool hasAsyncWork = events.Daemon is ProjectionOptions projectionOptions && projectionOptions.HasAnyAsyncProjections();
+        _ = (externallyManaged, hasAsyncWork);
 
         MartenMetadataConfig metadataConfig = events.MetadataConfig;
         _ = (metadataConfig.CausationIdEnabled, metadataConfig.CorrelationIdEnabled,
@@ -1480,6 +1780,13 @@ public class MartenApiSurfaceTest
         _ = advanced.AllAsyncProjectionShardNames();
         await advanced.AdvanceHighWaterMarkToLatestAsync(token);
         await advanced.TryCorrectProgressInDatabaseAsync(token);
+        await advanced.AdvanceHighWaterMarkToLatestAsync("tenant", token);
+        await advanced.TryCorrectProgressInDatabaseAsync("tenant", token);
+
+        // DB-0-fix: the database the tenant forms reach, asked the way AdvancedOperations asks it.
+        Tenant correctedTenant = await tenancy.GetTenantAsync(options.TenantIdStyle.MaybeCorrectTenantId("tenant"));
+        IMartenDatabase correctedDatabase = correctedTenant.Database;
+        _ = correctedDatabase.Id.Identity;
 
         MartenCoordinator coordinator = null!;
         IProjectionDaemon daemon = coordinator.DaemonForMainDatabase();

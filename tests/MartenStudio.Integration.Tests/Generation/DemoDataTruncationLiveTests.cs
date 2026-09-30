@@ -60,16 +60,36 @@ public class DemoDataTruncationLiveTests(TruncationDataSetFixture fixture) : ICl
         runs.Should().ContainSingle(x => x.Id == fixture.RunId);
         runs.Single(x => x.Id == fixture.RunId).Completed.Should().BeTrue();
 
-        var archived = 0;
-        DemoDataTruncation result = await truncator.TruncateAsync(
+        // A batch of seven, so that seventy-odd documents take more than a dozen statements: the bound is what keeps
+        // the Large preset's 600 000 customers - three foreign-key triggers a row - inside the command
+        // timeout, and a batch that never stopped at the bound would pass at the default size here.
+        const int BatchSize = 7;
+
+        List<DemoDataTruncationProgress> steps = [];
+        DemoDataTruncation result = await new DemoDataTruncator(store, BatchSize).TruncateAsync(
             deleteAllEventData: false,
-            progress: count => archived = count,
+            progress: steps.Add,
             Token);
 
         result.Runs.Should().Be(1);
+        result.DocumentsDeleted.Should().Be(plan.DocumentTarget, "every generated document, and only those");
         result.StreamsArchived.Should().Be(plan.Streams);
         result.EventDataDeleted.Should().BeFalse();
-        archived.Should().Be(plan.Streams);
+
+        // The panel's progress line: documents first, a batch at a time up to the total, then the streams.
+        long[] deleted =
+        [
+            0, .. steps.Where(x => x.Phase == DemoDataTruncationPhase.DeletingDocuments).Select(x => x.DocumentsDeleted),
+        ];
+
+        deleted.Zip(deleted.Skip(1), (before, after) => after - before)
+            .Should().AllSatisfy(x => x.Should().BeInRange(1, BatchSize, "one statement, one bounded batch"));
+        deleted.Last().Should().Be(plan.DocumentTarget);
+        deleted.Should().HaveCountGreaterThan((int) (plan.DocumentTarget / BatchSize));
+
+        steps.Last().Phase.Should().Be(DemoDataTruncationPhase.ArchivingStreams);
+        steps.Last().StreamsArchived.Should().Be(plan.Streams);
+        steps.Last().DocumentsDeleted.Should().Be(plan.DocumentTarget);
 
         await using (IQuerySession after = store.QuerySession())
         {

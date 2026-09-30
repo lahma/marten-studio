@@ -227,10 +227,24 @@ internal static class ProjectionProgressQueries
     /// </param>
     /// <param name="commandTimeout">A bound on the read.</param>
     /// <remarks>
+    /// <para>
     /// <c>last_value</c> is not a count and not the daemon's high-water mark: a sequence hands numbers out
     /// before the transaction that took them commits, and burns them outright when it rolls back. That is
     /// the number Marten answers and therefore the number the studio answers, and the places that render
     /// it say what it is.
+    /// </para>
+    /// <para>
+    /// <b>Except on a sequence nothing has drawn from.</b> Postgres reports <c>last_value = 1</c>,
+    /// <c>is_called = false</c> for a fresh sequence - the value the <em>next</em> <c>nextval</c> will
+    /// return, not one that was ever handed out. Read as it stands, a store whose event tables exist and
+    /// hold no event had a high-water mark of 1, every async projection lagged it by one, and the
+    /// projections page raised its "nothing appears to be running these projections" alarm on a fresh
+    /// install (<c>ProjectionsView.NoDaemonAnywhere</c> needs a mark above zero precisely so that it does
+    /// not). Marten's own detector made the same correction for the same reason (its #5091: "the
+    /// allocated high reads 0 for a pristine sequence"). So the statement is
+    /// <c>case when is_called then last_value else 0 end</c>, and a sequence that has handed out 1 still
+    /// reads 1.
+    /// </para>
     /// </remarks>
     public static NpgsqlCommand BuildHighWaterMark(
         string schema,
@@ -246,7 +260,8 @@ internal static class ProjectionProgressQueries
             command.CommandText = tenantPartitionedEvents
                 ? "select coalesce(max(" + SqlIdentifier.Quote("seq_id") + "), 0) from "
                   + SqlIdentifier.Qualify(schema, EventTableInfo.EventsTable)
-                : "select last_value from " + SqlIdentifier.Qualify(schema, EventsSequence);
+                : "select case when is_called then last_value else 0 end from "
+                  + SqlIdentifier.Qualify(schema, EventsSequence);
 
             ApplyTimeout(command, commandTimeout);
 

@@ -1,4 +1,5 @@
 @page "/marten/schema"
+@using MartenStudio.Services.Database
 @using Microsoft.AspNetCore.WebUtilities
 @using Microsoft.Extensions.Options
 @implements IDisposable
@@ -40,7 +41,7 @@
             @switch (ActiveTab)
             {
                 case TablesTabKey:
-                    <TablesTab CollectionLink="CollectionLink" />
+                    <TablesTab CollectionLink="CollectionLink" ObjectLink="ObjectLink" StreamsLink="@StreamsLink" />
                     break;
 
                 case IndexesTabKey:
@@ -150,6 +151,17 @@
 
     /// <summary>A link to a document collection, carrying the scope.</summary>
     private string CollectionLink(string alias) => Link("documents/" + Uri.EscapeDataString(alias));
+
+    /// <summary>A link to the event store's streams, carrying the scope.</summary>
+    private string StreamsLink => Link("events/streams");
+
+    /// <summary>
+    /// A link to one relation's detail in the database browser - <c>/marten/database/object?schema=&amp;name=</c>
+    /// - carrying the scope, built by the browser's own <see cref="DatabaseLinks" /> so the two screens can
+    /// never disagree about the route or its parameters.
+    /// </summary>
+    private string ObjectLink(string schema, string name) =>
+        DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, name);
 
     private string Link(string subPath, params (string Name, string? Value)[] extra)
     {

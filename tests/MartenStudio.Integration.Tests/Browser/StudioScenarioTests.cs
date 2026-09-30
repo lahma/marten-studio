@@ -37,11 +37,6 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
 
     private static readonly Regex Digits = new(@"\d", RegexOptions.None, TimeSpan.FromSeconds(5));
 
-    private static void Write(string line) => TestContext.Current.TestOutputHelper?.WriteLine(line);
-
-    private static string Join(IReadOnlyList<string> lines) =>
-        lines.Count == 0 ? "(none)" : Environment.NewLine + "  " + string.Join(Environment.NewLine + "  ", lines);
-
     // ------------------------------------------------------------------------------------------------
     // 1. The circuit connects and the landing page is live
     // ------------------------------------------------------------------------------------------------
@@ -312,8 +307,9 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     // ------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The diagram draws the store's foreign keys, and the table beside it lists exactly the same edges —
-    /// which is what makes the screen usable by somebody who cannot see the picture.
+    /// The diagram draws the store's foreign keys and - for a visitor the database browser admits - the
+    /// sample's Quartz.NET and legacy tables beside them, and in every view the table beside it lists
+    /// exactly the same edges, which is what makes the screen usable by somebody who cannot see the picture.
     /// </summary>
     [BrowserFact]
     public async Task The_relationships_diagram_and_its_table_list_the_same_edges()
@@ -324,43 +320,42 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
 
             await studio.Page.Locator("svg.ms-graph-svg").WaitForAsync();
 
-            // Scoped to the diagram itself: the legend beside it draws three sample arrows that carry the
-            // same classes, and counting those would compare five edges against two rows.
+            // Scoped to the diagram itself: the legend beside it draws sample arrows that carry the same
+            // classes, and counting those would compare more edges than there are rows.
             ILocator nodes = studio.Page.Locator("svg.ms-graph-svg .ms-graph-node");
+            ILocator tables = studio.Page.Locator("svg.ms-graph-svg .ms-graph-node-table");
             ILocator edges = studio.Page.Locator("svg.ms-graph-svg .ms-graph-edge");
             ILocator rows = studio.Page.Locator(".ms-graph-table tbody tr.ms-graph-row");
 
             (await nodes.CountAsync()).Should().BeGreaterThan(
                 1, "the demo declares foreign keys between order, invoice and customer");
-            (await edges.CountAsync()).Should().BeGreaterThan(0);
 
-            (await rows.CountAsync()).Should().Be(
-                await edges.CountAsync(),
-                "a table that listed fewer rows than the picture has arrows is a screen telling two stories");
+            // Both is the default, and admin passes the write policy BrowseDatabase is asked under, with
+            // quartz and legacy in the sample's BrowsableSchemas.
+            (await studio.Page.Locator(".ms-graph-views button[aria-pressed='true']").InnerTextAsync())
+                .Should().StartWith("Both");
+            (await tables.CountAsync()).Should().BeGreaterThan(0, "the sample's Quartz.NET tables take part in keys");
 
             List<string> titles = [];
-            foreach (ILocator edge in await edges.AllAsync())
+            foreach (ILocator title in await tables.Locator(".ms-graph-node-alias").AllAsync())
             {
-                // TextContentAsync, not InnerTextAsync: an SVG <title> is not an HTMLElement and has no
-                // rendered text, so innerText is undefined for it.
-                titles.Add((await edge.Locator("title").TextContentAsync() ?? string.Empty).Trim());
+                // TextContentAsync, not InnerTextAsync: SVG text is not an HTMLElement's rendered text.
+                titles.Add((await title.TextContentAsync() ?? string.Empty).Trim());
             }
 
-            foreach (ILocator row in await rows.AllAsync())
-            {
-                // The alias out of the chip, not the whole cell: the "Points at" cell also carries the
-                // arrow glyph the table draws for sighted readers.
-                string from = (await row.Locator("td").Nth(0).Locator(".ms-collection-alias").InnerTextAsync()).Trim();
-                string to = (await row.Locator("td").Nth(1).Locator(".ms-collection-alias").InnerTextAsync()).Trim();
-                string column = (await row.Locator("td").Nth(2).InnerTextAsync()).Trim();
+            titles.Should().Contain("qrtz_triggers");
 
-                titles.Should().Contain(
-                    x => x.StartsWith(from + "." + column + " → " + to, StringComparison.Ordinal),
-                    "every row of the accessible table is an arrow on the diagram; looked for "
-                    + from + "." + column + " -> " + to + " among: " + string.Join(" | ", titles));
-            }
+            await AssertTheTableListsTheDiagramAsync(edges, rows, "the Both view");
 
-            studio.AssertClean("reading the relationships screen");
+            // The Tables view, through the switch - a click that reaches the server and redraws.
+            await studio.Page.Locator(".ms-graph-views button", new PageLocatorOptions { HasTextString = "Tables" }).ClickAsync();
+            await studio.Page.Locator(".ms-graph-views button[aria-pressed='true']", new PageLocatorOptions { HasTextString = "Tables" })
+                .WaitForAsync();
+
+            (await tables.CountAsync()).Should().BeGreaterThan(0);
+            await AssertTheTableListsTheDiagramAsync(edges, rows, "the Tables view");
+
+            studio.AssertClean("reading the relationships screen in two views");
         });
     }
 
@@ -368,46 +363,14 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     // The runner
     // ------------------------------------------------------------------------------------------------
 
-    /// <summary>
-    /// Runs one scenario in a browser context of its own, and on failure leaves a screenshot and the
-    /// host's log behind.
-    /// </summary>
+    /// <summary>Runs one scenario through the suite's shared runner - see <see cref="BrowserScenario" />.</summary>
     /// <param name="name">The scenario's name, which is the screenshot's file name.</param>
     /// <param name="host">The sample host to drive.</param>
     /// <param name="user">Which demo user to sign in as.</param>
     /// <param name="body">The scenario.</param>
-    private async Task RunAsync(string name, SampleHost host, string user, Func<StudioPage, Task> body)
-    {
-        await using StudioPage studio = await StudioPage.SignInAsync(fixture.Browser, host, user);
+    private Task RunAsync(string name, SampleHost host, string user, Func<StudioPage, Task> body) =>
+        BrowserScenario.RunAsync(fixture.Browser, name, host, user, body);
 
-        try
-        {
-            await body(studio);
-        }
-        catch
-        {
-            string directory = Path.Combine(AppContext.BaseDirectory, "browser-screenshots");
-            Directory.CreateDirectory(directory);
-            string path = Path.Combine(directory, name + ".png");
-
-            try
-            {
-                await studio.ScreenshotAsync(path);
-                Write("Screenshot: " + path);
-            }
-            catch (PlaywrightException exception)
-            {
-                Write("No screenshot could be taken: " + exception.Message);
-            }
-
-            Write("Page errors:      " + Join(studio.PageErrors));
-            Write("Console problems: " + Join(studio.ConsoleProblems));
-            Write("Failed responses: " + Join(studio.FailedResponses));
-            Write("WebSockets:       " + Join(studio.WebSockets));
-            Write("Sample host (pid " + host.ProcessId + ") log, last 60 lines:");
-            Write(host.LogTail());
-
-            throw;
-        }
-    }
+    private static Task AssertTheTableListsTheDiagramAsync(ILocator edges, ILocator rows, string where) =>
+        BrowserScenario.AssertTheTableListsTheDiagramAsync(edges, rows, where);
 }

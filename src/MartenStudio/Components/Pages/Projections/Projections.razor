@@ -69,6 +69,21 @@
                 </p>
             </div>
         }
+        else if (view.NoDaemonAnywhere && view.Daemon.IsExternallyManaged)
+        {
+            @* The same facts, about a store whose projections another system runs: worth saying, because
+               there are events and nothing has advanced over them, and wrong to blame on a daemon this
+               process was never meant to host. A store with no events yet raises neither banner
+               (ProjectionsView.NoDaemonAnywhere): there has been nothing to advance over. *@
+            <div class="ms-alert ms-alert-warning ms-no-daemon-banner" role="alert">
+                <div class="ms-alert-content">
+                    <p>
+                        This store's asynchronous projections are run by an external system, and no shard has
+                        ever advanced. If that system is running, it has not processed anything yet.
+                    </p>
+                </div>
+            </div>
+        }
         else if (view.NoDaemonAnywhere)
         {
             <div class="ms-alert ms-alert-warning ms-no-daemon-banner" role="alert">
@@ -86,6 +101,7 @@
         }
 
         <DaemonStatusCard IsHostedHere="view.Daemon.IsHostedHere"
+                          IsExternallyManaged="view.Daemon.IsExternallyManaged"
                           IsRunning="view.Daemon.IsRunning"
                           Mode="@view.Daemon.Mode"
                           AgentCount="view.Daemon.Agents.Count"
@@ -100,27 +116,34 @@
             @if (!Capabilities.ReadOnly)
             {
                 <div class="ms-daemon-actions ms-actions">
-                    <button type="button"
-                            class="ms-button ms-daemon-pause"
-                            disabled="@(!ControlEnabled)"
-                            title="@ControlTitle"
-                            @onclick="() => AskAsync(PendingAction.PauseDaemon)">
-                        Pause daemon
-                    </button>
-                    <button type="button"
-                            class="ms-button ms-daemon-resume"
-                            disabled="@(!ControlEnabled)"
-                            title="@ControlTitle"
-                            @onclick="() => AskAsync(PendingAction.ResumeDaemon)">
-                        Resume daemon
-                    </button>
-                    <button type="button"
-                            class="ms-button ms-daemon-restart-high-water"
-                            disabled="@(!ControlEnabled)"
-                            title="@ControlTitle"
-                            @onclick="RestartHighWaterAsync">
-                        Restart high water
-                    </button>
+                    @* Hidden rather than disabled for an externally managed store: there is no option a
+                       host could set to make them work here - they belong to the system that runs the
+                       projections - and the card has already said so. The progression corrections stay:
+                       they are writes against the progression table and need no daemon. *@
+                    @if (!ExternallyManaged)
+                    {
+                        <button type="button"
+                                class="ms-button ms-daemon-pause"
+                                disabled="@(!ControlEnabled)"
+                                title="@ControlTitle"
+                                @onclick="() => AskAsync(PendingAction.PauseDaemon)">
+                            Pause daemon
+                        </button>
+                        <button type="button"
+                                class="ms-button ms-daemon-resume"
+                                disabled="@(!ControlEnabled)"
+                                title="@ControlTitle"
+                                @onclick="() => AskAsync(PendingAction.ResumeDaemon)">
+                            Resume daemon
+                        </button>
+                        <button type="button"
+                                class="ms-button ms-daemon-restart-high-water"
+                                disabled="@(!ControlEnabled)"
+                                title="@ControlTitle"
+                                @onclick="RestartHighWaterAsync">
+                            Restart high water
+                        </button>
+                    }
                     <button type="button"
                             class="ms-button ms-daemon-advance-high-water"
                             disabled="@(!CorrectEnabled)"
@@ -151,7 +174,7 @@
                     <p class="ms-muted ms-daemon-explanation ms-agent-refusal" role="status">@agentRefusal</p>
                 }
 
-                @if (!Capabilities.IsEnabled(StudioCapability.ControlDaemon))
+                @if (!ExternallyManaged && !Capabilities.IsEnabled(StudioCapability.ControlDaemon))
                 {
                     <CapabilityDisabled Capability="@nameof(StudioCapability.ControlDaemon)"
                                         Action="Pausing and resuming the projection daemon" />
@@ -166,14 +189,14 @@
                 @* One sentence per capability the policy refused this visitor, under the controls it
                    disabled. Each is its own line because a policy is free to allow a pause and refuse a
                    rebuild, and a reader has to be able to tell which button the sentence is about. *@
-                <WriteRefusal Refused="RefusedByPolicy(StudioCapability.ControlDaemon)"
+                <WriteRefusal Refused="@(!ExternallyManaged && RefusedByPolicy(StudioCapability.ControlDaemon))"
                               Capability="@nameof(StudioCapability.ControlDaemon)" />
                 <WriteRefusal Refused="RefusedByPolicy(StudioCapability.CorrectProgression)"
                               Capability="@nameof(StudioCapability.CorrectProgression)" />
-                <WriteRefusal Refused="RefusedByPolicy(StudioCapability.RebuildProjections)"
+                <WriteRefusal Refused="@(!ExternallyManaged && RefusedByPolicy(StudioCapability.RebuildProjections))"
                               Capability="@nameof(StudioCapability.RebuildProjections)" />
 
-                @if (!view.Daemon.IsHostedHere)
+                @if (!view.Daemon.IsHostedHere && !view.Daemon.IsExternallyManaged)
                 {
                     <p class="ms-muted ms-daemon-unavailable">
                         Start, stop and rebuild are unavailable because no async daemon is hosted in this
@@ -241,7 +264,7 @@
                                            ImplementationType="@projection.ImplementationTypeName"
                                            ShardCount="projection.ShardNames.Count">
                                 <Actions>
-                                    @if (!Capabilities.ReadOnly)
+                                    @if (!Capabilities.ReadOnly && !ExternallyManaged)
                                     {
                                         <button type="button"
                                                 class="ms-button ms-button-danger ms-btn-sm ms-projection-rebuild"
@@ -306,7 +329,7 @@
                                         @(shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never")
                                     </td>
                                     <td class="ms-table-cell ms-table-cell-actions">
-                                        @if (!Capabilities.ReadOnly)
+                                        @if (!Capabilities.ReadOnly && !ExternallyManaged)
                                         {
                                             @* Disabled, never hidden, while the coordinator is running: the
                                                option has to stay discoverable, and the hover text - like the
@@ -403,6 +426,7 @@
                    Tables="rebuild?.TablesAffected ?? []"
                    Lifecycle="@(rebuild?.Lifecycle.ToString() ?? string.Empty)"
                    IsAsync="@(rebuild?.Lifecycle == JasperFx.Events.Projections.ProjectionLifecycle.Async)"
+                   Tenant="@State.ActiveScope?.TenantId"
                    ShardTimeout="@(rebuild?.ShardTimeout ?? Options.Value.RebuildShardTimeout)"
                    OnConfirm="ConfirmRebuildAsync"
                    OnCancel="CancelRebuild" />
@@ -641,6 +665,15 @@
     // ------------------------------------------------------------------------------------------------
 
     private bool DaemonHostedHere => view?.Daemon.IsHostedHere == true;
+
+    /// <summary>
+    /// Whether an external system runs this store's async projections, so that the daemon controls are
+    /// not offered here at all. The service refuses them regardless (AGENTS.md hard rule 5), from the
+    /// same answer this reads: every control - pause and resume included - asks
+    /// <c>DaemonAccessor.ForScopeAsync</c> and refuses on <c>ExternallyManaged</c>, whether that came
+    /// from <c>AsyncMode</c> or from a coordinator whose lookup said <c>NotSupportedException</c>.
+    /// </summary>
+    private bool ExternallyManaged => view?.Daemon.IsExternallyManaged == true;
 
     private bool ControlEnabled =>
         Capabilities.IsEnabled(StudioCapability.ControlDaemon) && DaemonHostedHere && mayControl;
@@ -975,6 +1008,61 @@
         }
     }
 
+    /// <summary>
+    /// What the confirm dialog of a progression correction adds about where it lands, or nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Marten 9.31 has no per-database form of either correction: asked without a tenant, it runs
+    /// against every database of the store (the service's <c>AdvancedAsync</c> says where that was
+    /// read), so on a store with more than one database the dialog says so - the same way the pause
+    /// dialog says a pause reaches every database - and names the ones this visitor can see. The
+    /// service refuses the correction unless the visitor may change every one of them; this sentence is
+    /// what makes that refusal unsurprising.
+    /// </para>
+    /// <para>
+    /// The names come from the scope selector's own listing, which is already filtered through the store
+    /// policy, so the dialog never names a database the visitor may not address - nor says how many
+    /// others there are.
+    /// </para>
+    /// <para>
+    /// <b>With a tenant selected it is still not that tenant's correction.</b> Marten finds the tenant's
+    /// database and then runs the same untenanted correction over it: the high-water mark it advances and
+    /// the progression rows it rewrites are the database's, and every tenant stored there is read against
+    /// them. The dialog says so, because "that tenant's database only" read as "that tenant only", and the
+    /// service refuses it unless the visitor may change the database as a whole - or the database holds
+    /// no one else (<c>DatabaseReachAuthorization.RequireWholeDatabaseAsync</c>).
+    /// </para>
+    /// </remarks>
+    private string CorrectionReach
+    {
+        get
+        {
+            if (State.ActiveScope?.TenantId is { Length: > 0 } tenantId)
+            {
+                return $" With tenant {tenantId} selected, Marten does this in that tenant's database, and it is "
+                    + "not limited to that tenant: the high water mark and the progression rows belong to the "
+                    + "database, so every tenant stored in it is affected. It is refused unless you may change "
+                    + "that database as a whole, or it holds this tenant and no other.";
+            }
+
+            bool several = State.Cardinality is JasperFx.Descriptors.DatabaseCardinality.StaticMultiple
+                or JasperFx.Descriptors.DatabaseCardinality.DynamicMultiple;
+
+            if (!several)
+            {
+                return string.Empty;
+            }
+
+            string names = State.AvailableDatabases.Count > 0
+                ? ": " + string.Join(", ", State.AvailableDatabases.Select(static x => x.Identity))
+                : string.Empty;
+
+            return " With no tenant selected, Marten does this in every database of this store, not only the "
+                + $"one selected{names}. It is refused unless you may change every one of them.";
+        }
+    }
+
     private string PendingMessage => pending switch
     {
         PendingAction.PauseDaemon =>
@@ -989,10 +1077,12 @@
         PendingAction.AdvanceHighWaterMark =>
             "This moves the high water mark to the latest event sequence. Every async projection then treats "
             + "the events it has not processed as already gone: they will never be projected. This exists for "
-            + "retrofitting projections onto a very large event store, and it is not reversible.",
+            + "retrofitting projections onto a very large event store, and it is not reversible."
+            + CorrectionReach,
         PendingAction.CorrectProgression =>
             "This pulls the high water mark and every shard's progression back to the highest real event "
-            + "sequence. It only does anything if progression somehow ran ahead of the events themselves.",
+            + "sequence. It only does anything if progression somehow ran ahead of the events themselves."
+            + CorrectionReach,
         PendingAction.CancelOperation =>
             "Cancelling a replay leaves the projection partial: its tables were emptied before the replay "
             + "started, so what is in them is whatever had been rewritten when it stopped. Nothing will "
