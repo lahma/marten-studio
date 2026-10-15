@@ -30,8 +30,9 @@ model, the phased delivery plan — lives in the approved plan at
 1. **No new NuGet package without a decision recorded in this file.** The package budget below is
    complete. If a package looks necessary, add a dated row to *Package budget changes* saying what it is,
    what it replaces, and why nothing already present can do the job — before referencing it.
-2. **Never hand-edit `.github/workflows/*.yml`.** All three — `build.yml`, `publish.yml`, `release.yml` —
-   are generated from the `[GitHubActions]` attributes in `build/Build.CI.GitHubActions.cs`, and any build
+2. **Never hand-edit `.github/workflows/*.yml`.** All four — `build.yml`, `marten-latest.yml`,
+   `publish.yml`, `release.yml` — are generated from the `[GitHubActions]` attributes in
+   `build/Build.CI.GitHubActions.cs`, and any build
    run overwrites them. Change the attribute and re-run the build (`dotnet fallout
    --generate-configuration GitHubActions_publish --host GitHubActions` regenerates just one). A run whose
    generated output differs *aborts* with `Configuration files for GitHubActions (…) have changed` — run
@@ -184,14 +185,19 @@ left to the default, because Blazor sets component `[Parameter]` properties by n
 deserializes into types discovered from `IDocumentType.DocumentType` at run time — a trimmer told it may
 cut has no way to see either.
 
-**D3 — Two `PackageReference`s (`Marten`, floor `9.31.0`, and
+**D3 — Two `PackageReference`s (`Marten`, floor `9.39.0`, and
 `Microsoft.AspNetCore.App.Internal.Assets`, floor `10.0.12`, neither with an upper bound) plus
 `FrameworkReference Microsoft.AspNetCore.App`.** Everything else the RCL needs — Blazor, SignalR,
 authorization, endpoint routing — is in the shared framework, so the package pins no ASP.NET Core patch
 onto its host; the assets pack is three `.js` files and an MSBuild target, with no `lib/`, no `ref/` and
 no runtime assembly, so it does not either (D22). No `Marten.AspNetCore`: its value is ETag'd HTTP JSON
 writers generic over `T`, and the studio only ever has a runtime `Type`. No direct `Npgsql` either; it
-arrives through `Weasel.Postgresql`, and adding it would let the two drift.
+arrives through `Weasel.Postgresql`, and adding it would let the two drift. The Marten floor is a
+*security* floor (the two 9.39.0 advisories, *Package budget changes* 2026-10-15), and both suites run at
+it and at a pinned latest-tested 9.x (`MartenStudioMartenFloor` / `MartenStudioMartenLatest` in
+`Directory.Packages.props`, the `marten-latest` workflow); the package is only ever packed at the floor.
+The studio's own compilation runs without the JasperFx source generator Marten bundles, so the shipped
+assembly carries no JasperFx generator attribute and has the same public API whichever Marten built it.
 
 **D4 — Capabilities are a class of booleans, all defaulting to `false`.** A freshly mapped studio is a
 read-only browser; `o.Capabilities = MartenStudioCapabilities.All()` is the one-line, greppable opt-in, and
@@ -259,7 +265,7 @@ exactly the "registration changes host behaviour" failure this project refuses, 
 `DisableNpgsqlLogging=true` anyway. Every studio-generated grid carries a "Show SQL" disclosure instead,
 which answers the question people actually have.
 
-**D15 — Fallout 10.4.0 stable, CHANGELOG.md as the version authority, all three workflows generated,
+**D15 — Fallout 10.4.0 stable, CHANGELOG.md as the version authority, all four workflows generated,
 trusted publishing for nuget.org.** See *Build* and *Release engineering* below. The important half is that
 the version lives in one file that a human edits and no tool rewrites, and that the only credential
 anywhere in the release path lives for minutes.
@@ -466,7 +472,7 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 
 | Where | Package | Version | Why it is here |
 |---|---|---|---|
-| `src/MartenStudio` | `Marten` | `9.31.0` | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back, and 9.31.0 is the **lowest** 9.x the whole repository compiles and passes both suites on (bisected 2026-09-19; see *Package budget changes*). JasperFx / JasperFx.Events 2.60.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.29.0 and Npgsql 9.0.4 all arrive transitively through it. |
+| `src/MartenStudio` | `Marten` | `9.39.0` (latest tested `9.50.2`) | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. 9.39.0 is a **security** floor: it fixes GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5, and the code itself still needs nothing above 9.31.0 (bisected 2026-09-19; see *Package budget changes*, 2026-10-15). Both suites also run at a pinned latest-tested version, `MartenStudioMartenLatest`; the package is packed only at the floor. JasperFx / JasperFx.Events 2.74.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.33.0 and Npgsql 9.0.4 arrive transitively at the floor. The studio's own compilation drops the JasperFx source generator Marten bundles (`MartenStudio.csproj`). |
 | `src/MartenStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. |
 | `samples/`, `tests/…Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres, and the container the integration suite runs against. |
 | both test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
@@ -575,6 +581,103 @@ elsewhere in this file and throughout `src/` are deliberately left alone: they r
 2026-09-14 and are still true of 9.35, and a floor is a minimum rather than a statement about what a
 host resolves. **Exit condition:** raise the floor only when a member the studio needs is genuinely
 absent below the new value, and say here which one.
+
+**2026-10-15 — the `Marten` floor moved *up*, from `9.31.0` to `9.39.0`, for two advisories and not for
+an API; and both suites now also run at a pinned latest-tested `9.50.2`.** Marten 9.39.0 fixes
+**GHSA-q4xm-rhx9-xjm4** (SQL injection through a `GroupBy(…).Where(…)` HAVING operand, critical, affects
+9.13.0–9.38.0) and **GHSA-frqq-p5g3-8jq5** (SQL injection through `regConfig` on the full-text ranking
+path, critical, affects 9.31.0–9.38.0) — both disclosed in its release notes on 2026-09-22, and neither in
+the GitHub advisory database on 2026-10-15 (`GET /advisories/{id}` answers 404 for both, and
+`JasperFx/marten`'s published advisories are still only GHSA-rfx3-98h7-v3xp and GHSA-vmw2-qwm8-x84c). The
+day they are published, restore at any floor below 9.39.0 fails with `NU1904` under
+`TreatWarningsAsErrors` — the same wall as GHSA-rfx3 at ≤ 9.12.0, arriving on a CI run nobody changed.
+Moving first means the break never happens, and a package that sets a floor should not set it on an
+injectable Marten anyway. The studio itself reaches neither sink: its reads are raw parameterised SQL and
+its writes go through `StoreObjects` (D6). Nothing in the code needed the move — the 2026-09-19 entry
+above still records what it needs (9.31.0) — so this is the first floor raised for a reason other than a
+missing member, and the exit condition widens to say so.
+
+All four gates were run at 9.39.0 exactly as on 2026-09-19 — `dotnet restore marten-studio.slnx` with
+`TreatWarningsAsErrors` (zero NU warnings), `dotnet build marten-studio.slnx` (0 warnings), the fast
+suite (3 417 passed) and `MARTENSTUDIO_PG_REUSE=false dotnet test tests/MartenStudio.Integration.Tests`
+against `postgres:17-alpine` (729 passed, 9 opt-in skips) — and then again at 9.50.2 through
+`-p:MartenStudioMartenVersion=9.50.2` and through `dotnet fallout Test --marten-version latest`: zero NU
+warnings, 0 build warnings, 3 417 fast and 729 live passed with the same 9 opt-in skips (the 1.2M-row
+passes and the screenshot retakes). No test was touched to make either end pass, and `PublicApiTest`
+passes at both against an untouched baseline. The transitive graph:
+
+- **At the floor, 9.39.0:** JasperFx / JasperFx.Events **2.74.0**, Weasel.Core / Weasel.Postgresql /
+  Weasel.Storage **9.33.0**, Npgsql / Npgsql.NetTopologySuite **9.0.4**, DistributedLock.Core 1.0.8 /
+  DistributedLock.Postgres 1.3.0, Polly.Core 8.6.5.
+- **At the latest tested, 9.50.2:** JasperFx / JasperFx.Events **2.87.1**, Weasel.* **9.45.0**, Npgsql
+  **9.0.4** (unchanged), and three packages the floor does not have, all **transitive-only** — the studio
+  references none of them directly and must not start to, because none is in this budget:
+  **System.Linq.Dynamic.Core 1.7.4** (JasperFx has depended on it since 2.84, for Dynamic LINQ document
+  queries; two advisories in its history, both behind 1.7.4: CVE-2023-32571 / GHSA-w65q-jcmv-28gj,
+  critical, `< 1.3.0`, and CVE-2024-51417 / GHSA-4cv2-4hjh-77rx, high, `< 1.6.0`), and
+  **Patched.DistributedLock.Core 1.0.11 / Patched.DistributedLock.Postgres 1.3.3**, which replace
+  DistributedLock.Core / DistributedLock.Postgres from Weasel.Postgresql 9.45 on (JasperFx/weasel#614,
+  "Use patched advisory lock", merged 2026-09-24). They are a JasperFx-maintained fork, owned on
+  nuget.org by **Hawxy**, a JasperFx contributor — not packages from DistributedLock's own author, even
+  though their nuspec still carries the upstream authors and repository URL.
+
+Three things changed in how the repository consumes Marten, all measured rather than assumed:
+
+- **The version is a property, defined once.** `MartenStudioMartenFloor` and `MartenStudioMartenLatest`
+  in `Directory.Packages.props`; `Marten`'s `PackageVersion` reads `$(MartenStudioMartenVersion)`, which
+  defaults to the floor; `build/Build.Marten.cs` resolves `--marten-version floor|latest|<exact>` and
+  passes it to Restore, Compile and Test; `marten-latest.yml` runs both suites with `MARTEN_VERSION:
+  latest` on every push and pull request to `main`. The latest-tested version is exact and bumped by a
+  pull request of its own, never floating. Pack refuses anything but the floor, in the build and in
+  `MartenStudio.csproj` — which checks both the property and what the last restore resolved
+  (`"Marten/<floor>"` in `project.assets.json`, which is where NuGet takes the nuspec's range from), and
+  refuses when there is no assets file.
+- **The shipped assembly is compiled without the JasperFx source generator.** Marten bundles
+  `JasperFx.Events.SourceGenerator` in its own `analyzers/`, and from JasperFx 2.75 (Marten 9.40) it emits
+  `[assembly: JasperFxSourceGeneratorApplied]` into every assembly it processes — so `MartenStudio.dll`
+  built at 9.50.2 carried it and `PublicApiTest`'s received file gained the line. The obvious fix,
+  `ExcludeAssets="analyzers"` on the reference, **does nothing**: NuGet records the
+  exclusion (the include flags in `project.assets.json` drop `Analyzers`), but SDK 10.0.402's
+  `ResolvePackageAssets` adds the analyzers of every package in the lock file without consulting them,
+  and the generator still ran — in this project and in a minimal one without central package management
+  (decompiled `ResolvePackageAssets.CacheWriter.WriteAnalyzers`; built with `EmitCompilerGeneratedFiles`).
+  The removal is therefore a target in `MartenStudio.csproj`, `BeforeTargets="CoreCompile"`, that drops
+  the one `Analyzer` item, the same item-level surgery JasperFx.Events' own dedupe target does. Measured:
+  the nuspec is **byte-identical** with `ExcludeAssets` and without (`<dependency id="Marten"
+  version="9.39.0" exclude="Build,Analyzers" />` either way — analyzers are in the default
+  `PrivateAssets` already), and the target touches nothing NuGet sees; at 9.39.0 the generator emitted no
+  file for the studio at all, and at 9.50.2 the marker was the only one, so nothing in `src/` relied on
+  generated code. The sample and both test projects keep the generator, which still flows to them through
+  the same unfiltered resolution; `JasperFxSourceGeneratorTests` pins both halves. That flow is not a
+  promise: dotnet/sdk `main` has an opt-in `RestoreEnableAnalyzerAssets` path that does honour the include
+  flags, and if it becomes the default, `MartenStudio.Tests` — which reaches Marten only through its
+  `ProjectReference` to `src/` — would lose the generator (so would the integration suite, whose
+  references to Marten are project references too), and `JasperFxSourceGeneratorTests` on the latest leg
+  is what would say so. The fix then is a direct `Marten` reference in the test projects, not a looser
+  test.
+- **Behavioural differences between 9.39.0 and 9.50.2, read from the release notes and the source at
+  `V9.50.2` / JasperFx `V2.87.1`, none of which fails a test at either end:**
+  `DefaultTenantUsageDisabledException` now derives from `JasperFx.Events.DefaultTenantUsageDisabledException`
+  rather than `MartenException` (9.41, #5514) — nothing in `src/` catches through `MartenException`. The
+  read resilience pipeline no longer retries a timeout or `57014` (9.46, #5566) and a commit has its own,
+  narrower pipeline — `55P03` is still retried on reads, so the reason `DocumentWriteService` runs its
+  lock statements on `IQuerySession.Connection` still holds. Marten's progression statement gained
+  `last_updated` (9.43, #5541) — the studio's own read does not select it yet, and the two bookkeeping row
+  names it excludes are unchanged. During a rebuild, `StartAgentAsync(string)` on that projection's shard
+  now returns without starting anything (logged at Information, jasperfx#1009, JasperFx 2.86) where the
+  floor's JasperFx 2.74 has no such guard and can start a continuous agent beside the replay, whose agent
+  it cannot see; and a second rebuild of the same projection throws
+  `ProjectionAlreadyRebuildingException`, an `InvalidOperationException` that the operation tracker
+  reports — both safer than the floor, and both left to the rebuild-awareness work, since the studio's
+  Start button does not yet know a rebuild is running. Drains are bounded by `StopAndDrainTimeout`
+  (9.47); the HotCold leadership lock is session-scoped again (9.41) — the studio reads no daemon lock
+  today. #5665 (`AllObjects()` offline) is on Marten `master` but in no tag up to `V9.50.2`; hard rule 14
+  is unchanged.
+
+**Exit condition:** raise the floor when a member the studio needs is genuinely absent below the new
+value, *or* when a published advisory makes restore at the floor fail (`NU1901`–`NU1904` under
+`TreatWarningsAsErrors`) — and say here which. Bump `MartenStudioMartenLatest` when a newer stable 9.x
+ships, in its own pull request, with both suites green at it and every difference recorded.
 
 **Held deliberately, and not stale.**
 
@@ -708,7 +811,7 @@ tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, th
                                          and the relational demo schemas' idempotency and demo-data flows
 ```
 
-Outside those roots: `.github/workflows/` holds the three **generated** workflow files (hard rule 2),
+Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),
 `.config/dotnet-tools.json` pins the Fallout CLI, `.fallout/` holds the parameter file and the generated
 build schema, and `CHANGELOG.md` is the version authority.
 
@@ -726,16 +829,41 @@ depends on, does not exist there — and would regenerate the workflows backward
 Do not "update" it.
 
 ```powershell
-.\build.ps1 Test              # restore, compile, install browsers if asked, run both test projects
-.\build.ps1 Test --playwright # ... and install Chromium first (D19)
-.\build.ps1 Pack              # the NuGet package into artifacts/packages
-.\build.ps1 Browsers          # just the Chromium install
+.\build.ps1 Test                           # restore, compile, install browsers if asked, run both test projects
+.\build.ps1 Test --playwright              # ... and install Chromium first (D19)
+.\build.ps1 Test --marten-version latest   # ... at the latest-tested Marten instead of the floor
+.\build.ps1 Pack                           # the NuGet package into artifacts/packages (always at the floor)
+.\build.ps1 Browsers                       # just the Chromium install
 ```
 
 `CHANGELOG.md` is the **version authority**: its top section is parsed in `OnBuildInitialized` and passed
 to every compile, test and pack as `-p:Version=`. The file is never mutated by the build, and its first
 line must parse as a version header (`# 0.1.0`) — **do not add a `# Changelog` title**, it would abort the
 build. `Directory.Build.props`'s `VersionPrefix` is only the fallback for a plain `dotnet build`.
+
+**The Marten version is `Directory.Packages.props`'s, and the build only chooses between two.**
+`MartenStudioMartenFloor` (what the package depends on) and `MartenStudioMartenLatest` (the newest 9.x CI
+tests, an exact version) are defined there once; `Marten`'s `PackageVersion` reads
+`$(MartenStudioMartenVersion)`, which defaults to the floor. `build/Build.Marten.cs` resolves
+`--marten-version` (env `MARTEN_VERSION`) — `floor`, the default; `latest`; or an exact version such as
+`9.50.2`, never a range — in `OnBuildInitialized`, and passes the result as
+`-p:MartenStudioMartenVersion=` to Restore, Compile and Test, the floor included, so an environment
+variable of that name cannot change what a run tests. Without Fallout, `dotnet test …
+-p:MartenStudioMartenVersion=9.50.2` does the same. **`Pack` packs at the floor and refuses anything
+else**, twice: the Fallout target asserts it, and `MartenStudio.csproj` fails a bare `dotnet pack` before
+the nuspec is written unless both `MartenStudioMartenVersion` is the floor *and* `project.assets.json`
+holds the `"Marten/<floor>"` library — because NuGet writes the dependency range from the assets file,
+so `dotnet test … -p:MartenStudioMartenVersion=9.50.2` followed by `dotnet pack --no-restore` would
+otherwise pass a property check and still ship `Marten >= 9.50.2`. A missing assets file is a refusal,
+not a pass (a package packed at a newer Marten would raise every host's floor). To bump the
+latest-tested version: change `MartenStudioMartenLatest`, run both suites with `--marten-version latest`,
+and fix or record every difference in the same pull request. Raising the floor is a *Package budget
+changes* entry, never a side effect.
+
+`build/_build.csproj` restores with `NU1902`/`NU1903` warnings for `System.Security.Cryptography.Xml` and
+`System.Security.Cryptography.Pkcs` 10.0.10, which `Fallout.Components` 10.4.0 brings transitively (seen
+2026-10-15). They are warnings in the orchestrator only — it does not inherit `TreatWarningsAsErrors`, and
+none of it ships — and pinning either package forward would be a budget decision this file has not taken.
 
 The build needs at least one commit: `IHasGitRepository` injects `GitRepository` from the working tree and
 fails with `Could not find commit information` on an empty repository.
@@ -744,11 +872,20 @@ fails with `Could not find commit information` on an empty repository.
 
 ```powershell
 .\build.ps1 Test                                          # everything, through the orchestrator
+.\build.ps1 Test --marten-version latest                  # everything, at the latest-tested Marten
 dotnet test tests\MartenStudio.Tests                       # the fast suite alone
 $env:MARTENSTUDIO_PG_REUSE='false'                         # a container of this run's own; see PostgresFixture
 dotnet test tests\MartenStudio.Integration.Tests           # needs Docker - run `docker info` first
+dotnet test tests\MartenStudio.Tests -p:MartenStudioMartenVersion=9.50.2   # one suite at another Marten
 dotnet test tests\MartenStudio.Tests --filter "FullyQualifiedName~ApiSurface"
 ```
+
+**Both suites run at two Marten versions**: the floor (`build.yml`) and the pinned latest-tested 9.x
+(`marten-latest.yml`, which runs `dotnet fallout Test` with `MARTEN_VERSION: latest`). A change is green
+only when both are. A fix for a behavioural difference between them must hold at both ends; one that
+needs a member only the newer side has is run-time light-up behind a probe, not a reason to move the
+floor. `PublicApiTest` must pass at both without a baseline edit, which is one reason
+`JasperFxSourceGeneratorTests` exists.
 
 Container reuse is on by default locally (a second run attaches to the same Postgres) and off on CI.
 `MARTENSTUDIO_PG_REUSE=false` is how one run opts out, which every run that might overlap another —
@@ -775,7 +912,9 @@ There are seven kinds of test, in two projects:
    review: the workflows are the generated ones and still carry the permissions they need; the AGENTS.md
    layout tree matches disk; no `async void` in `src/`; README snippets equal the `#region` bodies in the
    sample's `Program.cs`; every `.ms-table` in `src/` is inside a scroll region (D25); the stylesheet
-   still carries the shell rules the 0.2.0 UX pass measured (`StylesheetTests` and its `.Shell` part).
+   still carries the shell rules the 0.2.0 UX pass measured (`StylesheetTests` and its `.Shell` part);
+   `MartenStudio.dll` carries no `JasperFxSourceGeneratorApplied` marker while the test assembly does
+   wherever JasperFx stamps one (`JasperFxSourceGeneratorTests`, D3).
    `NoAsyncVoidTests` and `TablesAreScrollableTests` both strip comments before scanning, which is
    exactly what makes them capable of being silently vacuous, so each carries an anti-vacuity theory that
    proves the scanner still catches a synthetic offender and still ignores one in prose.
@@ -820,8 +959,11 @@ or tag filter — so whichever file the policy names can mint a publishing key o
 workflow that can mint a key must not also hold repository write.** `WorkflowGenerationTests` asserts both
 halves, in both directions.
 
-`build.yml` — every push and pull request to `main` — cannot mint anything, because it is not the file in
-the policy.
+`build.yml` and `marten-latest.yml` — every push and pull request to `main`, at the Marten floor and at
+the latest-tested Marten — cannot mint anything, because neither is the file in the policy; both hold
+`contents: read` and nothing else, and `WorkflowGenerationTests` asserts that no workflow but `publish.yml`
+so much as mentions `id-token`. Neither packs: the package that `publish.yml` pushes is packed at the
+floor, and `Pack` refuses any other Marten.
 
 `CHANGELOG.md` stays the version authority here too. `CreateGitHubRelease` and `Publish` both refuse unless
 `GITHUB_REF_NAME` equals `v{version parsed from CHANGELOG.md}`. To release: land the changelog entry first,

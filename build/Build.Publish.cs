@@ -60,6 +60,10 @@ partial class Build
         .Produces(PackagesDirectory / "*.nupkg")
         .Executes(() =>
         {
+            // At the Marten floor or not at all (Build.Marten.cs): a package packed against a newer
+            // Marten would depend on that newer Marten and raise every host's floor.
+            AssertPackingAtTheMartenFloor();
+
             // Independent of Compile for the same reason PublishAot is: this is a Release build of
             // one project, and `dotnet pack` of a tool package runs its own publish anyway.
             PackagesDirectory.CreateOrCleanDirectory();
@@ -68,7 +72,10 @@ partial class Build
                 .SetProject(StudioProject)
                 .SetConfiguration(Configuration.Release)
                 .SetOutputDirectory(PackagesDirectory)
-                .SetProperty("Version", Version));
+                .SetProperty("Version", Version)
+                // Said explicitly, so that MSBuild's environment-as-properties rule cannot pack at
+                // anything else either.
+                .SetProperty(MartenVersionProperty, MartenFloor));
 
             var packages = PackagesDirectory.GlobFiles("*.nupkg");
             Assert.NotEmpty(packages, $"dotnet pack produced no .nupkg in '{PackagesDirectory}'");
@@ -80,6 +87,7 @@ partial class Build
 
             ReportSummary(_ => _
                 .AddPair("Version", Version)
+                .AddPair("Marten floor", MartenFloor)
                 .AddPair("Packages", packages.Count.ToString()));
         });
 

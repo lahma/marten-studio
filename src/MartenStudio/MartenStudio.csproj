@@ -31,6 +31,8 @@
     <!-- Blazor Server, SignalR, authorization and the endpoint routing the studio mounts into all
          come from the shared framework, so the package pins no ASP.NET Core patch on its host. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- The JasperFx source generator Marten bundles is taken out of this compilation by the
+         MartenStudioWithoutTheJasperFxSourceGenerator target at the end of this file. -->
     <PackageReference Include="Marten" />
     <!--
       blazor.web.js, for the host.
@@ -72,5 +74,80 @@
     <InternalsVisibleTo Include="MartenStudio.Tests" />
     <InternalsVisibleTo Include="MartenStudio.Integration.Tests" />
   </ItemGroup>
+
+  <!--
+    The studio is compiled WITHOUT the JasperFx aggregate source generator that Marten bundles in its
+    own analyzers/dotnet/cs folder.
+
+    Why: the studio declares no aggregate and no projection, so the generator has nothing to generate
+    here - at the 9.39.0 floor it emits no file for this assembly at all. But from JasperFx 2.75
+    (Marten 9.40) it emits [assembly: JasperFx.Events.Aggregation.JasperFxSourceGeneratorApplied] into
+    every assembly it processes, unconditionally, so a build at a newer Marten would put a JasperFx
+    attribute on the shipped MartenStudio.dll and into the public API baseline with it, while a build
+    at the floor would not. Measured at 9.50.2: that marker is the only file it writes for this
+    assembly, so nothing here relies on generated code. The marker is how the JasperFx runtime tells
+    an assembly the generator processed from one it never saw (jasperfx#887); an assembly with no
+    aggregate in it is not asked.
+
+    Why a target and not ExcludeAssets="analyzers" on the Marten reference: that was tried first and
+    measured to do nothing (SDK 10.0.402, 2026-10-15, in this project and in a minimal one without
+    central package management). NuGet records the exclusion - the include flags in
+    project.assets.json drop Analyzers - but the SDK's ResolvePackageAssets adds the analyzers of every
+    package in the lock file without consulting them, and the generator still ran. ExcludeAssets also
+    changes nothing in the nuspec: the dependency is exclude="Build,Analyzers" either way, byte for byte.
+
+    This file is not packed, so a consumer sees none of it: a host's own Marten reference brings the
+    generator to the host's own projections as before. Only this compilation loses it - the sample and
+    both test projects keep it, which they need (the 9.22.4 to 9.23.0 "no source-generated dispatcher"
+    wall in AGENTS.md). JasperFxSourceGeneratorTests pins both halves.
+    BeforeTargets="CoreCompile", like JasperFx.Events' own dedupe target, so design-time builds see the
+    same analyzer list as a real one.
+  -->
+  <Target Name="MartenStudioWithoutTheJasperFxSourceGenerator" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <_MartenStudioJasperFxGenerator Include="@(Analyzer)"
+                                      Condition="'%(Filename)%(Extension)' == 'JasperFx.Events.SourceGenerator.dll'" />
+      <Analyzer Remove="@(_MartenStudioJasperFxGenerator)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    The package is packed at the Marten floor and nowhere else. A nupkg packed against 9.50.2 would
+    say `Marten >= 9.50.2` and silently raise the floor of every host that takes it; the floor is a
+    decision recorded in AGENTS.md, not a side effect of which leg of CI ran Pack. The build's Pack
+    target refuses first and says why; this is the same refusal for a bare `dotnet pack`.
+
+    Two checks, because the property is not what NuGet packs from. Pack writes the dependency range
+    from project.assets.json - whatever the last restore wrote - so `dotnet test ...
+    -p:MartenStudioMartenVersion=9.50.2` followed by `dotnet pack` with no-restore or no-build would
+    pass a property-only check at the floor and still write `Marten >= 9.50.2`. So the guard also
+    reads $(ProjectAssetsFile) and requires the library key "Marten/<floor>" in it, quotes included,
+    so that a package whose name merely ends in Marten cannot satisfy it; a graph holds one version of
+    a package, so the key's presence is the resolved version. The quotes are spelled \x22 in the
+    regular expression so that no literal quote has to survive MSBuild's argument parsing. It fails
+    closed: no assets file at pack time is a refusal, not a pass. (In an ordinary pack NuGet's own
+    GetProjectReferencesFromAssetsFileTask refuses a missing file first; this branch is the guard not
+    depending on that, and was exercised by running the target directly.) Measured 2026-10-15: after a
+    restore at 9.50.2, pack with no-restore and pack with no-build both fail here and write no nupkg,
+    and a pack at the floor writes the same nuspec byte for byte.
+  -->
+  <Target Name="MartenStudioPackOnlyAtTheMartenFloor" BeforeTargets="GenerateNuspec">
+    <PropertyGroup>
+      <_MartenStudioAssetsFileExists>false</_MartenStudioAssetsFileExists>
+      <_MartenStudioAssetsFileExists Condition="'$(ProjectAssetsFile)' != '' and Exists('$(ProjectAssetsFile)')">true</_MartenStudioAssetsFileExists>
+      <_MartenStudioFloorLibraryKey>"Marten/$(MartenStudioMartenFloor)"</_MartenStudioFloorLibraryKey>
+      <_MartenStudioFloorLibraryPattern>\x22Marten/$(MartenStudioMartenFloor.Replace('.', '\.'))\x22</_MartenStudioFloorLibraryPattern>
+      <_MartenStudioAssets Condition="'$(_MartenStudioAssetsFileExists)' == 'true'">$([System.IO.File]::ReadAllText('$(ProjectAssetsFile)'))</_MartenStudioAssets>
+      <_MartenStudioAssetsAtFloor>false</_MartenStudioAssetsAtFloor>
+      <_MartenStudioAssetsAtFloor Condition="'$(_MartenStudioAssetsFileExists)' == 'true' and $([System.Text.RegularExpressions.Regex]::IsMatch($(_MartenStudioAssets), $(_MartenStudioFloorLibraryPattern)))">true</_MartenStudioAssetsAtFloor>
+    </PropertyGroup>
+
+    <Error Condition="'$(MartenStudioMartenVersion)' != '$(MartenStudioMartenFloor)'"
+           Text="MartenStudio is packed only at the Marten floor ($(MartenStudioMartenFloor), Directory.Packages.props), and this pack asks for Marten $(MartenStudioMartenVersion). A package packed here would depend on Marten &gt;= $(MartenStudioMartenVersion) and raise every host's floor. Pack without MartenStudioMartenVersion, or raise MartenStudioMartenFloor deliberately and record why in AGENTS.md, Package budget changes." />
+    <Error Condition="'$(_MartenStudioAssetsFileExists)' != 'true'"
+           Text="MartenStudio is packed only at the Marten floor ($(MartenStudioMartenFloor)), and there is no restore output to prove it ('$(ProjectAssetsFile)' does not exist). NuGet writes the package's dependency range from that file, so the guard refuses rather than guess. Pack with a restore (without --no-restore) at the floor." />
+    <Error Condition="'$(_MartenStudioAssetsFileExists)' == 'true' and '$(_MartenStudioAssetsAtFloor)' != 'true'"
+           Text="MartenStudio is packed only at the Marten floor ($(MartenStudioMartenFloor)), but the last restore ('$(ProjectAssetsFile)') resolved another Marten - it has no $(_MartenStudioFloorLibraryKey) library. NuGet writes the package's dependency range from that file, so this pack would raise every host's floor. Restore at the floor first: pack without --no-restore and without MartenStudioMartenVersion." />
+  </Target>
 
 </Project>
