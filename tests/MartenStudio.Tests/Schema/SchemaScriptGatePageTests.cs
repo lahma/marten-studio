@@ -130,8 +130,9 @@ public class SchemaScriptGatePageTests
 
         var page = RenderTab(context, "tables");
 
+        // Rows, live, dead, dead %, HOT % (F6) and both scan counters: each is a count of tenants here.
         page.FindAll(".ms-schema-withheld").Select(static x => x.TextContent.Trim()).Should()
-            .Equal("withheld", "withheld", "withheld", "withheld", "withheld");
+            .Equal("withheld", "withheld", "withheld", "withheld", "withheld", "withheld", "withheld");
         page.Markup.Should().NotContain("not analyzed", "the estimate is withheld, not missing");
         page.Find(".ms-schema-partition-note").TextContent.Should()
             .Contain("MartenStudioOptions.Capabilities.BrowseDatabase")

@@ -65,6 +65,12 @@ else
         are the database browser's: a table this store does not declare is "not Marten", wherever it lives.
     </p>
 
+    <p class="ms-schema-note ms-schema-health-note">
+        <strong>Dead %</strong> is dead rows among live and dead, which only vacuum makes reusable;
+        <strong>HOT %</strong> is the share of updates since the counters began that stayed on their page and
+        touched no index. <strong>Storage parameters</strong> are the table's <code>reloptions</code>@StorageParameterNote
+    </p>
+
     @if (HasPartitionedTable || HasWithheldFigures)
     {
         <p class="ms-schema-note ms-schema-partition-note">
@@ -91,14 +97,19 @@ else
                     <th>Owner</th>
                     <th class="ms-num">Total</th>
                     <th class="ms-num">Heap</th>
+                    <th class="ms-num">TOAST</th>
                     <th class="ms-num">Indexes</th>
                     <th class="ms-num">Rows</th>
                     <th class="ms-num">Live</th>
                     <th class="ms-num">Dead</th>
+                    <th class="ms-num">Dead %</th>
+                    <th class="ms-num">HOT %</th>
                     <th class="ms-num">Seq scans</th>
                     <th class="ms-num">Index scans</th>
                     <th>Last vacuum</th>
+                    <th>Last autovacuum</th>
                     <th>Last analyze</th>
+                    <th>Storage parameters</th>
                 </tr>
             </thead>
             <tbody>
@@ -165,25 +176,38 @@ else
                         </td>
                         <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.TotalBytes)</td>
                         <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.HeapBytes)</td>
+                        <td class="ms-table-cell ms-num ms-schema-toast">@SchemaFormat.Bytes(table.ToastBytes)</td>
                         <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.IndexBytes)</td>
                         @if (table.FiguresWithheld)
                         {
-                            <td class="ms-table-cell ms-num ms-schema-withheld" title="@WithheldFigureTitle">withheld</td>
-                            <td class="ms-table-cell ms-num ms-schema-withheld" title="@WithheldFigureTitle">withheld</td>
-                            <td class="ms-table-cell ms-num ms-schema-withheld" title="@WithheldFigureTitle">withheld</td>
-                            <td class="ms-table-cell ms-num ms-schema-withheld" title="@WithheldFigureTitle">withheld</td>
-                            <td class="ms-table-cell ms-num ms-schema-withheld" title="@WithheldFigureTitle">withheld</td>
+                            for (int withheldCell = 0; withheldCell < WithheldFigureColumns; withheldCell++)
+                            {
+                                <td class="ms-table-cell ms-num ms-schema-withheld" title="@WithheldFigureTitle">withheld</td>
+                            }
                         }
                         else
                         {
                             <td class="ms-table-cell ms-num ms-schema-estimate">@SchemaFormat.Estimate(table.EstimatedRows)</td>
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.LiveRows)</td>
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.DeadRows)</td>
+                            <td class="@DeadClass(table)">@Share(table.DeadShare)</td>
+                            <td class="@HotClass(table)" title="@HotTitle(table)">@Share(table.HotShare)</td>
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.SequentialScans)</td>
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(table.IndexScans)</td>
                         }
                         <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastVacuum)</td>
+                        <td class="ms-table-cell ms-table-cell-mono ms-schema-autovacuum">@State.FormatInSelectedTimeZone(table.LastAutovacuum)</td>
                         <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(table.LastAnalyze)</td>
+                        <td class="ms-table-cell ms-schema-parameters">
+                            @if (table.StorageParameters.Count == 0)
+                            {
+                                <span class="ms-schema-parameters-none">none</span>
+                            }
+                            @foreach (StorageParameterState parameter in table.StorageParameters)
+                            {
+                                <span class="@ParameterClass(parameter)" data-status="@parameter.Status" title="@ParameterTitle(parameter)" @key="parameter.Name">@ParameterText(parameter)</span>
+                            }
+                        </td>
                     </tr>
                 }
             </tbody>
@@ -205,10 +229,96 @@ else
         "Marten's own bookkeeping (every mt_ table that is not a registered document or event table: " +
         "mt_hilo, the tenancy tables, a table no registered type declares any more).";
 
+    /// <summary>The row figures a tenancy registry table withholds: rows, live, dead, dead %, HOT %, and both scan counters.</summary>
+    private const int WithheldFigureColumns = 7;
+
+    /// <summary>The dead share T07 speaks above, so the tab marks what the advisor would.</summary>
+    private const double DeadShareWorth = MartenStudio.Services.Health.Checks.VacuumBehindCheck.MaxDeadShare;
+
+    /// <summary>The HOT share T06 speaks below.</summary>
+    private const double HotShareWorth = MartenStudio.Services.Health.Checks.HotUpdateCheck.MinHotShare;
+
     private readonly CancellationTokenSource lifetime = new();
 
     private SchemaTables tables = SchemaTables.Empty;
     private bool loading = true;
+
+    /// <summary>
+    /// The end of the note's sentence about storage parameters: compared with the declarations on a Marten that
+    /// can declare them, shown as they are on one that cannot.
+    /// </summary>
+    /// <remarks>
+    /// Decided by the host's Marten (the probe), not by the rows: a page of tables none of which is a document
+    /// table of this store says nothing about whether the mappings could declare parameters.
+    /// </remarks>
+    private static string StorageParameterNote =>
+        MartenStudio.Services.Configuration.RuntimeFeature.DeclaredStorageParameters.IsAvailable(
+            MartenStudio.Services.Configuration.MartenRuntime.Current)
+            ? ", each beside what a document mapping declares: a declared one the table differs from is drift, which the " +
+              "next apply sets; one set outside Marten is left alone by Marten's delta - unless an apply rebuilds the table, " +
+              "as a changed partition scheme does - because Marten manages only the storage parameters a mapping declares. " +
+              "A partitioned table has none of its own: its partitions' are shown where they all agree."
+            : ", as they are. A mapping can declare them (FillFactor, StorageParameter) from Marten 9.47, and this host runs " +
+              MartenStudio.Services.Configuration.MartenRuntime.Current.Describe(MartenStudio.Services.Configuration.RuntimePackage.Marten) +
+              ", so there is nothing to compare them with.";
+
+    private static string Share(double? share) =>
+        share is { } value
+            ? (value * 100).ToString(value < 0.1 ? "0.0" : "0", System.Globalization.CultureInfo.InvariantCulture) + "%"
+            : "n/a";
+
+    /// <summary>The dead-share cell, marked past T07's share and its minimum of dead rows.</summary>
+    private static string DeadClass(TableStats table) =>
+        "ms-table-cell ms-num ms-schema-dead" +
+        (table.DeadShare > DeadShareWorth && table.DeadRows >= MartenStudio.Services.Health.Checks.VacuumBehindCheck.MinDeadRows
+            ? " ms-schema-share-high"
+            : string.Empty);
+
+    /// <summary>The HOT-share cell, marked below T06's share once the table has had T06's minimum of updates.</summary>
+    private static string HotClass(TableStats table) =>
+        "ms-table-cell ms-num ms-schema-hot" +
+        (table.HotShare < HotShareWorth && table.Updates >= MartenStudio.Services.Health.Checks.HotUpdateCheck.MinUpdates
+            ? " ms-schema-share-high"
+            : string.Empty);
+
+    private static string HotTitle(TableStats table) =>
+        table.Updates is { } updates
+            ? (table.HotUpdates ?? 0).ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + " of " +
+              updates.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) +
+              " updates since the counters began were HOT updates. The Health page judges the rate over the last hour instead (T06)."
+            : "No updates since the counters began.";
+
+    private static string ParameterClass(StorageParameterState parameter) => parameter.Status switch
+    {
+        StorageParameterStatus.Drift => "ms-index-flag ms-index-flag-danger ms-schema-parameter ms-schema-parameter-drift",
+        StorageParameterStatus.SetOutsideMarten => "ms-index-flag ms-index-flag-info ms-schema-parameter",
+        StorageParameterStatus.PartitionsDiffer => "ms-index-flag ms-index-flag-warn ms-schema-parameter ms-schema-parameter-differ",
+        _ => "ms-index-flag ms-schema-parameter",
+    };
+
+    private static string ParameterText(StorageParameterState parameter) => parameter.Status switch
+    {
+        StorageParameterStatus.Drift => parameter.Name + ": declared " + parameter.Declared + ", table " + (parameter.Actual ?? "unset"),
+        StorageParameterStatus.PartitionsDiffer => parameter.Name + ": partitions differ",
+        _ => parameter.Name + "=" + parameter.Actual,
+    };
+
+    private static string ParameterTitle(StorageParameterState parameter) => parameter.Status switch
+    {
+        StorageParameterStatus.Drift =>
+            "The mapping declares " + parameter.Name + " = " + parameter.Declared + " and the table " +
+            (parameter.Actual is null ? "does not have it" : "has " + parameter.Actual) +
+            ": the next apply sets it. A layout parameter such as fillfactor affects only pages written after that.",
+        StorageParameterStatus.SetOutsideMarten =>
+            "Set on the table, and not declared by the configuration (or by a Marten that cannot declare it): Marten's delta " +
+            "leaves it alone, unless an apply rebuilds the table - a changed partition scheme copies it out and back.",
+        StorageParameterStatus.PartitionsDiffer =>
+            "The table's partitions do not all have " + parameter.Name + " at one value" +
+            (parameter.Declared is { } declared ? " (the mapping declares " + declared + ")" : string.Empty) +
+            ". Postgres keeps no storage parameters on a partitioned table itself; the partitions are not named here, " +
+            "because Marten names a tenant's partition after the tenant.",
+        _ => "Declared by the mapping, and the table has it.",
+    };
 
     /// <summary>
     /// Where a collection link points, scope query and all.

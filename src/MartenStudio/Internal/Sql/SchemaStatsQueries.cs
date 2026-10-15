@@ -29,6 +29,21 @@ namespace MartenStudio.Internal.Sql;
 /// <param name="LastAnalyze">The later of <c>last_analyze</c> and <c>last_autoanalyze</c> - over the partitions too.</param>
 /// <param name="Kind"><c>relkind</c>: <c>r</c> for an ordinary table, <c>p</c> for a partitioned one.</param>
 /// <param name="PartitionCount">How many partitions hang directly off it; zero for an ordinary table.</param>
+/// <param name="Updates"><c>n_tup_upd</c>, HOT updates included - over the partitions too - or <see langword="null" />.</param>
+/// <param name="HotUpdates"><c>n_tup_hot_upd</c>, over the partitions too, or <see langword="null" />.</param>
+/// <param name="LastAutovacuum"><c>last_autovacuum</c> alone - over the partitions too.</param>
+/// <param name="ToastBytes">
+/// The TOAST table and its index: <c>pg_total_relation_size</c> of the listed table's own TOAST relation, plus
+/// its partitions' TOAST pages.
+/// </param>
+/// <param name="StorageOptions">
+/// <c>reloptions</c>: the storage parameters set on the table, as <c>name=value</c>. For a partitioned table -
+/// on which Postgres keeps none - the ones every leaf partition has at one value.
+/// </param>
+/// <param name="DifferingStorageOptions">
+/// For a partitioned table, the parameters its leaf partitions do not all have at one value, by name only -
+/// never a partition's.
+/// </param>
 internal sealed record TableStatsRow(
     string Schema,
     string Table,
@@ -43,7 +58,13 @@ internal sealed record TableStatsRow(
     DateTimeOffset? LastVacuum,
     DateTimeOffset? LastAnalyze,
     string Kind = "r",
-    int PartitionCount = 0)
+    int PartitionCount = 0,
+    long? Updates = null,
+    long? HotUpdates = null,
+    DateTimeOffset? LastAutovacuum = null,
+    long ToastBytes = 0,
+    IReadOnlyList<string>? StorageOptions = null,
+    IReadOnlyList<string>? DifferingStorageOptions = null)
 {
     /// <summary>Whether it is a partitioned table, whose partitions are rolled into it.</summary>
     public bool IsPartitioned => Kind == "p";
@@ -162,7 +183,7 @@ internal static class SchemaStatsQueries
     internal const string TableStatsSql =
         """
         with recursive listed as (
-            select c.oid, n.nspname, c.relname, c.relkind, c.reltuples
+            select c.oid, n.nspname, c.relname, c.relkind, c.reltuples, c.reltoastrelid, c.reloptions
             from pg_catalog.pg_class c
             join pg_catalog.pg_namespace n on n.oid = c.relnamespace
             where c.relkind in ('r', 'p')
@@ -196,13 +217,42 @@ internal static class SchemaStatsQueries
                    pg_catalog.sum(s.n_dead_tup) as dead,
                    pg_catalog.sum(s.seq_scan) as seq,
                    pg_catalog.sum(s.idx_scan) as idx,
+                   pg_catalog.sum(s.n_tup_upd) as upd,
+                   pg_catalog.sum(s.n_tup_hot_upd) as hot,
+                   pg_catalog.max(s.last_autovacuum) as autovacuumed,
                    pg_catalog.max(greatest(s.last_vacuum, s.last_autovacuum)) as vacuumed,
-                   pg_catalog.max(greatest(s.last_analyze, s.last_autoanalyze)) as analyzed
+                   pg_catalog.max(greatest(s.last_analyze, s.last_autoanalyze)) as analyzed,
+                   pg_catalog.count(*) filter (where d.relkind = 'r') as leaves
             from tree t
             join pg_catalog.pg_class d on d.oid = t.relid
             left join pg_catalog.pg_class toast on toast.oid = d.reltoastrelid
             left join pg_catalog.pg_stat_user_tables s on s.relid = d.oid
             group by t.root
+        ),
+        leaf_options as (
+            select t.root,
+                   pg_catalog.split_part(o.opt, '=', 1) as name,
+                   pg_catalog.substr(o.opt, pg_catalog.strpos(o.opt, '=') + 1) as value
+            from tree t
+            join pg_catalog.pg_class d on d.oid = t.relid
+            cross join lateral pg_catalog.unnest(d.reloptions) as o(opt)
+            where d.relkind = 'r'
+        ),
+        option_agreement as (
+            select o.root,
+                   o.name,
+                   pg_catalog.min(o.value) as value,
+                   pg_catalog.count(distinct o.value) = 1 and pg_catalog.count(*) = r.leaves as agreed
+            from leaf_options o
+            join rolled r on r.root = o.root
+            group by o.root, o.name, r.leaves
+        ),
+        options_rolled as (
+            select a.root,
+                   pg_catalog.array_agg(a.name || '=' || a.value order by a.name) filter (where a.agreed) as agreed,
+                   pg_catalog.array_agg(a.name order by a.name) filter (where not a.agreed) as differing
+            from option_agreement a
+            group by a.root
         )
         select l.nspname::text as schema_name,
                l.relname::text as table_name,
@@ -228,9 +278,20 @@ internal static class SchemaStatsQueries
                (select pg_catalog.count(*)
                   from pg_catalog.pg_inherits i
                   join pg_catalog.pg_class ch on ch.oid = i.inhrelid
-                  where i.inhparent = l.oid and ch.relispartition)::int
+                  where i.inhparent = l.oid and ch.relispartition)::int,
+               case when l.relkind = 'p' then r.upd::bigint else s.n_tup_upd end,
+               case when l.relkind = 'p' then r.hot::bigint else s.n_tup_hot_upd end,
+               greatest(s.last_autovacuum, r.autovacuumed),
+               coalesce(pg_catalog.pg_total_relation_size(nullif(l.reltoastrelid, 0::pg_catalog.oid)), 0)
+                   + coalesce(r.toast_pages, 0) * pg_catalog.current_setting('block_size')::bigint,
+               case
+                   when l.relkind = 'p' then coalesce(orl.agreed, '{}'::text[])
+                   else coalesce(l.reloptions, '{}'::text[])
+               end,
+               coalesce(orl.differing, '{}'::text[])
         from listed l
         left join rolled r on r.root = l.oid
+        left join options_rolled orl on orl.root = l.oid
         left join pg_catalog.pg_stat_user_tables s on s.relid = l.oid
         order by total_bytes desc, schema_name, table_name
         """;
@@ -424,7 +485,13 @@ internal static class SchemaStatsQueries
                 NullableTimestamp(reader, 10),
                 NullableTimestamp(reader, 11),
                 reader.GetString(12),
-                reader.GetInt32(13)));
+                reader.GetInt32(13),
+                NullableInt64(reader, 14),
+                NullableInt64(reader, 15),
+                NullableTimestamp(reader, 16),
+                reader.GetInt64(17),
+                reader.IsDBNull(18) ? [] : reader.GetFieldValue<string[]>(18),
+                reader.IsDBNull(19) ? [] : reader.GetFieldValue<string[]>(19)));
         }
 
         return rows;

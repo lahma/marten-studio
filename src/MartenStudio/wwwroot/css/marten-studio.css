@@ -10006,3 +10006,56 @@ a.ms-row-ref-key:hover {
     margin: 0;
     font-size: var(--ms-font-size-sm);
 }
+
+/* ==========================================================================
+   HEALTH-4. Tables and indexes on the Schema screen (F6)
+
+   Appended after HEALTH-1 on purpose (D26), and after HEALTH-2 and HEALTH-3
+   wherever those are merged. Every rule is new and prefixed ms-schema-; none
+   re-declares a selector an earlier section owns. The marks reuse
+   .ms-index-flag and its -danger / -warn / -info variants, so a drift chip
+   and an invalid-index mark read like the flags already on these tabs.
+   ========================================================================== */
+
+/* The Tables tab's note about the new columns, close under the estimates note. */
+.ms-schema-health-note {
+    margin-top: calc(var(--ms-space-xs) * -1);
+}
+
+/* A share past what the advisor would speak about (T06, T07): the number says so, not the cell. */
+.ms-schema-share-high {
+    color: var(--ms-color-warning);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+/* Storage parameters: one chip each, wrapping inside the cell rather than widening the table (D25). */
+.ms-schema-parameters {
+    min-width: 12rem;
+    max-width: 22rem;
+    white-space: normal;
+}
+
+.ms-schema-parameter {
+    margin-bottom: 2px;
+    font-family: var(--ms-font-mono);
+    overflow-wrap: anywhere;
+}
+
+.ms-schema-parameters-none {
+    color: var(--ms-color-text-muted);
+}
+
+/* The Indexes tab's summary count of invalid indexes, in the colour of the mark it counts. */
+.ms-schema-health-count-invalid strong {
+    color: var(--ms-color-danger);
+}
+
+/* A mark is a link to its finding on the Health page. */
+a.ms-schema-health-mark {
+    text-decoration: none;
+}
+
+a.ms-schema-health-mark:hover,
+a.ms-schema-health-mark:focus-visible {
+    text-decoration: underline;
+}

@@ -8,6 +8,7 @@ using Marten.Schema;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Database;
 
 using Microsoft.Extensions.Logging;
@@ -430,9 +431,14 @@ internal sealed class SchemaDataService : ISchemaDataService
             capabilities.ReadOnly, answer.CapabilityEnabled, answer.Authorized, answer.Refusal);
 
         Dictionary<string, string> typeNames = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, IReadOnlyList<KeyValuePair<string, string>>?> declaredParameters = new(StringComparer.OrdinalIgnoreCase);
         foreach ((string key, IDocumentType documentType) in DocumentTypesByTable(resolved.Store.Options))
         {
             typeNames[key] = SchemaTypeName.Of(documentType.DocumentType);
+
+            // F6: what the mapping declares, on a Marten that can declare it (9.47+); null below, which is
+            // "unknown", never "none".
+            declaredParameters[key] = StorageParameters.Declared(documentType, MartenRuntime.Current);
         }
 
         try
@@ -459,7 +465,8 @@ internal sealed class SchemaDataService : ISchemaDataService
                 classification.Value,
                 resolved.Registration.Key,
                 typeNames,
-                partitionCountsShown: withheld is null);
+                partitionCountsShown: withheld is null,
+                declaredParameters);
 
             return new SchemaTables(assembled.Tables, schemas, databaseBytes, null, withheld)
             {

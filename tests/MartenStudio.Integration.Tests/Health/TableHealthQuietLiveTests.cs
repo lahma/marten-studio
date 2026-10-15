@@ -1,0 +1,140 @@
+using Marten;
+
+using MartenStudio.SampleDomain;
+using MartenStudio.SampleDomain.Documents;
+using MartenStudio.Services.Health;
+
+using Npgsql;
+
+using static MartenStudio.Integration.Tests.Health.TableHealthLive;
+
+namespace MartenStudio.Integration.Tests.Health;
+
+/// <summary>
+/// The anti-cry-wolf half: the healthy sample store, seeded and read the way a demo is, says nothing about its
+/// tables and indexes - and a hidden document type never appears, whatever is wrong with its table.
+/// </summary>
+public class TableHealthQuietLiveTests(PostgresFixture postgres)
+{
+    private static readonly string[] TableCodes = ["T01", "T03", "T04", "T05", "T06", "T07", "T08", "T09", "T10", "T11", "T12"];
+
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    /// <summary>
+    /// Two regular sweeps an interval apart - so the rate checks have a window - with the seeder's writes and a
+    /// visitor's reads before them, and the deeper checks run once.
+    /// </summary>
+    [PostgresFact]
+    [HealthQuiet("T01")]
+    [HealthQuiet("T03")]
+    [HealthQuiet("T04")]
+    [HealthQuiet("T05")]
+    [HealthQuiet("T06")]
+    [HealthQuiet("T07")]
+    [HealthQuiet("T08")]
+    [HealthQuiet("T09")]
+    [HealthQuiet("T10")]
+    [HealthQuiet("T11")]
+    [HealthQuiet("T12")]
+    public async Task The_seeded_sample_store_is_quiet_on_every_table_and_index_check()
+    {
+        ManualClock clock = new(Start);
+        await using HealthLiveHost host = await HostAsync(postgres, "health_tables_quiet", clock);
+
+        await new SampleDataSeeder().Populate(host.Store, Token);
+
+        HealthReport first = await ReportAsync(host);
+        first.Findings.Should().NotContain(static x => TableCodes.Contains(x.Code), string.Join(" | ", first.Findings.Select(static x => x.Finding.Title)));
+
+        // The cost budget: the ten regular table checks share one table read and one index read through the
+        // sweep's memo, so the whole area is five statements - those two, T10's pg_stats read for the soft-deleted
+        // Order, and T11's mt_hilo existence check and one-row read for the int-id Invoice.
+        first.Checks.Where(static x => x.Code.StartsWith('T')).SelectMany(static x => x.Statements).Select(static x => x.Sql)
+            .Distinct(StringComparer.Ordinal).Should().HaveCount(5, "the regular table checks' whole catalog cost on the sample store");
+
+        await using (IQuerySession session = host.Store.QuerySession())
+        {
+            (await session.Query<Customer>().Take(10).ToListAsync(Token)).Should().NotBeEmpty();
+            (await session.Query<Order>().Take(10).ToListAsync(Token)).Should().NotBeEmpty();
+        }
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+        HealthReport second = await ReportAsync(host, deeper: true);
+
+        second.Findings.Should().NotContain(static x => TableCodes.Contains(x.Code), string.Join(" | ", second.Findings.Select(static x => x.Finding.Title)));
+
+        foreach (string code in TableCodes)
+        {
+            HealthCheckStatus status = HealthLiveHost.Status(second, code);
+            status.Outcome.Should().Be(HealthCheckOutcome.Checked, "{0} is quiet because it looked, not because it did not run: {1}", code, status.Problem);
+            status.Statements.Should().NotBeEmpty("{0} read the catalog", code);
+        }
+
+        host.Logs.WarningsOrWorse.Should().BeEmpty("an expected state is never a warning");
+    }
+
+    /// <summary>
+    /// Acceptance 3: a hidden document type never appears - not in a finding, not in a status row's note, not in
+    /// the text of a statement Show SQL prints - although its table has an invalid index, a redundant one and an
+    /// unused one. Its visible twin, shaped the same way, is the proof the conditions are real.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_hidden_document_type_never_appears_though_its_table_has_everything_wrong_with_it()
+    {
+        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(
+            postgres,
+            "health_tables_hidden",
+            store: static o =>
+            {
+                o.Schema.For<HealthSecretThing>().Index(x => x.Name).Index(new System.Linq.Expressions.Expression<Func<HealthSecretThing, object>>[] { x => x.Name, x => x.Rank });
+                o.Schema.For<HealthIndexedThing>().Index(x => x.Name).Index(new System.Linq.Expressions.Expression<Func<HealthIndexedThing, object>>[] { x => x.Name, x => x.Rank });
+            },
+            studio: static o => o.IsDocumentTypeVisible = static type => type != typeof(HealthSecretThing));
+        await ApplyAsync(host.Store);
+
+        foreach (string table in new[] { TableOf<HealthSecretThing>(host.Store), TableOf<HealthIndexedThing>(host.Store) })
+        {
+            // A hundred thousand writes and distinct names - so the declared indexes are past T05's megabyte, which a
+            // b-tree's deduplication would never let one repeated name reach - then the two duplicates the failed
+            // unique build is about.
+            await InsertAsync(postgres, table, 110_000);
+            await InsertAsync(postgres, table, 2, "jsonb_build_object('Name', 'same')");
+
+            try
+            {
+                await ExecuteAsync(postgres, "create unique index concurrently " + (table.Contains("secret", StringComparison.Ordinal) ? "secret_unique" : "visible_unique")
+                    + " on " + table + " ((data ->> 'Name'))");
+            }
+            catch (PostgresException exception) when (exception.SqlState == "23505")
+            {
+                // Expected: the duplicate is the point, and the invalid index is what it leaves.
+            }
+
+            // ANALYZE refreshes the indexes' relpages, which is what T05 sizes them by: inserts alone do not.
+            await ExecuteAsync(postgres, "analyze " + table);
+        }
+
+        HealthReport report = await ReportAsync(host);
+
+        report.Findings.Should().Contain(static x => x.Code == "T03" && x.Finding.Subject!.Contains("healthindexedthing", StringComparison.Ordinal),
+            "the visible twin's invalid index is found, so the hidden one's absence means something");
+        report.Findings.Should().Contain(static x => x.Code == "T04" && x.Finding.Subject!.Contains("healthindexedthing", StringComparison.Ordinal));
+        report.Findings.Should().Contain(static x => x.Code == "T05" && x.Finding.Subject!.Contains("healthindexedthing", StringComparison.Ordinal),
+            "the visible twin's unscanned index on a table of 110,000 inserts is found too");
+
+        foreach (HealthReportFinding finding in report.Findings)
+        {
+            string text = finding.Finding.Title + " " + finding.Finding.WhyItMatters + " " + finding.Finding.Subject + " "
+                + string.Join(" ", finding.Evidence.Select(static x => x.Value));
+            text.Should().NotContainEquivalentOf("secret", "{0} names nothing a hidden type owns", finding.Code);
+            finding.Finding.DocumentTypes.Should().NotContain(typeof(HealthSecretThing));
+        }
+
+        foreach (HealthCheckStatus status in report.Checks.Where(static x => x.Code.StartsWith('T')))
+        {
+            (status.Note ?? string.Empty).Should().NotContainEquivalentOf("secret");
+            status.Statements.Should().OnlyContain(static x => !x.Sql.Contains("secret", StringComparison.OrdinalIgnoreCase),
+                "a hidden type's table name is never in a statement's text");
+        }
+    }
+}

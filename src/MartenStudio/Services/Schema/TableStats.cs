@@ -81,6 +81,40 @@ internal sealed record TableStats(
 
     /// <summary>Whether it is one of the event store's own tables.</summary>
     public bool IsEventTable => Ownership.Owner == DatabaseObjectOwner.MartenEventStore;
+
+    /// <summary><c>n_tup_upd</c> since the counters began, or <see langword="null" /> - and when withheld.</summary>
+    public long? Updates { get; init; }
+
+    /// <summary><c>n_tup_hot_upd</c> since the counters began, or <see langword="null" /> - and when withheld.</summary>
+    public long? HotUpdates { get; init; }
+
+    /// <summary><c>last_autovacuum</c> alone, where <see cref="LastVacuum" /> is the later of either kind.</summary>
+    public DateTimeOffset? LastAutovacuum { get; init; }
+
+    /// <summary>The TOAST table and its index, its partitions' TOAST pages included.</summary>
+    public long ToastBytes { get; init; }
+
+    /// <summary>
+    /// The table's storage parameters (<c>reloptions</c>), each beside what the configuration declares when this
+    /// Marten can declare them (F6).
+    /// </summary>
+    public IReadOnlyList<StorageParameterState> StorageParameters { get; init; } = [];
+
+    /// <summary>
+    /// Whether the declared storage parameters could be read - a document table of this store, on Marten 9.47+ -
+    /// so a parameter the table has and the configuration does not is known to be undeclared rather than unknown.
+    /// </summary>
+    public bool DeclaredParametersKnown { get; init; }
+
+    /// <summary>The share of dead rows among live and dead, or <see langword="null" /> when the collector has nothing.</summary>
+    public double? DeadShare => LiveRows is { } live && DeadRows is { } dead && live + dead > 0
+        ? (double) dead / (live + dead)
+        : null;
+
+    /// <summary>The share of updates since the counters began that were HOT, or <see langword="null" /> before the first.</summary>
+    public double? HotShare => Updates is { } updates && updates > 0 && HotUpdates is { } hot
+        ? (double) hot / updates
+        : null;
 }
 
 /// <summary>The Tables tab's answer for one database.</summary>

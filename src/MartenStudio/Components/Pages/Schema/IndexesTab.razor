@@ -1,7 +1,13 @@
+@using MartenStudio.Services.Health
 @using MartenStudio.Services.Schema
+@using Microsoft.Extensions.Logging
+@using Microsoft.Extensions.Options
 @implements IDisposable
 @inject ISchemaDataService SchemaData
 @inject StudioState State
+@inject IHealthService Health
+@inject IOptions<MartenStudioOptions> Options
+@inject ILogger<IndexesTab> Logger
 
 @*
     Both directions of the join: what Postgres has that the configuration does not ask for, and what the
@@ -26,6 +32,11 @@
     names a schema this visitor may not see - an expression index calling a function there - reads
     ‹withheld› in its place, as the database browser's object detail does. A registered store that cannot
     be read withholds the indexes of every table it could own, with a notice, rather than blanking the tab.
+
+    The invalid, redundant and unused marks (F6) are the health advisor's own findings T03, T04 and T05 from
+    its last sweep, read through the cache-only CachedFindingsAsync: the tab never starts a sweep, and with
+    nothing cached it draws no mark at all - an absent mark is never a claim that an index is fine. Each mark
+    links to its finding on the Health page.
 *@
 
 @if (!loading && indexes.ClassificationNotice is { Length: > 0 } notice)
@@ -52,7 +63,24 @@ else
         <span><strong>@indexes.NeverUsedCount</strong> never scanned</span>
         <span><strong>@indexes.Missing.Count</strong> declared but missing</span>
         <span><strong>@indexes.Unindexed.Count</strong> collections with only a primary key</span>
+        @if (MarkedCount("T03") is > 0 and var invalid)
+        {
+            <span class="ms-schema-health-count ms-schema-health-count-invalid"><strong>@invalid</strong> invalid</span>
+        }
+        @if (MarkedCount("T04") is > 0 and var redundant)
+        {
+            <span class="ms-schema-health-count"><strong>@redundant</strong> redundant</span>
+        }
     </div>
+
+    @if (HasMarks)
+    {
+        <p class="ms-schema-note ms-schema-health-note">
+            The invalid, redundant and unused marks are the health advisor's, from its last check
+            @(marksMeasuredAt is { } at ? "(" + State.FormatInSelectedTimeZone(at) + ")" : string.Empty); each links to
+            the finding, with what it is based on and what to change.
+        </p>
+    }
 
     @if (indexes.WouldBeDroppedCount > 0)
     {
@@ -196,6 +224,10 @@ else
                                 {
                                     <span class="ms-index-flag ms-index-flag-warn">never used</span>
                                 }
+                                @foreach (IndexHealthMark mark in MarksFor(index))
+                                {
+                                    <a class="@MarkClass(mark)" href="@mark.Link" title="@mark.Title" data-code="@mark.Code" @key="mark.Code">@mark.Label</a>
+                                }
                             </td>
                             <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(index.Bytes)</td>
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.Scans)</td>
@@ -221,6 +253,80 @@ else
     private SchemaIndexes indexes = SchemaIndexes.Empty;
     private bool loading = true;
 
+    private IReadOnlyDictionary<string, IReadOnlyList<IndexHealthMark>> marks =
+        new Dictionary<string, IReadOnlyList<IndexHealthMark>>();
+
+    private DateTimeOffset? marksMeasuredAt;
+
+    private IReadOnlyList<IndexHealthMark> MarksFor(IndexInfo index) =>
+        marks.TryGetValue(SchemaKey.For(index.Schema, index.Table, index.Name), out IReadOnlyList<IndexHealthMark>? found) ? found : [];
+
+    /// <summary>Whether any row on this tab carries a mark - a finding about no row here (a table's partitions) draws nothing.</summary>
+    private bool HasMarks
+    {
+        get
+        {
+            foreach (IndexInfo index in indexes.Indexes)
+            {
+                if (MarksFor(index).Count > 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    private int MarkedCount(string code)
+    {
+        int count = 0;
+        foreach (IndexInfo index in indexes.Indexes)
+        {
+            foreach (IndexHealthMark mark in MarksFor(index))
+            {
+                if (mark.Code == code)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static string MarkClass(IndexHealthMark mark) =>
+        "ms-index-flag ms-schema-health-mark " + (mark.Severity == HealthSeverity.Critical ? "ms-index-flag-danger" : "ms-index-flag-warn");
+
+    /// <summary>
+    /// The advisor's marks for this scope, from its last sweep only. A failure here is never the tab's: the marks
+    /// are a decoration, and the index list stands without them.
+    /// </summary>
+    private async Task LoadMarksAsync(StudioScope scope)
+    {
+        try
+        {
+            IReadOnlyList<HealthReportFinding> findings = await Health.CachedFindingsAsync(scope, SchemaHealthMarks.IndexCodes, lifetime.Token);
+
+            marks = SchemaHealthMarks.ForIndexes(findings, finding => HealthLinks.ToFinding(Options.Value, scope, finding));
+            marksMeasuredAt = findings.Count == 0 ? null : findings.Max(static x => x.Finding.MeasuredAt);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // Debug: the marks decorate the list, which stands without them; nothing the visitor asked for failed.
+            if (Logger.IsEnabled(LogLevel.Debug))
+            {
+                Logger.LogDebug(exception, "Marten Studio could not read the health advisor's cached findings for the Indexes tab");
+            }
+
+            marks = new Dictionary<string, IReadOnlyList<IndexHealthMark>>();
+            marksMeasuredAt = null;
+        }
+    }
+
     /// <summary>
     /// The headline of the drop warning, as one string.
     /// </summary>
@@ -245,6 +351,11 @@ else
             indexes = scope is null
                 ? SchemaIndexes.Empty
                 : await SchemaData.IndexesAsync(scope, lifetime.Token);
+
+            if (scope is not null && indexes.Reason is null)
+            {
+                await LoadMarksAsync(scope);
+            }
         }
         catch (OperationCanceledException)
         {
