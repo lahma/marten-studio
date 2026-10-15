@@ -55,6 +55,9 @@ internal static class WritePolicyRefusal
         nameof(StudioCapability.ApplySchemaChanges) => "Your account may not apply schema changes to this database as a whole.",
         nameof(StudioCapability.RunSql) => "Your account may not run SQL here.",
         nameof(StudioCapability.BrowseDatabase) => "Your account may not browse the database here.",
+        nameof(StudioCapability.ViewDatabaseActivity) => "Your account may not see this database's sessions, statements or other activity.",
+        nameof(StudioCapability.CompactStreams) => "Your account may not compact streams here.",
+        nameof(StudioCapability.RunLinqQueries) => "Your account may not run LINQ queries here.",
         _ => "Your account may not do this here.",
     };
 }

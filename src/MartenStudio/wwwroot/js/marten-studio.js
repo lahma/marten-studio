@@ -896,4 +896,26 @@
 
         return {};
     })();
+
+    // The health advisor's "mute in this browser" (H1): one JSON list of mute keys in localStorage, and
+    // nowhere else - not the cookie martenStudio.prefs falls back to, because a mute is nothing the server
+    // needs on every request. Every access is in a try: a private window or blocked storage answers as
+    // "nothing muted", and the page is correct either way.
+    window.martenStudio.health = window.martenStudio.health || {
+        getMuted: function () {
+            try {
+                return window.localStorage.getItem("ms_health_muted");
+            }
+            catch {
+                return null;
+            }
+        },
+        setMuted: function (json) {
+            try {
+                window.localStorage.setItem("ms_health_muted", typeof json === "string" ? json : "[]");
+            }
+            catch {
+            }
+        }
+    };
 })();

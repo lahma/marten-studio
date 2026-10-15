@@ -7,6 +7,7 @@ using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Health;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
 using MartenStudio.Services.Relationships;
@@ -183,6 +184,40 @@ public class CapabilityGatingMatrixTests
             "GetDefinitionAsync", "GetObjectAsync", "GetOverviewAsync", "GetSequenceValueAsync", "ListAsync",
         ],
         [typeof(ITableRowService)] = ["CountExactAsync", "GetCellAsync", "GetReferencesAsync", "GetRowAsync", "ListRowsAsync"],
+
+        // H1: the health advisor reads; ViewDatabaseActivity decides what of a report a visitor is shown, per
+        // finding and per piece of evidence, and refuses nothing - see Reserved.
+        [typeof(IHealthService)] = ["CachedFindingsAsync", "GetReportAsync", "GlanceAsync"],
+    };
+
+    /// <summary>
+    /// Capabilities that exist ahead of the service member that will be gated on them, and why.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 0.4 lands every public-surface addition in one packet (H1), so that later packets never contend for the
+    /// API baseline - which means three capabilities exist before the reads and writes that need them do.
+    /// "A capability no method requires is a capability nothing enforces" is still the rule; this list is
+    /// where the exception is written down, naming the packet that ends it.
+    /// <see cref="A_reserved_capability_is_required_by_nothing_yet" /> fails the moment a service starts to
+    /// <c>Require</c> one, so its packet has to move it into <see cref="Mutating" /> or <see cref="GatedReads" />
+    /// and give it the three refusals.
+    /// </para>
+    /// <para>
+    /// <c>ViewDatabaseActivity</c> is consumed already, but as a redaction rather than a refusal: the health
+    /// report is a read that names nothing behind the gate unless the visitor passes it.
+    /// <c>HealthGateTests</c> prove its three refusals (capability off, <c>ReadOnly</c>, write policy) and that
+    /// the policy is asked with <c>TenantId = null</c>.
+    /// </para>
+    /// </remarks>
+    private static readonly Dictionary<StudioCapability, string> Reserved = new()
+    {
+        [StudioCapability.ViewDatabaseActivity] =
+            "H1's HealthService asks it per finding and per piece of evidence; H3's Database > Sessions reads will refuse on it and move it to GatedReads.",
+        [StudioCapability.CompactStreams] =
+            "F3 (stream compaction) adds the compacting write to the events service and moves it to Mutating.",
+        [StudioCapability.RunLinqQueries] =
+            "F7 (LINQ mode on the Query page) adds the LINQ read and moves it to GatedReads or Mutating.",
     };
 
     /// <summary>
@@ -270,10 +305,47 @@ public class CapabilityGatingMatrixTests
     [Fact]
     public void The_roster_covers_every_capability()
     {
-        Mutating.Concat(GatedReads).Select(static x => x.Capability).Distinct().Order().Should().Equal(
+        Mutating.Concat(GatedReads).Select(static x => x.Capability).Concat(Reserved.Keys).Distinct().Order().Should().Equal(
             Enum.GetValues<StudioCapability>().Order(),
             "a capability no method requires is a capability nothing enforces, and one this roster has "
             + "forgotten is a set of methods nothing here tests");
+    }
+
+    /// <summary>
+    /// A visitor the write policy refuses is told so in a sentence about that capability, not the catch-all -
+    /// the three 0.4 added included, before their screens exist.
+    /// </summary>
+    [Fact]
+    public void Every_capability_has_a_refusal_sentence_of_its_own()
+    {
+        string fallback = WritePolicyRefusal.For("NoSuchCapability");
+
+        foreach (StudioCapability capability in Enum.GetValues<StudioCapability>())
+        {
+            WritePolicyRefusal.For(capability).Should().NotBe(fallback, "{0} has a sentence of its own", capability);
+        }
+
+        Enum.GetValues<StudioCapability>().Select(static x => WritePolicyRefusal.For(x)).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public void A_reserved_capability_is_required_by_nothing_yet()
+    {
+        Mutating.Concat(GatedReads).Select(static x => x.Capability).Should().NotIntersectWith(
+            Reserved.Keys, "a capability something gates on is in the roster, not reserved");
+
+        foreach ((StudioCapability capability, string why) in Reserved)
+        {
+            why.Length.Should().BeGreaterThan(20, "a reason, naming the packet that ends it, for {0}", capability);
+
+            string required = "Require(StudioCapability." + capability + ")";
+
+            SourceScanner.ShippedSourceFiles()
+                .Where(file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains(required, StringComparison.Ordinal))
+                .Should().BeEmpty(
+                    "{0} is reserved; a service that requires it now gates on it, so move it to Mutating or GatedReads and assert its refusals",
+                    capability);
+        }
     }
 
     [Fact]

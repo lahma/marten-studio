@@ -14,13 +14,16 @@ namespace MartenStudio
         public bool ApplySchemaChanges { get; set; }
         public bool ArchiveStreams { get; set; }
         public bool BrowseDatabase { get; set; }
+        public bool CompactStreams { get; set; }
         public bool ControlDaemon { get; set; }
         public bool CorrectProgression { get; set; }
         public bool DeleteDocuments { get; set; }
         public bool EditDocuments { get; set; }
         public bool ManageDeadLetters { get; set; }
         public bool RebuildProjections { get; set; }
+        public bool RunLinqQueries { get; set; }
         public bool RunSql { get; set; }
+        public bool ViewDatabaseActivity { get; set; }
         public static MartenStudio.MartenStudioCapabilities All() { }
     }
     public static class MartenStudioEndpointRouteBuilderExtensions
@@ -37,6 +40,7 @@ namespace MartenStudio
         public int DefaultPageSize { get; set; }
         public bool DiscoverTenantIds { get; set; }
         public long ExactCountThreshold { get; set; }
+        public System.TimeSpan HealthInterval { get; set; }
         public bool IncludeAncillaryStores { get; set; }
         public System.Func<System.Type, bool>? IsDocumentTypeVisible { get; set; }
         public System.Collections.Generic.IList<string> KnownTenantIds { get; }

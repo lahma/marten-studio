@@ -137,6 +137,32 @@ public sealed class MartenStudioOptions
     public TimeSpan RefreshInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// How often the health advisor re-checks a database while somebody has its Health page or the
+    /// Overview open. Between fifteen seconds and one hour; a <see cref="RefreshInterval"/> longer than it
+    /// wins, so the advisor never checks more often than the pages poll.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is the operators' setting for what the advisor costs the database it watches. Nothing is checked
+    /// while no page is open: a check runs when a page asks, and every open page and every circuit shares
+    /// the one result for a database until this much time has passed, so ten open tabs cost one check per
+    /// interval rather than ten. The default is a minute, because several of the checks read
+    /// <c>pg_locks</c> and <c>pg_stat_activity</c>, which scan the server's lock table and process array.
+    /// </para>
+    /// <para>
+    /// The deeper checks behind "Run deeper checks" are cached for five minutes whatever this says.
+    /// </para>
+    /// </remarks>
+    public TimeSpan HealthInterval { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// The cadence the advisor really runs at: <see cref="HealthInterval"/>, or <see cref="RefreshInterval"/>
+    /// when that is longer. A clamp rather than a startup error, so a host that already polls slowly is not
+    /// refused a start by an option it never set.
+    /// </summary>
+    internal TimeSpan EffectiveHealthInterval => HealthInterval >= RefreshInterval ? HealthInterval : RefreshInterval;
+
+    /// <summary>
     /// The per-shard replay timeout handed to Marten's rebuild. At least one minute.
     /// </summary>
     /// <remarks>

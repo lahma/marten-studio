@@ -70,11 +70,21 @@ internal sealed class ConfigurationService : IConfigurationService
             databases,
             notice);
 
+        MartenRuntime runtime = MartenRuntime.Current;
+
         return new StudioConfiguration(
             store,
             ConfigurationDescriber.DescribeEvents(storeOptions.Events),
             ConfigurationDescriber.DescribeDocumentTypes(storeOptions, options.Value.IsDocumentTypeVisible),
-            postgresVersion);
+            postgresVersion)
+        {
+            Runtime = runtime.Components,
+            Features =
+            [
+                .. RuntimeFeature.All.Select(feature => new RuntimeFeatureStatus(
+                    feature.Name, feature.Requirement, feature.IsAvailable(runtime), feature.Summary)),
+            ],
+        };
     }
 
     /// <summary>

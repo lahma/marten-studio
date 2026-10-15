@@ -170,6 +170,45 @@ public class ConfigurationPageTests
             "customer foreign keys table");
     }
 
+    /// <summary>
+    /// F1 on the page: the packages this process loaded, by version, and what the studio can light up on them -
+    /// read from the assemblies, never from a project file.
+    /// </summary>
+    [Fact]
+    public void The_runtime_card_lists_the_resolved_versions_and_the_light_up_features()
+    {
+        using var context = NewContext(out FakeConfigurationService configuration);
+        configuration.Configuration = configuration.Configuration with
+        {
+            Runtime =
+            [
+                new RuntimeComponent(RuntimePackage.Marten, "Marten", new Version(9, 31, 0), "9.31.0+abc"),
+                new RuntimeComponent(RuntimePackage.Npgsql, "Npgsql", null, null),
+            ],
+            Features = [new RuntimeFeatureStatus("DocumentFillFactor", "Marten 9.47+", false, "A document table's fill factor.")],
+        };
+
+        var page = context.Render<ConfigurationPage>();
+
+        CardHeader(page, "Runtime").Should().NotBeNull();
+        page.Markup.Should().Contain("9.31.0").And.Contain("AssemblyInformationalVersion 9.31.0+abc");
+        page.Markup.Should().Contain("no informational version on the assembly");
+        page.TextOfAll(".ms-config-runtime tbody td").Should().Equal(
+            "DocumentFillFactor", "Marten 9.47+", "not available", "A document table's fill factor.");
+        page.FindAll(".ms-config-runtime [role=region]").Single().GetAttribute("aria-label").Should().Be("Runtime features table");
+    }
+
+    /// <summary>The real service fills the card from this process's own assemblies.</summary>
+    [Fact]
+    public void The_process_runtime_reads_Marten_and_every_package_it_brought()
+    {
+        MartenRuntime runtime = MartenRuntime.Current;
+
+        runtime.Components.Select(static x => x.Package).Should().Equal(Enum.GetValues<RuntimePackage>());
+        runtime.Components.Should().OnlyContain(static x => x.Version != null, "every package the studio ships against stamps an informational version");
+        runtime.VersionOf(RuntimePackage.Marten).Should().BeGreaterThanOrEqualTo(new Version(9, 31, 0), "the floor");
+    }
+
     private static AngleSharp.Dom.IElement CardHeader(IRenderedComponent<ConfigurationPage> page, string title)
     {
         foreach (var header in page.FindAll(".ms-config-card-header"))

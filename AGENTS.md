@@ -809,6 +809,16 @@ src/MartenStudio/Components/Pages/Database/  The database browser's screens: the
 tests/MartenStudio.Tests/Database/        Gate, matcher, classifier, catalog SQL shape, options - no database
 tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, the gate and its audit, no DDL,
                                          and the relational demo schemas' idempotency and demo-data flows
+src/MartenStudio/Services/Health/         The health advisor: check model and registry, sweeper, sweep cache,
+                                         history, per-visitor report and gates, mutes and toasts
+src/MartenStudio/Services/Health/Checks/  One file per health check (attribute, gatherer, pure evaluator); a
+                                         check is added by adding its file here, nothing else
+src/MartenStudio/Components/Pages/Health/ The Health page and its presentation helpers
+tests/MartenStudio.Tests/Health/          Evaluators, sweeper, cache, history, gates, page, badge, toast, the
+                                         check and docs conventions - no database
+tests/MartenStudio.Integration.Tests/Health/  Live Postgres: each check fires and stays quiet, the no-DDL /
+                                         no-lock sweep helper, and the fires/quiet attribute convention
+docs/health/                             One file per health area, one "## <code> <title>" anchor per check
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

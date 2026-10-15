@@ -1,4 +1,5 @@
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Health;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.Logging;
@@ -39,6 +40,15 @@ internal sealed record NavIndicators(
 
     /// <summary>Whether the dead-letter entry carries a count.</summary>
     public bool ShowDeadLetterCount => DeadLetters is > 0;
+
+    /// <summary>
+    /// What the last health sweep of this database said, for this visitor and unmuted, or
+    /// <see langword="null" /> when no recent sweep exists. Read from the sweep cache, never by sweeping.
+    /// </summary>
+    public HealthGlance? Health { get; init; }
+
+    /// <summary>Whether the Health entry carries a count.</summary>
+    public bool ShowHealthBadge => Health?.Worst is not null;
 }
 
 /// <summary>
@@ -103,6 +113,13 @@ internal interface INavIndicatorService
 /// Nothing here throws. A badge that could break the sidebar would be a decoration that takes navigation
 /// down with it, and the studio's answer to an unreadable region is always a value (plan §4.8).
 /// </para>
+/// <para>
+/// <b>The health badge costs no query.</b> It is <see cref="IHealthService.GlanceAsync" />: the last sweep a
+/// Health page or the Overview ran for this database, read from the sweep cache and shown through this
+/// visitor's gates - policy questions, no connection, and never a sweep of its own. With no recent sweep the
+/// entry carries no badge. It is read outside the snapshot cache, because what a visitor is shown of a sweep
+/// is that visitor's.
+/// </para>
 /// </remarks>
 internal sealed class NavIndicatorService : INavIndicatorService
 {
@@ -112,14 +129,20 @@ internal sealed class NavIndicatorService : INavIndicatorService
     private readonly IProjectionDataService projections;
     private readonly StudioSnapshotCache cache;
     private readonly ILogger<NavIndicatorService> logger;
+    private readonly IHealthService? health;
 
+    /// <remarks>
+    /// <paramref name="health" /> is optional so that a test of the dead-letter and projection badges can
+    /// build this by hand; the container always supplies one.
+    /// </remarks>
     public NavIndicatorService(
         StudioState state,
         StudioAuthorization authorization,
         IEventDataService events,
         IProjectionDataService projections,
         StudioSnapshotCache cache,
-        ILogger<NavIndicatorService> logger)
+        ILogger<NavIndicatorService> logger,
+        IHealthService? health = null)
     {
         this.state = state;
         this.authorization = authorization;
@@ -127,6 +150,7 @@ internal sealed class NavIndicatorService : INavIndicatorService
         this.projections = projections;
         this.cache = cache;
         this.logger = logger;
+        this.health = health;
     }
 
     /// <inheritdoc />
@@ -147,9 +171,13 @@ internal sealed class NavIndicatorService : INavIndicatorService
                 return NavIndicators.None;
             }
 
-            return await cache
+            NavIndicators indicators = await cache
                 .GetAsync(CacheKey(scope), token => ReadUncachedAsync(scope, token), cancellationToken)
                 .ConfigureAwait(false);
+
+            return health is null
+                ? indicators
+                : indicators with { Health = await GlanceAsync(health, scope, cancellationToken).ConfigureAwait(false) };
         }
         catch (OperationCanceledException)
         {
@@ -159,6 +187,20 @@ internal sealed class NavIndicatorService : INavIndicatorService
         {
             logger.LogDebug(exception, "Marten Studio could not read the navigation indicators");
             return NavIndicators.None;
+        }
+    }
+
+    /// <summary>The health glance, or nothing when it could not be read - a decoration, never a failure.</summary>
+    private async Task<HealthGlance?> GlanceAsync(IHealthService service, StudioScope scope, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await service.GlanceAsync(scope, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogDebug(exception, "Marten Studio could not read the health badge");
+            return null;
         }
     }
 

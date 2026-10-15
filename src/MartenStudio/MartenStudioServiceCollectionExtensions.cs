@@ -7,6 +7,7 @@ using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Health;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
@@ -87,6 +88,9 @@ public static partial class MartenStudioServiceCollectionExtensions
             .Validate(
                 static options => options.RefreshInterval >= TimeSpan.FromSeconds(1) && options.RefreshInterval <= TimeSpan.FromMinutes(5),
                 "MartenStudioOptions.RefreshInterval must be between one second and five minutes")
+            .Validate(
+                static options => options.HealthInterval >= TimeSpan.FromSeconds(15) && options.HealthInterval <= TimeSpan.FromHours(1),
+                "MartenStudioOptions.HealthInterval must be between fifteen seconds and one hour: several health checks scan the server's lock table and process array, and a page polls them no faster than this")
             .Validate(
                 static options => options.RebuildShardTimeout >= TimeSpan.FromMinutes(1),
                 "MartenStudioOptions.RebuildShardTimeout must be at least one minute: it is the per-shard replay budget, and a rebuild that exceeds it stops with the projection's tables already emptied")
@@ -198,6 +202,19 @@ public static partial class MartenStudioServiceCollectionExtensions
         // DB-5: the Rows tab's per-circuit memory - "Run anyway" answers, keyset history and the page a row
         // was opened from. Scoped, like DocumentBrowserState, so it is one browser tab's and nobody else's.
         services.TryAddScoped<DatabaseBrowserState>();
+
+        // H1: the health advisor. The checks, their history and the one sweep per database per interval are
+        // process-wide singletons - a sweep's facts are about the database and the same for every circuit -
+        // and none of them runs anything on its own: no hosted service, no timer. A sweep happens when the
+        // Health page or the Overview asks. What a visitor is shown, what they muted and which Critical they
+        // have already been toasted about are that circuit's, so scoped.
+        services.TryAddSingleton<HealthCheckRegistry>();
+        services.TryAddSingleton<HealthHistory>();
+        services.TryAddSingleton<HealthSweeper>();
+        services.TryAddSingleton<HealthSweepCache>();
+        services.TryAddScoped<HealthMutes>();
+        services.TryAddScoped<HealthAlerts>();
+        services.TryAddScoped<IHealthService, HealthService>();
 
         return services;
     }

@@ -163,6 +163,17 @@ internal static partial class StudioLog
     public static partial void TenantPolicyFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
 
     /// <remarks>
+    /// A health check failed for a reason nobody chose: an unexpected SQLSTATE, a connection the database
+    /// refused, a bug in a check. The Health page and the Overview re-check at <c>HealthInterval</c> while
+    /// they are open, so the same failure comes round again; the throttle key is the check's code (or the
+    /// connection, which is one failure however many checks it stops), the store, the database and the kind
+    /// of failure. Expected states - a missing extension, a privilege the role lacks, a statement that ran out
+    /// of its timeout - are rows the page draws and Debug lines, and never come here.
+    /// </remarks>
+    [LoggerMessage(EventId = 9222, Message = "Marten Studio's health check {Code} could not check store {StoreKey}, database {DatabaseId}")]
+    public static partial void HealthCheckFailed(this ILogger logger, LogLevel level, Exception exception, string code, string storeKey, string databaseId);
+
+    /// <remarks>
     /// <para>
     /// Warning, once per host start, from <c>DatabaseBrowserConfigurationNotice</c>. <c>"*"</c> in
     /// <c>BrowsableSchemas</c> is a legitimate development setting, and it is also the one line that makes

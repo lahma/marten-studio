@@ -9716,3 +9716,293 @@ a.ms-row-ref-key:hover {
 .ms-db-still-shown {
     font-size: var(--ms-font-size-sm);
 }
+
+/* ==========================================================================
+   HEALTH-1. The health advisor
+
+   0.4's first section, appended after UX-7 on purpose (D26). Every rule is
+   new and prefixed ms-health- (or scoped under .ms-overview-health); none
+   re-declares a selector an earlier section owns, so nothing above changes.
+   The severity colours are the design tokens' danger / warning / info, the
+   same three the stat cards and the navigation badges use.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The page: the header's two buttons, the lead, and the summary lines
+   -------------------------------------------------------------------------- */
+
+.ms-health-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-health-lead {
+    max-width: 72ch;
+    margin: 0 0 var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-health-summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-health-summary-line {
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-health-cost,
+.ms-health-deeper-note {
+    color: var(--ms-color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   One finding
+
+   A card with a severity rail on its leading edge: the colour says how much it
+   matters before a word is read, and the chip repeats it in words, because a
+   colour alone says nothing to a screen reader or to somebody who cannot tell
+   amber from red.
+   -------------------------------------------------------------------------- */
+
+.ms-health-area {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+}
+
+.ms-health-finding {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left: 4px solid var(--ms-color-info);
+    border-radius: var(--ms-radius-lg);
+    background: var(--ms-color-surface);
+}
+
+.ms-health-finding-critical {
+    border-left-color: var(--ms-color-danger);
+}
+
+.ms-health-finding-warning {
+    border-left-color: var(--ms-color-warning);
+}
+
+.ms-health-finding-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+}
+
+.ms-health-finding-title {
+    flex: 1 1 20rem;
+    min-width: 0;
+    margin: 0;
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+    overflow-wrap: anywhere;
+}
+
+.ms-health-code {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-health-severity {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 var(--ms-space-sm);
+    border-radius: var(--ms-radius-full);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-semibold);
+    line-height: 1.5rem;
+    white-space: nowrap;
+}
+
+.ms-health-severity-critical {
+    background: var(--ms-color-danger-bg);
+    color: var(--ms-color-danger);
+}
+
+.ms-health-severity-warning {
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-text);
+}
+
+.ms-health-severity-info {
+    background: var(--ms-color-info-bg);
+    color: var(--ms-color-info);
+}
+
+.ms-health-why,
+.ms-health-caveat,
+.ms-health-measured,
+.ms-health-remedy-explanation {
+    margin: 0;
+    max-width: 80ch;
+}
+
+.ms-health-measured,
+.ms-health-caveat {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+/* Evidence: label and value, two columns that become one on a phone. A value
+   is often a setting name or a number, and a long one wraps rather than
+   pushing the card past the content column (D25 - there is no scroll region
+   here because there is no table). */
+.ms-health-evidence {
+    display: grid;
+    grid-template-columns: minmax(10rem, max-content) minmax(0, 1fr);
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0;
+}
+
+.ms-health-evidence-row {
+    display: contents;
+}
+
+.ms-health-evidence dt {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-health-evidence dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   The remedy: a StoreOptions line to copy, never DDL
+   -------------------------------------------------------------------------- */
+
+.ms-health-remedy {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-health-remedy-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-health-remedy-title {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-health-requirement {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-health-requirement-missing {
+    color: var(--ms-color-warning);
+}
+
+.ms-health-remedy-code {
+    margin: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.ms-health-finding-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+/* --------------------------------------------------------------------------
+   Muted findings, and the status table
+   -------------------------------------------------------------------------- */
+
+.ms-health-muted {
+    margin: var(--ms-space-md) 0;
+}
+
+.ms-health-muted > summary {
+    cursor: pointer;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-health-muted > .ms-health-finding {
+    margin-top: var(--ms-space-sm);
+    opacity: 0.8;
+}
+
+.ms-health-outcome {
+    display: block;
+}
+
+.ms-health-outcome-detail {
+    display: block;
+    max-width: 60ch;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-health-check-failed .ms-health-outcome {
+    color: var(--ms-color-danger);
+}
+
+/* --------------------------------------------------------------------------
+   The Overview's Health list
+   -------------------------------------------------------------------------- */
+
+.ms-overview-health-list .ms-health-severity {
+    flex: 0 0 auto;
+}
+
+@media (max-width: 640px) {
+    .ms-health-evidence {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ms-health-evidence dd {
+        margin-bottom: var(--ms-space-xs);
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Seven Overview tiles on one desktop row
+
+   The Health tile is the Overview's seventh. Seven 160 px tracks and six gaps
+   are 1 216 px, which orphaned the seventh tile under the other six in a
+   1 200 px content column - the failure the 0.2.0 pass measured with six. A
+   140 px track holds all seven from about 1 080 px of content. Above the
+   1 024 px breakpoint only, so the two-column layout below it stays the
+   .ms-stat-grid rule's (D26: this wins by source order where it applies).
+   -------------------------------------------------------------------------- */
+
+@media (min-width: 1025px) {
+    .ms-overview-tiles {
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
+}
+
+/* --------------------------------------------------------------------------
+   A finding's link to the studio screen that helps with it
+   -------------------------------------------------------------------------- */
+
+.ms-health-link {
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+}

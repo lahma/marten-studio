@@ -103,6 +103,13 @@ internal class StudioComponentContext : BunitContext
         // Every live page builds its own loop from this, so the circuit's container never tracks one.
         Services.AddScoped<StudioLiveUpdatesFactory>();
 
+        // H1: the Overview's Health region, the Health page and the sidebar's badge all read through this;
+        // the mutes and the toast memory are the real ones, because they are per circuit and cheap.
+        Health = new MartenStudio.Tests.Health.FakeHealthService();
+        Services.AddSingleton<MartenStudio.Services.Health.IHealthService>(Health);
+        Services.AddSingleton<MartenStudio.Services.Health.HealthMutes>();
+        Services.AddSingleton<MartenStudio.Services.Health.HealthAlerts>();
+
         Services.AddSingleton<IAuthorizationService>(AuthorizationService);
         Services.AddSingleton<AuthenticationStateProvider>(AuthenticationState);
         Services.AddSingleton<StudioAuthorization>();
@@ -162,6 +169,9 @@ internal class StudioComponentContext : BunitContext
 
     /// <summary>What the sidebar's badges are told.</summary>
     public FakeNavIndicatorService NavBadges { get; }
+
+    /// <summary>What the Health page, the Overview's Health region and the badge are told (H1).</summary>
+    public MartenStudio.Tests.Health.FakeHealthService Health { get; }
 
     /// <summary>What document detail's "referenced by" panel and the relationships screen are given.</summary>
     public FakeRelationshipDataService RelationshipData { get; }

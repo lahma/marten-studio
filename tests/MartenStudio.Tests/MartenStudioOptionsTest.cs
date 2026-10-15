@@ -44,6 +44,7 @@ public class MartenStudioOptionsTest
         options.SqlConsoleRole.Should().BeNull();
         options.ExactCountThreshold.Should().Be(100_000);
         options.RefreshInterval.Should().Be(TimeSpan.FromSeconds(5));
+        options.HealthInterval.Should().Be(TimeSpan.FromSeconds(60));
         options.RebuildShardTimeout.Should().Be(TimeSpan.FromHours(1));
         options.IsDocumentTypeVisible.Should().BeNull();
         options.IncludeAncillaryStores.Should().BeTrue();
@@ -51,8 +52,11 @@ public class MartenStudioOptionsTest
         options.BrowsableSchemas.Should().BeEmpty();
         options.DiscoverTenantIds.Should().BeTrue();
 
-        // D4: every capability is off until the host says otherwise.
-        StudioCapabilityGuard.All.Should().HaveCount(10);
+        // D4: every capability is off until the host says otherwise - the three 0.4 added included.
+        StudioCapabilityGuard.All.Should().HaveCount(13);
+        options.Capabilities.ViewDatabaseActivity.Should().BeFalse();
+        options.Capabilities.CompactStreams.Should().BeFalse();
+        options.Capabilities.RunLinqQueries.Should().BeFalse();
         foreach (var capability in StudioCapabilityGuard.All)
         {
             new StudioCapabilityGuard(Options.Create(options)).IsEnabled(capability).Should().BeFalse();
@@ -184,6 +188,41 @@ public class MartenStudioOptionsTest
     {
         ResolveAction(options => options.RefreshInterval = TimeSpan.FromMilliseconds(milliseconds))
             .Should().Throw<OptionsValidationException>().WithMessage("*RefreshInterval*");
+    }
+
+    /// <summary>
+    /// H1: the advisor's cadence is bounded like RefreshInterval is - fifteen seconds to an hour - because several
+    /// checks scan the lock table and the process array.
+    /// </summary>
+    [Theory]
+    [InlineData(14_999)]
+    [InlineData(3_600_001)]
+    [InlineData(0)]
+    public void A_health_interval_outside_fifteen_seconds_to_an_hour_is_refused(int milliseconds)
+    {
+        ResolveAction(options => options.HealthInterval = TimeSpan.FromMilliseconds(milliseconds))
+            .Should().Throw<OptionsValidationException>().WithMessage("*HealthInterval*");
+    }
+
+    /// <summary>
+    /// "Never shorter than RefreshInterval" is a clamp, not a startup error: a host that already polls every two
+    /// minutes must not be refused a start by an option it never set.
+    /// </summary>
+    [Theory]
+    [InlineData(15_000, 5_000, 15_000)]
+    [InlineData(3_600_000, 300_000, 3_600_000)]
+    [InlineData(20_000, 120_000, 120_000)]
+    [InlineData(60_000, 60_000, 60_000)]
+    public void The_advisor_never_runs_faster_than_the_pages_poll(int healthMilliseconds, int refreshMilliseconds, int effectiveMilliseconds)
+    {
+        MartenStudioOptions options = Resolve(options =>
+        {
+            options.HealthInterval = TimeSpan.FromMilliseconds(healthMilliseconds);
+            options.RefreshInterval = TimeSpan.FromMilliseconds(refreshMilliseconds);
+        });
+
+        options.HealthInterval.Should().Be(TimeSpan.FromMilliseconds(healthMilliseconds));
+        options.EffectiveHealthInterval.Should().Be(TimeSpan.FromMilliseconds(effectiveMilliseconds));
     }
 
     [Fact]

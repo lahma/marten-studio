@@ -86,4 +86,18 @@ internal sealed record StudioConfiguration(
     StoreConfiguration Store,
     EventStoreConfiguration Events,
     IReadOnlyList<DocumentTypeConfiguration> DocumentTypes,
-    string? PostgresVersion);
+    string? PostgresVersion)
+{
+    /// <summary>The packages this process resolved, Marten first (F1).</summary>
+    public IReadOnlyList<RuntimeComponent> Runtime { get; init; } = [];
+
+    /// <summary>What the newer-than-floor features the studio can light up say on this host.</summary>
+    public IReadOnlyList<RuntimeFeatureStatus> Features { get; init; } = [];
+}
+
+/// <summary>One light-up feature, as the Configuration page lists it.</summary>
+/// <param name="Name">The feature's name.</param>
+/// <param name="Requirement">"Marten 9.47+".</param>
+/// <param name="Available">Whether this host has it - the probe's answer.</param>
+/// <param name="Summary">What it lets the studio do.</param>
+internal sealed record RuntimeFeatureStatus(string Name, string Requirement, bool Available, string Summary);

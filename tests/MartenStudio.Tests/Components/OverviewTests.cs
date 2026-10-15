@@ -191,7 +191,8 @@ public class OverviewTests
 
         List<string> hrefs = [.. page.FindAll(".ms-overview-tiles a").Select(x => x.GetAttribute("href") ?? string.Empty)];
 
-        hrefs.Should().HaveCount(6);
+        hrefs.Should().HaveCount(7);
+        hrefs.Should().Contain(x => x.StartsWith("health?", StringComparison.Ordinal), "the Health tile opens the Health page");
         hrefs.Should().Contain(x => x.StartsWith("events/streams?", StringComparison.Ordinal));
         hrefs.Should().Contain(x => x.StartsWith("events/feed?", StringComparison.Ordinal));
         hrefs.Should().Contain(x => x.StartsWith("events/dead-letters?", StringComparison.Ordinal));

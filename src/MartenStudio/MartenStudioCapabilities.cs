@@ -2,8 +2,10 @@ namespace MartenStudio;
 
 /// <summary>
 /// The operations Marten Studio is allowed to perform beyond browsing the store: the mutating ones, and
-/// the two reads that reach past the store's own documents and events (<see cref="RunSql"/> and
-/// <see cref="BrowseDatabase"/>). Every property defaults to <see langword="false"/>: a freshly mapped
+/// the reads that are authorized like writes - the two that reach past the store's own documents and
+/// events (<see cref="RunSql"/> and <see cref="BrowseDatabase"/>), the one that names other sessions
+/// (<see cref="ViewDatabaseActivity"/>) and the one that evaluates a typed expression
+/// (<see cref="RunLinqQueries"/>). Every property defaults to <see langword="false"/>: a freshly mapped
 /// studio is a read-only browser of the store until the host enables what it needs, one switch at a
 /// time, or calls <see cref="All"/>. <see cref="MartenStudioOptions.ReadOnly"/> overrides every property
 /// here.
@@ -52,6 +54,36 @@ public sealed class MartenStudioCapabilities
     /// </summary>
     public bool BrowseDatabase { get; set; }
 
+    /// <summary>
+    /// See who and what is using the store's database: the process ids, roles, client addresses and
+    /// application names of other sessions, the text of the statements they are running or have run, and
+    /// the tenants a database-wide finding names. It is for the people who operate the database rather
+    /// than the people who browse its data, and what it reveals is other applications' as much as this
+    /// one's - statement text carries literal values and other schemas' names. Without it the health
+    /// advisor still shows counts and ages, never those details. Like <see cref="BrowseDatabase"/> it is a
+    /// read authorized as a write: <see cref="MartenStudioOptions.WriteAuthorizationPolicy"/> is asked,
+    /// against the database as a whole with no tenant, and <see cref="MartenStudioOptions.ReadOnly"/> turns
+    /// it off with everything else.
+    /// </summary>
+    public bool ViewDatabaseActivity { get; set; }
+
+    /// <summary>
+    /// Compact event streams: replace a long stream's history with a snapshot of its aggregate, through
+    /// Marten's own <c>CompactStreamAsync</c>. It is for the people who own the event store, and it changes
+    /// what a stream's events are - the compacted events are gone from the stream, and a projection
+    /// rebuilt afterwards sees only what compaction left.
+    /// </summary>
+    public bool CompactStreams { get; set; }
+
+    /// <summary>
+    /// Run LINQ queries from the Query page: a typed predicate over a document type, parsed in this process
+    /// and handed to Marten's own <c>Query&lt;T&gt;()</c>, so tenancy and soft deletes stay Marten's. It
+    /// changes nothing, but it evaluates an expression somebody typed inside the host application, so it
+    /// is for people trusted with the store's data; like <see cref="RunSql"/>, it is a read authorized as a
+    /// write, and <see cref="MartenStudioOptions.ReadOnly"/> turns it off with everything else.
+    /// </summary>
+    public bool RunLinqQueries { get; set; }
+
     /// <summary>Every capability enabled. Still subject to <see cref="MartenStudioOptions.ReadOnly"/>.</summary>
     public static MartenStudioCapabilities All() => new()
     {
@@ -65,5 +97,8 @@ public sealed class MartenStudioCapabilities
         ApplySchemaChanges = true,
         RunSql = true,
         BrowseDatabase = true,
+        ViewDatabaseActivity = true,
+        CompactStreams = true,
+        RunLinqQueries = true,
     };
 }

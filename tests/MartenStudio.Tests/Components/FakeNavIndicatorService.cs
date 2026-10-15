@@ -28,6 +28,9 @@ internal sealed class FakeNavIndicatorService : INavIndicatorService
     /// <summary>What <see cref="ReadAsync" /> throws, when a test is about a sidebar that must not break.</summary>
     public Exception? Failure { get; set; }
 
+    /// <summary>The health glance the badge is told about (H1), or <see langword="null" /> for none.</summary>
+    public MartenStudio.Services.Health.HealthGlance? Health { get; set; }
+
     public Task<NavIndicators> ReadAsync(CancellationToken cancellationToken = default)
     {
         Reads++;
@@ -40,6 +43,9 @@ internal sealed class FakeNavIndicatorService : INavIndicatorService
         return Task.FromResult(new NavIndicators(
             DeadLetters,
             ProjectionsNeedAttention,
-            ProjectionsNeedAttention ? ProjectionsExplanation : null));
+            ProjectionsNeedAttention ? ProjectionsExplanation : null)
+        {
+            Health = Health,
+        });
     }
 }

@@ -81,6 +81,12 @@ internal sealed record ReadOnlySqlOptions
 
     /// <summary>The cell caps.</summary>
     public SqlValueFormatterOptions? Formatting { get; init; }
+
+    /// <summary>
+    /// Where the session's wall time is counted for the health advisor's "studio cost" line, or
+    /// <see langword="null" /> for the process's own <see cref="StudioDatabaseTime.Shared" />.
+    /// </summary>
+    public StudioDatabaseTime? Meter { get; init; }
 }
 
 /// <summary>
@@ -229,6 +235,10 @@ internal sealed class ReadOnlySqlSession
             throw new InvalidOperationException($"'{options.Role}' is not a valid Postgres role name.");
         }
 
+        // The studio's own database time, for the health advisor's "studio cost" line: begin to rollback,
+        // whatever happened in between.
+        long started = Stopwatch.GetTimestamp();
+
         var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
 
         try
@@ -253,9 +263,12 @@ internal sealed class ReadOnlySqlSession
         {
             // Always, and with its own token: a rollback that is skipped because the caller cancelled is a
             // transaction left open on a pooled connection.
+            bool rolledBack = false;
+
             try
             {
                 await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                rolledBack = true;
             }
             catch (NpgsqlException)
             {
@@ -267,6 +280,8 @@ internal sealed class ReadOnlySqlSession
             }
 
             await transaction.DisposeAsync().ConfigureAwait(false);
+
+            (options.Meter ?? StudioDatabaseTime.Shared).RecordSince(StudioDatabaseTime.KeyOf(connection), started, rolledBack);
         }
     }
 
