@@ -1,10 +1,14 @@
 using Bunit;
 
 using MartenStudio.Services.Configuration;
+using MartenStudio.Services.Health;
+using MartenStudio.Services.Health.Checks;
 using MartenStudio.Tests.Components;
+using MartenStudio.Tests.Health;
 using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 using ConfigurationPage = MartenStudio.Components.Pages.Configuration.Configuration;
 
@@ -186,16 +190,48 @@ public class ConfigurationPageTests
                 new RuntimeComponent(RuntimePackage.Npgsql, "Npgsql", null, null),
             ],
             Features = [new RuntimeFeatureStatus("DocumentFillFactor", "Marten 9.47+", false, "A document table's fill factor.")],
+            HostEnvironment = "Production",
         };
 
         var page = context.Render<ConfigurationPage>();
 
         CardHeader(page, "Runtime").Should().NotBeNull();
+        page.Find(".ms-config-runtime .ms-config-grid").TextContent.Should().Contain("Host environment").And.Contain("Production")
+            .And.Contain("IHostEnvironment.EnvironmentName");
         page.Markup.Should().Contain("9.31.0").And.Contain("AssemblyInformationalVersion 9.31.0+abc");
         page.Markup.Should().Contain("no informational version on the assembly");
         page.TextOfAll(".ms-config-runtime tbody td").Should().Equal(
             "DocumentFillFactor", "Marten 9.47+", "not available", "A document table's fill factor.");
         page.FindAll(".ms-config-runtime [role=region]").Single().GetAttribute("aria-label").Should().Be("Runtime features table");
+    }
+
+    /// <summary>
+    /// H1-fix item 6: K01 prints the host's environment name to every visitor of the scope, and a configuration
+    /// finding says nothing the Configuration page does not - so the Runtime card prints the very value K01 reads,
+    /// and says plainly when the host registers none or names none, which is when K01 says it cannot tell.
+    /// </summary>
+    [Theory]
+    [InlineData("Production", "Production")]
+    [InlineData("Staging", "Staging")]
+    [InlineData("", "registered, with no name")]
+    [InlineData(null, "not registered (the host has no IHostEnvironment)")]
+    public void The_runtime_card_names_the_environment_K01_reads(string? name, string shown)
+    {
+        IHostEnvironment? environment = name is null ? null : new TestHostEnvironment(name);
+
+        ConfigurationService.DescribeEnvironment(environment).Should().Be(shown);
+
+        if (name is { Length: > 0 })
+        {
+            HealthVerdict verdict = new AutoCreateInProductionCheck().Evaluate(
+                new AutoCreateFacts(JasperFx.AutoCreate.CreateOrUpdate, name),
+                HealthEvaluation.At(DateTimeOffset.UnixEpoch));
+
+            foreach (HealthEvidence printed in verdict.Findings.SelectMany(static x => x.Evidence).Where(static x => x.Label == "Environment"))
+            {
+                printed.Value.Should().Be(shown, "what K01 prints is what the card prints");
+            }
+        }
     }
 
     /// <summary>The real service fills the card from this process's own assemblies.</summary>
@@ -206,7 +242,7 @@ public class ConfigurationPageTests
 
         runtime.Components.Select(static x => x.Package).Should().Equal(Enum.GetValues<RuntimePackage>());
         runtime.Components.Should().OnlyContain(static x => x.Version != null, "every package the studio ships against stamps an informational version");
-        runtime.VersionOf(RuntimePackage.Marten).Should().BeGreaterThanOrEqualTo(new Version(9, 31, 0), "the floor");
+        runtime.VersionOf(RuntimePackage.Marten).Should().BeGreaterThanOrEqualTo(new Version(9, 39, 0), "the floor");
     }
 
     private static AngleSharp.Dom.IElement CardHeader(IRenderedComponent<ConfigurationPage> page, string title)

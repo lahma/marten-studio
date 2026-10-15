@@ -44,13 +44,52 @@ internal enum HealthCheckOutcome
 }
 
 /// <summary>What went wrong with a check, before it is masked for a visitor.</summary>
+/// <remarks>
+/// <para>
+/// <b>Three kinds of words, kept apart</b> (H1 review): the report labels each by where it came from, and a
+/// label that said "Postgres said:" over an exception message the studio or a library wrote would be telling a
+/// visitor something untrue about it - and showing them text nothing had masked for them.
+/// </para>
+/// <list type="bullet">
+/// <item><see cref="Reason" /> is the studio's own sentence. It names a code, a count, a type or a SQLSTATE and
+/// never a subject, a tenant, a series or a schema, so it is shown at the check's gate as it is.</item>
+/// <item><see cref="PostgresText" /> is Postgres' own message, from a <c>PostgresException</c> and nothing else.
+/// It is shown after the report masks every withheld schema's name in it (D27).</item>
+/// <item><see cref="Detail" /> is the words of an error that is neither: today only a connection failure, whose
+/// message is Npgsql's or the operating system's. It is shown at <see cref="HealthGate.Database" />, because
+/// it is about the database's address. Any other exception's message is not carried at all: it is the
+/// author's of whatever threw, it may name what this visitor is not shown, and it is in the server log under
+/// event 9222.</item>
+/// </list>
+/// </remarks>
 /// <param name="Reason">The studio's own sentence.</param>
 /// <param name="SqlState">The SQLSTATE, when Postgres said something.</param>
-/// <param name="PostgresText">
-/// What Postgres (or Npgsql) said, verbatim. Never shown as it is: the report masks every withheld schema's
-/// name in it for the visitor reading (D27), or withholds it outright when that cannot be decided.
-/// </param>
-internal sealed record HealthCheckProblem(string Reason, string? SqlState, string? PostgresText);
+/// <param name="PostgresText">What Postgres said, verbatim, from a <c>PostgresException</c> only.</param>
+/// <param name="Detail">A connection failure's own words, shown only at the database-wide gate.</param>
+internal sealed record HealthCheckProblem(string Reason, string? SqlState, string? PostgresText, string? Detail = null);
+
+/// <summary>
+/// A check broke one of the sweep's rules - a finding coded for another check, two findings under one key, two
+/// pieces of evidence under one label, a series written twice, too many rows.
+/// </summary>
+/// <remarks>
+/// <see cref="Shown" /> is the studio's own sentence for the page, and names the check's code and a count -
+/// never a subject, a label or a series, which may name a tenant or a table, and which sit at the finding's
+/// gate rather than the check's. <see cref="Exception.Message" /> may name them, and goes to the server log.
+/// </remarks>
+internal sealed class HealthSweepRuleException : InvalidOperationException
+{
+    /// <param name="shown">The page's sentence: a code and a count, nothing a gate could withhold.</param>
+    /// <param name="logged">The log's sentence, which may name what broke the rule.</param>
+    public HealthSweepRuleException(string shown, string logged)
+        : base(logged)
+    {
+        Shown = shown;
+    }
+
+    /// <summary>The page's sentence.</summary>
+    public string Shown { get; }
+}
 
 /// <summary>One check's part of a sweep.</summary>
 /// <param name="Check">Which check.</param>
@@ -110,8 +149,9 @@ internal sealed record HealthSweep(
 /// <para>
 /// <b>A verdict must be drawable.</b> Two findings with one key, or one finding with two pieces of evidence
 /// under one label, would be two elements under one Blazor <c>@key</c> - which ends the circuit rather than
-/// the render (issue #1 was the same shape) - so such a verdict is that check's failure, with a message that
-/// says what was duplicated.
+/// the render (issue #1 was the same shape) - so such a verdict is that check's failure. The row names the code
+/// and a count and the log names what was duplicated, because a key holds the finding's Subject and a label can
+/// hold a name, and both sit at the finding's gate rather than the check's (<see cref="HealthSweepRuleException" />).
 /// </para>
 /// <para>
 /// <b>Expected states are values</b> (AGENTS.md, the memory rule): a gatherer's
@@ -217,6 +257,7 @@ internal sealed class HealthSweeper
         // Phase 1: every gatherer, in order. All of the sweep's I/O happens here.
         List<Gathered> gathered = [];
         Dictionary<string, double> sample = new(StringComparer.Ordinal);
+        Dictionary<string, HealthGate> sampleGates = new(StringComparer.Ordinal);
 
         foreach (HealthCheckDescriptor descriptor in registry.All.Where(x => tiers.Contains(x.Info.Tier)))
         {
@@ -231,14 +272,27 @@ internal sealed class HealthSweeper
         // gated tier reads becomes history an ungated evaluator can see.
         if (kind == HealthSweepKind.Regular)
         {
-            history.Append(storeKey, databaseId, new HealthSample(now, sample), value.EffectiveHealthInterval / 2);
+            history.Append(storeKey, databaseId, new HealthSample(now, sample) { Gates = sampleGates }, value.EffectiveHealthInterval / 2);
         }
 
         HealthHistoryView view = history.Read(storeKey, databaseId);
 
-        // Phase 3: every evaluator, pure, with the history in hand.
-        HealthEvaluation evaluation = new(now, runtime, view);
-        List<HealthCheckResult> results = [.. gathered.Select(x => Evaluate(x, evaluation, storeKey, databaseId))];
+        // Phase 3: every evaluator, pure, with the history in hand - each with only the series written at or below
+        // its own check's gate, so no number crosses a gate on its way from one check to another.
+        Dictionary<HealthGate, HealthEvaluation> evaluations = [];
+        HealthEvaluation EvaluationAt(HealthGate gate)
+        {
+            if (!evaluations.TryGetValue(gate, out HealthEvaluation? evaluation))
+            {
+                evaluation = new HealthEvaluation(now, runtime, view.VisibleAt(gate));
+                evaluations[gate] = evaluation;
+            }
+
+            return evaluation;
+        }
+
+        List<HealthCheckResult> results =
+            [.. gathered.Select(x => Evaluate(x, EvaluationAt(x.Descriptor.Info.Gate), storeKey, databaseId))];
 
         return new HealthSweep(storeKey, databaseId, kind, now, Stopwatch.GetElapsedTime(started), results);
 
@@ -263,13 +317,26 @@ internal sealed class HealthSweeper
             {
                 object facts = await descriptor.Check.GatherAsync(context, budget.Token).ConfigureAwait(false);
 
-                foreach (HealthSamplePart part in descriptor.Check.Sample(facts))
+                // Checked whole before any of it is kept, so a check that breaks the rule leaves no part behind.
+                List<HealthSamplePart> parts = [.. descriptor.Check.Sample(facts)];
+                HashSet<string> own = new(StringComparer.Ordinal);
+
+                foreach (HealthSamplePart part in parts)
                 {
-                    if (!sample.TryAdd(part.Series, part.Value))
+                    if (sample.ContainsKey(part.Series) || !own.Add(part.Series))
                     {
-                        throw new InvalidOperationException(
+                        throw new HealthSweepRuleException(
+                            $"{info.Code} wrote a health series that was already written in this sweep; a series has one writer.",
                             $"Health series '{part.Series}' was written twice in one sweep; {info.Code} is the second writer.");
                     }
+                }
+
+                foreach (HealthSamplePart part in parts)
+                {
+                    sample[part.Series] = part.Value;
+
+                    // The writer's gate, or a stricter one the part names - never a looser one.
+                    sampleGates[part.Series] = part.Gate > info.Gate ? part.Gate : info.Gate;
                 }
 
                 return new Gathered(descriptor, facts, HealthCheckOutcome.Checked, null, null, sql.Statements, checkStarted);
@@ -302,25 +369,30 @@ internal sealed class HealthSweeper
         {
             HealthVerdict verdict = gathered.Descriptor.Check.Evaluate(gathered.Facts, evaluation);
 
-            HashSet<string> keys = new(StringComparer.Ordinal);
+            // A key holds the finding's Subject, and a label can hold a name: both sit at the finding's gate, which can
+            // be stricter than the check's that the status row is shown at. So the page's sentence names the code and
+            // a count, and only the log's names what was duplicated.
+            if (verdict.Findings.GroupBy(static x => x.Key, StringComparer.Ordinal).Where(static x => x.Count() > 1).ToList() is { Count: > 0 } shared)
+            {
+                throw new HealthSweepRuleException(
+                    $"{shared.Sum(static x => x.Count())} of {info.Code}'s {verdict.Findings.Count} findings share a key with another; each finding needs its own Subject.",
+                    $"{info.Code}'s evaluator produced more than one finding keyed '{shared[0].Key}'; give each its own Subject.");
+            }
+
             List<HealthFinding> findings = [];
             foreach (HealthFinding finding in verdict.Findings)
             {
                 if (!string.Equals(finding.Code, info.Code, StringComparison.Ordinal))
                 {
-                    throw new InvalidOperationException(
+                    throw new HealthSweepRuleException(
+                        $"{info.Code}'s evaluator produced a finding coded {finding.Code}; a check speaks only for its own code.",
                         $"{info.Code}'s evaluator produced a finding coded {finding.Code}; a check speaks only for its own code.");
-                }
-
-                if (!keys.Add(finding.Key))
-                {
-                    throw new InvalidOperationException(
-                        $"{info.Code}'s evaluator produced two findings keyed '{finding.Key}'; give each its own Subject.");
                 }
 
                 if (finding.Evidence.GroupBy(static x => x.Label, StringComparer.Ordinal).FirstOrDefault(static x => x.Count() > 1) is { } twice)
                 {
-                    throw new InvalidOperationException(
+                    throw new HealthSweepRuleException(
+                        $"One of {info.Code}'s findings has {twice.Count()} pieces of evidence under one label; each label is one row.",
                         $"{info.Code}'s finding '{finding.Key}' has two pieces of evidence labelled '{twice.Key}'; each label is one row.");
                 }
 
@@ -346,16 +418,20 @@ internal sealed class HealthSweeper
             // An evaluator is pure, so a throw is a bug in the studio - and still only this check's row.
             Report(info, HealthCheckOutcome.Failed, exception, storeKey, databaseId);
 
-            return new HealthCheckResult(
-                info,
-                HealthCheckOutcome.Failed,
-                [],
-                null,
-                new HealthCheckProblem("The check's judgement failed: " + exception.GetType().Name + ".", null, exception.Message),
-                gathered.Statements,
-                gathered.Elapsed);
+            HealthCheckProblem problem = exception is HealthSweepRuleException rule
+                ? new HealthCheckProblem("The check's verdict was refused: " + rule.Shown, null, null)
+                : new HealthCheckProblem("The check's judgement failed: " + exception.GetType().Name + ". " + MessageIsLogged, null, null);
+
+            return new HealthCheckResult(info, HealthCheckOutcome.Failed, [], null, problem, gathered.Statements, gathered.Elapsed);
         }
     }
+
+    /// <summary>
+    /// What a status row says in place of an exception's own message, which is not the studio's and is not shown.
+    /// </summary>
+    internal const string MessageIsLogged =
+        "Its message is in the server log under event 9222 rather than here: it is not the studio's own wording, and "
+        + "could name something this page withholds.";
 
     /// <summary>What a check whose turn came after the sweep's budget ran out is told.</summary>
     private static readonly HealthCheckProblem OutOfSweepBudget = new(
@@ -370,7 +446,13 @@ internal sealed class HealthSweeper
 
         if (exception is HealthCheckUnavailableException unavailable)
         {
+            // The check's own sentence, written for this row.
             return (HealthCheckOutcome.Unavailable, new HealthCheckProblem(unavailable.Message, null, null));
+        }
+
+        if (exception is HealthSweepRuleException rule)
+        {
+            return (HealthCheckOutcome.Failed, new HealthCheckProblem(rule.Shown, null, null));
         }
 
         if (exception is OperationCanceledException && budgetExpired)
@@ -408,12 +490,15 @@ internal sealed class HealthSweeper
 
         if (PostgresFailure.IsConnectionFailure(exception))
         {
+            // Npgsql's or the socket's words, not Postgres': carried apart, and shown at the database-wide gate.
             return (HealthCheckOutcome.Failed, new HealthCheckProblem(
-                "The studio could not connect to this database.", null, exception.Message));
+                "The studio could not connect to this database.", null, null, exception.Message));
         }
 
+        // Anything else is a bug in a check or a library, in words the studio did not write: the type is shown, and
+        // the message is in the log.
         return (HealthCheckOutcome.Failed, new HealthCheckProblem(
-            "The check failed: " + exception.GetType().Name + ".", null, exception.Message));
+            "The check failed: " + exception.GetType().Name + ". " + MessageIsLogged, null, null));
     }
 
     private void Report(HealthCheckInfo info, HealthCheckOutcome outcome, Exception exception, string storeKey, string databaseId)

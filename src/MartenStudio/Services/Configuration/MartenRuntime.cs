@@ -91,7 +91,7 @@ internal sealed class MartenRuntime
     public Version? VersionOf(RuntimePackage package) =>
         components.TryGetValue(package, out RuntimeComponent? component) ? component.Version : null;
 
-    /// <summary>"Marten 9.31.0", "JasperFx.Events 2.60.0" - or "Marten (version unknown)".</summary>
+    /// <summary>"Marten 9.39.0", "JasperFx.Events 2.74.0" - or "Marten (version unknown)".</summary>
     public string Describe(RuntimePackage package) =>
         VersionOf(package) is { } version
             ? PackageName(package) + " " + Format(version)
@@ -99,8 +99,8 @@ internal sealed class MartenRuntime
 
     /// <summary>
     /// What this host runs, as a person thinks of it - its Marten - with <paramref name="package" />'s own
-    /// version in parentheses when the feature in question is that package's: "Marten 9.31.0 (JasperFx.Events
-    /// 2.60.0)". A remedy says "Marten 9.50+", so the answer leads with the Marten it is compared to.
+    /// version in parentheses when the feature in question is that package's: "Marten 9.39.0 (JasperFx.Events
+    /// 2.74.0)". A remedy says "Marten 9.50+", so the answer leads with the Marten it is compared to.
     /// </summary>
     public string DescribeHost(RuntimePackage package) =>
         package == RuntimePackage.Marten

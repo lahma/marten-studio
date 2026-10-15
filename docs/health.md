@@ -43,8 +43,13 @@ Checks come in four cost tiers:
 |---|---|---|
 | 0 | The store's configuration and the process's own state. No I/O. | With every sweep |
 | 1 | The catalog and the statistics views (`pg_class`, `pg_stat_*`, `pg_locks`, `pg_stat_activity`). | With every sweep |
-| 2 | A bounded slice of the data itself. | Only behind **Run deeper checks**, cached for five minutes |
+| 2 | A bounded slice of the data itself. | Only behind **Run deeper checks**, for a visitor the store policy allows the database as a whole; cached for five minutes |
 | 3 | `pg_stat_statements` and `EXPLAIN`. | Only for a visitor through the activity gate, cached for five minutes |
+
+Who may *start* a costlier sweep is decided by the studio's service, not by the page's button: a tier-2 sweep
+reads a slice of every table it checks, so a visitor the store policy admits for one tenant only cannot start
+one, whatever their browser sends. They see the button off, the policy it needs, and the results of a run
+somebody else started - through the same per-finding gates as everything else.
 
 A sweep runs **only when the Health page or the Overview asks**, and its result is shared by everybody
 watching that database until `MartenStudioOptions.HealthInterval` (a minute by default) has passed: ten open
@@ -67,13 +72,28 @@ own reads are not counted yet. It is a database-wide number, so it is shown at t
 The sweep is about the database; what each visitor is shown of it is decided per visitor:
 
 - A configuration finding (tier 0) is shown to anybody the store policy lets see the scope they selected -
-  it says nothing the Configuration page does not.
+  it says nothing the Configuration page does not. That is a rule the page is kept to rather than a hope:
+  what K01 prints (the database's `AutoCreate` and the host's environment name) and what K02 and K03 print
+  (the two tracking switches) are on the Configuration page's store, Events and Runtime cards.
 - A database-wide number needs the store policy for the database as a whole, asked with `TenantId = null`.
 - Anything that names a session, a process id, a role, a client address, an application, a statement or a
   tenant needs `MartenStudioOptions.Capabilities.ViewDatabaseActivity` - off by default, off under
   `ReadOnly` - and the write policy, asked with `Capability = "ViewDatabaseActivity"` and `TenantId = null`.
   Without it a visitor still sees the counts and ages, never the names.
 - A document type `IsDocumentTypeVisible` hides never appears in a finding.
+- A number one check measures can become another's evidence through the history, and only downwards: each
+  number keeps the gate of the check that read it, and a check is handed only the numbers read at or below
+  its own gate. A count of sessions by role never turns up in a finding every visitor sees.
 
-What Postgres says about a check that failed is shown only with every schema the visitor may not see masked
-out of it, by the same rule the database browser uses.
+A check that could not check says why in the studio's own words - which name a code, a count, a type or a
+SQLSTATE, never a subject, a tenant or a table. After that, and only under its own label:
+
+- **Postgres said:** Postgres' own message, from a Postgres error and nothing else, with every schema the
+  visitor may not see masked out of it by the same rule the database browser uses - or withheld outright
+  when that cannot be decided.
+- **The connection error said:** the words of a connection failure (Npgsql's or the network's), which name
+  the database's address, so only for a visitor through the database-wide gate.
+
+Any other exception's message - a bug in a check, a library's own complaint - is not on the page at all. It
+is the author's of whatever threw, it may name something the page withholds, and it is in the server log
+under event 9222.

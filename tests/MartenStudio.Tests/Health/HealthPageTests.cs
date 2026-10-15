@@ -168,7 +168,7 @@ public class HealthPageTests
     public async Task With_a_deeper_check_the_button_runs_it_and_only_the_button_does()
     {
         await using StudioComponentContext context = await ReadyAsync();
-        context.Health.Report = context.Health.Report with { DeeperChecksExist = true };
+        context.Health.Report = context.Health.Report with { DeeperChecksExist = true, DeeperChecksAllowed = true };
 
         var page = context.Render<HealthPage>();
         page.WaitForAssertion(() => page.Find(".ms-health-deeper").HasAttribute("disabled").Should().BeFalse());
@@ -178,6 +178,28 @@ public class HealthPageTests
         page.Find(".ms-health-deeper").Click();
 
         page.WaitForAssertion(() => context.Health.Requests.Should().Contain(static x => x.Deeper == HealthDeeperChecks.Run));
+    }
+
+    /// <summary>
+    /// H1-fix item 1, the page's half: a visitor the service would not let start the deeper checks sees the
+    /// button off and is told the policy it needs. The refusal itself is the service's (HealthGateTests).
+    /// </summary>
+    [Fact]
+    public async Task A_visitor_who_may_not_start_the_deeper_checks_sees_the_button_off_and_why()
+    {
+        await using StudioComponentContext context = await ReadyAsync();
+        context.Health.Report = context.Health.Report with
+        {
+            DeeperChecksExist = true,
+            DeeperChecksAllowed = false,
+            DeeperChecksRefused = "needs the store policy to allow this database as a whole",
+        };
+
+        var page = context.Render<HealthPage>();
+
+        page.WaitForAssertion(() => page.Find(".ms-health-deeper").HasAttribute("disabled").Should().BeTrue());
+        page.Find(".ms-health-deeper").GetAttribute("title").Should().Contain("as a whole");
+        page.Find(".ms-health-deeper-note").TextContent.Should().Contain("off for you").And.Contain("needs the store policy");
     }
 
     [Fact]

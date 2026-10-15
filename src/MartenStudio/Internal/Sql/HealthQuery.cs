@@ -21,11 +21,19 @@ namespace MartenStudio.Internal.Sql;
 /// size function over a list (D27: a list locks nothing it lists) - and the live no-lock helper is what
 /// proves a sweep kept to that.
 /// </para>
+/// <para>
+/// <b>Fenced, and sealed after construction.</b> <c>HealthQueryConventionTests</c> refuses the identifier
+/// <c>HealthQuery</c> anywhere in <c>src/</c> outside this folder and the runner, and scans the compiled
+/// assembly for a constructor call from any type outside this namespace - so a check holds one only as a
+/// <c>var</c> a builder handed it. Both properties are get-only, not the record's default <c>init</c>, so
+/// <c>query with { Sql = query.Sql + name }</c> does not compile anywhere: the text a builder made is the text
+/// that runs.
+/// </para>
 /// </remarks>
 /// <param name="Sql">The statement.</param>
 /// <param name="Parameters">
-/// What it binds. Created fresh by the builder for every query: an <see cref="NpgsqlParameter" /> belongs to
-/// one command.
+/// What it binds. The runner binds copies (<c>NpgsqlParameter.Clone()</c>), so a builder may hand the same
+/// query out twice.
 /// </param>
 internal sealed record HealthQuery(string Sql, IReadOnlyList<NpgsqlParameter> Parameters)
 {
@@ -33,6 +41,12 @@ internal sealed record HealthQuery(string Sql, IReadOnlyList<NpgsqlParameter> Pa
     public HealthQuery(string sql) : this(sql, [])
     {
     }
+
+    /// <summary>The statement - get-only, so no <c>with</c> expression can rewrite it.</summary>
+    public string Sql { get; } = Sql;
+
+    /// <summary>What it binds - get-only for the same reason.</summary>
+    public IReadOnlyList<NpgsqlParameter> Parameters { get; } = Parameters;
 
     /// <summary>The parameter names as the statement spells them, for "Show SQL" - never their values.</summary>
     public IReadOnlyList<string> ParameterNames =>

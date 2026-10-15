@@ -10,8 +10,9 @@ namespace MartenStudio.Integration.Tests.Health;
 /// </summary>
 /// <remarks>
 /// The quiet case is the sample store <em>with K02's recommendation applied</em>, not the sample store as it
-/// ships: <see cref="SampleStore.Configure" /> leaves the flag at Marten's default, and changing the shared
-/// sample domain is outside this packet (it would change what the daemon writes for every other live test).
+/// ships: <see cref="SampleStore.Configure" /> keeps Marten's defaults on purpose, so that what the advisor
+/// says about the sample is what it says about a new host - K02 firing there is intended, and
+/// <c>docs/health/configuration.md</c> says so.
 /// </remarks>
 public class ExtendedProgressionTrackingLiveTests(PostgresFixture postgres)
 {

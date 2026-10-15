@@ -130,15 +130,22 @@
             </div>
         </section>
 
-        @* F1: the Marten this host runs, and what the studio can light up on it. Read from the loaded assemblies'
-           informational versions, so it is what this process resolved rather than what any project file says. *@
+        @* F1: the host's environment, the Marten this host runs, and what the studio can light up on it. Versions are
+           read from the loaded assemblies' informational versions, so they are what this process resolved rather than
+           what any project file says. *@
         <section class="ms-config-card ms-config-runtime">
             <div class="ms-config-card-header">
                 <h2 class="ms-config-card-title">Runtime</h2>
-                <span class="ms-config-card-subtitle">the packages this process loaded</span>
+                <span class="ms-config-card-subtitle">the host's environment, and the packages this process loaded</span>
             </div>
             <div class="ms-config-card-body">
                 <div class="ms-config-grid">
+                    @if (configuration.HostEnvironment is { } environment)
+                    {
+                        @* What health check K01 reads and prints to every visitor of the scope: shown here so that a
+                           configuration finding says nothing this page does not. *@
+                        <ConfigurationValueRow Name="Host environment" Value="@environment" Member="IHostEnvironment.EnvironmentName" @key="@("host-environment")" />
+                    }
                     @foreach (RuntimeComponent component in configuration.Runtime)
                     {
                         <ConfigurationValueRow Name="@component.Name" Value="@component.DisplayVersion" Member="@AssemblyNote(component)" @key="component.Name" />

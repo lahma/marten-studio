@@ -21,7 +21,7 @@
             <button type="button"
                     class="ms-button ms-health-deeper"
                     @onclick="RunDeeperAsync"
-                    disabled="@(!interactive || busy || report?.DeeperChecksExist != true)"
+                    disabled="@(!interactive || busy || report?.DeeperChecksAllowed != true)"
                     title="@DeeperTitle">
                 Run deeper checks
             </button>
@@ -79,6 +79,19 @@
                 <p class="ms-health-summary-line ms-health-deeper-note">
                     "Run deeper checks" reads a bounded slice of the data itself, behind its button and cached for five
                     minutes. This version of the studio has no such check yet, so the button is off.
+                </p>
+            }
+            else if (!report.DeeperChecksAllowed)
+            {
+                @* The service refuses the run whatever this says (it reads Run as IfCached for this visitor); the note
+                   is so the disabled button is not a mystery. *@
+                <p class="ms-health-summary-line ms-health-deeper-note">
+                    "Run deeper checks" is off for you: it reads a bounded slice of the data in every table it checks, a
+                    database-wide read, so it @report.DeeperChecksRefused.
+                    @if (report.DeeperMeasuredAt is { } shared)
+                    {
+                        <text>Results of the last run, @State.FormatInSelectedTimeZone(shared), are shown below where you may see them.</text>
+                    }
                 </p>
             }
             else if (report.DeeperMeasuredAt is { } deeper)
@@ -199,9 +212,12 @@
     private List<HealthReportFinding> MutedFindings =>
         report is null ? [] : [.. report.Findings.Where(x => Mutes.IsMuted(x.MuteKey))];
 
-    private string DeeperTitle => report?.DeeperChecksExist == true
-        ? "Reads a bounded slice of the data; cached for five minutes"
-        : "This version of the studio has no deeper check yet";
+    private string DeeperTitle => report switch
+    {
+        { DeeperChecksExist: false } or null => "This version of the studio has no deeper check yet",
+        { DeeperChecksAllowed: false } => "A database-wide read: it " + report.DeeperChecksRefused,
+        _ => "Reads a bounded slice of the data; cached for five minutes",
+    };
 
     protected override void OnInitialized()
     {

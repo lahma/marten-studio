@@ -91,6 +91,14 @@ internal sealed record StudioConfiguration(
     /// <summary>The packages this process resolved, Marten first (F1).</summary>
     public IReadOnlyList<RuntimeComponent> Runtime { get; init; } = [];
 
+    /// <summary>
+    /// The host's <c>IHostEnvironment.EnvironmentName</c> as the Runtime card prints it - the name, or a sentence
+    /// saying the host registers none or names none - or <see langword="null" /> when it was not read. Shown
+    /// because health check K01 prints it to every visitor of the scope, and a configuration finding says
+    /// nothing this page does not.
+    /// </summary>
+    public string? HostEnvironment { get; init; }
+
     /// <summary>What the newer-than-floor features the studio can light up say on this host.</summary>
     public IReadOnlyList<RuntimeFeatureStatus> Features { get; init; } = [];
 }

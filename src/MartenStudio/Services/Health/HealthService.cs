@@ -22,7 +22,11 @@ internal interface IHealthService
     /// shown through the visitor's gates. Never throws but for cancellation; a refusal is a value.
     /// </summary>
     /// <param name="scope">The store and database; a tenant in it narrows what is shown, not what is swept.</param>
-    /// <param name="request">Whether to run the costlier tiers, or only show a recent run of them.</param>
+    /// <param name="request">
+    /// Whether to run the costlier tiers, or only show a recent run of them. A request to run is honoured only for a
+    /// visitor through that tier's gate - <see cref="HealthGate.Database" /> for tier 2, <see cref="HealthGate.Activity" />
+    /// for tier 3 - and is otherwise read as <see cref="HealthDeeperChecks.IfCached" />; the report says why.
+    /// </param>
     /// <param name="cancellationToken">Cancels this caller's wait, never the shared sweep.</param>
     Task<HealthReport> GetReportAsync(StudioScope scope, HealthReportRequest request, CancellationToken cancellationToken = default);
 
@@ -65,10 +69,13 @@ internal interface IHealthService
 /// tenant. Each question is asked at most once per report.
 /// </para>
 /// <para>
-/// <b>Postgres' words are masked.</b> A check that failed carries Postgres' message, which can name a schema
-/// this visitor may not see; it is shown only after every withheld schema's name is masked out of it with
-/// the database browser's own rule (<see cref="PostgresErrorText" />), against this visitor's gate - and when
-/// that gate cannot be read, the words are withheld and only the SQLSTATE is shown.
+/// <b>Postgres' words are masked, and only Postgres' words are called Postgres'.</b> A check that failed on a
+/// <c>PostgresException</c> carries Postgres' message, which can name a schema this visitor may not see; it is
+/// shown, labelled "Postgres said:", only after every withheld schema's name is masked out of it with the
+/// database browser's own rule (<see cref="PostgresErrorText" />), against this visitor's gate - and when that
+/// gate cannot be read, the words are withheld and only the SQLSTATE is shown. A connection error's own words
+/// are labelled as such and shown at the database-wide gate; any other exception's message is not on the page
+/// at all (<see cref="HealthCheckProblem" />).
 /// </para>
 /// </remarks>
 internal sealed class HealthService : IHealthService
@@ -155,14 +162,25 @@ internal sealed class HealthService : IHealthService
 
         HealthSweep regular = await cache.GetAsync(whole, HealthSweepKind.Regular, scope.DatabaseId, cancellationToken).ConfigureAwait(false);
 
-        HealthSweep? deeper = registry.HasTier(HealthCostTier.BoundedData)
-            ? await SweepOfAsync(whole, HealthSweepKind.Deeper, request.Deeper, scope, cancellationToken).ConfigureAwait(false)
+        // Who may START a costlier sweep is decided here, not by the page: a circuit is a long-lived object a client
+        // can drive, so a disabled button is a courtesy and this is the refusal (hard rule 5). A tier-2 sweep reads a
+        // bounded slice of the data in every table it checks, whoever asked - a database-wide act - so only a visitor
+        // through the database-wide gate starts one. Anybody else is shown a recent run if there is one, through the
+        // same per-finding gates as the regular sweep, and never one they caused.
+        bool deeperExist = registry.HasTier(HealthCostTier.BoundedData);
+        bool deeperAllowed = deeperExist && await gate.PassesAsync(HealthGate.Database).ConfigureAwait(false);
+
+        HealthSweep? deeper = deeperExist
+            ? await SweepOfAsync(whole, HealthSweepKind.Deeper, deeperAllowed && request.Deeper == HealthDeeperChecks.Run, scope, cancellationToken)
+                .ConfigureAwait(false)
             : null;
 
+        // Tier 3 reads other people's statements: nothing of it is run or shown short of the activity gate.
         bool statementsAllowed = registry.HasTier(HealthCostTier.Statements) && await gate.PassesAsync(HealthGate.Activity).ConfigureAwait(false);
 
         HealthSweep? statements = statementsAllowed
-            ? await SweepOfAsync(whole, HealthSweepKind.Statements, request.Statements, scope, cancellationToken).ConfigureAwait(false)
+            ? await SweepOfAsync(whole, HealthSweepKind.Statements, request.Statements == HealthDeeperChecks.Run, scope, cancellationToken)
+                .ConfigureAwait(false)
             : null;
 
         List<HealthCheckResult> results = [.. regular.Results];
@@ -193,7 +211,9 @@ internal sealed class HealthService : IHealthService
             History = history.Read(scope.StoreKey, databaseId).Describe(cache.Now),
             Cost = database ? meter.Total(CostKey(resolved.Database)) : null,
             CostWithheld = database ? null : gate.WhyNot(HealthGate.Database),
-            DeeperChecksExist = registry.HasTier(HealthCostTier.BoundedData),
+            DeeperChecksExist = deeperExist,
+            DeeperChecksAllowed = deeperAllowed,
+            DeeperChecksRefused = deeperExist && !deeperAllowed ? gate.WhyNot(HealthGate.Database) : null,
             StatementChecksExist = registry.HasTier(HealthCostTier.Statements),
             StatementChecksAllowed = statementsAllowed,
         };
@@ -287,15 +307,18 @@ internal sealed class HealthService : IHealthService
         return (sweep, [.. findings.Where(x => !mutes.IsMuted(x.MuteKey))]);
     }
 
-    /// <summary>A costlier sweep: run on request, otherwise only a recent one still in the cache.</summary>
+    /// <summary>
+    /// A costlier sweep: run when <paramref name="start" /> - which the caller decides from the visitor's gate,
+    /// never from the request alone - and otherwise only a recent one still in the cache.
+    /// </summary>
     private async Task<HealthSweep?> SweepOfAsync(
         ResolvedScope whole,
         HealthSweepKind kind,
-        HealthDeeperChecks wanted,
+        bool start,
         StudioScope scope,
         CancellationToken cancellationToken)
     {
-        if (wanted == HealthDeeperChecks.Run)
+        if (start)
         {
             return await cache.GetAsync(whole, kind, scope.DatabaseId, cancellationToken).ConfigureAwait(false);
         }
@@ -438,6 +461,7 @@ internal sealed class HealthService : IHealthService
                 continue;
             }
 
+            // The studio's sentence first, as it is; then each other source under its own label (HealthCheckProblem).
             string? problem = result.Problem?.Reason;
 
             if (result.Problem?.PostgresText is { Length: > 0 } text)
@@ -451,6 +475,14 @@ internal sealed class HealthService : IHealthService
                 problem = withheld is null
                     ? problem + " What Postgres said is withheld: the schemas it may name could not be checked for this visitor."
                     : problem + " Postgres said: " + PostgresErrorText.Redact(text, withheld);
+            }
+
+            if (result.Problem?.Detail is { Length: > 0 } detail)
+            {
+                // A connection error's words name the database's address, which is the database-wide gate's to show.
+                problem = await gate.PassesAsync(HealthGate.Database).ConfigureAwait(false)
+                    ? problem + " The connection error said: " + detail
+                    : problem + " What the connection error said is withheld - " + gate.WhyNot(HealthGate.Database) + ".";
             }
 
             statuses.Add(new HealthCheckStatus(

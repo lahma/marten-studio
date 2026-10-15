@@ -203,6 +203,11 @@ public class HealthSweeperTests
         harness.Warnings.Where(static x => x.EventId.Id == 9222).Should().ContainSingle(
             "the connection is one problem, not one per check");
 
+        HealthCheckProblem problem = sweep.Results.Single(static x => x.Check.Code == "T90").Problem!;
+        problem.Reason.Should().Be("The studio could not connect to this database.");
+        problem.Detail.Should().NotBeNullOrWhiteSpace("a connection error's own words are carried, apart");
+        problem.PostgresText.Should().BeNull("they are Npgsql's or the socket's, not Postgres'");
+
         sweep.Results.Single(static x => x.Check.Code == "K90").Outcome.Should().Be(HealthCheckOutcome.Checked,
             "a check that needs no SQL is unaffected by a database that is down");
     }
@@ -223,39 +228,86 @@ public class HealthSweeperTests
         harness.Script.Runs.Should().NotContainKey("D90");
     }
 
-    /// <summary>Review item 4: two findings under one key would be two elements under one Blazor @key.</summary>
+    /// <summary>
+    /// Review item 4: two findings under one key would be two elements under one Blazor @key. H1-fix item 5: the
+    /// row says so with the code and a count - the key holds the Subject, which sits at the finding's gate and
+    /// may be stricter than the check's - and does not call the studio's sentence Postgres'.
+    /// </summary>
     [Fact]
-    public async Task Two_findings_with_one_key_fail_the_check_that_made_them()
+    public async Task Two_findings_with_one_key_fail_the_check_that_made_them_and_the_row_names_no_subject()
     {
         await using HealthHarness harness = HealthHarness.Create();
         harness.Script.Judge["K90"] = static (_, _) => HealthVerdict.Of(
-            new HealthFinding { Code = "K90", Severity = HealthSeverity.Info, Title = "One", WhyItMatters = "x", Subject = "s" },
-            new HealthFinding { Code = "K90", Severity = HealthSeverity.Info, Title = "Two", WhyItMatters = "x", Subject = "s" });
+            new HealthFinding { Code = "K90", Severity = HealthSeverity.Info, Title = "One", WhyItMatters = "x", Subject = "acme-orders" },
+            new HealthFinding { Code = "K90", Severity = HealthSeverity.Info, Title = "Two", WhyItMatters = "x", Subject = "acme-orders" },
+            new HealthFinding { Code = "K90", Severity = HealthSeverity.Info, Title = "Three", WhyItMatters = "x", Subject = "globex" });
         harness.Script.Finds("K91", HealthSeverity.Info);
 
         HealthSweep sweep = await harness.SweepAsync();
 
         HealthCheckResult result = sweep.Results.Single(static x => x.Check.Code == "K90");
         result.Outcome.Should().Be(HealthCheckOutcome.Failed);
-        result.Problem!.PostgresText.Should().Contain("two findings keyed 'K90|s'");
+        result.Problem!.Reason.Should().Contain("2 of K90's 3 findings share a key").And.NotContain("acme").And.NotContain("globex");
+        result.Problem.PostgresText.Should().BeNull("these are the studio's words, not Postgres'");
+        result.Problem.Detail.Should().BeNull();
         sweep.Results.Single(static x => x.Check.Code == "K91").Findings.Should().ContainSingle();
+
+        harness.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9222 && x.Message.Contains("K90", StringComparison.Ordinal),
+            "the log carries the exception, whose message is where the duplicated key is named");
     }
 
     [Fact]
-    public async Task Two_pieces_of_evidence_under_one_label_fail_the_check()
+    public async Task Two_pieces_of_evidence_under_one_label_fail_the_check_and_the_row_names_no_label()
     {
         await using HealthHarness harness = HealthHarness.Create();
         harness.Script.Finds("K90", HealthSeverity.Info, shape: static x =>
         {
-            x.Evidence.Add(new HealthEvidence("Rows", "1"));
-            x.Evidence.Add(new HealthEvidence("Rows", "2"));
+            x.Evidence.Add(new HealthEvidence("Rows in acme", "1"));
+            x.Evidence.Add(new HealthEvidence("Rows in acme", "2"));
         });
 
         HealthSweep sweep = await harness.SweepAsync();
 
         HealthCheckResult result = sweep.Results.Single(static x => x.Check.Code == "K90");
         result.Outcome.Should().Be(HealthCheckOutcome.Failed);
-        result.Problem!.PostgresText.Should().Contain("labelled 'Rows'");
+        result.Problem!.Reason.Should().Contain("2 pieces of evidence under one label").And.NotContain("acme");
+        result.Problem.PostgresText.Should().BeNull();
+    }
+
+    /// <summary>
+    /// H1-fix item 5: a failure that is not Postgres' carries no words of its own to the page - its type, and a
+    /// pointer to the log, where its message is - and nothing about it is labelled as Postgres'.
+    /// </summary>
+    [Fact]
+    public async Task A_failure_that_is_not_Postgres_shows_its_type_and_leaves_its_message_to_the_log()
+    {
+        await using HealthHarness harness = HealthHarness.Create();
+        harness.Script.Throws("K90", new InvalidOperationException("table acme.secret_orders is odd"));
+        harness.Script.Judge["K91"] = static (_, _) => throw new KeyNotFoundException("The given key 'globex' was not present");
+
+        HealthSweep sweep = await harness.SweepAsync();
+
+        foreach ((string code, string type) in new[] { ("K90", "InvalidOperationException"), ("K91", "KeyNotFoundException") })
+        {
+            HealthCheckProblem problem = sweep.Results.Single(x => x.Check.Code == code).Problem!;
+
+            problem.Reason.Should().Contain(type).And.Contain("event 9222").And.NotContain("acme").And.NotContain("globex");
+            problem.PostgresText.Should().BeNull("{0}'s exception is not Postgres'", code);
+            problem.Detail.Should().BeNull("only a connection failure's words are carried");
+        }
+    }
+
+    [Fact]
+    public async Task Only_a_PostgresException_carries_Postgres_words()
+    {
+        PostgresException postgres = new("relation \"acme.mt_doc_x\" does not exist", "ERROR", "ERROR", PostgresErrorCodes.UndefinedTable);
+
+        (HealthCheckOutcome outcome, HealthCheckProblem problem) = HealthSweeper.Classify(postgres, budgetExpired: false);
+
+        outcome.Should().Be(HealthCheckOutcome.Failed);
+        problem.PostgresText.Should().Be("relation \"acme.mt_doc_x\" does not exist");
+        problem.SqlState.Should().Be(PostgresErrorCodes.UndefinedTable);
+        problem.Reason.Should().NotContain("acme", "the studio's sentence names the SQLSTATE, and Postgres' words go where they are masked");
     }
 
     /// <summary>
@@ -442,6 +494,82 @@ public class HealthSweeperTests
 
         sweep.Results.Single(static x => x.Check.Code == "K90").Outcome.Should().Be(HealthCheckOutcome.Checked);
         sweep.Results.Single(static x => x.Check.Code == "K91").Outcome.Should().Be(HealthCheckOutcome.Failed);
+        sweep.Results.Single(static x => x.Check.Code == "K91").Problem!.Reason.Should().NotContain("x.y",
+            "a series name can carry a qualifier - a projection, a tenant - so the row names the code only");
+    }
+
+    /// <summary>A check that breaks the one-writer rule leaves none of its parts behind, not only the duplicate.</summary>
+    [Fact]
+    public async Task A_check_that_writes_a_series_twice_leaves_none_of_its_parts_in_the_sample()
+    {
+        await using HealthHarness harness = HealthHarness.Create();
+        harness.Script.Gather["K90"] = static (_, _) => Task.FromResult(new ScriptedFacts("K90", [new HealthSamplePart("x.y", 1)], null));
+        harness.Script.Gather["K91"] = static (_, _) => Task.FromResult(new ScriptedFacts("K91",
+            [new HealthSamplePart("k91.own", 5), new HealthSamplePart("x.y", 2)], null));
+
+        await harness.SweepAsync();
+
+        HealthSample sample = harness.History.Read("default", harness.Resolved.Database.Id.Identity).Samples.Single();
+        sample.Values.Should().ContainKey("x.y").WhoseValue.Should().Be(1);
+        sample.Values.Should().NotContainKey("k91.own");
+    }
+
+    /// <summary>
+    /// H1-fix item 3: a number crosses from one check to another only through the history, so that is where the
+    /// gates are kept. Every series carries its writer's gate - the check's, or a stricter one the part names -
+    /// and an evaluator reads only the series at or below its own check's gate.
+    /// </summary>
+    [Fact]
+    public async Task An_evaluator_reads_only_the_series_written_at_or_below_its_own_gate()
+    {
+        await using HealthHarness harness = HealthHarness.Create();
+
+        // C90 is Activity-gated, T90 Database-gated, K90 and K91 at None; K91 marks one of its own parts Activity.
+        harness.Script.Gather["C90"] = static (_, _) => Task.FromResult(new ScriptedFacts("C90", [new HealthSamplePart("connections.by-role:reporting", 3)], null));
+        harness.Script.Gather["T90"] = static (_, _) => Task.FromResult(new ScriptedFacts("T90", [new HealthSamplePart("tables.rows", 1_000)], null));
+        harness.Script.Gather["K91"] = static (_, _) => Task.FromResult(new ScriptedFacts("K91",
+        [
+            new HealthSamplePart("configuration.count", 7),
+            new HealthSamplePart("configuration.names", 2) { Gate = HealthGate.Activity },
+        ], null));
+
+        Dictionary<string, IReadOnlyCollection<string>> seen = new(StringComparer.Ordinal);
+        foreach (string code in new[] { "K90", "T90", "C90" })
+        {
+            harness.Script.Judge[code] = (_, evaluation) =>
+            {
+                seen[code] = [.. evaluation.History.Samples.SelectMany(static x => x.Values.Keys)];
+                return HealthVerdict.Quiet();
+            };
+        }
+
+        await harness.SweepAsync();
+
+        seen["K90"].Should().BeEquivalentTo(["configuration.count"],
+            "an ungated check sees neither the activity count, the database-wide number, nor the part K91 marked Activity");
+        seen["T90"].Should().BeEquivalentTo(["configuration.count", "tables.rows"]);
+        seen["C90"].Should().BeEquivalentTo(["configuration.count", "configuration.names", "tables.rows", "connections.by-role:reporting"],
+            "the strictest gate reads everything");
+
+        HealthSample stored = harness.History.Read("default", harness.Resolved.Database.Id.Identity).Samples.Single();
+        stored.GateOf("connections.by-role:reporting").Should().Be(HealthGate.Activity, "the writer's gate is stamped by the sweep");
+        stored.GateOf("tables.rows").Should().Be(HealthGate.Database);
+        stored.GateOf("configuration.names").Should().Be(HealthGate.Activity, "a part may be stricter than its check");
+        stored.GateOf("configuration.count").Should().Be(HealthGate.None);
+    }
+
+    /// <summary>A part cannot loosen its writer's gate: an Activity check's part marked None is still Activity.</summary>
+    [Fact]
+    public async Task A_part_cannot_be_looser_than_the_check_that_wrote_it()
+    {
+        await using HealthHarness harness = HealthHarness.Create();
+        harness.Script.Gather["C90"] = static (_, _) => Task.FromResult(new ScriptedFacts("C90",
+            [new HealthSamplePart("connections.by-role:reporting", 3) { Gate = HealthGate.None }], null));
+
+        await harness.SweepAsync();
+
+        harness.History.Read("default", harness.Resolved.Database.Id.Identity).Samples.Single()
+            .GateOf("connections.by-role:reporting").Should().Be(HealthGate.Activity);
     }
 
     /// <summary>

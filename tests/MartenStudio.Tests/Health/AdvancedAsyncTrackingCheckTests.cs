@@ -8,7 +8,7 @@ public class AdvancedAsyncTrackingCheckTests
 {
     private static readonly HealthEvaluation Evaluation = HealthEvaluation.At(new DateTimeOffset(2026, 10, 15, 9, 0, 0, TimeSpan.Zero));
 
-    private static HealthVerdict Evaluate(bool hasAsyncWork, bool enabled) =>
+    private static HealthVerdict Evaluate(bool? hasAsyncWork, bool enabled) =>
         new AdvancedAsyncTrackingCheck().Evaluate(new AsyncTrackingFacts(hasAsyncWork, 1, enabled), Evaluation);
 
     [Fact]
@@ -33,5 +33,14 @@ public class AdvancedAsyncTrackingCheckTests
     public void A_store_with_nothing_for_the_daemon_to_run_is_quiet()
     {
         Evaluate(hasAsyncWork: false, enabled: false).Findings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_store_whose_projections_could_not_be_read_is_quiet_and_says_so()
+    {
+        HealthVerdict verdict = Evaluate(hasAsyncWork: null, enabled: false);
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Be(AsyncTrackingFacts.UnreadableNote);
     }
 }

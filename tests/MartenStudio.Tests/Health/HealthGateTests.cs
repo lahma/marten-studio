@@ -1,5 +1,8 @@
+using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Health;
+
+using Npgsql;
 
 namespace MartenStudio.Tests.Health;
 
@@ -213,6 +216,113 @@ public class HealthGateTests
         banner.Select(static x => x.Code).Should().Equal(["T90"], "C90 is behind the activity gate this visitor is short of, and K90 was not asked for");
         harness.Cache.SweepCount.Should().Be(sweeps);
         (await harness.Health.CachedFindingsAsync(harness.Scope, [], Token)).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// H1-fix item 1, the refusing side: a tier-2 sweep reads a slice of the data in every table it checks, so a
+    /// visitor the store policy admits for one tenant only cannot start one by asking - the service reads the
+    /// request as "if cached" and says why - and is shown a run somebody else started only through the
+    /// per-finding gates.
+    /// </summary>
+    [Fact]
+    public async Task A_visitor_short_of_the_database_gate_cannot_start_the_deeper_checks()
+    {
+        await using HealthHarness harness = Scripted(static options => options.KnownTenantIds.Add("acme"));
+        harness.Script.Finds("E90", HealthSeverity.Warning, "Deeper finding");
+        harness.Policies.Allow(static resource => resource.Capability is null && resource.TenantId == "acme");
+
+        StudioScope tenantScope = harness.Scope with { TenantId = "acme" };
+        HealthReportRequest run = new(Deeper: HealthDeeperChecks.Run);
+
+        HealthReport refused = await harness.Health.GetReportAsync(tenantScope, run, Token);
+
+        refused.Refusal.Should().Be(HealthRefusal.None);
+        refused.DeeperChecksExist.Should().BeTrue();
+        refused.DeeperChecksAllowed.Should().BeFalse();
+        refused.DeeperChecksRefused.Should().Contain("as a whole");
+        refused.DeeperMeasuredAt.Should().BeNull("nothing was started, and nothing was cached");
+        harness.Script.Runs.Should().NotContainKey("E90", "the request alone never starts a tier-2 sweep");
+
+        // A visitor through the gate runs it; the tenant visitor then sees that run's time, and none of its findings.
+        harness.Policies.Allow(static _ => true);
+        await harness.Health.GetReportAsync(harness.Scope, run, Token);
+        harness.Script.Runs["E90"].Should().Be(1);
+
+        harness.Policies.Allow(static resource => resource.Capability is null && resource.TenantId == "acme");
+        HealthReport later = await harness.Health.GetReportAsync(tenantScope, run, Token);
+
+        harness.Script.Runs["E90"].Should().Be(1, "asking again does not start another");
+        later.DeeperMeasuredAt.Should().NotBeNull("a recent run is shown");
+        later.Findings.Select(static x => x.Code).Should().NotContain("E90", "E90's findings are behind the database-wide gate");
+        later.WithheldCount.Should().Be(refused.WithheldCount + 1, "E90's finding is counted as withheld, not shown");
+    }
+
+    /// <summary>H1-fix item 1, the admitting side: through the database-wide gate, "Run" runs the tier-2 checks.</summary>
+    [Fact]
+    public async Task A_visitor_through_the_database_gate_starts_the_deeper_checks()
+    {
+        await using HealthHarness harness = Scripted();
+        harness.Script.Finds("E90", HealthSeverity.Warning, "Deeper finding");
+
+        HealthReport cached = await harness.Health.GetReportAsync(harness.Scope, HealthReportRequest.Regular, Token);
+
+        cached.DeeperChecksAllowed.Should().BeTrue();
+        cached.DeeperChecksRefused.Should().BeNull();
+        harness.Script.Runs.Should().NotContainKey("E90", "a regular report never runs tier 2, whoever reads it");
+
+        HealthReport run = await harness.Health.GetReportAsync(harness.Scope, new HealthReportRequest(Deeper: HealthDeeperChecks.Run), Token);
+
+        harness.Script.Runs["E90"].Should().Be(1);
+        run.DeeperMeasuredAt.Should().Be(harness.Clock.GetUtcNow());
+        run.Findings.Select(static x => x.Code).Should().Contain("E90");
+    }
+
+    /// <summary>
+    /// H1-fix item 5, at the report: "Postgres said:" labels Postgres' words and nothing else, and an exception
+    /// message the studio did not write is not on the page at all.
+    /// </summary>
+    [Fact]
+    public async Task Only_Postgres_words_are_labelled_as_Postgres_and_other_messages_stay_in_the_log()
+    {
+        await using HealthHarness harness = HealthHarness.Create();
+        harness.Script.Throws("K90", new InvalidOperationException("table acme.secret_orders is odd"));
+        harness.Script.Throws("K91", new PostgresException("relation \"acme.mt_doc_x\" does not exist", "ERROR", "ERROR", PostgresErrorCodes.UndefinedTable));
+
+        HealthReport report = await harness.Health.GetReportAsync(harness.Scope, HealthReportRequest.Regular, Token);
+
+        report.Checks.Single(static x => x.Code == "K90").Problem.Should()
+            .Contain("InvalidOperationException").And.Contain("event 9222").And.NotContain("Postgres").And.NotContain("acme");
+
+        report.Checks.Single(static x => x.Code == "K91").Problem.Should().Contain("Postgres said",
+            "masked for this visitor, or withheld when the schema list cannot be read - either way, labelled as Postgres'");
+    }
+
+    /// <summary>
+    /// H1-fix item 5: a connection error's own words (Npgsql's, the socket's) name the database's address, so a
+    /// visitor short of the database-wide gate is told the check could not connect and no more.
+    /// </summary>
+    [Fact]
+    public async Task A_connection_errors_words_are_shown_only_through_the_database_wide_gate()
+    {
+        await using HealthHarness harness = HealthHarness.Create(studio: static options => options.KnownTenantIds.Add("acme"), policies: true);
+        harness.Script.Gather["K90"] = static async (context, token) =>
+        {
+            await context.Sql.ScalarAsync<int>(new HealthQuery("select 1"), token);
+            return new ScriptedFacts("K90", [], null);
+        };
+        harness.Policies.Allow(static resource => resource.Capability is null && resource.TenantId == "acme");
+
+        HealthReport tenant = await harness.Health.GetReportAsync(harness.Scope with { TenantId = "acme" }, HealthReportRequest.Regular, Token);
+
+        string? shortOfGate = tenant.Checks.Single(static x => x.Code == "K90").Problem;
+        shortOfGate.Should().Contain("could not connect").And.Contain("connection error said is withheld").And.Contain("as a whole")
+            .And.NotContain("127.0.0.1").And.NotContain("Postgres said");
+
+        harness.Policies.Allow(static _ => true);
+        HealthReport whole = await harness.Health.GetReportAsync(harness.Scope, HealthReportRequest.Regular, Token);
+
+        whole.Checks.Single(static x => x.Code == "K90").Problem.Should().Contain("The connection error said: ")
+            .And.NotContain("Postgres said", "Npgsql's words are not Postgres'");
     }
 
     /// <summary>Review item 4: two keys whose anchors read alike still get an element id each.</summary>

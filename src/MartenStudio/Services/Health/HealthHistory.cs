@@ -3,17 +3,38 @@ using System.Globalization;
 namespace MartenStudio.Services.Health;
 
 /// <summary>One number a check contributes to a sweep's sample.</summary>
+/// <remarks>
+/// <para>
+/// <b>A series is read at or below its writer's gate.</b> The history is the one place a number crosses from
+/// one check to another - a rate one check measures becomes another's evidence - so it is also the one place a
+/// number could cross a gate: a session count by role that an <see cref="HealthGate.Activity" /> check samples
+/// must not become the evidence of a check every visitor sees. So every part carries the gate of the check that
+/// wrote it (the sweep stamps it: <see cref="Gate" /> is raised to the writer's gate and never lowered), and an
+/// evaluator is handed only the series written at or below its own check's gate
+/// (<see cref="HealthHistoryView.VisibleAt" />). A check may name a stricter gate for one part than its own -
+/// a count at <see cref="HealthGate.None" /> beside a per-role breakdown at <see cref="HealthGate.Activity" /> -
+/// and never a looser one.
+/// </para>
+/// <para>
+/// Two checks writing one series in the same sweep is a bug, and fails the second.
+/// </para>
+/// </remarks>
 /// <param name="Series">
 /// The series it belongs to - <c>daemon.highest-sequence</c>, <c>daemon.shard-position:OrderSummary:All</c>.
-/// Lower case, the area first, a qualifier after a colon. Any check may read any series, which is how a
-/// rate one check measures becomes another's evidence; two checks writing one series in the same sweep is
-/// a bug, and fails the second.
+/// Lower case, the area first, a qualifier after a colon.
 /// </param>
 /// <param name="Value">
 /// The value. A <see cref="double" /> holds every counter and sequence Postgres hands out exactly up to
 /// 2^53, which is well past anything a sample will see.
 /// </param>
-internal sealed record HealthSamplePart(string Series, double Value);
+internal sealed record HealthSamplePart(string Series, double Value)
+{
+    /// <summary>
+    /// Who may read this part through the history: the stricter of what the check says here and the check's own
+    /// gate, which the sweep stamps.
+    /// </summary>
+    public HealthGate Gate { get; init; } = HealthGate.None;
+}
 
 /// <summary>What one sweep recorded: when, and a bag of numbers keyed by series.</summary>
 /// <remarks>
@@ -22,7 +43,20 @@ internal sealed record HealthSamplePart(string Series, double Value);
 /// </remarks>
 /// <param name="At">When the sweep read the facts.</param>
 /// <param name="Values">Every check's parts, by series.</param>
-internal sealed record HealthSample(DateTimeOffset At, IReadOnlyDictionary<string, double> Values);
+internal sealed record HealthSample(DateTimeOffset At, IReadOnlyDictionary<string, double> Values)
+{
+    private static readonly IReadOnlyDictionary<string, HealthGate> NoGates = new Dictionary<string, HealthGate>();
+
+    /// <summary>
+    /// The gate each series was written at (<see cref="HealthSamplePart.Gate" />). A series with no entry is read
+    /// as <see cref="HealthGate.Activity" />: a number whose writer is unknown is shown to nobody short of the
+    /// strictest gate.
+    /// </summary>
+    public IReadOnlyDictionary<string, HealthGate> Gates { get; init; } = NoGates;
+
+    /// <summary>The gate <paramref name="series" /> was written at.</summary>
+    public HealthGate GateOf(string series) => Gates.TryGetValue(series, out HealthGate gate) ? gate : HealthGate.Activity;
+}
 
 /// <summary>One series over the samples that have it, oldest first.</summary>
 /// <param name="Series">The series.</param>
@@ -61,6 +95,43 @@ internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, Da
 
     /// <summary>When watching began, or <see langword="null" /> before the first sweep.</summary>
     public DateTimeOffset? Since => WatchingSince ?? (Samples.Count == 0 ? null : Samples[0].At);
+
+    /// <summary>
+    /// The history as a check at <paramref name="gate" /> may read it: only the series written at or below that
+    /// gate, and only the samples left with any number in them. What the sweeper hands each evaluator.
+    /// </summary>
+    public HealthHistoryView VisibleAt(HealthGate gate)
+    {
+        if (gate >= HealthGate.Activity)
+        {
+            return this;
+        }
+
+        List<HealthSample> visible = [];
+
+        foreach (HealthSample sample in Samples)
+        {
+            Dictionary<string, double> values = new(StringComparer.Ordinal);
+            Dictionary<string, HealthGate> gates = new(StringComparer.Ordinal);
+
+            foreach ((string series, double value) in sample.Values)
+            {
+                HealthGate written = sample.GateOf(series);
+                if (written <= gate)
+                {
+                    values[series] = value;
+                    gates[series] = written;
+                }
+            }
+
+            if (values.Count > 0)
+            {
+                visible.Add(new HealthSample(sample.At, values) { Gates = gates });
+            }
+        }
+
+        return new HealthHistoryView(visible, Since);
+    }
 
     /// <summary>
     /// One series over every sample that has it. A sample from a sweep that did not run the check simply has
@@ -123,9 +194,11 @@ internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, Da
 /// sample is too.
 /// </para>
 /// <para>
-/// <b>Regular sweeps only.</b> A deeper or statement sweep adds nothing here: a number only a gated tier-3
-/// sweep could read must not become readable to an ungated evaluator through <see cref="HealthEvaluation.History" />,
-/// which would be a channel across the gates. And a sample is kept only if it is newer than the newest one
+/// <b>Regular sweeps only, and read per gate.</b> A deeper or statement sweep adds nothing here: a number only a
+/// gated tier-3 sweep could read must not become readable to an ungated evaluator through
+/// <see cref="HealthEvaluation.History" />, which would be a channel across the gates. Within a regular sweep the
+/// same holds check by check: every series carries its writer's gate, and an evaluator reads only the series at
+/// or below its own (<see cref="HealthSamplePart" />). And a sample is kept only if it is newer than the newest one
 /// already held and at least <c>minimumSpacing</c> after it - the sweeper passes half of
 /// <c>EffectiveHealthInterval</c> - so a page and the opt-in health check sweeping the same database do not
 /// fill the ring twice as fast and halve the hour it covers. A sample with no numbers in it marks only when

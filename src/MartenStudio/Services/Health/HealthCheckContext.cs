@@ -294,7 +294,7 @@ internal sealed class HealthSqlRunner
     public IReadOnlyList<HealthStatement> Statements => statements;
 
     /// <summary>Runs <paramref name="query" /> and maps every row.</summary>
-    /// <exception cref="InvalidOperationException">It returned more than <see cref="MaxRows" /> rows.</exception>
+    /// <exception cref="HealthSweepRuleException">It returned more than <see cref="MaxRows" /> rows.</exception>
     public async Task<IReadOnlyList<T>> QueryAsync<T>(
         HealthQuery query,
         Func<NpgsqlDataReader, T> map,
@@ -332,8 +332,8 @@ internal sealed class HealthSqlRunner
                             {
                                 if (rows.Count == MaxRows)
                                 {
-                                    throw new InvalidOperationException(
-                                        $"A health statement returned more than {MaxRows:N0} rows; a check reads a bounded answer.");
+                                    string bounded = $"A health statement returned more than {MaxRows:N0} rows; a check reads a bounded answer.";
+                                    throw new HealthSweepRuleException(bounded, bounded);
                                 }
 
                                 rows.Add(map(reader));

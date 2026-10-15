@@ -21,7 +21,10 @@ internal enum HealthDeeperChecks
     /// <summary>Only if one ran recently and is still cached - never start one.</summary>
     IfCached,
 
-    /// <summary>Run one now (or take the one already running): what "Run deeper checks" asks for.</summary>
+    /// <summary>
+    /// Run one now (or take the one already running): what "Run deeper checks" asks for. Honoured only for a visitor
+    /// through the tier's gate; anyone else is answered as <see cref="IfCached" />.
+    /// </summary>
     Run,
 }
 
@@ -45,7 +48,7 @@ internal sealed record HealthReportRequest(
 /// Whether this host can use the remedy as written - <see langword="false" /> when it needs a feature this
 /// host's Marten does not have.
 /// </param>
-/// <param name="HostRuns">What this host runs, for a remedy it cannot use yet ("Marten 9.31.0").</param>
+/// <param name="HostRuns">What this host runs, for a remedy it cannot use yet ("Marten 9.39.0").</param>
 internal sealed record HealthReportFinding(
     HealthFinding Finding,
     IReadOnlyList<HealthEvidence> Evidence,
@@ -76,8 +79,9 @@ internal sealed record HealthReportFinding(
 /// <param name="FindingCount">How many findings this visitor is shown.</param>
 /// <param name="Note">What its evaluator said beside "no finding", or why it did not apply.</param>
 /// <param name="Problem">
-/// Why it did not check, in the studio's words, with Postgres' own words appended only once every withheld
-/// schema's name is masked out of them for this visitor (D27).
+/// Why it did not check, in the studio's words - then, each under its own label, Postgres' own words once every
+/// withheld schema's name is masked out of them for this visitor (D27), and a connection error's words for a
+/// visitor through the database-wide gate. No other exception's message is shown.
 /// </param>
 /// <param name="SqlState">The SQLSTATE, when Postgres said something.</param>
 /// <param name="DocsUrl">The check's docs anchor.</param>
@@ -148,6 +152,18 @@ internal sealed record HealthReport
 
     /// <summary>Whether any tier-2 check exists in this version of the studio.</summary>
     public bool DeeperChecksExist { get; init; }
+
+    /// <summary>
+    /// Whether this visitor may start the tier-2 checks. They read a bounded slice of the data in every table they
+    /// check, which is a database-wide act, so it takes the store policy for the database as a whole
+    /// (<see cref="HealthGate.Database" />) - decided in the service, whatever the page's button says.
+    /// </summary>
+    public bool DeeperChecksAllowed { get; init; }
+
+    /// <summary>
+    /// What starting the tier-2 checks would take, naming the policy, when they exist and this visitor may not.
+    /// </summary>
+    public string? DeeperChecksRefused { get; init; }
 
     /// <summary>Whether any tier-3 check exists in this version of the studio.</summary>
     public bool StatementChecksExist { get; init; }

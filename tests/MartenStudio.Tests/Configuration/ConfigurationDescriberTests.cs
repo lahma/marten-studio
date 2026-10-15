@@ -71,6 +71,24 @@ public class ConfigurationDescriberTests
         Value(events.Daemon, "Async mode").Member.Should().Be("StoreOptions.Events.Daemon.AsyncMode");
     }
 
+    /// <summary>
+    /// H1-fix item 6: health checks K02 and K03 print these two switches to every visitor of the scope, so the
+    /// Events card shows them - Marten's defaults here, off and on.
+    /// </summary>
+    [Fact]
+    public void The_event_store_card_shows_the_two_switches_K02_and_K03_are_about()
+    {
+        EventStoreConfiguration events = ConfigurationDescriber.DescribeEvents(Options.Events);
+
+        ConfigurationValue extended = Value(events.Values, "Extended progression tracking");
+        extended.Member.Should().Be("StoreOptions.Events.EnableExtendedProgressionTracking");
+        extended.Value.Should().Be(Options.Events.EnableExtendedProgressionTracking ? "yes" : "no");
+
+        ConfigurationValue advanced = Value(events.Values, "Advanced async tracking");
+        advanced.Member.Should().Be("StoreOptions.Events.EnableAdvancedAsyncTracking");
+        advanced.Value.Should().Be(Options.Events.EnableAdvancedAsyncTracking ? "yes" : "no");
+    }
+
     [Fact]
     public void A_document_type_reports_its_identity_concurrency_tenancy_and_delete_style()
     {

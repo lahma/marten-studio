@@ -2,7 +2,8 @@
 
 These checks read the store's configuration and the host's environment, and nothing else: tier 0, no I/O.
 They are shown to anybody the store policy lets see the scope they selected, because they say nothing the
-Configuration page does not. Back to the [index](../health.md).
+Configuration page does not: its store card shows `AutoCreate`, its Events card both tracking switches, and
+its Runtime card the host's environment name. Back to the [index](../health.md).
 
 ## K01 AutoCreate in Production
 
@@ -38,17 +39,37 @@ Marten's apply lock, at a moment you chose and can review with `db-patch`, rathe
 `opts.Events.EnableExtendedProgressionTracking` is off.
 
 With it off, the daemon writes each shard's position to `mt_event_progression` and nothing else. With it
-on, it also writes a heartbeat, the agent's status, a pause reason, the node it runs on and the failure
-columns on every shard state change. That is what lets the advisor tell a shard that is alive and idle from
-one that has stopped, use a projection's own lag thresholds, and say why a shard failed.
+on, it also writes - whenever a shard changes state - the shard's status, why it was paused, the node
+running it and, for a shard that failed, the kind of failure and the event it failed on. That is what the
+Projections screen shows in a shard's status column, and the only record of why a shard stopped that
+outlives the process that ran it.
 
-Marten leaves it off by default on purpose - turning it on changes what every deployment writes - and since
-Marten 9.31 the columns exist either way; the flag only decides whether they are written. A store with no
-async projection or subscription gets no finding.
+What it does not do, so that nothing here promises it (checked in Marten 9.39.0 and 9.50.2, JasperFx 2.74.0
+and 2.87.1):
+
+- It does not make anything write `warning_behind_threshold` or `critical_behind_threshold`. Marten creates
+  those two columns and neither writes nor reads them (marten#5173), so there are no per-projection lag
+  thresholds to read.
+- It does not make the `heartbeat` column a liveness signal. The heartbeat is written at state transitions
+  only; JasperFx writes it periodically only when `opts.Projections.ExtendedProgressionHeartbeatInterval` is
+  set (jasperfx#622), which its documentation calls a compatibility hatch rather than the recommended
+  shape - each beat costs a pooled connection and a transaction per database per node, and, it says,
+  nothing in JasperFx, Marten or CritterWatch reads the persisted heartbeat. The advisor does not use it to
+  tell an idle shard from a stopped one, and this check does not suggest the interval.
+
+Marten leaves the flag off by default on purpose - turning it on changes what every deployment writes - and
+since Marten 9.31 the columns exist either way; the flag only decides whether they are written, so turning
+it on migrates nothing. A store with no async projection or subscription gets no finding, and neither does
+one whose projections the studio could not read.
 
 ```csharp
 opts.Events.EnableExtendedProgressionTracking = true;
 ```
+
+**K02 fires on Marten's defaults, and on the sample host, by design.** A new store with an async projection
+and nothing else configured gets this Info, and so does `samples/MartenStudio.Sample`, which keeps Marten's
+defaults on purpose so that what the advisor says about it is what it says about a new host. It is an Info,
+not a Warning: nothing is wrong, and muting it in the browser is a reasonable answer.
 
 ## K03 Advanced async tracking
 

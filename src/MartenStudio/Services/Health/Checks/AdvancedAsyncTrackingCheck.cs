@@ -23,9 +23,12 @@ internal sealed class AdvancedAsyncTrackingCheck : HealthCheck<AsyncTrackingFact
     /// <inheritdoc />
     public override HealthVerdict Evaluate(AsyncTrackingFacts facts, HealthEvaluation evaluation)
     {
-        if (!facts.HasAsyncWork)
+        switch (facts.HasAsyncWork)
         {
-            return HealthVerdict.Quiet("The store registers no async projection or subscription, so no gap is ever skipped for one.");
+            case null:
+                return HealthVerdict.Quiet(AsyncTrackingFacts.UnreadableNote);
+            case false:
+                return HealthVerdict.Quiet("The store registers no async projection or subscription, so no gap is ever skipped for one.");
         }
 
         if (facts.Enabled)
