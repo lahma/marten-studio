@@ -49,6 +49,12 @@ internal sealed class DaemonControlState
     private readonly ConcurrentDictionary<string, StudioDaemonPause> pauses =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// The D01 Explain's shared read, per store and database, for a minute - kept here because this is the process's
+    /// one singleton of daemon facts, and a read every circuit shares is one.
+    /// </summary>
+    public HighWaterExplainCache Explains { get; } = new();
+
     /// <summary>The pause recorded for <paramref name="storeKey" />, or <see langword="null" />.</summary>
     public StudioDaemonPause? Find(string? storeKey) =>
         storeKey is { Length: > 0 } key && pauses.TryGetValue(key, out StudioDaemonPause? pause) ? pause : null;
@@ -73,4 +79,60 @@ internal sealed class DaemonControlState
 
     /// <summary>How many stores this process has paused. For a test, and for nothing else.</summary>
     internal int Count => pauses.Count;
+
+    /// <summary>The most start refusals remembered per process, newest kept.</summary>
+    internal const int MaxStartRefusals = 200;
+
+    private readonly ConcurrentDictionary<string, StudioStartRefusal> startRefusals = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Remembers that a start the studio asked for was refused, and why - which D05 shows beside the shard's state.
+    /// </summary>
+    /// <remarks>
+    /// Keyed by store, database and shard; the newest refusal of a shard replaces the last. Bounded at
+    /// <see cref="MaxStartRefusals" /> by dropping the oldest, so a page clicked all day cannot grow it.
+    /// </remarks>
+    public void RecordStartRefusal(StudioStartRefusal refusal)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+
+        startRefusals[RefusalKey(refusal.StoreKey, refusal.DatabaseId, refusal.ShardName)] = refusal;
+
+        while (startRefusals.Count > MaxStartRefusals
+               && startRefusals.OrderBy(static x => x.Value.RefusedAt).FirstOrDefault() is { Key: { } oldest })
+        {
+            startRefusals.TryRemove(oldest, out _);
+        }
+    }
+
+    /// <summary>Forgets a shard's refusal: it has since started.</summary>
+    public void ClearStartRefusal(string storeKey, string databaseId, string shardName) =>
+        startRefusals.TryRemove(RefusalKey(storeKey, databaseId, shardName), out _);
+
+    /// <summary>The refusals recorded for one store and database, by shard.</summary>
+    public IReadOnlyDictionary<string, StudioStartRefusal> StartRefusals(string storeKey, string databaseId) =>
+        startRefusals.Values
+            .Where(x => string.Equals(x.StoreKey, storeKey, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(x.DatabaseId, databaseId, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(static x => x.ShardName, StringComparer.OrdinalIgnoreCase);
+
+    private static string RefusalKey(string storeKey, string databaseId, string shardName) =>
+        storeKey + "|" + databaseId + "|" + shardName;
 }
+
+/// <summary>One start the studio asked the daemon for, and the daemon did not do.</summary>
+/// <param name="StoreKey">The store.</param>
+/// <param name="DatabaseId">The database.</param>
+/// <param name="ShardName">The shard it was asked to start.</param>
+/// <param name="Reason">The classified reason (<c>ShardStartException.Reason</c>), or the studio's own (<c>Rebuilding</c>).</param>
+/// <param name="IsTransient">Whether a retry is expected to resolve it, when JasperFx says.</param>
+/// <param name="Message">What the visitor was told.</param>
+/// <param name="RefusedAt">When.</param>
+internal sealed record StudioStartRefusal(
+    string StoreKey,
+    string DatabaseId,
+    string ShardName,
+    string? Reason,
+    bool? IsTransient,
+    string Message,
+    DateTimeOffset RefusedAt);

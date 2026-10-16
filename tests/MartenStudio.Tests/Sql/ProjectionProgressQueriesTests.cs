@@ -49,7 +49,10 @@ public class ProjectionProgressQueriesTests
     /// <summary>The two rows Marten's own statement excludes, which this one excludes too.</summary>
     private static readonly string[] BookkeepingRows = ["HighWaterAllocationFence", "HighWaterStuckGap"];
 
-    /// <summary>A table without the columns is two columns, whatever the store's flag says.</summary>
+    /// <summary>
+    /// A table without the extended columns is name, position, the server's read time and <c>last_updated</c>, whatever
+    /// the store's flag says - the last because the projections screen's liveness column renders it (H2, F2).
+    /// </summary>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -57,10 +60,10 @@ public class ProjectionProgressQueriesTests
     {
         using NpgsqlCommand command = ProjectionProgressQueries.BuildProgressionRows("studio_events", Minimal, extended);
 
-        command.CommandText.Should().StartWith("select \"name\", \"last_seq_id\"\n");
+        command.CommandText.Should().StartWith("select \"name\", \"last_seq_id\", transaction_timestamp() as \"read_at\", \"last_updated\"\n");
         command.CommandText.Should().Contain("from \"studio_events\".\"mt_event_progression\"");
         command.CommandText.Should().NotContain("select *");
-        command.CommandText.Should().NotContain("last_updated", "nothing renders it, so nothing reads it");
+        command.CommandText.Should().Contain("\"last_updated\"", "the projections screen's liveness column renders it");
         command.CommandText.Should().NotContain("agent_status");
     }
 
@@ -82,7 +85,7 @@ public class ProjectionProgressQueriesTests
         using NpgsqlCommand on = ProjectionProgressQueries.BuildProgressionRows("studio_events", Extended, true);
 
         on.CommandText.Should().StartWith(
-            "select \"name\", \"last_seq_id\", \"heartbeat\", \"agent_status\", \"pause_reason\", "
+            "select \"name\", \"last_seq_id\", transaction_timestamp() as \"read_at\", \"last_updated\", \"heartbeat\", \"agent_status\", \"pause_reason\", "
             + "\"running_on_node\", \"failure_category\", \"failure_event_sequence\", \"failure_event_type\", "
             + "\"failure_event_tenant_id\"\n");
 
@@ -93,7 +96,7 @@ public class ProjectionProgressQueriesTests
         // The same table, with the flag off: the columns are there and are not asked for.
         using NpgsqlCommand off = ProjectionProgressQueries.BuildProgressionRows("studio_events", Extended, false);
 
-        off.CommandText.Should().StartWith("select \"name\", \"last_seq_id\"\n");
+        off.CommandText.Should().StartWith("select \"name\", \"last_seq_id\", transaction_timestamp() as \"read_at\", \"last_updated\"\n");
         off.CommandText.Should().NotContain("heartbeat").And.NotContain("pause_reason")
             .And.NotContain("failure_category");
 
@@ -123,7 +126,7 @@ public class ProjectionProgressQueriesTests
             .BuildProgressionRows("studio_events", halfMigrated, true);
 
         command.CommandText.Should().StartWith(
-            "select \"name\", \"last_seq_id\", \"heartbeat\", \"agent_status\"\n");
+            "select \"name\", \"last_seq_id\", transaction_timestamp() as \"read_at\", \"last_updated\", \"heartbeat\", \"agent_status\"\n");
         command.CommandText.Should().NotContain("pause_reason");
     }
 

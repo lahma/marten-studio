@@ -37,6 +37,13 @@
             <span class="ms-kv-key">Time allowed per shard</span>
             <span class="ms-kv-value ms-mono">@TimeoutText</span>
         </div>
+        @if (Estimate is { Length: > 0 })
+        {
+            <div class="ms-kv-row ms-rebuild-estimate">
+                <span class="ms-kv-key">How long it may take</span>
+                <span class="ms-kv-value">@Estimate</span>
+            </div>
+        }
     </div>
 
     <p class="ms-muted ms-rebuild-timeout-note">
@@ -44,6 +51,28 @@
         @TimeoutText stops with them still empty. Raise
         <code>MartenStudioOptions.RebuildShardTimeout</code> if this store needs longer.
     </p>
+
+    @if (Warnings.Count > 0)
+    {
+        @* The health advisor's D08: this projection is being rebuilt somewhere, or a rebuild stopped half-way. From its
+           last sweep, never a new one; absent when there is no such finding. *@
+        <div class="ms-alert ms-alert-warning ms-rebuild-health-warning" role="note">
+            <div class="ms-alert-content">
+                @foreach (string warning in Warnings)
+                {
+                    <p>@warning</p>
+                }
+            </div>
+        </div>
+    }
+
+    @if (DrainNote is { Length: > 0 })
+    {
+        @* The rebuild stops the projection's running shards before it tears their tables down, and a stop is
+           bounded by Projections.StopAndDrainTimeout - the dialog says what that means rather than implying a clean
+           hand-over. *@
+        <p class="ms-muted ms-rebuild-drain-note">The rebuild stops this projection's running shards first. @DrainNote</p>
+    }
 
     @if (Tenant is { Length: > 0 })
     {
@@ -110,6 +139,24 @@
     /// </remarks>
     [Parameter]
     public TimeSpan ShardTimeout { get; set; } = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// How long the replay may take: the events to replay over the throughput the health advisor measured for this
+    /// projection - or its honest "no estimate yet" before the advisor has seen it process anything.
+    /// </summary>
+    [Parameter]
+    public string? Estimate { get; set; }
+
+    /// <summary>What stopping the projection's shards does, in the store's own <c>StopAndDrainTimeout</c>.</summary>
+    [Parameter]
+    public string? DrainNote { get; set; }
+
+    /// <summary>
+    /// The health advisor's findings about rebuilding this projection (D08), by title - from its cache, so empty when no
+    /// recent sweep has one.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<string> Warnings { get; set; } = [];
 
     /// <summary>Raised when the name has been typed and the button pressed.</summary>
     [Parameter]

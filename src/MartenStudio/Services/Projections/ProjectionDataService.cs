@@ -7,6 +7,8 @@ using Marten.Schema;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Database;
+using MartenStudio.Services.Health;
 using MartenStudio.Services.Live;
 
 using Microsoft.Extensions.Logging;
@@ -51,7 +53,7 @@ namespace MartenStudio.Services.Projections;
 /// <c>store.BuildProjectionDaemonAsync()</c> (AGENTS.md hard rule 11).
 /// </para>
 /// </remarks>
-internal sealed class ProjectionDataService : IProjectionDataService
+internal sealed partial class ProjectionDataService : IProjectionDataService
 {
     /// <summary>
     /// The progression row Marten keeps the store-global high-water mark in, which is not a shard and
@@ -87,6 +89,8 @@ internal sealed class ProjectionDataService : IProjectionDataService
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<ProjectionDataService> logger;
     private readonly DatabaseReachAuthorization reach;
+    private readonly DatabaseAccess databaseAccess;
+    private readonly HealthHistory healthHistory;
 
     public ProjectionDataService(
         StudioScopeResolver resolver,
@@ -101,8 +105,12 @@ internal sealed class ProjectionDataService : IProjectionDataService
         ColumnCatalog catalog,
         IOptions<MartenStudioOptions> options,
         StudioLogThrottle throttle,
-        ILogger<ProjectionDataService> logger)
+        ILogger<ProjectionDataService> logger,
+        DatabaseAccess databaseAccess,
+        HealthHistory healthHistory)
     {
+        this.databaseAccess = databaseAccess;
+        this.healthHistory = healthHistory;
         this.resolver = resolver;
         this.authorization = authorization;
         this.capabilities = capabilities;
@@ -139,8 +147,16 @@ internal sealed class ProjectionDataService : IProjectionDataService
 
         IReadOnlyList<ShardProgress> progress = MergeProgress(resolved, stored);
 
+        (IReadOnlyDictionary<string, ShardTrend> trends, HealthHistoryView history) =
+            await TrendsAsync(resolved, daemon, progress, cancellationToken).ConfigureAwait(false);
+
         return new ProjectionsView(
-            stored.Projections, progress, daemon, stored.HighWaterMark, stored.ReadAt, stored.HasEventStore);
+            stored.Projections, progress, daemon, stored.HighWaterMark, stored.ReadAt, stored.HasEventStore,
+            resolved.Database.Id.Identity)
+        {
+            Trends = trends,
+            HealthHistory = history,
+        };
     }
 
     /// <inheritdoc />
@@ -270,7 +286,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
 
         return AgentControlAsync(
             scope, "StartAgent", shardName,
-            (daemon, token) => daemon.StartAgentAsync(shardName, token),
+            (daemon, resolved, token) => StartAgentCheckedAsync(daemon, resolved, shardName, token),
             cancellationToken);
     }
 
@@ -282,7 +298,11 @@ internal sealed class ProjectionDataService : IProjectionDataService
         return AgentControlAsync(
             scope, "StopAgent", shardName,
             // StopAgentAsync takes the exception that stopped it rather than a token: null means "asked to".
-            (daemon, _) => daemon.StopAgentAsync(shardName, null),
+            async (daemon, _, _) =>
+            {
+                await daemon.StopAgentAsync(shardName, null).ConfigureAwait(false);
+                return null;
+            },
             cancellationToken);
     }
 
@@ -358,6 +378,13 @@ internal sealed class ProjectionDataService : IProjectionDataService
 
             ISubscriptionSource source = FindSource(resolved.Store, projectionName)
                 ?? throw new KeyNotFoundException($"This store has no projection named '{projectionName}'.");
+
+            // "Already rebuilding" is a state: the daemon here is rebuilding it and the studio is not (JasperFx 2.86+).
+            if (RebuildRefusal(daemon, resolved, source) is { } refusal)
+            {
+                audit.Record(action, source.Name, false, refusal, StudioCapability.RebuildProjections, scope);
+                return OperationStart.Refused("Rebuild", source.Name, refusal);
+            }
 
             string user = await authorization.UserNameAsync().ConfigureAwait(false);
             string storeKey = resolved.Registration.Key;
@@ -573,14 +600,22 @@ internal sealed class ProjectionDataService : IProjectionDataService
             ? rows.Rows
             : rows.Rows.Where(x => BelongsToTenant(x.Name, tenantId));
 
-        List<ShardState> states = [.. kept.Select(ToShardState)];
+        List<ProgressionRow> keptRows = [.. kept];
+        List<ShardState> states = [.. keptRows.Select(ToShardState)];
+
+        Dictionary<string, ProgressionRow> byName = new(StringComparer.OrdinalIgnoreCase);
+        foreach (ProgressionRow row in keptRows)
+        {
+            byName.TryAdd(row.Name, row);
+        }
 
         return new StoredProjections(
             projections,
             states,
             highWaterMark ?? 0,
             highWaterMark is not null || rows.TableExists,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            byName);
     }
 
     /// <summary>The event store's schema, which is where all three of these objects live.</summary>
@@ -756,7 +791,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
             foreach (string shardName in projection.ShardNames)
             {
                 rendered.Add(shardName);
-                progress.Add(Build(shardName, projection.Name, byShard.GetValueOrDefault(shardName), live.GetValueOrDefault(shardName), stored.HighWaterMark, isRegistered: true));
+                progress.Add(Build(shardName, projection.Name, byShard.GetValueOrDefault(shardName), live.GetValueOrDefault(shardName), stored.HighWaterMark, isRegistered: true, stored.Rows?.GetValueOrDefault(shardName)));
             }
         }
 
@@ -768,7 +803,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
         {
             if (!rendered.Contains(orphan.Key))
             {
-                progress.Add(Build(orphan.Key, ProjectionNameOf(orphan.Key), orphan.Value, live.GetValueOrDefault(orphan.Key), stored.HighWaterMark, isRegistered: false));
+                progress.Add(Build(orphan.Key, ProjectionNameOf(orphan.Key), orphan.Value, live.GetValueOrDefault(orphan.Key), stored.HighWaterMark, isRegistered: false, stored.Rows?.GetValueOrDefault(orphan.Key)));
             }
         }
 
@@ -787,7 +822,8 @@ internal sealed class ProjectionDataService : IProjectionDataService
         ShardState? stored,
         ShardState? live,
         long highWaterMark,
-        bool isRegistered)
+        bool isRegistered,
+        ProgressionRow? row)
     {
         // The tracker is ahead of the database by design: it publishes as the shard advances, and the
         // progression row is written in the same transaction as the projected documents. Take whichever
@@ -808,7 +844,11 @@ internal sealed class ProjectionDataService : IProjectionDataService
             Blank(state?.TenantId),
             stored is not null,
             useLive && live is not null,
-            isRegistered);
+            isRegistered,
+            row?.LastUpdated,
+            row is { LastUpdated: { } updated, ReadAt: { } readAt } ? readAt - updated : null,
+            row?.WarningBehindThreshold,
+            row?.CriticalBehindThreshold);
     }
 
     private async Task<DaemonStatus> DescribeDaemonAsync(ResolvedScope resolved, CancellationToken cancellationToken)
@@ -838,7 +878,8 @@ internal sealed class ProjectionDataService : IProjectionDataService
                 PausedByStudio: null,
                 LeadershipPollingMilliseconds: pollingMilliseconds,
                 CoordinatedDatabases: databases,
-                AgentPauseMilliseconds: agentPauseMilliseconds);
+                AgentPauseMilliseconds: agentPauseMilliseconds,
+                StopAndDrainMilliseconds: StopAndDrainMillisecondsOf(resolved.Store));
         }
 
         // Several IProjectionDaemon members are default interface methods in JasperFx whose default
@@ -871,7 +912,9 @@ internal sealed class ProjectionDataService : IProjectionDataService
             pause,
             pollingMilliseconds,
             databases,
-            agentPauseMilliseconds);
+            agentPauseMilliseconds,
+            RebuildingProjectionsOf(daemon, resolved.Store),
+            StopAndDrainMillisecondsOf(resolved.Store));
     }
 
     /// <summary>
@@ -1079,7 +1122,7 @@ internal sealed class ProjectionDataService : IProjectionDataService
         StudioScope scope,
         string action,
         string target,
-        Func<IProjectionDaemon, CancellationToken, Task> operation,
+        Func<IProjectionDaemon, ResolvedScope, CancellationToken, Task<string?>> operation,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
@@ -1129,7 +1172,16 @@ internal sealed class ProjectionDataService : IProjectionDataService
             string user = await authorization.UserNameAsync().ConfigureAwait(false);
             logger.DaemonControlRequested(user, action, target, resolved.Registration.Key, resolved.Database.Id.Identity);
 
-            await operation(daemon, cancellationToken).ConfigureAwait(false);
+            // A control the daemon did not do is refused, not done: audited as such, with the daemon's reason, and shown
+            // as a hint rather than a success toast. From JasperFx 2.86 a start during a rebuild returned quietly and was
+            // audited here as a success - StartAgentCheckedAsync is what reads whether anything started.
+            if (await operation(daemon, resolved, cancellationToken).ConfigureAwait(false) is { } refusal)
+            {
+                audit.Record(action, target, false, refusal, capability, scope);
+                cache.InvalidatePrefix(CachePrefix(scope));
+
+                return DaemonControlResult.Refused(refusal);
+            }
 
             audit.Record(action, target, true, null, capability, scope);
             cache.InvalidatePrefix(CachePrefix(scope));
@@ -1501,31 +1553,18 @@ internal sealed class ProjectionDataService : IProjectionDataService
 
     /// <summary>
     /// The tables a rebuild would rewrite, by matching the projection's published types against the
-    /// document types this store knows.
+    /// document types this store knows - leaving out every type <c>IsDocumentTypeVisible</c> hides, whose
+    /// table name is never shown.
     /// </summary>
-    private static List<string> TablesFor(IDocumentStore store, ISubscriptionSource source)
+    private List<string> TablesFor(IDocumentStore store, ISubscriptionSource source)
     {
-        HashSet<Type> published = [];
-        if (source is IProjectionSource<IDocumentOperations, IQuerySession> projection)
-        {
-            try
-            {
-                foreach (Type type in projection.PublishedTypes())
-                {
-                    published.Add(type);
-                }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                // A projection that will not describe itself still rebuilds; the dialog just cannot list
-                // its tables, and says so by listing none.
-            }
-        }
+        HashSet<Type> published = [.. PublishedTypesOf(source)];
+        Func<Type, bool>? isVisible = options.Value.IsDocumentTypeVisible;
 
         List<string> tables = [];
         foreach (IDocumentType documentType in store.Options.AllKnownDocumentTypes())
         {
-            if (published.Contains(documentType.DocumentType))
+            if (published.Contains(documentType.DocumentType) && isVisible?.Invoke(documentType.DocumentType) != false)
             {
                 tables.Add(documentType.TableName.QualifiedName);
             }
@@ -1533,6 +1572,30 @@ internal sealed class ProjectionDataService : IProjectionDataService
 
         tables.Sort(StringComparer.OrdinalIgnoreCase);
         return tables;
+    }
+
+    /// <summary>
+    /// The document types a projection writes (<c>IProjectionSource.PublishedTypes()</c>): none for a subscription,
+    /// and none for a projection that will not describe itself - which still rebuilds; the dialog just cannot list
+    /// its tables, and says so by listing none.
+    /// </summary>
+    internal static IReadOnlyList<Type> PublishedTypesOf(ISubscriptionSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (source is not IProjectionSource<IDocumentOperations, IQuerySession> projection)
+        {
+            return [];
+        }
+
+        try
+        {
+            return [.. projection.PublishedTypes().Distinct()];
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return [];
+        }
     }
 
     private static string ModeOf(IDocumentStore store)
@@ -1597,12 +1660,17 @@ internal sealed class ProjectionDataService : IProjectionDataService
     /// one to find out (hard rule 14).
     /// </param>
     /// <param name="ReadAt">When this was read.</param>
+    /// <param name="Rows">
+    /// The rows behind <paramref name="Progress" />, by name, for what a <c>ShardState</c> cannot carry at the floor:
+    /// <c>last_updated</c>, the per-row thresholds and the server's read time.
+    /// </param>
     private sealed record StoredProjections(
         IReadOnlyList<ProjectionInfo> Projections,
         IReadOnlyList<ShardState> Progress,
         long HighWaterMark,
         bool HasEventStore,
-        DateTimeOffset ReadAt);
+        DateTimeOffset ReadAt,
+        IReadOnlyDictionary<string, ProgressionRow>? Rows = null);
 
     /// <summary>The lease handed out when there is no tracker to watch.</summary>
     private sealed class NullLease : IDisposable

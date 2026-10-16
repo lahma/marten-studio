@@ -172,6 +172,10 @@ public class CapabilityGatingMatrixTests
             // lookup of a running operation by its handle, which reads the tracker and touches nothing.
             "DescribeRebuildAsync", "FindOperation", "GetProjectionsAsync", "GetSummaryAsync",
             "RunningOperationsAsync", "SubscribeToLiveStateAsync",
+
+            // H2: D01's "Explain". ViewDatabaseActivity decides whether the sessions that could hold the mark are
+            // named, as the health report's evidence is - a redaction, never a refusal (see Reserved).
+            "ExplainHighWaterAsync",
         ],
         [typeof(ISchemaDataService)] =
         [

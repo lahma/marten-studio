@@ -10008,6 +10008,133 @@ a.ms-row-ref-key:hover {
 }
 
 /* ==========================================================================
+   HEALTH-2. Daemon and high water on the projections screen
+
+   Appended after HEALTH-1 on purpose (D26), and re-declares nothing an
+   earlier section owns: every rule is new, for the D01/D02 banners, the D01
+   Explain, the lag cell's trend arrow and ETA, and the rebuilding badges.
+   Colours are the design tokens' danger / warning / success / muted, the same
+   ones the lag colours (--ms-lag-*) are built from.
+   ========================================================================== */
+
+.ms-health-banner {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-health-banner-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    margin: 0;
+    font-weight: var(--ms-font-weight-medium);
+    overflow-wrap: anywhere;
+}
+
+.ms-health-banner-code {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-health-banner-meta {
+    margin: var(--ms-space-xs) 0 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-health-banner-link {
+    margin-left: var(--ms-space-xs);
+}
+
+.ms-health-banner-actions {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-high-water-explanation {
+    margin-top: var(--ms-space-md);
+    padding-top: var(--ms-space-sm);
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-high-water-explanation-summary {
+    margin: 0 0 var(--ms-space-sm);
+}
+
+.ms-high-water-explanation-counts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--ms-space-xs) var(--ms-space-lg);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-high-water-explanation-counts > div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-high-water-explanation-counts dt {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-high-water-explanation-counts dd {
+    margin: 0;
+}
+
+.ms-high-water-statement {
+    max-width: 32ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ms-high-water-withheld,
+.ms-high-water-remedy {
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-shard-trend {
+    display: inline-block;
+    margin-left: var(--ms-space-xs);
+    font-family: var(--ms-font-family);
+    font-weight: var(--ms-font-weight-bold);
+}
+
+.ms-shard-trend-growing {
+    color: var(--ms-color-danger);
+}
+
+.ms-shard-trend-draining,
+.ms-shard-trend-caughtup {
+    color: var(--ms-color-success);
+}
+
+.ms-shard-trend-steady {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-shard-eta {
+    display: block;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+.ms-shard-rebuilding,
+.ms-projection-rebuilding {
+    margin-left: var(--ms-space-xs);
+    padding: 1px var(--ms-space-xs);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-info-bg);
+    color: var(--ms-color-info);
+}
+
+.ms-rebuild-drain-note {
+    font-size: var(--ms-font-size-sm);
+}
+
+/* ==========================================================================
    HEALTH-4. Tables and indexes on the Schema screen (F6)
 
    Appended after HEALTH-1 on purpose (D26), and after HEALTH-2 and HEALTH-3

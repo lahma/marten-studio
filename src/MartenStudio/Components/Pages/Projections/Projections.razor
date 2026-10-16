@@ -1,8 +1,11 @@
 @page "/marten/projections"
 @using System.Globalization
 @using MartenStudio.Services
+@using MartenStudio.Services.Health
+@using MartenStudio.Services.Health.Checks
 @using MartenStudio.Services.Live
 @using MartenStudio.Services.Projections
+@using Microsoft.Extensions.DependencyInjection
 @using Microsoft.Extensions.Options
 @implements IAsyncDisposable
 @inject IProjectionDataService ProjectionData
@@ -12,6 +15,8 @@
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject ToastService Toasts
 @inject IOptions<MartenStudioOptions> Options
+@inject IHealthService Health
+@inject IServiceProvider Services
 
 <PageTitle>Projections</PageTitle>
 
@@ -69,7 +74,7 @@
                 </p>
             </div>
         }
-        else if (view.NoDaemonAnywhere && view.Daemon.IsExternallyManaged)
+        else if (view.NoDaemonAnywhere && view.Daemon.IsExternallyManaged && !HasHealthBanner("D02"))
         {
             @* The same facts, about a store whose projections another system runs: worth saying, because
                there are events and nothing has advanced over them, and wrong to blame on a daemon this
@@ -84,7 +89,7 @@
                 </div>
             </div>
         }
-        else if (view.NoDaemonAnywhere)
+        else if (view.NoDaemonAnywhere && !HasHealthBanner("D02"))
         {
             <div class="ms-alert ms-alert-warning ms-no-daemon-banner" role="alert">
                 <div class="ms-alert-content">
@@ -98,6 +103,144 @@
                     </p>
                 </div>
             </div>
+        }
+
+        @* D01 and D02, from the health advisor's last regular sweep of this database - read from its cache on
+           every poll, never by starting a sweep (pg_locks is read at the health cadence, by the Health page and
+           the Overview). With no recent sweep there is nothing here, and nothing here claims the store is
+           healthy either: absence is "not checked", not "fine". *@
+        @foreach (HealthReportFinding finding in healthBanners)
+        {
+            bool critical = finding.Severity == HealthSeverity.Critical;
+
+            <section class="@("ms-alert ms-health-banner ms-health-banner-" + finding.Code.ToLowerInvariant() + (critical ? " ms-alert-error" : " ms-alert-warning"))"
+                     role="@(critical ? "alert" : "status")"
+                     aria-label="@("Health finding " + finding.Code)"
+                     @key="finding.MuteKey">
+                <div class="ms-alert-content">
+                    <p class="ms-health-banner-title">
+                        <span class="@HealthBannerChip(finding)">@finding.Severity</span>
+                        <code class="ms-health-banner-code">@finding.Code</code>
+                        @finding.Finding.Title
+                    </p>
+                    <p class="ms-muted ms-health-banner-meta">
+                        From the health advisor's check at @State.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
+                        <a class="ms-health-banner-link" href="@HealthLinks.ToFinding(Options.Value, State.ActiveScope, finding)">Why, and what to change</a>
+                    </p>
+
+                    @if (string.Equals(finding.Code, "D01", StringComparison.Ordinal))
+                    {
+                        <div class="ms-health-banner-actions">
+                            <button type="button"
+                                    class="ms-button ms-btn-sm ms-high-water-explain"
+                                    disabled="@explaining"
+                                    title="Asks the database, once, which open transactions could be holding the mark: Marten's own gap-liveness questions, plus prepared transactions."
+                                    @onclick="ExplainHighWaterAsync">
+                                @(explaining ? "Asking..." : "Explain")
+                            </button>
+                        </div>
+
+                        @if (explanation is { } explained)
+                        {
+                            <div class="ms-high-water-explanation" role="region" aria-label="What could be holding the high-water mark">
+                                <p class="ms-high-water-explanation-summary">@explained.Summary</p>
+
+                                @if (explained.Unavailable is null && explained.IsPinned)
+                                {
+                                    <dl class="ms-high-water-explanation-counts">
+                                        <div><dt>Open since before the pin</dt><dd class="ms-mono">@explained.OpenTransactions</dd></div>
+                                        <div><dt>Of them, mid-append on mt_events</dt><dd class="ms-mono">@explained.EventsWriteLockHolders</dd></div>
+                                        <div><dt>Of them, writing</dt><dd class="ms-mono">@explained.Writers</dd></div>
+                                        <div><dt>Ruled out, as Marten rules them out</dt><dd class="ms-mono">@explained.RuledOut</dd></div>
+                                        <div><dt>Prepared before the pin</dt><dd class="ms-mono">@explained.PreparedBeforePin of @explained.PreparedTransactions</dd></div>
+                                        <div><dt>Other roles' writers this role cannot date</dt><dd class="ms-mono">@explained.HiddenWriters</dd></div>
+                                        @if (explained.OldestOpenTransaction is { } oldest)
+                                        {
+                                            <div><dt>Oldest open transaction</dt><dd class="ms-mono">@DaemonCheckConfiguration.Format(oldest)</dd></div>
+                                        }
+                                    </dl>
+
+                                    @if (explained.DetailsShown && explained.Sessions.Count > 0)
+                                    {
+                                        <TableScroll Label="Sessions that could be holding the high-water mark">
+                                            <table class="ms-table ms-high-water-sessions">
+                                                <thead>
+                                                    <tr>
+                                                        <th scope="col">pid</th>
+                                                        <th scope="col">Role</th>
+                                                        <th scope="col">Application</th>
+                                                        <th scope="col">Client</th>
+                                                        <th scope="col">Transaction began</th>
+                                                        <th scope="col">State</th>
+                                                        <th scope="col">Holding the mark?</th>
+                                                        <th scope="col">Statement</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (HighWaterSuspect suspect in explained.Sessions)
+                                                    {
+                                                        <tr class="ms-table-row" @key="suspect.Pid">
+                                                            <td class="ms-table-cell ms-table-cell-mono">@suspect.Pid</td>
+                                                            <td class="ms-table-cell">@(suspect.User ?? "not visible")</td>
+                                                            <td class="ms-table-cell">@suspect.Application</td>
+                                                            <td class="ms-table-cell ms-table-cell-mono">@suspect.ClientAddress</td>
+                                                            <td class="ms-table-cell ms-table-cell-mono">@(suspect.TransactionStart is { } began ? State.FormatInSelectedTimeZone(began) : string.Empty)</td>
+                                                            <td class="ms-table-cell">@(suspect.State + (suspect.Wait is { } wait ? " (" + wait + ")" : string.Empty))</td>
+                                                            <td class="ms-table-cell">@SuspectVerdict(suspect)</td>
+                                                            <td class="ms-table-cell ms-table-cell-mono ms-high-water-statement" title="@suspect.Query">@suspect.Query</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </TableScroll>
+                                    }
+
+                                    @if (explained.DetailsShown && explained.Prepared.Count > 0)
+                                    {
+                                        <TableScroll Label="Prepared transactions in this database">
+                                            <table class="ms-table ms-high-water-prepared">
+                                                <thead>
+                                                    <tr>
+                                                        <th scope="col">Transaction</th>
+                                                        <th scope="col">Owner</th>
+                                                        <th scope="col">Prepared</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (PreparedTransactionInfo prepared in explained.Prepared)
+                                                    {
+                                                        <tr class="ms-table-row" @key="prepared.Gid">
+                                                            <td class="ms-table-cell ms-table-cell-mono">@prepared.Gid</td>
+                                                            <td class="ms-table-cell">@prepared.Owner</td>
+                                                            <td class="ms-table-cell ms-table-cell-mono">@State.FormatInSelectedTimeZone(prepared.Prepared)</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </TableScroll>
+                                    }
+
+                                    @if (!explained.DetailsShown && explained.DetailsWithheldReason is { Length: > 0 } withheld)
+                                    {
+                                        <p class="ms-muted ms-high-water-withheld">@withheld</p>
+                                    }
+
+                                    <p class="ms-muted ms-high-water-remedy">
+                                        End the transaction that holds it, or use <strong>Advance high water mark</strong> above:
+                                        it moves the mark to the latest committed event, and anything that commits inside the
+                                        gap afterwards is never projected.
+                                    </p>
+                                }
+
+                                @foreach (HealthStatement statement in explained.Statements)
+                                {
+                                    <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            </section>
         }
 
         <DaemonStatusCard IsHostedHere="view.Daemon.IsHostedHere"
@@ -248,7 +391,7 @@
                             <th scope="col">Progress</th>
                             <th scope="col">Lag</th>
                             <th scope="col">Status</th>
-                            <th scope="col">Last advanced</th>
+                            <th scope="col" title="When the shard last advanced, from its progression row's last_updated, in the database server's time">Last progress</th>
                             <th scope="col">Actions</th>
                         </tr>
                     </thead>
@@ -262,7 +405,9 @@
                                            SubscriptionType="@projection.SubscriptionType"
                                            Version="projection.Version"
                                            ImplementationType="@projection.ImplementationTypeName"
-                                           ShardCount="projection.ShardNames.Count">
+                                           ShardCount="projection.ShardNames.Count"
+                                           IsRebuilding="IsRebuilding(projection.Name)"
+                                           RebuildingBy="@RebuildingBy(projection.Name)">
                                 <Actions>
                                     @if (!Capabilities.ReadOnly && !ExternallyManaged)
                                     {
@@ -305,8 +450,19 @@
                                                           HighWater="shard.HighWater"
                                                           Severity="@shard.Severity.ToString().ToLowerInvariant()" />
                                     </td>
-                                    <td class="ms-table-cell ms-table-cell-mono ms-shard-lag ms-lag-@shard.Severity.ToString().ToLowerInvariant()">
+                                    <td class="ms-table-cell ms-table-cell-mono ms-shard-lag ms-lag-@shard.Severity.ToString().ToLowerInvariant()"
+                                        title="@LagTitle(shard)">
                                         @shard.Lag.ToString("N0", CultureInfo.InvariantCulture)
+                                        @if (TrendOf(shard) is { } trend && trend.Arrow.Length > 0)
+                                        {
+                                            <span class="@("ms-shard-trend ms-shard-trend-" + trend.Direction.ToString().ToLowerInvariant())"
+                                                  title="@trend.Describe()"
+                                                  aria-label="@trend.Describe()">@trend.Arrow</span>
+                                            @if (trend is { Direction: LagDirection.Draining, CaughtUpIn: { } eta })
+                                            {
+                                                <span class="ms-shard-eta" title="@trend.Describe()">~@DaemonCheckConfiguration.Format(eta)</span>
+                                            }
+                                        }
                                     </td>
                                     <td class="ms-table-cell ms-shard-status">
                                         <StateIndicator State="@(shard.AgentStatus ?? "Unknown")" />
@@ -325,8 +481,13 @@
                                             </span>
                                         }
                                     </td>
-                                    <td class="ms-table-cell ms-table-cell-mono ms-shard-last-advanced">
-                                        @(shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never")
+                                    <td class="ms-table-cell ms-table-cell-mono ms-shard-last-advanced"
+                                        title="@LastProgressTitle(shard)">
+                                        @LastProgressText(shard)
+                                        @if (IsRebuilding(shard.ProjectionName))
+                                        {
+                                            <span class="ms-badge ms-shard-rebuilding" title="@RebuildingBy(shard.ProjectionName)">rebuilding</span>
+                                        }
                                     </td>
                                     <td class="ms-table-cell ms-table-cell-actions">
                                         @if (!Capabilities.ReadOnly && !ExternallyManaged)
@@ -336,15 +497,15 @@
                                                hint on the card - says exactly what would make it work. *@
                                             <button type="button"
                                                     class="ms-btn ms-btn-sm ms-shard-start"
-                                                    disabled="@(!AgentControlEnabled)"
-                                                    title="@AgentControlTitle"
+                                                    disabled="@(!AgentControlEnabled || IsRebuilding(shard.ProjectionName))"
+                                                    title="@StartTitle(shard)"
                                                     @onclick="() => StartAgentAsync(shard.ShardName)">
                                                 Start
                                             </button>
                                             <button type="button"
                                                     class="ms-btn ms-btn-sm ms-shard-stop"
                                                     disabled="@(!AgentControlEnabled)"
-                                                    title="@AgentControlTitle"
+                                                    title="@(AgentControlTitle is { Length: > 0 } refused ? refused : DrainSentence)"
                                                     @onclick="() => StopAgentAsync(shard.ShardName)">
                                                 Stop
                                             </button>
@@ -360,7 +521,10 @@
             <p class="ms-muted ms-projections-footnote">
                 Lag is the high water mark minus the shard's own sequence. Amber above
                 @ProjectionLagThresholds.Amber.ToString("N0", CultureInfo.InvariantCulture) events, red above
-                @ProjectionLagThresholds.Red.ToString("N0", CultureInfo.InvariantCulture).
+                @ProjectionLagThresholds.Red.ToString("N0", CultureInfo.InvariantCulture) - unless the shard's
+                progression row carries thresholds of its own, which Marten creates and does not write. The arrow and
+                the time to catch up come from the health advisor's samples, taken while the Health page or the
+                Overview is open; without them there is no arrow.
             </p>
         }
 
@@ -428,6 +592,9 @@
                    IsAsync="@(rebuild?.Lifecycle == JasperFx.Events.Projections.ProjectionLifecycle.Async)"
                    Tenant="@State.ActiveScope?.TenantId"
                    ShardTimeout="@(rebuild?.ShardTimeout ?? Options.Value.RebuildShardTimeout)"
+                   Estimate="@RebuildEstimate"
+                   DrainNote="@DrainSentence"
+                   Warnings="rebuildWarnings"
                    OnConfirm="ConfirmRebuildAsync"
                    OnCancel="CancelRebuild" />
 
@@ -498,6 +665,33 @@
 
     /// <inheritdoc cref="mayControl" />
     private bool mayCorrect = true;
+
+    /// <summary>The health findings this screen draws as banners: D01 and D02, nothing else.</summary>
+    private static readonly string[] BannerCodes = ["D01", "D02"];
+
+    /// <summary>
+    /// D01 and D02 as this visitor may see them, from the advisor's last regular sweep - read from its cache on every
+    /// poll, never by asking for a sweep. Empty when no recent sweep exists, which is "not checked", never "healthy".
+    /// </summary>
+    private IReadOnlyList<HealthReportFinding> healthBanners = [];
+
+    /// <summary>The health finding the rebuild dialog reads: D08, H6's - unknown to this build until H6 lands.</summary>
+    private static readonly string[] RebuildCodes = ["D08"];
+
+    /// <summary>D08's titles for the projection whose rebuild dialog is open; empty when there are none.</summary>
+    private IReadOnlyList<string> rebuildWarnings = [];
+
+    /// <summary>What the D01 Explain found, once asked; cleared when the scope changes.</summary>
+    private HighWaterExplanation? explanation;
+
+    /// <summary>Whether the Explain is being asked right now.</summary>
+    private bool explaining;
+
+    /// <summary>
+    /// The advisor's samples as this visitor may read them, for the rebuild estimate - from the view, which reads them
+    /// behind the database gate; empty without them.
+    /// </summary>
+    private HealthHistoryView history => view?.HealthHistory ?? HealthHistoryView.Empty;
 
     protected override async Task OnInitializedAsync()
     {
@@ -586,6 +780,10 @@
             view = await ProjectionData.GetProjectionsAsync(scope, cancellationToken);
             operations = await ProjectionData.RunningOperationsAsync(scope, cancellationToken);
             loadError = null;
+
+            // Both read what the health advisor already has - its cache and its in-memory history - and neither asks
+            // for a sweep: this is the 5 s poll, and pg_locks is read only at the health cadence (H2, criterion 5).
+            await LoadHealthAsync(scope, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -613,8 +811,9 @@
     {
         // The refusal was about the daemon of the scope being left: a different store or database has a
         // different coordinator, a pause of its own or none, and carrying the sentence across would
-        // explain the new scope with the old one's facts.
+        // explain the new scope with the old one's facts. The Explain was about that database's sessions.
         agentRefusal = null;
+        explanation = null;
 
         ReleaseLease();
         await SubscribeToLiveStateAsync();
@@ -745,17 +944,219 @@
     {
         if (IsRebuilding(projectionName))
         {
-            return $"A rebuild of {projectionName} is already running. Only one rebuild of a projection runs at a time.";
+            return $"A rebuild of {projectionName} is already running ({RebuildingBy(projectionName)}). Only one rebuild of a projection runs at a time.";
         }
 
         return Title(StudioCapability.RebuildProjections, needsDaemon: true);
     }
 
-    /// <summary>Whether a rebuild of this projection is running anywhere in this process.</summary>
+    /// <summary>
+    /// Whether this projection is being rebuilt: by Marten Studio, anywhere in this process - or, where the daemon here
+    /// can say so (JasperFx 2.86+), by anything. A daemon that says nothing proves nothing, so "no" is "not known to be".
+    /// </summary>
     private bool IsRebuilding(string projectionName) =>
+        IsRebuildingByStudio(projectionName) || view?.Daemon.IsRebuildingHere(projectionName) == true;
+
+    private bool IsRebuildingByStudio(string projectionName) =>
         operations.Any(x => x.IsRunning
             && string.Equals(x.Kind, "Rebuild", StringComparison.Ordinal)
             && string.Equals(x.Target, projectionName, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Who is rebuilding it, for the row's badge and the buttons' hover text.</summary>
+    private string? RebuildingBy(string projectionName) =>
+        IsRebuildingByStudio(projectionName) ? "by Marten Studio"
+        : view?.Daemon.IsRebuildingHere(projectionName) == true ? "on this daemon, by something other than Marten Studio"
+        : null;
+
+    /// <summary>The hover text of a shard's Start: the controls' own refusal first, then a rebuild of its projection.</summary>
+    private string StartTitle(ShardProgress shard)
+    {
+        if (AgentControlTitle is { Length: > 0 } refused)
+        {
+            return refused;
+        }
+
+        if (IsRebuilding(shard.ProjectionName))
+        {
+            return $"{shard.ProjectionName} is being rebuilt {RebuildingBy(shard.ProjectionName)}. A continuous agent started now would run beside the replay; start it once the rebuild has finished.";
+        }
+
+        return DaemonLightUp.CanTellRebuilding ? string.Empty : StartBlindToRebuilds;
+    }
+
+    /// <summary>
+    /// What Start says on a Marten whose daemon cannot tell anybody it is rebuilding (below 9.50, JasperFx 2.86): a
+    /// rebuild started outside Marten Studio is invisible to the studio, nothing refuses the start, and the continuous
+    /// agent it starts writes the shard's progression row beside the replay - measured: whichever inserts second fails on
+    /// <c>pk_mt_event_progression</c> (23505), and the rebuild can be the one that fails.
+    /// </summary>
+    internal const string StartBlindToRebuilds =
+        "On this Marten version the daemon cannot say whether this projection is being rebuilt by something other than "
+        + "Marten Studio. Starting it during such a rebuild runs a second agent beside the replay, and the two can collide on "
+        + "the shard's progression row - which can fail the rebuild. Make sure no rebuild is running first.";
+
+    /// <summary>
+    /// What stopping an agent does, at both ends of the supported Marten range: it gets <c>StopAndDrainTimeout</c> to
+    /// finish what it is processing, and whatever is still running then is cancelled and processed again at the next
+    /// start (from Marten 9.47 the page in flight is also rolled back). Said on Pause, Stop and Rebuild, because the
+    /// screen must not promise a clean finish Marten does not make.
+    /// </summary>
+    private string DrainSentence
+    {
+        get
+        {
+            if (view?.Daemon is { IsDrainBounded: false })
+            {
+                return "Stopping waits for each agent to finish what it is processing, with no time limit: "
+                    + "Projections.StopAndDrainTimeout is not positive, and JasperFx then applies no bound, so a page that never "
+                    + "finishes holds the stop with it. Delivery is at-least-once, so a side effect outside Marten's session can "
+                    + "happen twice.";
+            }
+
+            TimeSpan drain = view?.Daemon.StopAndDrainTimeout ?? TimeSpan.FromMilliseconds(DaemonDefaults.StopAndDrainMilliseconds);
+
+            return "Stopping gives each agent up to " + DaemonCheckConfiguration.Format(drain)
+                + " (Projections.StopAndDrainTimeout) to finish what it is processing; whatever is still running then is cancelled, "
+                + "and its events are processed again when the shard next starts. Delivery is at-least-once, so a side effect "
+                + "outside Marten's session can happen twice.";
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The health advisor's half: banners, trends and the Explain. Read from what the advisor already has.
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>The banners, from the advisor's cache - never a sweep. The trends come with the view.</summary>
+    private async Task LoadHealthAsync(StudioScope scope, CancellationToken cancellationToken)
+    {
+        try
+        {
+            healthBanners = await Health.CachedFindingsAsync(scope, BannerCodes, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // A banner is a decoration: one that could not be read is no banner, never a broken page.
+            healthBanners = [];
+        }
+    }
+
+    private bool HasHealthBanner(string code) =>
+        healthBanners.Any(x => string.Equals(x.Code, code, StringComparison.Ordinal));
+
+    private static string HealthBannerChip(HealthReportFinding finding) =>
+        MartenStudio.Components.Pages.Health.HealthPresentation.ChipClass(finding.Severity);
+
+    /// <summary>
+    /// A shard's trend, as the service judged it - read behind the database gate, recent, and withheld where a pause, a
+    /// rebuild or a stopped shard explains the lag (the arrow then is none, and the hover says why).
+    /// </summary>
+    private ShardTrend? TrendOf(ShardProgress shard) => view?.Trends.GetValueOrDefault(shard.ShardName);
+
+    /// <summary>The lag cell's hover text: which thresholds colour it, and the trend.</summary>
+    private string LagTitle(ShardProgress shard)
+    {
+        string thresholds = "Amber above " + shard.EffectiveWarningThreshold.ToString("N0", CultureInfo.InvariantCulture)
+            + ", red above " + shard.EffectiveCriticalThreshold.ToString("N0", CultureInfo.InvariantCulture)
+            + (shard.WarningThreshold is not null || shard.CriticalThreshold is not null
+                ? " (this shard's own thresholds, from its progression row)."
+                : " (the studio's defaults).");
+
+        return TrendOf(shard) is { } trend ? thresholds + " " + char.ToUpperInvariant(trend.Describe()[0]) + trend.Describe()[1..] + "." : thresholds;
+    }
+
+    /// <summary>"12 s ago", from the row's last_updated in server time; the live tracker's time below it; or "never".</summary>
+    private string LastProgressText(ShardProgress shard)
+    {
+        if (shard.SinceLastProgress is { } ago)
+        {
+            return ago < TimeSpan.FromSeconds(1) ? "just now" : DaemonCheckConfiguration.Format(ago) + " ago";
+        }
+
+        return shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never";
+    }
+
+    private string LastProgressTitle(ShardProgress shard) =>
+        shard.LastProgress is { } at
+            ? "Last progress written " + State.FormatInSelectedTimeZone(at) + " (mt_event_progression.last_updated, database server time)."
+            : shard.LastAdvanced is { } advanced
+                ? "Last advanced " + State.FormatInSelectedTimeZone(advanced) + ", as the in-process daemon's tracker reported it."
+                : "This shard has no progress recorded.";
+
+    /// <summary>The Explain's verdict on one session, in Marten's terms.</summary>
+    private static string SuspectVerdict(HighWaterSuspect suspect) =>
+        suspect.RuledOutBecause is { } ruledOut ? "no - " + ruledOut
+        : suspect.HoldsEventsWriteLock ? "likely - it is mid-append on mt_events"
+        : suspect.HasTransactionId ? "possibly - it has written in its transaction"
+        : "possibly - its transaction was open before the mark was pinned";
+
+    /// <summary>The rebuild dialog's duration estimate: events to replay over the throughput the advisor measured.</summary>
+    private string? RebuildEstimate => rebuild is null
+        ? null
+        : ProjectionTrend.EstimateRebuild(rebuild.EventsToReplay, ProjectionTrend.Throughput(history, rebuild.ShardNames), history);
+
+    /// <summary>
+    /// What the advisor's last sweep says about rebuilding this projection: D08 ("being rebuilt somewhere, or a rebuild
+    /// stopped half-way", H6) through the cache-only read - nothing, when no such finding exists or no sweep is cached.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> RebuildWarningsAsync(StudioScope scope, string projectionName)
+    {
+        try
+        {
+            IReadOnlyList<HealthReportFinding> found = await Health.CachedFindingsAsync(scope, RebuildCodes, pageCancellation.Token);
+
+            return
+            [
+                .. found
+                    .Where(x => x.Finding.Subject is not { } subject
+                        || string.Equals(subject, projectionName, StringComparison.OrdinalIgnoreCase)
+                        || subject.StartsWith(projectionName + ":", StringComparison.OrdinalIgnoreCase))
+                    .Select(static x => x.Finding.Title),
+            ];
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // A warning that could not be read is no warning: the dialog says what it always said.
+            return [];
+        }
+    }
+
+    /// <summary>D01's Explain: asks the database once, on this click, who could be holding the mark.</summary>
+    private async Task ExplainHighWaterAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || explaining)
+        {
+            return;
+        }
+
+        explaining = true;
+
+        try
+        {
+            explanation = await ProjectionData.ExplainHighWaterAsync(scope, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            await Toasts.Error("The Explain could not ask the database: " + exception.Message);
+        }
+        finally
+        {
+            explaining = false;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
 
     /// <summary>
     /// The hover text of one control: the capability, then the visitor, then the daemon.
@@ -871,7 +1272,9 @@
 
         try
         {
-            rebuild = await ProjectionData.DescribeRebuildAsync(scope, projectionName, pageCancellation.Token);
+            RebuildScope described = await ProjectionData.DescribeRebuildAsync(scope, projectionName, pageCancellation.Token);
+            rebuildWarnings = await RebuildWarningsAsync(scope, described.ProjectionName);
+            rebuild = described;
         }
         catch (OperationCanceledException)
         {
@@ -893,22 +1296,43 @@
         }
 
         rebuild = null;
-        await RunAsync(
-            $"Rebuild of {scope.ProjectionName} started",
-            async (studioScope, token) =>
-            {
-                OperationStart start = await ProjectionData.RebuildAsync(studioScope, scope.ProjectionName, token);
 
-                if (start.Started)
-                {
-                    await Toasts.Info($"Rebuild {start.Id} runs in the background; it will finish even if you leave this page.");
-                }
-                else
-                {
-                    await Toasts.Info(
-                        $"{scope.ProjectionName} is already being rebuilt, as operation {start.Id}. Nothing was started.");
-                }
-            });
+        StudioScope? studioScope = State.ActiveScope;
+        if (studioScope is null)
+        {
+            return;
+        }
+
+        try
+        {
+            OperationStart start = await ProjectionData.RebuildAsync(studioScope, scope.ProjectionName, pageCancellation.Token);
+
+            if (start.Refusal is { } refusal)
+            {
+                // "Already rebuilding" is a state, not a failure: nothing was started, and nothing went wrong.
+                await Toasts.Info(refusal);
+            }
+            else if (start.Started)
+            {
+                await Toasts.Success($"Rebuild of {scope.ProjectionName} started");
+                await Toasts.Info($"Rebuild {start.Id} runs in the background; it will finish even if you leave this page.");
+            }
+            else
+            {
+                await Toasts.Info(
+                    $"{scope.ProjectionName} is already being rebuilt, as operation {start.Id}. Nothing was started.");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            await Toasts.Error(exception.Message);
+        }
+
+        await LoadAsync(pageCancellation.Token);
+        await InvokeAsync(StateHasChanged);
     }
 
     private Task AskAsync(PendingAction action)
@@ -1069,7 +1493,8 @@
             DaemonControlMessages.PauseIsProcessWide
             + $" That is every database this store has here: {AffectedDatabases}. Nothing projects "
             + "asynchronously while it is paused - inline projections are unaffected - and it stays "
-            + "paused after you close this page, until somebody resumes it.",
+            + "paused after you close this page, until somebody resumes it. "
+            + DrainSentence,
         PendingAction.ResumeDaemon =>
             "This restarts the projection coordinator, which brings the agents of every database this "
             + $"store has here back up: {AffectedDatabases}. Any agent you started or stopped by hand "
