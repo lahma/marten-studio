@@ -218,3 +218,89 @@ Counted raw, grouped by the JSON property the serializer's casing stores `Projec
 `FetchDeadLetterCountsAsync` applies the table's migration first, which a health read never does (hard rule 14).
 `DeadLetterEvent` is single-tenanted, so the count is every tenant's. A host that hides `DeadLetterEvent` with
 `IsDocumentTypeVisible` gets no read at all.
+
+## D07 Gaps were skipped
+
+**Info**, or **Warning** for a skip in the last hour on a store configured to skip past live appends. The
+daemon's high-water detector moved the mark past a gap in the event sequence in the last day.
+
+When the mark has been held under a gap for `StaleSequenceThreshold` (3 s) and the transaction evidence shows
+nothing alive that could still fill it, the detector moves the mark past it - and, under
+`Events.EnableAdvancedAsyncTracking`, records the move in `mt_high_water_skips` (`HighWaterDetector.DetectInSafeZone`
+and `mt_mark_progression_with_skip`, read at `V9.39.0` and `V9.50.2`). One row is one move: it spans every number
+between the old mark and the new one, the committed ones included, and the detector clears a whole field of dead
+gaps in one move (#5108).
+
+Under Marten's defaults - `Projections.UseTransactionEvidenceForGapSkipping` on and
+`SkipStaleGapsDespiteLiveTransactionsAfter` unset - a skip is a range of numbers that rolled-back appends drew: lost
+numbers, not lost events, so the finding is an Info. Many of them mean many failed appends. Under Rich appends a
+failed save normally leaves tombstones (E02) instead of a gap; under the Quick modes an append that fails inside
+`mt_quick_append_events` after drawing its numbers - two appends racing past one version check, most often - leaves
+a gap.
+
+Where the configuration lets the detector skip past a live append - the evidence switched off, or the cap set - a
+skip in the last hour is a Warning: if the append that held the gap committed afterwards, its events sit inside a
+range every async projection and subscription has already passed, and none of them will ever see them. **Explain**,
+on the projections screen while the mark is held (D01), names the transactions that could be holding it. Below
+Marten 9.47 the evidence counts in-progress transactions in every database on the server, prepared ones included
+(`pg_snapshot_xip(pg_current_snapshot())` is server-wide; #5605 scoped it to this database and added
+`pg_prepared_xacts` back), so an older host errs toward holding the mark rather than skipping; the caveat says so.
+
+The check reads the newest 100 rows of `mt_high_water_skips` by its primary key - `ending_sequence` only grows -
+with the server's clock, so every age is server time. The table exists only under advanced async tracking: without
+it the check is not run, and K03 says how to turn it on. Only the store-global mark records skips; a store with
+`Events.UseTenantPartitionedEvents` keeps a mark per tenant whose skips are recorded nowhere, and the caveat says so.
+
+What to change depends on why:
+
+```csharp
+// The evidence is off: skip a gap only once nothing alive could still fill it (Marten's default).
+opts.Projections.UseTransactionEvidenceForGapSkipping = true;
+
+// The cap overrules the evidence: without it, a live append's gap is never skipped (the mark can stay
+// pinned behind a forgotten transaction instead, D01).
+opts.Projections.SkipStaleGapsDespiteLiveTransactionsAfter = null;
+
+// Quick appends with an expected version: the loser of a race waits at the version check and fails
+// before it draws a number, so it leaves no gap.
+opts.Events.UseExclusiveLockOnConcurrentAppends = true;
+```
+
+## D08 Rebuilt elsewhere, or stopped half-way
+
+**Info** while a shard is being replayed by something other than this studio, **Warning** once it has stopped
+part-way. An async shard's position fell, nothing in this studio did it, and it has not yet reached the high-water
+mark again.
+
+What a database shows of a rebuild, read at `V9.39.0` and `V9.50.2`: JasperFx's `rebuildProjection` tears the
+projection down first - Marten's `TeardownExistingProjectionStateAsync` deletes its documents and its shards'
+progression rows - and then replays from the first event, writing progress as it goes. So the shard's position falls
+to nothing and climbs back to the mark, and until it gets there readers see a partial projection. Starting a rebuild
+here while that runs would race it: two rebuilds of one projection tear down and refill the same tables.
+
+**The `mode` column does not say so.** `mt_event_progression.mode` exists on every table Marten has created since
+9.31 (#5309), with `ShardMode.none` as its default, and it is read under `UseOptimizedProjectionRebuilds` - but no
+Marten release writes it. `ShardMode.rebuilding` is stamped only on the in-memory states a running agent publishes
+(jasperfx#681). The check still reads the column, and believes a `rebuilding` that a host's own tooling wrote.
+
+What it watches instead is the position itself, sampled into the advisor's history at every regular sweep. A fall
+between two samples is explained away when this process's studio rebuilt or rewound that projection around then, or
+when this process is rebuilding it now - its tracker's latest state says so, or, on Marten 9.50+,
+`IProjectionDaemon.IsRebuilding` does (a daemon that does not track rebuilds answers `false`, which proves nothing,
+so that answer only ever explains a finding away). A fall is also explained away when the store-global high-water
+mark, sampled beside the shards, fell in the same interval: Marten's `TryCorrectProgressInDatabaseAsync` - the
+studio's Correct progression, Marten's CLI, another process - rewrites every progression row, the mark's included,
+when the mark is ahead of the event sequence, and that is a correction, not a rebuild. What is left was run by
+another process, or by hand: while the shard climbs it is being replayed there (Info); once it has stood still
+below the mark for ten minutes the replay stopped half-way (Warning). A rebuild started from this studio that
+failed or was cancelled below the mark is named as such (Warning). Nothing is said once the shard is back at the
+mark, or back at or past the position it fell from: a healthy shard under steady appends sits a few events behind
+the mark, so the mark alone would keep calling a finished replay unfinished.
+
+The history exists only while a Health page or the Overview is open, so a fall that happened while nobody watched
+is not seen; before two samples exist the check says it is watching. A shard whose projection writes a document
+type `IsDocumentTypeVisible` hides is never named. Like D01-D04, a store with `Events.UseTenantPartitionedEvents`
+is not covered.
+
+There is no `StoreOptions` line. If another process is rebuilding, let it finish; if a rebuild stopped part-way,
+restarting the shard continues it from its position, and a rebuild here starts it again from the first event.
