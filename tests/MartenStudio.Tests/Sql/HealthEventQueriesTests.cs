@@ -131,6 +131,10 @@ public class HealthEventQueriesTests
             .And.Contain("group by w.stream\n  order by 4 desc, 2\n  limit @max_streams)",
                 "rows of one stream that carry different tenant ids are still one stream, and one finding key");
         plain.Should().NotContain("group by w.tenant_id, w.stream");
+        plain.Should().Contain("e.xmin::text::bigint as xact", "the window carries each row's writing transaction")
+            .And.Contain("pg_catalog.count(distinct w.xact)\n   from win w\n  where w.type <> @tombstone",
+                "a stream's rate counts the transactions that wrote it, so one bulk SaveChanges is one writer");
+        plain.Split("count(distinct w.xact)").Length.Should().Be(2, "only the stream rows count transactions");
         conjoined.Should().Contain("(select 'stream', w.stream, w.tenant_id,")
             .And.Contain("group by w.tenant_id, w.stream\n  order by 4 desc, 3, 2\n  limit @max_streams)",
                 "on a conjoined store two tenants may each have a stream of the same id");

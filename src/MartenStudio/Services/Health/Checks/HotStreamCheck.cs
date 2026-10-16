@@ -15,6 +15,13 @@ namespace MartenStudio.Services.Health.Checks;
 /// <c>for update</c> on purpose. One stream with a large share of the store's appends is where that queue forms.
 /// </para>
 /// <para>
+/// <b>A share is not a queue.</b> Only writers that overlap queue, so the Warning is for a stream written by at least
+/// <see cref="MinimumContendingTransactions" /> transactions at <see cref="ContendedTransactionsPerSecond" /> or more -
+/// transactions, read as the distinct <c>xmin</c> of its rows, never events: one <c>SaveChanges</c> of a thousand
+/// events is one writer, and a bulk import must not read as contention for as long as it stays in the window. A large
+/// share from fewer or slower transactions is an Info.
+/// </para>
+/// <para>
 /// <b>A stream id is data.</b> On a conjoined event store a stream belongs to one tenant, so the finding names that
 /// tenant (<see cref="HealthFinding.TenantId" />) and is shown only to a visitor through the activity gate whom the
 /// store policy lets see that tenant; elsewhere it is shown at the check's own gate, the store policy for the
@@ -35,20 +42,41 @@ internal sealed class HotStreamCheck : HealthCheck<TrafficProfile>
     internal const long MinimumStreamEvents = 200;
 
     /// <summary>
-    /// The append rate, over the stream's own span in the window, from which writers plausibly overlap on its row:
-    /// at or above it the finding is a Warning about contention, below it an Info about a stream that takes a large
-    /// share of a quiet store - a long-lived ledger, a settings stream - with nothing queueing behind it.
+    /// The rate of appending <em>transactions</em>, over the stream's own span in the window, from which writers
+    /// plausibly overlap on its row: at or above it (and with <see cref="MinimumContendingTransactions" />) the finding
+    /// is a Warning about contention, below it an Info about a stream that takes a large share of the store without
+    /// anybody waiting on anybody - a long-lived ledger, a settings stream, a bulk import.
     /// </summary>
-    internal const double ContendedAppendsPerSecond = 1.0;
+    internal const double ContendedTransactionsPerSecond = 1.0;
 
-    /// <summary>The append rate of one stream over its span in the window; a burst at one instant counts as contended.</summary>
-    internal static double AppendsPerSecond(TrafficProfileRow stream)
+    /// <summary>
+    /// The fewest transactions a stream must have been written by before its rate can say that writers met on it: a
+    /// bulk import in a handful of <c>SaveChanges</c> calls is one writer, however fast it went.
+    /// </summary>
+    internal const long MinimumContendingTransactions = 10;
+
+    /// <summary>How many transactions wrote the stream's events in the window (each event counted as one if unknown).</summary>
+    internal static long TransactionsOf(TrafficProfileRow stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        return stream.Transactions ?? stream.Events;
+    }
+
+    /// <summary>
+    /// The stream's appending transactions a second, over the span between its first and last append in the window,
+    /// taken as at least a second - so a burst inside one second is counted as that many transactions in that second.
+    /// </summary>
+    internal static double TransactionsPerSecond(TrafficProfileRow stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
         double seconds = stream is { FirstAt: { } first, LastAt: { } last } ? (last - first).TotalSeconds : 0;
-        return seconds < 1 ? stream.Events : stream.Events / seconds;
+        return TransactionsOf(stream) / Math.Max(seconds, 1);
     }
+
+    /// <summary>Whether the stream's writers plausibly queued on its row: enough transactions, fast enough.</summary>
+    internal static bool Contended(TrafficProfileRow stream) =>
+        TransactionsOf(stream) >= MinimumContendingTransactions && TransactionsPerSecond(stream) >= ContendedTransactionsPerSecond;
 
     /// <inheritdoc />
     public override Task<TrafficProfile> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken) =>
@@ -127,55 +155,79 @@ internal sealed class HotStreamCheck : HealthCheck<TrafficProfile>
             }
         }
 
-        double rate = AppendsPerSecond(stream);
-        bool contended = rate >= ContendedAppendsPerSecond;
+        long transactions = TransactionsOf(stream);
+        double rate = TransactionsPerSecond(stream);
+        bool contended = Contended(stream);
 
-        evidence.Add(new HealthEvidence("Its append rate", Rate(rate)));
+        evidence.Add(new HealthEvidence("Transactions that appended to it", EventHealth.Count(transactions)));
+        evidence.Add(new HealthEvidence("Their rate", Rate(rate)));
         evidence.Add(new HealthEvidence("Append mode", facts.AppendMode.ToString()));
 
         bool rich = facts.AppendMode == EventAppendMode.Rich;
+        string percent = EventHealth.Percent(share);
 
         string queue =
-            "Every append bumps its stream's version in mt_streams inside the appending transaction, so appends to one "
-            + "stream wait for each other on that row, and FetchForExclusiveWriting locks it for update on purpose. ";
+            "Every append bumps its stream's version in mt_streams inside the appending transaction, so concurrent appends "
+            + "to one stream wait for each other on that row, and FetchForExclusiveWriting locks it for update on purpose. ";
+
+        string title;
+        string why;
+
+        if (contended)
+        {
+            title = "One stream took " + percent + " of the recent appends, from " + Rate(rate);
+            why = queue
+                + "A stream written by this many transactions at this rate is where that queue forms: its appends serialize, "
+                + (rich
+                    ? "and under Rich appends every one that loses a version check fails with a concurrency exception and "
+                        + "leaves tombstones (E02)."
+                    : "and one that loses a race for the same version inside mt_quick_append_events fails, and can leave a "
+                        + "gap the daemon later skips (D07).")
+                + " Splitting what the stream models - a stream per order rather than per customer, a new stream per period "
+                + "- spreads the writes; a lock taken once per stream is cheap only while few writers want the same one.";
+        }
+        else
+        {
+            title = transactions == 1
+                ? "One stream took " + percent + " of the recent appends, all in one transaction"
+                : transactions < MinimumContendingTransactions
+                    ? "One stream took " + percent + " of the recent appends, in only " + EventHealth.Count(transactions) + " transactions"
+                    : "One stream took " + percent + " of the recent appends, though from only " + Rate(rate);
+            why = queue
+                + (transactions < MinimumContendingTransactions
+                    ? "Its appends came in " + (transactions == 1 ? "one transaction" : EventHealth.Count(transactions) + " transactions")
+                        + " - a bulk import, or one writer saving in batches - so nobody waited on anybody: a share is not a "
+                        + "queue. "
+                    : "At under one transaction a second, writers are unlikely to meet on this one, so this is not contention "
+                        + "yet - the store is quiet and this stream carries much of what it does: a ledger, a settings stream, a "
+                        + "long-lived aggregate. ")
+                + "It matters if many writers start appending to it, and because a stream that only grows is replayed whole by "
+                + "every live aggregation of it (E06).";
+        }
 
         return new HealthFinding
         {
             Code = "E03",
             Severity = contended ? HealthSeverity.Warning : HealthSeverity.Info,
-            Title = contended
-                ? "One stream took " + EventHealth.Percent(share) + " of the recent appends, at " + Rate(rate)
-                : "One stream took " + EventHealth.Percent(share) + " of the recent appends, though only at " + Rate(rate),
-            WhyItMatters = contended
-                ? queue
-                    + "A stream that takes this much of the store's traffic at this rate is where that queue forms: its appends "
-                    + "serialize, "
-                    + (rich
-                        ? "and under Rich appends every one that loses a version check fails with a concurrency exception and "
-                            + "leaves tombstones (E02)."
-                        : "and one that loses a race for the same version inside mt_quick_append_events fails, and can leave a "
-                            + "gap the daemon later skips (D07).")
-                    + " Splitting what the stream models - a stream per order rather than per customer, a new stream per period "
-                    + "- spreads the writes; a lock taken once per stream is cheap only while few writers want the same one."
-                : queue
-                    + "At under one append a second, writers are unlikely to meet on this one, so this is not contention yet - "
-                    + "the store is quiet and this stream carries much of what it does: a ledger, a settings stream, a "
-                    + "long-lived aggregate. It matters if the traffic grows, and because a stream that only grows is replayed "
-                    + "whole by every live aggregation of it (E06).",
+            Title = title,
+            WhyItMatters = why,
             Subject = (tenant is null ? string.Empty : tenant + "/") + stream.Name,
             TenantId = tenant,
             Evidence = evidence,
             Caveat =
                 "Counted over the newest " + EventHealth.Count(HealthEventQueries.TrafficWindow) + " events, read once "
                 + "when somebody asked for the deeper checks; tombstones are left out of both the stream's count and the total."
-                + " The rate is the stream's appends over the span between its first and last in the window."
+                + " The rate counts transactions, not events - the distinct transaction ids (xmin) that wrote the stream's "
+                + "events, over the span between its first and last append in the window, taken as at least a second - so one "
+                + "SaveChanges of a thousand events is one writer. Several fast transactions from one writer look the same as "
+                + "several writers."
                 + (tenant is null ? string.Empty : " The stream belongs to one tenant, so it is shown only to a visitor who may see that tenant."),
         };
     }
 
-    /// <summary>"3.2 appends a second", "40 appends a minute".</summary>
+    /// <summary>"3.2 transactions a second", "40 transactions a minute".</summary>
     private static string Rate(double perSecond) =>
         perSecond >= 1
-            ? perSecond.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " appends a second"
-            : (perSecond * 60).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " appends a minute";
+            ? perSecond.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " transactions a second"
+            : (perSecond * 60).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " transactions a minute";
 }

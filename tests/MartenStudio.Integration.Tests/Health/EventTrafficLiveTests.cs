@@ -84,6 +84,7 @@ public class EventTrafficLiveTests(PostgresFixture postgres)
     // E03
     // ---------------------------------------------------------------------------------------------------
 
+    /// <summary>One stream written by sixty saves in quick succession: a queue's worth of transactions on one row.</summary>
     [PostgresFact]
     [HealthFires("E03")]
     public async Task One_stream_taking_most_of_the_appends_is_E03_and_names_the_stream()
@@ -92,7 +93,7 @@ public class EventTrafficLiveTests(PostgresFixture postgres)
 
         await EventHealthData.AppendAsync(host.Store, streams: 300, eventsPerStream: 3);
         Guid hot = (await EventHealthData.AppendAsync(host.Store, streams: 1, eventsPerStream: 1))[0];
-        await EventHealthData.AppendToAsync(host.Store, hot, events: 900);
+        await EventHealthData.AppendToAsync(host.Store, hot, events: 900, perSession: 15);
 
         HealthReport report = await host.DeeperReportAsync();
 
@@ -100,6 +101,30 @@ public class EventTrafficLiveTests(PostgresFixture postgres)
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Finding.TenantId.Should().BeNull("a single-tenant store's streams are the database's");
         finding.Evidence.Should().Contain(new HealthEvidence("Stream", hot.ToString()));
+        finding.Evidence.Should().Contain(new HealthEvidence("Transactions that appended to it", "61"),
+            "the stream's start and sixty saves of fifteen, counted by the distinct xmin of its rows");
+    }
+
+    /// <summary>
+    /// The review's case: the same share appended by one <c>SaveChanges</c> - a bulk import - is one writer, and an
+    /// Info however fast it went.
+    /// </summary>
+    [PostgresFact]
+    [HealthFires("E03")]
+    public async Task A_bulk_import_in_one_save_is_an_info_not_contention()
+    {
+        await using EventHealthHost host = await EventHealthHost.CreateAsync(postgres, "health_e03_import");
+
+        await EventHealthData.AppendAsync(host.Store, streams: 300, eventsPerStream: 3);
+        Guid import = (await EventHealthData.AppendAsync(host.Store, streams: 1, eventsPerStream: 900))[0];
+
+        HealthReport report = await host.DeeperReportAsync();
+
+        HealthReportFinding finding = report.Findings.Should().ContainSingle(static x => x.Code == "E03").Subject;
+        finding.Severity.Should().Be(HealthSeverity.Info, "nine hundred events in one transaction queued behind nobody");
+        finding.Finding.Title.Should().EndWith("all in one transaction");
+        finding.Evidence.Should().Contain(new HealthEvidence("Stream", import.ToString()));
+        finding.Evidence.Should().Contain(new HealthEvidence("Transactions that appended to it", "1"));
     }
 
     [PostgresFact]

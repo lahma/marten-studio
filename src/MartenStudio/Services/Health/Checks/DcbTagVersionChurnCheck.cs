@@ -184,17 +184,26 @@ internal sealed class DcbTagVersionChurnCheck : HealthCheck<DcbTagVersionFacts>
                 Title = "mt_dcb_tag_version is churning, and the fillfactor this store declares has not been applied to it",
                 WhyItMatters = why + " Events.DcbTagVersionFillFactor is " + wanted.ToString(CultureInfo.InvariantCulture)
                     + ", and the table still has " + (facts.TableFillFactor is { } on ? "fillfactor " + on.ToString(CultureInfo.InvariantCulture) : "PostgreSQL's default of 100")
-                    + ": the schema change that sets it is pending. Until it is applied the declaration does nothing.",
+                    + ": the schema change that sets it is pending. Until it is applied the declaration does nothing. Applying "
+                    + "it is not limited to this table: ApplyAllDatabaseChangesOnStartup() and db-apply apply every pending "
+                    + "change in the database, under AutoCreate.CreateOrUpdate - which is not additive. It drops indexes and "
+                    + "columns the configuration does not declare, alters a changed column's type, drops and recreates a "
+                    + "changed primary key, and copies a table out and back to change its partitioning. Review the whole patch "
+                    + "with db-patch first.",
                 Evidence = evidence,
                 Caveat = Caveat(table, over),
                 Remedy = new HealthRemedy(
                     """
-                    // The declaration is already there; apply the pending schema change, at startup or at deploy:
+                    // The declaration is already there; the schema change is pending. Review EVERY pending change first -
+                    // an apply runs them all, under CreateOrUpdate, which drops what the configuration does not declare:
+                    //   dotnet run -- db-patch pending.sql     (with app.RunJasperFxCommands(args))
+                    // then apply them at deploy, or at startup:
+                    //   dotnet run -- db-apply
                     builder.Services.AddMarten(opts => { /* ... */ }).ApplyAllDatabaseChangesOnStartup();
-                    // or, with app.RunJasperFxCommands(args): dotnet run -- db-patch (review), then db-apply
                     """,
-                    "The change is an ALTER TABLE ... SET (fillfactor), which does not rewrite the pages already written: the free "
-                    + "space appears as pages are rewritten."),
+                    "Read the db-patch script before applying anything: it holds every pending change in this database, not only "
+                    + "this table's. The fillfactor change itself is an ALTER TABLE ... SET (fillfactor), which does not rewrite "
+                    + "the pages already written: the free space appears as pages are rewritten."),
             });
         }
 

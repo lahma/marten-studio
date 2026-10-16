@@ -188,6 +188,66 @@ public class RebuiltElsewhereCheckTests
     }
 
     [Fact]
+    public void A_replay_restarted_part_way_is_not_recovered_once_it_passes_the_second_starting_point()
+    {
+        // The first replay fell from 900 and got to 400; restarted, it fell again from 400. At 500 it is past the second
+        // fall's starting point and still far short of where the shard stood, and of the mark it was replaying to.
+        HealthHistoryView history = History(
+            Series,
+            RebuiltElsewhereCheck.MarkSeries,
+            (Ago(6), 900, 1_000),
+            (Ago(5), 0, 1_000),
+            (Ago(4), 400, 1_000),
+            (Ago(3), 0, 1_000),
+            (Ago(2), 450, 1_000),
+            (Now, 500, 1_000));
+
+        HealthFinding finding = new RebuiltElsewhereCheck().Evaluate(Facts(Reading(500), mark: 1_000), At(history))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Title.Should().Contain("is being replayed");
+        finding.Evidence.Should().Contain(static x => x.Label == "Position fell" && x.Value.StartsWith("from #400 to #0", StringComparison.Ordinal),
+            "the latest fall is the one described");
+        finding.Evidence.Should().Contain(new HealthEvidence("Back once it reaches", "#1,000, the high-water mark when it fell"));
+    }
+
+    [Fact]
+    public void Without_a_sample_of_the_mark_a_restarted_replay_is_judged_against_the_highest_position_before_it()
+    {
+        HealthFinding finding = Evaluate(Facts(Reading(500)), (Ago(6), 900), (Ago(5), 0), (Ago(4), 400), (Ago(3), 0), (Ago(2), 450), (Now, 500))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Evidence.Should().Contain(new HealthEvidence("Back once it reaches", "#900, the highest it had reached before it fell"));
+    }
+
+    [Fact]
+    public void A_restarted_replay_that_gets_past_the_mark_it_fell_from_is_quiet_while_appends_keep_it_behind_the_mark()
+    {
+        HealthHistoryView history = History(
+            Series,
+            RebuiltElsewhereCheck.MarkSeries,
+            (Ago(6), 900, 920),
+            (Ago(5), 0, 930),
+            (Ago(4), 400, 950),
+            (Ago(3), 0, 960),
+            (Ago(2), 450, 1_000),
+            (Now, 960, 1_100));
+
+        new RebuiltElsewhereCheck().Evaluate(Facts(Reading(960), mark: 1_100), At(history))
+            .Findings.Should().BeEmpty("960 is past #950, the mark the restarted replay fell from, though short of today's #1,100");
+    }
+
+    [Fact]
+    public void The_recovery_target_is_never_below_the_position_just_before_the_fall()
+    {
+        HealthTrend positions = History(Series, (Ago(2), 900), (Now, 0)).Trend(Series);
+        HealthTrend marks = History(RebuiltElsewhereCheck.MarkSeries, (Ago(2), 850), (Now, 850)).Trend(RebuiltElsewhereCheck.MarkSeries);
+
+        RebuiltElsewhereCheck.WithRecoveryTarget(positions, marks, RebuiltElsewhereCheck.Fall(positions)!)
+            .RecoverAt.Should().Be(900, "a mark sampled a moment behind the shard does not lower the bar");
+    }
+
+    [Fact]
     public void A_fall_in_the_same_interval_as_the_marks_is_a_progression_correction_not_a_rebuild()
     {
         // Marten's TryCorrectProgressInDatabaseAsync rewrites every progression row, the mark's included, when the mark

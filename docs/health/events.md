@@ -48,19 +48,24 @@ application does when a save throws.
 
 ## E03 Hot stream
 
-**Warning** when that stream took them at one append a second or more; **Info** below that. One stream took more
-than 20% of the recent window's appends, with at least 200 of them, over a window of at least 1,000 appends.
-Tombstones are left out of both counts, and a stream that has since been archived is not reported. The rate is the
-stream's appends over the span between its first and last in the window; a burst inside one second counts as
-contended.
+**Warning** when at least ten transactions wrote that stream, at one or more a second; **Info** otherwise. One
+stream took more than 20% of the recent window's appends, with at least 200 of them, over a window of at least 1,000
+appends. Tombstones are left out of both counts, and a stream that has since been archived is not reported.
+
+The rate counts **transactions, not events**: the distinct `xmin` of the stream's rows in the window - the
+transaction that wrote each one - over the span between its first and last append, taken as at least a second. One
+`SaveChanges` of a thousand events is one writer, so a bulk import is an Info ("all in one transaction") rather
+than a contention Warning for as long as it stays in the window. Several fast transactions from one writer still
+look like several writers; the rate cannot tell them apart.
 
 Every append bumps its stream's version in `mt_streams` inside the appending transaction - Rich appends with an
 `update ... where version = ...`, Quick ones inside `mt_quick_append_events` - so appends to one stream queue on
 that row, and `FetchForExclusiveWriting` takes it `for update` on purpose. One stream with a fifth of the store's
 traffic is where that queue forms: its appends serialize, and the ones that lose a race for the same version fail
 (E02, D07). A share is not a queue, though: on a quiet store a ledger or a settings stream can carry a fifth of
-the traffic at a few appends a minute, with nothing waiting behind it, and that is the Info - worth knowing if the
-traffic grows, and because a stream that only grows is replayed whole by every live aggregation of it (E06).
+the traffic at a few transactions a minute, and a bulk import can carry it in one, with nothing waiting behind
+either - that is the Info, worth knowing if many writers start appending to it, and because a stream that only
+grows is replayed whole by every live aggregation of it (E06).
 
 The finding names the stream. On a conjoined event store it also names the stream's tenant and that tenant's
 share of the window, and is shown only to a visitor who may see that tenant (see above).
@@ -195,10 +200,18 @@ vacuum. Marten measured it (#5622): 100% HOT at 50 rows whatever the fillfactor;
 default and 100% at fillfactor 70, for 45% more disk.
 
 The share is measured over the advisor's own window once two samples a minute apart exist, and over the counters
-since the statistics were last reset until then. When the store already declares a fillfactor that the table does
-not have yet, the line is not repeated: the finding says the schema change that sets it is pending, and the remedy
-is to apply it - `ApplyAllDatabaseChangesOnStartup()`, or `db-patch` to review and `db-apply` with
-`RunJasperFxCommands`. When the fillfactor is already declared and on the table, the finding is an Info instead: `ALTER TABLE ... SET (fillfactor)` does not rewrite the pages already written, so the
+since the statistics were last reset until then.
+
+When the store already declares a fillfactor that the table does not have yet, the line is not repeated: the
+finding says the schema change that sets it is pending. **Applying it is not limited to this table.**
+`ApplyAllDatabaseChangesOnStartup()` and `db-apply` apply every pending change in the database under
+`AutoCreate.CreateOrUpdate`, which is not additive: it drops indexes and columns the configuration does not declare,
+alters a changed column's type, drops and recreates a changed primary key, and copies a table out and back to
+change its partitioning. So the finding says to review the whole patch with `db-patch` first, and only then apply
+it, at deploy or at startup.
+
+When the fillfactor is already declared and on the table, the finding is an Info instead: `ALTER TABLE ... SET
+(fillfactor)` does not rewrite the pages already written, so the
 free space appears as pages are rewritten, and fully only after the table is rewritten once (`VACUUM FULL` or
 `CLUSTER`, run by whoever owns the database - both lock the table).
 

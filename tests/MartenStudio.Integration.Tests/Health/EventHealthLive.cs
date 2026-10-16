@@ -228,15 +228,16 @@ internal static class EventHealthData
         return ids;
     }
 
-    /// <summary>Appends <paramref name="events" /> more pings to one stream, in batches.</summary>
-    public static async Task AppendToAsync(IDocumentStore store, Guid stream, int events, string? tenant = null)
+    /// <summary>
+    /// Appends <paramref name="events" /> more pings to one stream, <paramref name="perSession" /> to a
+    /// <c>SaveChanges</c> - so the stream is written by that many transactions.
+    /// </summary>
+    public static async Task AppendToAsync(IDocumentStore store, Guid stream, int events, string? tenant = null, int perSession = 500)
     {
-        const int PerSession = 500;
-
-        for (int done = 0; done < events; done += PerSession)
+        for (int done = 0; done < events; done += perSession)
         {
             await using IDocumentSession session = tenant is null ? store.LightweightSession() : store.LightweightSession(tenant);
-            session.Events.Append(stream, Enumerable.Range(done, Math.Min(PerSession, events - done)).Select(static n => (object) new HealthPing(n)).ToArray());
+            session.Events.Append(stream, Enumerable.Range(done, Math.Min(perSession, events - done)).Select(static n => (object) new HealthPing(n)).ToArray());
             await session.SaveChangesAsync(Token);
         }
     }

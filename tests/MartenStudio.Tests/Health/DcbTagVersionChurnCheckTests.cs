@@ -136,6 +136,12 @@ public class DcbTagVersionChurnCheckTests
         finding.Remedy!.Code.Should().Contain("ApplyAllDatabaseChangesOnStartup").And.Contain("db-apply")
             .And.NotContain("DcbTagVersionFillFactor =", "the line is already there - what is missing is the migration");
         finding.WhyItMatters.Should().Contain("the schema change that sets it is pending");
+        finding.WhyItMatters.Should().Contain("apply every pending change in the database, under AutoCreate.CreateOrUpdate - which is not additive")
+            .And.Contain("drops indexes and columns the configuration does not declare")
+            .And.Contain("Review the whole patch with db-patch first", "hard rule 14: an apply is never described as touching only this table");
+        finding.Remedy.Code.Should().Contain("db-patch pending.sql");
+        finding.Remedy.Code.IndexOf("db-patch", StringComparison.Ordinal).Should().BeLessThan(
+            finding.Remedy.Code.IndexOf("ApplyAllDatabaseChangesOnStartup", StringComparison.Ordinal), "the review comes before the apply");
         finding.Remedy.Code.Should().NotContainEquivalentOf("alter table", "the studio prints no DDL for a table Marten manages");
     }
 

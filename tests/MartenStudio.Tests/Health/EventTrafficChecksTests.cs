@@ -116,9 +116,10 @@ public class EventTrafficChecksTests
 
         finding.Code.Should().Be("E03");
         finding.Severity.Should().Be(HealthSeverity.Warning);
-        finding.Title.Should().Be("One stream took 35% of the recent appends, at 7.3 appends a second")
+        finding.Title.Should().Be("One stream took 35% of the recent appends, from 7.3 transactions a second")
             .And.NotContain("7c9e6679", "a title names nothing a gate would hide");
-        finding.Evidence.Should().Contain(new HealthEvidence("Its append rate", "7.3 appends a second"), "3,500 appends over its eight minutes in the window");
+        finding.Evidence.Should().Contain(new HealthEvidence("Transactions that appended to it", "3,500"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Their rate", "7.3 transactions a second"), "3,500 transactions over its eight minutes in the window");
         finding.TenantId.Should().BeNull("a single-tenant store's streams are the database's");
         finding.Subject.Should().Be("7c9e6679-7425-40de-944b-e07fc1f90ae7");
         finding.Evidence.Should().Contain(new HealthEvidence("Stream", "7c9e6679-7425-40de-944b-e07fc1f90ae7"));
@@ -157,33 +158,65 @@ public class EventTrafficChecksTests
     }
 
     [Fact]
-    public void E03_a_large_share_at_under_one_append_a_second_is_an_info_not_contention()
+    public void E03_a_large_share_at_under_one_transaction_a_second_is_an_info_not_contention()
     {
-        // A quiet store whose ledger takes 30% of the window: 300 appends over its eight minutes is 0.625 a second.
+        // A quiet store whose ledger takes 30% of the window: 300 transactions over its eight minutes is 0.625 a second.
         TrafficProfile facts = Profile(Totals(1_000), streams: [StreamOf("ledger", 300)]);
 
         HealthFinding finding = new HotStreamCheck().Evaluate(facts, At()).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Info, "writers are unlikely to meet on a row they touch once every couple of seconds");
-        finding.Title.Should().Be("One stream took 30% of the recent appends, though only at 37.5 appends a minute");
+        finding.Title.Should().Be("One stream took 30% of the recent appends, though from only 37.5 transactions a minute");
         finding.WhyItMatters.Should().Contain("not contention yet");
-        finding.Evidence.Should().Contain(new HealthEvidence("Its append rate", "37.5 appends a minute"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Their rate", "37.5 transactions a minute"));
     }
 
     [Fact]
-    public void E03_a_burst_inside_one_second_counts_as_contended()
+    public void E03_a_bulk_import_in_one_SaveChanges_is_one_writer_and_an_info_however_fast_it_went()
     {
-        TrafficProfileRow burst = StreamOf("burst", 300) with { FirstAt = Now, LastAt = Now.AddMilliseconds(400) };
+        // The review's case: a thousand events appended in one transaction inside half a second. By events that is
+        // 2,000 a second; by transactions it is one writer, and nobody queued.
+        TrafficProfileRow import = StreamOf("import", 1_000, transactions: 1) with { FirstAt = Now, LastAt = Now.AddMilliseconds(500) };
+
+        HealthFinding finding = new HotStreamCheck().Evaluate(Profile(Totals(2_000), streams: [import]), At())
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Info);
+        finding.Title.Should().Be("One stream took 50% of the recent appends, all in one transaction");
+        finding.WhyItMatters.Should().Contain("a bulk import, or one writer saving in batches").And.Contain("a share is not a queue");
+        finding.Evidence.Should().Contain(new HealthEvidence("Transactions that appended to it", "1"));
+    }
+
+    [Fact]
+    public void E03_a_few_fast_batches_are_still_one_writer_below_the_minimum_transactions()
+    {
+        TrafficProfileRow batches = StreamOf("batches", 900, transactions: HotStreamCheck.MinimumContendingTransactions - 1)
+            with { FirstAt = Now, LastAt = Now.AddSeconds(2) };
+
+        HealthFinding finding = new HotStreamCheck().Evaluate(Profile(Totals(2_000), streams: [batches]), At())
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Info, "nine saves in two seconds is a batch job, not a crowd");
+        finding.Title.Should().EndWith("in only 9 transactions");
+    }
+
+    [Fact]
+    public void E03_many_transactions_inside_one_second_count_as_contended()
+    {
+        TrafficProfileRow burst = StreamOf("burst", 300, transactions: 40) with { FirstAt = Now, LastAt = Now.AddMilliseconds(400) };
 
         new HotStreamCheck().Evaluate(Profile(Totals(1_000), streams: [burst]), At())
-            .Findings.Should().ContainSingle().Which.Severity.Should().Be(HealthSeverity.Warning, "300 appends inside a second is a queue");
+            .Findings.Should().ContainSingle().Which.Severity.Should().Be(HealthSeverity.Warning, "forty writers inside a second is a queue");
     }
 
     [Fact]
-    public void E03_the_rate_is_the_streams_appends_over_its_own_span()
+    public void E03_the_rate_is_the_streams_transactions_over_its_own_span_of_at_least_a_second()
     {
-        HotStreamCheck.AppendsPerSecond(StreamOf("a", 480)).Should().BeApproximately(1.0, 1e-9, "480 appends over eight minutes");
-        HotStreamCheck.AppendsPerSecond(StreamOf("a", 479)).Should().BeLessThan(HotStreamCheck.ContendedAppendsPerSecond);
+        HotStreamCheck.TransactionsPerSecond(StreamOf("a", 480)).Should().BeApproximately(1.0, 1e-9, "480 transactions over eight minutes");
+        HotStreamCheck.Contended(StreamOf("a", 479)).Should().BeFalse("479 over eight minutes is under one a second");
+        HotStreamCheck.TransactionsPerSecond(StreamOf("a", 5_000, transactions: 480)).Should().BeApproximately(1.0, 1e-9, "events do not count, transactions do");
+        HotStreamCheck.TransactionsPerSecond(StreamOf("a", 300, transactions: 12) with { FirstAt = Now, LastAt = Now })
+            .Should().Be(12, "a span under a second is taken as one second");
     }
 
     [Fact]

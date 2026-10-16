@@ -294,8 +294,11 @@ when the mark is ahead of the event sequence, and that is a correction, not a re
 another process, or by hand: while the shard climbs it is being replayed there (Info); once it has stood still
 below the mark for ten minutes the replay stopped half-way (Warning). A rebuild started from this studio that
 failed or was cancelled below the mark is named as such (Warning). Nothing is said once the shard is back at the
-mark, or back at or past the position it fell from: a healthy shard under steady appends sits a few events behind
-the mark, so the mark alone would keep calling a finished replay unfinished.
+mark, or back past where the replay began - the high-water mark sampled with the fall, or without that sample the
+highest position the history holds before it. A healthy shard under steady appends sits a few events behind the
+current mark, so that mark alone would keep calling a finished replay unfinished; and a rebuild restarted part-way
+falls a second time from below where the first began, so the latest fall's own starting point would call it
+finished half-way through.
 
 The history exists only while a Health page or the Overview is open, so a fall that happened while nobody watched
 is not seen; before two samples exist the check says it is watching. A shard whose projection writes a document

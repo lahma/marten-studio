@@ -76,6 +76,10 @@ internal sealed record EventStatisticsRow(
 /// <param name="Tombstones">How many of them are Marten's tombstones - totals and tenants.</param>
 /// <param name="Archived">How many of them belong to archived streams.</param>
 /// <param name="Tenants">How many tenants appended in the window - totals only.</param>
+/// <param name="Transactions">
+/// How many transactions wrote the row's events - streams only: the distinct <c>xmin</c> of its rows in the window.
+/// One <c>SaveChanges</c> is one transaction however many events it appends.
+/// </param>
 internal sealed record TrafficProfileRow(
     string Kind,
     string? Name,
@@ -91,7 +95,8 @@ internal sealed record TrafficProfileRow(
     DateTimeOffset? LastAt,
     long? Tombstones,
     long? Archived,
-    long? Tenants);
+    long? Tenants,
+    long? Transactions = null);
 
 /// <summary>What the traffic profile's statement has to know about <c>mt_events</c> before it is built.</summary>
 /// <param name="EventSchema">The event store's schema.</param>
@@ -436,6 +441,14 @@ internal static class HealthEventQueries
     /// Tombstones (<c>@tombstone</c>) are counted in the totals and kept out of the stream ranking: Marten files
     /// every tombstone under one stream of its own, which would otherwise always look like the hottest one.
     /// </para>
+    /// <para>
+    /// <b>Transactions, not events, for a stream's rate.</b> Each stream row counts the distinct <c>xmin</c> of its
+    /// rows - the transaction that wrote each one, kept when a row is frozen - so a bulk import that appends a
+    /// thousand events in one <c>SaveChanges</c> is one transaction, not a thousand writers. <c>xid</c> has no
+    /// ordering operator for <c>count(distinct)</c> to sort by, so it is counted as its number
+    /// (<c>xmin::text::bigint</c>). A row rewritten in place since - archiving does that - carries the rewriting
+    /// transaction's id instead, and such a stream is archived, which E03 does not report.
+    /// </para>
     /// </remarks>
     public static HealthQuery TrafficProfile(TrafficProfileShape shape)
     {
@@ -459,7 +472,8 @@ internal static class HealthEventQueries
         }
 
         sql.Append(")::bigint as bytes,\n");
-        sql.Append("         e.\"timestamp\" as appended_at\n");
+        sql.Append("         e.\"timestamp\" as appended_at,\n");
+        sql.Append("         e.xmin::text::bigint as xact\n");
         sql.Append("    from ").Append(events).Append(" e\n");
         sql.Append("   order by e.seq_id desc\n");
         sql.Append("   limit @window\n");
@@ -481,13 +495,15 @@ internal static class HealthEventQueries
                    pg_catalog.max(w.appended_at) as last_at,
                    pg_catalog.count(*) filter (where w.type = @tombstone) as tombstones,
                    pg_catalog.count(*) filter (where w.archived) as archived,
-                   pg_catalog.count(distinct w.tenant_id) as tenants
+                   pg_catalog.count(distinct w.tenant_id) as tenants,
+                   null::bigint as transactions
               from win w
             union all
             (select 'type', w.type, null::text, pg_catalog.count(*), coalesce(pg_catalog.sum(w.bytes), 0)::bigint, null::bigint,
                     (pg_catalog.percentile_disc(0.95::float8) within group (order by w.bytes))::bigint, pg_catalog.max(w.bytes),
                     pg_catalog.min(w.seq_id), pg_catalog.max(w.seq_id), null::timestamptz, null::timestamptz,
-                    pg_catalog.count(*) filter (where w.type = @tombstone), pg_catalog.count(*) filter (where w.archived), null::bigint
+                    pg_catalog.count(*) filter (where w.type = @tombstone), pg_catalog.count(*) filter (where w.archived), null::bigint,
+                    null::bigint
                from win w
               group by w.type
               order by 4 desc, 2
@@ -506,7 +522,7 @@ internal static class HealthEventQueries
              pg_catalog.count(*), coalesce(pg_catalog.sum(w.bytes), 0)::bigint, null::bigint,
                     null::bigint, pg_catalog.max(w.bytes), pg_catalog.min(w.seq_id), pg_catalog.max(w.seq_id),
                     pg_catalog.min(w.appended_at), pg_catalog.max(w.appended_at), null::bigint,
-                    pg_catalog.count(*) filter (where w.archived), null::bigint
+                    pg_catalog.count(*) filter (where w.archived), null::bigint, pg_catalog.count(distinct w.xact)
                from win w
               where w.type <> @tombstone
             """);
@@ -524,7 +540,7 @@ internal static class HealthEventQueries
                 (select 'tenant', null::text, w.tenant_id, pg_catalog.count(*), coalesce(pg_catalog.sum(w.bytes), 0)::bigint, null::bigint,
                         null::bigint, pg_catalog.max(w.bytes), pg_catalog.min(w.seq_id), pg_catalog.max(w.seq_id),
                         null::timestamptz, null::timestamptz, pg_catalog.count(*) filter (where w.type = @tombstone),
-                        pg_catalog.count(*) filter (where w.archived), null::bigint
+                        pg_catalog.count(*) filter (where w.archived), null::bigint, null::bigint
                    from win w
                   group by w.tenant_id
                   order by 4 desc, 3
@@ -568,7 +584,8 @@ internal static class HealthEventQueries
             NullableTimestamp(reader, 11),
             NullableInt64(reader, 12),
             NullableInt64(reader, 13),
-            NullableInt64(reader, 14));
+            NullableInt64(reader, 14),
+            NullableInt64(reader, 15));
     }
 
     /// <summary>

@@ -23,9 +23,10 @@ internal static class EventHealthFacts
         new(HealthEventQueries.TotalRow, null, null, events, events * 500, median, p95, max,
             events == 0 ? null : 1, events == 0 ? null : events, Now.AddMinutes(-10), Now, tombstones, 0, tenants);
 
-    /// <summary>One stream's row.</summary>
-    public static TrafficProfileRow StreamOf(string id, long events, string tenant = "*DEFAULT*", long archived = 0) =>
-        new(HealthEventQueries.StreamRow, id, tenant, events, events * 500, null, null, 4_000, 1, events, Now.AddMinutes(-9), Now.AddMinutes(-1), null, archived, null);
+    /// <summary>One stream's row, its appends spread over eight minutes - by default one event to a transaction.</summary>
+    public static TrafficProfileRow StreamOf(string id, long events, string tenant = "*DEFAULT*", long archived = 0, long? transactions = null) =>
+        new(HealthEventQueries.StreamRow, id, tenant, events, events * 500, null, null, 4_000, 1, events, Now.AddMinutes(-9), Now.AddMinutes(-1), null, archived, null,
+            transactions ?? events);
 
     /// <summary>One event type's row.</summary>
     public static TrafficProfileRow TypeOf(string name, long events, long p95) =>

@@ -85,9 +85,11 @@ internal sealed record RebuildFacts(
 /// not rebuilding either, is a rebuild, rewind or reset run somewhere else. While the shard climbs it is being replayed
 /// there; once it has stood still below the mark for <see cref="StalledAfter" />, the replay stopped half-way. A studio
 /// rebuild that failed or was cancelled below the mark is named as such. Nothing is said once the shard is back at
-/// the mark, or back at or past the position it fell from - a healthy shard under steady appends sits a few events
-/// behind the mark, so the mark alone would keep calling a finished replay unfinished. A fall in the same interval
-/// as the mark's own (<see cref="MarkSeries" />) is a progression correction and explains itself.
+/// the mark, or back past where the replay began - the mark sampled with the fall, which also covers a replay that was
+/// restarted part-way and fell a second time from below where the first began (<see cref="WithRecoveryTarget" />). A
+/// healthy shard under steady appends sits a few events behind the current mark, so that mark alone would keep
+/// calling a finished replay unfinished. A fall in the same interval as the mark's own (<see cref="MarkSeries" />) is
+/// a progression correction and explains itself.
 /// </para>
 /// <para>
 /// <b>Seen only while somebody watches.</b> The history exists only while a Health page or the Overview is open, so a
@@ -261,14 +263,18 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
                 continue;
             }
 
-            if (position >= fall.Before)
+            HealthTrend marks = evaluation.History.Trend(MarkSeries);
+            fall = WithRecoveryTarget(trend, marks, fall);
+
+            if (position >= fall.RecoverAt)
             {
-                // Back where it was before the fall: whatever replayed it has finished, wherever it ran. A healthy shard
-                // under steady appends sits a few events below the mark, so the mark alone would say "still replaying".
+                // Back where it was before the replay began: whatever replayed it has finished, wherever it ran. A healthy
+                // shard under steady appends sits a few events below the mark, so the mark alone would say "still
+                // replaying"; and a replay restarted part-way has to get back past where the first one began.
                 continue;
             }
 
-            if (MarkFellWith(evaluation.History.Trend(MarkSeries), fall))
+            if (MarkFellWith(marks, fall))
             {
                 // The mark fell in the same interval: every row was moved back together, which is a progression
                 // correction - Marten rewrites the mark's row with the shards' - not a rebuild of this one.
@@ -325,6 +331,55 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
     {
         /// <summary>Whether it has climbed since it fell.</summary>
         public bool Climbing => Now > After;
+
+        /// <summary>
+        /// The position the shard has to reach again before the replay can be said to have finished - see
+        /// <see cref="WithRecoveryTarget" />.
+        /// </summary>
+        public double RecoverAt { get; init; }
+
+        /// <summary>Whether <see cref="RecoverAt" /> is the high-water mark sampled with the fall, rather than the history's highest.</summary>
+        public bool RecoverAtMark { get; init; }
+    }
+
+    /// <summary>
+    /// <paramref name="fall" /> with where the shard has to get back to before whatever replayed it has finished
+    /// (<see cref="PositionFall.RecoverAt" />): the high-water mark sampled
+    /// with the last sample before the fall - every position the shard had reached by then is at or below it, the one
+    /// it stood at before an <em>earlier</em> fall that a restarted replay never got back to included - or, where the
+    /// mark has no sample then, the highest position the history holds up to the fall. Never below the position just
+    /// before the fall.
+    /// </summary>
+    /// <remarks>
+    /// The latest fall alone is not enough: a rebuild restarted part-way falls a second time from below where the first
+    /// began, and judged against that second starting point the shard would read as recovered half-way through the
+    /// replay. The mark is taken at the fall rather than now, because under steady appends the mark keeps moving and a
+    /// healthy shard sits a few events behind it.
+    /// </remarks>
+    internal static PositionFall WithRecoveryTarget(HealthTrend positions, HealthTrend marks, PositionFall fall)
+    {
+        ArgumentNullException.ThrowIfNull(positions);
+        ArgumentNullException.ThrowIfNull(marks);
+        ArgumentNullException.ThrowIfNull(fall);
+
+        foreach ((DateTimeOffset at, double value) in marks.Points)
+        {
+            if (at == fall.From)
+            {
+                return fall with { RecoverAt = Math.Max(fall.Before, value), RecoverAtMark = true };
+            }
+        }
+
+        double highest = fall.Before;
+        foreach ((DateTimeOffset at, double value) in positions.Points)
+        {
+            if (at <= fall.From && value > highest)
+            {
+                highest = value;
+            }
+        }
+
+        return fall with { RecoverAt = highest, RecoverAtMark = false };
     }
 
     /// <summary>Whether the high-water mark fell between the two samples <paramref name="fall" /> fell between.</summary>
@@ -469,12 +524,23 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
         DocumentTypes = shard.DocumentTypes,
     };
 
-    private static IEnumerable<HealthEvidence> Fallen(PositionFall fall) =>
-    [
-        new("Position fell", "from #" + EventHealth.Count(fall.Before) + " to #" + EventHealth.Count(fall.After)
-            + ", between " + EventHealth.Time(fall.From) + " and " + EventHealth.Time(fall.To)),
-        new("Last moved", EventHealth.Time(fall.LastChange)),
-    ];
+    private static IEnumerable<HealthEvidence> Fallen(PositionFall fall)
+    {
+        yield return new HealthEvidence(
+            "Position fell",
+            "from #" + EventHealth.Count(fall.Before) + " to #" + EventHealth.Count(fall.After)
+                + ", between " + EventHealth.Time(fall.From) + " and " + EventHealth.Time(fall.To));
+
+        if (fall.RecoverAt > fall.Before)
+        {
+            yield return new HealthEvidence(
+                "Back once it reaches",
+                "#" + EventHealth.Count(fall.RecoverAt)
+                    + (fall.RecoverAtMark ? ", the high-water mark when it fell" : ", the highest it had reached before it fell"));
+        }
+
+        yield return new HealthEvidence("Last moved", EventHealth.Time(fall.LastChange));
+    }
 
     private static IEnumerable<HealthEvidence> Position(RebuildFacts facts, ShardProgressReading shard, long position)
     {
