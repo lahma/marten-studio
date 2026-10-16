@@ -67,7 +67,18 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
         }
 
         probe.StatementsObserved.Should().BePositive();
-        probe.BeyondCatalogReads.Where(x => !IsAllowedRead(x, host.EventSchema)).Should()
+
+        // The daemon checks' own statements only: the same sweep runs every area's checks, and the table checks read rows
+        // of their own (T11 reads mt_hilo) - which are theirs to assert, as their own live tests do.
+        HashSet<string> daemonStatements =
+        [
+            .. ((HealthSweep[]) [first, second])
+                .SelectMany(static sweep => DaemonCodes.SelectMany(code => Result(sweep, code).Statements))
+                .Select(static x => x.Sql),
+        ];
+
+        probe.Locks.Should().Contain(x => daemonStatements.Contains(x.Statement), "the scope must hold the daemon checks' statements, or it proves nothing");
+        probe.BeyondCatalogReads.Where(x => daemonStatements.Contains(x.Statement) && !IsAllowedRead(x, host.EventSchema)).Should()
             .BeEmpty("a daemon check reads the progression table, the sequence, one probe of mt_events and the dead letters, and locks nothing else");
 
         (await HealthSweepProbe.SnapshotAsync(postgres, schema, host.EventSchema)).Should().BeEquivalentTo(before, "a sweep runs no DDL");
@@ -78,8 +89,10 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
     /// The H2 review's follow-up: the quiet test above moves only the studio's clock, and D01-D03 measure in server time.
     /// So here real server time is made to have passed - every shard's row and the HighWaterMark row put ten minutes into
     /// the past, as an idle store looks after ten quiet minutes - and the studio watches from a host with no daemon of its
-    /// own, beside one running Solo on the same schema: what it sees is only what the database says. The daemon restamps
-    /// its allocation fence while caught up (and from Marten 9.43 its mark's row too), and that is enough.
+    /// own, beside one running Solo on the same schema: what it sees is only what the database says. Every shard is caught
+    /// up here, so D02 is quiet on "nothing is behind" before any write is looked at, and D03 has no shard behind the mark;
+    /// what this proves is that ten minutes of server-time silence on rows that should be silent raises nothing. The case
+    /// where only the daemon's own restamp keeps D02 quiet is the next-but-one test, with a shard held behind.
     /// </summary>
     [PostgresFact]
     [HealthQuiet("D02")]
@@ -105,20 +118,145 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
     {
         const string schema = "h2_daemon_follower";
 
-        await using DaemonHealthHost leader = await DaemonHealthHost.StartAsync(postgres, schema, DaemonMode.HotCold);
+        // A lock id of this test's own, so the wait below is for this leader's locks and nobody else's 4444.
+        const int lockId = 7_740_040;
+
+        await using DaemonHealthHost leader = await DaemonHealthHost.StartAsync(
+            postgres, schema, DaemonMode.HotCold, store: static options => options.Projections.DaemonLockId = lockId);
         await leader.WaitForDaemonAsync();
         await WaitCaughtUpAsync(leader, "DailySales:All", "ShipmentTracker:All");
 
-        IReadOnlyList<long> keys = LiveConfiguration(leader).LockKeys;
+        IReadOnlyList<long> keys = LiveConfiguration(leader, lockId).LockKeys;
         await Projections.ProjectionsFixture.WaitForAsync(
             async () => (await HeldAsync(keys)).Count > 0,
             "the leader to take its locks",
             TimeSpan.FromSeconds(60),
             Token);
 
-        await using DaemonHealthHost follower = await DaemonHealthHost.StartAsync(postgres, schema, DaemonMode.HotCold, fresh: false);
+        await using DaemonHealthHost follower = await DaemonHealthHost.StartAsync(
+            postgres, schema, DaemonMode.HotCold, fresh: false, store: static options => options.Projections.DaemonLockId = lockId);
 
         await QuietAfterIdleServerTimeAsync(leader, follower);
+    }
+
+    /// <summary>
+    /// The H2 re-review: with every shard caught up D02 is quiet before it ever looks at a write, so the two tests above
+    /// never reach the branch that matters. Here one shard is hung on a closed gate - the work is real, the lag is above
+    /// zero - while the high-water agent is caught up with every committed event; every row is put ten minutes into the
+    /// past, and the one write left is the running daemon's own restamp of its allocation fence (and from Marten 9.43 of
+    /// its mark's row). That write alone is what keeps D02 quiet, and D02 says so. D03, meanwhile, sees the hung shard.
+    /// </summary>
+    [PostgresFact]
+    [HealthQuiet("D02")]
+    public async Task With_work_waiting_only_the_daemons_own_restamp_keeps_D02_quiet()
+    {
+        const string schema = "h2_daemon_beside_hung";
+        const string gate = "h2-beside-hung";
+        const string hung = GatedProjection.ProjectionName + ":All";
+
+        await using DaemonHealthHost daemon = await DaemonHealthHost.StartAsync(postgres, schema, DaemonMode.Solo, gated: true);
+        await daemon.WaitForDaemonAsync();
+
+        try
+        {
+            await daemon.AppendGatedAsync(5);
+            await WaitCaughtUpAsync(daemon, hung);
+
+            GatedProjection.Close(gate);
+            await daemon.AppendGatedAsync(1, gate);
+            await daemon.AppendGatedAsync(5);
+
+            long stuck = await daemon.ShardPositionAsync(hung, postgres);
+            long highest = await daemon.HighestSequenceAsync(postgres);
+            await Projections.ProjectionsFixture.WaitForAsync(
+                async () => await MarkAsync(daemon) >= highest,
+                "the mark to catch up with every committed event while the gated shard is held",
+                TimeSpan.FromSeconds(60),
+                Token);
+            await WaitCaughtUpAsync(daemon, "DailySales:All", "ShipmentTracker:All");
+
+            await using DaemonHealthHost studio = await DaemonHealthHost.StartAsync(postgres, schema, mode: null, gated: true, fresh: false);
+
+            DateTimeOffset backdatedAt = await daemon.BackdateAllButTheFenceAsync(TimeSpan.FromMinutes(10), postgres);
+            await Projections.ProjectionsFixture.WaitForAsync(
+                async () => await daemon.FenceStampedAsync(postgres) is { } stamped && stamped > backdatedAt,
+                "the running daemon to restamp its allocation fence",
+                TimeSpan.FromSeconds(60),
+                Token);
+
+            await studio.SweepAsync();
+            studio.Advance(TimeSpan.FromMinutes(6));
+            HealthSweep second = await studio.SweepAsync();
+
+            HealthCheckResult d02 = Result(second, "D02");
+            d02.Outcome.Should().Be(HealthCheckOutcome.Checked, d02.Problem?.Reason);
+            d02.Findings.Should().BeEmpty("the daemon runs elsewhere and its own restamp says so");
+            d02.Note.Should().StartWith("Something wrote to the progression table", "the lag is above zero, so the write is what decided it");
+
+            (await daemon.ShardPositionAsync(hung, postgres)).Should().Be(stuck, "the gated shard is still held");
+            Findings(second, "D03").Should().Contain(x => x.Subject == hung, "and the shard that is not moving is D03's, seen from here too");
+        }
+        finally
+        {
+            GatedProjection.Open(gate);
+        }
+    }
+
+    /// <summary>
+    /// D02's 9.43 pin rule, live (H2 re-review): a studio beside a daemon running elsewhere, the mark pinned behind a gap
+    /// with work waiting, every row put ten minutes into the past. From Marten 9.43 the running daemon restamps its mark's
+    /// row even while pinned, and that restamp is what keeps D02 quiet; below 9.43 a pinned daemon writes nothing, and D02
+    /// stands down on the pin itself. Asserted per version.
+    /// </summary>
+    [PostgresFact]
+    [HealthQuiet("D02")]
+    public async Task During_a_pin_a_daemon_elsewhere_is_kept_alive_by_its_restamp_from_9_43()
+    {
+        const string schema = "h2_daemon_beside_pin";
+
+        await using DaemonHealthHost daemon = await DaemonHealthHost.StartAsync(postgres, schema, DaemonMode.Solo);
+        await daemon.WaitForDaemonAsync();
+        await WaitCaughtUpAsync(daemon, "DailySales:All", "ShipmentTracker:All");
+
+        await using DaemonHealthHost studio = await DaemonHealthHost.StartAsync(postgres, schema, mode: null, fresh: false);
+
+        await using NpgsqlConnection holder = await postgres.OpenAsync(Token);
+        await using NpgsqlTransaction transaction = await holder.BeginTransactionAsync(Token);
+        await using (NpgsqlCommand draw = new("select nextval(@sequence::regclass)", holder, transaction))
+        {
+            draw.Parameters.AddWithValue("sequence", SqlIdentifier.Qualify(daemon.EventSchema, "mt_events_sequence"));
+            await draw.ExecuteScalarAsync(Token);
+        }
+
+        await using (IDocumentSession session = daemon.Store.LightweightSession())
+        {
+            session.Events.StartStream(Guid.NewGuid(), new OrderPlaced(Guid.NewGuid(), "pinned", DateTimeOffset.UtcNow));
+            await session.SaveChangesAsync(Token);
+        }
+
+        await WaitForPinAsync(daemon);
+
+        bool stampIsLiveness = MartenStudio.Services.Configuration.RuntimeFeature.HighWaterMarkLivenessStamp
+            .IsAvailable(MartenStudio.Services.Configuration.MartenRuntime.Current);
+
+        DateTimeOffset backdatedAt = await daemon.BackdateAllButTheFenceAsync(TimeSpan.FromMinutes(10), postgres);
+
+        if (stampIsLiveness)
+        {
+            await Projections.ProjectionsFixture.WaitForAsync(
+                async () => await daemon.StampedAsync(HealthDaemonQueries.HighWaterMarkRow, postgres) is { } stamped && stamped > backdatedAt,
+                "the pinned daemon to restamp its mark's row",
+                TimeSpan.FromSeconds(60),
+                Token);
+        }
+
+        HealthCheckResult d02 = Result(await studio.SweepAsync(), "D02");
+
+        d02.Outcome.Should().Be(HealthCheckOutcome.Checked, d02.Problem?.Reason);
+        d02.Findings.Should().BeEmpty("a daemon pinned behind a gap is alive, and is D01's");
+        d02.Note.Should().Contain(stampIsLiveness ? "the high-water agent restamped it" : "Below Marten 9.43");
+
+        await transaction.RollbackAsync(Token);
     }
 
     /// <summary>Backdates every row but the fence, waits for one real restamp of it, and sweeps twice from <paramref name="studio" />.</summary>
@@ -363,13 +501,18 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
     [InlineData(DaemonMode.HotCold)]
     public async Task The_daemons_lock_ids_are_the_ones_the_studio_recognises(DaemonMode mode)
     {
-        await using DaemonHealthHost host = await DaemonHealthHost.StartAsync(postgres, "h2_daemon_locks_" + mode.ToString().ToLowerInvariant(), mode);
+        // A base lock id of this test's own (H2 re-review): advisory locks are the whole database's, and another class's
+        // multi-database daemon holds the default 4444 in this one while the suites run four classes at a time.
+        int lockId = mode == DaemonMode.Solo ? 7_740_020 : 7_740_021;
+
+        await using DaemonHealthHost host = await DaemonHealthHost.StartAsync(
+            postgres, "h2_daemon_locks_" + mode.ToString().ToLowerInvariant(), mode, store: options => options.Projections.DaemonLockId = lockId);
         await host.WaitForDaemonAsync();
 
-        DaemonCheckConfiguration configuration = LiveConfiguration(host);
+        DaemonCheckConfiguration configuration = LiveConfiguration(host, lockId);
         IReadOnlyList<long> expected = mode == DaemonMode.Solo
             ? []
-            : [.. DaemonCheckConfiguration.AsyncShardsOf(host.Store).Select(shard => (long) JasperFx.Events.Daemon.ProjectionLockIds.Compute(host.EventSchema, shard, 4444))];
+            : [.. DaemonCheckConfiguration.AsyncShardsOf(host.Store).Select(shard => (long) JasperFx.Events.Daemon.ProjectionLockIds.Compute(host.EventSchema, shard, lockId))];
 
         if (mode == DaemonMode.HotCold)
         {
@@ -471,13 +614,14 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>
-    /// A projection that keeps up, slowly: every event takes it ten milliseconds, three thousand arrive at once, and it
-    /// moves - a page at a time - while the lag stays far past the threshold and grows. That is D04: running, moving,
-    /// with the mark moving too, and slower than its arrivals.
+    /// A projection that stays slower than its arrivals, sample after sample: every event takes it ten milliseconds, and
+    /// three thousand more arrive between each of the advisor's samples while it finishes a page or so. It moves, the
+    /// mark moves, and its lag grows at each step - that is D04. One burst alone would not be (the H2 re-review): the
+    /// second sweep, after the first burst, says nothing.
     /// </summary>
     [PostgresFact]
     [HealthFires("D04")]
-    public async Task A_shard_that_moves_slower_than_events_arrive_is_falling_behind()
+    public async Task A_shard_that_stays_slower_than_events_arrive_is_falling_behind()
     {
         const string shard = GatedProjection.ProjectionName + ":All";
 
@@ -489,22 +633,32 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
 
         await host.SweepAsync();
 
-        long before = await host.ShardPositionAsync(shard, postgres);
-        await host.AppendGatedAsync(3_000, delayMilliseconds: 10);
+        HealthSweep? sweep = null;
 
-        await Projections.ProjectionsFixture.WaitForAsync(
-            async () => await host.ShardPositionAsync(shard, postgres) > before,
-            "the slow shard to finish its first page",
-            TimeSpan.FromSeconds(90),
-            Token);
+        for (int burst = 0; burst < 2; burst++)
+        {
+            long before = await host.ShardPositionAsync(shard, postgres);
+            await host.AppendGatedAsync(3_000, delayMilliseconds: 10);
 
-        host.Advance(TimeSpan.FromMinutes(2));
-        HealthSweep second = await host.SweepAsync();
+            await Projections.ProjectionsFixture.WaitForAsync(
+                async () => await host.ShardPositionAsync(shard, postgres) > before,
+                "the slow shard to finish a page",
+                TimeSpan.FromSeconds(90),
+                Token);
 
-        HealthFinding finding = Findings(second, "D04").Should().Contain(x => x.Subject == shard).Which;
+            host.Advance(TimeSpan.FromMinutes(2));
+            sweep = await host.SweepAsync();
+
+            if (burst == 0)
+            {
+                Findings(sweep, "D04").Should().NotContain(x => x.Subject == shard, "one burst, however large, lands in one step");
+            }
+        }
+
+        HealthFinding finding = Findings(sweep!, "D04").Should().Contain(x => x.Subject == shard).Which;
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Evidence.Should().Contain(x => x.Label == "Processing" && !x.Value.StartsWith("0 ", StringComparison.Ordinal));
-        Findings(second, "D03").Should().NotContain(x => x.Subject == shard, "a shard that moved is not stalled");
+        Findings(sweep!, "D03").Should().NotContain(x => x.Subject == shard, "a shard that moved is not stalled");
     }
 
     // ---- D05 -----------------------------------------------------------------------------------------------------
@@ -602,10 +756,10 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
 
     // ---- Helpers ----------------------------------------------------------------------------------------------
 
-    private static DaemonCheckConfiguration LiveConfiguration(DaemonHealthHost host) =>
-        new(host.EventSchema, false, false, DaemonMode.Solo, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(5), 4444, null, true, true,
+    private static DaemonCheckConfiguration LiveConfiguration(DaemonHealthHost host, int lockId = DaemonCheckConfiguration.DefaultDaemonLockId) =>
+        new(host.EventSchema, false, false, DaemonMode.Solo, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(5), lockId, null, true, true,
             [.. DaemonCheckConfiguration.AsyncShardsOf(host.Store).Select(static x => x.Identity)],
-            DaemonCheckConfiguration.LockKeysFor(host.EventSchema, DaemonCheckConfiguration.AsyncShardsOf(host.Store), 4444));
+            DaemonCheckConfiguration.LockKeysFor(host.EventSchema, DaemonCheckConfiguration.AsyncShardsOf(host.Store), lockId));
 
     private async Task<IReadOnlyList<(long Key, string? State)>> HeldAsync(IReadOnlyList<long> keys)
     {

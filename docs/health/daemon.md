@@ -23,9 +23,10 @@ D06 still apply.
 
 ## D01 High-water mark pinned behind a gap
 
-**Warning** once a committed event has waited behind the gap for 1 minute, **Critical** after 10. The daemon's
-high-water mark is held below a sequence number that was handed out and not committed, and an event above it is
-committed and waiting.
+**Warning** once a committed event has waited behind the gap for 1 minute - or at first sight, when Marten's record
+of the pin says the mark has already been held for more than a minute - and **Critical** once the advisor has seen
+one waiting for 10. The daemon's high-water mark is held below a sequence number that was handed out and not
+committed, and an event above it is committed and waiting.
 
 The high-water mark is the point below which every event is committed and safely ordered; no async projection
 processes anything above it. It moves contiguously, so it stops under any hole in the sequence. Most holes fill
@@ -48,7 +49,9 @@ the row (both tags). That is every long append transaction on an idle store - a 
 beside a rolled-back append, and, under `UseTransactionEvidenceForGapSkipping = false`, every tail gap under 32,
 permanently (#3865). No event is late in any of them, so D01 stays quiet and its status line says which shape it saw.
 How long a committed event has waited is measured from the advisor's first sample that saw one waiting behind this
-mark - "at least" that long - never from the row's time, which can predate anything waiting by hours.
+mark - "at least" that long - and that is what makes D01 Critical, never the row's time, which can predate anything
+waiting by hours. The row's age does make the first sweep that sees a committed event behind an old pin a Warning,
+so a stall that has lasted all morning is not left for two more sweeps.
 
 **Explain**, on the projections screen and only when asked, puts Marten's own `GapLivenessProbe` questions to
 the database: transactions in this database open since before the pin (and which of them hold a
@@ -115,12 +118,14 @@ builder.Services.AddMarten(opts => { /* ... */ })
 for longer than its window - and the advisor has seen the mark ahead of it, with the shard where it is, for that
 whole window.
 
-**The window is the shard's own:** at least 5 minutes (and at least `5 x SlowPollingTime`), and three times the
-longest the advisor has seen this shard hold still with work to do before it moved on - a lower bound of how long one
-of its pages takes. A healthy shard is still for as long as a page takes, and a page of a slow projection - a handler
-that calls out, a large `BatchSize` - can take minutes, so a shard is not called stalled for taking its usual time.
-A run the advisor did not watch end to end (a gap of more than 5 minutes between samples) measures nothing, and no
-one run can stretch the window past an hour.
+**The window is the shard's own:** at least 5 minutes (and at least `5 x SlowPollingTime`), and three times its
+typical page - the median of the runs in which the advisor saw it hold still with work to do before it moved on. A
+healthy shard is still for as long as a page takes, and a page of a slow projection - a handler that calls out, a
+large `BatchSize` - can take minutes, so a shard is not called stalled for taking its usual time. A run longer than
+the window in force when it ended was not a page - a stall, a pause, an outage, a rebuild writing nothing - and is
+dropped, and a run the advisor did not watch end to end (a gap of more than 5 minutes between samples) measures
+nothing. The window is never more than 20 minutes, nor half of what the advisor's history spans (60 samples at
+`HealthInterval`), because "the mark has been ahead for the whole window" has to be something the history can show.
 
 A shard's `last_updated` is stamped on every progress write (#4981): it is when the shard last moved, not whether
 its agent is alive. "Not moving" alone is a shard on an idle store, so D03 also needs the daemon to be alive and the
@@ -140,14 +145,14 @@ daemon here says is paused or failed is D05's; one being rebuilt is moving in a 
 
 ## D04 Falling behind, with an ETA
 
-**Warning.** A shard's lag is past its warning threshold and grew over the last ten minutes of samples, and had not
-started shrinking at the latest one.
+**Warning.** A shard's lag is past its warning threshold and grew at each of the last two steps between the
+advisor's samples: events arrived faster than the shard processed them, twice running.
 
 Tier 0: it runs no statement, and judges the sequence, the mark and the shard positions D01 and D03 recorded in the
-same sweep, with what this process knows of the daemon. A lag that is high and draining is not a finding - it is
-"draining at N ev/s, caught up in ~T", which the check's status row says and the projections screen draws as its
-arrow and ETA. Two samples a minute apart is the least the advisor believes, because a burst of appends grows every
-lag for a moment.
+same sweep, with what this process knows of the daemon. A burst of appends lands in one step, however large, and a
+shard that keeps up drains it by the next, so a single burst is never a finding - it takes three samples, over at
+least a minute, to say "falling behind". A lag that is high and draining is not a finding either - it is "draining
+at N ev/s, caught up in ~T", which the check's status row says and the projections screen draws as its arrow and ETA.
 
 **Only a shard that runs, moves, and is slower than its arrivals.** A lag grows for reasons that have nothing to do
 with speed, and each is somebody else's, so D04 - and the projections screen's arrow - say nothing of a shard while

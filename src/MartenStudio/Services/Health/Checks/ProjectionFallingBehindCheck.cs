@@ -21,10 +21,11 @@ internal sealed record ProjectionFallingBehindFacts(DaemonCheckConfiguration Con
 /// which the projections screen draws its arrow and ETA from as well). It reads nothing itself, so it costs nothing.
 /// </para>
 /// <para>
-/// <b>What fires.</b> The latest lag is past the shard's warning threshold and the lag grew over the window, and had
-/// not started shrinking at the latest sample: Warning. A lag that is high and draining is not a finding - it is
-/// "draining at N ev/s, caught up in ~T", which the projections screen shows and this check's status row says. A burst
-/// of appends grows every lag for a moment; two samples a minute apart is the least the advisor believes.
+/// <b>What fires.</b> The latest lag is past the shard's warning threshold and grew at each of the last two steps between
+/// samples - arrivals outpaced processing twice running: Warning. A burst of appends lands in one step, however large,
+/// and a shard that keeps up drains it at the next, so one burst is never a finding; neither is a lag that is high and
+/// draining - that is "draining at N ev/s, caught up in ~T", which the projections screen shows and this check's status
+/// row says. Three samples over at least a minute is the least the advisor believes.
 /// </para>
 /// <para>
 /// <b>Only a shard that is running and slower than its arrivals.</b> A lag grows for reasons that have nothing to do

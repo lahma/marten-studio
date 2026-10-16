@@ -20,7 +20,7 @@ internal enum LagDirection
     /// <summary>The lag has not changed.</summary>
     Steady,
 
-    /// <summary>The lag is growing, and was still growing at the latest sample.</summary>
+    /// <summary>The lag grew at each of the last two steps between samples: not a single burst.</summary>
     Growing,
 }
 
@@ -110,8 +110,10 @@ internal sealed record ShardTrend(
 /// </para>
 /// <para>
 /// <b>Rates over the window, not the last step</b> (<see cref="HealthTrend.PerSecond" />'s rule): one slow sweep must
-/// not make a steady drain look stalled. "Growing" also needs the latest step not to have shrunk, so a lag that grew
-/// and is now draining is not reported as still growing.
+/// not make a steady drain look stalled. "Growing" is the opposite case and needs more than a rate: the lag must have
+/// grown at each of the last two steps, so arrivals outpaced processing twice running. A burst of appends lands in one
+/// step, however large, and a shard that keeps up drains it at the next - so a single burst is never "growing", and a
+/// lag that grew and is now draining is not reported as still growing.
 /// </para>
 /// </remarks>
 internal static class ProjectionTrend
@@ -173,12 +175,11 @@ internal static class ProjectionTrend
         double processed = Math.Max(0, (latestPosition - firstPosition) / seconds);
         double appended = Math.Max(0, (latestHighest - firstHighest) / seconds);
         long firstLag = LagOf(firstPosition, firstHighest);
-        long previousLag = LagOf(points[^2].Position, points[^2].Highest);
         double lagRate = (lag - firstLag) / seconds;
 
         LagDirection direction =
             lag == 0 ? LagDirection.CaughtUp
-            : lag > firstLag && lag >= previousLag ? LagDirection.Growing
+            : GrewAtEachOfTheLastTwoSteps(points) ? LagDirection.Growing
             : lag < firstLag ? LagDirection.Draining
             : LagDirection.Steady;
 
@@ -217,7 +218,7 @@ internal static class ProjectionTrend
                 ? "not judged: its agent here is " + status + " (D05)"
             : trend.Direction is LagDirection.Growing or LagDirection.Steady && trend.ProcessedPerSecond is not > 0
                 ? "not judged: the shard has not moved while the advisor watched, which is about whether it runs (D02, D03), not its speed"
-            : trend.Direction == LagDirection.Growing && !trend.MarkMoved
+            : trend.Direction is LagDirection.Growing or LagDirection.Steady && !trend.MarkMoved
                 ? "not judged: the high-water mark has not moved, so nothing new reached the shard (D01)"
             : null;
 
@@ -225,21 +226,63 @@ internal static class ProjectionTrend
     }
 
     /// <summary>
-    /// The longest the advisor has seen <paramref name="shard" /> stand still with work to do before it moved on: a
-    /// lower bound of how long one of its pages takes, which D03's window is calibrated against.
+    /// How long a page of <paramref name="shard" /> typically takes, as the advisor saw it: the median of the runs in
+    /// which the shard stood still with work to do before it moved on - what D03's window is calibrated against.
     /// </summary>
+    /// <param name="history">The advisor's samples.</param>
+    /// <param name="shard">The shard.</param>
+    /// <param name="windowFor">D03's window for a given typical page - the rule a run is checked against.</param>
     /// <remarks>
+    /// <para>
+    /// <b>The median, of runs that were pages.</b> A run that lasted longer than D03's window in force when it ended - the
+    /// window the median of the runs before it gave - was a stall, a pause, an outage or a rebuild writing nothing, not a
+    /// page, and is dropped: counting it would let one bad hour switch the check off for the next. The median then keeps
+    /// one odd run from moving the window at all.
+    /// </para>
+    /// <para>
     /// A run starts at a sample in which the mark is ahead of the shard and ends at the first sample in which the shard
     /// is further on. A run broken by a sample without the shard, or by a step longer than <see cref="MaxSampleStep" />
     /// (nobody watched in between), measures nothing; one still running now is the stall itself and is not counted.
+    /// </para>
     /// </remarks>
-    public static TimeSpan? LongestPage(HealthHistoryView history, string shard)
+    public static TimeSpan? TypicalPage(HealthHistoryView history, string shard, Func<TimeSpan?, TimeSpan> windowFor)
+    {
+        ArgumentNullException.ThrowIfNull(windowFor);
+
+        List<TimeSpan> pages = [];
+
+        foreach (TimeSpan run in CompletedRuns(history, shard))
+        {
+            if (run <= windowFor(Median(pages)))
+            {
+                pages.Add(run);
+            }
+        }
+
+        return Median(pages);
+    }
+
+    private static TimeSpan? Median(List<TimeSpan> runs)
+    {
+        if (runs.Count == 0)
+        {
+            return null;
+        }
+
+        List<TimeSpan> sorted = [.. runs.Order()];
+        int middle = sorted.Count / 2;
+
+        return sorted.Count % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+    }
+
+    /// <summary>Every completed still-with-work run of <paramref name="shard" />, oldest first.</summary>
+    private static List<TimeSpan> CompletedRuns(HealthHistoryView history, string shard)
     {
         ArgumentNullException.ThrowIfNull(history);
         ArgumentException.ThrowIfNullOrWhiteSpace(shard);
 
         string series = DaemonSeries.ShardPosition(shard);
-        TimeSpan? longest = null;
+        List<TimeSpan> runs = [];
         DateTimeOffset? runStart = null;
         DateTimeOffset previousAt = DateTimeOffset.MinValue;
         double runPosition = 0;
@@ -259,8 +302,7 @@ internal static class ProjectionTrend
             {
                 if (position > runPosition && runHadWork)
                 {
-                    TimeSpan still = sample.At - started;
-                    longest = longest is { } before && before >= still ? before : still;
+                    runs.Add(sample.At - started);
                 }
 
                 if (position != runPosition)
@@ -280,14 +322,11 @@ internal static class ProjectionTrend
             previousAt = sample.At;
         }
 
-        return longest is { } page && page > MaxCalibratedPage ? MaxCalibratedPage : longest;
+        return runs;
     }
 
     /// <summary>A step between two samples longer than this is a gap in the watching, not a page.</summary>
     internal static readonly TimeSpan MaxSampleStep = TimeSpan.FromMinutes(5);
-
-    /// <summary>The longest page D03's window is calibrated by, so one odd run cannot switch the check off.</summary>
-    internal static readonly TimeSpan MaxCalibratedPage = TimeSpan.FromMinutes(20);
 
     /// <summary>
     /// The fastest any of <paramref name="shards" /> was measured processing events, in events per second, or
@@ -339,4 +378,22 @@ internal static class ProjectionTrend
     }
 
     private static long LagOf(double position, double highest) => (long) Math.Max(0, highest - position);
+
+    /// <summary>
+    /// Whether the lag grew at each of the last two steps between samples: arrivals outpaced processing twice running.
+    /// A burst lands in one step; a shard that drains it shrinks the lag at the next, so a burst alone is never growth.
+    /// </summary>
+    private static bool GrewAtEachOfTheLastTwoSteps(List<(DateTimeOffset At, double Position, double Highest, double? Mark)> points)
+    {
+        if (points.Count < 3)
+        {
+            return false;
+        }
+
+        long last = LagOf(points[^1].Position, points[^1].Highest);
+        long before = LagOf(points[^2].Position, points[^2].Highest);
+        long earlier = LagOf(points[^3].Position, points[^3].Highest);
+
+        return last > before && before > earlier;
+    }
 }

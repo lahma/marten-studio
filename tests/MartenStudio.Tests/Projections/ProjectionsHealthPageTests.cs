@@ -291,7 +291,12 @@ public class ProjectionsHealthPageTests
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         ShardTrend growing = ProjectionTrend.For(
-            new HealthHistoryView([Sample(now - TimeSpan.FromMinutes(2), position: 400, highest: 1_000, mark: 1_000), Sample(now, position: 600, highest: 5_000, mark: 5_000)]),
+            new HealthHistoryView(
+            [
+                Sample(now - TimeSpan.FromMinutes(4), position: 300, highest: 500, mark: 500),
+                Sample(now - TimeSpan.FromMinutes(2), position: 400, highest: 1_000, mark: 1_000),
+                Sample(now, position: 600, highest: 5_000, mark: 5_000),
+            ]),
             "DailySales:All");
 
         growing.Direction.Should().Be(LagDirection.Growing);

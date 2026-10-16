@@ -371,12 +371,15 @@ internal sealed class DaemonHealthHost : IAsyncDisposable
     }
 
     /// <summary>When the allocation fence was last restamped, in server time, or <see langword="null" /> without one.</summary>
-    public async Task<DateTimeOffset?> FenceStampedAsync(PostgresFixture postgres)
+    public Task<DateTimeOffset?> FenceStampedAsync(PostgresFixture postgres) => StampedAsync(HealthDaemonQueries.AllocationFenceRow, postgres);
+
+    /// <summary>When one progression row was last written, in server time, or <see langword="null" /> without one.</summary>
+    public async Task<DateTimeOffset?> StampedAsync(string row, PostgresFixture postgres)
     {
         await using NpgsqlConnection connection = await postgres.OpenAsync(TestContext.Current.CancellationToken);
         await using NpgsqlCommand command = new(
-            "select last_updated from " + SqlIdentifier.Qualify(EventSchema, "mt_event_progression") + " where name = @fence", connection);
-        command.Parameters.AddWithValue("fence", HealthDaemonQueries.AllocationFenceRow);
+            "select last_updated from " + SqlIdentifier.Qualify(EventSchema, "mt_event_progression") + " where name = @row", connection);
+        command.Parameters.AddWithValue("row", row);
 
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);
         return await reader.ReadAsync(TestContext.Current.CancellationToken) && !reader.IsDBNull(0) ? reader.GetFieldValue<DateTimeOffset>(0) : null;

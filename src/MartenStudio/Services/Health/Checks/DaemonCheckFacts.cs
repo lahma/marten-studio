@@ -45,8 +45,14 @@ internal static class DaemonThresholds
     /// </summary>
     public static readonly TimeSpan ShardQuietFloor = TimeSpan.FromMinutes(5);
 
-    /// <summary>D03: the window is at least this many times the longest page the advisor has seen the shard take.</summary>
+    /// <summary>D03: the window is at least this many times the shard's typical page, as the advisor saw it.</summary>
     public const int PageCalibrationMultiple = 3;
+
+    /// <summary>
+    /// D03's ceiling: however slow the shard's pages, the window is never longer than this - nor than half of what the
+    /// advisor's history holds, or "ahead of the shard for the whole window" could never be seen and D03 would go blind.
+    /// </summary>
+    public static readonly TimeSpan ShardQuietCeiling = TimeSpan.FromMinutes(20);
 
     /// <summary>D04 and D06: the trailing window a trend is read over.</summary>
     public static readonly TimeSpan TrendWindow = TimeSpan.FromMinutes(10);
@@ -61,12 +67,14 @@ internal static class DaemonThresholds
     public static TimeSpan DaemonQuiet(TimeSpan slowPollingTime) => slowPollingTime * DaemonQuietPolls + MinimumQuiet;
 
     /// <summary>
-    /// D03's window for a shard: <c>max(5 x SlowPollingTime, 5 min, 3 x the longest page the advisor has seen it
-    /// take)</c> - calibrated by the shard's own cadence where the history has one, floored where it has not.
+    /// D03's window for a shard: <c>max(5 x SlowPollingTime, 5 min, 3 x its typical page)</c>, and never more than
+    /// <c>min(20 min, half the history's span)</c> - calibrated by the shard's own cadence where the history has one,
+    /// floored where it has not, and capped so that the window can always be watched whole.
     /// </summary>
     /// <param name="slowPollingTime">The store's <c>SlowPollingTime</c>.</param>
-    /// <param name="longestPage">The longest the advisor saw this shard hold still with work to do before moving, if it saw one.</param>
-    public static TimeSpan ShardQuiet(TimeSpan slowPollingTime, TimeSpan? longestPage = null)
+    /// <param name="healthInterval">The advisor's sampling interval (<c>EffectiveHealthInterval</c>), which sets how long its history spans.</param>
+    /// <param name="typicalPage">The median page the advisor saw this shard take (<see cref="ProjectionTrend.TypicalPage" />), if it saw one.</param>
+    public static TimeSpan ShardQuiet(TimeSpan slowPollingTime, TimeSpan healthInterval, TimeSpan? typicalPage = null)
     {
         TimeSpan window = slowPollingTime * ShardQuietPolls;
 
@@ -75,12 +83,20 @@ internal static class DaemonThresholds
             window = ShardQuietFloor;
         }
 
-        if (longestPage is { } page && page * PageCalibrationMultiple > window)
+        if (typicalPage is { } page && page * PageCalibrationMultiple > window)
         {
             window = page * PageCalibrationMultiple;
         }
 
-        return window;
+        TimeSpan ceiling = ShardQuietCeilingFor(healthInterval);
+        return window > ceiling ? ceiling : window;
+    }
+
+    /// <summary>The most D03's window may be for a history sampled every <paramref name="healthInterval" />.</summary>
+    public static TimeSpan ShardQuietCeilingFor(TimeSpan healthInterval)
+    {
+        TimeSpan half = healthInterval * HealthHistory.Capacity / 2;
+        return half < ShardQuietCeiling ? half : ShardQuietCeiling;
     }
 }
 
@@ -184,6 +200,12 @@ internal sealed record DaemonCheckConfiguration(
     /// </summary>
     public IReadOnlySet<string> HiddenProjections { get; init; } = NoHiddenProjections;
 
+    /// <summary>
+    /// The advisor's sampling interval (<c>EffectiveHealthInterval</c>) - how far apart its samples are, and so how long
+    /// its history of <see cref="HealthHistory.Capacity" /> samples spans. D03 caps its window by it.
+    /// </summary>
+    public TimeSpan HealthInterval { get; init; } = TimeSpan.FromMinutes(1);
+
     /// <summary>The document types the projection behind <paramref name="shard" /> writes.</summary>
     public IReadOnlyList<Type> PublishedTypesOf(string shard) =>
         PublishedTypes.GetValueOrDefault(ProjectionOf(shard)) ?? [];
@@ -228,6 +250,7 @@ internal sealed record DaemonCheckConfiguration(
             [.. shards.Select(static x => x.Identity).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)],
             LockKeysFor(schema, shards, lockId))
         {
+            HealthInterval = context.StudioOptions.EffectiveHealthInterval,
             PublishedTypes = published,
             HiddenProjections = new HashSet<string>(
                 published.Where(x => x.Value.Any(type => !context.IsDocumentTypeVisible(type))).Select(static x => x.Key),

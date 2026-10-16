@@ -33,6 +33,12 @@ public class DaemonLockIdsMultiDatabaseLiveTests(PostgresFixture postgres)
 {
     private const string SecondDatabaseName = "martenstudio_h2_locks";
 
+    /// <summary>
+    /// A lock id of this class's own: the distributor takes it in the shared test database too, and holding the default
+    /// 4444 there raced every other class that takes or expects 4444 (H2 re-review).
+    /// </summary>
+    private const int LockId = 7_740_030;
+
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [PostgresFact]
@@ -57,6 +63,7 @@ public class DaemonLockIdsMultiDatabaseLiveTests(PostgresFixture postgres)
                 options.Events.DatabaseSchemaName = eventSchema;
                 options.AutoCreateSchemaObjects = AutoCreate.All;
                 options.Projections.LeadershipPollingTime = 1_000;
+                options.Projections.DaemonLockId = LockId;
                 options.Projections.Add(new DailySalesProjection(), ProjectionLifecycle.Async);
 
                 options.MultiTenantedDatabases(tenancy =>
@@ -79,17 +86,17 @@ public class DaemonLockIdsMultiDatabaseLiveTests(PostgresFixture postgres)
 
         try
         {
-            IReadOnlyList<long> keys = DaemonCheckConfiguration.LockKeysFor(eventSchema, DaemonCheckConfiguration.AsyncShardsOf(store), 4444);
+            IReadOnlyList<long> keys = DaemonCheckConfiguration.LockKeysFor(eventSchema, DaemonCheckConfiguration.AsyncShardsOf(store), LockId);
 
             foreach (string connectionString in (string[]) [first, second])
             {
                 await ProjectionsFixture.WaitForAsync(
-                    async () => (await HeldAsync(connectionString, keys)).Contains(4444),
+                    async () => (await HeldAsync(connectionString, keys)).Contains(LockId),
                     "the HotCold leader to take DaemonLockId in " + new NpgsqlConnectionStringBuilder(connectionString).Database,
                     TimeSpan.FromSeconds(60),
                     Token);
 
-                (await HeldAsync(connectionString, keys)).Should().Equal([4444L],
+                (await HeldAsync(connectionString, keys)).Should().Equal([(long) LockId],
                     "the multi-database distributor takes DaemonLockId per database and nothing per shard");
             }
         }

@@ -113,12 +113,75 @@ public class ShardStalledCheckTests
         if (fires)
         {
             verdict.Findings.Single().Evidence.Should().Contain(x => x.Label == "Quiet window"
-                && x.Value.StartsWith("12 min (3 x the longest page the advisor saw this shard take, 4 min", StringComparison.Ordinal));
+                && x.Value.StartsWith("12 min (3 x this shard's typical page as the advisor saw it, 4 min", StringComparison.Ordinal));
         }
         else
         {
             verdict.Findings.Should().BeEmpty();
         }
+    }
+
+    /// <summary>
+    /// The H2 re-review: calibrated on the median, not the longest - one slow page among quick ones does not move the
+    /// window. Pages of 2, 2 and 4.5 minutes give a six-minute window, where the longest would have given 13.5.
+    /// </summary>
+    [Fact]
+    public void The_window_is_calibrated_on_the_median_page_not_the_longest()
+    {
+        HealthSample[] samples =
+        [
+            SampleAt(TimeSpan.FromMinutes(50), 10, 100),
+            SampleAt(TimeSpan.FromMinutes(48), 20, 100),
+            SampleAt(TimeSpan.FromMinutes(46), 30, 100),
+            SampleAt(TimeSpan.FromMinutes(41.5), 40, 100),
+            SampleAt(TimeSpan.FromMinutes(8), 100, 150),
+            Current(),
+        ];
+
+        HealthFinding finding = Evaluate(Reading(TimeSpan.FromSeconds(1)), StillSince(TimeSpan.FromMinutes(7)), samples).Findings.Single();
+
+        finding.Evidence.Should().Contain(x => x.Label == "Quiet window"
+            && x.Value.StartsWith("6 min (3 x this shard's typical page as the advisor saw it, 2 min", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A run longer than the window in force when it ended was a stall, a pause or an outage, not a page: it is dropped,
+    /// so a past bad half-hour does not blind D03 for the next one.
+    /// </summary>
+    [Fact]
+    public void A_run_longer_than_the_window_then_in_force_is_not_a_page()
+    {
+        HealthSample[] samples =
+        [
+            SampleAt(TimeSpan.FromMinutes(60), 50, 100),
+            SampleAt(TimeSpan.FromMinutes(55), 50, 100),
+            SampleAt(TimeSpan.FromMinutes(50), 50, 100),
+            SampleAt(TimeSpan.FromMinutes(45), 50, 100),
+            SampleAt(TimeSpan.FromMinutes(40), 50, 100),
+            SampleAt(TimeSpan.FromMinutes(35), 50, 100),
+            SampleAt(TimeSpan.FromMinutes(30), 50, 100),
+            SampleAt(TimeSpan.FromMinutes(25), 80, 120),
+            AheadSixMinutesAgo,
+            Current(),
+        ];
+
+        HealthFinding finding = Evaluate(Reading(TimeSpan.FromSeconds(1)), StillSince(TimeSpan.FromMinutes(7)), samples).Findings.Single();
+
+        finding.Evidence.Should().Contain(x => x.Label == "Quiet window" && x.Value.StartsWith("5 min (max of 5 x", StringComparison.Ordinal),
+            "the 35-minute still run was longer than the five-minute window in force, so it was no page");
+    }
+
+    /// <summary>The window is never longer than the history can watch whole: 20 minutes, and half the ring's span.</summary>
+    [Fact]
+    public void The_window_is_capped_at_twenty_minutes_and_half_the_historys_span()
+    {
+        DaemonThresholds.ShardQuietCeilingFor(TimeSpan.FromMinutes(1)).Should().Be(TimeSpan.FromMinutes(20), "60 samples a minute apart span an hour");
+        DaemonThresholds.ShardQuietCeilingFor(TimeSpan.FromSeconds(30)).Should().Be(TimeSpan.FromMinutes(15));
+
+        DaemonThresholds.ShardQuiet(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(7)).Should().Be(TimeSpan.FromMinutes(20));
+        DaemonThresholds.ShardQuiet(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(4)).Should().Be(TimeSpan.FromMinutes(5),
+            "a history ten minutes long can watch five minutes whole, not twelve");
+        DaemonThresholds.ShardQuiet(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1)).Should().Be(TimeSpan.FromMinutes(5));
     }
 
     /// <summary>A mark that moved a second ago gives a healthy shard no time: the advisor must have seen it ahead for the window.</summary>

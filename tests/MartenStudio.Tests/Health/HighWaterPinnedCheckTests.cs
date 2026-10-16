@@ -93,26 +93,50 @@ public class HighWaterPinnedCheckTests
         verdict.Findings.Single().Severity.Should().Be(HealthSeverity.Warning, "the event has waited two minutes, whatever the row says");
     }
 
-    /// <summary>Marten holds every gap for StaleSequenceThreshold before it asks; a fresh wait is the daemon's ordinary work.</summary>
+    /// <summary>Marten holds every gap for StaleSequenceThreshold before it asks; a fresh wait behind a fresh pin is the daemon's ordinary work.</summary>
     [Theory]
     [InlineData(0)]
-    [InlineData(59)]
-    public void A_wait_under_a_minute_is_quiet(int seconds)
+    [InlineData(29)]
+    public void A_wait_under_a_minute_behind_a_young_pin_is_quiet(int seconds)
     {
-        HealthVerdict verdict = Evaluate(Pinned(TimeSpan.FromHours(1)), null, Waiting(TimeSpan.FromSeconds(seconds)));
+        HealthVerdict verdict = Evaluate(Pinned(TimeSpan.FromSeconds(30)), null, Waiting(TimeSpan.FromSeconds(seconds)));
 
         verdict.Findings.Should().BeEmpty();
         verdict.Note.Should().Contain("within the 1 min the daemon is given");
     }
 
-    /// <summary>The first sweep that sees the wait has nothing to measure it from, and says so.</summary>
+    /// <summary>The first sweep that sees a wait behind a young pin has nothing to measure it from, and says so.</summary>
     [Fact]
-    public void A_wait_seen_for_the_first_time_is_only_watched()
+    public void A_wait_seen_for_the_first_time_behind_a_young_pin_is_only_watched()
     {
-        HealthVerdict verdict = Evaluate(Pinned(TimeSpan.FromHours(1)));
+        HealthVerdict verdict = Evaluate(Pinned(TimeSpan.FromSeconds(30)));
 
         verdict.Findings.Should().BeEmpty();
         verdict.Note.Should().Contain("only just seen it");
+    }
+
+    /// <summary>
+    /// The H2 re-review: a stall that has lasted hours must not wait for the third sweep. On first sight of a committed
+    /// event behind a pin Marten says is more than a minute old, a Warning at once - and only a Warning, because the pin
+    /// can predate the event by hours; Critical is the advisor's own measured wait.
+    /// </summary>
+    [Fact]
+    public void A_committed_event_seen_for_the_first_time_behind_an_old_pin_is_a_warning_at_once()
+    {
+        HealthFinding finding = Evaluate(Pinned(TimeSpan.FromHours(3))).Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Warning, "Critical needs the advisor's own ten minutes");
+        finding.Title.Should().Be("A committed event is waiting behind a gap that has held the high-water mark for 3 h 0 min");
+        finding.Evidence.Should().Contain(new HealthEvidence("Waiting for", "seen in this sweep for the first time; Critical is measured from here"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Pinned for", "3 h 0 min (server time)"));
+        finding.Evidence.Select(static x => x.Label).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public void A_pin_just_over_a_minute_old_is_a_warning_on_first_sight_and_one_just_under_is_not()
+    {
+        Evaluate(Pinned(TimeSpan.FromSeconds(61))).Findings.Should().ContainSingle();
+        Evaluate(Pinned(TimeSpan.FromSeconds(59))).Findings.Should().BeEmpty();
     }
 
     /// <summary>A sample of another mark, of no wait, or without D01 ends the run: the wait is measured since then.</summary>

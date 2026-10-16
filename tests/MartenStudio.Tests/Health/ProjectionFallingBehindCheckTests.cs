@@ -91,11 +91,46 @@ public class ProjectionFallingBehindCheckTests
     public void A_rows_own_warning_threshold_wins()
     {
         HealthFinding finding = Evaluate(
-                At(TimeSpan.FromMinutes(2), 100, 300, warning: 50),
+                At(TimeSpan.FromMinutes(4), 100, 200, warning: 50),
+                At(TimeSpan.FromMinutes(2), 120, 300, warning: 50),
                 At(TimeSpan.Zero, 150, 900, warning: 50))
             .Findings.Single();
 
         finding.Evidence.Should().Contain(x => x.Label == "Warning threshold" && x.Value == "50 (warning_behind_threshold)");
+    }
+
+    /// <summary>
+    /// The H2 re-review: a burst of appends lands in one step, however large. Growth needs two steps in a row, so a
+    /// single burst - between two samples, or after a quiet one - is never "falling behind".
+    /// </summary>
+    [Fact]
+    public void A_single_burst_between_two_samples_is_not_falling_behind()
+    {
+        Evaluate(At(TimeSpan.FromMinutes(2), 1_000, 1_000), At(TimeSpan.Zero, 1_500, 5_000)).Findings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_single_burst_after_a_quiet_step_is_not_falling_behind()
+    {
+        HealthVerdict verdict = Evaluate(
+            At(TimeSpan.FromMinutes(4), 1_000, 1_000),
+            At(TimeSpan.FromMinutes(2), 1_000, 1_000),
+            At(TimeSpan.Zero, 1_500, 5_000));
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Contain(Shard + ": steady", "a lag that stepped up once and has not grown since is not growing");
+    }
+
+    /// <summary>Two steps of arrivals outpacing processing, the burst's own step excluded: that is falling behind.</summary>
+    [Fact]
+    public void Growth_at_each_of_the_last_two_steps_is_falling_behind()
+    {
+        Evaluate(
+                At(TimeSpan.FromMinutes(6), 1_000, 1_000),
+                At(TimeSpan.FromMinutes(4), 1_200, 5_000),
+                At(TimeSpan.FromMinutes(2), 1_700, 6_000),
+                At(TimeSpan.Zero, 2_200, 7_000))
+            .Findings.Should().ContainSingle();
     }
 
     // ---- The stand-downs: a growing lag that is somebody else's finding (H2 review) -----------------------------
@@ -251,9 +286,11 @@ public class ProjectionFallingBehindCheckTests
         ProjectionTrend.EstimateRebuild(36_000, throughput, history).Should().StartWith("About 1 h 0 min, at the 10 ev/s");
     }
 
-    /// <summary>D03's calibration: the longest still run with work that ended in a move; a gap in the watching measures nothing.</summary>
+    private static TimeSpan WindowFor(TimeSpan? page) => DaemonThresholds.ShardQuiet(TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), page);
+
+    /// <summary>D03's calibration: a still run with work that ended in a move; a gap in the watching measures nothing.</summary>
     [Fact]
-    public void The_longest_page_is_a_still_run_with_work_that_ended_in_a_move()
+    public void A_page_is_a_still_run_with_work_that_ended_in_a_move()
     {
         HealthHistoryView history = new(
         [
@@ -265,14 +302,14 @@ public class ProjectionFallingBehindCheckTests
             At(TimeSpan.Zero, 90, 100),
         ]);
 
-        ProjectionTrend.LongestPage(history, Shard).Should().Be(TimeSpan.FromMinutes(4),
+        ProjectionTrend.TypicalPage(history, Shard, WindowFor).Should().Be(TimeSpan.FromMinutes(4),
             "30 to 26 minutes ago is a page; 26 to 1 crosses a fourteen-minute and an eleven-minute gap, which nobody watched");
     }
 
     [Fact]
     public void A_shard_that_was_caught_up_while_still_took_no_page()
     {
-        ProjectionTrend.LongestPage(new HealthHistoryView([At(TimeSpan.FromMinutes(4), 100, 100), At(TimeSpan.Zero, 200, 200)]), Shard)
+        ProjectionTrend.TypicalPage(new HealthHistoryView([At(TimeSpan.FromMinutes(4), 100, 100), At(TimeSpan.Zero, 200, 200)]), Shard, WindowFor)
             .Should().BeNull("still with nothing to do is idle, not a page");
     }
 

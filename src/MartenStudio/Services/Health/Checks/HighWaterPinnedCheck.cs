@@ -26,9 +26,11 @@ internal sealed record HighWaterPinnedFacts(DaemonCheckConfiguration Configurati
 /// upserts the row (V9.39.0, V9.50.2). That is every long append transaction on an idle store (a bulk import), every
 /// long transaction beside a rolled-back append, and, under <c>UseTransactionEvidenceForGapSkipping = false</c>,
 /// every tail gap under 32 forever (#3865) - and in none of them is any event late. So D01 fires only when a
-/// committed event waits behind the gap (<see cref="HighWaterReading.IsHoldingCommittedEvents" />), and the delay is
-/// measured from the advisor's first sample that saw one waiting behind this mark (<see cref="DaemonSeries.WaitingMark" />),
-/// never from the stuck row's time, which can predate anything waiting by hours.
+/// committed event waits behind the gap (<see cref="HighWaterReading.IsHoldingCommittedEvents" />). Critical is the
+/// delay measured from the advisor's first sample that saw one waiting behind this mark
+/// (<see cref="DaemonSeries.WaitingMark" />), never the stuck row's age, which can predate anything waiting by hours. A
+/// Warning comes sooner: on first sight, when the row says the mark has already been held for more than a minute - so a
+/// stall that has lasted all morning is reported by the first sweep that sees a committed event behind it.
 /// </para>
 /// <para>
 /// <b>Why it is not reported sooner.</b> Most gaps fill within milliseconds - they are appends that drew a number
@@ -163,8 +165,15 @@ internal sealed class HighWaterPinnedCheck : HealthCheck<HighWaterPinnedFacts>
         }
 
         TimeSpan waited = WaitingFor(evaluation.History, mark, evaluation.Now);
+        TimeSpan pinned = reading.PinnedFor ?? TimeSpan.Zero;
 
-        if (waited <= DaemonThresholds.PinnedWarning)
+        // On first sight the advisor has no wait of its own to measure, but Marten's record of the pin does say how long
+        // the mark has been held: past a minute, with a committed event behind it, that is a Warning now - not two sweeps
+        // from now. Critical stays the advisor's measured wait, because the pin can predate the event by hours.
+        bool seenLong = waited > DaemonThresholds.PinnedWarning;
+        bool pinnedLong = pinned > DaemonThresholds.PinnedWarning;
+
+        if (!seenLong && !pinnedLong)
         {
             return HealthVerdict.Quiet(
                 "A committed event (" + DaemonCheckConfiguration.Number(next) + ") is waiting behind a gap at the mark; the advisor has "
@@ -179,8 +188,11 @@ internal sealed class HighWaterPinnedCheck : HealthCheck<HighWaterPinnedFacts>
             new("High-water mark", DaemonCheckConfiguration.Number(mark)),
             new("Highest sequence handed out", DaemonCheckConfiguration.Number(reading.HighestSequence)),
             new("Not committed", range + "; the next committed event is " + DaemonCheckConfiguration.Number(next)),
-            new("Waiting for", "at least " + DaemonCheckConfiguration.Format(waited) + " (since the advisor first saw a committed event behind this mark)"),
+            new("Waiting for", waited > TimeSpan.Zero
+                ? "at least " + DaemonCheckConfiguration.Format(waited) + " (since the advisor first saw a committed event behind this mark)"
+                : "seen in this sweep for the first time; Critical is measured from here"),
             new("Pinned since", reading.StuckSince!.Value.ToString("u", CultureInfo.InvariantCulture) + " (server time, Marten's HighWaterStuckGap row)"),
+            new("Pinned for", DaemonCheckConfiguration.Format(pinned) + " (server time)"),
             new("Projections.StaleSequenceThreshold", DaemonCheckConfiguration.Format(configuration.StaleSequenceThreshold)),
             new("Projections.SkipStaleGapsDespiteLiveTransactionsAfter", configuration.SkipStaleGapsCap is { } cap
                 ? DaemonCheckConfiguration.Format(cap)
@@ -198,7 +210,9 @@ internal sealed class HighWaterPinnedCheck : HealthCheck<HighWaterPinnedFacts>
         {
             Code = "D01",
             Severity = severity,
-            Title = "Committed events have waited behind a gap in the event sequence for at least " + DaemonCheckConfiguration.Format(waited),
+            Title = seenLong
+                ? "Committed events have waited behind a gap in the event sequence for at least " + DaemonCheckConfiguration.Format(waited)
+                : "A committed event is waiting behind a gap that has held the high-water mark for " + DaemonCheckConfiguration.Format(pinned),
             WhyItMatters =
                 "No async projection or subscription in this database processes an event above the high-water mark, and the "
                 + "mark cannot pass a sequence number that was handed out and not committed. Marten holds it while any "

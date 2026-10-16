@@ -41,8 +41,11 @@ internal sealed record ShardStalledFacts(
 /// </para>
 /// <para>
 /// <b>How long is too long</b> is the shard's own: at least five minutes (and five <c>SlowPollingTime</c>s), and three
-/// times the longest the advisor has seen this shard hold still with work to do before it moved - a page of a slow
-/// projection can take minutes, and a healthy one must not be called stalled for taking its usual time.
+/// times its typical page - the median of the runs in which the advisor saw it hold still with work to do before it
+/// moved, a run longer than the window then in force being a stall or an outage and dropped - because a page of a slow
+/// projection can take minutes and a healthy one must not be called stalled for taking its usual time. And never more
+/// than 20 minutes, nor half of what the advisor's history holds: a window the history cannot cover could never be
+/// watched whole, and D03 would go blind.
 /// </para>
 /// <para>
 /// <b>Not a heartbeat.</b> <c>mt_event_progression.heartbeat</c> is written at status changes (JasperFx documents it
@@ -136,8 +139,11 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
                 continue;
             }
 
-            TimeSpan? longestPage = ProjectionTrend.LongestPage(evaluation.History, shard);
-            TimeSpan window = DaemonThresholds.ShardQuiet(configuration.SlowPollingTime, longestPage);
+            TimeSpan? typicalPage = ProjectionTrend.TypicalPage(
+                evaluation.History,
+                shard,
+                page => DaemonThresholds.ShardQuiet(configuration.SlowPollingTime, configuration.HealthInterval, page));
+            TimeSpan window = DaemonThresholds.ShardQuiet(configuration.SlowPollingTime, configuration.HealthInterval, typicalPage);
 
             long behindMark = mark - row.Sequence;
             if (behindMark <= 0 || row.LastUpdated is not { } lastMoved || reading.ServerNow - lastMoved <= window)
@@ -177,8 +183,9 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
                     new HealthEvidence("Position", DaemonCheckConfiguration.Number(row.Sequence)),
                     new HealthEvidence("High-water mark", DaemonCheckConfiguration.Number(mark)),
                     new HealthEvidence("Last progress", lastMoved.ToString("u", CultureInfo.InvariantCulture) + " (server time)"),
-                    new HealthEvidence("Quiet window", DaemonCheckConfiguration.Format(window) + (longestPage is { } page
-                        ? " (3 x the longest page the advisor saw this shard take, " + DaemonCheckConfiguration.Format(page) + ", and at least 5 min)"
+                    new HealthEvidence("Quiet window", DaemonCheckConfiguration.Format(window) + (typicalPage is { } page
+                        ? " (3 x this shard's typical page as the advisor saw it, " + DaemonCheckConfiguration.Format(page)
+                          + ", at least 5 min, at most " + DaemonCheckConfiguration.Format(DaemonThresholds.ShardQuietCeilingFor(configuration.HealthInterval)) + ")"
                         : " (max of 5 x Projections.SlowPollingTime and 5 min; the advisor has not yet seen this shard take a page)")),
                     new HealthEvidence("Daemon alive because", liveness.Because),
                     row.AgentStatus is { Length: > 0 } status
