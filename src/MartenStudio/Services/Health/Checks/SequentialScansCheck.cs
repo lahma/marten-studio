@@ -25,9 +25,13 @@ internal sealed record SequentialScanFacts(DateTimeOffset ReadAt, IReadOnlyList<
 /// (<see cref="WholeTableFraction" />), so a million cheap <c>limit 1</c> scans do not look like full ones.
 /// </para>
 /// <para>
-/// <b>A partitioned table is judged by its partitions</b>, from leaf figures the catalog walk rolls up: the
-/// size line applies to its largest partition, and one scan covers its mean partition. Fifty tenants of four
-/// thousand rows each, every query scanning its own tenant's partition, is the right plan and no finding.
+/// <b>A partitioned table is judged by its largest partition</b>, from leaf figures the catalog walk rolls up:
+/// the size line applies to it, and so does the per-scan test - an average scan must read a good part of the
+/// largest partition. Fifty tenants of four thousand rows each, every query scanning its own tenant's partition,
+/// is the right plan and no finding; so is one large tenant beside many small ones whose per-tenant scans never
+/// touch the large one. The counters are rolled up, so a scan of the large partition and a scan of a small one
+/// cannot be told apart: what is lost is a table whose whole-partition scans of its large partitions are
+/// outnumbered by scans of small ones, which pull the average down - the conservative side of the line.
 /// </para>
 /// </remarks>
 [HealthCheck("T01", HealthArea.Tables, HealthCostTier.Catalog, "Sequential scans on a large table")]
@@ -65,11 +69,13 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
         (table.Row.IsPartitioned ? table.Row.LargestLeafRows ?? 0 : table.Rows) >= LargeTableRows;
 
     /// <summary>
-    /// The rows one whole scan reads: the table's for an ordinary table, the mean partition's for a partitioned one,
-    /// which is what a scan pruned to one partition reads.
+    /// The rows one whole scan reads: the table's for an ordinary table, and for a partitioned one its
+    /// <b>largest partition's</b> - never the mean. The size line is the largest partition's, so the per-scan
+    /// test must be too: against the mean, one large tenant among many small ones makes the mean small, and every
+    /// per-tenant scan of a small partition passes for a whole-table scan though the large one was never read.
     /// </summary>
     internal static double ScanUnit(TableFacts table) =>
-        table.Row.IsPartitioned ? (double) table.Rows / Math.Max(1, table.Row.PartitionLeaves) : table.Rows;
+        table.Row.IsPartitioned ? Math.Max(table.Row.LargestLeafRows ?? 0, 1) : table.Rows;
 
     /// <inheritdoc />
     public override IEnumerable<HealthSamplePart> Sample(SequentialScanFacts facts)
@@ -151,6 +157,7 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
         MartenTable declared = table.Table;
         TimeSpan window = read.Span;
         string times = Math.Floor(wholeTableReads).ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+
 
         return new HealthFinding
         {

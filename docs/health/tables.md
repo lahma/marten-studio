@@ -56,12 +56,17 @@ opts.Schema.For<Order>().Duplicate(x => x.Status);
 
 The studio's own exact counts, `pg_dump` and a one-off report are sequential scans too.
 
-**A partitioned table is judged by its partitions.** A tenant-partitioned table counts one scan per partition
-read, and a per-tenant query that reads its own small partition whole is often the right plan. So the 100,000
-line applies to the table's largest partition, and "an average scan read a good part of one scan's worth" is
-measured against its mean partition, both rolled up from the catalog without opening a partition. Fifty tenants
-of 4,000 rows, each query scanning its own tenant's partition, is no finding; a finding on a partitioned table is
-worded "partition-wide".
+**A partitioned table is judged by its largest partition.** A tenant-partitioned table counts one scan per
+partition read, and a per-tenant query that reads its own small partition whole is often the right plan. So the
+100,000 line applies to the table's largest partition, and so does "an average scan read a good part of one
+scan's worth" - never the mean partition, which one large tenant among many small ones makes small enough for
+every per-tenant scan of a small partition to pass for a whole-table scan. Both are rolled up from the catalog
+without opening a partition. Fifty tenants of 4,000 rows, each query scanning its own tenant's partition, is no
+finding, and neither is one tenant of 200,000 beside 499 of 1,000 whose queries never read the large one; a
+finding on a partitioned table is worded "partition-wide". The counters are rolled up, so a scan of a large
+partition and a scan of a small one cannot be told apart: whole scans of the large partitions that are
+outnumbered by per-tenant scans of small ones pull the average down and are missed - the quiet side of the line,
+on purpose.
 
 ## T03 Invalid index
 
@@ -77,10 +82,17 @@ planner never uses it; every insert and every update still maintains it.
 `_ccnew` index and Weasel's concurrent build on a partitioned table until its last partition is attached are all
 invalid while they work, and re-applying then would queue a `DROP INDEX` for an `AccessExclusiveLock` behind the
 build, with every query on the table queued behind that. So the check reads `pg_stat_progress_create_index`
-(which takes no lock) beside `pg_index`: an index a build is working on, or a partitioned table one of whose
-partitions is being indexed, is no finding - the check's note says "being built" and the phase. Postgres hides
-the table of another role's build from a role without `pg_read_all_stats`; while any such build is running, an
-invalid index is a **Warning** whose caveat says so, never a Critical.
+(which takes no lock) beside `pg_index`: an invalid index a build is working on is no finding - the check's note
+says "being built" and the phase. Postgres hides the table of another role's build from a role without
+`pg_read_all_stats`; while any such build is running, an invalid index is a **Warning** whose text and caveat say
+so, never a Critical.
+
+"Working on" is narrow: the build's own index (`index_relid`); for a `REINDEX CONCURRENTLY`, the `_ccnew` or
+`_ccold` copy of the index it reports (its first phase reports the index it copies, not the copy); and for a
+partitioned index, a `CREATE INDEX` on one of its partitions, which it waits for to be attached. A build of
+**another** index on the same table is not a reason this one is invalid - matching it would hide an older failure
+for as long as a nightly rolling `REINDEX` ran - so the older failure stays a finding, and its caveat says a build
+is running on the table and to let it finish before re-applying or dropping anything.
 
 On an ordinary table, re-apply the configuration. Weasel reads an invalid index as drift even when its definition
 matches the declaration, so an apply drops it and builds it again (weasel#503); one nobody declares is dropped by
@@ -128,10 +140,13 @@ and the write volume, and how old the counters are: `pg_stat_reset()`, a crash a
 an index used only by a monthly job looks unused for most of the month. Unique indexes, primary keys, exclusion
 constraints, Marten's own structural indexes and the event store's are never reported.
 
-The finding is only **Info** while "never scanned" is unproven: counters reset less than a day ago; counters that
-were never reset, whose age is unknown; and a multi-host data source, whose reads may go to a standby that counts
-its own index scans - the primary's zero says nothing about them. The advisor's own samples are the proof it can
-offer: once they have seen the index unscanned, without a break, for a day, the finding is a Warning.
+The finding is only **Info** while "never scanned" is unproven: counters reset less than a day ago, or counters
+that were never reset, whose age is unknown. The advisor's own samples are the proof it can offer there: once
+they have seen the index unscanned, without a break, for a day, the finding is a Warning.
+
+On a **multi-host data source** the finding is Info always. Its reads may go to a standby, which counts its own
+index scans, and the advisor's samples are of the primary's counters - no length of them says anything about a
+standby's. The finding says to check `pg_stat_user_indexes` on every standby before removing the index.
 
 ## T06 Low HOT-update ratio
 

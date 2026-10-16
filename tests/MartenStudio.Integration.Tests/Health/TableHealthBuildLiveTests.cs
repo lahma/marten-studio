@@ -96,6 +96,98 @@ public class TableHealthBuildLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>
+    /// The H4 re-review's probe, kept: an older failed index (<c>old_failed</c>) stays invalid while a
+    /// <c>REINDEX INDEX CONCURRENTLY</c> of another index on the same table runs - and a build of another index is
+    /// no reason this one is invalid, so it must stay a finding rather than drop out as "being built" for as long
+    /// as a nightly rolling reindex runs. The reindex's own <c>_ccnew</c> copy is invalid too, and is the build's:
+    /// in its first phase (held here by a writer) the progress view reports the index it copies, not the copy,
+    /// so the copy is matched by name; later (held by an old snapshot) it reports the copy itself.
+    /// </summary>
+    [PostgresTheory]
+    [InlineData("writer", "waiting for writers before build")]
+    [InlineData("snapshot", "waiting for old snapshots")]
+    public async Task An_older_failed_index_stays_a_T03_while_a_REINDEX_CONCURRENTLY_of_another_index_runs(string holding, string phase)
+    {
+        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(postgres, "health_t03_reindex_" + holding, store: static o => o.Schema.For<HealthIndexedThing>());
+        await ApplyAsync(host.Store);
+
+        string schema = host.Store.Options.FindOrResolveDocumentType(typeof(HealthIndexedThing)).TableName.Schema;
+        string table = TableOf<HealthIndexedThing>(host.Store);
+        await InsertAsync(postgres, table, 1_000);
+        await InsertAsync(postgres, table, 2, "jsonb_build_object('Name', 'same', 'Rank', 0)");
+
+        Func<Task> failing = () => ExecuteAsync(postgres, "create unique index concurrently old_failed on " + table + " ((data ->> 'Name'))");
+        (await failing.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be("23505", "two documents share the name");
+        await ExecuteAsync(postgres, "create index by_y on " + table + " ((data ->> 'Rank'))");
+
+        await using NpgsqlConnection holder = await postgres.OpenAsync(Token);
+        await using NpgsqlConnection builder = await postgres.OpenAsync(Token);
+        await using NpgsqlConnection watcher = await postgres.OpenAsync(Token);
+
+        int holderPid = await ScalarAsync<int>(holder, "select pg_catalog.pg_backend_pid()");
+        await using NpgsqlTransaction? writing = holding == "writer" ? await holder.BeginTransactionAsync(Token) : null;
+
+        if (writing is not null)
+        {
+            // A writer the reindex must wait for before it builds: a row inserted in a transaction still open.
+            await using NpgsqlCommand insert = new("insert into " + table + " (id, data) values (gen_random_uuid(), '{}'::jsonb)", holder, writing);
+            await insert.ExecuteNonQueryAsync(Token);
+        }
+
+        await using NpgsqlCommand sleep = new("select pg_catalog.pg_sleep(120)", holder, writing) { CommandTimeout = 0 };
+        Task sleeping = sleep.ExecuteNonQueryAsync(Token);
+
+        await WaitForAsync(
+            async () => await ScalarAsync<bool>(watcher,
+                "select exists (select 1 from pg_catalog.pg_stat_activity where pid = " + holderPid.ToString(CultureInfo.InvariantCulture)
+                + " and state = 'active' and query like 'select pg_catalog.pg_sleep%')"),
+            "the holding session's sleep to start");
+
+        await using NpgsqlCommand reindex = new("reindex index concurrently " + SqlIdentifier.Qualify(schema, "by_y"), builder) { CommandTimeout = 0 };
+        Task reindexing = reindex.ExecuteNonQueryAsync(Token);
+
+        try
+        {
+            await WaitForAsync(
+                async () => await ScalarAsync<bool>(watcher,
+                    "select exists (select 1 from pg_catalog.pg_stat_progress_create_index p "
+                    + "where p.relid = '" + table.Replace("'", "''", StringComparison.Ordinal) + "'::regclass "
+                    + "and p.command = 'REINDEX CONCURRENTLY' and p.phase = '" + phase + "') "
+                    + "and exists (select 1 from pg_catalog.pg_class c where c.relname = 'by_y_ccnew')"),
+                "the reindex to reach '" + phase + "' with its _ccnew copy in the catalog");
+
+            HealthReport report = await ReportAsync(host);
+            string key = KeyOf<HealthIndexedThing>(host.Store);
+
+            HealthReportFinding finding = Of(report, "T03").Should().ContainSingle(
+                "old_failed is a finding, and the reindex's copy is not: {0}", string.Join(" | ", Of(report, "T03").Select(static x => x.Finding.Subject))).Subject;
+            finding.Finding.Subject.Should().Be(key + ".old_failed");
+            finding.Severity.Should().Be(HealthSeverity.Critical, "every build is in view, and none of them is old_failed's");
+            finding.Finding.Caveat.Should().Contain("A build of another index on this table is running right now (" + phase + ")");
+
+            HealthCheckStatus status = HealthLiveHost.Status(report, "T03");
+            status.Note.Should().Contain("by_y_ccnew (" + phase + ")", "the copy is the build's, and only a note");
+        }
+        finally
+        {
+            await ExecuteOnAsync(watcher, "select pg_catalog.pg_cancel_backend(" + holderPid.ToString(CultureInfo.InvariantCulture) + ")");
+
+            Func<Task> cancelled = () => sleeping;
+            (await cancelled.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be("57014", "the sleep was cancelled");
+
+            if (writing is not null)
+            {
+                await writing.RollbackAsync(Token);
+            }
+        }
+
+        await reindexing;
+
+        (await ScalarAsync<bool>(watcher, "select indisvalid from pg_catalog.pg_index where indexrelid = '"
+            + SqlIdentifier.Qualify(schema, "old_failed") + "'::regclass")).Should().BeFalse("nothing repaired the older failure meanwhile");
+    }
+
+    /// <summary>
     /// Postgres keeps no storage parameters on a partitioned table itself, so a DBA's
     /// <c>autovacuum_enabled = false</c> on every partition is invisible on the parent - and T07 and T08 would
     /// wait ten minutes for an autovacuum that is not coming. The leaves' rollup is what the table checks read.

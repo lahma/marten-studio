@@ -131,8 +131,34 @@ public partial class HealthTableQueriesTests
 
         HealthTableQueries.IndexesSql.Should().Contain("where b.index_relid = i.oid",
             "CREATE INDEX CONCURRENTLY reports the index it builds")
-            .And.Contain("or b.relid in (select t.relid from table_tree t where t.root = i.table_oid)",
-                "REINDEX CONCURRENTLY reports the old index, not its _ccnew one, and a partition's build its partition");
+            .And.Contain("or (b.command = 'REINDEX CONCURRENTLY'")
+            .And.Contain("and i.index_name ~ '_cc(new|old)[0-9]*$'",
+                "REINDEX CONCURRENTLY's first phase reports the index it copies, not its _ccnew copy")
+            .And.Contain("or (i.relkind = 'I'")
+            .And.Contain("and b.command not like 'REINDEX%'",
+                "only a partitioned index is matched by a build anywhere in its tree, and only by a CREATE INDEX (spelt so the "
+                + "statement never contains the word the no-DDL scan looks for)");
+    }
+
+    /// <summary>
+    /// The H4 re-review's case, pinned in the text: a build of another index on the same table - a nightly rolling
+    /// REINDEX - is no reason an index is invalid, so the own-build match never matches "any build on the table".
+    /// That broad match is read too, but only as the "let it finish first" caveat.
+    /// </summary>
+    [Fact]
+    public void A_build_of_another_index_on_the_table_is_never_this_index_s_build()
+    {
+        string ownBuild = HealthTableQueries.IndexesSql[
+            HealthTableQueries.IndexesSql.IndexOf("where b.index_relid = i.oid", StringComparison.Ordinal)..
+            HealthTableQueries.IndexesSql.IndexOf("(select pg_catalog.count(*) from builds b where b.relid is null)", StringComparison.Ordinal)];
+
+        ownBuild.Should().NotContain("or b.relid in", "a build anywhere on an ordinary table hid an older failed index for as long as it ran");
+
+        string sql = HealthTableQueries.TablesSql;
+        string partitions = sql[sql.IndexOf("tree_invalid as (", StringComparison.Ordinal)..sql.IndexOf("invalid_rolled as (", StringComparison.Ordinal)];
+        partitions.Should().Contain("where b.index_relid = x.indexrelid")
+            .And.Contain("and b.relid = d.oid")
+            .And.NotContain("or b.relid in", "the same narrow match decides a partition's invalid index");
     }
 
     /// <summary>

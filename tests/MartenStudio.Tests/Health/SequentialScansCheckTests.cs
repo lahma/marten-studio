@@ -143,13 +143,46 @@ public class SequentialScansCheckTests
         Check.Sample(Facts(Partitioned(orders, 50, 4_000))).Should().BeEmpty("a table that is never judged is never sampled");
     }
 
+    /// <summary>
+    /// The review's case: one tenant of 200,000 rows beside 499 tenants of 1,000. Against the mean partition (about
+    /// 1,400 rows) every per-tenant scan of a 1,000-row partition passed for a whole scan, and one a second for an
+    /// hour read the table's worth five times - "partition-wide" scans of a large partition nobody scanned. The
+    /// per-scan test is the largest partition's, as the size line is.
+    /// </summary>
     [Fact]
-    public void A_partitioned_table_s_scan_is_measured_against_its_mean_partition_not_the_whole_table()
+    public void One_large_partition_beside_many_small_ones_scanned_only_per_tenant_says_nothing()
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+        TableFacts table = Table(orders, row => row with
+        {
+            Kind = "p",
+            LiveRows = 200_000 + 499 * 1_000,
+            EstimatedRows = 200_000 + 499 * 1_000,
+            PartitionLeaves = 500,
+            LargestLeafRows = 200_000,
+        });
+
+        // One per-tenant scan of a 1,000-row partition a second, for an hour.
+        HealthHistoryView perTenant = Window(orders.Key, (0, 0), (3_600, 3_600_000));
+
+        SequentialScansCheck.IsLarge(table).Should().BeTrue("the large partition is past the size line");
+        SequentialScansCheck.ScanUnit(table).Should().Be(200_000, "a whole scan is measured against the largest partition, never the mean");
+        Check.Evaluate(Facts(table), Evaluation(perTenant)).Findings
+            .Should().BeEmpty("no scan read anything like the large partition, and a small partition read whole is a small table");
+
+        // Scans of the large partition itself are still found: eleven of 200,000 rows read the table's worth three times.
+        HealthHistoryView large = Window(orders.Key, (0, 0), (11, 2_200_000));
+        Check.Evaluate(Facts(table), Evaluation(large)).Findings.Should().ContainSingle()
+            .Which.Title.Should().StartWith("Partition-wide sequential scans of " + orders.Key);
+    }
+
+    [Fact]
+    public void A_partitioned_table_s_scan_is_measured_against_its_largest_partition_not_the_whole_table()
     {
         MartenTable orders = Document<HealthOrderDoc>();
 
-        // Ten partitions, the largest 150,000 rows, 1,000,000 in all - a mean of 100,000. Forty scans of 100,000 rows
-        // each read four tables' worth, and each read a whole mean partition: a finding, although no scan read half
+        // Ten partitions, the largest 150,000 rows, 1,000,000 in all. Forty scans of 100,000 rows each read four
+        // tables' worth, and each read more than half the largest partition: a finding, although no scan read half
         // the table.
         HealthHistoryView whole = Window(orders.Key, (0, 0), (40, 4_000_000));
         TableFacts table = Table(orders, row => row with

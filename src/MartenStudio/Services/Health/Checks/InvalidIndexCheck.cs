@@ -23,9 +23,17 @@ internal sealed record InvalidIndexFacts(IReadOnlyList<IndexFacts> Indexes, IRea
 /// <c>REINDEX CONCURRENTLY</c>'s <c>_ccnew</c> index, Weasel's concurrent build on a partitioned parent until its
 /// last child is attached - and re-applying then would queue a <c>DROP INDEX</c> for an
 /// <c>AccessExclusiveLock</c> behind the build, with every query on the table queued behind that. So an
-/// invalid index on a table with a build in <c>pg_stat_progress_create_index</c> right now is no finding, only a
+/// invalid index a build in <c>pg_stat_progress_create_index</c> is working on right now is no finding, only a
 /// note; and while that view shows builds whose table this role cannot see - another role's, without
 /// <c>pg_read_all_stats</c> - an invalid index is a Warning that says why, never a Critical.
+/// </para>
+/// <para>
+/// <b>"Working on" is narrow on purpose</b>: the build's own index (<c>index_relid</c>); for a
+/// <c>REINDEX CONCURRENTLY</c>, the <c>_ccnew</c> or <c>_ccold</c> copy of the index it reports - its first phase
+/// reports the index it copies, not the copy, measured live; and for a partitioned index, a <c>CREATE INDEX</c>
+/// on one of its partitions. A build of another index on the same table is not a reason this one is invalid,
+/// and matching it would hide a failed index for as long as a nightly rolling <c>REINDEX</c> ran. Such a build
+/// does change the advice, though: the finding then says to let it finish before re-applying.
 /// </para>
 /// <para>
 /// <b>Re-apply is the remedy on an ordinary table</b>, verified rather than hoped: Weasel reads
@@ -98,52 +106,72 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 
         foreach (TableFacts table in facts.Tables)
         {
-            if (table.Row.InvalidPartitionIndexes == 0)
+            if (table.Row.BuildingPartitionIndexes > 0)
             {
-                continue;
+                int count = table.Row.BuildingPartitionIndexes;
+                building.Add((count == 1 ? "an index" : count.ToString("N0", CultureInfo.InvariantCulture) + " indexes")
+                    + " on the partitions of " + table.Key + " (" + (table.Row.PartitionBuildPhase ?? "in progress") + ")");
             }
 
-            if (table.Row.PartitionBuildPhase is { } phase)
+            if (table.Row.InvalidPartitionIndexes > 0)
             {
-                building.Add("an index on a partition of " + table.Key + " (" + phase + ")");
-                continue;
+                findings.Add(OnPartitions(table));
             }
-
-            findings.Add(OnPartitions(table));
         }
+
+        string? note = building.Count > 0
+            ? "Being built right now, and so not judged until the build ends: " + string.Join(", ", building) + "."
+            : null;
 
         if (findings.Count > 0)
         {
-            return new HealthVerdict(findings);
+            return new HealthVerdict(findings, note);
         }
 
-        return HealthVerdict.Quiet(building.Count > 0
-            ? "Being built right now, and so not judged until the build ends: " + string.Join(", ", building) + "."
-            : facts.Indexes.Count == 0 ? "No table this store declares exists yet." : null);
+        return HealthVerdict.Quiet(note ?? (facts.Indexes.Count == 0 ? "No table this store declares exists yet." : null));
     }
 
-    /// <summary>The caveat, and the severity it allows, given the builds this role cannot see.</summary>
-    private static (HealthSeverity Severity, string Caveat) Certainty(int unseenBuilds, string source)
+    /// <summary>
+    /// What the finding can say about the builds running now: none in view, another index's on the same table, or
+    /// some whose table this role may not see - the last of which caps it at a Warning.
+    /// </summary>
+    /// <param name="unseenBuilds">Builds in this database whose table the role may not see.</param>
+    /// <param name="tableBuild">The phase of a build of another index on the table, or <see langword="null" />.</param>
+    /// <param name="source">What the finding was read from, for the caveat.</param>
+    private static (HealthSeverity Severity, string Builds, string Caveat) Certainty(int unseenBuilds, string? tableBuild, string source)
     {
+        string meanwhile = tableBuild is null
+            ? string.Empty
+            : " A build of another index on this table is running right now (" + tableBuild + "): let it finish before "
+              + "re-applying or dropping anything, or the DROP INDEX queues for an AccessExclusiveLock behind it, and every "
+              + "query on the table queues behind that.";
+
+        string inView = tableBuild is null
+            ? "and no index build is running on the table"
+            : "and the index build running on the table is another index's";
+
         if (unseenBuilds == 0)
         {
             return (HealthSeverity.Critical,
+                inView + ", so it is what",
                 "Read from " + source + ", with every index build running in this database in view "
-                + "(pg_stat_progress_create_index): none of them is working on this one.");
+                + "(pg_stat_progress_create_index): none of them is working on this one." + meanwhile);
         }
 
         return (HealthSeverity.Warning,
+            "and no index build this role can see is working on it, so it is most likely what",
             "Read from " + source + ". Postgres reports " + unseenBuilds.ToString("N0", CultureInfo.InvariantCulture)
             + " index build" + (unseenBuilds == 1 ? string.Empty : "s")
             + " running in this database whose table this role may not see (another role's, without pg_read_all_stats), and this "
             + "may be one of them still being built - so a Warning rather than a Critical until it can be told. Check "
-            + "pg_stat_progress_create_index as a role that can, before acting.");
+            + "pg_stat_progress_create_index as a role that can, before acting." + meanwhile);
     }
 
     private static HealthFinding OnTable(IndexFacts index, bool onPartitionedTable)
     {
         MartenTable table = index.Table;
-        (HealthSeverity severity, string caveat) = Certainty(index.Row.UnseenIndexBuilds, "pg_index.indisvalid");
+        (HealthSeverity severity, string builds, string caveat) = Certainty(
+            index.Row.UnseenIndexBuilds, index.Row.TableBuildPhase, "pg_index.indisvalid");
 
         string whose = index.Origin switch
         {
@@ -168,8 +196,8 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             DocumentTypes = table.DocumentTypes,
             Title = "Index " + index.Row.Name + " on " + table.Key + " is invalid: every write maintains it and no query uses it",
             WhyItMatters =
-                "Postgres has marked the index invalid, and no index build is running on the table, so it is what a "
-                + "CREATE INDEX CONCURRENTLY that failed half-way leaves behind. The planner never chooses it, so every query that "
+                "Postgres has marked the index invalid, " + builds + " a CREATE INDEX CONCURRENTLY that failed half-way leaves "
+                + "behind. The planner never chooses it, so every query that "
                 + "needed it reads the table instead, while every insert and every update still pays to maintain it." + whose,
             Evidence =
             [
@@ -188,9 +216,16 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
     {
         int count = table.Row.InvalidPartitionIndexes;
         string indexes = count == 1 ? "1 index" : count.ToString("N0", CultureInfo.InvariantCulture) + " indexes";
-        (HealthSeverity severity, string caveat) = Certainty(
+        (HealthSeverity severity, _, string caveat) = Certainty(
             table.Row.UnseenIndexBuilds,
+            table.Row.TreeBuildPhase,
             "pg_index.indisvalid over the table's partitions, walked through pg_inherits without opening any of them");
+
+        string builds = table.Row.UnseenIndexBuilds > 0
+            ? ", and no build this role can see is working on them, so this is most likely what"
+            : table.Row.TreeBuildPhase is not null
+                ? ", and the build running on the table now is another index's, so this is what"
+                : ", and no build is running on any of them, so this is what";
 
         return new HealthFinding
         {
@@ -200,8 +235,8 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             DocumentTypes = table.Table.DocumentTypes,
             Title = indexes + " on the partitions of " + table.Key + (count == 1 ? " is" : " are") + " invalid",
             WhyItMatters =
-                "Postgres has marked an index on one or more of this table's partitions invalid, and no build is running on any "
-                + "of them: a concurrent build or rebuild on a partition that failed. Queries that reach that partition read it "
+                "Postgres has marked an index on one or more of this table's partitions invalid" + builds
+                + " a concurrent build or rebuild on a partition that failed leaves behind. Queries that reach that partition read it "
                 + "without the index, and every write to it still maintains it." + PartitionedInWords,
             Evidence =
             [

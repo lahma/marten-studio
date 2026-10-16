@@ -36,11 +36,14 @@ internal sealed record UnusedIndexFacts(
 /// counters reset less than <see cref="MinCounterAge" /> ago is Info rather than a Warning, and says so.
 /// </para>
 /// <para>
-/// <b>Two more things make "never scanned" unproven, and cap the finding at Info</b>: statistics that were never
-/// reset (their age is unknown - they may be a minute old after a crash-free restore of a fresh cluster), and a
-/// multi-host data source, whose reads may be served by a standby that counts its own scans. In either case the
-/// advisor's own history is the proof it can offer: once its samples have seen the index unscanned for
-/// <see cref="MinCounterAge" />, the finding is a Warning.
+/// <b>Statistics that were never reset are unproven too</b> - their age is unknown - and for those, and for a
+/// recent reset, the advisor's own history is the proof it can offer: once its samples have seen the index
+/// unscanned for <see cref="MinCounterAge" />, the finding is a Warning.
+/// </para>
+/// <para>
+/// <b>A multi-host data source is Info always.</b> Its reads may be served by a standby, which counts its own
+/// index scans; the history is samples of this primary's counters, so no length of it proves anything about
+/// the standby's, and the finding says to check every standby before removing the index.
 /// </para>
 /// </remarks>
 [HealthCheck("T05", HealthArea.Tables, HealthCostTier.Catalog, "Unused index on a write-heavy table")]
@@ -83,7 +86,7 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or NotSupportedException)
         {
-            // Unknown is treated as the cautious answer: the finding stays Info until the history proves it.
+            // Unknown is treated as the cautious answer, multi-host: the finding stays Info.
             return true;
         }
     }
@@ -140,21 +143,26 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
     }
 
     /// <summary>
-    /// Why "never scanned" is not yet proven, or <see langword="null" /> when it is: the counters' own age, or
-    /// the advisor's history of the index.
+    /// Why "never scanned" is not yet proven, or <see langword="null" /> when it is: a multi-host data source,
+    /// which nothing read here can prove; the counters' own age; or the advisor's history of the index.
     /// </summary>
+    /// <remarks>
+    /// The multi-host reason comes first and the history never lifts it: the history is samples of this
+    /// primary's <c>idx_scan</c>, so a day of zeroes says nothing about the scans a standby served.
+    /// </remarks>
     internal static string? Unproven(IndexFacts index, UnusedIndexFacts facts, HealthEvaluation evaluation)
     {
+        if (facts.MultiHost)
+        {
+            return "The database is reached through a multi-host data source, so reads may be served by a standby, which counts "
+                + "its own index scans: this primary's zero proves nothing about them, however long it has held. Check "
+                + "pg_stat_user_indexes on every standby before removing it.";
+        }
+
         DateTimeOffset? seenSince = TableHistory.HeldSince(evaluation.History, SweptSeries, UnscannedSeries + index.Key);
         if (seenSince is { } since && facts.ReadAt - since >= MinCounterAge)
         {
             return null;
-        }
-
-        if (facts.MultiHost)
-        {
-            return "The database is reached through a multi-host data source, so reads may be served by a standby, which counts "
-                + "its own index scans: this primary's zero proves nothing about them.";
         }
 
         return facts.Database.StatsReset switch
@@ -201,7 +209,9 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
                 TableText.CountersSince(facts.Database.StatsReset, evaluation.Now)
                 + (unproven is null
                     ? string.Empty
-                    : " " + unproven + " So this is Info until the advisor's own samples have seen the index unscanned for a day.")
+                    : facts.MultiHost
+                        ? " " + unproven + " So this is Info, and stays Info."
+                        : " " + unproven + " So this is Info until the advisor's own samples have seen the index unscanned for a day.")
                 + " An index used by a monthly job, a failover's replica or a query that has not run yet looks unused too: "
                 + "check before removing it.",
             Remedy = index.Origin switch

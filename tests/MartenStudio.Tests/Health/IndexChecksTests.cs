@@ -97,14 +97,71 @@ public class IndexChecksTests
         TableFacts table = Table(orders, row => row with
         {
             Kind = "p",
-            InvalidPartitionIndexes = 3,
+            InvalidPartitionIndexes = 0,
+            BuildingPartitionIndexes = 3,
             PartitionBuildPhase = "building index: loading tuples in tree",
+            TreeBuildPhase = "building index: loading tuples in tree",
         });
 
         HealthVerdict verdict = new InvalidIndexCheck().Evaluate(new InvalidIndexFacts([], [table]), Evaluation());
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Contain("an index on a partition of " + orders.Key);
+        verdict.Note.Should().Contain("3 indexes on the partitions of " + orders.Key + " (building index: loading tuples in tree)");
+    }
+
+    /// <summary>
+    /// The review's probe, as facts: an older failed index stays invalid while a <c>REINDEX CONCURRENTLY</c> of
+    /// another index on the same table runs. That build is not this index's, so it is still a finding - and its
+    /// advice is to let the build finish first, because the re-apply's DROP INDEX would queue behind it. The
+    /// reindex's own <c>_ccnew</c> copy is the build's, and only a note.
+    /// </summary>
+    [Fact]
+    public void An_older_failed_index_stays_a_finding_while_a_build_of_another_index_runs_and_says_to_wait_for_it()
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+        IndexFacts oldFailed = Index(orders, IndexRow(orders, "old_failed", "(data ->> 'Status'::text)") with
+        {
+            IsValid = false,
+            TableBuildPhase = "waiting for old snapshots",
+        });
+        IndexFacts copy = Index(orders, IndexRow(orders, "by_y_ccnew", "(data ->> 'Rank'::text)") with
+        {
+            IsValid = false,
+            BuildPhase = "waiting for old snapshots",
+            TableBuildPhase = "waiting for old snapshots",
+        }, IndexOrigin.Undeclared);
+
+        HealthVerdict verdict = new InvalidIndexCheck().Evaluate(new InvalidIndexFacts([oldFailed, copy], [Table(orders)]), Evaluation());
+
+        HealthFinding finding = verdict.Findings.Should().ContainSingle("only the index no build is working on is judged").Subject;
+        finding.Subject.Should().EndWith(".old_failed");
+        finding.Severity.Should().Be(HealthSeverity.Critical, "every build is in view, and none is this one's");
+        finding.WhyItMatters.Should().Contain("the index build running on the table is another index's");
+        finding.Caveat.Should().Contain("A build of another index on this table is running right now (waiting for old snapshots)")
+            .And.Contain("let it finish before re-applying");
+        verdict.Note.Should().Contain("by_y_ccnew (waiting for old snapshots)", "the note still says what is being built beside the finding");
+    }
+
+    [Fact]
+    public void Invalid_partition_indexes_no_build_is_working_on_are_found_while_another_partition_is_being_built()
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+        TableFacts table = Table(orders, row => row with
+        {
+            Kind = "p",
+            InvalidPartitionIndexes = 1,
+            BuildingPartitionIndexes = 1,
+            PartitionBuildPhase = "waiting for old snapshots",
+            TreeBuildPhase = "waiting for old snapshots",
+        });
+
+        HealthVerdict verdict = new InvalidIndexCheck().Evaluate(new InvalidIndexFacts([], [table]), Evaluation());
+
+        HealthFinding finding = verdict.Findings.Should().ContainSingle("a nightly rolling REINDEX must not hide an older failure").Subject;
+        finding.Title.Should().StartWith("1 index on the partitions of " + orders.Key);
+        finding.WhyItMatters.Should().Contain("the build running on the table now is another index's");
+        finding.Caveat.Should().Contain("let it finish before re-applying");
+        verdict.Note.Should().Contain("an index on the partitions of " + orders.Key);
     }
 
     [Fact]
@@ -120,6 +177,12 @@ public class IndexChecksTests
             "a build another role runs is invisible without pg_read_all_stats, and this may be it");
         verdict.Findings.Should().OnlyContain(static x => x.Caveat!.Contains("pg_read_all_stats", StringComparison.Ordinal)
             && x.Caveat.Contains("2 index builds", StringComparison.Ordinal));
+
+        // D: the why must not contradict the caveat - it may not say no build is running when one may be this one.
+        verdict.Findings.Should().OnlyContain(static x => !x.WhyItMatters.Contains("no index build is running", StringComparison.Ordinal)
+            && !x.WhyItMatters.Contains("no build is running", StringComparison.Ordinal));
+        verdict.Findings.Should().OnlyContain(static x => x.WhyItMatters.Contains("most likely", StringComparison.Ordinal)
+            && x.WhyItMatters.Contains("this role can see", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -246,8 +309,12 @@ public class IndexChecksTests
             .Findings.Single().Severity.Should().Be(HealthSeverity.Info, "23 hours is not a day");
     }
 
+    /// <summary>
+    /// The advisor's history is samples of the primary's own <c>idx_scan</c>: however many days of zeroes it holds,
+    /// it says nothing about the scans a standby served, so on a multi-host data source T05 is Info always.
+    /// </summary>
     [Fact]
-    public void A_multi_host_data_source_caps_the_finding_at_Info_however_old_the_counters_until_the_history_covers_a_day()
+    public void A_multi_host_data_source_keeps_the_finding_at_Info_however_old_the_counters_and_however_long_the_history()
     {
         MartenTable orders = Document<HealthOrderDoc>();
         IndexFacts index = Index(orders, IndexRow(orders, "by_status", "id") with { Scans = 0 });
@@ -255,10 +322,16 @@ public class IndexChecksTests
 
         HealthFinding standby = new UnusedIndexCheck().Evaluate(Unused(index, table, Now.AddDays(-30), multiHost: true), Evaluation()).Findings.Single();
         standby.Severity.Should().Be(HealthSeverity.Info, "reads served by a standby are counted there, not on the primary");
-        standby.Caveat.Should().Contain("multi-host data source").And.Contain("standby");
+        standby.Caveat.Should().Contain("multi-host data source").And.Contain("every standby").And.Contain("stays Info")
+            .And.NotContain("until the advisor's own samples", "no length of primary-side history lifts it");
 
-        new UnusedIndexCheck().Evaluate(Unused(index, table, Now.AddDays(-30), multiHost: true), Evaluation(SeenUnscanned(index, TimeSpan.FromDays(2))))
-            .Findings.Single().Severity.Should().Be(HealthSeverity.Warning);
+        HealthFinding afterDays = new UnusedIndexCheck()
+            .Evaluate(Unused(index, table, Now.AddDays(-30), multiHost: true), Evaluation(SeenUnscanned(index, TimeSpan.FromDays(7))))
+            .Findings.Single();
+        afterDays.Severity.Should().Be(HealthSeverity.Info, "a week of the primary's zeroes proves nothing about a standby's scans");
+
+        new UnusedIndexCheck().Evaluate(Unused(index, table, Now.AddDays(-30)), Evaluation(SeenUnscanned(index, TimeSpan.FromDays(7))))
+            .Findings.Single().Severity.Should().Be(HealthSeverity.Warning, "the same history on one host is the proof");
     }
 
     [Fact]

@@ -95,8 +95,18 @@ internal sealed record HealthTableRow
     /// </summary>
     public long? OldestXidAge { get; init; }
 
-    /// <summary>How many indexes on its partitions Postgres has marked invalid. Never their names.</summary>
+    /// <summary>
+    /// How many indexes on its partitions Postgres has marked invalid and no build is working on - see
+    /// <see cref="BuildingPartitionIndexes" />. Never their names.
+    /// </summary>
     public int InvalidPartitionIndexes { get; init; }
+
+    /// <summary>
+    /// How many invalid indexes on its partitions a build running right now is working on: its own index
+    /// (<c>index_relid</c>), a <c>REINDEX CONCURRENTLY</c>'s <c>_ccnew</c> or <c>_ccold</c> copy of the index it
+    /// reports, or a partitioned index a <c>CREATE INDEX</c> in the tree is completing.
+    /// </summary>
+    public int BuildingPartitionIndexes { get; init; }
 
     /// <summary><c>reloptions</c>: the storage parameters set on the table, as <c>name=value</c>.</summary>
     public IReadOnlyList<string> StorageOptions { get; init; } = [];
@@ -124,10 +134,16 @@ internal sealed record HealthTableRow
     public IReadOnlyList<string> DifferingStorageOptions { get; init; } = [];
 
     /// <summary>
-    /// The phase of an index build running right now on one of a partitioned table's partitions
+    /// The phase of a build working on one of <see cref="BuildingPartitionIndexes" />
     /// (<c>pg_stat_progress_create_index</c>), or <see langword="null" />.
     /// </summary>
     public string? PartitionBuildPhase { get; init; }
+
+    /// <summary>
+    /// The phase of any index build running right now on the table or one of its partitions, whatever index it
+    /// is building - for the caveat that a re-apply would queue behind it - or <see langword="null" />.
+    /// </summary>
+    public string? TreeBuildPhase { get; init; }
 
     /// <summary>
     /// How many index builds in this database the reading role cannot see the table of - another role's, without
@@ -205,11 +221,20 @@ internal sealed record HealthIndexRow
     public IReadOnlyList<string> ReferencedColumns { get; init; } = [];
 
     /// <summary>
-    /// The phase of an index build running right now on this index, or on the table it is on or one of its
-    /// partitions (<c>pg_stat_progress_create_index</c>) - an invalid index is then most likely the one being
-    /// built - or <see langword="null" />.
+    /// The phase of an index build running right now that is building this index
+    /// (<c>pg_stat_progress_create_index</c>), or <see langword="null" />: one whose <c>index_relid</c> is this
+    /// index; a <c>REINDEX CONCURRENTLY</c> on the table whose reported index this is the <c>_ccnew</c> or
+    /// <c>_ccold</c> copy of (its first phase reports the index it copies, not the copy); or, for a partitioned
+    /// index, a <c>CREATE INDEX</c> on a partition, which the index waits for to be attached. Never a build of
+    /// another index on the same table, which says nothing about why this one is invalid.
     /// </summary>
     public string? BuildPhase { get; init; }
+
+    /// <summary>
+    /// The phase of any index build running right now on the table or one of its partitions, or
+    /// <see langword="null" /> - for the caveat that a re-apply would queue behind it.
+    /// </summary>
+    public string? TableBuildPhase { get; init; }
 
     /// <summary>How many index builds in this database the reading role cannot see the table of.</summary>
     public int UnseenIndexBuilds { get; init; }
@@ -326,9 +351,6 @@ internal static class HealthTableQueries
                                    from pg_catalog.pg_index x
                                    join pg_catalog.pg_class ic on ic.oid = x.indexrelid
                                    where x.indrelid = d.oid)) as index_pages,
-                   pg_catalog.sum((select pg_catalog.count(*)
-                                   from pg_catalog.pg_index x
-                                   where x.indrelid = d.oid and not x.indisvalid)) as invalid_indexes,
                    pg_catalog.bool_and(d.reltuples < 0) filter (where d.relkind = 'r') as unanalyzed,
                    pg_catalog.sum(greatest(d.reltuples, 0)) filter (where d.relkind = 'r') as tuples,
                    pg_catalog.sum(s.n_live_tup) as live,
@@ -382,9 +404,41 @@ internal static class HealthTableQueries
             group by a.root
         ),
         builds as (
-            select p.relid, p.index_relid, p.phase::text as phase
+            select p.relid, p.index_relid, p.command::text as command, p.phase::text as phase
             from pg_catalog.pg_stat_progress_create_index p
             where p.datid = (select db.oid from pg_catalog.pg_database db where db.datname = pg_catalog.current_database())
+        ),
+        tree_invalid as (
+            select t.root,
+                   (select b.phase
+                    from builds b
+                    where b.index_relid = x.indexrelid
+                       or (b.command = 'REINDEX CONCURRENTLY'
+                           and b.relid = d.oid
+                           and xc.relname ~ '_cc(new|old)[0-9]*$'
+                           and exists (
+                               select 1
+                               from pg_catalog.pg_class bi
+                               where bi.oid = b.index_relid
+                                 and pg_catalog.left(bi.relname::text,
+                                         pg_catalog.length(pg_catalog.regexp_replace(xc.relname::text, '_cc(new|old)[0-9]*$', '')))
+                                     = pg_catalog.regexp_replace(xc.relname::text, '_cc(new|old)[0-9]*$', '')))
+                       or (xc.relkind = 'I'
+                           and b.command not like 'REINDEX%'
+                           and b.relid in (select t2.relid from tree t2 where t2.root = t.root))
+                    limit 1) as phase
+            from tree t
+            join pg_catalog.pg_class d on d.oid = t.relid
+            join pg_catalog.pg_index x on x.indrelid = d.oid and not x.indisvalid
+            join pg_catalog.pg_class xc on xc.oid = x.indexrelid
+        ),
+        invalid_rolled as (
+            select v.root,
+                   pg_catalog.count(*) filter (where v.phase is null) as invalid,
+                   pg_catalog.count(*) filter (where v.phase is not null) as building,
+                   pg_catalog.min(v.phase) as building_phase
+            from tree_invalid v
+            group by v.root
         ),
         settings as (
             select pg_catalog.current_setting('block_size')::bigint as block_size,
@@ -426,7 +480,7 @@ internal static class HealthTableQueries
                greatest(s.last_analyze, r.analyzed),
                greatest(s.last_autoanalyze, r.autoanalyzed),
                greatest(l.xid_age, case when lt.oid is not null then pg_catalog.age(lt.relfrozenxid) end, r.xid_age)::bigint,
-               coalesce(r.invalid_indexes, 0)::int,
+               coalesce(ir.invalid, 0)::int,
                case
                    when l.relkind = 'p' then coalesce(orl.agreed, '{}'::text[])
                    else coalesce(l.reloptions, '{}'::text[])
@@ -437,18 +491,20 @@ internal static class HealthTableQueries
                coalesce(r.leaves, 0)::int,
                r.largest_leaf::bigint,
                coalesce(orl.differing, '{}'::text[]),
-               (select b.phase
-                from builds b
-                where l.relkind = 'p'
-                  and (b.relid = l.oid or b.relid in (select t.relid from tree t where t.root = l.oid))
-                limit 1),
+               ir.building_phase,
                st.unseen_builds,
                st.freeze_max_age,
-               st.server_version
+               st.server_version,
+               coalesce(ir.building, 0)::int,
+               (select b.phase
+                from builds b
+                where b.relid = l.oid or b.relid in (select t.relid from tree t where t.root = l.oid)
+                limit 1)
         from listed l
         cross join settings st
         left join pg_catalog.pg_class lt on lt.oid = l.reltoastrelid
         left join rolled r on r.root = l.oid
+        left join invalid_rolled ir on ir.root = l.oid
         left join options_rolled orl on orl.root = l.oid
         left join pg_catalog.pg_stat_user_tables s on s.relid = l.oid
         order by 1, 2
@@ -496,7 +552,7 @@ internal static class HealthTableQueries
             join pg_catalog.pg_inherits inh on inh.inhparent = t.relid
         ),
         builds as (
-            select p.relid, p.index_relid, p.phase::text as phase
+            select p.relid, p.index_relid, p.command::text as command, p.phase::text as phase
             from pg_catalog.pg_stat_progress_create_index p
             where p.datid = (select db.oid from pg_catalog.pg_database db where db.datname = pg_catalog.current_database())
         ),
@@ -554,13 +610,29 @@ internal static class HealthTableQueries
                (select b.phase
                 from builds b
                 where b.index_relid = i.oid
-                   or b.relid in (select t.relid from table_tree t where t.root = i.table_oid)
+                   or (b.command = 'REINDEX CONCURRENTLY'
+                       and b.relid = i.table_oid
+                       and i.index_name ~ '_cc(new|old)[0-9]*$'
+                       and exists (
+                           select 1
+                           from pg_catalog.pg_class bi
+                           where bi.oid = b.index_relid
+                             and pg_catalog.left(bi.relname::text,
+                                     pg_catalog.length(pg_catalog.regexp_replace(i.index_name::text, '_cc(new|old)[0-9]*$', '')))
+                                 = pg_catalog.regexp_replace(i.index_name::text, '_cc(new|old)[0-9]*$', '')))
+                   or (i.relkind = 'I'
+                       and b.command not like 'REINDEX%'
+                       and b.relid in (select t.relid from table_tree t where t.root = i.table_oid))
                 limit 1),
                (select pg_catalog.count(*) from builds b where b.relid is null)::int,
                pg_catalog.current_setting('server_version_num')::int,
                i.indisexclusion,
                i.indimmediate,
-               i.nulls_not_distinct
+               i.nulls_not_distinct,
+               (select b.phase
+                from builds b
+                where b.relid in (select t.relid from table_tree t where t.root = i.table_oid)
+                limit 1)
         from indexes i
         left join rolled r on r.root = i.oid
         left join pg_catalog.pg_stat_user_indexes s on s.indexrelid = i.oid
@@ -755,6 +827,8 @@ internal static class HealthTableQueries
             UnseenIndexBuilds = reader.GetInt32(31),
             FreezeMaxAge = reader.GetInt64(32),
             ServerVersion = reader.GetInt32(33),
+            BuildingPartitionIndexes = reader.GetInt32(34),
+            TreeBuildPhase = reader.IsDBNull(35) ? null : reader.GetString(35),
         };
     }
 
@@ -787,6 +861,7 @@ internal static class HealthTableQueries
             IsExclusion = reader.GetBoolean(19),
             IsImmediate = reader.GetBoolean(20),
             NullsNotDistinct = reader.GetBoolean(21),
+            TableBuildPhase = reader.IsDBNull(22) ? null : reader.GetString(22),
         };
     }
 
