@@ -10186,3 +10186,159 @@ a.ms-schema-health-mark:hover,
 a.ms-schema-health-mark:focus-visible {
     text-decoration: underline;
 }
+
+/* ==========================================================================
+   HEALTH-3. Database > Sessions
+
+   Wave 1's connections packet (D26: appended after HEALTH-1, and after
+   HEALTH-2 when that lands first - the order between the wave-1 sections does
+   not matter, because none of them re-declares another's selector). Every rule
+   is new and prefixed ms-sessions-, or scoped under .ms-db-rail-activity; the
+   tables are .ms-table inside TableScroll (D25), so they scroll sideways in
+   their own region rather than widening the page.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   The header, the lead and the way back to the browser
+   -------------------------------------------------------------------------- */
+
+.ms-sessions-back {
+    margin: 0 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-sessions-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-sessions-lead {
+    max-width: 72ch;
+    margin: 0 0 var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   The counts: a row of five that wraps, one per line on a phone
+   -------------------------------------------------------------------------- */
+
+.ms-sessions-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-sessions-stat {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-sessions-stat dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-sessions-stat dd {
+    margin: 0;
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-sessions-stat-alert {
+    color: var(--ms-color-warning);
+}
+
+.ms-sessions-stat-note {
+    display: block;
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-sessions-states {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-sessions-caveat,
+.ms-sessions-measured,
+.ms-sessions-gate {
+    max-width: 80ch;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-sessions-refusal {
+    margin-bottom: var(--ms-space-md);
+}
+
+/* --------------------------------------------------------------------------
+   The three lists
+   -------------------------------------------------------------------------- */
+
+.ms-sessions-section {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-sessions-heading {
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-sessions-table td {
+    vertical-align: top;
+}
+
+.ms-sessions-awaited td {
+    background: var(--ms-color-warning-bg);
+}
+
+/* A statement is somebody else's source text: kept to a readable column and
+   wrapped anywhere, so one long line does not make the table wider than any
+   screen. */
+.ms-sessions-statement {
+    min-width: 24ch;
+    max-width: 60ch;
+}
+
+.ms-sessions-statement code {
+    display: block;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-sessions-statement-note {
+    display: block;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   The rail's Activity band
+   -------------------------------------------------------------------------- */
+
+.ms-db-rail-activity .ms-rail-list {
+    margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+    .ms-sessions-stats {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ms-sessions-statement {
+        min-width: 16ch;
+    }
+}

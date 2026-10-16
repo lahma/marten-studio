@@ -1,0 +1,558 @@
+@page "/marten/database/sessions"
+@using MartenStudio.Services.Database
+@using MartenStudio.Services.Health
+@using MartenStudio.Services.Live
+@using Microsoft.Extensions.Options
+@implements IAsyncDisposable
+@inject ISessionActivityService SessionData
+@inject SessionPoolObserver Pools
+@inject StudioState State
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    Database › Sessions: who is connected to this database, what they wait for, what is locked, and which
+    prepared transactions are waiting - this database only, read through ISessionActivityService.
+
+    Two audiences (decision 4). Anybody the store policy passes for the database as a whole sees counts, ages,
+    states, wait classes, lock modes and the Marten label of what is locked; the details - process ids, roles,
+    client addresses, application names, connection times and statements - need
+    MartenStudioOptions.Capabilities.ViewDatabaseActivity and the write policy, and the service refuses them
+    otherwise. The page asks for details only when the summary says the gate is open, so a closed gate refuses
+    nothing; and only once interactive, so a prerender reads nothing and audits nothing.
+
+    Read when the page becomes interactive, every HealthInterval while it stays open (never RefreshInterval:
+    pg_stat_activity and pg_locks are process-array and lock-table scans), and on Refresh - and the service's
+    snapshot is shared and at least ten seconds old before it is read again, however often anybody clicks.
+
+    No cancel and no terminate buttons (plan §9): the studio never ends another session. While the page is open
+    it holds a lease on the in-process pool observer, which is what shows this process's own pool.
+*@
+
+<PageTitle>Sessions</PageTitle>
+
+<div class="ms-page ms-sessions">
+    <p class="ms-sessions-back"><a href="@DatabaseHref">Database</a> <span aria-hidden="true">›</span> Sessions</p>
+
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Sessions</h1>
+        <div class="ms-sessions-actions">
+            <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+        </div>
+    </div>
+
+    <p class="ms-sessions-lead">
+        Who is connected to this database right now, what they are waiting for and what is locked - read when this page
+        opens, once per <code>HealthInterval</code> while it stays open, and on Refresh. It changes nothing: there is no
+        cancel and no terminate here.
+    </p>
+
+    @if (!interactive || (loading && summary is null))
+    {
+        @* A static render reads nothing: the read waits for the circuit, so a prerender is never a second read. *@
+        <LoadingSpinner />
+    }
+    else if (error is { Length: > 0 })
+    {
+        <ErrorAlert Message="@error" OnRetry="RefreshAsync" />
+    }
+    else if (summary is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No database selected</p>
+            <p class="ms-empty-description">Pick a store and database in the header to see its sessions.</p>
+        </div>
+    }
+    else if (summary.Refusal != DatabaseRefusal.None)
+    {
+        <div class="ms-alert ms-alert-warning ms-sessions-refusal" role="status">
+            <div class="ms-alert-content">
+                <p>@summary.Reason</p>
+            </div>
+        </div>
+        @DetailsNotice(summary.Details)
+    }
+    else
+    {
+        <dl class="ms-sessions-stats">
+            <div class="ms-sessions-stat">
+                <dt>Sessions</dt>
+                <dd>@SessionText.Number(summary.SessionCount)</dd>
+            </div>
+            <div class="ms-sessions-stat">
+                <dt>Waiting for a lock</dt>
+                <dd class="@(summary.Waiting > 0 ? "ms-sessions-stat-alert" : null)">@SessionText.Number(summary.Waiting)</dd>
+            </div>
+            <div class="ms-sessions-stat">
+                <dt>Longest transaction</dt>
+                <dd>@(summary.LongestTransaction is { } longest ? SessionText.Duration(longest) : "none open")</dd>
+            </div>
+            <div class="ms-sessions-stat">
+                <dt>Prepared transactions</dt>
+                <dd class="@(summary.PreparedCount > 0 ? "ms-sessions-stat-alert" : null)">
+                    @SessionText.Number(summary.PreparedCount)
+                    @if (summary.OldestPrepared is { } oldest)
+                    {
+                        <span class="ms-sessions-stat-note">oldest @SessionText.Duration(oldest)</span>
+                    }
+                </dd>
+            </div>
+            <div class="ms-sessions-stat">
+                <dt>This process's pool</dt>
+                <dd>@PoolText(summary.Pool)</dd>
+            </div>
+        </dl>
+
+        @if (summary.ByState.Count > 0)
+        {
+            <p class="ms-sessions-states">
+                @foreach (KeyValuePair<string, int> state in summary.ByState)
+                {
+                    <span class="ms-sessions-state" @key="state.Key">@state.Key <strong>@SessionText.Number(state.Value)</strong></span>
+                }
+            </p>
+        }
+
+        @foreach (string caveat in summary.Caveats)
+        {
+            <p class="ms-sessions-caveat" @key="caveat"><strong>How sure:</strong> @caveat</p>
+        }
+
+        @DetailsNotice(summary.Details)
+
+        @if (details is { Refusal: not DatabaseRefusal.None } refused)
+        {
+            <div class="ms-alert ms-alert-warning ms-sessions-refusal" role="status">
+                <div class="ms-alert-content">
+                    <p>@refused.Reason</p>
+                </div>
+            </div>
+        }
+
+        <section class="ms-sessions-section" aria-labelledby="ms-sessions-list">
+            <h2 class="ms-sessions-heading" id="ms-sessions-list">Sessions</h2>
+
+            @if (summary.Sessions.Count == 0)
+            {
+                @* Counted whatever the role may read of them: a session it cannot see into is listed as "not readable". *@
+                <p class="ms-muted">At this reading, no session but the studio's own was connected to this database.</p>
+            }
+            else if (ShowDetails)
+            {
+                <TableScroll Label="Sessions of this database">
+                    <table class="ms-table ms-sessions-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">pid</th>
+                                <th scope="col">Role</th>
+                                <th scope="col">Application</th>
+                                <th scope="col">Client</th>
+                                <th scope="col">State</th>
+                                <th scope="col">Transaction</th>
+                                <th scope="col">In state</th>
+                                <th scope="col">Waiting on</th>
+                                <th scope="col">Blocked by</th>
+                                <th scope="col">Statement</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (SessionDetailRow row in details!.Sessions)
+                            {
+                                <tr @key="row.ProcessId">
+                                    <td class="ms-mono">@row.ProcessId</td>
+                                    <td>@(row.User ?? "–")</td>
+                                    <td>@(string.IsNullOrEmpty(row.Application) ? "–" : row.Application)</td>
+                                    <td class="ms-mono">@(row.ClientAddress ?? "local socket")</td>
+                                    <td>@(row.State ?? "not readable")</td>
+                                    <td>@Age(row.TransactionAge)</td>
+                                    <td>@Age(row.StateAge)</td>
+                                    <td>@Wait(row.WaitEventType, row.WaitEvent)</td>
+                                    <td class="ms-mono">@(row.BlockedBy.Count == 0 ? "–" : string.Join(", ", row.BlockedBy))</td>
+                                    <td class="ms-sessions-statement">
+                                        @if (row.Statement.Text is { Length: > 0 } text)
+                                        {
+                                            <code class="ms-mono">@text</code>
+                                        }
+                                        @if (row.Statement.Note is { Length: > 0 } note)
+                                        {
+                                            <span class="ms-sessions-statement-note">@note</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+            else
+            {
+                <TableScroll Label="Sessions of this database">
+                    <table class="ms-table ms-sessions-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">State</th>
+                                <th scope="col">Transaction</th>
+                                <th scope="col">Since its last statement</th>
+                                <th scope="col">In state</th>
+                                <th scope="col">Waiting on</th>
+                                <th scope="col">Blocked by</th>
+                                <th scope="col">Has written</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < summary.Sessions.Count; i++)
+                            {
+                                SessionSummaryRow row = summary.Sessions[i];
+                                <tr @key="i">
+                                    <td>@(row.State ?? "not readable")</td>
+                                    <td>@Age(row.TransactionAge)</td>
+                                    <td>@Age(row.QueryAge)</td>
+                                    <td>@Age(row.StateAge)</td>
+                                    <td>@(row.WaitEventType ?? "–")</td>
+                                    <td>@(row.BlockedByCount == 0 ? "–" : SessionText.Count(row.BlockedByCount, "session"))</td>
+                                    <td>@(row.HasTransactionId ? "yes" : "no")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+        </section>
+
+        <section class="ms-sessions-section" aria-labelledby="ms-sessions-locks">
+            <h2 class="ms-sessions-heading" id="ms-sessions-locks">Locks</h2>
+
+            @if (summary.Locks.Count == 0)
+            {
+                <p class="ms-muted">No session of this database holds or awaits a lock beyond its own transaction's.</p>
+            }
+            else if (ShowDetails)
+            {
+                <TableScroll Label="Locks of this database's sessions">
+                    <table class="ms-table ms-sessions-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">pid</th>
+                                <th scope="col">On</th>
+                                <th scope="col">Relation</th>
+                                <th scope="col">Mode</th>
+                                <th scope="col">Held or awaited</th>
+                                <th scope="col">Waited</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < details!.Locks.Count; i++)
+                            {
+                                LockDetailRow row = details.Locks[i];
+                                <tr @key="i" class="@(row.Granted ? null : "ms-sessions-awaited")">
+                                    <td class="ms-mono">@row.ProcessId</td>
+                                    <td>@row.Target</td>
+                                    <td class="ms-mono">@(row.Relation ?? "–")</td>
+                                    <td class="ms-mono">@row.Mode</td>
+                                    <td>@(row.Granted ? "held" : "awaited")</td>
+                                    <td>@Age(row.Waited)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+            else
+            {
+                <TableScroll Label="Locks of this database's sessions">
+                    <table class="ms-table ms-sessions-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">On</th>
+                                <th scope="col">Mode</th>
+                                <th scope="col">Held or awaited</th>
+                                <th scope="col">Count</th>
+                                <th scope="col">Longest wait</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < summary.Locks.Count; i++)
+                            {
+                                LockSummaryRow row = summary.Locks[i];
+                                <tr @key="i" class="@(row.Granted ? null : "ms-sessions-awaited")">
+                                    <td>@row.Target</td>
+                                    <td class="ms-mono">@row.Mode</td>
+                                    <td>@(row.Granted ? "held" : "awaited")</td>
+                                    <td>@SessionText.Number(row.Count)</td>
+                                    <td>@Age(row.LongestWait)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+        </section>
+
+        <section class="ms-sessions-section" aria-labelledby="ms-sessions-prepared">
+            <h2 class="ms-sessions-heading" id="ms-sessions-prepared">Prepared transactions</h2>
+
+            @if (summary.PreparedCount == 0)
+            {
+                <p class="ms-muted">
+                    @(summary.MaxPreparedTransactions == 0
+                        ? "None: max_prepared_transactions is 0 on this server, so none can exist."
+                        : "None is waiting in this database.")
+                </p>
+            }
+            else if (ShowDetails)
+            {
+                <TableScroll Label="Prepared transactions of this database">
+                    <table class="ms-table ms-sessions-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Global id</th>
+                                <th scope="col">Owner</th>
+                                <th scope="col">Prepared</th>
+                                <th scope="col">Waiting for</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (PreparedDetailRow row in details!.Prepared)
+                            {
+                                <tr @key="row.Gid">
+                                    <td class="ms-mono">@row.Gid</td>
+                                    <td>@row.Owner</td>
+                                    <td>@State.FormatInSelectedTimeZone(row.Prepared)</td>
+                                    <td>@SessionText.Duration(row.Age)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+            else
+            {
+                <p>
+                    @SessionText.Count(summary.PreparedCount, "prepared transaction") waiting
+                    @(summary.OldestPrepared is { } prepared ? ", the oldest for " + SessionText.Duration(prepared) : string.Empty).
+                    Their global ids and owners are details.
+                </p>
+            }
+        </section>
+
+        @foreach (HealthStatement statement in summary.Statements)
+        {
+            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+        }
+
+        @if (summary.MeasuredAt is { } measured)
+        {
+            <p class="ms-sessions-measured">
+                Read @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), for this database only.
+            </p>
+        }
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    /// <summary>The page's own polling loop, at <c>HealthInterval</c>; built rather than injected.</summary>
+    private StudioLiveUpdates? live;
+
+    /// <summary>This page's lease on the pool observer: the listener runs only while some page or sweep holds one.</summary>
+    private SessionPoolLease? lease;
+
+    private SessionActivitySummary? summary;
+    private SessionActivityDetails? details;
+    private string? error;
+    private bool loading = true;
+    private bool busy;
+    private bool interactive;
+    private bool disposed;
+
+    /// <summary>Whether the details are on screen: the gate open and the service's answer a grant.</summary>
+    private bool ShowDetails => summary?.Details.IsOpen == true && details is { Refusal: DatabaseRefusal.None };
+
+    private string DatabaseHref => DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope);
+
+    protected override void OnInitialized()
+    {
+        // Nothing is read here: this runs during prerendering too, and the read waits for the circuit.
+        State.ScopeChanged += OnScopeChangedAsync;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || disposed)
+        {
+            return;
+        }
+
+        interactive = true;
+
+        try
+        {
+            lease = Pools.Lease();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The container is going away with the circuit; the page has nothing to show for long.
+        }
+
+        await LoadAsync();
+
+        // Leaving the page during the first read disposes it under the await: the lifetime's source is gone, and
+        // reading its token would throw out of OnAfterRenderAsync and end the circuit.
+        if (disposed)
+        {
+            return;
+        }
+
+        live = LiveFactory.Create();
+        await live.StartAsync(Options.Value.EffectiveHealthInterval, TickAsync, lifetime.Token);
+    }
+
+    private async Task TickAsync(CancellationToken _) => await LoadAsync();
+
+    private async Task RefreshAsync() => await LoadAsync();
+
+    private async Task OnScopeChangedAsync()
+    {
+        if (!interactive)
+        {
+            return;
+        }
+
+        summary = null;
+        details = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        StudioScope? scope = State.ActiveScope;
+
+        // Taken while the page is alive: a disposal under one of the awaits below cancels it rather than leaving a
+        // disposed source to be read.
+        CancellationToken token = lifetime.Token;
+        busy = true;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            SessionActivitySummary? read = scope is null ? null : await SessionData.GetSummaryAsync(scope, token);
+
+            // Details only through an open gate: a closed one is never asked, so it refuses - and audits - nothing.
+            SessionActivityDetails? named = scope is not null && !disposed && read is { Refusal: DatabaseRefusal.None, Details.IsOpen: true }
+                ? await SessionData.GetDetailsAsync(scope, token)
+                : null;
+
+            // A scope change while this was reading: the answer is about a database nobody is looking at.
+            if (State.ActiveScope == scope)
+            {
+                summary = read;
+                details = named;
+                error = null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page, not only in the log: a failure the visitor cannot see is a page that silently shows nothing.
+            error = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// What the details would add and what it takes, when they are not shown: the capability's own notice, naming
+    /// <c>MartenStudioOptions.Capabilities.ViewDatabaseActivity</c>, or the policy's sentence.
+    /// </summary>
+    private RenderFragment DetailsNotice(SessionDetailsAccess access) => __builder =>
+    {
+        if (access.IsOpen)
+        {
+            return;
+        }
+
+        if (access.Refusal is DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly)
+        {
+            <CapabilityDisabled Capability="ViewDatabaseActivity" Action="Session details" />
+            <p class="ms-muted ms-sessions-gate">
+                Without it this page shows counts, ages, states, wait classes, lock modes and what Marten object is locked -
+                never process ids, roles, client addresses, application names or statements, which are other applications'
+                as much as this one's.
+            </p>
+        }
+        else if (access.Denial is { Length: > 0 } denial)
+        {
+            <div class="ms-alert ms-alert-info ms-capability-disabled ms-sessions-gate" role="note">
+                <div class="ms-alert-content">
+                    <p>Session details are not shown.</p>
+                    <p class="ms-muted">@denial</p>
+                </div>
+            </div>
+        }
+    };
+
+    private static string Age(TimeSpan? value) => value is { } age ? SessionText.Duration(age) : "–";
+
+    private static string Wait(string? type, string? wait) =>
+        type is null ? "–" : wait is null ? type : type + ": " + wait;
+
+    private static string PoolText(SessionPoolSummary? pool) => pool switch
+    {
+        null => "not read",
+        { Pooling: false } => "no pool (Pooling=false)",
+        { Ambiguous: true } => "not told apart: more than one pool in this process uses this connection string",
+        { Matched: false } => "not matched to this database",
+        { Used: { } used, Max: { } max } => used + " of " + max + " in use",
+        _ => "not read",
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            lease?.Dispose();
+            lease = null;
+
+            try
+            {
+                await lifetime.CancelAsync();
+            }
+            finally
+            {
+                lifetime.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}

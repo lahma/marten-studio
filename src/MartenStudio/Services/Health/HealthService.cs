@@ -69,6 +69,14 @@ internal interface IHealthService
 /// tenant. Each question is asked at most once per report.
 /// </para>
 /// <para>
+/// <b>What the activity gate shows is audited, by signature.</b> Evidence behind <see cref="HealthGate.Activity" />
+/// names other people's sessions - process ids, roles, applications, client addresses, a prepared transaction's
+/// owner - which is what <c>ViewDatabaseActivity</c> guards on Database › Sessions too. So the first report or
+/// cached read that shows any of it in a circuit is one Activity entry under that capability, per store and
+/// database, and the next is recorded only when the set of checks showing it changes; the sidebar's glance shows no
+/// evidence and records nothing.
+/// </para>
+/// <para>
 /// <b>Postgres' words are masked, and only Postgres' words are called Postgres'.</b> A check that failed on a
 /// <c>PostgresException</c> carries Postgres' message, which can name a schema this visitor may not see; it is
 /// shown, labelled "Postgres said:", only after every withheld schema's name is masked out of it with the
@@ -80,6 +88,23 @@ internal interface IHealthService
 /// </remarks>
 internal sealed class HealthService : IHealthService
 {
+    /// <summary>What the audit ring calls showing findings with session details in them.</summary>
+    internal const string ActivityAction = "Read health session details";
+
+    /// <summary>What the audit ring says was shown.</summary>
+    internal const string ActivityTarget = "health findings' session evidence";
+
+    // The audit ledger is keyed by store, database and what was read, as the Sessions page's is; these name "what".
+    private const string ActivityLedgerSchema = "(health)";
+    private const string ActivityLedgerRelation = "findings";
+    private const string ActivityLedgerKind = "activity";
+
+    /// <summary>
+    /// What this circuit has recorded of Activity-gated evidence it showed, per store and database: the set of checks
+    /// whose findings carried it. Scoped with the service, so one per circuit.
+    /// </summary>
+    private readonly TableRowAuditLedger activityLedger = new();
+
     private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioScopeResolver resolver;
     private readonly StudioAuthorization authorization;
@@ -188,7 +213,7 @@ internal sealed class HealthService : IHealthService
         results.AddRange(statements?.Results ?? []);
 
         (List<HealthReportFinding> findings, int withheld, IReadOnlyList<string> reasons) =
-            await ShowAsync(results, gate, scope.StoreKey, databaseId).ConfigureAwait(false);
+            await ShowAsync(results, gate, scope.StoreKey, databaseId, scope).ConfigureAwait(false);
 
         IReadOnlyList<HealthCheckStatus> statuses = await StatusesAsync(results, findings, gate, scope, resolved, cancellationToken)
             .ConfigureAwait(false);
@@ -224,8 +249,9 @@ internal sealed class HealthService : IHealthService
     {
         ArgumentNullException.ThrowIfNull(scope);
 
+        // A badge shows counts and titles, never evidence: nothing is revealed, so nothing is audited.
         (HealthSweep? sweep, List<HealthReportFinding> unmuted) =
-            await CachedAsync(scope, static _ => true, cancellationToken).ConfigureAwait(false);
+            await CachedAsync(scope, static _ => true, audit: false, cancellationToken).ConfigureAwait(false);
 
         if (sweep is null)
         {
@@ -256,6 +282,7 @@ internal sealed class HealthService : IHealthService
         (_, List<HealthReportFinding> unmuted) = await CachedAsync(
                 scope,
                 result => codes.Contains(result.Check.Code, StringComparer.Ordinal),
+                audit: true,
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -284,6 +311,7 @@ internal sealed class HealthService : IHealthService
     private async Task<(HealthSweep? Sweep, List<HealthReportFinding> Unmuted)> CachedAsync(
         StudioScope scope,
         Func<HealthCheckResult, bool> wanted,
+        bool audit,
         CancellationToken cancellationToken)
     {
         HealthSweep? sweep = cache.Latest(scope.StoreKey, scope.DatabaseId);
@@ -301,7 +329,7 @@ internal sealed class HealthService : IHealthService
 
         VisitorGate gate = new(this, scope);
         (List<HealthReportFinding> findings, _, _) = await ShowAsync(
-                sweep.Results.Where(wanted), gate, scope.StoreKey, sweep.DatabaseId)
+                sweep.Results.Where(wanted), gate, scope.StoreKey, sweep.DatabaseId, audit ? scope : null)
             .ConfigureAwait(false);
 
         return (sweep, [.. findings.Where(x => !mutes.IsMuted(x.MuteKey))]);
@@ -331,15 +359,25 @@ internal sealed class HealthService : IHealthService
     /// The findings this visitor may see, worst first, with their evidence redacted - and how many were
     /// withheld, and behind which gate.
     /// </summary>
+    /// <param name="results">The checks' results.</param>
+    /// <param name="gate">This visitor's gate.</param>
+    /// <param name="storeKey">The store.</param>
+    /// <param name="databaseId">The database.</param>
+    /// <param name="audited">
+    /// The scope the visitor asked with, when what is shown is to be audited (<see cref="RecordActivityShown" />);
+    /// <see langword="null" /> for a read that shows no evidence.
+    /// </param>
     private async Task<(List<HealthReportFinding> Findings, int Withheld, IReadOnlyList<string> Reasons)> ShowAsync(
         IEnumerable<HealthCheckResult> results,
         VisitorGate gate,
         string storeKey,
-        string databaseId)
+        string databaseId,
+        StudioScope? audited)
     {
         List<HealthReportFinding> shown = [];
         int withheld = 0;
         List<string> reasons = [];
+        SortedSet<string> activityShown = new(StringComparer.Ordinal);
 
         foreach (HealthCheckResult result in results)
         {
@@ -365,12 +403,22 @@ internal sealed class HealthService : IHealthService
                     continue;
                 }
 
+                bool revealsActivity = required == HealthGate.Activity;
+
                 List<HealthEvidence> evidence = [];
                 foreach (HealthEvidence item in finding.Evidence)
                 {
-                    evidence.Add(await gate.PassesAsync(item.Gate).ConfigureAwait(false)
+                    bool passes = await gate.PassesAsync(item.Gate).ConfigureAwait(false);
+                    revealsActivity |= passes && item.Gate == HealthGate.Activity;
+
+                    evidence.Add(passes
                         ? item
                         : item with { Value = "withheld - " + gate.WhyNot(item.Gate) });
+                }
+
+                if (revealsActivity)
+                {
+                    activityShown.Add(finding.Code);
                 }
 
                 RuntimeFeature? feature = finding.Remedy?.Requires;
@@ -414,7 +462,40 @@ internal sealed class HealthService : IHealthService
             }
         }
 
+        if (audited is not null && activityShown.Count > 0)
+        {
+            RecordActivityShown(audited, storeKey, databaseId, activityShown);
+        }
+
         return (shown, withheld, reasons);
+    }
+
+    /// <summary>
+    /// One audit entry for Activity-gated evidence shown - process ids, roles, applications, client addresses, a
+    /// prepared transaction's gid and owner - the first time a circuit is shown it for a store and database, and
+    /// again only when the set of checks showing it changes: the Sessions page's first-read rule, by signature, so a
+    /// page's interval reads record nothing more.
+    /// </summary>
+    private void RecordActivityShown(StudioScope scope, string storeKey, string databaseId, SortedSet<string> codes)
+    {
+        string signature = string.Join(",", codes);
+
+        if (services.GetService<StudioActionLog>() is not { } audit
+            || !activityLedger.TryRecord(
+                TableRowAuditLedger.Key(storeKey, databaseId, ActivityLedgerSchema, ActivityLedgerRelation, ActivityLedgerKind),
+                signature,
+                out _))
+        {
+            return;
+        }
+
+        audit.Record(
+            ActivityAction,
+            ActivityTarget,
+            succeeded: true,
+            "Health findings shown with session details: " + string.Join(", ", codes) + ".",
+            StudioCapability.ViewDatabaseActivity,
+            new StudioScope(scope.StoreKey, databaseId, null));
     }
 
     /// <summary>

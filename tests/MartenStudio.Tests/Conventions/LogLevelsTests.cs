@@ -164,6 +164,8 @@ public class LogLevelsTests
             "A health check failed other than by an expected state (privilege, timeout, missing extension); the Health page and Overview re-check at HealthInterval."),
         ["src/MartenStudio/Services/StudioLog.cs : 9237 TableRowReadFailed"] = (Verdict.Throttled,
             "A row read failed by connection or an unexpected SQLSTATE; a timeout, privilege, RLS or unrefreshed view is Debug, and page turns repeat it."),
+        ["src/MartenStudio/Services/StudioLog.Sessions.cs : 9246 SessionActivityReadFailed"] = (Verdict.Throttled,
+            "A read of a database's sessions failed by connection or an unexpected SQLSTATE; privilege and timeouts are Debug, and the Sessions page re-reads every HealthInterval."),
 
         // ---- Visitor-started reads and writes, one line per action ------------------------------------
         ["src/MartenStudio/Services/Configuration/ConfigurationService.cs : Marten Studio could not describe the databases of store {StoreKey}"] = (Verdict.VisitorAction,

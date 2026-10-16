@@ -119,6 +119,41 @@ Every disabled control in the UI names the property that would enable it
 (`MartenStudioOptions.Capabilities.EditDocuments`), because "not permitted" with nothing to act on is
 the failure mode of every feature-flagged admin UI.
 
+### `ViewDatabaseActivity`
+
+`pg_stat_activity`, `pg_locks` and `pg_prepared_xacts` describe every session on the database server, not
+only this application's: other applications' process ids, roles, client addresses and application names,
+and the text of the statements they are running — literals included, and the names of schemas the
+database browser would withhold. `ViewDatabaseActivity` is the capability for that, shaped like
+`BrowseDatabase`: off by default, included in `All()`, off under `ReadOnly`, and authorized as a write —
+the write policy asked with `Capability = "ViewDatabaseActivity"` and `TenantId = null`, because a session
+belongs to no tenant. It is for the people who operate the database rather than those who browse its data.
+
+Without it, a visitor the store policy passes for the database as a whole still sees how many sessions
+there are, how old their transactions are, what state they are in, the class of what they wait for, lock
+modes, and which of this store's objects is locked (the apply-changes lock, the daemon's lock, an
+`mt_streams` row, a document table) — on the Health page's connection findings and on Database › Sessions
+alike — and never a process id, a role, an address, an application name or a statement. A lock label names
+only this store's own declared, visible objects and Postgres' system catalogs, and always by the table a
+locked index, partition or TOAST table belongs to — never by that relation's own name, which can carry a
+tenant id or a hidden type's alias; a hidden type's table, another store's table and an `mt_` name no store
+declares are named to nobody, details included. A session the studio's role cannot see into is counted, and
+said to be one it cannot see into, never left out.
+
+The refusal lives in the service (`ISessionActivityService.GetDetailsAsync` refuses as a value, and every
+refusal is audited); on the Health page each such piece of evidence is withheld per visitor. Statements are
+never part of a health finding at all: they appear only on Database › Sessions, masked for the schemas that
+visitor may not see, cut before a half-written name, and withheld outright when the visitor's schemas cannot
+be checked, when the statement names a document type `IsDocumentTypeVisible` hides, or — while hiding is
+configured — when it names a Marten document table no registered store declares.
+
+Both are audited by signature, never per poll. The first read of session details per circuit, store and
+database is one Activity entry and event 9245. On the Health page, the first report in a circuit that shows
+any evidence behind the activity gate for a store and database is one Activity entry under
+`ViewDatabaseActivity` (event 9200, with the checks it came from), and another is recorded only when the set
+of checks showing it changes; the sidebar's health badge shows no evidence and records nothing. A read that
+fails for a reason nobody chose is event 9246, throttled. The studio never cancels or terminates a session.
+
 ## The SQL console
 
 `RunSql` is off by default like every other capability. What makes the console safe when it *is* on is

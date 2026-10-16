@@ -216,6 +216,15 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<HealthAlerts>();
         services.TryAddScoped<IHealthService, HealthService>();
 
+        // H3: Database > Sessions and the connection checks. The pool observer is a singleton because a
+        // MeterListener is process-wide, and it listens only while a sweep or an open Sessions page holds a
+        // lease. The session snapshot is the database's, shared by every circuit for ten seconds; what a
+        // visitor is shown of it, and which first read this circuit has audited, are the circuit's.
+        services.TryAddSingleton<SessionPoolObserver>();
+        services.TryAddSingleton<ISessionActivityReader, SessionActivityReader>();
+        services.TryAddSingleton<SessionActivitySnapshots>();
+        services.TryAddScoped<ISessionActivityService, SessionActivityService>();
+
         return services;
     }
 

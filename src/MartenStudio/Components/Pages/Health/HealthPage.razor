@@ -237,12 +237,33 @@
 
         // Idempotent, and normally already done by the layout. Awaited here so the first read is never made
         // before the circuit's scope is settled - a scope change that arrived before this render is in it.
-        await State.EnsureInitializedAsync(lifetime.Token);
-        await Mutes.LoadAsync(JsRuntime, lifetime.Token);
+        // Leaving the page under any of these awaits disposes it: the lifetime's source is gone, and reading its token
+        // would throw out of OnAfterRenderAsync and end the circuit. So each step asks first.
+        CancellationToken token = lifetime.Token;
+
+        await State.EnsureInitializedAsync(token);
+
+        if (disposed)
+        {
+            return;
+        }
+
+        await Mutes.LoadAsync(JsRuntime, token);
+
+        if (disposed)
+        {
+            return;
+        }
+
         await LoadAsync(HealthReportRequest.Regular);
 
+        if (disposed)
+        {
+            return;
+        }
+
         live = LiveFactory.Create();
-        await live.StartAsync(Options.Value.EffectiveHealthInterval, TickAsync, lifetime.Token);
+        await live.StartAsync(Options.Value.EffectiveHealthInterval, TickAsync, token);
     }
 
     private async Task TickAsync(CancellationToken _)
@@ -275,13 +296,17 @@
         }
 
         StudioScope? scope = State.ActiveScope;
+
+        // Taken while the page is alive: a disposal under the awaits below cancels it rather than leaving a disposed
+        // source to be read.
+        CancellationToken token = lifetime.Token;
         busy = true;
         loading = true;
         await InvokeAsync(StateHasChanged);
 
         try
         {
-            HealthReport? read = scope is null ? null : await HealthData.GetReportAsync(scope, request, lifetime.Token);
+            HealthReport? read = scope is null ? null : await HealthData.GetReportAsync(scope, request, token);
 
             // A scope change while the sweep was running: the answer is about a database nobody is looking at.
             if (State.ActiveScope == scope)

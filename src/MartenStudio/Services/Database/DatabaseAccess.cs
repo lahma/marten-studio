@@ -263,7 +263,74 @@ internal sealed class DatabaseAccess
         ArgumentNullException.ThrowIfNull(registration);
         ArgumentNullException.ThrowIfNull(resolvedStore);
 
-        List<(string Key, IDocumentStore Store)> stores = [];
+        if (CollectStores(registry, provider, registration, resolvedStore, out List<(string Key, IDocumentStore Store)> stores) is { } unbuilt)
+        {
+            return unbuilt;
+        }
+
+        Func<Type, bool>? isVisible = options.Value.IsDocumentTypeVisible;
+
+        if (Fingerprint(stores) is not { } fingerprint)
+        {
+            // A type Marten cannot map is a configuration that cannot be read: fail closed, as below.
+            return Declare(stores, registration.Key, resolvedStore, isVisible);
+        }
+
+        if (declarations.TryGetValue(registration.Key, out var cached) && cached.Fingerprint == fingerprint)
+        {
+            return cached.Declarations;
+        }
+
+        DatabaseDeclarations result = Declare(stores, registration.Key, resolvedStore, isVisible);
+
+        if (result.Succeeded)
+        {
+            declarations[registration.Key] = (fingerprint, result);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Every registered store's declarations, with <paramref name="registration" /> as the resolved store, read
+    /// afresh and remembered nowhere - the classification <see cref="ReadDeclarations(ResolvedScope)" /> caches per
+    /// circuit, for a caller that has no circuit: a health check labelling the locks it reads (C06). Fails closed in
+    /// the same way, and touches no connection.
+    /// </summary>
+    /// <param name="registry">The store registry.</param>
+    /// <param name="provider">What the other stores are resolved from.</param>
+    /// <param name="registration">The resolved store's registration.</param>
+    /// <param name="resolvedStore">The resolved store.</param>
+    /// <param name="isDocumentTypeVisible"><see cref="MartenStudioOptions.IsDocumentTypeVisible" />.</param>
+    internal static DatabaseDeclarations DeclareEveryStore(
+        MartenStoreRegistry registry,
+        IServiceProvider provider,
+        MartenStoreRegistration registration,
+        IDocumentStore resolvedStore,
+        Func<Type, bool>? isDocumentTypeVisible)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(registration);
+        ArgumentNullException.ThrowIfNull(resolvedStore);
+
+        return CollectStores(registry, provider, registration, resolvedStore, out List<(string Key, IDocumentStore Store)> stores) is { } unbuilt
+            ? unbuilt
+            : Declare(stores, registration.Key, resolvedStore, isDocumentTypeVisible);
+    }
+
+    /// <summary>
+    /// Every registered store, ancillary ones included and <paramref name="resolvedStore" /> first-class among them -
+    /// or the failure that a store which will not build is.
+    /// </summary>
+    private static DatabaseDeclarations? CollectStores(
+        MartenStoreRegistry registry,
+        IServiceProvider provider,
+        MartenStoreRegistration registration,
+        IDocumentStore resolvedStore,
+        out List<(string Key, IDocumentStore Store)> stores)
+    {
+        stores = [];
 
         foreach (MartenStoreRegistration each in registry.Registrations(includeAncillaryStores: true))
         {
@@ -300,25 +367,7 @@ internal sealed class DatabaseAccess
             stores.Insert(0, (registration.Key, resolvedStore));
         }
 
-        if (Fingerprint(stores) is not { } fingerprint)
-        {
-            // A type Marten cannot map is a configuration that cannot be read: fail closed, as below.
-            return Declare(stores, registration.Key, resolvedStore);
-        }
-
-        if (declarations.TryGetValue(registration.Key, out var cached) && cached.Fingerprint == fingerprint)
-        {
-            return cached.Declarations;
-        }
-
-        DatabaseDeclarations result = Declare(stores, registration.Key, resolvedStore);
-
-        if (result.Succeeded)
-        {
-            declarations[registration.Key] = (fingerprint, result);
-        }
-
-        return result;
+        return null;
     }
 
     /// <summary>
@@ -346,12 +395,12 @@ internal sealed class DatabaseAccess
         return fingerprint.ToString();
     }
 
-    private DatabaseDeclarations Declare(
+    private static DatabaseDeclarations Declare(
         List<(string Key, IDocumentStore Store)> stores,
         string resolvedKey,
-        IDocumentStore resolvedStore)
+        IDocumentStore resolvedStore,
+        Func<Type, bool>? isVisible)
     {
-        Func<Type, bool>? isVisible = options.Value.IsDocumentTypeVisible;
         List<StoreDeclarations> declared = [];
         IReadOnlyList<string> storeSchemas = [];
 

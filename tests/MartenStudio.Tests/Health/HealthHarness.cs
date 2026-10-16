@@ -260,7 +260,9 @@ internal sealed class HealthHarness : IAsyncDisposable
 
         services.AddMarten(options =>
         {
-            options.Connection(RefusedConnectionString);
+            // A pool of this harness's own, as a real host's data source is: Npgsql names an unnamed pool by its
+            // connection string, and every harness in the process sharing one would make C01's pool ambiguous.
+            options.Connection(RefusedConnectionString + ";Application Name=MartenStudio.Tests." + Guid.NewGuid().ToString("N"));
             options.DatabaseSchemaName = "health_unit";
             store?.Invoke(options);
         });

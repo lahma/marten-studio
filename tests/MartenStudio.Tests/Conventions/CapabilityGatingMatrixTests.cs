@@ -136,6 +136,10 @@ public class CapabilityGatingMatrixTests
         new(typeof(ITableRowService), nameof(ITableRowService.GetReferencesAsync), StudioCapability.BrowseDatabase),
         new(typeof(ITableRowService), nameof(ITableRowService.CountExactAsync), StudioCapability.BrowseDatabase),
         new(typeof(ITableRowService), nameof(ITableRowService.GetCellAsync), StudioCapability.BrowseDatabase),
+
+        // H3: Database > Sessions' details - process ids, roles, client addresses, application names and
+        // statements - refused as a value and audited; the summary beside it is a plain read.
+        new(typeof(ISessionActivityService), nameof(ISessionActivityService.GetDetailsAsync), StudioCapability.ViewDatabaseActivity),
     ];
 
     /// <summary>
@@ -190,8 +194,11 @@ public class CapabilityGatingMatrixTests
         [typeof(ITableRowService)] = ["CountExactAsync", "GetCellAsync", "GetReferencesAsync", "GetRowAsync", "ListRowsAsync"],
 
         // H1: the health advisor reads; ViewDatabaseActivity decides what of a report a visitor is shown, per
-        // finding and per piece of evidence, and refuses nothing - see Reserved.
+        // finding and per piece of evidence, and refuses nothing - the read that refuses on it is the sessions one.
         [typeof(IHealthService)] = ["CachedFindingsAsync", "GetReportAsync", "GlanceAsync"],
+
+        // H3: the summary is the store policy's for the database as a whole; the details are a gated read.
+        [typeof(ISessionActivityService)] = ["GetDetailsAsync", "GetSummaryAsync"],
     };
 
     /// <summary>
@@ -208,16 +215,13 @@ public class CapabilityGatingMatrixTests
     /// and give it the three refusals.
     /// </para>
     /// <para>
-    /// <c>ViewDatabaseActivity</c> is consumed already, but as a redaction rather than a refusal: the health
-    /// report is a read that names nothing behind the gate unless the visitor passes it.
-    /// <c>HealthGateTests</c> prove its three refusals (capability off, <c>ReadOnly</c>, write policy) and that
-    /// the policy is asked with <c>TenantId = null</c>.
+    /// <c>ViewDatabaseActivity</c> left this list with H3: <c>ISessionActivityService.GetDetailsAsync</c> requires
+    /// it and is a gated read above. The health report still consumes it as a redaction rather than a refusal
+    /// (<c>HealthGateTests</c>, <c>ConnectionFindingGatesTests</c>).
     /// </para>
     /// </remarks>
     private static readonly Dictionary<StudioCapability, string> Reserved = new()
     {
-        [StudioCapability.ViewDatabaseActivity] =
-            "H1's HealthService asks it per finding and per piece of evidence; H3's Database > Sessions reads will refuse on it and move it to GatedReads.",
         [StudioCapability.CompactStreams] =
             "F3 (stream compaction) adds the compacting write to the events service and moves it to Mutating.",
         [StudioCapability.RunLinqQueries] =
@@ -438,7 +442,7 @@ public class CapabilityGatingMatrixTests
 
         harness.Policies.Calls.Where(static x => x.Resource.Capability is not null)
             .Should().OnlyContain(static x => x.Resource.TenantId == null,
-                "BrowseDatabase is always asked of the database as a whole");
+                "BrowseDatabase and ViewDatabaseActivity are always asked of the database as a whole");
     }
 
     private static async Task AssertEveryGatedReadRefusedAsync(Harness harness, DatabaseRefusal expected)

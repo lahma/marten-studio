@@ -132,6 +132,28 @@ internal sealed class DatabaseObjectClassifier
         && !declared.ContainsKey(SchemaKey.For(schema, name));
 
     /// <summary>
+    /// Whether some registered store declares a document table called <paramref name="name" />, in any schema - what
+    /// an unqualified name in a statement can be checked against, when its <c>search_path</c> is not known.
+    /// </summary>
+    public bool DeclaresDocumentTableNamed(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        foreach ((string key, (string _, MartenDeclaredObject value)) in declared)
+        {
+            if (value.Kind == MartenObjectKind.DocumentTable
+                && key.Length > name.Length
+                && key[^(name.Length + 1)] == '.'
+                && key.EndsWith(name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Whose one relation is, or <see langword="null" /> when the browser must not show it at all.
     /// </summary>
     public DatabaseObjectOwnership? ClassifyRelation(string schema, string name)
