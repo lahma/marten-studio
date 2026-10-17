@@ -1,12 +1,17 @@
 @page "/marten/events/types"
 @using System.Globalization
+@using Microsoft.Extensions.Logging
 @using Microsoft.Extensions.Options
+@using MartenStudio.Components.Pages.Health
 @using MartenStudio.Services
 @using MartenStudio.Services.Events
+@using MartenStudio.Services.Health
 @implements IAsyncDisposable
 @inject IEventDataService Events
+@inject IHealthService Health
 @inject StudioState State
 @inject IOptions<MartenStudioOptions> Options
+@inject ILogger<EventTypes> Logger
 
 <PageTitle>Event types</PageTitle>
 
@@ -23,6 +28,33 @@
         the button because <code>group by type</code> reads the whole events table - the same reason
         collection counts are estimates by default. They are cached for this session once loaded.
     </p>
+
+    @* E05 from the health advisor's last regular sweep, read from its cache: this page never starts a sweep.
+       With no recent sweep there is nothing here - and nothing here says the store is healthy either, because
+       absence is "not checked", not "fine". The table's own "not registered" marks below are this page's own
+       read and do not depend on it. *@
+    @foreach (HealthReportFinding finding in healthFindings)
+    {
+        bool critical = finding.Severity == HealthSeverity.Critical;
+
+        <section class="@("ms-alert ms-health-banner ms-event-types-health ms-health-banner-" + finding.Code.ToLowerInvariant() + (critical ? " ms-alert-error" : " ms-alert-warning"))"
+                 role="@(critical ? "alert" : "status")"
+                 aria-label="@("Health finding " + finding.Code)"
+                 @key="finding.MuteKey">
+            <div class="ms-alert-content">
+                <p class="ms-health-banner-title">
+                    <span class="@HealthPresentation.ChipClass(finding.Severity)">@HealthPresentation.Label(finding.Severity)</span>
+                    <code class="ms-health-banner-code">@finding.Code</code>
+                    @finding.Finding.Title
+                </p>
+                <p class="ms-event-types-health-why">@finding.Finding.WhyItMatters</p>
+                <p class="ms-muted ms-health-banner-meta">
+                    From the health advisor's check at @State.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
+                    <a class="ms-health-banner-link" href="@HealthLinks.ToFinding(Options.Value, State.ActiveScope, finding)">Why, and what to change</a>
+                </p>
+            </div>
+        </section>
+    }
 
     @if (loading)
     {
@@ -122,6 +154,74 @@
             </p>
         }
     }
+
+    @* F4. The store's DCB tag types: what each holds, where it lives, how many rows its table has (an estimate,
+       D8, and none at all for a tenant-scoped visitor on a conjoined store) and whether the feed's tag: filter
+       on it is index-backed. Drawn only on a store that registers a tag type. *@
+    @if (tagTypes.Error is { } tagError)
+    {
+        <section class="ms-section ms-event-tag-types">
+            <h2 class="ms-section-title">DCB tag types</h2>
+            <ErrorAlert Message="@tagError.Display" />
+        </section>
+    }
+    else if (tagTypes.HasTags)
+    {
+        <section class="ms-section ms-event-tag-types">
+            <h2 class="ms-section-title">DCB tag types</h2>
+            <p class="ms-muted ms-event-tag-types-lead">@TagStorageSentence</p>
+
+            <TableScroll Label="DCB tag types table">
+                <table class="ms-table">
+                    <thead>
+                        <tr>
+                            <th>Tag type</th>
+                            <th>Value</th>
+                            <th>Aggregate</th>
+                            <th>Stored in</th>
+                            <th>Rows</th>
+                            <th>tag: filter</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (int index = 0; index < tagTypes.Types.Count; index++)
+                        {
+                            EventTagTypeInfo tag = tagTypes.Types[index];
+
+                            <tr class="ms-table-row" @key="index">
+                                <td class="ms-table-cell">
+                                    <span class="ms-event-tag-type-name">@tag.Name</span>
+                                    <span class="ms-muted ms-mono ms-event-tag-type-suffix" title="The table suffix, which tag: also accepts">@tag.Suffix</span>
+                                </td>
+                                <td class="ms-table-cell ms-table-cell-mono">@tag.ValueType</td>
+                                <td class="ms-table-cell">@(tag.AggregateName ?? "-")</td>
+                                <td class="ms-table-cell ms-table-cell-mono">
+                                    @tag.Table
+                                    @if (!tag.TableExists)
+                                    {
+                                        <span class="ms-event-flag ms-event-flag-skipped" title="@tag.RowsNote">not created</span>
+                                    }
+                                </td>
+                                <td class="ms-table-cell ms-table-cell-mono" title="@(tag.RowsNote ?? string.Empty)">@tag.Rows.Display</td>
+                                <td class="ms-table-cell">
+                                    <span class="@("ms-verdict-badge ms-verdict-badge-" + tag.FilterLevel.ToString().ToLowerInvariant())"
+                                          title="@tag.FilterReason">@VerdictText(tag)</span>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+
+            @if (tagTypes.VersionTableExists)
+            {
+                <p class="ms-muted ms-event-tag-version">
+                    <code>mt_dcb_tag_version</code>, the boundary-version row every DCB save bumps:
+                    @tagTypes.VersionRows.Display rows.
+                </p>
+            }
+        </section>
+    }
 </div>
 
 @code {
@@ -132,6 +232,27 @@
     private bool counting;
     private bool countsRequested;
     private string? signature;
+
+    /// <summary>The store's DCB tag types; empty on a store with none.</summary>
+    private EventTagTypeList tagTypes = EventTagTypeList.None;
+
+    /// <summary>E05 as this visitor may see it, from the advisor's last regular sweep; empty without one.</summary>
+    private IReadOnlyList<HealthReportFinding> healthFindings = [];
+
+    private string TagStorageSentence => tagTypes.Storage == EventTagStorage.HStore
+        ? "Kept inline in mt_events.tags, an hstore keyed by each type's table suffix, with one GIN index over the column - "
+            + "so an event's tags come with the event, and tag: is a containment test the index serves."
+        : "Kept in one table per tag type, keyed " + (tagTypes.IsConjoined ? "(value, tenant_id, seq_id)" : "(value, seq_id)")
+            + " - so tag: on the feed reads only that value's rows, while finding one event's tags reads the whole table, "
+            + "which is why the feed only does that for small ones.";
+
+    private static string VerdictText(EventTagTypeInfo tag) =>
+        tag.FilterLevel switch
+        {
+            MartenStudio.Services.Query.IndexVerdictLevel.Green => "indexed",
+            MartenStudio.Services.Query.IndexVerdictLevel.Amber => "partly indexed",
+            _ => "full scan",
+        };
 
     /// <summary>The store this link is about.</summary>
     [SupplyParameterFromQuery(Name = EventLinks.StoreKey)]
@@ -213,6 +334,9 @@
         try
         {
             list = await Events.ListEventTypesAsync(scope, countsRequested, pageCancellation.Token);
+
+            // Options only on a store without tag types; catalog and pg_class reads on one with them.
+            tagTypes = await Events.ListTagTypesAsync(scope, pageCancellation.Token);
         }
         catch (OperationCanceledException)
         {
@@ -224,6 +348,29 @@
         finally
         {
             loading = false;
+        }
+
+        await LoadHealthAsync(scope);
+    }
+
+    /// <summary>
+    /// E05 from the advisor's cache. A banner is a decoration: one that could not be read is no banner, never
+    /// a broken page - and no banner is never a claim that the store is healthy.
+    /// </summary>
+    private async Task LoadHealthAsync(StudioScope scope)
+    {
+        try
+        {
+            healthFindings = await Health.CachedFindingsAsync(scope, EventTypesHealth.BannerCodes, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // Debug: the page loses only a decoration, and the advisor logs its own failures where they happen.
+            Logger.LogDebug(exception, "Marten Studio's Event types screen could not read the health advisor's cached E05 finding");
+            healthFindings = [];
         }
     }
 

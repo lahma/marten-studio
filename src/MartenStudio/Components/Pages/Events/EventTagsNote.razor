@@ -1,0 +1,55 @@
+@* Why a page of events is shown without its DCB tags, and the button that reads them.
+
+   A tag table's key leads with the tag's value, not with the event, so finding one page's tags reads every
+   tag table in full. The service pays that with the page only while each table is small enough that the
+   studio would count it exactly (ExactCountThreshold - the documents rail's rule); past that it leaves the
+   tags for the visitor to ask for, once, rather than scanning on every refresh of a polled page (D8). A
+   failed tag read lands here too, so the events are never lost to their decoration. *@
+
+@if (!string.IsNullOrWhiteSpace(Reason))
+{
+    <div class="@NoteClass" role="status">
+        <div class="ms-alert-content">
+            <p class="ms-event-tags-note-text">@Reason</p>
+            @if (CanLoad)
+            {
+                <button type="button"
+                        class="ms-button ms-btn-sm ms-event-tags-load"
+                        disabled="@IsLoading"
+                        @onclick="LoadAsync">
+                    @(IsLoading ? "Loading tags..." : "Load tags")
+                </button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Why the tags are not shown, or <see langword="null" /> when they are (or there are none).</summary>
+    [Parameter]
+    public string? Reason { get; set; }
+
+    /// <summary>Whether reading them is on offer - true when they were deferred, false when the read failed.</summary>
+    [Parameter]
+    public bool CanLoad { get; set; }
+
+    /// <summary>Whether the read is running.</summary>
+    [Parameter]
+    public bool IsLoading { get; set; }
+
+    /// <summary>Reads the tags.</summary>
+    [Parameter]
+    public EventCallback OnLoad { get; set; }
+
+    private string NoteClass => CanLoad
+        ? "ms-alert ms-alert-info ms-event-tags-note"
+        : "ms-alert ms-alert-warning ms-event-tags-note";
+
+    private async Task LoadAsync()
+    {
+        if (OnLoad.HasDelegate)
+        {
+            await OnLoad.InvokeAsync();
+        }
+    }
+}

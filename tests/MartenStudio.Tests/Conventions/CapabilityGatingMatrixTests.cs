@@ -90,6 +90,7 @@ public class CapabilityGatingMatrixTests
         new(typeof(IEventDataService), nameof(IEventDataService.DiscardDeadLetterAsync), StudioCapability.ManageDeadLetters),
         new(typeof(IEventDataService), nameof(IEventDataService.SkipEventAsync), StudioCapability.ManageDeadLetters),
         new(typeof(IEventDataService), nameof(IEventDataService.RewindSubscriptionAsync), StudioCapability.ManageDeadLetters),
+        new(typeof(IEventDataService), nameof(IEventDataService.CompactStreamAsync), StudioCapability.CompactStreams),
 
         new(typeof(IProjectionDataService), nameof(IProjectionDataService.StartAgentAsync), StudioCapability.ControlDaemon),
         new(typeof(IProjectionDataService), nameof(IProjectionDataService.StopAgentAsync), StudioCapability.ControlDaemon),
@@ -165,10 +166,11 @@ public class CapabilityGatingMatrixTests
         ],
         [typeof(IEventDataService)] =
         [
-            "AggregateAtVersionAsync", "CountDeadLettersAsync", "DescribeAsync", "GetEventBySequenceAsync",
-            "GetEventStoreCountsAsync", "GetFeedAsync", "GetHighestSequenceAsync", "GetRecentStreamsAsync",
+            "AggregateAtVersionAsync", "CountDeadLettersAsync", "DescribeAsync", "DescribeCompactionAsync",
+            "FindStreamsByNaturalKeyAsync", "GetEventBySequenceAsync", "GetEventStoreCountsAsync",
+            "GetEventTagsAsync", "GetFeedAsync", "GetHighestSequenceAsync", "GetRecentStreamsAsync",
             "GetStreamAsync", "GetStreamEventsAsync", "ListAggregateCandidatesAsync", "ListDeadLettersAsync",
-            "ListEventTypesAsync", "ListStreamsAsync",
+            "ListEventTypesAsync", "ListStreamsAsync", "ListTagTypesAsync",
         ],
         [typeof(IProjectionDataService)] =
         [
@@ -207,7 +209,8 @@ public class CapabilityGatingMatrixTests
     /// <remarks>
     /// <para>
     /// 0.4 lands every public-surface addition in one packet (H1), so that later packets never contend for the
-    /// API baseline - which means three capabilities exist before the reads and writes that need them do.
+    /// API baseline - which means capabilities exist before the reads and writes that need them do (three did;
+    /// EV's compaction has since moved <c>CompactStreams</c> into <see cref="Mutating" />).
     /// "A capability no method requires is a capability nothing enforces" is still the rule; this list is
     /// where the exception is written down, naming the packet that ends it.
     /// <see cref="A_reserved_capability_is_required_by_nothing_yet" /> fails the moment a service starts to
@@ -222,8 +225,6 @@ public class CapabilityGatingMatrixTests
     /// </remarks>
     private static readonly Dictionary<StudioCapability, string> Reserved = new()
     {
-        [StudioCapability.CompactStreams] =
-            "F3 (stream compaction) adds the compacting write to the events service and moves it to Mutating.",
         [StudioCapability.RunLinqQueries] =
             "F7 (LINQ mode on the Query page) adds the LINQ read and moves it to GatedReads or Mutating.",
     };
@@ -239,7 +240,7 @@ public class CapabilityGatingMatrixTests
     /// </remarks>
     private static readonly string[] MutatingVerbs =
     [
-        "Advance", "Apply", "Archive", "BulkDelete", "Cancel", "Correct", "Delete", "Discard", "Pause",
+        "Advance", "Apply", "Archive", "BulkDelete", "Cancel", "Compact", "Correct", "Delete", "Discard", "Pause",
         "Rebuild", "Restart", "Resume", "Rewind", "RunSql", "Save", "Skip", "Start", "Stop", "Undelete",
     ];
 

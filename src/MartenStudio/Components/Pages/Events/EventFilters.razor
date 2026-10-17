@@ -46,6 +46,35 @@
                @onchange="OnStreamChangedAsync" />
     </div>
 
+    @if (ShowTagFilter)
+    {
+        @* tag:<type>=<value>, the type by CLR name or table suffix - JasperFx's own matching rule. The verdict
+           is the documents list's, for the one filter here that is about an index: in tag-table mode the
+           primary key leads with value, in hstore mode a GIN index covers mt_events.tags, and a red means the
+           database differs from what the store declares. *@
+        <div class="ms-event-filter ms-event-tag-filter">
+            <label class="ms-event-filter-label" for="ms-feed-tag">DCB tag</label>
+            <div class="ms-event-tag-filter-row">
+                <input id="ms-feed-tag"
+                       type="text"
+                       class="ms-input ms-input-mono"
+                       placeholder="@TagPlaceholder"
+                       value="@TagFilter"
+                       spellcheck="false"
+                       autocomplete="off"
+                       @onchange="OnTagChangedAsync" />
+                @if (!string.IsNullOrWhiteSpace(TagFilter) && !string.IsNullOrWhiteSpace(TagVerdict))
+                {
+                    <span class="@($"ms-verdict-badge ms-verdict-badge-{TagVerdict}")" title="@TagVerdictReason">@TagVerdictText</span>
+                }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(TagFilter) && !string.IsNullOrWhiteSpace(TagVerdictReason) && TagVerdict != "green")
+            {
+                <span class="ms-event-tag-filter-reason">@TagVerdictReason</span>
+            }
+        </div>
+    }
+
     @if (ShowTenant)
     {
         <div class="ms-event-filter">
@@ -134,6 +163,30 @@
     [Parameter]
     public string StreamPlaceholder { get; set; } = "any stream";
 
+    /// <summary>Whether the store registers DCB tag types, so the tag filter is drawn at all.</summary>
+    [Parameter]
+    public bool ShowTagFilter { get; set; }
+
+    /// <summary>The tag filter as it travels in the URL - <c>type=value</c> - or empty.</summary>
+    [Parameter]
+    public string? TagFilter { get; set; }
+
+    /// <summary>Raised with what was typed into the tag box.</summary>
+    [Parameter]
+    public EventCallback<string> TagFilterChanged { get; set; }
+
+    /// <summary>The tag types the box accepts, for its placeholder.</summary>
+    [Parameter]
+    public IReadOnlyList<string> TagTypes { get; set; } = [];
+
+    /// <summary>The verdict's colour - <c>green</c>, <c>amber</c> or <c>red</c> - or empty when it is not known.</summary>
+    [Parameter]
+    public string? TagVerdict { get; set; }
+
+    /// <summary>The sentence behind the verdict.</summary>
+    [Parameter]
+    public string? TagVerdictReason { get; set; }
+
     /// <summary>Whether the tenant is shown at all.</summary>
     [Parameter]
     public bool ShowTenant { get; set; }
@@ -191,6 +244,20 @@
 
     private async Task OnStreamChangedAsync(ChangeEventArgs args) =>
         await StreamIdChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+
+    private async Task OnTagChangedAsync(ChangeEventArgs args) =>
+        await TagFilterChanged.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+
+    private string TagPlaceholder => TagTypes.Count == 0
+        ? "tag:<type>=<value>"
+        : "tag:" + TagTypes[0] + "=<value>";
+
+    private string TagVerdictText => TagVerdict switch
+    {
+        "green" => "indexed",
+        "amber" => "partly indexed",
+        _ => "full scan",
+    };
 
     private async Task OnIncludeArchivedChangedAsync(ChangeEventArgs args) =>
         await IncludeArchivedChanged.InvokeAsync(args.Value is bool value && value);

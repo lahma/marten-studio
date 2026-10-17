@@ -53,7 +53,7 @@ namespace MartenStudio.Services.Events;
 /// registered and never builds a second daemon (hard rule 11).
 /// </para>
 /// </remarks>
-internal sealed class EventDataService : IEventDataService
+internal sealed partial class EventDataService : IEventDataService
 {
     /// <summary>The action names the audit ring records these operations under.</summary>
     internal const string ArchiveStreamAction = "Archive stream";
@@ -82,6 +82,7 @@ internal sealed class EventDataService : IEventDataService
     private readonly StudioAuthorization authorization;
     private readonly DaemonAccessor daemons;
     private readonly ColumnCatalog catalog;
+    private readonly IndexCatalog indexes;
     private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<EventDataService> logger;
@@ -94,6 +95,7 @@ internal sealed class EventDataService : IEventDataService
         StudioAuthorization authorization,
         DaemonAccessor daemons,
         ColumnCatalog catalog,
+        IndexCatalog indexes,
         IOptions<MartenStudioOptions> options,
         StudioLogThrottle throttle,
         ILogger<EventDataService> logger)
@@ -104,6 +106,7 @@ internal sealed class EventDataService : IEventDataService
         this.authorization = authorization;
         this.daemons = daemons;
         this.catalog = catalog;
+        this.indexes = indexes;
         this.options = options;
         this.throttle = throttle;
         this.logger = logger;
@@ -135,6 +138,8 @@ internal sealed class EventDataService : IEventDataService
                 HasBinaryData = table.HasBinaryData,
                 OptionalColumns = MetadataColumns(table),
                 TenantId = scope.TenantId,
+                TagStorage = EventTagModel.From(resolved.Store.Options).Storage,
+                NaturalKeys = [.. NaturalKeyCatalog.From(resolved.Store.Options, options.Value.IsDocumentTypeVisible).Select(static x => x.Label)],
             };
         }
         catch (Exception exception) when (IsReadFailure(exception))
@@ -144,10 +149,27 @@ internal sealed class EventDataService : IEventDataService
     }
 
     /// <inheritdoc />
-    public async Task<StreamPage> ListStreamsAsync(
+    public Task<StreamPage> ListStreamsAsync(
         StudioScope scope,
         StreamListRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        ReadStreamsAsync(scope, request, ConnectionUsage.Read, cancellationToken);
+
+    /// <summary>The stream list, on a connection of the given usage.</summary>
+    /// <param name="scope">The store, database and tenant.</param>
+    /// <param name="request">What to list.</param>
+    /// <param name="usage">
+    /// <see cref="ConnectionUsage.Read" /> for every page, which follows the host's
+    /// <c>MultiHostSettings.ReadSessionPreference</c> and so may be a standby;
+    /// <see cref="ConnectionUsage.ReadWrite" /> only where a write depends on the answer
+    /// (<see cref="ReadStreamOnPrimaryAsync" />).
+    /// </param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    private async Task<StreamPage> ReadStreamsAsync(
+        StudioScope scope,
+        StreamListRequest request,
+        ConnectionUsage usage,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(request);
@@ -156,7 +178,7 @@ internal sealed class EventDataService : IEventDataService
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
-            await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+            await using NpgsqlConnection connection = await OpenAsync(resolved, usage, cancellationToken).ConfigureAwait(false);
             EventTableInfo table = await DescribeTablesAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
 
             if (table.StreamColumns.Count == 0)
@@ -240,10 +262,37 @@ internal sealed class EventDataService : IEventDataService
     }
 
     /// <inheritdoc />
-    public async Task<StreamState> GetStreamAsync(
+    public Task<StreamState> GetStreamAsync(
         StudioScope scope,
         string streamId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        ReadStreamAsync(scope, streamId, ConnectionUsage.Read, cancellationToken);
+
+    /// <summary>
+    /// One stream's row, read on the primary - for a write that decides on what it reads.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GetStreamAsync" /> opens <see cref="ConnectionUsage.Read" />, which Marten maps to
+    /// <c>MultiHostSettings.ReadSessionPreference</c>: on a multi-host data source set to
+    /// <c>PreferStandby</c> that is a standby, and an asynchronous standby answers with the row as it was. That
+    /// is fine for a page and wrong for a compaction, whose checks before the save and whose read-back after it
+    /// must see what the primary holds - a stale <c>compacted_version</c> after the save reads as "nothing was
+    /// compacted" while the events are already gone. <see cref="ConnectionUsage.ReadWrite" /> maps to
+    /// <c>WriteSessionPreference</c>, the host the write itself runs on, which is also what Marten's own write
+    /// session reads with (<c>AutoClosingLifetime</c> picks <c>ReadWrite</c> for any session that is not
+    /// read-only).
+    /// </remarks>
+    private Task<StreamState> ReadStreamOnPrimaryAsync(
+        StudioScope scope,
+        string streamId,
+        CancellationToken cancellationToken) =>
+        ReadStreamAsync(scope, streamId, ConnectionUsage.ReadWrite, cancellationToken);
+
+    private async Task<StreamState> ReadStreamAsync(
+        StudioScope scope,
+        string streamId,
+        ConnectionUsage usage,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -252,9 +301,10 @@ internal sealed class EventDataService : IEventDataService
             return StreamState.Missing(streamId ?? string.Empty);
         }
 
-        StreamPage page = await ListStreamsAsync(
+        StreamPage page = await ReadStreamsAsync(
             scope,
             new StreamListRequest { StreamId = streamId, IncludeArchived = true, PageSize = 1 },
+            usage,
             cancellationToken).ConfigureAwait(false);
 
         if (page.Error is { } error)
@@ -276,7 +326,10 @@ internal sealed class EventDataService : IEventDataService
             row.Created,
             row.LastEvent,
             row.IsArchived,
-            row.TenantId);
+            row.TenantId)
+        {
+            CompactedVersion = row.CompactedVersion,
+        };
     }
 
     /// <inheritdoc />
@@ -323,7 +376,10 @@ internal sealed class EventDataService : IEventDataService
                     rows.RemoveRange(pageSize, rows.Count - pageSize);
                 }
 
-                return new EventPage(rows, rows.Count > 0 ? rows[^1].Sequence : null, hasMore);
+                (List<EventRow> tagged, EventTagLoad tags) = await AttachTagsAsync(resolved, connection, table, rows, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return new EventPage(tagged, tagged.Count > 0 ? tagged[^1].Sequence : null, hasMore) { TagLoad = tags };
             }
         }
         catch (Exception exception) when (IsReadFailure(exception))
@@ -355,6 +411,20 @@ internal sealed class EventDataService : IEventDataService
 
             int pageSize = Math.Clamp(request.PageSize, 1, options.Value.MaxPageSize);
 
+            // A tag type this store does not have, or a value its type cannot hold, is an answer rather than
+            // an empty page: "no event carries that tag" is a different fact.
+            EventTagPredicate? tag = null;
+            if (request.Tag is { } filter)
+            {
+                (tag, string? tagError) = await ResolveTagFilterAsync(resolved, connection, table, filter, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (tagError is not null)
+                {
+                    return EventPage.Failed(new EventDataError(tagError, null, false));
+                }
+            }
+
             await using NpgsqlCommand command = EventQueryBuilder.BuildFeed(table, new EventFeedQuery
             {
                 AfterSequence = request.AfterSequence,
@@ -365,6 +435,7 @@ internal sealed class EventDataService : IEventDataService
                 To = request.To,
                 IncludeArchived = request.IncludeArchived,
                 IncludeSkipped = request.IncludeSkipped,
+                Tag = tag,
                 PageSize = pageSize + 1,
             });
 
@@ -379,7 +450,11 @@ internal sealed class EventDataService : IEventDataService
             if (request.SinceSequence is { } since)
             {
                 rows.RemoveAll(row => row.Sequence <= since);
-                return new EventPage(rows, rows.Count > 0 ? rows[^1].Sequence : null, HasMore: false);
+
+                (List<EventRow> delta, EventTagLoad deltaTags) = await AttachTagsAsync(resolved, connection, table, rows, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return new EventPage(delta, delta.Count > 0 ? delta[^1].Sequence : null, HasMore: false) { TagLoad = deltaTags };
             }
 
             bool hasMore = rows.Count > pageSize;
@@ -388,7 +463,10 @@ internal sealed class EventDataService : IEventDataService
                 rows.RemoveRange(pageSize, rows.Count - pageSize);
             }
 
-            return new EventPage(rows, rows.Count > 0 ? rows[^1].Sequence : null, hasMore);
+            (List<EventRow> tagged, EventTagLoad tags) = await AttachTagsAsync(resolved, connection, table, rows, cancellationToken)
+                .ConfigureAwait(false);
+
+            return new EventPage(tagged, tagged.Count > 0 ? tagged[^1].Sequence : null, hasMore) { TagLoad = tags };
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
@@ -663,7 +741,7 @@ internal sealed class EventDataService : IEventDataService
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
-            return AggregateStreamInvoker.Candidates(resolved.Store.Options);
+            return AggregateStreamInvoker.Candidates(resolved.Store.Options, options.Value.IsDocumentTypeVisible);
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
@@ -689,7 +767,10 @@ internal sealed class EventDataService : IEventDataService
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
             AggregateTypeCandidate? candidate = null;
-            foreach (AggregateTypeCandidate known in AggregateStreamInvoker.Candidates(resolved.Store.Options))
+            // The same filtered list the picker offered: a hidden type's name typed into a request is refused
+            // as "not one of this store's aggregate types", the answer for a type the store does not have.
+            foreach (AggregateTypeCandidate known in AggregateStreamInvoker.Candidates(
+                         resolved.Store.Options, options.Value.IsDocumentTypeVisible))
             {
                 if (string.Equals(known.FullName, typeName, StringComparison.Ordinal))
                 {
@@ -713,6 +794,21 @@ internal sealed class EventDataService : IEventDataService
             {
                 return AggregateSnapshot.Failed(
                     candidate.Name, version, new EventDataError(parsed.Error ?? "That stream id is not usable.", null, false));
+            }
+
+            // Marten's EventStatement emits its stream predicate only for a non-empty id, so a replay of the
+            // empty GUID would fetch - and fold into one aggregate - every event of the tenant or the store:
+            // a wrong answer, and a read of the whole log on one click (StreamCompactionRules.IsWholeLogId).
+            if (StreamCompactionRules.IsWholeLogId(parsed.Value))
+            {
+                return AggregateSnapshot.Failed(
+                    candidate.Name,
+                    version,
+                    new EventDataError(
+                        "This stream's id is the empty GUID, which Marten's stream fetch reads as no stream filter at all, "
+                        + "so replaying it would fold every event in the log. The studio does not replay it.",
+                        null,
+                        false));
             }
 
             await using IQuerySession session = OpenQuerySession(resolved);
@@ -1397,7 +1493,8 @@ internal sealed class EventDataService : IEventDataService
     /// The shape of every mutating call: capability, then scope with the write policy, then the
     /// operation, then the audit entry - written on failure as well as on success (hard rule 5).
     /// </summary>
-    private async Task MutateAsync(
+    /// <returns>The operation's outcome, as it was audited.</returns>
+    private async Task<string> MutateAsync(
         StudioScope scope,
         StudioCapability capability,
         string action,
@@ -1430,6 +1527,7 @@ internal sealed class EventDataService : IEventDataService
         {
             string outcome = await operation(resolved, cancellationToken).ConfigureAwait(false);
             audit.Record(action, target, succeeded: true, outcome, capability, scope);
+            return outcome;
         }
         catch (StudioNotAuthorizedException denied)
         {
@@ -1451,9 +1549,15 @@ internal sealed class EventDataService : IEventDataService
         }
     }
 
-    private static async Task<NpgsqlConnection> OpenAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    private static Task<NpgsqlConnection> OpenAsync(ResolvedScope resolved, CancellationToken cancellationToken) =>
+        OpenAsync(resolved, ConnectionUsage.Read, cancellationToken);
+
+    private static async Task<NpgsqlConnection> OpenAsync(
+        ResolvedScope resolved,
+        ConnectionUsage usage,
+        CancellationToken cancellationToken)
     {
-        NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+        NpgsqlConnection connection = resolved.Database.CreateConnection(usage);
 
         try
         {
@@ -1542,7 +1646,7 @@ internal sealed class EventDataService : IEventDataService
         List<string> present = [];
 
         foreach (string column in
-                 (string[]) ["tenant_id", "mt_dotnet_type", "correlation_id", "causation_id", "headers", "user_name", "tags"])
+                 (string[]) ["tenant_id", "mt_dotnet_type", "correlation_id", "causation_id", "headers", "user_name"])
         {
             if (table.HasEventColumn(column))
             {
@@ -1589,7 +1693,10 @@ internal sealed class EventDataService : IEventDataService
                 columns.Boolean(reader, "has_binary") ?? false,
                 columns.Int64(reader, "binary_length"),
                 columns.Text(reader, "data"),
-                metadata));
+                metadata)
+            {
+                Tags = columns.HStoreTags(reader),
+            });
         }
 
         return rows;
@@ -1603,7 +1710,10 @@ internal sealed class EventDataService : IEventDataService
             columns.Timestamp(reader, "created"),
             columns.Timestamp(reader, "timestamp"),
             columns.Boolean(reader, "is_archived") ?? false,
-            columns.Text(reader, "tenant_id"));
+            columns.Text(reader, "tenant_id"))
+        {
+            CompactedVersion = columns.Int64(reader, "compacted_version") ?? 0,
+        };
 
     private static StreamKeysetCursor? ToBuilderCursor(StreamCursor? cursor) =>
         cursor is null ? null : new StreamKeysetCursor(cursor.Timestamp, cursor.Id);
@@ -1698,7 +1808,8 @@ internal sealed class EventDataService : IEventDataService
     /// </summary>
     /// <remarks>
     /// Separate so the classification can be tested without a database. A connection that could not be
-    /// opened is never expected here, however Npgsql spells it: <see cref="OpenAsync" /> opens through
+    /// opened is never expected here, however Npgsql spells it:
+    /// <see cref="OpenAsync(ResolvedScope, ConnectionUsage, CancellationToken)" /> opens through
     /// <see cref="PostgresFailure.OpenAsync" />, which is what keeps a pool that ran dry off this list.
     /// </remarks>
     /// <param name="exception">What the read threw.</param>
@@ -1751,5 +1862,28 @@ internal sealed class EventDataService : IEventDataService
             ordinals.TryGetValue(column, out int index) && !reader.IsDBNull(index)
                 ? reader.GetFieldValue<DateTimeOffset>(index)
                 : null;
+
+        /// <summary>
+        /// A store's inline DCB tags: <c>mt_events.tags</c> in <c>DcbStorageMode.HStore</c>, keyed by the tag
+        /// type's suffix, which Npgsql reads as a dictionary. Empty on a store without the column, and for any
+        /// <c>tags</c> column that is not an hstore.
+        /// </summary>
+        public List<EventTag> HStoreTags(NpgsqlDataReader reader)
+        {
+            if (!ordinals.TryGetValue(EventTagModel.HStoreColumn, out int index)
+                || reader.IsDBNull(index)
+                || reader.GetValue(index) is not IDictionary<string, string?> tags)
+            {
+                return [];
+            }
+
+            List<EventTag> found = new(tags.Count);
+            foreach (KeyValuePair<string, string?> tag in tags.OrderBy(static x => x.Key, StringComparer.Ordinal))
+            {
+                found.Add(new EventTag(tag.Key, tag.Value ?? string.Empty));
+            }
+
+            return found;
+        }
     }
 }

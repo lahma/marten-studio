@@ -54,6 +54,12 @@ internal sealed record EventFeedQuery
     /// </summary>
     public bool IncludeSkipped { get; init; } = true;
 
+    /// <summary>
+    /// Only events carrying this DCB tag. Index-backed in both storage modes - see
+    /// <see cref="EventTagQueries.AppendFeedPredicate" />.
+    /// </summary>
+    public EventTagPredicate? Tag { get; init; }
+
     /// <summary>How many events to return.</summary>
     public int PageSize { get; init; } = DefaultPageSize;
 }
@@ -131,8 +137,15 @@ internal static class EventQueryBuilder
         ["tenant_id", "mt_dotnet_type", "is_archived", "is_skipped", "correlation_id", "causation_id", "headers", "user_name", "tags"];
 
     /// <summary>The columns the stream list selects, when they exist.</summary>
+    /// <remarks>
+    /// <c>compacted_version</c> is Marten 9's compaction watermark (<c>StreamsTable.CompactedVersionColumn</c>,
+    /// unconditional at 9.39.0): the stream detail page reads it to know whether there is anything left to fold.
+    /// </remarks>
     private static readonly string[] StreamColumns =
-        ["id", "type", "version", "timestamp", "created", "is_archived", "tenant_id"];
+        ["id", "type", "version", "timestamp", "created", "is_archived", "tenant_id", "compacted_version"];
+
+    /// <summary>The stream list's select list, for the other stream reads that render as stream rows.</summary>
+    internal static IReadOnlyList<string> StreamSelectColumns => StreamColumns;
 
     /// <summary>The global event feed, newest first.</summary>
     public static NpgsqlCommand BuildFeed(EventTableInfo table, EventFeedQuery query)
@@ -198,6 +211,13 @@ internal static class EventQueryBuilder
             {
                 sql.Append("  and (").Append(parameters.Add(NpgsqlDbType.Boolean, query.IncludeSkipped, "includeSkipped"))
                     .Append(" or ").Append(Column(Alias, "is_skipped")).Append(" = false)\n");
+            }
+
+            if (query.Tag is { } tag)
+            {
+                // @tenant exists exactly when the events table has tenant_id (above), and the predicate reuses it.
+                EventTagQueries.AppendFeedPredicate(
+                    sql, command, table.Schema, Alias, table.HasTenantId, hasTenantParameter: table.HasTenantId, tag);
             }
 
             sql.Append("order by ").Append(Column(Alias, "seq_id")).Append(" desc\n");

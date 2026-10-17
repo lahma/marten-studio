@@ -76,6 +76,12 @@ internal sealed record EventStoreShape
 
     /// <summary>The tenant the current scope is pinned to, or <see langword="null" /> for all of them.</summary>
     public string? TenantId { get; init; }
+
+    /// <summary>How the store keeps DCB tags, from its options; <see cref="EventTagStorage.None" /> without tag types.</summary>
+    public EventTagStorage TagStorage { get; init; }
+
+    /// <summary>The natural keys the Streams box can look a stream up by, as <c>Aggregate.Member</c>.</summary>
+    public IReadOnlyList<string> NaturalKeys { get; init; } = [];
 }
 
 /// <summary>One row of the stream list.</summary>
@@ -93,7 +99,14 @@ internal sealed record StreamRow(
     DateTimeOffset? Created,
     DateTimeOffset? LastEvent,
     bool IsArchived,
-    string? TenantId);
+    string? TenantId)
+{
+    /// <summary>
+    /// The version an earlier compaction folded the stream through (<c>mt_streams.compacted_version</c>,
+    /// Marten 9.x, 0 when never compacted or when the column is not there).
+    /// </summary>
+    public long CompactedVersion { get; init; }
+}
 
 /// <summary>Where the next keyset page of the stream list starts.</summary>
 /// <param name="Timestamp">The last row's timestamp.</param>
@@ -215,6 +228,9 @@ internal sealed record StreamState(
 
     /// <summary>A stream that is not there.</summary>
     public static StreamState Missing(string id) => new(id, false, null, 0, null, null, false, null);
+
+    /// <summary>The version an earlier compaction folded the stream through; 0 when never.</summary>
+    public long CompactedVersion { get; init; }
 }
 
 /// <summary>One event, as the timeline and the feed draw it.</summary>
@@ -246,7 +262,14 @@ internal sealed record EventRow(
     bool HasBinary,
     long? BinaryLength,
     string? Json,
-    IReadOnlyDictionary<string, string?> Metadata);
+    IReadOnlyDictionary<string, string?> Metadata)
+{
+    /// <summary>
+    /// The event's DCB tags, when they were read with it: inline in hstore mode, from the tag tables when
+    /// the page's <see cref="EventPage.TagLoad" /> says so.
+    /// </summary>
+    public IReadOnlyList<EventTag> Tags { get; init; } = [];
+}
 
 /// <summary>One page of events.</summary>
 /// <param name="Rows">The events: newest first in the feed, oldest first in a timeline.</param>
@@ -264,6 +287,9 @@ internal sealed record EventPage(
 
     /// <summary>An empty page that succeeded.</summary>
     public static EventPage Empty { get; } = new([], null, false);
+
+    /// <summary>Whether the rows carry their DCB tags, and why not when they do not.</summary>
+    public EventTagLoad TagLoad { get; init; } = EventTagLoad.NotApplicable;
 }
 
 /// <summary>What the global feed is asking for.</summary>
@@ -292,6 +318,9 @@ internal sealed record EventFeedRequest
 
     /// <summary>Whether events the daemon was told to skip are included.</summary>
     public bool IncludeSkipped { get; init; } = true;
+
+    /// <summary>Only events carrying this DCB tag - the feed's <c>tag:&lt;type&gt;=&lt;value&gt;</c> filter.</summary>
+    public EventTagFilter? Tag { get; init; }
 
     /// <summary>How many events to return.</summary>
     public int PageSize { get; init; } = 50;

@@ -74,6 +74,11 @@ internal static class AggregateStreamInvoker
     /// projection first, then every document type the store knows, as the manual fallback.
     /// </summary>
     /// <param name="options">The store's own configuration - nothing here is guessed.</param>
+    /// <param name="isVisible">
+    /// <c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> for every type. A type it
+    /// hides is not a candidate at all: the picker would print its name, and a replay would put its state on
+    /// the screen that the Documents browser never shows.
+    /// </param>
     /// <returns>The candidates, projections first, each type appearing once.</returns>
     /// <remarks>
     /// <para>
@@ -88,7 +93,9 @@ internal static class AggregateStreamInvoker
     /// stream's events. That is a "try any type (may fail)" affordance and the screen says so.
     /// </para>
     /// </remarks>
-    public static IReadOnlyList<AggregateTypeCandidate> Candidates(IReadOnlyStoreOptions options)
+    public static IReadOnlyList<AggregateTypeCandidate> Candidates(
+        IReadOnlyStoreOptions options,
+        Func<Type, bool>? isVisible = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -100,7 +107,7 @@ internal static class AggregateStreamInvoker
         foreach (ISubscriptionSource source in options.Events.Projections())
         {
             Type? aggregate = SingleStreamAggregateType(source, identity);
-            if (aggregate is not null && IsUsable(aggregate) && seen.Add(aggregate))
+            if (aggregate is not null && IsUsable(aggregate) && IsShown(aggregate, isVisible) && seen.Add(aggregate))
             {
                 candidates.Add(Describe(aggregate, AggregateCandidateSource.SingleStreamProjection));
             }
@@ -109,7 +116,7 @@ internal static class AggregateStreamInvoker
         foreach (IDocumentType documentType in options.AllKnownDocumentTypes())
         {
             Type candidate = documentType.DocumentType;
-            if (IsUsable(candidate) && seen.Add(candidate))
+            if (IsUsable(candidate) && IsShown(candidate, isVisible) && seen.Add(candidate))
             {
                 candidates.Add(Describe(candidate, AggregateCandidateSource.DocumentType));
             }
@@ -272,6 +279,8 @@ internal static class AggregateStreamInvoker
     /// </summary>
     private static bool IsUsable(Type type) =>
         !type.IsValueType && !type.ContainsGenericParameters && !type.IsAbstract && !type.IsInterface;
+
+    private static bool IsShown(Type type, Func<Type, bool>? isVisible) => isVisible is null || isVisible(type);
 
     private static AggregateTypeCandidate Describe(Type type, AggregateCandidateSource source) =>
         new(type, type.Name, type.FullName ?? type.Name, source);

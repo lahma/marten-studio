@@ -10342,3 +10342,172 @@ a.ms-schema-health-mark:focus-visible {
         min-width: 16ch;
     }
 }
+
+/* ==========================================================================
+   EVENTS-4. Stream compaction, DCB tags, natural keys and the E05 banner
+
+   0.4's Events packet, appended after the Health sections on purpose (D26).
+   Every rule is new and scoped to a class this packet introduced; none
+   re-declares a selector an earlier section owns. The tag chips reuse
+   .ms-event-meta-chip and the verdict reuses .ms-verdict-badge-*, so only
+   what is different about them is said here.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Tags on an event card: their own row under the metadata chips, because a
+   tag is the one chip a reader follows somewhere
+   -------------------------------------------------------------------------- */
+
+.ms-event-tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-event-tags-label {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.ms-event-tag-chip {
+    border-color: var(--ms-color-primary-light);
+}
+
+.ms-event-tag-chip a.ms-event-meta-value {
+    color: var(--ms-color-primary);
+    overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   "Tags are not shown yet": the note above a timeline whose tags were left
+   for the visitor to ask for, and its button
+   -------------------------------------------------------------------------- */
+
+.ms-event-tags-note {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-event-tags-note .ms-alert-content {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+}
+
+.ms-event-tags-note-text {
+    flex: 1 1 32ch;
+    margin: 0;
+}
+
+.ms-event-tags-load {
+    flex: 0 0 auto;
+}
+
+/* --------------------------------------------------------------------------
+   The feed's tag: filter and its index verdict
+   -------------------------------------------------------------------------- */
+
+.ms-event-tag-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-event-tag-filter-row .ms-input {
+    min-width: 0;
+    flex: 1 1 16rem;
+}
+
+.ms-event-tag-filter-reason {
+    display: block;
+    max-width: 60ch;
+    margin-top: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   Stream detail: the Compact section and what its dialog says
+   -------------------------------------------------------------------------- */
+
+.ms-stream-compact-tenant {
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-warning);
+}
+
+/* What the last compaction did, read back: the section stays for it after the page reloads. */
+.ms-stream-compact-outcome {
+    margin: var(--ms-space-sm) 0 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-stream-compact-unconfirmed {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-compact-facts {
+    max-height: 40vh;
+    overflow-y: auto;
+    margin: var(--ms-space-sm) 0 var(--ms-space-md);
+    padding-left: var(--ms-space-lg);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-compact-fact + .ms-compact-fact {
+    margin-top: var(--ms-space-xs);
+}
+
+/* --------------------------------------------------------------------------
+   Event types: the E05 banner and the DCB tag types table
+   -------------------------------------------------------------------------- */
+
+.ms-event-types-health {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-event-types-health .ms-health-banner-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin: 0;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-event-types-health-why {
+    max-width: 72ch;
+    margin: var(--ms-space-xs) 0;
+}
+
+.ms-event-tag-types {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-event-tag-types-lead,
+.ms-event-tag-version {
+    max-width: 72ch;
+}
+
+.ms-event-tag-type-suffix {
+    margin-left: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* --------------------------------------------------------------------------
+   Streams: what the box found by natural key
+   -------------------------------------------------------------------------- */
+
+.ms-natural-key-matches {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-natural-key-none {
+    margin: 0 0 var(--ms-space-md);
+}

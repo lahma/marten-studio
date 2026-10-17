@@ -27,6 +27,12 @@
                   StreamId="@Stream"
                   StreamIdChanged="OnStreamChangedAsync"
                   StreamPlaceholder="@StreamPlaceholder"
+                  ShowTagFilter="@(tagTypes.HasTags)"
+                  TagFilter="@Tag"
+                  TagFilterChanged="OnTagChangedAsync"
+                  TagTypes="TagTypeNames"
+                  TagVerdict="@TagVerdict?.Level"
+                  TagVerdictReason="@TagVerdict?.Reason"
                   ShowTenant="@(shape?.HasTenantId == true)"
                   TenantId="@State.ActiveScope?.TenantId"
                   IncludeArchived="ArchivedFlag"
@@ -85,6 +91,11 @@
     }
     else
     {
+        <EventTagsNote Reason="@TagNote"
+                       CanLoad="@(tagLoad.State == EventTagLoadState.Deferred)"
+                       IsLoading="loadingTags"
+                       OnLoad="LoadTagsAsync" />
+
         <div class="ms-timeline">
             @foreach (EventRow row in rows)
             {
@@ -104,7 +115,9 @@
                                HasBinary="row.HasBinary"
                                BinaryLength="row.BinaryLength"
                                Json="@row.Json"
-                               Metadata="row.Metadata" />
+                               Metadata="row.Metadata"
+                               Tags="EventTagView.Pairs(row)"
+                               TagHref="TagHref" />
                 </div>
             }
         </div>
@@ -199,6 +212,14 @@
     private bool hasMore;
     private bool started;
 
+    /// <summary>The store's DCB tag types, for the tag filter's box and verdict; empty on a store with none.</summary>
+    private EventTagTypeList tagTypes = EventTagTypeList.None;
+
+    /// <summary>Whether the rows on the page carry their tags.</summary>
+    private EventTagLoad tagLoad = EventTagLoad.NotApplicable;
+
+    private bool loadingTags;
+
     /// <summary>Whether the pending buffer has had to drop events, so the pill says "500+" rather than "500".</summary>
     private bool pendingTrimmed;
 
@@ -218,6 +239,10 @@
     /// <summary>The stream filter.</summary>
     [SupplyParameterFromQuery(Name = "stream")]
     public string? Stream { get; set; }
+
+    /// <summary>The DCB tag filter, <c>type=value</c> (D9: a filtered feed is a link).</summary>
+    [SupplyParameterFromQuery(Name = "tag")]
+    public string? Tag { get; set; }
 
     /// <summary>Whether archived events are included.</summary>
     [SupplyParameterFromQuery(Name = "archived")]
@@ -311,6 +336,24 @@
         ? "any stream key"
         : "any stream GUID";
 
+    /// <summary>The tag filter, parsed; <see langword="null" /> when there is none or it is not one.</summary>
+    private EventTagFilter? TagFilterValue => EventTagFilter.Parse(Tag);
+
+    /// <summary>Something is in the tag box that is not <c>type=value</c>, which is an answer, not "no filter".</summary>
+    private bool TagFilterIsMalformed => !string.IsNullOrWhiteSpace(Tag) && TagFilterValue is null;
+
+    private IReadOnlyList<string> TagTypeNames => [.. tagTypes.Types.Select(static x => x.Suffix)];
+
+    /// <summary>The tag filter's index verdict, from the tag type it names.</summary>
+    private TagVerdictView? TagVerdict =>
+        TagFilterValue is { } filter && tagTypes.Find(filter.TypeName) is { } type
+            ? new TagVerdictView(type.FilterLevel.ToString().ToLowerInvariant(), type.FilterReason)
+            : null;
+
+    /// <summary>What the tags note says, when the page's tags were deferred or could not be read.</summary>
+    private string? TagNote =>
+        tagLoad.State is EventTagLoadState.Deferred or EventTagLoadState.Failed ? tagLoad.Reason : null;
+
     protected override async Task OnInitializedAsync()
     {
         State.ScopeChanged += OnScopeChangedAsync;
@@ -393,6 +436,7 @@
         error = null;
         pending.Clear();
         pendingTrimmed = false;
+        tagLoad = EventTagLoad.NotApplicable;
         StateHasChanged();
 
         try
@@ -401,7 +445,18 @@
 
             shape = await Events.DescribeAsync(scope, token);
 
-            EventPage page = await Events.GetFeedAsync(scope, BuildRequest(After, since: null), token);
+            // Only on a store that has tag types: the box, its placeholder and its verdict come from these.
+            tagTypes = shape.TagStorage == EventTagStorage.None
+                ? EventTagTypeList.None
+                : await Events.ListTagTypesAsync(scope, token);
+
+            EventPage page = TagFilterIsMalformed
+                ? EventPage.Failed(new EventDataError(
+                    "Write the tag filter as tag:<type>=<value> - the type by name or table suffix, for example tag:"
+                    + (TagTypeNames.Count > 0 ? TagTypeNames[0] : "student") + "=42.",
+                    null,
+                    false))
+                : await Events.GetFeedAsync(scope, BuildRequest(After, since: null), token);
 
             rows.Clear();
 
@@ -414,6 +469,7 @@
             {
                 rows.AddRange(page.Rows);
                 hasMore = page.HasMore;
+                tagLoad = page.TagLoad;
             }
 
             await RefreshTypesAsync(scope, token);
@@ -471,6 +527,7 @@
         SinceSequence = since,
         EventTypes = SelectedTypes,
         StreamId = string.IsNullOrWhiteSpace(Stream) ? null : Stream,
+        Tag = TagFilterValue,
         From = EventFilters.ResolveFrom(Range, DateTimeOffset.UtcNow),
         IncludeArchived = ArchivedFlag,
         IncludeSkipped = SkippedFlag,
@@ -522,6 +579,12 @@
             .GetFeedAsync(scope, BuildRequest(after: null, since: known, DeltaPageSize), cancellationToken)
             .ConfigureAwait(false);
 
+        // A delta whose tags were deferred arrives untagged, and stays so: reading them here would be a scan of
+        // every large tag table on every tick of a polled page - the cost "Load tags" asked the visitor to pay
+        // once, not every RefreshInterval. So the new rows are shown bare and the note comes back with its
+        // button; pressing it reads the tags of everything on the page, once.
+        bool deferred = delta.Error is null && delta.Rows.Count > 0 && delta.TagLoad.State == EventTagLoadState.Deferred;
+
         // The buffers are read by the renderer, so they are only ever written on the renderer's
         // synchronization context - a timer thread mutating a list a render is walking is the kind of bug
         // that shows up once a fortnight as a torn page.
@@ -532,8 +595,59 @@
                 Merge(delta.Rows);
             }
 
+            if (deferred)
+            {
+                tagLoad = delta.TagLoad;
+            }
+
             StateHasChanged();
         });
+    }
+
+    /// <summary>Reads the tags of the rows on the page, which the feed read left for the visitor to ask for.</summary>
+    private async Task LoadTagsAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || loadingTags || rows.Count == 0)
+        {
+            return;
+        }
+
+        loadingTags = true;
+
+        try
+        {
+            List<EventRow> shown = [.. pending, .. rows];
+            EventTagRead read = await Events.GetEventTagsAsync(
+                scope, [.. shown.Select(static x => x.Sequence)], pageCancellation.Token);
+
+            if (read.Error is { } failure)
+            {
+                tagLoad = EventTagLoad.Failed(failure.Display);
+                return;
+            }
+
+            List<EventRow> taggedRows = EventTagView.Merge(rows, read.Rows);
+            List<EventRow> taggedPending = EventTagView.Merge(pending, read.Rows);
+
+            rows.Clear();
+            rows.AddRange(taggedRows);
+            pending.Clear();
+            pending.AddRange(taggedPending);
+
+            tagLoad = EventTagLoad.Loaded;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            tagLoad = EventTagLoad.Failed(exception.Message);
+        }
+        finally
+        {
+            loadingTags = false;
+        }
     }
 
     /// <summary>
@@ -638,6 +752,16 @@
         return NavigateAsync();
     }
 
+    /// <summary>
+    /// What was typed into the tag box, as the URL carries it: <c>type=value</c> when it parses, the text as
+    /// typed when it does not - so the page can say how to write it, rather than quietly showing everything.
+    /// </summary>
+    private Task OnTagChangedAsync(string tag)
+    {
+        Tag = EventTagFilter.Parse(tag)?.Token ?? (string.IsNullOrWhiteSpace(tag) ? null : tag.Trim());
+        return NavigateAsync();
+    }
+
     private Task OnArchivedChangedAsync(bool included)
     {
         Archived = included ? "1" : null;
@@ -661,6 +785,7 @@
         Types = null;
         Range = null;
         Stream = null;
+        Tag = null;
         Archived = null;
         Skipped = null;
         After = null;
@@ -682,6 +807,7 @@
                 new("types", Types),
                 new("range", Range),
                 new("stream", Stream),
+                new("tag", Tag),
                 new("archived", EventLinks.Flag(ArchivedFlag)),
                 new("skipped", SkippedFlag ? null : "0"),
                 new("after", EventLinks.Number(after)),
@@ -694,6 +820,14 @@
     private string TypeHref(string eventType) =>
         EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
 
+    private string? TagHref(string tagType, string value) =>
+        EventLinks.ToFeedForTag(Options.Value, State.ActiveScope, tagType, value);
+
+    /// <summary>A tag filter's verdict, as the filter bar draws it.</summary>
+    /// <param name="Level">The colour: <c>green</c>, <c>amber</c> or <c>red</c>.</param>
+    /// <param name="Reason">The sentence behind it.</param>
+    private sealed record TagVerdictView(string Level, string Reason);
+
     private string Signature() =>
         string.Join(
             '',
@@ -703,6 +837,7 @@
             Types,
             Range,
             Stream,
+            Tag,
             Archived,
             Skipped,
             After?.ToString(CultureInfo.InvariantCulture),

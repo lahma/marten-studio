@@ -21,7 +21,7 @@ namespace MartenStudio.Tests.Events;
 /// page asked for, so a test can assert that the feed's filters reached the service rather than only that
 /// the markup changed.
 /// </remarks>
-internal sealed class FakeEventDataService : IEventDataService
+internal sealed partial class FakeEventDataService : IEventDataService
 {
     /// <summary>What <see cref="DescribeAsync" /> answers.</summary>
     public EventStoreShape Shape { get; set; } = new()

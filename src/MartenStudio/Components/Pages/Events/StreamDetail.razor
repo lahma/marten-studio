@@ -133,6 +133,63 @@
             }
         </section>
 
+        @* F3. Drawn only where compaction means something: a stream that is not archived, whose aggregate type
+           is a registered single-stream aggregate Marten can fold it into, with more than one event left to
+           fold. Everywhere else there is no section at all - the plan's reason is what the service would say
+           if somebody asked anyway, and it refuses regardless of what this page draws (hard rule 5). *@
+        @* The section also stays while a compaction's result is on screen: the page reloads after one, and
+           a stream it compacted may no longer be offered - its outcome must not vanish with the button. *@
+        @if (compaction is { IsOffered: true } || HasCompactResult)
+        {
+            <section class="ms-section ms-stream-compact">
+                <h2 class="ms-section-title">Compact</h2>
+                @if (compaction is { IsOffered: true } && !Capabilities.IsEnabled(StudioCapability.CompactStreams))
+                {
+                    <CapabilityDisabled Capability="@nameof(StudioCapability.CompactStreams)" Action="Compacting streams" />
+                }
+                else if (compaction is { IsOffered: true } plan)
+                {
+                    <p class="ms-muted">
+                        Compaction folds this stream's @plan.EventsToFold.ToString("N0", CultureInfo.InvariantCulture)
+                        events into one <code>Compacted&lt;@plan.AggregateName&gt;</code> snapshot and deletes the rest.
+                        It is a write, it is audited, and nothing here can undo it.
+                    </p>
+
+                    @if (plan.NeedsTenant)
+                    {
+                        <p class="ms-stream-compact-tenant" role="note">@StreamCompactionRules.TenantRequired(plan.StreamTenantId)</p>
+                    }
+
+                    @* Disabled rather than hidden for a visitor the write policy refuses, as Archive is. *@
+                    <button type="button"
+                            class="ms-button ms-button-danger ms-stream-compact-button"
+                            disabled="@(compacting || !mayCompact || plan.NeedsTenant)"
+                            title="@CompactTitle(plan)"
+                            @onclick="OpenCompactDialog">
+                        @(compacting ? "Compacting..." : "Compact this stream")
+                    </button>
+
+                    <WriteRefusal Refused="!mayCompact" Capability="@nameof(StudioCapability.CompactStreams)" />
+                }
+
+                @if (!string.IsNullOrWhiteSpace(compactOutcome))
+                {
+                    <p class="ms-stream-compact-outcome" role="status">Stream @Id is @compactOutcome.</p>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(compactUnconfirmed))
+                {
+                    @* Neither a success nor a refusal: the save returned and what it did could not be read back. *@
+                    <div class="ms-alert ms-alert-warning ms-stream-compact-unconfirmed" role="status">@compactUnconfirmed</div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(compactError))
+                {
+                    <ErrorAlert Message="@compactError" />
+                }
+            </section>
+        }
+
         <div class="ms-stream-panes">
             <div class="ms-stream-timeline-pane">
                 <h2 class="ms-section-title">Timeline</h2>
@@ -146,6 +203,11 @@
                 }
                 else
                 {
+                    <EventTagsNote Reason="@TagNote"
+                                   CanLoad="@(tagLoad.State == EventTagLoadState.Deferred)"
+                                   IsLoading="loadingTags"
+                                   OnLoad="LoadTagsAsync" />
+
                     <StreamTimeline HasMore="hasMoreEvents"
                                     IsLoading="loadingMore"
                                     OnLoadMore="LoadMoreAsync"
@@ -167,6 +229,8 @@
                                            BinaryLength="row.BinaryLength"
                                            Json="@row.Json"
                                            Metadata="row.Metadata"
+                                           Tags="EventTagView.Pairs(row)"
+                                           TagHref="TagHref"
                                            IsSelected="@(row.Version == SelectedVersion)"
                                            OnSelect="SelectVersionAsync" />
                             </div>
@@ -205,6 +269,29 @@
                OnConfirm="ArchiveAsync"
                OnCancel="CloseArchiveDialog" />
 
+@* The phrase is the stream's id as the database holds it, and what is typed travels to the service, which
+   checks it again (the schema apply's rule): the dialog is the part a person reads, not the part that
+   enforces. Every sentence in it is something Marten's own compaction code does - StreamCompactionRules. *@
+@if (compaction is { IsOffered: true } dialogPlan)
+{
+    IReadOnlyList<string> facts = StreamCompactionRules.WhatHappens(dialogPlan);
+
+    <ConfirmDialog IsOpen="compactDialogOpen"
+                   Title="Compact this stream?"
+                   Message="@CompactMessage(dialogPlan)"
+                   ConfirmationPhrase="@dialogPlan.StreamId"
+                   ConfirmText="Compact"
+                   OnConfirm="CompactAsync"
+                   OnCancel="CloseCompactDialog">
+        <ul class="ms-compact-facts">
+            @for (int index = 0; index < facts.Count; index++)
+            {
+                <li class="ms-compact-fact" @key="index">@facts[index]</li>
+            }
+        </ul>
+    </ConfirmDialog>
+}
+
 @code {
     /// <summary>How many events one window of the timeline holds.</summary>
     private const int WindowSize = 50;
@@ -238,6 +325,44 @@
     /// the scope with the same capability and throws (AGENTS.md hard rule 5).
     /// </remarks>
     private bool mayArchive = true;
+
+    /// <summary>
+    /// Whether this stream can be compacted from here, and what the dialog says about it; null until read.
+    /// </summary>
+    private CompactionPlan? compaction;
+
+    /// <summary>The write policy's answer about this visitor for <c>CompactStreams</c> - the same rule as <see cref="mayArchive" />.</summary>
+    private bool mayCompact = true;
+
+    private bool compacting;
+    private bool compactDialogOpen;
+    private string? compactError;
+
+    /// <summary>What the last compaction did, as the service read it back - the version it is compacted through.</summary>
+    private string? compactOutcome;
+
+    /// <summary>A compaction whose save returned but whose result could not be read back: "saved, not confirmed".</summary>
+    private string? compactUnconfirmed;
+
+    private bool HasCompactResult =>
+        !string.IsNullOrWhiteSpace(compactOutcome)
+        || !string.IsNullOrWhiteSpace(compactUnconfirmed)
+        || !string.IsNullOrWhiteSpace(compactError);
+
+    private void ClearCompactResult()
+    {
+        compactOutcome = null;
+        compactUnconfirmed = null;
+        compactError = null;
+    }
+
+    /// <summary>Whether the timeline's rows carry their tags.</summary>
+    private EventTagLoad tagLoad = EventTagLoad.NotApplicable;
+
+    private bool loadingTags;
+
+    private string? TagNote =>
+        tagLoad.State is EventTagLoadState.Deferred or EventTagLoadState.Failed ? tagLoad.Reason : null;
 
     private string ArchiveRefusal => WritePolicyRefusal.For(StudioCapability.ArchiveStreams);
 
@@ -285,6 +410,20 @@
 
     private string TypeHref(string eventType) =>
         EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
+
+    private string? TagHref(string tagType, string value) =>
+        EventLinks.ToFeedForTag(Options.Value, State.ActiveScope, tagType, value);
+
+    private string CompactTitle(CompactionPlan plan) =>
+        !mayCompact
+            ? WritePolicyRefusal.For(StudioCapability.CompactStreams)
+            : plan.NeedsTenant
+                ? StreamCompactionRules.TenantRequired(plan.StreamTenantId)
+                : $"Fold this stream into one Compacted<{plan.AggregateName}> snapshot and delete the events it replaces";
+
+    private static string CompactMessage(CompactionPlan plan) =>
+        $"Compacting replaces the history of stream {plan.StreamId} with a snapshot of its {plan.AggregateName}. "
+        + "Read what that means before you type the id.";
 
     /// <summary>
     /// Why the replay produced nothing, when the service could tell the cases apart.
@@ -343,6 +482,8 @@
             return;
         }
 
+        // Another stream: the last one's compaction result is not this one's.
+        ClearCompactResult();
         await LoadAsync();
     }
 
@@ -368,6 +509,7 @@
     private async Task OnScopeChangedAsync()
     {
         signature = Signature();
+        ClearCompactResult();
         await LoadAsync();
         await InvokeAsync(StateHasChanged);
     }
@@ -391,6 +533,8 @@
         timeline.Clear();
         timelineError = null;
         snapshot = null;
+        compaction = null;
+        tagLoad = EventTagLoad.NotApplicable;
         lastVersionLoaded = 0;
         StateHasChanged();
 
@@ -402,9 +546,17 @@
             // button showing the last visitor's answer. Per visitor rather than per process, so it is
             // asked here rather than read off the guard, and never memoised.
             mayArchive = await Authorization.IsAuthorizedAsync(scope, StudioCapability.ArchiveStreams, token);
+            mayCompact = await Authorization.IsAuthorizedAsync(scope, StudioCapability.CompactStreams, token);
 
             shape = await Events.DescribeAsync(scope, token);
             stream = await Events.GetStreamAsync(scope, Id, token);
+
+            // Only for a stream that is there: the plan is what decides whether a Compact section exists. It is
+            // made from the read just above rather than a second read of the same row.
+            if (stream.Exists)
+            {
+                compaction = await Events.DescribeCompactionAsync(scope, stream, token);
+            }
 
             IReadOnlyList<AggregateTypeCandidate> candidates = await Events.ListAggregateCandidatesAsync(scope, token);
             // The two sources are two different promises, and the labels say which is which. A registered
@@ -448,6 +600,13 @@
 
         timeline.AddRange(window.Rows);
         hasMoreEvents = window.HasMore;
+
+        // A window whose tags were deferred makes the whole timeline's tags a question; one that came with
+        // them changes nothing about the windows before it.
+        if (window.TagLoad.State != EventTagLoadState.Loaded || tagLoad.State == EventTagLoadState.NotApplicable)
+        {
+            tagLoad = window.TagLoad;
+        }
 
         if (window.Rows.Count > 0)
         {
@@ -565,6 +724,111 @@
         finally
         {
             archiving = false;
+        }
+    }
+
+    private void OpenCompactDialog()
+    {
+        ClearCompactResult();
+        compactDialogOpen = true;
+    }
+
+    private void CloseCompactDialog() => compactDialogOpen = false;
+
+    /// <summary>
+    /// Compacts the stream with what the visitor typed, which the service checks again, through the version
+    /// the dialog described - so an event appended while it was open is not folded into something nobody read.
+    /// </summary>
+    private async Task CompactAsync(string typed)
+    {
+        StudioScope? scope = State.ActiveScope;
+        compactDialogOpen = false;
+
+        if (scope is null || string.IsNullOrWhiteSpace(Id) || compaction is not { IsOffered: true } plan)
+        {
+            return;
+        }
+
+        compacting = true;
+        ClearCompactResult();
+
+        // Whatever the service answered once the visitor confirmed, the page reloads: a failure after the
+        // confirmation can come after a save (the read-back that turned it into "nothing was compacted",
+        // or could not confirm it), and a timeline still showing events that are gone is the one wrong
+        // answer. A refusal before the save reloads the same stream, which costs one read.
+        bool reload = false;
+
+        try
+        {
+            string outcome = await Events.CompactStreamAsync(scope, Id, typed, plan.Version, pageCancellation.Token);
+            compactOutcome = outcome;
+            reload = true;
+            await Toasts.Success($"Stream {Id} is {outcome}.");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (StreamCompactionUnconfirmedException unconfirmed)
+        {
+            compactUnconfirmed = unconfirmed.Message;
+            reload = true;
+            await Toasts.Info(unconfirmed.Message);
+        }
+        catch (Exception exception)
+        {
+            // On the page as well as in the toast, as Archive's failure is (plan §4.8).
+            compactError = exception.Message;
+            reload = true;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            compacting = false;
+        }
+
+        if (reload)
+        {
+            await LoadAsync();
+        }
+    }
+
+    /// <summary>Reads the tags of the timeline's events, which the window reads left for the visitor to ask for.</summary>
+    private async Task LoadTagsAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || loadingTags || timeline.Count == 0)
+        {
+            return;
+        }
+
+        loadingTags = true;
+
+        try
+        {
+            EventTagRead read = await Events.GetEventTagsAsync(
+                scope, [.. timeline.Select(static x => x.Sequence)], pageCancellation.Token);
+
+            if (read.Error is { } failure)
+            {
+                tagLoad = EventTagLoad.Failed(failure.Display);
+                return;
+            }
+
+            List<EventRow> tagged = EventTagView.Merge(timeline, read.Rows);
+            timeline.Clear();
+            timeline.AddRange(tagged);
+            tagLoad = EventTagLoad.Loaded;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            tagLoad = EventTagLoad.Failed(exception.Message);
+        }
+        finally
+        {
+            loadingTags = false;
         }
     }
 
