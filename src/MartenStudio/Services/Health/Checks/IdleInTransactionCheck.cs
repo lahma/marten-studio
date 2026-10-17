@@ -59,16 +59,18 @@ internal sealed record IdleInTransactionFacts(
 /// behind (D01). It is nearly always an application that began a transaction and never ended it.
 /// </para>
 /// <para>
-/// <b>Marten's own daemon is not one.</b> At the floor (Marten 9.39 and 9.40, where
-/// <c>Events.UseAdvisoryLockTransaction</c> is on by default) the HotCold leader holds its leadership with
-/// <c>pg_try_advisory_xact_lock</c> in a transaction it never ends - measured live, with a snapshot - and re-polls its
-/// locks about once a second, so it is <c>idle in transaction</c> for a second at a time and never for the minute this
-/// check waits for; from 9.41 the lock is the session's and it is not in a transaction at all. Marten's own
-/// <c>GapLivenessProbe</c> rules the leader out too (#5125). A session that has no transaction id, no snapshot and no
-/// relation lock pins nothing, whoever it is - Wolverine's lock listeners, a leader configured to poll rarely without
-/// a snapshot - and is counted in the status row rather than raised; Marten's daemon lock ids are read too, so the row
-/// can say when it is the daemon's. A leader that holds a snapshot and does sit idle for a minute - one that polls its
-/// locks less often than that - is raised, because it does hold back vacuum.
+/// <b>Marten's own daemon, as Marten configures it by default, is not one.</b> At the floor (Marten 9.39 and 9.40,
+/// where <c>Events.UseAdvisoryLockTransaction</c> is on by default) the HotCold leader holds its leadership with
+/// <c>pg_try_advisory_xact_lock</c> in a transaction it never ends - with a snapshot, measured live. What keeps that
+/// transaction from sitting idle is <c>Events.UseMonitoredAdvisoryLock</c>, on by default: Weasel's lock monitoring
+/// keeps using the leader's connection - measured live, a statement about once a second at a one-second
+/// <c>LeadershipPollingTime</c>, and a <c>pg_sleep</c> that runs on at a ten-second one - so the leader is never idle in
+/// its transaction for the minute this check waits for. With monitoring off it is idle in that transaction for as long
+/// as it leads, and this check raises it after a minute, because its snapshot does hold back vacuum. From 9.41 the
+/// lock is the session's and the leader is not in a transaction at all. Marten's own <c>GapLivenessProbe</c> rules the
+/// leader out too (#5125). A session that has no transaction id, no snapshot and no relation lock pins nothing, whoever
+/// it is - Wolverine's lock listeners - and is counted in the status row rather than raised; Marten's daemon lock ids
+/// are read too, so the row can say when it is the daemon's.
 /// </para>
 /// <para>
 /// Who the sessions are - process id, role, application, client, when they connected - is evidence behind the

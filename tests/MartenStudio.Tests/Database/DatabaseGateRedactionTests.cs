@@ -259,6 +259,30 @@ public class DatabaseGateRedactionTests
     // F4 - another store's identity and rows
     // ---------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// What a statement on Database › Sessions or in D01's Explain must not be shown naming: the document tables of a
+    /// store whose policy refuses the visitor - only its document tables, only when refused, and never this store's.
+    /// </summary>
+    [Fact]
+    public void A_refused_stores_document_tables_are_what_a_statement_must_not_name()
+    {
+        DatabaseGate refused = Gate(
+            entries: ["*"],
+            storeKey: "default",
+            otherStores: new Dictionary<string, DatabaseStoreAccess>
+            {
+                [OtherStoreKey] = new(false, DatabaseRowAccess.Refused(DatabaseRefusal.StorePolicy, DatabaseGate.OtherStorePolicyDenial)),
+            });
+
+        refused.RefusedStoreDocumentTables().Should().Equal(["mt_doc_dbinvoice"],
+            "its alias is in its table's name; its extended table names no alias, and this store's tables are this visitor's");
+
+        Gate(entries: ["*"], storeKey: "default", otherStores: new Dictionary<string, DatabaseStoreAccess> { [OtherStoreKey] = DatabaseStoreAccess.Open })
+            .RefusedStoreDocumentTables().Should().BeEmpty("a store whose policy passes the visitor hides nothing from them");
+        Gate(entries: ["*"], storeKey: "default", otherStores: new Dictionary<string, DatabaseStoreAccess>())
+            .RefusedStoreDocumentTables().Should().BeEmpty("a store nobody asked about is shown as the classifier has it");
+    }
+
     [Fact]
     public void Another_stores_identity_and_rows_follow_that_stores_policies()
     {

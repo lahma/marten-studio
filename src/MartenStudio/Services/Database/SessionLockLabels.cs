@@ -1,8 +1,8 @@
 using System.Globalization;
 
-using JasperFx.Events.Daemon;
-
 using Marten;
+
+using MartenStudio.Services.Health.Checks;
 
 namespace MartenStudio.Services.Database;
 
@@ -179,18 +179,23 @@ internal sealed class SessionLockLabels
         long? applyChangesLockId,
         long? daemonLockId,
         Dictionary<long, string> shardLocks,
+        IReadOnlyList<long> daemonLockIds,
         DatabaseObjectClassifier? classifier)
     {
         this.storeKey = storeKey;
         this.applyChangesLockId = applyChangesLockId;
         this.daemonLockId = daemonLockId;
         this.shardLocks = shardLocks;
+        DaemonLockIds = daemonLockIds;
         this.classifier = classifier;
     }
 
-    /// <summary>Every advisory key Marten's daemon negotiates leadership with: the base id and every shard's.</summary>
-    public IReadOnlyCollection<long> DaemonLockIds =>
-        daemonLockId is { } id ? [id, .. shardLocks.Keys.Where(x => x != id)] : [.. shardLocks.Keys];
+    /// <summary>
+    /// Every advisory key Marten's daemon negotiates leadership with - the base id and every shard's - as the one
+    /// definition of the set has it (<see cref="DaemonCheckConfiguration.LockKeysFor" />, which D02 and D01's Explain
+    /// read too).
+    /// </summary>
+    public IReadOnlyList<long> DaemonLockIds { get; }
 
     /// <summary>The labels for <paramref name="store" />, registered under <paramref name="storeKey" />.</summary>
     /// <param name="store">The store.</param>
@@ -205,42 +210,23 @@ internal sealed class SessionLockLabels
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(storeKey);
 
-        long? apply = null;
-        long? daemon = null;
+        long? apply = store.Options is StoreOptions options ? options.ApplyChangesLockId : null;
+
+        // The daemon's ids from the one definition of the set, H2's: a projection that cannot list its shards lists
+        // none, and its locks read as "not Marten's" - a label, not a judgement, and C04 then treats such a session as
+        // it would any other; a shard whose id cannot be computed is nobody's, as it would be in pg_locks too.
+        string schema = store.Options.Events.DatabaseSchemaName;
+        int baseLockId = DaemonCheckConfiguration.DaemonLockIdOf(store.Options);
+        var asyncShards = DaemonCheckConfiguration.AsyncShardsOf(store);
+
         Dictionary<long, string> shards = [];
-
-        if (store.Options is StoreOptions options)
+        foreach ((long id, var shard) in DaemonCheckConfiguration.ShardLockIdsFor(schema, asyncShards, baseLockId))
         {
-            apply = options.ApplyChangesLockId;
-
-            int baseLockId = options.Projections.DaemonLockId;
-            daemon = baseLockId;
-
-            string schema = store.Options.Events.DatabaseSchemaName;
-
-            try
-            {
-                foreach (var shard in options.Projections.AllShards())
-                {
-                    try
-                    {
-                        shards.TryAdd(ProjectionLockIds.Compute(schema, shard.Name, baseLockId), shard.Name.Identity);
-                    }
-                    catch (OverflowException)
-                    {
-                        // Math.Abs(int.MinValue) inside the hash: a shard whose id cannot be computed is labelled
-                        // as nobody's, which is what it would be in pg_locks too.
-                    }
-                }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                // A projection that cannot list its shards: its locks read as "not Marten's" - a label, not a
-                // judgement, and C04 then treats such a session as it would any other.
-            }
+            shards.TryAdd(id, shard.Identity);
         }
 
-        return new SessionLockLabels(storeKey, apply, daemon, shards, classifier);
+        return new SessionLockLabels(
+            storeKey, apply, baseLockId, shards, DaemonCheckConfiguration.LockKeysFor(schema, asyncShards, baseLockId), classifier);
     }
 
     /// <summary>What one lock is on.</summary>

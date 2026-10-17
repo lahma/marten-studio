@@ -49,8 +49,12 @@ and spells out its members, and `IsDocumentTypeVisible` hides a type whatever sc
 that names a hidden type's table is replaced with a note saying so. While `IsDocumentTypeVisible` is set at all, so
 is a statement that names an `mt_doc_` table no registered store declares: a type nothing in the process has
 touched yet may be a hidden one, and a tenant partition's name carries a tenant id. When the declarations of every
-store cannot be read and types may be hidden, every statement is withheld. A statement that names a hidden table
-only through dynamic SQL is not detected - D27's limit for source text.
+store cannot be read and types may be hidden, every statement is withheld. A statement that names a document
+table of another registered store whose store policy refuses the visitor is withheld too, with a note of its
+own: that store's alias is in the table's name. A statement that names a hidden table only through dynamic SQL is
+not detected - D27's limit for source text. Literals are shown as written - a tenant id in a `where` clause, a
+document's JSON - which is why statements need `ViewDatabaseActivity` at all. D01's Explain on the Projections
+screen shows statements by this same rule.
 
 The first read of session details in a circuit, per store and database, is one Activity entry and one event
 9245; the page's interval reads and Refresh record nothing more. Every refusal is audited. The Health page's own
@@ -169,16 +173,19 @@ has written holds a transaction id that Marten's high-water detection can wait b
 holds something back is raised: one with no transaction id, no snapshot and no relation lock pins nothing -
 Wolverine's lock listeners are such sessions - and is counted in the status row, not raised.
 
-Marten's own HotCold leader is not raised either, for a different reason. At Marten 9.39 and 9.40
-(`Events.UseAdvisoryLockTransaction` on by default) it holds its leadership with `pg_try_advisory_xact_lock` in a
-transaction it never ends, with a snapshot - measured live - but it re-polls its locks about once a second, so it is
-idle in that transaction for a second at a time and never for a minute. From 9.41 the lock is the session's and the
-leader is not in a transaction at all. A leader configured to poll less often than once a minute would be raised,
-because its snapshot does hold back vacuum.
+Marten's own HotCold leader, as Marten configures it by default, is not raised either, for a different reason. At
+Marten 9.39 and 9.40 (`Events.UseAdvisoryLockTransaction` on by default) it holds its leadership with
+`pg_try_advisory_xact_lock` in a transaction it never ends, with a snapshot - measured live. What keeps that
+transaction busy is `Events.UseMonitoredAdvisoryLock`, also on by default: Weasel's lock monitoring keeps using the
+leader's connection (measured live: a statement about once a second at a one-second `LeadershipPollingTime`, and a
+`pg_sleep` that runs on at a ten-second one), so the leader is never idle in its transaction for a minute. With
+monitoring turned off it sits idle in that transaction for as long as it leads, and C04 raises it after a minute -
+rightly, because its snapshot holds back vacuum; `Events.UseAdvisoryLockTransaction = false`, or Marten 9.41, is the
+change that ends it. From 9.41 the lock is the session's and the leader is not in a transaction at all.
 
 The fix is in the application: dispose every session (`await using`), and end what it began. A server-wide
-`idle_in_transaction_session_timeout` is the DBA's backstop - and on Marten 9.39 and 9.40, set below the
-leader's polling interval, it would also end the HotCold daemon's leadership session.
+`idle_in_transaction_session_timeout` is the DBA's backstop - and on Marten 9.39 and 9.40, with lock monitoring
+off, it would also end the HotCold daemon's leadership session.
 
 ## C05 Long-running statement
 

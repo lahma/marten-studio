@@ -8,6 +8,41 @@ namespace MartenStudio.Services.Database;
 internal sealed record SessionStatementText(string? Text, string? Note);
 
 /// <summary>
+/// What one visitor's statements are checked against - read off the database browser's gate for them, by Database ›
+/// Sessions and by D01's Explain alike, so both show a statement by one rule (<see cref="SessionQueryText" />).
+/// </summary>
+/// <param name="Withheld">
+/// The visitor's withheld schemas (<see cref="DatabaseGate.WithheldSchemas" />), or <see langword="null" /> when they
+/// could not be read - which withholds every statement.
+/// </param>
+/// <param name="Classifier">
+/// The classifier over every registered store's declarations, or <see langword="null" /> when they could not all be
+/// read.
+/// </param>
+/// <param name="HidesDocumentTypes">Whether <c>MartenStudioOptions.IsDocumentTypeVisible</c> is set at all.</param>
+/// <param name="RefusedStoreTables">
+/// The document tables of every other registered store whose store policy refuses the visitor
+/// (<see cref="DatabaseGate.RefusedStoreDocumentTables" />).
+/// </param>
+internal sealed record StatementScreen(
+    IReadOnlySet<string>? Withheld,
+    DatabaseObjectClassifier? Classifier,
+    bool HidesDocumentTypes,
+    IReadOnlyCollection<string> RefusedStoreTables)
+{
+    /// <summary>The screen of a visitor whose gate could not be read: every statement is withheld.</summary>
+    public static StatementScreen Unchecked(bool hidesDocumentTypes) => new(null, null, hidesDocumentTypes, []);
+
+    /// <summary>One visitor's screen, from the database browser's gate as <c>DatabaseAccess.GateAsync</c> read it.</summary>
+    /// <param name="read">The gate, or <see langword="null" /> when it could not be asked.</param>
+    /// <param name="hidesDocumentTypes">Whether <c>MartenStudioOptions.IsDocumentTypeVisible</c> is set at all.</param>
+    public static StatementScreen Of(DatabaseGateRead? read, bool hidesDocumentTypes) =>
+        read is not null && read.Succeeded
+            ? new StatementScreen(read.Gate.WithheldSchemas, read.Gate.Classifier, hidesDocumentTypes, read.Gate.RefusedStoreDocumentTables())
+            : Unchecked(hidesDocumentTypes);
+}
+
+/// <summary>
 /// Another application's statement, as Database › Sessions shows it: masked for the visitor's withheld schemas
 /// (D27), never ending in half a name, and capped.
 /// </summary>
@@ -35,6 +70,19 @@ internal sealed record SessionStatementText(string? Text, string? Note);
 /// registered store declares - a type Marten has not learned yet may be a hidden one, and a tenant partition's
 /// name carries a tenant id. When every store's declarations cannot be read and hiding is configured, nothing
 /// can be checked and every statement is withheld: classification fails closed (D27).
+/// </para>
+/// <para>
+/// <b>Nor is one about a store the visitor may not see.</b> Another registered store's document table is named
+/// <c>mt_doc_&lt;alias&gt;</c>, and that store's alias is shown only to a visitor its store policy passes (D27); so
+/// a statement that names one of a refused store's tables - by the same whole-name substring test as a hidden
+/// type's - is withheld with a note of its own.
+/// </para>
+/// <para>
+/// <b>What a shown statement can still carry.</b> Everything that is not a schema's or a table's name: literals and
+/// bound values as the application wrote them - a tenant id in <c>where tenant_id = 'acme'</c>, an e-mail address,
+/// an amount - column and JSON member names, a schema it reaches only through its own <c>search_path</c>, and any
+/// name it builds in dynamic SQL. That is why statements need <c>ViewDatabaseActivity</c> at all: they are other
+/// people's source text.
 /// </para>
 /// <para>
 /// <b>A cut text loses its last word.</b> Postgres keeps at most <c>track_activity_query_size</c> bytes of a
@@ -67,26 +115,26 @@ internal static partial class SessionQueryText
     public const string UnclassifiedNote =
         "Withheld: the configuration of every Marten store could not be read, so it cannot be checked for document types the studio does not show.";
 
+    /// <summary>What a statement withheld for naming a table of a store the visitor may not see says.</summary>
+    public const string RefusedStoreNote =
+        "Withheld: it names a document table of a registered Marten store your account may not see.";
 
-    /// <summary>The text one visitor is shown.</summary>
+    /// <summary>What a statement says when the visitor's withheld schemas could not be read.</summary>
+    public const string SchemasUncheckedNote =
+        "Withheld: the schemas it may name could not be checked against the ones you may see.";
+
+    /// <summary>What a statement the studio's role may not read says.</summary>
+    public const string NotReadableNote =
+        "Not readable: the studio's Postgres role is not a member of pg_read_all_stats, nor of this session's role.";
+
+    /// <summary>The text one visitor is shown, by every rule: the one Database › Sessions and D01's Explain both use.</summary>
     /// <param name="query">What <c>pg_stat_activity</c> holds, as read (already cut on the server).</param>
     /// <param name="truncated">Whether Postgres or the read cut it.</param>
-    /// <param name="withheld">
-    /// The visitor's withheld schemas (<see cref="DatabaseGate.WithheldSchemas" />), or <see langword="null" />
-    /// when they could not be read - which withholds the text.
-    /// </param>
-    /// <param name="classifier">
-    /// The classifier over every registered store's declarations, or <see langword="null" /> when they could not all
-    /// be read.
-    /// </param>
-    /// <param name="hidesDocumentTypes">Whether <c>MartenStudioOptions.IsDocumentTypeVisible</c> is set at all.</param>
-    public static SessionStatementText Present(
-        string? query,
-        bool truncated,
-        IReadOnlySet<string>? withheld,
-        DatabaseObjectClassifier? classifier,
-        bool hidesDocumentTypes)
+    /// <param name="screen">What this visitor's statements are checked against.</param>
+    public static SessionStatementText Present(string? query, bool truncated, StatementScreen screen)
     {
+        ArgumentNullException.ThrowIfNull(screen);
+
         if (string.IsNullOrEmpty(query))
         {
             return new SessionStatementText(null, null);
@@ -94,21 +142,17 @@ internal static partial class SessionQueryText
 
         if (string.Equals(query, InsufficientPrivilege, StringComparison.Ordinal))
         {
-            return new SessionStatementText(
-                null,
-                "Not readable: the studio's Postgres role is not a member of pg_read_all_stats, nor of this session's role.");
+            return new SessionStatementText(null, NotReadableNote);
         }
 
-        if (withheld is null)
+        if (screen.Withheld is not { } withheld)
         {
-            return new SessionStatementText(
-                null,
-                "Withheld: the schemas it may name could not be checked against the ones you may see.");
+            return new SessionStatementText(null, SchemasUncheckedNote);
         }
 
-        if (classifier is null)
+        if (screen.Classifier is not { } classifier)
         {
-            if (hidesDocumentTypes)
+            if (screen.HidesDocumentTypes)
             {
                 return new SessionStatementText(null, UnclassifiedNote);
             }
@@ -120,6 +164,11 @@ internal static partial class SessionQueryText
         else if (classifier.MayHideDocumentTypes && NamesUndeclaredDocumentTable(query, classifier))
         {
             return new SessionStatementText(null, UndeclaredTableNote);
+        }
+
+        if (screen.RefusedStoreTables.Any(table => query.Contains(table, StringComparison.OrdinalIgnoreCase)))
+        {
+            return new SessionStatementText(null, RefusedStoreNote);
         }
 
         string text = truncated ? DropOpenTail(query) : query;

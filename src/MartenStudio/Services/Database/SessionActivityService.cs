@@ -279,10 +279,9 @@ internal sealed class SessionActivityService : ISessionActivityService
             return SessionActivityDetails.Refused(DatabaseRefusal.Unavailable, Failure(exception, resolved));
         }
 
-        IReadOnlySet<string>? withheld = await WithheldAsync(whole, resolved, cancellationToken).ConfigureAwait(false);
-        DatabaseObjectClassifier? classifier = Classifier(resolved);
-        bool hidesDocumentTypes = value.IsDocumentTypeVisible is not null;
-        SessionLockLabels labels = SessionLockLabels.For(resolved.Store, resolved.Registration.Key, classifier);
+        StatementScreen screen = await ScreenAsync(whole, resolved, value.IsDocumentTypeVisible is not null, cancellationToken).ConfigureAwait(false);
+        IReadOnlySet<string>? withheld = screen.Withheld;
+        SessionLockLabels labels = SessionLockLabels.For(resolved.Store, resolved.Registration.Key, Classifier(resolved));
 
         SessionActivityDetails details = new()
         {
@@ -302,7 +301,7 @@ internal sealed class SessionActivityService : ISessionActivityService
                     x.QueryAge,
                     x.StateAge,
                     x.BlockedBy,
-                    SessionQueryText.Present(x.Query, x.QueryTruncated, withheld, classifier, hidesDocumentTypes))),
+                    SessionQueryText.Present(x.Query, x.QueryTruncated, screen))),
             ],
             Locks =
             [
@@ -346,15 +345,16 @@ internal sealed class SessionActivityService : ISessionActivityService
     }
 
     /// <summary>
-    /// The schemas this visitor may not see, from the database browser's own gate - or <see langword="null" />
-    /// when it cannot be read, which withholds every statement.
+    /// What this visitor's statements are checked against, from the database browser's own gate: the schemas they
+    /// may not see, the classifier over every store, and the tables of every store whose policy refuses them - or
+    /// <see cref="StatementScreen.Unchecked" /> when the gate cannot be read, which withholds every statement.
     /// </summary>
-    private async Task<IReadOnlySet<string>?> WithheldAsync(StudioScope whole, ResolvedScope resolved, CancellationToken cancellationToken)
+    private async Task<StatementScreen> ScreenAsync(StudioScope whole, ResolvedScope resolved, bool hidesDocumentTypes, CancellationToken cancellationToken)
     {
         try
         {
             DatabaseGateRead read = await access.GateAsync(whole, resolved, cancellationToken).ConfigureAwait(false);
-            return read.Succeeded ? read.Gate.WithheldSchemas : null;
+            return StatementScreen.Of(read, hidesDocumentTypes);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -363,7 +363,7 @@ internal sealed class SessionActivityService : ISessionActivityService
                 logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Database.Id.Identity);
             }
 
-            return null;
+            return StatementScreen.Unchecked(hidesDocumentTypes);
         }
     }
 

@@ -1,5 +1,6 @@
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Projections;
+using MartenStudio.Tests.Database;
 
 namespace MartenStudio.Tests.Projections;
 
@@ -109,7 +110,7 @@ public class HighWaterExplainCacheTests
 
     // ---- The statement a visitor is shown ---------------------------------------------------------------------------
 
-    private static readonly IReadOnlySet<string> HrWithheld = new HashSet<string>(StringComparer.Ordinal) { "hr" };
+    private static readonly StatementScreen HrWithheld = new(new HashSet<string>(StringComparer.Ordinal) { "hr" }, null, false, []);
 
     [Fact]
     public void A_withheld_schema_is_masked_in_a_statement()
@@ -132,7 +133,27 @@ public class HighWaterExplainCacheTests
     [Fact]
     public void Without_the_withheld_schemas_the_statement_is_withheld()
     {
-        ExplainQueryText.Present("select * from hr.payroll", truncated: false, withheld: null).Should().Be(ExplainQueryText.Withheld);
-        ExplainQueryText.Present(null, truncated: false, withheld: null).Should().BeNull();
+        ExplainQueryText.Present("select * from hr.payroll", truncated: false, StatementScreen.Unchecked(false)).Should().Be(ExplainQueryText.Withheld);
+        ExplainQueryText.Present(null, truncated: false, StatementScreen.Unchecked(false)).Should().BeNull();
+    }
+
+    /// <summary>
+    /// One rule with Database › Sessions (<see cref="SessionQueryText" />): a statement naming a hidden type's table, one
+    /// no store declares while hiding is configured, or a table of a store whose policy refuses the visitor is withheld,
+    /// and the Explain says why in brackets.
+    /// </summary>
+    [Fact]
+    public void The_Explain_withholds_a_statement_by_the_Sessions_pages_own_rules()
+    {
+        StatementScreen screen = new(new HashSet<string>(), DatabaseTestStores.Classifier(), true, ["mt_doc_dbinvoice"]);
+
+        ExplainQueryText.Present("select d.data from studio_db.mt_doc_dbsecret as d", truncated: false, screen)
+            .Should().Be("(" + SessionQueryText.HiddenTypeNote + ")");
+        ExplainQueryText.Present("select d.data from studio_db.mt_doc_dbpayroll as d", truncated: false, screen)
+            .Should().Be("(" + SessionQueryText.UndeclaredTableNote + ")");
+        ExplainQueryText.Present("select d.data from other_db.mt_doc_dbinvoice as d", truncated: false, screen)
+            .Should().Be("(" + SessionQueryText.RefusedStoreNote + ")");
+        ExplainQueryText.Present("select d.data from studio_db.mt_doc_dbcustomer as d", truncated: false, screen)
+            .Should().Be("select d.data from studio_db.mt_doc_dbcustomer as d", "a statement naming only what the visitor may see is shown");
     }
 }

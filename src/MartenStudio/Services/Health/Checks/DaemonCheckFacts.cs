@@ -229,7 +229,7 @@ internal sealed record DaemonCheckConfiguration(
         IReadOnlyDaemonSettings daemon = options.Events.Daemon;
         string schema = options.Events.DatabaseSchemaName;
 
-        int lockId = daemon is DaemonSettings settings ? settings.DaemonLockId : DefaultDaemonLockId;
+        int lockId = DaemonLockIdOf(options);
         ProjectionOptions? projections = daemon as ProjectionOptions;
 
         IReadOnlyList<ShardName> shards = AsyncShardsOf(context.Store);
@@ -284,21 +284,43 @@ internal sealed record DaemonCheckConfiguration(
     /// <summary>JasperFx's default <c>DaemonLockId</c>, for a settings object of another shape.</summary>
     internal const int DefaultDaemonLockId = 4444;
 
+    /// <summary>The store's <c>Projections.DaemonLockId</c>: the base of every leadership lock id.</summary>
+    internal static int DaemonLockIdOf(IReadOnlyStoreOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return options.Events.Daemon is DaemonSettings settings ? settings.DaemonLockId : DefaultDaemonLockId;
+    }
+
     /// <summary>
     /// The lock ids, read at JasperFx V2.74.0 and V2.87.1 (byte-identical distributors): <c>DaemonLockId</c> itself
     /// (<c>MultiTenantedProjectionDistributor</c>, HotCold over several databases) and
     /// <c>ProjectionLockIds.Compute(EventGraph.DatabaseSchemaName, shard, DaemonLockId)</c> per shard
     /// (<c>SingleTenantProjectionDistributor</c>, HotCold over one). <c>SoloProjectionDistributor</c> takes no lock.
+    /// The one definition of the set: D02 and D01's Explain read it here, and so do C04 and the lock labels of
+    /// Database › Sessions and C06 (<c>SessionLockLabels</c>).
     /// </summary>
     internal static IReadOnlyList<long> LockKeysFor(string eventSchema, IEnumerable<ShardName> shards, int daemonLockId)
     {
-        HashSet<long> keys = [daemonLockId];
+        HashSet<long> keys = [daemonLockId, .. ShardLockIdsFor(eventSchema, shards, daemonLockId).Select(static x => x.Id)];
+        return [.. keys.Order()];
+    }
+
+    /// <summary>
+    /// Each shard's own lock id - <c>ProjectionLockIds.Compute(eventSchema, shard, DaemonLockId)</c> - with the shard it
+    /// is for, so that a label can say whose lock it is. <see cref="LockKeysFor" /> is these and <c>DaemonLockId</c>.
+    /// </summary>
+    internal static IReadOnlyList<(long Id, ShardName Shard)> ShardLockIdsFor(string eventSchema, IEnumerable<ShardName> shards, int daemonLockId)
+    {
+        ArgumentNullException.ThrowIfNull(eventSchema);
+        ArgumentNullException.ThrowIfNull(shards);
+
+        List<(long Id, ShardName Shard)> ids = [];
 
         foreach (ShardName shard in shards)
         {
             try
             {
-                keys.Add(ProjectionLockIds.Compute(eventSchema, shard, daemonLockId));
+                ids.Add((ProjectionLockIds.Compute(eventSchema, shard, daemonLockId), shard));
             }
             catch (OverflowException)
             {
@@ -306,7 +328,7 @@ internal sealed record DaemonCheckConfiguration(
             }
         }
 
-        return [.. keys.Order()];
+        return ids;
     }
 
     /// <summary>

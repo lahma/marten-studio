@@ -107,78 +107,30 @@ internal sealed class HighWaterExplainCache(TimeProvider timeProvider)
 }
 
 /// <summary>
-/// A session's statement as the Explain shows it to one visitor: masked for their withheld schemas (D27), never ending
-/// in half a name, or withheld outright when those schemas cannot be read.
+/// A session's statement as the Explain shows it to one visitor - by Database › Sessions' own rule
+/// (<see cref="SessionQueryText" />), put into the one line of text the Explain has for it.
 /// </summary>
 /// <remarks>
-/// The same rule Database › Sessions applies (H3's <c>SessionQueryText</c>): <c>pg_stat_activity.query</c> is any
-/// application's source text, so every withheld schema is masked in it by <see cref="PostgresErrorText.Redact" /> - as
-/// a qualifier and as every whole token that spells it - and a text the read cut first loses the identifier, quoted
-/// name or literal the cut left open, because <c>from hr_payr</c> is the start of a withheld <c>hr_payroll</c> that no
-/// mask recognises. When H3 lands, this can become a call to its helper.
+/// One rule, not a copy of it: every withheld schema masked, a cut text losing what the cut left open, and the
+/// statement withheld outright when the visitor's schemas cannot be checked, when it names a hidden document type's
+/// table, while hiding is configured one no store declares, or a table of a store whose policy refuses the visitor.
+/// A withheld statement is shown as its note, in brackets.
 /// </remarks>
 internal static class ExplainQueryText
 {
     /// <summary>What is shown instead of a statement whose schemas could not be checked.</summary>
-    public const string Withheld = "(statement withheld: the schemas it may name could not be checked against the ones you may see)";
+    public const string Withheld = "(" + SessionQueryText.SchemasUncheckedNote + ")";
 
     /// <summary>What a cut text ends with.</summary>
-    public const string Cut = " …";
+    public const string Cut = SessionQueryText.Cut;
 
     /// <summary>The statement as this visitor is shown it.</summary>
     /// <param name="query">The first characters of the statement, as read.</param>
     /// <param name="truncated">Whether the read cut it.</param>
-    /// <param name="withheld">The visitor's withheld schemas, or <see langword="null" /> when they could not be read.</param>
-    public static string? Present(string? query, bool truncated, IReadOnlySet<string>? withheld)
+    /// <param name="screen">What this visitor's statements are checked against.</param>
+    public static string? Present(string? query, bool truncated, StatementScreen screen)
     {
-        if (string.IsNullOrEmpty(query))
-        {
-            return null;
-        }
-
-        if (withheld is null)
-        {
-            return Withheld;
-        }
-
-        string text = truncated ? DropOpenTail(query) : query;
-        string masked = PostgresErrorText.Redact(text, withheld) ?? text;
-
-        return truncated ? masked.TrimEnd() + Cut : masked;
+        SessionStatementText shown = SessionQueryText.Present(query, truncated, screen);
+        return shown.Text ?? (shown.Note is { } note ? "(" + note + ")" : null);
     }
-
-    /// <summary><paramref name="text" /> without an open quoted name, an open literal, or the identifier it ends in.</summary>
-    internal static string DropOpenTail(string text)
-    {
-        ArgumentNullException.ThrowIfNull(text);
-
-        string result = CutAtOpenQuote(CutAtOpenQuote(text, '"'), '\'');
-
-        int end = result.Length;
-        while (end > 0 && IsNameCharacter(result[end - 1]))
-        {
-            end--;
-        }
-
-        return result[..end];
-    }
-
-    private static string CutAtOpenQuote(string text, char quote)
-    {
-        int count = 0;
-        int last = -1;
-
-        for (int i = 0; i < text.Length; i++)
-        {
-            if (text[i] == quote)
-            {
-                count++;
-                last = i;
-            }
-        }
-
-        return count % 2 == 1 ? text[..last] : text;
-    }
-
-    private static bool IsNameCharacter(char c) => char.IsLetterOrDigit(c) || c is '_' or '$' || c >= '\u0080';
 }

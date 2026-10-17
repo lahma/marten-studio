@@ -1,4 +1,5 @@
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Schema;
 
 namespace MartenStudio.Services.Database;
 
@@ -385,6 +386,44 @@ internal sealed class DatabaseGate
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The document tables, by name, of every other registered store whose store policy refuses this visitor: what a
+    /// statement naming one would tell them - that store's alias, which is not theirs to learn (D27). A store missing
+    /// from what was asked is shown as the classifier has it, and so is not among them.
+    /// </summary>
+    public IReadOnlyList<string> RefusedStoreDocumentTables()
+    {
+        List<string> tables = [];
+
+        foreach (StoreDeclarations store in Classifier.Stores)
+        {
+            if (!IsOtherStore(store.StoreKey)
+                || !otherStores.TryGetValue(store.StoreKey, out DatabaseStoreAccess? access)
+                || access.IdentityVisible)
+            {
+                continue;
+            }
+
+            foreach ((string key, MartenDeclaredObject value) in store.Declarations.Objects)
+            {
+                if (value.Kind != MartenObjectKind.DocumentTable)
+                {
+                    continue;
+                }
+
+                int dot = key.IndexOf('.', StringComparison.Ordinal);
+                string table = dot >= 0 ? key[(dot + 1)..] : key;
+
+                if (table.Length > 0 && !tables.Contains(table, StringComparer.OrdinalIgnoreCase))
+                {
+                    tables.Add(table);
+                }
+            }
+        }
+
+        return tables;
     }
 
     private bool IsOtherStore(string key) =>

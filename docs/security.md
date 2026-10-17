@@ -142,10 +142,18 @@ said to be one it cannot see into, never left out.
 
 The refusal lives in the service (`ISessionActivityService.GetDetailsAsync` refuses as a value, and every
 refusal is audited); on the Health page each such piece of evidence is withheld per visitor. Statements are
-never part of a health finding at all: they appear only on Database › Sessions, masked for the schemas that
-visitor may not see, cut before a half-written name, and withheld outright when the visitor's schemas cannot
-be checked, when the statement names a document type `IsDocumentTypeVisible` hides, or — while hiding is
-configured — when it names a Marten document table no registered store declares.
+never part of a health finding at all: they appear only on Database › Sessions and in the Projections screen's
+high-water Explain, by one rule for both — masked for the schemas that visitor may not see, cut before a
+half-written name, and withheld outright when the visitor's schemas cannot be checked, when the statement names a
+document type `IsDocumentTypeVisible` hides, while hiding is configured when it names a Marten document table no
+registered store declares, or when it names a document table of another registered store whose store policy
+refuses the visitor (its alias is in the table's name).
+
+What a shown statement can still carry is everything that is not a schema's or a table's name: literals and
+bound values as the application wrote them — a tenant id in `where tenant_id = 'acme'`, an e-mail address, an
+amount, a document's JSON in an `insert` — column and JSON member names, a schema it reaches only through its own
+`search_path` (an unqualified name is not a qualifier to mask), and any name it builds in dynamic SQL. Statements
+are other people's source text; grant `ViewDatabaseActivity` to the people you would let read them.
 
 Both are audited by signature, never per poll. The first read of session details per circuit, store and
 database is one Activity entry and event 9245. On the Health page, the first report in a circuit that shows

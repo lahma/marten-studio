@@ -104,8 +104,8 @@ internal sealed partial class ProjectionDataService
         IReadOnlyList<HighWaterSuspect> shown = [];
         if (details)
         {
-            IReadOnlySet<string>? withheldSchemas = await WithheldSchemasAsync(whole, resolved, cancellationToken).ConfigureAwait(false);
-            shown = [.. sessions.Select(x => x with { Query = ExplainQueryText.Present(x.Query, x.QueryTruncated, withheldSchemas) })];
+            StatementScreen screen = await StatementScreenAsync(whole, resolved, cancellationToken).ConfigureAwait(false);
+            shown = [.. sessions.Select(x => x with { Query = ExplainQueryText.Present(x.Query, x.QueryTruncated, screen) })];
         }
 
         HighWaterExplanation explanation = new()
@@ -217,15 +217,18 @@ internal sealed partial class ProjectionDataService
     }
 
     /// <summary>
-    /// The visitor's withheld schemas, from the database browser's own gate - or <see langword="null" /> when they could
-    /// not be read, which withholds every statement rather than showing one unmasked.
+    /// What this visitor's statements are checked against - the same screen Database › Sessions uses, from the database
+    /// browser's own gate - or <see cref="StatementScreen.Unchecked" /> when the gate could not be read, which withholds
+    /// every statement rather than showing one unmasked.
     /// </summary>
-    private async Task<IReadOnlySet<string>?> WithheldSchemasAsync(StudioScope whole, ResolvedScope resolved, CancellationToken cancellationToken)
+    private async Task<StatementScreen> StatementScreenAsync(StudioScope whole, ResolvedScope resolved, CancellationToken cancellationToken)
     {
+        bool hidesDocumentTypes = options.Value.IsDocumentTypeVisible is not null;
+
         try
         {
             DatabaseGateRead gate = await databaseAccess.GateAsync(whole, resolved, cancellationToken).ConfigureAwait(false);
-            return gate.Succeeded ? gate.Gate.WithheldSchemas : null;
+            return StatementScreen.Of(gate, hidesDocumentTypes);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -234,7 +237,7 @@ internal sealed partial class ProjectionDataService
                 logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask the Explain's statements for {DatabaseId}", resolved.Database.Id.Identity);
             }
 
-            return null;
+            return StatementScreen.Unchecked(hidesDocumentTypes);
         }
     }
 
@@ -243,7 +246,7 @@ internal sealed partial class ProjectionDataService
     {
         IReadOnlyStoreOptions storeOptions = resolved.Store.Options;
         string schema = storeOptions.Events.DatabaseSchemaName;
-        int lockId = storeOptions.Events.Daemon is DaemonSettings settings ? settings.DaemonLockId : DaemonCheckConfiguration.DefaultDaemonLockId;
+        int lockId = DaemonCheckConfiguration.DaemonLockIdOf(storeOptions);
         IReadOnlyList<long> lockKeys = DaemonCheckConfiguration.LockKeysFor(schema, DaemonCheckConfiguration.AsyncShardsOf(resolved.Store), lockId);
 
         MartenStudioOptions studio = options.Value;

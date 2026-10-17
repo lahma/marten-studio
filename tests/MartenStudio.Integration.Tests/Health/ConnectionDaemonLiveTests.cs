@@ -122,13 +122,16 @@ public class ConnectionDaemonLiveTests(PostgresFixture postgres)
     private static readonly Version LeadershipLockIsTheSessions = new(9, 41);
 
     /// <summary>
-    /// The HotCold leader. At Marten 9.39 and 9.40 (<c>Events.UseAdvisoryLockTransaction</c> on by default) it holds
-    /// its leadership with <c>pg_try_advisory_xact_lock</c> in a transaction it never ends - with a snapshot, measured -
-    /// and re-polls its locks about once a second, so it is <c>idle in transaction</c> for a second at a time: C04's own
-    /// read lists it, holding Marten's daemon lock, and judges it by its real idle time, which is never a minute. From
-    /// 9.41 the lock is the session's and the leader is merely idle, so C04 never lists it. Each branch proves its own
-    /// half against the leader it found; neither is judged at a shifted clock, because a session that changes every
-    /// second has no idle time to project.
+    /// The HotCold leader, as this class's host runs it - <c>LeadershipPollingTime</c> one second and
+    /// <c>Events.UseMonitoredAdvisoryLock</c> at its default, on. At Marten 9.39 and 9.40
+    /// (<c>Events.UseAdvisoryLockTransaction</c> on by default) it holds its leadership with
+    /// <c>pg_try_advisory_xact_lock</c> in a transaction it never ends - with a snapshot, measured - and the lock
+    /// monitoring uses that connection about once a second, so it is <c>idle in transaction</c> for a second at a time:
+    /// C04's own read lists it, holding Marten's daemon lock, and judges it by its real idle time, which is never a
+    /// minute. From 9.41 the lock is the session's and the leader is merely idle, so C04 never lists it. Each branch
+    /// proves its own half against the leader it found; neither is judged at a shifted clock, because a session that
+    /// changes every second has no idle time to project. (With monitoring off the leader sits idle in its transaction
+    /// for as long as it leads, and C04 does raise it - measured, and said in docs/health/connections.md.)
     /// </summary>
     [PostgresFact]
     [HealthQuiet("C04")]
@@ -193,7 +196,7 @@ public class ConnectionDaemonLiveTests(PostgresFixture postgres)
                 leader.State.Should().Be("idle in transaction");
                 leader.HasTransactionId.Should().BeFalse("the leader writes nothing in its leadership transaction");
                 leader.IdleAtRead.Should().BeLessThan(ConnectionThresholds.IdleInTransactionWarning,
-                    "it re-polls its locks about once a second, so it is never idle for a minute");
+                    "the lock monitoring (Events.UseMonitoredAdvisoryLock) uses its connection about once a second here, so it is never idle for a minute");
 
                 HealthVerdict verdict = check.Evaluate(seen, HealthEvaluation.At(seen.ReadAt));
                 verdict.Findings.Should().BeEmpty("the session C04 read was idle for a second, not a minute");

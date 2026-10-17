@@ -2,12 +2,14 @@ using JasperFx;
 
 using Marten;
 
+using MartenStudio.Integration.Tests.Database;
 using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.SampleDomain.Documents;
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Health.Checks;
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
@@ -269,6 +271,91 @@ public class SessionLockNamingLiveTests(PostgresFixture postgres)
             await held.RollbackAsync(CancellationToken.None);
             await blocked;
             await waiterTransaction.RollbackAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// H3-fix2: a statement naming another registered store's document table tells a visitor that store's alias, which
+    /// is theirs only when that store's store policy passes them (D27). Two visitors read one session's statement: the
+    /// one the other store's policy refuses is shown a note, the one it passes the statement as written.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_statement_naming_a_table_of_a_store_the_visitor_may_not_see_is_withheld_from_them_alone()
+    {
+        string database = await ConnectionsLiveHost.CreateDatabaseAsync(postgres.ConnectionString, "health_sessions_other_store");
+
+        void OtherStore(StoreOptions options)
+        {
+            options.Connection(database);
+            options.DatabaseSchemaName = OtherSchema;
+            options.AutoCreateSchemaObjects = AutoCreate.All;
+            options.Schema.For<H3OtherThing>();
+        }
+
+        static void Studio(MartenStudioOptions options)
+        {
+            options.Capabilities.ViewDatabaseActivity = true;
+            options.StoreAuthorizationPolicy = "store";
+        }
+
+        ResourcePolicy onlyDefault = new(static resource => resource.StoreName == "default");
+
+        await using ConnectionsLiveHost refused = await ConnectionsLiveHost.CreateAsync(
+            database,
+            studio: Studio,
+            services: services =>
+            {
+                services.AddMartenStore<IH3OtherStore>(OtherStore);
+                services.AddSingleton<IAuthorizationService>(onlyDefault);
+            });
+
+        await using ConnectionsLiveHost passed = await ConnectionsLiveHost.CreateAsync(
+            database,
+            studio: Studio,
+            services: services =>
+            {
+                services.AddMartenStore<IH3OtherStore>(OtherStore);
+                services.AddSingleton<IAuthorizationService>(new ResourcePolicy(static _ => true));
+            });
+
+        await refused.Provider.GetRequiredService<IH3OtherStore>().Storage.ApplyAllConfiguredChangesToDatabaseAsync();
+
+        string others = SqlIdentifier.Qualify(OtherSchema, "mt_doc_h3otherthing");
+
+        await using NpgsqlConnection reader = await refused.OpenAsync();
+        await using NpgsqlTransaction reading = await reader.BeginTransactionAsync(Token);
+        await ExecuteAsync(reader, reading, $"select count(*) from {others} where data ->> 'Owner' = 'acme'");
+        int readerPid = reader.ProcessID;
+
+        try
+        {
+            await using (AsyncServiceScope circuit = refused.Circuit())
+            {
+                SessionActivityDetails details = await circuit.ServiceProvider.GetRequiredService<ISessionActivityService>()
+                    .GetDetailsAsync(refused.Scope, Token);
+
+                details.Refusal.Should().Be(DatabaseRefusal.None, details.Reason);
+                SessionStatementText statement = details.Sessions.Single(x => x.ProcessId == readerPid).Statement;
+                statement.Text.Should().BeNull("the other store's alias is in its table's name, and its policy refuses this visitor");
+                statement.Note.Should().Be(SessionQueryText.RefusedStoreNote);
+
+                onlyDefault.Calls.Should().Contain(static x => x.Resource.StoreName == nameof(IH3OtherStore) && x.Resource.TenantId == null,
+                    "the other store's own policy was asked, for the database as a whole");
+            }
+
+            await using (AsyncServiceScope circuit = passed.Circuit())
+            {
+                SessionActivityDetails details = await circuit.ServiceProvider.GetRequiredService<ISessionActivityService>()
+                    .GetDetailsAsync(passed.Scope, Token);
+
+                details.Sessions.Single(x => x.ProcessId == readerPid).Statement.Text.Should().Contain("mt_doc_h3otherthing",
+                    "a visitor that store's policy passes is shown the statement")
+                    .And.Contain("'acme'", "and its literals as written - what docs/security.md says a statement can still carry");
+            }
+        }
+        finally
+        {
+            await reading.RollbackAsync(CancellationToken.None);
         }
     }
 

@@ -17,9 +17,48 @@ public class SessionQueryTextTests
     private static readonly DatabaseObjectClassifier NotHiding = DatabaseTestStores.Classifier(isVisible: null);
 
     private static SessionStatementText Present(string query, bool truncated = false, IReadOnlySet<string>? withheld = null) =>
-        SessionQueryText.Present(query, truncated, withheld ?? Withheld, NotHiding, hidesDocumentTypes: false);
+        Screened(query, truncated, withheld ?? Withheld, NotHiding, hidesDocumentTypes: false);
 
     private static string? Shown(string query, bool truncated = false) => Present(query, truncated).Text;
+
+    /// <summary>The one rule, through a screen with no store refused.</summary>
+    private static SessionStatementText Screened(
+        string query,
+        bool truncated,
+        IReadOnlySet<string>? withheld,
+        DatabaseObjectClassifier? classifier,
+        bool hidesDocumentTypes) =>
+        SessionQueryText.Present(query, truncated, new StatementScreen(withheld, classifier, hidesDocumentTypes, []));
+
+    /// <summary>
+    /// H3-fix2: another registered store's document table is <c>mt_doc_&lt;alias&gt;</c>, and that store's alias is not
+    /// for a visitor its store policy refuses (D27) - so a statement naming one of its tables is withheld with a note of
+    /// its own, and one naming only what the visitor may see is shown.
+    /// </summary>
+    [Theory]
+    [InlineData("select d.data from other_db.mt_doc_dbinvoice as d where d.id = $1")]
+    [InlineData("select count(*) from \"other_db\".\"mt_doc_dbinvoice\"")]
+    [InlineData("select count(*) from MT_DOC_DBINVOICE")]
+    public void A_statement_naming_a_refused_stores_table_is_withheld_with_a_note_of_its_own(string query)
+    {
+        StatementScreen refused = new(new HashSet<string>(), NotHiding, HidesDocumentTypes: false, ["mt_doc_dbinvoice"]);
+
+        SessionStatementText text = SessionQueryText.Present(query, truncated: false, refused);
+        text.Text.Should().BeNull("another store's alias is not this visitor's to learn");
+        text.Note.Should().Be(SessionQueryText.RefusedStoreNote);
+
+        SessionQueryText.Present(query, truncated: false, refused with { RefusedStoreTables = [] }).Text
+            .Should().Be(query, "a visitor that store's policy passes sees the statement as written");
+        SessionQueryText.Present("select d.data from studio_db.mt_doc_dbcustomer as d", truncated: false, refused).Text
+            .Should().NotBeNull("only the refused store's tables are a reason");
+    }
+
+    [Fact]
+    public void The_screen_of_a_gate_that_could_not_be_read_withholds_everything()
+    {
+        SessionQueryText.Present("select 1", truncated: false, StatementScreen.Of(null, hidesDocumentTypes: false)).Note
+            .Should().Be(SessionQueryText.SchemasUncheckedNote);
+    }
 
     [Theory]
     [InlineData("select * from hr.salaries where id = $1", "select * from ‹withheld›.salaries where id = $1")]
@@ -36,7 +75,7 @@ public class SessionQueryTextTests
     [Fact]
     public void Nothing_is_shown_when_the_withheld_schemas_cannot_be_read()
     {
-        SessionStatementText text = SessionQueryText.Present("select * from hr.salaries", truncated: false, withheld: null, Hiding, hidesDocumentTypes: true);
+        SessionStatementText text = Screened("select * from hr.salaries", truncated: false, withheld: null, Hiding, hidesDocumentTypes: true);
 
         text.Text.Should().BeNull("an unmasked statement is never the fallback");
         text.Note.Should().Contain("could not be checked");
@@ -106,7 +145,7 @@ public class SessionQueryTextTests
     [InlineData("insert into studio_db.mt_doc_dbsecret (data, id) values ($1, $2)")]
     public void A_statement_that_names_a_hidden_types_table_is_withheld_with_a_note(string query)
     {
-        SessionStatementText text = SessionQueryText.Present(query, truncated: false, new HashSet<string>(), Hiding, hidesDocumentTypes: true);
+        SessionStatementText text = Screened(query, truncated: false, new HashSet<string>(), Hiding, hidesDocumentTypes: true);
 
         text.Text.Should().BeNull("IsDocumentTypeVisible hides a type from everybody, whatever schema it is in");
         text.Note.Should().Be(SessionQueryText.HiddenTypeNote);
@@ -119,12 +158,12 @@ public class SessionQueryTextTests
     [InlineData("select * from other_schema.mt_doc_dbcustomer")]
     public void While_types_may_be_hidden_a_statement_naming_a_document_table_nobody_declares_is_withheld(string query)
     {
-        SessionStatementText text = SessionQueryText.Present(query, truncated: false, new HashSet<string>(), Hiding, hidesDocumentTypes: true);
+        SessionStatementText text = Screened(query, truncated: false, new HashSet<string>(), Hiding, hidesDocumentTypes: true);
 
         text.Text.Should().BeNull("a type Marten has not learned may be a hidden one, and a tenant partition's name is a tenant id");
         text.Note.Should().Be(SessionQueryText.UndeclaredTableNote);
 
-        SessionQueryText.Present(query, truncated: false, new HashSet<string>(), NotHiding, hidesDocumentTypes: false).Text
+        Screened(query, truncated: false, new HashSet<string>(), NotHiding, hidesDocumentTypes: false).Text
             .Should().Be(query, "with nothing hidden there is nothing to protect");
     }
 
@@ -135,18 +174,18 @@ public class SessionQueryTextTests
     [InlineData("select * from other_db.mt_doc_dbinvoice")]
     public void A_statement_naming_only_declared_visible_tables_is_shown(string query)
     {
-        SessionQueryText.Present(query, truncated: false, new HashSet<string>(), Hiding, hidesDocumentTypes: true).Text.Should().Be(query);
+        Screened(query, truncated: false, new HashSet<string>(), Hiding, hidesDocumentTypes: true).Text.Should().Be(query);
     }
 
     [Fact]
     public void While_types_may_be_hidden_nothing_is_shown_without_every_stores_declarations()
     {
-        SessionStatementText text = SessionQueryText.Present("select 1", truncated: false, new HashSet<string>(), classifier: null, hidesDocumentTypes: true);
+        SessionStatementText text = Screened("select 1", truncated: false, new HashSet<string>(), classifier: null, hidesDocumentTypes: true);
 
         text.Text.Should().BeNull("a statement cannot be checked against declarations that could not be read (fail closed)");
         text.Note.Should().Be(SessionQueryText.UnclassifiedNote);
 
-        SessionQueryText.Present("select 1", truncated: false, new HashSet<string>(), classifier: null, hidesDocumentTypes: false).Text
+        Screened("select 1", truncated: false, new HashSet<string>(), classifier: null, hidesDocumentTypes: false).Text
             .Should().Be("select 1", "with no type hidden, the classifier is not what protects a statement");
     }
 }
