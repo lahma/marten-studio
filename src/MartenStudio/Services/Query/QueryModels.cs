@@ -2,7 +2,7 @@ using MartenStudio.Internal.Sql;
 
 namespace MartenStudio.Services.Query;
 
-/// <summary>Which of the Query page's two modes a request is for.</summary>
+/// <summary>Which of the Query page's three modes a request is for.</summary>
 internal enum QueryMode
 {
     /// <summary>
@@ -14,6 +14,13 @@ internal enum QueryMode
     /// The read-only SQL console. Gated on <see cref="MartenStudioCapabilities.RunSql" />.
     /// </summary>
     Sql,
+
+    /// <summary>
+    /// A typed LINQ predicate over one document type, parsed by JasperFx's Dynamic LINQ under the studio's
+    /// allow-list and translated by Marten's own <c>Query&lt;T&gt;()</c>. Gated on
+    /// <see cref="MartenStudioCapabilities.RunLinqQueries" />, and present only on Marten 9.48+ (F7).
+    /// </summary>
+    Linq,
 }
 
 /// <summary>

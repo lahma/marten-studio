@@ -10511,3 +10511,132 @@ a.ms-schema-health-mark:focus-visible {
 .ms-natural-key-none {
     margin: 0 0 var(--ms-space-md);
 }
+
+/* ==========================================================================
+   QUERY-LINQ. LINQ mode on the Query page (F7)
+
+   Appended at the end, after the 0.4 sections before it (D26). Every rule is
+   new and prefixed ms-query-linq-, except one deliberate re-declaration: the
+   mode tab row wraps, because a third tab does not fit beside the other two
+   on a phone, and this wins over the QUERY section's .ms-query-modes by
+   source order. The verdict badges are the documents browser's own
+   (.ms-verdict-badge-green / -amber / -red); the advice panel only lays them
+   out. The results table is inside a TableScroll (D25).
+   ========================================================================== */
+
+.ms-query-modes {
+    flex-wrap: wrap;
+}
+
+.ms-query-linq-warning {
+    font-size: var(--ms-font-size-sm);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-query-linq-unavailable {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-query-linq-order {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-query-linq-orderby {
+    width: 100%;
+    max-width: 640px;
+}
+
+.ms-query-linq-order-error {
+    margin-top: var(--ms-space-xs);
+}
+
+.ms-query-linq-members {
+    margin-bottom: 0;
+}
+
+.ms-query-linq-error {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-query-linq-advice {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    margin: var(--ms-space-md) 0;
+}
+
+.ms-query-linq-advice-title {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+    margin: 0 0 var(--ms-space-sm);
+}
+
+.ms-query-linq-verdicts {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-query-linq-verdict {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-query-linq-verdict-subject {
+    overflow-wrap: anywhere;
+}
+
+.ms-query-linq-verdict-reason {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.ms-query-linq-suggestion {
+    flex: 1 1 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-query-linq-suggestion .ms-code-inline {
+    overflow-wrap: anywhere;
+}
+
+.ms-query-linq-scans,
+.ms-query-linq-advice-note {
+    font-size: var(--ms-font-size-xs);
+    margin: var(--ms-space-sm) 0 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-query-linq-not-inlined {
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-query-linq-pager {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-query-linq-range {
+    font-size: var(--ms-font-size-xs);
+    margin-right: auto;
+}

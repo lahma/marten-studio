@@ -1,0 +1,796 @@
+@using System.Globalization
+@using Microsoft.Extensions.Logging
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Query
+@implements IAsyncDisposable
+@inject ILinqQueryService Linq
+@inject StudioState State
+@inject ToastService Toasts
+@inject IOptions<MartenStudioOptions> Options
+@inject ILogger<LinqQueryPanel> Logger
+
+@*
+    LINQ mode (F7): the predicate the host's own code would write, parsed by JasperFx's Dynamic LINQ under the
+    studio's allow-list and handed to Marten's own Query<T>() - so the tenant, the soft-delete filter and a
+    subclass's mt_doc_type filter are Marten's, not the studio's.
+
+    Gated on RunLinqQueries, asked like a write (D13), and present only on Marten 9.48+. The panel says which of
+    the two is missing; the service refuses regardless of what is rendered (AGENTS.md hard rule 5). Every handler
+    is a Task, every failure is put on screen (hard rule 6), and every list is keyed by position rather than by a
+    value that could repeat - two tenants can hold a document with the same id, and a repeated @key ends the
+    circuit.
+*@
+
+<div class="ms-query-mode-panel ms-query-panel-linq">
+    @if (status is null)
+    {
+        @if (loadError is { Length: > 0 })
+        {
+            <ErrorAlert Message="@loadError" OnRetry="LoadAsync" />
+        }
+        else
+        {
+            <LoadingSpinner />
+        }
+    }
+    else if (status.Availability is LinqAvailability.CapabilityOff or LinqAvailability.ReadOnly)
+    {
+        <CapabilityDisabled Capability="@nameof(StudioCapability.RunLinqQueries)" Action="Running LINQ queries" />
+        <p class="ms-muted ms-query-linq-warning">@RunLinqWarning</p>
+    }
+    else if (!status.IsAvailable)
+    {
+        <div class="ms-alert ms-alert-info ms-query-linq-unavailable" role="note">
+            <div class="ms-alert-content">
+                <p>@status.Message</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <WriteRefusal Refused="@(!status.MayRun)" Capability="@nameof(StudioCapability.RunLinqQueries)" />
+
+        <div class="ms-query-toolbar">
+            <label class="ms-form-label" for="ms-query-linq-type">Document type</label>
+            <select id="ms-query-linq-type" class="ms-select ms-query-type" value="@alias" @onchange="OnTypeChangedAsync">
+                @for (int ordinal = 0; ordinal < status.Types.Count; ordinal++)
+                {
+                    LinqDocumentTypeInfo type = status.Types[ordinal];
+                    <option value="@type.Alias" title="@type.FullTypeName" @key="ordinal">
+                        @OptionLabel(type)
+                    </option>
+                }
+            </select>
+
+            <label class="ms-form-label" for="ms-query-linq-page-size">Rows</label>
+            <select id="ms-query-linq-page-size" class="ms-select ms-query-page-size" value="@pageSize" @onchange="OnPageSizeChangedAsync">
+                @foreach (int size in PageSizes)
+                {
+                    <option value="@size" @key="size">@size.ToString(CultureInfo.InvariantCulture)</option>
+                }
+            </select>
+
+            @if (SelectedType is { SoftDeleted: true })
+            {
+                <label class="ms-form-label" for="ms-query-linq-deleted">Deleted</label>
+                <select id="ms-query-linq-deleted" class="ms-select ms-query-deleted" value="@deleted" @onchange="OnDeletedChangedAsync">
+                    <option value="@nameof(DeletedFilter.Exclude)">Live only</option>
+                    <option value="@nameof(DeletedFilter.Include)">Live and deleted</option>
+                    <option value="@nameof(DeletedFilter.Only)">Deleted only</option>
+                </select>
+            }
+        </div>
+
+        <QueryEditor EditorId="ms-query-linq-where"
+                     Label="LINQ predicate"
+                     Placeholder="@WherePlaceholder"
+                     Rows="4"
+                     Value="@where"
+                     ValueChanged="OnWhereChangedAsync"
+                     Running="running"
+                     ElapsedMilliseconds="elapsedMilliseconds"
+                     Disabled="@(status.Types.Count == 0)"
+                     ErrorMessage="@whereError"
+                     ErrorPosition="whereErrorPosition"
+                     Status="@statusText"
+                     OnRun="RunAsync"
+                     OnCancel="CancelAsync"
+                     OnSave="SaveAsync" />
+
+        <div class="ms-query-linq-order">
+            <label class="ms-form-label" for="ms-query-linq-orderby">Order by</label>
+            <input id="ms-query-linq-orderby"
+                   class="ms-input ms-input-mono ms-query-linq-orderby"
+                   type="text"
+                   spellcheck="false"
+                   autocomplete="off"
+                   placeholder="Total desc, Name"
+                   value="@orderBy"
+                   aria-describedby="ms-query-linq-orderby-status"
+                   @onchange="OnOrderByChangedAsync" />
+            <div id="ms-query-linq-orderby-status" class="ms-query-linq-order-status" role="status" aria-live="polite">
+                @if (orderError is { Length: > 0 })
+                {
+                    <div class="ms-alert ms-alert-error ms-query-error ms-query-linq-order-error" role="alert">
+                        <div class="ms-query-error-message">@orderError</div>
+                        @if (Caret(orderBy, orderErrorPosition) is { } caret)
+                        {
+                            <pre class="ms-code ms-query-caret"><code>@caret.Source
+@caret.Line</code></pre>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        @if (SelectedType is { Members.Count: > 0 } picked)
+        {
+            <p class="ms-muted ms-query-note ms-query-linq-members">
+                Members of <code>@picked.TypeName</code> include @(string.Join(", ", picked.Members) + (picked.Members.Count >= 12 ? ", …" : "."))
+            </p>
+        }
+
+        <p class="ms-muted ms-query-note ms-query-linq-note">
+            The predicate is parsed by JasperFx's Dynamic LINQ under the studio's allow-list and handed to Marten's own
+            <code>Query&lt;T&gt;()</code>, so the tenant, soft deletes and a subclass's filter are Marten's. It may compare
+            members (<code>==</code> <code>!=</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code>),
+            combine them with <code>and</code>, <code>or</code> and <code>not</code>, call <code>StartsWith</code>,
+            <code>EndsWith</code>, <code>Contains</code>, <code>ToLower</code> on text and <code>Any</code>, <code>All</code>,
+            <code>Count</code> and <code>Contains</code> on a collection - <code>Items.Any(Quantity &gt; 5)</code>. Values are
+            literals: <code>"text"</code>, <code>42</code>, <code>3.5m</code>, <code>true</code>, <code>null</code>. No arithmetic,
+            no type names and no methods of your own. Pages are read with <code>OFFSET</code> and stop at row
+            @LinqQueryLimits.MaxOffset.ToString("N0", CultureInfo.InvariantCulture), inside a read-only transaction with a
+            statement timeout.
+        </p>
+
+        @if (generalError is { Length: > 0 })
+        {
+            <div class="ms-alert ms-alert-error ms-query-linq-error" role="alert">
+                <div class="ms-alert-content"><p>@generalError</p></div>
+            </div>
+        }
+
+        @if (status.Types.Count == 0)
+        {
+            <div class="ms-empty ms-query-empty">
+                <p class="ms-empty-title">No document type to query</p>
+                <p class="ms-empty-description">
+                    This store registered no document type you are allowed to see. Marten learns them from the host's
+                    <code>StoreOptions</code>; <code>MartenStudioOptions.IsDocumentTypeVisible</code> can also be hiding them.
+                </p>
+            </div>
+        }
+        else if (result is { } current)
+        {
+            <QueryStats RowCount="current.Rows.Count"
+                        DurationMilliseconds="current.Duration.TotalMilliseconds"
+                        Truncated="current.HasMore"
+                        Chips="@Chips(current)"
+                        Sql="@current.Sql"
+                        SqlNote="@SqlNote(current)"
+                        Plan="@plan?.PlanJson"
+                        PlanUnavailable="@PlanNote(plan)"
+                        Messages="@Messages(current)" />
+
+            @if (advice is { Verdicts.Count: > 0 } shown)
+            {
+                <section class="ms-query-linq-advice" aria-labelledby="ms-query-linq-advice-title">
+                    <h2 id="ms-query-linq-advice-title" class="ms-query-linq-advice-title">
+                        Index advice
+                        <span class="ms-verdict-badge ms-verdict-badge-@Level(shown.Worst)">@Level(shown.Worst)</span>
+                    </h2>
+                    <ul class="ms-query-linq-verdicts">
+                        @for (int ordinal = 0; ordinal < shown.Verdicts.Count; ordinal++)
+                        {
+                            LinqIndexVerdict verdict = shown.Verdicts[ordinal];
+                            <li class="ms-query-linq-verdict" @key="ordinal">
+                                <span class="ms-verdict-badge ms-verdict-badge-@Level(verdict.Verdict.Level)">@Level(verdict.Verdict.Level)</span>
+                                <code class="ms-code-inline ms-query-linq-verdict-subject">@verdict.Subject</code>
+                                <span class="ms-query-linq-verdict-reason">@verdict.Verdict.Reason</span>
+                                @if (verdict.Verdict.Suggestion is { Length: > 0 } line)
+                                {
+                                    <div class="ms-query-linq-suggestion">
+                                        <code class="ms-code-inline">@line</code>
+                                        <CopyButton Value="@line" Label="Copy the StoreOptions line" />
+                                    </div>
+                                }
+                            </li>
+                        }
+                    </ul>
+
+                    @if (shown.Scans.Count > 0)
+                    {
+                        <p class="ms-muted ms-query-linq-scans">Postgres plans: @(string.Join("; ", shown.Scans.Select(DescribeScan)) + ".")</p>
+                    }
+
+                    @if (shown.Note is { Length: > 0 } note)
+                    {
+                        <p class="ms-muted ms-query-linq-advice-note">@note</p>
+                    }
+                </section>
+            }
+
+            @if (current.Succeeded)
+            {
+                @if (current.Rows.Count == 0)
+                {
+                    <div class="ms-empty ms-query-empty">
+                        <p class="ms-empty-title">No document matched</p>
+                        <p class="ms-empty-description">The query ran; nothing this session can see satisfies it.</p>
+                    </div>
+                }
+                else
+                {
+                    <TableScroll Label="LINQ query results table">
+                        <table class="ms-table ms-query-linq-rows">
+                            <thead>
+                                <tr>
+                                    <th scope="col">id</th>
+                                    <th scope="col">document</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (int ordinal = 0; ordinal < current.Rows.Count; ordinal++)
+                                {
+                                    LinqQueryRow row = current.Rows[ordinal];
+                                    <tr class="ms-table-row" @key="current.Offset + ordinal">
+                                        <td class="ms-table-cell ms-table-cell-mono ms-query-row-id">
+                                            @if (row.Id is { Length: > 0 })
+                                            {
+                                                <a class="ms-details-link" href="@DocumentLink(current.Alias, row.Id)">@row.Id</a>
+                                            }
+                                            @if (row.TenantId is { Length: > 0 } rowTenant)
+                                            {
+                                                <span class="ms-chip ms-query-row-tenant">@rowTenant</span>
+                                            }
+                                            @if (row.IsDeleted == true)
+                                            {
+                                                <span class="ms-chip ms-chip-warning ms-query-row-deleted">deleted</span>
+                                            }
+                                        </td>
+                                        <td class="ms-table-cell ms-query-row-document">
+                                            @if (row.Json is { } json)
+                                            {
+                                                <JsonView Json="@json"
+                                                          Label="Document"
+                                                          AutoExpandDepth="1"
+                                                          ShowSearch="false"
+                                                          ShowToolbar="false"
+                                                          DownloadFileName="document.json" />
+                                            }
+                                            else
+                                            {
+                                                <span class="ms-muted ms-query-linq-not-inlined">@row.NotInlined</span>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                }
+
+                <div class="ms-query-linq-pager">
+                    <span class="ms-muted ms-query-linq-range">@Range(current)</span>
+                    <button type="button" class="ms-btn ms-btn-sm" disabled="@(running || current.Offset == 0)" @onclick="PreviousPageAsync">Previous</button>
+                    <button type="button" class="ms-btn ms-btn-sm" disabled="@(running || !current.HasMore || current.Offset + current.PageSize > LinqQueryLimits.MaxOffset)" @onclick="NextPageAsync">Next</button>
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    /// <summary>What the README says about LINQ mode, repeated where the capability is refused.</summary>
+    internal const string RunLinqWarning =
+        "LINQ mode evaluates a predicate somebody typed inside this application, under an allow-list, and reads " +
+        "any document of a type they can see. It changes nothing, and it is authorized like a write. Grant it to " +
+        "people trusted with the store's data.";
+
+    /// <summary>What an empty predicate box shows.</summary>
+    internal const string WherePlaceholder = "Status == \"Open\" && Total > 100 && Customer.Name.StartsWith(\"A\")";
+
+    private static readonly int[] PageSizes = [25, 50, 100, 250, 500];
+
+    private readonly CancellationTokenSource panelCts = new();
+
+    private CancellationTokenSource? runCts;
+
+    private LinqModeStatus? status;
+    private string? loadError;
+
+    private string? alias;
+    private string where = string.Empty;
+    private string orderBy = string.Empty;
+    private int pageSize;
+    private DeletedFilter deleted = DeletedFilter.Exclude;
+
+    private LinqQueryResult? result;
+    private ExplainResult? plan;
+    private LinqIndexAdvice? advice;
+
+    private string? whereError;
+    private int whereErrorPosition = -1;
+    private string? orderError;
+    private int orderErrorPosition = -1;
+    private string? generalError;
+    private string? statusText;
+
+    private bool running;
+    private long elapsedMilliseconds;
+
+    /// <summary>The alias the page's deep link names, applied once the types are known.</summary>
+    [Parameter]
+    public string? Alias { get; set; }
+
+    /// <summary>The predicate the page's deep link carries.</summary>
+    [Parameter]
+    public string? Where { get; set; }
+
+    /// <summary>The ordering the page's deep link carries.</summary>
+    [Parameter]
+    public string? OrderBy { get; set; }
+
+    /// <summary>Raised when the type, the predicate or the ordering changes, so the page can keep its deep link in step.</summary>
+    [Parameter]
+    public EventCallback<(string? Alias, string Where, string OrderBy)> OnChanged { get; set; }
+
+    private LinqDocumentTypeInfo? SelectedType =>
+        status?.Types.FirstOrDefault(x => string.Equals(x.Alias, alias, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnInitialized()
+    {
+        pageSize = Options.Value.DefaultPageSize;
+        alias = Alias;
+        where = Where ?? string.Empty;
+        orderBy = OrderBy ?? string.Empty;
+        State.ScopeChanged += OnScopeChangedAsync;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await State.EnsureInitializedAsync(panelCts.Token);
+        await LoadAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        await panelCts.CancelAsync();
+        panelCts.Dispose();
+
+        if (runCts is not null)
+        {
+            try
+            {
+                await runCts.CancelAsync();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The run finished and disposed it between the check and the cancel.
+            }
+
+            runCts = null;
+        }
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        result = null;
+        plan = null;
+        advice = null;
+
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        loadError = null;
+
+        if (scope is null)
+        {
+            status = new LinqModeStatus(LinqAvailability.Available, null, []);
+            return;
+        }
+
+        try
+        {
+            status = await Linq.DescribeAsync(scope, panelCts.Token);
+
+            if (status.Types.Count > 0 && !status.Types.Any(x => string.Equals(x.Alias, alias, StringComparison.OrdinalIgnoreCase)))
+            {
+                alias = status.Types[0].Alias;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The circuit is going away, or the scope moved under us.
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            status = null;
+            loadError = "You are not authorized to read this store.";
+        }
+        catch (Exception exception)
+        {
+            status = null;
+            loadError = Unexpected(exception, scope);
+        }
+    }
+
+    /// <summary>
+    /// What the page says about an exception that escaped the service: its type and nothing more, as the service says
+    /// about its own - the words go to the application log (event 9263), never to the visitor.
+    /// </summary>
+    private string Unexpected(Exception exception, StudioScope scope)
+    {
+        if (Logger.IsEnabled(LogLevel.Information))
+        {
+            Logger.LinqQueryUnexpected(exception, alias ?? string.Empty, scope.StoreKey);
+        }
+
+        return "LINQ mode failed (" + exception.GetType().Name + "). The application log has the details.";
+    }
+
+    private async Task OnTypeChangedAsync(ChangeEventArgs args)
+    {
+        alias = args.Value?.ToString();
+        deleted = DeletedFilter.Exclude;
+        result = null;
+        plan = null;
+        advice = null;
+
+        await NotifyAsync();
+    }
+
+    private Task OnPageSizeChangedAsync(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+        {
+            pageSize = parsed;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task OnDeletedChangedAsync(ChangeEventArgs args)
+    {
+        deleted = Enum.TryParse(args.Value?.ToString(), ignoreCase: true, out DeletedFilter parsed) ? parsed : DeletedFilter.Exclude;
+        result = null;
+
+        return Task.CompletedTask;
+    }
+
+    private async Task OnWhereChangedAsync(string value)
+    {
+        where = value;
+        await NotifyAsync();
+    }
+
+    private async Task OnOrderByChangedAsync(ChangeEventArgs args)
+    {
+        orderBy = args.Value?.ToString() ?? string.Empty;
+        await NotifyAsync();
+    }
+
+    private Task SaveAsync(string text)
+    {
+        // Saved queries keep one text and one alias; a LINQ query is two texts. Listed as a follow-up rather than
+        // squeezed into the Marten mode's lists, where it would be offered to the wrong editor.
+        statusText = "Saved queries do not cover LINQ mode yet; the address bar keeps this query.";
+        return Task.CompletedTask;
+    }
+
+    private async Task NotifyAsync()
+    {
+        try
+        {
+            await OnChanged.InvokeAsync((alias, where, orderBy));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await Toasts.Error("The address could not be updated (" + exception.GetType().Name + ").");
+        }
+    }
+
+    private async Task RunAsync(string text)
+    {
+        where = text;
+        await NotifyAsync();
+        await ExecuteAsync(offset: 0);
+    }
+
+    private async Task PreviousPageAsync() =>
+        await ExecuteAsync(Math.Max(0, (result?.Offset ?? 0) - (result?.PageSize ?? pageSize)));
+
+    private async Task NextPageAsync() =>
+        await ExecuteAsync((result?.Offset ?? 0) + (result?.PageSize ?? pageSize));
+
+    private async Task ExecuteAsync(int offset)
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || string.IsNullOrWhiteSpace(alias) || running)
+        {
+            return;
+        }
+
+        whereError = null;
+        whereErrorPosition = -1;
+        orderError = null;
+        orderErrorPosition = -1;
+        generalError = null;
+        statusText = null;
+
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(panelCts.Token);
+        runCts = cts;
+        running = true;
+        elapsedMilliseconds = 0;
+        _ = TickAsync(cts.Token);
+
+        try
+        {
+            LinqQueryResult run = await Linq.RunAsync(
+                scope,
+                new LinqQueryRequest(alias, where, orderBy, pageSize, offset, deleted, IncludePlan: offset == 0 && status?.MayExplain == true),
+                cts.Token);
+
+            result = run;
+
+            // The plan and the advice belong to the query, so a page turn keeps the first page's.
+            if (offset == 0)
+            {
+                plan = run.Plan ?? (status?.MayExplain == true ? null : ExplainResult.Unavailable(LinqQueryService.PlanRefusedMessage));
+                advice = run.Advice;
+            }
+
+            if (run.Refusal is { } refusal)
+            {
+                switch (refusal.Clause)
+                {
+                    case LinqClause.Where:
+                        whereError = refusal.Message;
+                        whereErrorPosition = refusal.Position;
+                        break;
+
+                    case LinqClause.OrderBy:
+                        orderError = refusal.Message;
+                        orderErrorPosition = refusal.Position;
+                        break;
+
+                    default:
+                        generalError = refusal.Message;
+                        break;
+                }
+            }
+            else if (run.Error is { } error)
+            {
+                generalError = Describe(error);
+            }
+            else
+            {
+                statusText = run.Rows.Count.ToString(CultureInfo.InvariantCulture) + " documents in " +
+                             run.Duration.TotalMilliseconds.ToString("0.##", CultureInfo.InvariantCulture) + " ms";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            statusText = "Cancelled.";
+        }
+        catch (StudioCapabilityDeniedException exception)
+        {
+            // The service refuses whatever the panel rendered: a circuit is a long-lived object a client can drive.
+            generalError = exception.Message;
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            generalError = SelectedType is { Conjoined: false } && scope.TenantId is { Length: > 0 }
+                ? LinqQueryService.WholeDatabaseRefusedMessage
+                : WritePolicyRefusal.For(nameof(StudioCapability.RunLinqQueries));
+        }
+        catch (KeyNotFoundException exception)
+        {
+            generalError = exception.Message;
+        }
+        catch (Exception exception)
+        {
+            generalError = Unexpected(exception, scope);
+            await Toasts.Error(generalError);
+        }
+        finally
+        {
+            running = false;
+            runCts = null;
+            cts.Dispose();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (runCts is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await runCts.CancelAsync();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Keeps the "Running… N ms" label moving. A <see cref="Task" /> deliberately not awaited, and never an
+    /// <c>async void</c>: everything it can throw is caught here (AGENTS.md hard rule 6).
+    /// </summary>
+    private async Task TickAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            while (running && await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+            // The circuit went away while the timer was waiting.
+        }
+    }
+
+    private string Describe(LinqQueryError error)
+    {
+        string text = error.SqlState == "57014"
+            ? "The query ran past MartenStudioOptions.QueryTimeout (" +
+              Options.Value.QueryTimeout.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s) and Postgres cancelled it."
+            : error.Message;
+
+        return error.SqlState + ": " + text + (error.Detail is { Length: > 0 } detail ? " " + detail : string.Empty);
+    }
+
+    private string DocumentLink(string documentAlias, string id) =>
+        StudioLink.To(Options.Value, "documents/" + Uri.EscapeDataString(documentAlias) + "/doc") + "?id=" + Uri.EscapeDataString(id);
+
+    private static string OptionLabel(LinqDocumentTypeInfo type) =>
+        type.Alias + " - " + type.TypeName + (type.RootAlias is { } root ? " (subclass of " + root + ")" : string.Empty);
+
+    private static string Level(IndexVerdictLevel level) => level.ToString().ToLowerInvariant();
+
+    private static string DescribeScan(LinqPlanScan scan) =>
+        scan.NodeType + (scan.Relation is { } relation ? " on " + relation : string.Empty) +
+        (scan.Index is { } index ? " using " + index : string.Empty);
+
+    private static string Range(LinqQueryResult current) =>
+        current.Rows.Count == 0
+            ? "No rows"
+            : "Rows " + (current.Offset + 1).ToString("N0", CultureInfo.InvariantCulture) + "–" +
+              (current.Offset + current.Rows.Count).ToString("N0", CultureInfo.InvariantCulture) +
+              (current.HasMore ? ", more follow" : string.Empty);
+
+    /// <summary>The chips beside the row count: which tenant, and what happened to soft-deleted rows. Each text is unique.</summary>
+    internal static IReadOnlyList<(string Text, bool Warning)> Chips(LinqQueryResult result)
+    {
+        List<(string Text, bool Warning)> chips = [];
+        MartenQueryScope scope = result.Scope ?? MartenQueryScope.Plain;
+
+        if (scope.CrossTenant)
+        {
+            chips.Add(("all tenants", true));
+        }
+        else if (scope.TenantId is { Length: > 0 } tenant)
+        {
+            chips.Add(("tenant " + tenant, false));
+        }
+
+        if (scope.SoftDeleted)
+        {
+            chips.Add(scope.Deleted switch
+            {
+                DeletedFilter.Only => ("deleted only", true),
+                DeletedFilter.Include => ("live and deleted", true),
+                _ => ("live only", false),
+            });
+        }
+
+        if (result.BudgetSpent)
+        {
+            chips.Add(("text budget spent", true));
+        }
+
+        return chips;
+    }
+
+    private static string SqlNote(LinqQueryResult result)
+    {
+        if (result.Sql.Length == 0)
+        {
+            return "The query never reached Marten, so there is no statement to show.";
+        }
+
+        string note = "This is the statement Marten built from your LINQ, character for character, and the one that ran - " +
+                      "inside the studio's read-only transaction, never through Marten's own execution path, which would " +
+                      "also create the table if it were missing. The tenant, soft-delete and subclass terms are Marten's.";
+
+        return result.Parameters.Count == 0
+            ? note
+            : note + " Parameters: " + string.Join(", ", result.Parameters.Select(static x => x.Name + " (" + x.Type + ")")) + ".";
+    }
+
+    private static string? PlanNote(ExplainResult? plan)
+    {
+        if (plan is null)
+        {
+            return "The plan is fetched with the first page.";
+        }
+
+        if (plan.Error is { } error)
+        {
+            return "The plan could not be fetched: " + error.SqlState + ": " + error.MessageText;
+        }
+
+        return plan.UnavailableReason;
+    }
+
+    private static IReadOnlyList<string> Messages(LinqQueryResult result)
+    {
+        List<string> messages = [];
+        MartenQueryScope scope = result.Scope ?? MartenQueryScope.Plain;
+
+        if (scope.CrossTenant)
+        {
+            messages.Add(
+                "This collection is tenanted and no tenant is selected, so Marten was told to read every tenant (AnyTenant()). " +
+                "Pick one in the scope selector to narrow it.");
+        }
+
+        if (scope.SoftDeleted && scope.Deleted != DeletedFilter.Exclude)
+        {
+            messages.Add(scope.Deleted == DeletedFilter.Only
+                ? "Only soft-deleted documents are shown (Marten's IsDeleted())."
+                : "Soft-deleted documents are included (Marten's MaybeDeleted()); each one carries a 'deleted' chip when Marten selects the column.");
+        }
+
+        if (result.BudgetSpent)
+        {
+            messages.Add("Some documents are listed by id only: this page's budget for document text was spent.");
+        }
+
+        if (result.Refusal is { } refusal)
+        {
+            messages.Add(refusal.Message);
+        }
+
+        if (result.Error is { } error)
+        {
+            messages.Add(error.SqlState + ": " + error.Message);
+        }
+
+        return messages;
+    }
+
+    /// <summary>The line an ordering error is on and a caret under it, the way the editor points at a predicate's.</summary>
+    internal static (string Source, string Line)? Caret(string? text, int position)
+    {
+        if (string.IsNullOrEmpty(text) || position < 0 || position > text.Length)
+        {
+            return null;
+        }
+
+        int at = Math.Min(position, text.Length - 1);
+        return (text, new string(' ', at) + "^");
+    }
+}

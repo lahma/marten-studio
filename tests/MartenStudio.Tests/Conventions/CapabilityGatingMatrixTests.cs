@@ -105,6 +105,10 @@ public class CapabilityGatingMatrixTests
         new(typeof(ISchemaDataService), nameof(ISchemaDataService.ApplyAsync), StudioCapability.ApplySchemaChanges),
 
         new(typeof(IQueryService), nameof(IQueryService.RunSqlAsync), StudioCapability.RunSql),
+
+        // F7: a read gated like a write that refuses by throwing, exactly as the console does - so it sits
+        // here, beside RunSqlAsync, and gets the same three refusals.
+        new(typeof(ILinqQueryService), nameof(ILinqQueryService.RunAsync), StudioCapability.RunLinqQueries),
     ];
 
     /// <summary>
@@ -189,6 +193,7 @@ public class CapabilityGatingMatrixTests
             "PreviewAsync", "TablesAsync",
         ],
         [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync"],
+        [typeof(ILinqQueryService)] = ["DescribeAsync"],
         [typeof(IDatabaseObjectService)] =
         [
             "GetDefinitionAsync", "GetObjectAsync", "GetOverviewAsync", "GetSequenceValueAsync", "ListAsync",
@@ -222,11 +227,14 @@ public class CapabilityGatingMatrixTests
     /// it and is a gated read above. The health report still consumes it as a redaction rather than a refusal
     /// (<c>HealthGateTests</c>, <c>ConnectionFindingGatesTests</c>).
     /// </para>
+    /// <para>
+    /// <c>CompactStreams</c> left it with EV (<c>IEventDataService.CompactStreamAsync</c>, Mutating) and
+    /// <c>RunLinqQueries</c> with F7 (<c>ILinqQueryService.RunAsync</c>), so the list is empty in 0.4; it stays as the
+    /// place a capability added before its consumer is parked.
+    /// </para>
     /// </remarks>
     private static readonly Dictionary<StudioCapability, string> Reserved = new()
     {
-        [StudioCapability.RunLinqQueries] =
-            "F7 (LINQ mode on the Query page) adds the LINQ read and moves it to GatedReads or Mutating.",
     };
 
     /// <summary>
@@ -639,6 +647,13 @@ public class CapabilityGatingMatrixTests
         if (type == typeof(SqlConsoleRequest))
         {
             return new SqlConsoleRequest("select 1");
+        }
+
+        // A request the screen would accept, so a gate that ran after the text was looked at would be caught
+        // looking rather than refusing for the text.
+        if (type == typeof(LinqQueryRequest))
+        {
+            return new LinqQueryRequest("customer", "Name == \"x\"", "Name");
         }
 
         // A schema that is not the store's own, which is what makes a database-browser call a

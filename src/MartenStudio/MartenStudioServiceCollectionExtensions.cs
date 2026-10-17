@@ -163,6 +163,10 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<ISchemaDataService, SchemaDataService>();
         services.TryAddScoped<IConfigurationService, ConfigurationService>();
         services.TryAddScoped<IQueryService, QueryService>();
+
+        // F7: LINQ mode. Scoped like every data service: it keeps one circuit's audit ledger, so a page turn
+        // is not a second opening.
+        services.TryAddScoped<ILinqQueryService, LinqQueryService>();
         services.TryAddScoped<IRelationshipDataService, RelationshipDataService>();
 
         // Projections and the async daemon. The four singletons are process-wide on purpose: one
