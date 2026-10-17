@@ -1,0 +1,268 @@
+using System.Reflection;
+
+using JasperFx.Descriptors;
+
+using Marten;
+using Marten.Storage;
+
+using MartenStudio.Services;
+using MartenStudio.Tests.Projections;
+
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+
+using Npgsql;
+
+namespace MartenStudio.Tests.Services;
+
+/// <summary>
+/// F8-D3 C4: tier 2 of tenant discovery reads a master-table or sharded database's own tenant list, and
+/// describes every other tenancy.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Both dynamic tenancies here are Marten's own classes with <c>ITenancy</c> re-listed, so that the
+/// interface's <c>BuildDatabases</c> and <c>DescribeDatabasesAsync</c> map to counting methods while every
+/// other member stays Marten's - the technique Marten's own <c>TenantPartitionedSingleDatabaseTenancy</c> uses,
+/// and <c>TenantScopedReachTests</c>' <c>ListedShardedTenancy</c>. The database handed to discovery is built
+/// by hand with the tenant list <c>BuildDatabases()</c> would have reconciled onto it, which is what the
+/// caller's own <c>AllDatabases()</c> hands over.
+/// </para>
+/// <para>
+/// Nothing has a database behind it. A describe call that was made would be counted, and a real one would
+/// fail against an <c>.invalid</c> host and fall through to a tier that answers something else.
+/// </para>
+/// </remarks>
+public class TenantDiscoveryInstanceTests
+{
+    private const string UnreachableMaster = "Host=f8d3-master.invalid;Database=master;Username=u;Password=p";
+
+    private const string UnreachableTenant = "Host=f8d3-tenant.invalid;Database=tenant;Username=u;Password=p";
+
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    private static TenantDiscovery Create() =>
+        new(Options.Create(new MartenStudioOptions()), NullLogger<TenantDiscovery>.Instance, TimeProvider.System);
+
+    [Fact]
+    public async Task A_master_table_database_is_read_for_its_own_tenant_and_never_described()
+    {
+        StoreOptions options = new();
+        options.MultiTenantedDatabasesWithMasterDatabaseTable(UnreachableMaster, "tenants");
+        options.Schema.For<TenantedNote>().MultiTenanted();
+
+        var tenancy = new CountingMasterTableTenancy(options);
+        options.Tenancy = tenancy;
+
+        await using var store = new DocumentStore(options);
+        await using MartenDatabase database = TenantDatabase(options, "acme", ["acme"]);
+
+        TenantList tenants = await Create().DiscoverAsync("default", store, database, Token);
+
+        tenants.Source.Should().Be(TenantListSource.Descriptor);
+        tenants.Ids.Should().Equal("acme");
+        tenancy.Describes.Should().Be(0, "describing a master-table tenancy is BuildDatabases() again, a read of the master table");
+        tenancy.Builds.Should().Be(0, "and discovery never enumerates either");
+    }
+
+    [Fact]
+    public async Task A_shard_is_read_for_its_reconciled_tenants_and_never_described()
+    {
+        StoreOptions options = new();
+        options.MultiTenantedWithShardedDatabases(x => x.ConnectionString = UnreachableMaster);
+
+        var tenancy = new CountingShardedTenancy(options, new ShardedTenancyOptions { ConnectionString = UnreachableMaster });
+        options.Tenancy = tenancy;
+
+        await using var store = new DocumentStore(options);
+        await using MartenDatabase shard = TenantDatabase(options, "shard-1", ["globex", "acme"]);
+
+        TenantList tenants = await Create().DiscoverAsync("default", store, shard, Token);
+
+        tenants.Source.Should().Be(TenantListSource.Descriptor);
+        tenants.Ids.Should().Equal(["acme", "globex"], "ordinal order, as every tier answers");
+        tenancy.Describes.Should().Be(0, "describing a sharded tenancy is BuildDatabases() again, two reads of the pool tables");
+        tenancy.Builds.Should().Be(0);
+    }
+
+    /// <summary>
+    /// A database that lists no tenant is not described as a fallback: on these two tenancies the describe
+    /// call would answer the same empty list, after a read of the lookup table.
+    /// </summary>
+    [Fact]
+    public async Task A_dynamic_database_that_lists_no_tenant_falls_through_without_being_described()
+    {
+        StoreOptions options = new();
+        options.MultiTenantedDatabasesWithMasterDatabaseTable(UnreachableMaster, "tenants");
+
+        var tenancy = new CountingMasterTableTenancy(options);
+        options.Tenancy = tenancy;
+
+        await using var store = new DocumentStore(options);
+        await using MartenDatabase database = TenantDatabase(options, "acme", []);
+
+        TenantList tenants = await Create().DiscoverAsync("default", store, database, Token);
+
+        tenants.Source.Should().Be(TenantListSource.Unavailable, "nothing in this store has a tenant column to query");
+        tenancy.Describes.Should().Be(0);
+    }
+
+    /// <summary>
+    /// The other half, and the proof the counting technique counts: a static multi-tenancy's databases list
+    /// their tenants too, so only the counter can say which path ran - and it is the describe call, which
+    /// answers from configuration.
+    /// </summary>
+    [Fact]
+    public async Task Every_other_tenancy_is_described()
+    {
+        StoreOptions options = new();
+        options.MultiTenantedDatabases(x => x.AddMultipleTenantDatabase(UnreachableTenant, "tenants-a").ForTenants("globex", "acme"));
+
+        DescribeCountingTenancy counting = DescribeCountingTenancy.Over(options.Tenancy);
+        options.Tenancy = (ITenancy) (object) counting;
+
+        await using var store = new DocumentStore(options);
+        IMartenDatabase database = (await store.Storage.AllDatabases()).Single();
+        database.TenantIds.Should().BeEquivalentTo(["acme", "globex"], "the premise: the instance would have answered too");
+
+        TenantList tenants = await Create().DiscoverAsync("default", store, database, Token);
+
+        tenants.Source.Should().Be(TenantListSource.Descriptor);
+        tenants.Ids.Should().Equal("acme", "globex");
+        counting.Describes.Should().Be(1, "a static tenancy describes from its configuration, and that is the call tier 2 makes for it");
+    }
+
+    [Fact]
+    public void Only_Martens_master_table_and_sharded_tenancies_are_read_from_the_instance()
+    {
+        StoreOptions single = new();
+        single.Connection(UnreachableTenant);
+
+        StoreOptions partitioned = new();
+        partitioned.Connection(UnreachableTenant);
+        partitioned.Events.UseTenantPartitionedEvents = true;
+
+        StoreOptions statics = new();
+        statics.MultiTenantedDatabases(x => x.AddMultipleTenantDatabase(UnreachableTenant, "tenants-a").ForTenants("acme"));
+
+        StoreOptions singleServer = new();
+        singleServer.MultiTenantedWithSingleServer(UnreachableMaster);
+
+        StoreOptions masterTable = new();
+        masterTable.MultiTenantedDatabasesWithMasterDatabaseTable(UnreachableMaster, "tenants");
+
+        StoreOptions sharded = new();
+        sharded.MultiTenantedWithShardedDatabases(x => x.ConnectionString = UnreachableMaster);
+
+        partitioned.Tenancy.GetType().Name.Should().Be("TenantPartitionedSingleDatabaseTenancy", "the premise");
+
+        TenantDiscovery.ReadsTenantsFromTheInstance(single.Tenancy).Should().BeFalse();
+        TenantDiscovery.ReadsTenantsFromTheInstance(partitioned.Tenancy).Should().BeFalse();
+        TenantDiscovery.ReadsTenantsFromTheInstance(statics.Tenancy).Should().BeFalse();
+        TenantDiscovery.ReadsTenantsFromTheInstance(singleServer.Tenancy)
+            .Should().BeFalse("a single-server tenancy's databases list no tenants; only its descriptors carry them");
+        TenantDiscovery.ReadsTenantsFromTheInstance(masterTable.Tenancy).Should().BeTrue();
+        TenantDiscovery.ReadsTenantsFromTheInstance(sharded.Tenancy).Should().BeTrue();
+    }
+
+    /// <summary>A database as a dynamic tenancy builds one, with the tenant list it reconciles onto it.</summary>
+    private static MartenDatabase TenantDatabase(StoreOptions options, string identifier, string[] tenantIds)
+    {
+        var database = new MartenDatabase(options, NpgsqlDataSource.Create(UnreachableTenant), identifier);
+        foreach (string tenantId in tenantIds)
+        {
+            database.TenantIds.Add(tenantId);
+        }
+
+        return database;
+    }
+
+    /// <summary>A conjoined document type, so the query tier would have had a table to read.</summary>
+    public class TenantedNote
+    {
+        /// <summary>The id.</summary>
+        public Guid Id { get; set; }
+    }
+
+    /// <summary>Marten's master-table tenancy, counting the two calls tier 2 must not make.</summary>
+    private sealed class CountingMasterTableTenancy(StoreOptions options)
+        : MasterTableTenancy(options, UnreachableMaster, "tenants"), ITenancy
+    {
+        private int builds;
+        private int describes;
+
+        public int Builds => Volatile.Read(ref builds);
+
+        public int Describes => Volatile.Read(ref describes);
+
+        public new ValueTask<IReadOnlyList<Weasel.Core.Migrations.IDatabase>> BuildDatabases()
+        {
+            Interlocked.Increment(ref builds);
+            return ValueTask.FromResult<IReadOnlyList<Weasel.Core.Migrations.IDatabase>>([]);
+        }
+
+        public new ValueTask<DatabaseUsage> DescribeDatabasesAsync(CancellationToken token)
+        {
+            Interlocked.Increment(ref describes);
+            return ValueTask.FromResult(new DatabaseUsage { Cardinality = DatabaseCardinality.DynamicMultiple });
+        }
+    }
+
+    /// <summary>Marten's sharded tenancy, counting the same two calls.</summary>
+    private sealed class CountingShardedTenancy(StoreOptions options, ShardedTenancyOptions configuration)
+        : ShardedTenancy(options, configuration), ITenancy
+    {
+        private int builds;
+        private int describes;
+
+        public int Builds => Volatile.Read(ref builds);
+
+        public int Describes => Volatile.Read(ref describes);
+
+        public new ValueTask<IReadOnlyList<Weasel.Core.Migrations.IDatabase>> BuildDatabases()
+        {
+            Interlocked.Increment(ref builds);
+            return ValueTask.FromResult<IReadOnlyList<Weasel.Core.Migrations.IDatabase>>([]);
+        }
+
+        public new ValueTask<DatabaseUsage> DescribeDatabasesAsync(CancellationToken token)
+        {
+            Interlocked.Increment(ref describes);
+            return ValueTask.FromResult(new DatabaseUsage { Cardinality = DatabaseCardinality.DynamicMultiple });
+        }
+    }
+}
+
+/// <summary>
+/// Any tenancy, counting its <c>DescribeDatabasesAsync</c> calls and forwarding everything. A
+/// <see cref="DispatchProxy" /> rather than a subclass because Marten's static and single-database tenancies
+/// are built through an internal data source factory; public and unsealed because a proxy type must be.
+/// </summary>
+public class DescribeCountingTenancy : DispatchProxy
+{
+    private ITenancy? inner;
+    private int describes;
+
+    /// <summary>How many times anything asked the tenancy to describe its databases.</summary>
+    public int Describes => Volatile.Read(ref describes);
+
+    internal static DescribeCountingTenancy Over(ITenancy tenancy)
+    {
+        ITenancy proxy = Create<ITenancy, DescribeCountingTenancy>();
+        var counting = (DescribeCountingTenancy) (object) proxy;
+        counting.inner = tenancy;
+        return counting;
+    }
+
+    protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+    {
+        ArgumentNullException.ThrowIfNull(targetMethod);
+
+        if (targetMethod.Name == "DescribeDatabasesAsync")
+        {
+            Interlocked.Increment(ref describes);
+        }
+
+        return UnlistableStore.Forward(targetMethod, inner!, args);
+    }
+}

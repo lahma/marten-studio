@@ -461,9 +461,16 @@ subscription", a schema apply — is authorized as `(store, database, null)` unl
 exclusively the selected tenant's (never on a sharded tenancy, which pools tenants by design); the SQL
 console, the Mode A subquery lift and `EXPLAIN` are always asked with `TenantId = null`, because nothing
 narrows a typed statement to a tenant. A tenant's database is found without asking a dynamic tenancy for a
-tenant it does not have (`DatabaseReach.FindTenantDatabaseAsync`). Master-table and sharded tenancies run
-their pool or master-table `CreateOrUpdate` once per process on the first `AllDatabases()`, under the
-host's own `AutoCreate`, and the studio can be that first caller — a known limit, not a per-poll cost.
+tenant it does not have (`DatabaseReach.FindTenantDatabaseAsync`). Enumerating a dynamic tenancy's
+databases is never a read, at any Marten through 9.50.2: `AllDatabases()`, `Tenancy.DescribeDatabasesAsync()`
+and 9.50.1's `IEventStore.TryDescribeDatabasesAsync()` all run `Tenancy.BuildDatabases()`. Once per process,
+that applies a master-table or sharded tenancy's lookup table under the store's `AutoCreateSchemaObjects`.
+That includes `All`, which drops and recreates a table it cannot alter, and `None` is promoted to
+`CreateOrUpdate` when the tenancy's own `AutoCreate` is set. It also upserts the tenancy's seed rows. On a
+single-server tenancy it creates every configured database that does not exist yet, under no `AutoCreate` at
+all. The studio enumerates on the first navigation, so in a process that runs no daemon of its own it can be
+that first caller; a host whose daemon runs in-process, or that applies on startup, has always enumerated
+before it. A known limit, not a per-poll cost.
 
 ## Package budget
 
@@ -819,6 +826,8 @@ tests/MartenStudio.Tests/Health/          Evaluators, sweeper, cache, history, g
 tests/MartenStudio.Integration.Tests/Health/  Live Postgres: each check fires and stays quiet, the no-DDL /
                                          no-lock sweep helper, and the fires/quiet attribute convention
 docs/health/                             One file per health area, one "## <code> <title>" anchor per check
+tests/MartenStudio.Integration.Tests/Tenancy/  Live Postgres: first navigation per tenancy shape changes nothing,
+                                         and the enumerations that still apply a lookup table
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

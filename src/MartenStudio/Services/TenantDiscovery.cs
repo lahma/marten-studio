@@ -53,10 +53,14 @@ internal sealed record TenantList(IReadOnlyList<string> Ids, bool IsTruncated, T
 /// <remarks>
 /// <para>
 /// Tier 1 is <see cref="MartenStudioOptions.KnownTenantIds" />: a host that knows its tenants says so and
-/// nothing is discovered. Tier 2 is Marten's own <c>Tenancy.DescribeDatabasesAsync</c>, which answers for
-/// a static multi-tenancy configuration without touching the database. Tier 3 is a bounded
-/// <c>select distinct tenant_id</c> over every table in the store that has a tenant column, run only when
-/// <see cref="MartenStudioOptions.DiscoverTenantIds" /> allows it.
+/// nothing is discovered. Tier 2 is what Marten itself lists for the database
+/// (<see cref="ListedTenantsAsync" />). On a master-table or sharded tenancy that is the instance's own
+/// <c>TenantIds</c>, which the caller's <c>AllDatabases()</c> has just reconciled: describing either would
+/// be <c>BuildDatabases()</c> again, a read of the master or pool table (AGENTS.md D27). On every other
+/// tenancy it is <c>Tenancy.DescribeDatabasesAsync</c>, which answers from configuration for a static or
+/// single-server multi-tenancy. Tier 3 is a bounded <c>select distinct tenant_id</c> over every table in the
+/// store that has a tenant column, run only when <see cref="MartenStudioOptions.DiscoverTenantIds" />
+/// allows it.
 /// </para>
 /// <para>
 /// "Every table that has one" and not just <c>mt_streams</c>: conjoined tenancy is a per-document-type
@@ -126,6 +130,12 @@ internal sealed class TenantDiscovery
     /// <summary>
     /// The tenants of <paramref name="database" /> in <paramref name="store" />, cached for a minute.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="database" /> is an instance <c>Storage.AllDatabases()</c> has just answered - the
+    /// resolver and the scope catalog both find it that way, and nothing else calls this - because on a
+    /// master-table or sharded tenancy its own <c>TenantIds</c> are the answer, and that call is what
+    /// reconciles them.
+    /// </remarks>
     public async ValueTask<TenantList> DiscoverAsync(
         string storeKey,
         IDocumentStore store,
@@ -184,32 +194,14 @@ internal sealed class TenantDiscovery
         MartenStudioOptions value,
         CancellationToken cancellationToken)
     {
-        // Tier 2: Marten's own descriptors. Free where the tenancy is static, and it answers for a
-        // database whose tenants are configured rather than inferred from data.
+        // Tier 2: what Marten itself lists for this database. It answers for tenants that are configured or
+        // assigned rather than inferred from data - a tenant with no rows yet included.
         try
         {
-            DatabaseUsage usage = await store.Options.Tenancy.DescribeDatabasesAsync(cancellationToken).ConfigureAwait(false);
-            List<string> fromDescriptors = [];
-            foreach (DatabaseDescriptor descriptor in usage.Databases)
+            IReadOnlyList<string> listed = await ListedTenantsAsync(store, database, cancellationToken).ConfigureAwait(false);
+            if (listed.Count > 0)
             {
-                if (!DescribesSameDatabase(descriptor, database))
-                {
-                    continue;
-                }
-
-                foreach (string tenantId in descriptor.TenantIds)
-                {
-                    if (!string.IsNullOrWhiteSpace(tenantId))
-                    {
-                        fromDescriptors.Add(tenantId);
-                    }
-                }
-            }
-
-            if (fromDescriptors.Count > 0)
-            {
-                fromDescriptors.Sort(StringComparer.Ordinal);
-                return new TenantList(fromDescriptors, IsTruncated: false, TenantListSource.Descriptor);
+                return new TenantList(listed, IsTruncated: false, TenantListSource.Descriptor);
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -288,6 +280,79 @@ internal sealed class TenantDiscovery
 
         return tables;
     }
+
+    /// <summary>
+    /// The tenants Marten itself lists for <paramref name="database" />, in ordinal order and without
+    /// duplicates; empty when it lists none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A master-table or sharded tenancy is read from the instance.</b> Both fill each database's
+    /// <c>TenantIds</c> in <c>BuildDatabases()</c> - a master-table database lists the one tenant whose row it
+    /// was built from, and a shard lists its active assignments, reconciled against the assignment table on
+    /// every call (Marten #4868) - and their <c>DescribeDatabasesAsync</c> is <c>BuildDatabases()</c> again
+    /// followed by a copy of those same lists (read at <c>V9.39.0</c> and <c>V9.50.2</c>, in
+    /// <c>MasterTableTenancy</c> and <c>ShardedTenancy</c>). Describing would be a second read of the lookup
+    /// table for an answer already in hand, because the instance handed in is one <c>AllDatabases()</c> has
+    /// just returned (<see cref="DiscoverAsync" />).
+    /// </para>
+    /// <para>
+    /// <b>Every other tenancy is described.</b> A static multi-tenancy describes from its configuration, and a
+    /// single-server one from its configured tenant-to-database map, which only the descriptors carry: its
+    /// databases list no tenants. Neither reads a lookup table. A single-server describe call does run
+    /// <c>BuildDatabases()</c>, but after the caller's own enumeration every database it names is built.
+    /// </para>
+    /// <para>
+    /// Known limit: two master-table rows with one connection string are two instances over one database,
+    /// each listing its own tenant, and the studio resolves that database to the first of them - so the
+    /// selector offers that instance's tenant, where describing matched both by server and database name.
+    /// </para>
+    /// </remarks>
+    private static async ValueTask<IReadOnlyList<string>> ListedTenantsAsync(
+        IDocumentStore store,
+        IMartenDatabase database,
+        CancellationToken cancellationToken)
+    {
+        SortedSet<string> tenants = new(StringComparer.Ordinal);
+        ITenancy tenancy = store.Options.Tenancy;
+
+        if (ReadsTenantsFromTheInstance(tenancy))
+        {
+            // Copied before it is read: a sharded tenancy reconciles these lists from whichever thread asks.
+            string[] reconciled = [.. database.TenantIds];
+            Add(reconciled);
+            return [.. tenants];
+        }
+
+        DatabaseUsage usage = await tenancy.DescribeDatabasesAsync(cancellationToken).ConfigureAwait(false);
+        foreach (DatabaseDescriptor descriptor in usage.Databases)
+        {
+            if (DescribesSameDatabase(descriptor, database))
+            {
+                Add(descriptor.TenantIds);
+            }
+        }
+
+        return [.. tenants];
+
+        void Add(IEnumerable<string> tenantIds)
+        {
+            foreach (string tenantId in tenantIds)
+            {
+                if (!string.IsNullOrWhiteSpace(tenantId))
+                {
+                    tenants.Add(tenantId);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="tenancy" />'s databases carry tenant lists of their own, reconciled by the
+    /// enumeration that handed them out: Marten's <c>MasterTableTenancy</c> and <c>ShardedTenancy</c>.
+    /// </summary>
+    internal static bool ReadsTenantsFromTheInstance(ITenancy tenancy) =>
+        tenancy is MasterTableTenancy or ShardedTenancy;
 
     /// <summary>
     /// Whether <paramref name="descriptor" /> is about <paramref name="database" />.
