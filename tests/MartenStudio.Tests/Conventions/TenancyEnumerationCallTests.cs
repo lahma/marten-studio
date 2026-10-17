@@ -19,7 +19,9 @@ namespace MartenStudio.Tests.Conventions;
 /// <c>FindDatabase(id)</c> rebuilds on a miss. <c>FindOrCreateDatabase</c>, <c>GetTenant</c> and
 /// <c>GetTenantAsync</c> provision a tenant a sharded or single-server tenancy does not have.
 /// <c>TryFindDatabase</c> and 9.50's <c>FindDatabaseForTenantAsync</c> never provision, but on a master-table
-/// or sharded miss they build a data source nothing caches.
+/// or sharded miss they build a data source nothing caches. A projection coordinator's <c>AllDaemonsAsync()</c>
+/// is <c>Store.Storage.AllDatabases()</c> inside Marten's own coordinator (read at <c>V9.39.0</c> and
+/// <c>V9.50.2</c>), so it is a site too, though the enumeration it makes is Marten's.
 /// </para>
 /// <para>
 /// So a new call is a decision, not a convenience: it goes on <see cref="AllowedSites" /> with what it needs,
@@ -57,7 +59,7 @@ public class TenancyEnumerationCallTests
     private static readonly Regex TenancyCall = new(
         @"\.\s*(?:(?<member>AllDatabases|BuildDatabases|TryDescribeDatabasesAsync|DescribeDatabasesAsync"
         + @"|FindOrCreateDatabase|GetTenantAsync|GetTenant|TryFindDatabase|FindDatabaseForTenantAsync|FindDatabase"
-        + @"|AllDisabledTenantsAsync|AllDisabledAsync)\s*\("
+        + @"|AllDisabledTenantsAsync|AllDisabledAsync|AllDaemonsAsync)\s*\("
         + @"|(?<member>ListDatabasesAsync)\s*\((?=[^,()]*(?:\([^()]*\)[^,()]*)*\)))",
         RegexOptions.Compiled,
         TimeSpan.FromSeconds(5));
@@ -96,13 +98,24 @@ public class TenancyEnumerationCallTests
             "the tenant's database, asked only of a tenancy that never provisions, or for a tenant proven present"),
         new("src/MartenStudio/Services/DatabaseReachAuthorization.cs", "AllDatabases", 1,
             "names: every database an operation asked for without a tenant reaches, each put to the policy"),
-        new("src/MartenStudio/Services/Projections/DaemonAccessor.cs", "AllDatabases", 1,
-            "names: the databases a daemon hosted in this process covers - reached only once a projection "
-            + "coordinator is registered here, so that daemon has enumerated before the studio does"),
-        new("src/MartenStudio/Services/Health/Checks/ConnectionBudgetCheck.cs", "AllDatabases", 2,
-            "the instances' data sources, for C02's pool budget: Storage.AllDatabases() only on a Single or "
-            + "StaticMultiple store, and on a single-server tenancy Weasel's own SingleServerDatabaseCollection."
-            + "AllDatabases(), the databases already built, from memory - never Tenancy.BuildDatabases()"),
+        // H8-fix F5: the daemon card's list and C02's pool budget - both read inside every health sweep, the opt-in
+        // export's included - and the export itself all go through one helper, which never builds anything.
+        new("src/MartenStudio/Services/HeldDatabases.cs", "AllDatabases", 2,
+            "the instances a tenancy holds, from configuration or memory: Storage.AllDatabases() only on a Single "
+            + "or StaticMultiple store, and on a single-server tenancy Weasel's own SingleServerDatabaseCollection."
+            + "AllDatabases(), the databases already built - never Tenancy.BuildDatabases() on a dynamic tenancy"),
+        new("src/MartenStudio/Services/HeldDatabases.cs", "TryFindDatabase", 1,
+            "the instances a master-table or sharded tenancy holds: each id comes from ITenantedSource.AllActive(), "
+            + "the tenancy's own cache, and an id TenantIdStyle would correct is skipped - so every lookup is a "
+            + "cache hit, never the master-table read and uncached data source a miss builds"),
+        // H8-fix2: the one way to find a hosted daemon that never provisions. DaemonForDatabase(id) would be worse:
+        // on Marten's coordinator it is FindOrCreateDatabase.
+        new("src/MartenStudio/Services/Projections/DaemonAccessor.cs", "AllDaemonsAsync", 1,
+            "the instances' daemons, matched by tracker to the swept database - asked only once a projection coordinator "
+            + "is registered in this process, and once per sweep (memoised). On Marten's coordinator it enumerates the "
+            + "store, as the coordinator's own leadership loop does every cycle, so a probe can be the first enumerator "
+            + "only in the window before that loop's first cycle - or always, under MartenDaemonModeIsSolo(), a "
+            + "testing coordinator with no loop"),
     ];
 
     [Fact]
@@ -174,6 +187,7 @@ public class TenancyEnumerationCallTests
     [InlineData("AvailableDatabases = await catalog.ListDatabasesAsync(\n    store.Key,\n    cancellationToken);", null)]
     [InlineData("IReadOnlyList<DatabaseOverview>? databases = await ListDatabasesAsync(storeKey, store, cancellationToken);", null)]
     [InlineData("IReadOnlyList<DatabaseListing> databases = await ListDatabasesAsync(registration.Key, store, cancellationToken);", null)]
+    [InlineData("var daemons = await coordinator.AllDaemonsAsync();", "AllDaemonsAsync")]
     [InlineData("StoreDatabases listed = await StoreDatabases.ListAsync(store);", null)]
     [InlineData("/// <c>Storage.AllDatabases()</c> is a query on a master-table tenancy.", null)]
     [InlineData("// tenancy.GetTenantAsync(id) provisions a sharded tenant", null)]

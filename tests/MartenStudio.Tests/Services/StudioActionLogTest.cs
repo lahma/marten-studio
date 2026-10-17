@@ -223,10 +223,10 @@ public class StudioActionLogTest
         // the throttled read failure. 9222 is the health advisor's throttled check failure (H1). 9245 and 9246
         // are Database > Sessions' (H3, 9245-9249): the first details read, and the throttled read failure.
         // 9260-9264 are LINQ mode's (F7): a run, a refusal, a Postgres failure, an unexpected exception, and the
-        // advice it could not give.
+        // advice it could not give. 9270 is the opt-in health export's throttled failure (H8, 9270-9274).
         declared.Should().Equal(
             9200, 9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211,
             9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9221, 9222, 9230, 9235, 9236, 9237, 9245, 9246,
-            9260, 9261, 9262, 9263, 9264);
+            9260, 9261, 9262, 9263, 9264, 9270);
     }
 }

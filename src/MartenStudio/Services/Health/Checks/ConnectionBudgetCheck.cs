@@ -1,14 +1,8 @@
 using System.Globalization;
 
-using JasperFx.Descriptors;
-using JasperFx.MultiTenancy;
-
-using Marten;
 using Marten.Storage;
 
 using MartenStudio.Services.Database;
-
-using Weasel.Postgresql.Migrations;
 
 namespace MartenStudio.Services.Health.Checks;
 
@@ -46,12 +40,12 @@ internal sealed record ConnectionBudgetFacts(
 /// this application's other tenants, and every other application on it.
 /// </para>
 /// <para>
-/// <b>Listed without making a tenancy do anything</b> (<see cref="StoreDatabases" />): a single or static
-/// tenancy's databases are configuration; a single-server tenancy's are the ones it has built, from memory; a
-/// master-table or sharded tenancy's are counted from what it holds (<c>ITenantedSource.AllActive()</c>), because
-/// <c>AllDatabases()</c> on those reads the master table on every call and applies it on the first. Databases
-/// are grouped by host and port as their connection strings spell them, read from each data source without a
-/// connection.
+/// <b>Listed without making a tenancy do anything</b> (<see cref="HeldDatabases" />, shared with the health
+/// export and the daemon card): a single or static tenancy's databases are configuration; a single-server
+/// tenancy's are the ones it has built, from memory; a master-table or sharded tenancy's are counted from the
+/// ones it holds, each found in its own cache, because <c>AllDatabases()</c> on those reads the master table on
+/// every call and applies it on the first. Databases are grouped by host and port as their connection strings
+/// spell them, read from each data source without a connection.
 /// </para>
 /// <para>
 /// A store with one database on the server is C03's to watch: one pool against the server is the ordinary case,
@@ -70,21 +64,22 @@ internal sealed class ConnectionBudgetCheck : HealthCheck<ConnectionBudgetFacts>
             ?? throw new HealthCheckUnavailableException(
                 "This database's data source is not one the studio can read pool settings from, so the store's budget is not judged.");
 
-        StoreDatabases listed = await StoreDatabases.ListAsync(context.Store).ConfigureAwait(false);
+        HeldDatabaseList listed = await HeldDatabases.ListAsync(context.Store).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
+
+        if (!listed.IsKnown)
+        {
+            throw new HealthCheckUnavailableException(
+                "This store's tenancy can list its databases only by building or querying them, so its connection budget is not judged.");
+        }
 
         ServerConnectionLimits server = await ServerConnectionLimits.SharedAsync(context).ConfigureAwait(false);
 
-        if (listed.Databases is null)
+        if (listed.Shape == TenancyShape.Held)
         {
-            if (listed.HeldCount is not { } held)
-            {
-                throw new HealthCheckUnavailableException(
-                    "This store's tenancy can list its databases only by building or querying them, so its connection budget is not judged.");
-            }
-
-            // Counted, not listed: each held database is taken to be like this one.
-            int count = Math.Max(held, 1);
+            // Counted, as C02 has always counted a master-table or sharded tenancy: each held database is taken
+            // to be like this one - those the helper could not name from the cache included, since they are held.
+            int count = Math.Max(listed.Databases.Count + listed.Unnamed, 1);
 
             return new ConnectionBudgetFacts(
                 count,
@@ -203,90 +198,5 @@ internal sealed class ConnectionBudgetCheck : HealthCheck<ConnectionBudgetFacts>
                 + "such as PgBouncer in front of the server is the other way out; raising max_connections is the server's own "
                 + "setting, and the studio never changes it."),
         });
-    }
-}
-
-/// <summary>A store's databases as C02 may know them on every sweep, without making the tenancy do anything.</summary>
-/// <param name="Databases">The databases, when the tenancy can hand them over from configuration or memory.</param>
-/// <param name="HeldCount">Otherwise, how many databases it holds, when it can say without I/O.</param>
-internal sealed record StoreDatabases(IReadOnlyList<IMartenDatabase>? Databases, int? HeldCount)
-{
-    /// <summary>
-    /// The databases of <paramref name="store" />, read the way the opt-in health export reads them (read at Marten
-    /// <c>V9.39.0</c> and <c>V9.50.2</c>).
-    /// </summary>
-    /// <remarks>
-    /// <list type="bullet">
-    /// <item><description>
-    /// <c>Single</c> and <c>StaticMultiple</c> - <c>DefaultTenancy</c> and <c>StaticMultiTenancy</c> - build nothing:
-    /// <c>AllDatabases()</c> returns the databases they were configured with.
-    /// </description></item>
-    /// <item><description>
-    /// <c>SingleServerMultiTenancy</c> is Weasel's <see cref="SingleServerDatabaseCollection{T}" />, whose own
-    /// <c>AllDatabases()</c> is the databases already built, from memory. <c>Storage.AllDatabases()</c> on it would
-    /// run <c>CREATE DATABASE</c> for every tenant it was configured with that does not exist yet.
-    /// </description></item>
-    /// <item><description>
-    /// <c>MasterTableTenancy</c> and <c>ShardedTenancy</c> are JasperFx <see cref="ITenantedSource{T}" />s, whose
-    /// <see cref="ITenantedSource{T}.AllActive" /> names the databases they hold, from memory - identities, not
-    /// databases, so they are counted rather than listed. <c>AllDatabases()</c> on them reads the master table on
-    /// every call and applies its schema on the first.
-    /// </description></item>
-    /// <item><description>Any other tenancy cannot be asked without building, and is not listed.</description></item>
-    /// </list>
-    /// </remarks>
-    public static async Task<StoreDatabases> ListAsync(IDocumentStore store)
-    {
-        ArgumentNullException.ThrowIfNull(store);
-
-        ITenancy tenancy = store.Options.Tenancy;
-
-        if (BuildsNothing(tenancy))
-        {
-            return new StoreDatabases(OnePerIdentity(await store.Storage.AllDatabases().ConfigureAwait(false)), null);
-        }
-
-        if (tenancy is SingleServerDatabaseCollection<MartenDatabase> server)
-        {
-            return new StoreDatabases(OnePerIdentity(server.AllDatabases()), null);
-        }
-
-        if (tenancy is ITenantedSource<string> source)
-        {
-            return new StoreDatabases(null, source.AllActive().Distinct(StringComparer.OrdinalIgnoreCase).Count());
-        }
-
-        return new StoreDatabases(null, null);
-    }
-
-    /// <summary>Whether the tenancy's databases are configuration rather than something it builds.</summary>
-    /// <remarks>A tenancy that cannot say is treated as one that builds, which is the cautious answer.</remarks>
-    private static bool BuildsNothing(ITenancy tenancy)
-    {
-        try
-        {
-            return tenancy.Cardinality is DatabaseCardinality.Single or DatabaseCardinality.StaticMultiple;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return false;
-        }
-    }
-
-    /// <summary>One database per identity: two tenants over one database are one pool.</summary>
-    private static List<IMartenDatabase> OnePerIdentity(IEnumerable<IMartenDatabase> databases)
-    {
-        List<IMartenDatabase> distinct = [];
-        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
-
-        foreach (IMartenDatabase database in databases)
-        {
-            if (seen.Add(database.Id.Identity))
-            {
-                distinct.Add(database);
-            }
-        }
-
-        return distinct;
     }
 }

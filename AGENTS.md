@@ -62,7 +62,7 @@ model, the phased delivery plan — lives in the approved plan at
    `EventHandler` is what *forces* the mistake, so the type is the enforcement and the scanner is only
    the backstop.
 7. **A public API change needs a reviewed Verify baseline and a CHANGELOG entry.** The public surface is
-   two static classes, two classes and one record; anything else appearing in
+   three static classes, two classes and one record; anything else appearing in
    `tests/MartenStudio.Tests/Verify/PublicApiTest_MartenStudio.verified.txt` is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request
    what moved and why, then accept the baseline.
@@ -252,7 +252,7 @@ somewhere; rewriting it would be the single most likely way to ship something th
 404s behind a path base. There is no "integrate into the host's own Blazor app" mode in v1.
 
 **D12 — The data seam is internal.** Per-area service interfaces (`IDocumentDataService`,
-`IEventDataService`, …) with `InternalsVisibleTo` for the two test projects. The *public* surface is two
+`IEventDataService`, …) with `InternalsVisibleTo` for the two test projects. The *public* surface is three
 static classes, two classes and one record, snapshot-tested. Everything a consumer can bind to is
 everything we have to keep working.
 
@@ -822,6 +822,8 @@ src/MartenStudio/Services/Health/         The health advisor: check model and re
                                          history, per-visitor report and gates, mutes and toasts
 src/MartenStudio/Services/Health/Checks/  One file per health check (attribute, gatherer, pure evaluator); a
                                          check is added by adding its file here, nothing else
+src/MartenStudio/Services/Health/Export/  The opt-in ASP.NET Core health check: one run per interval over every
+                                         store and database, summarised as codes and counts, never names
 src/MartenStudio/Components/Pages/Health/ The Health page and its presentation helpers
 tests/MartenStudio.Tests/Health/          Evaluators, sweeper, cache, history, gates, page, badge, toast, the
                                          check and docs conventions - no database

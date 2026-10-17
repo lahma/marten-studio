@@ -90,6 +90,13 @@ builder.Services.AddMartenStudio(options =>
 });
 #endregion
 
+#region readme_health
+// Optional, and AddMartenStudio() does not do it for you: the health advisor's configuration and catalog
+// checks as one ASP.NET Core health check. It reports codes and counts, never a name, and runs the checks at
+// most once per HealthInterval however often the endpoint is probed.
+builder.Services.AddHealthChecks().AddMartenStudio(tags: ["marten"]);
+#endregion
+
 WebApplication app = builder.Build();
 
 app.UseAuthentication();
@@ -115,6 +122,11 @@ else
 #endregion
 
 app.MapLogin();
+
+// The default response writer prints only the status word, so whoever can reach /healthz learns Healthy,
+// Degraded or Unhealthy and nothing more; the codes and counts are in the report's data, for a writer the host
+// chooses. Anonymous, because an orchestrator's probe signs in as nobody.
+app.MapHealthChecks("/healthz").AllowAnonymous();
 
 // The sample has no icon, and says so rather than answering 404: a browser asks for /favicon.ico on the
 // first page that names no icon of its own - the studio's pages name none, since the icon is the host's to

@@ -31,6 +31,10 @@ namespace MartenStudio
         public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapMartenStudio(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder builder) { }
         public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapMartenStudio(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder builder, string pattern) { }
     }
+    public static class MartenStudioHealthChecksBuilderExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder AddMartenStudio(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder builder, string name = "marten-studio", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = default, System.Collections.Generic.IEnumerable<string>? tags = null, System.TimeSpan? timeout = default) { }
+    }
     public sealed class MartenStudioOptions
     {
         public MartenStudioOptions() { }

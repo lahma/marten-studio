@@ -66,7 +66,40 @@ internal enum HealthCheckOutcome
 /// <param name="SqlState">The SQLSTATE, when Postgres said something.</param>
 /// <param name="PostgresText">What Postgres said, verbatim, from a <c>PostgresException</c> only.</param>
 /// <param name="Detail">A connection failure's own words, shown only at the database-wide gate.</param>
-internal sealed record HealthCheckProblem(string Reason, string? SqlState, string? PostgresText, string? Detail = null);
+/// <param name="UnavailableReason">
+/// For an <see cref="HealthCheckOutcome.Unavailable" /> row, which kind of expected state it is - so that a reader
+/// that has to tell "the host chose this" from "it ran out of time" (the health export) need not parse a sentence.
+/// </param>
+internal sealed record HealthCheckProblem(
+    string Reason,
+    string? SqlState,
+    string? PostgresText,
+    string? Detail = null,
+    HealthUnavailableReason? UnavailableReason = null);
+
+/// <summary>Which kind of expected state kept a check from checking.</summary>
+/// <remarks>
+/// The Health page shows both kinds the same way - not checked, and why, at Debug in the log. The health export
+/// does not (H8-fix F2): a missing privilege is the host's choice and stays Healthy, while a database whose
+/// statements keep running out of time is worth somebody's look, and is Degraded.
+/// </remarks>
+internal enum HealthUnavailableReason
+{
+    /// <summary>
+    /// The host's choice: a privilege the role lacks (42501), or what a gatherer said with
+    /// <see cref="HealthCheckUnavailableException" /> - no extension, an old Postgres, nothing to read yet.
+    /// </summary>
+    HostChoice,
+
+    /// <summary>
+    /// It ran out of time: <c>statement_timeout</c> (57014), a lock wait (55P03), a client-side timeout, or the
+    /// check's own budget.
+    /// </summary>
+    TimedOut,
+
+    /// <summary>The sweep's budget - one <c>HealthInterval</c> - ran out before this check's turn.</summary>
+    SweepBudget,
+}
 
 /// <summary>
 /// A check broke one of the sweep's rules - a finding coded for another check, two findings under one key, two
@@ -437,7 +470,8 @@ internal sealed class HealthSweeper
     private static readonly HealthCheckProblem OutOfSweepBudget = new(
         "The sweep ran out of its budget - one HealthInterval - before this check's turn, so it was not started; it is tried again at the next interval.",
         null,
-        null);
+        null,
+        UnavailableReason: HealthUnavailableReason.SweepBudget);
 
     /// <summary>Which outcome an exception is, and the problem a visitor is shown.</summary>
     internal static (HealthCheckOutcome Outcome, HealthCheckProblem Problem) Classify(Exception exception, bool budgetExpired)
@@ -447,7 +481,8 @@ internal sealed class HealthSweeper
         if (exception is HealthCheckUnavailableException unavailable)
         {
             // The check's own sentence, written for this row.
-            return (HealthCheckOutcome.Unavailable, new HealthCheckProblem(unavailable.Message, null, null));
+            return (HealthCheckOutcome.Unavailable, new HealthCheckProblem(
+                unavailable.Message, null, null, UnavailableReason: HealthUnavailableReason.HostChoice));
         }
 
         if (exception is HealthSweepRuleException rule)
@@ -458,7 +493,8 @@ internal sealed class HealthSweeper
         if (exception is OperationCanceledException && budgetExpired)
         {
             return (HealthCheckOutcome.Unavailable, new HealthCheckProblem(
-                "The check took longer than its budget and was stopped; it is tried again at the next interval.", null, null));
+                "The check took longer than its budget and was stopped; it is tried again at the next interval.", null, null,
+                UnavailableReason: HealthUnavailableReason.TimedOut));
         }
 
         PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
@@ -477,7 +513,13 @@ internal sealed class HealthSweeper
             };
 
             return expected is not null
-                ? (HealthCheckOutcome.Unavailable, new HealthCheckProblem(expected, postgres.SqlState, postgres.MessageText))
+                ? (HealthCheckOutcome.Unavailable, new HealthCheckProblem(
+                    expected,
+                    postgres.SqlState,
+                    postgres.MessageText,
+                    UnavailableReason: postgres.SqlState == PostgresErrorCodes.InsufficientPrivilege
+                        ? HealthUnavailableReason.HostChoice
+                        : HealthUnavailableReason.TimedOut))
                 : (HealthCheckOutcome.Failed, new HealthCheckProblem(
                     "Postgres refused the check's statement (SQLSTATE " + postgres.SqlState + ").", postgres.SqlState, postgres.MessageText));
         }
@@ -485,7 +527,8 @@ internal sealed class HealthSweeper
         if (PostgresFailure.IsTimeout(exception))
         {
             return (HealthCheckOutcome.Unavailable, new HealthCheckProblem(
-                "The check's statement timed out; it is tried again at the next interval.", null, null));
+                "The check's statement timed out; it is tried again at the next interval.", null, null,
+                UnavailableReason: HealthUnavailableReason.TimedOut));
         }
 
         if (PostgresFailure.IsConnectionFailure(exception))

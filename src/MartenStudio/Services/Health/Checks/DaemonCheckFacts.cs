@@ -808,7 +808,7 @@ internal sealed record DaemonInProcess(
             return NotHosted with { PausedByStudio = pause, StartRefusals = refusals, StudioRebuilds = studioRebuilds, LiveExceptions = exceptions };
         }
 
-        DaemonHosting hosting = await accessor.ForScopeAsync(context.Scope, cancellationToken).ConfigureAwait(false);
+        DaemonHosting hosting = await SweptDaemon.HostingAsync(context, accessor).ConfigureAwait(false);
 
         if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
         {

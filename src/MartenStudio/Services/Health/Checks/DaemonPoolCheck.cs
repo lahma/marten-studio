@@ -63,7 +63,8 @@ internal sealed class DaemonPoolCheck : HealthCheck<DaemonPoolFacts>
         DaemonAccessor accessor = context.Services.GetService<DaemonAccessor>()
             ?? throw new HealthCheckUnavailableException("The studio's daemon accessor is not registered in this container.");
 
-        DaemonHosting hosting = await accessor.ForScopeAsync(context.Scope, cancellationToken).ConfigureAwait(false);
+        DaemonHosting hosting = await SweptDaemon.HostingAsync(context, accessor).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
         {

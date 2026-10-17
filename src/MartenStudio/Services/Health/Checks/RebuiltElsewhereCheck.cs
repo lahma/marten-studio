@@ -617,7 +617,8 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
             return false;
         }
 
-        DaemonHosting hosting = await accessor.ForScopeAsync(context.Scope, cancellationToken).ConfigureAwait(false);
+        DaemonHosting hosting = await SweptDaemon.HostingAsync(context, accessor).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
         {
             return false;

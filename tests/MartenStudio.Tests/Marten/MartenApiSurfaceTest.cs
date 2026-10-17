@@ -793,6 +793,51 @@ public class MartenApiSurfaceTest
         FluentActions.Invoking(() => sharded.Tenancy.Default).Should().Throw<NotSupportedException>();
     }
 
+    /// <summary>
+    /// H8-fix B1 and F3: what <c>HeldDatabases</c> lists a dynamic tenancy's databases with, so that neither the
+    /// health export nor a sweep is ever the call that makes a tenancy apply, seed, query or create anything.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read at tags <c>V9.39.0</c> and <c>V9.50.2</c>. <c>Storage.AllDatabases()</c> is <c>Tenancy.BuildDatabases()</c>:
+    /// on <c>MasterTableTenancy</c> and <c>ShardedTenancy</c> that applies the lookup tables' schema under the host's
+    /// <c>AutoCreate</c> on the first call, upserts the seed rows, and reads the whole master table on every call;
+    /// on <c>SingleServerMultiTenancy</c> it runs <c>CREATE DATABASE</c> for every configured tenant missing one.
+    /// </para>
+    /// <para>
+    /// So the held databases are read instead. <c>ITenantedSource&lt;string&gt;.AllActive()</c> is the tenancy's own
+    /// cache, from memory, and <c>ITenancy.TryFindDatabase(id)</c> (#5400, "for diagnostics and monitoring reads
+    /// that must not change what exists") answers a key of that cache from the cache - it reaches the master table
+    /// only on a miss. It must be <em>declared</em> by both tenancies: the interface's default body is
+    /// <c>FindOrCreateDatabase</c>, which provisions. A single-server tenancy is Weasel's
+    /// <c>SingleServerDatabaseCollection&lt;MartenDatabase&gt;</c>, whose own <c>AllDatabases()</c> is what it has
+    /// built, from memory. None of these connect: the tenancies below are built over a refused address.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_dynamic_tenancy_says_what_it_holds_without_building_anything()
+    {
+        RequireMethod(typeof(ITenancy), "TryFindDatabase", typeof(string)).ReturnType.Should().Be<ValueTask<IMartenDatabase>>();
+        RequireMethod(typeof(ITenantedSource<string>), "AllActive").ReturnType.Should().Be<IReadOnlyList<string>>();
+
+        foreach (Type dynamic in new[] { typeof(MasterTableTenancy), typeof(ShardedTenancy) })
+        {
+            typeof(ITenantedSource<string>).IsAssignableFrom(dynamic).Should().BeTrue("{0} names what it holds", dynamic.Name);
+            dynamic.GetMethod("TryFindDatabase", BindingFlags.Public | BindingFlags.Instance, [typeof(string)])
+                .Should().NotBeNull("{0} must declare its own read-only lookup, or ITenancy's default provisions", dynamic.Name)
+                .And.Subject.As<MethodInfo>().DeclaringType.Should().Be(dynamic);
+        }
+
+        var masterTable = new StoreOptions();
+        masterTable.MultiTenantedDatabasesWithMasterDatabaseTable(DummyConnectionString, "tenants");
+        ((ITenantedSource<string>) masterTable.Tenancy).AllActive().Should().BeEmpty("a tenancy nothing has asked holds nothing");
+
+        var singleServer = new StoreOptions();
+        singleServer.MultiTenantedWithSingleServer(DummyConnectionString, static x => x.WithTenants("a", "b"));
+        singleServer.Tenancy.Should().BeAssignableTo<Weasel.Postgresql.Migrations.SingleServerDatabaseCollection<MartenDatabase>>()
+            .Which.AllDatabases().Should().BeEmpty("nothing has been built, and asking what has is not building it");
+    }
+
     // --------------------------------------------------------------------------------------------
     // The async daemon
     // --------------------------------------------------------------------------------------------
@@ -1778,6 +1823,22 @@ public class MartenApiSurfaceTest
         {
             List<string> tenantIds = descriptor.TenantIds;
             _ = (descriptor.Identifier, tenantIds.Count, cardinality);
+        }
+
+        // HeldDatabases (H8-fix): what a dynamic tenancy holds, without building or reading anything.
+        if (tenancy is ITenantedSource<string> tenantedSource)
+        {
+            foreach (string held in tenantedSource.AllActive())
+            {
+                IMartenDatabase? found = await tenancy.TryFindDatabase(held);
+                _ = found?.Id.Identity;
+            }
+        }
+
+        if (tenancy is Weasel.Postgresql.Migrations.SingleServerDatabaseCollection<MartenDatabase> server)
+        {
+            IReadOnlyList<MartenDatabase> built = server.AllDatabases();
+            _ = built.Count;
         }
 
         // --- advanced operations and the daemon ----------------------------------------------------------
