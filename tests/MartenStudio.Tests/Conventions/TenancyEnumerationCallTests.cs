@@ -8,16 +8,18 @@ namespace MartenStudio.Tests.Conventions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// None of these is a read on a dynamic tenancy, at any Marten through 9.50.2 (AGENTS.md D27).
+/// None of these is read-only on a dynamic tenancy, at any Marten through 9.50.2 (AGENTS.md D27).
 /// <c>AllDatabases()</c>, <c>DescribeDatabasesAsync()</c> and 9.50.1's <c>TryDescribeDatabasesAsync()</c> all
 /// run <c>Tenancy.BuildDatabases()</c>: a read of a master-table or sharded tenancy's lookup table every
-/// time, and the first time in the process that table's apply under the store's
+/// time, and the first time per store instance that table's apply under the store's
 /// <c>AutoCreateSchemaObjects</c> and its seed rows' upsert - or, on a single-server tenancy, a
-/// <c>CREATE DATABASE</c> for every configured database that does not exist yet. <c>FindDatabase(id)</c>
-/// rebuilds on a miss. <c>FindOrCreateDatabase</c>, <c>GetTenant</c> and <c>GetTenantAsync</c> provision a
-/// tenant a sharded or single-server tenancy does not have. <c>TryFindDatabase</c> and 9.50's
-/// <c>FindDatabaseForTenantAsync</c> never provision, but on a master-table or sharded miss they build a data
-/// source nothing caches.
+/// <c>CREATE DATABASE</c> for every configured database that does not exist yet. The admin reads
+/// <c>AllDisabledAsync()</c> (both tenancies, and JasperFx's <c>AllDisabledTenantsAsync</c> over them) and the
+/// sharded pool's <c>ListDatabasesAsync(token)</c> apply the same table before they read it.
+/// <c>FindDatabase(id)</c> rebuilds on a miss. <c>FindOrCreateDatabase</c>, <c>GetTenant</c> and
+/// <c>GetTenantAsync</c> provision a tenant a sharded or single-server tenancy does not have.
+/// <c>TryFindDatabase</c> and 9.50's <c>FindDatabaseForTenantAsync</c> never provision, but on a master-table
+/// or sharded miss they build a data source nothing caches.
 /// </para>
 /// <para>
 /// So a new call is a decision, not a convenience: it goes on <see cref="AllowedSites" /> with what it needs,
@@ -26,15 +28,22 @@ namespace MartenStudio.Tests.Conventions;
 /// is pruned - the list is a statement about the code that exists, never a standing exemption.
 /// </para>
 /// <para>
+/// <b>It counts call sites, not reach.</b> A helper that makes one of these calls is one site however many
+/// paths reach it, and how often a page polls through a site is not measured here: that is what the doc comment
+/// at each site, the "needs" on its entry and the live <c>Tenancy/</c> suite are for.
+/// </para>
+/// <para>
 /// A call is a member access followed by an argument list - <c>.AllDatabases(</c> - read after
 /// <see cref="SourceScanner" /> has blanked comments and strings, because every one of these is explained at
 /// length in the doc comments of the files that make it. The dot is what keeps a studio method that happens
 /// to share a name out of it (<c>ConfigurationService</c> has a private <c>DescribeDatabasesAsync</c> of its
-/// own, called without a receiver); every call into Marten has a receiver.
+/// own, called without a receiver); every call into Marten has a receiver. <c>ListDatabasesAsync</c> is matched
+/// only with a single argument, the pool's shape, because the studio's own scope catalog has a
+/// <c>ListDatabasesAsync(storeKey, token)</c> that its state calls with a receiver.
 /// <see cref="The_scanner_finds_a_real_call_and_ignores_one_in_a_comment_a_string_or_a_studio_helper" /> is the
-/// anti-vacuity half, and
-/// <see cref="NoSchemaBuildingCallTests.Every_scanned_file_is_one_the_scanner_can_follow_to_the_end" /> already
-/// fails on a file the stripping pass cannot follow to its end, which would hide a call here too.
+/// anti-vacuity half, <see cref="What_the_scanner_cannot_see_is_written_down" /> records the shapes it misses,
+/// and <see cref="NoSchemaBuildingCallTests.Every_scanned_file_is_one_the_scanner_can_follow_to_the_end" />
+/// already fails on a file the stripping pass cannot follow to its end, which would hide a call here too.
 /// </para>
 /// </remarks>
 public class TenancyEnumerationCallTests
@@ -42,10 +51,14 @@ public class TenancyEnumerationCallTests
     /// <summary>
     /// A call to one of the members, as a member access. <c>TryDescribeDatabasesAsync</c> and
     /// <c>DescribeDatabasesAsync</c> are told apart by the dot, which a <c>Try</c> prefix would sit between.
+    /// <c>ListDatabasesAsync</c> is the second alternative: a call whose argument list holds no top-level comma -
+    /// the pool's <c>ListDatabasesAsync(token)</c> - and never the studio catalog's two-argument one.
     /// </summary>
     private static readonly Regex TenancyCall = new(
-        @"\.\s*(?<member>AllDatabases|BuildDatabases|TryDescribeDatabasesAsync|DescribeDatabasesAsync"
-        + @"|FindOrCreateDatabase|GetTenantAsync|GetTenant|TryFindDatabase|FindDatabaseForTenantAsync|FindDatabase)\s*\(",
+        @"\.\s*(?:(?<member>AllDatabases|BuildDatabases|TryDescribeDatabasesAsync|DescribeDatabasesAsync"
+        + @"|FindOrCreateDatabase|GetTenantAsync|GetTenant|TryFindDatabase|FindDatabaseForTenantAsync|FindDatabase"
+        + @"|AllDisabledTenantsAsync|AllDisabledAsync)\s*\("
+        + @"|(?<member>ListDatabasesAsync)\s*\((?=[^,()]*(?:\([^()]*\)[^,()]*)*\)))",
         RegexOptions.Compiled,
         TimeSpan.FromSeconds(5));
 
@@ -150,6 +163,18 @@ public class TenancyEnumerationCallTests
     [InlineData("var db = await tenancy.FindDatabase(databaseId);", "FindDatabase")]
     [InlineData("var db = await events.FindDatabaseForTenantAsync(id, token);", "FindDatabaseForTenantAsync")]
     [InlineData("var all = store?.Storage.AllDatabases();", "AllDatabases")]
+    [InlineData("var off = await masterTable.AllDisabledAsync();", "AllDisabledAsync")]
+    [InlineData("var off = await services.AllDisabledTenantsAsync();", "AllDisabledTenantsAsync")]
+    [InlineData("var pool = await sharded.ListDatabasesAsync(token);", "ListDatabasesAsync")]
+    [InlineData("var pool = await sharded.ListDatabasesAsync(CancellationToken.None);", "ListDatabasesAsync")]
+    [InlineData("var pool = await sharded\n    .ListDatabasesAsync(cts.Token);", "ListDatabasesAsync")]
+    [InlineData("var pool = await sharded.ListDatabasesAsync(Token());", "ListDatabasesAsync")]
+    [InlineData("var pool = await ((ITenantDatabasePool) tenancy).ListDatabasesAsync(default);", "ListDatabasesAsync")]
+    [InlineData("AvailableDatabases = await catalog.ListDatabasesAsync(store.Key, cancellationToken).ConfigureAwait(false);", null)]
+    [InlineData("AvailableDatabases = await catalog.ListDatabasesAsync(\n    store.Key,\n    cancellationToken);", null)]
+    [InlineData("IReadOnlyList<DatabaseOverview>? databases = await ListDatabasesAsync(storeKey, store, cancellationToken);", null)]
+    [InlineData("IReadOnlyList<DatabaseListing> databases = await ListDatabasesAsync(registration.Key, store, cancellationToken);", null)]
+    [InlineData("StoreDatabases listed = await StoreDatabases.ListAsync(store);", null)]
     [InlineData("/// <c>Storage.AllDatabases()</c> is a query on a master-table tenancy.", null)]
     [InlineData("// tenancy.GetTenantAsync(id) provisions a sharded tenant", null)]
     [InlineData("/* store.Storage.FindOrCreateDatabase(id) */", null)]
@@ -174,6 +199,44 @@ public class TenancyEnumerationCallTests
             match.Success.Should().BeTrue("'{0}' calls {1}", source, member);
             match.Groups["member"].Value.Should().Be(member);
         }
+    }
+
+    /// <summary>
+    /// The shapes the scanner does <em>not</em> see, written down as facts so that they are a decision rather than
+    /// a surprise - and so that a scanner taught to see one of them fails here, and this list is updated.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><description>
+    /// A <b>method group</b> - <c>store.Storage.AllDatabases</c> handed on as a delegate - is not a call, and the
+    /// delegate's later invocation (<c>all()</c>) names nothing the scanner knows. Nothing in <c>src/</c> does this,
+    /// and review is what keeps it so.
+    /// </description></item>
+    /// <item><description>
+    /// A call inside an <b>interpolation hole</b> - <c>$"{await store.Storage.AllDatabases()}"</c> - is blanked
+    /// with the rest of the string literal by <see cref="SourceScanner" />, which does not parse holes.
+    /// </description></item>
+    /// <item><description>
+    /// A pool <b><c>ListDatabasesAsync</c> whose one argument nests calls two deep</b> - <c>F(G(x))</c> - is
+    /// beyond the one level of parentheses the single-argument pattern follows.
+    /// </description></item>
+    /// <item><description>
+    /// A call made through <b>reflection or <c>dynamic</c></b> names the member as a string or not at all.
+    /// </description></item>
+    /// </list>
+    /// </remarks>
+    [Theory]
+    [InlineData("Func<ValueTask<IReadOnlyList<IMartenDatabase>>> all = store.Storage.AllDatabases;", "a method group")]
+    [InlineData("var databases = await all();", "the method group's invocation")]
+    [InlineData("var text = $\"{(await store.Storage.AllDatabases()).Count} databases\";", "an interpolation hole")]
+    [InlineData("var pool = await sharded.ListDatabasesAsync(Tokens(Source(cts)));", "two nested levels in the pool's argument")]
+    [InlineData("var all = typeof(IMartenStorage).GetMethod(\"AllDatabases\")!.Invoke(store.Storage, null);", "reflection")]
+    public void What_the_scanner_cannot_see_is_written_down(string source, string shape)
+    {
+        TenancyCall.IsMatch(SourceScanner.StripCommentsAndStrings(source)).Should().BeFalse(
+            "{0} is a known limit of a call-site scan; if the scanner now sees it, move the row to the theory above "
+            + "and the bullet out of this remark",
+            shape);
     }
 
     private static int AllowedCount((string File, string Member) site) =>

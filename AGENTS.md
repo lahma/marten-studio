@@ -128,6 +128,8 @@ model, the phased delivery plan — lives in the approved plan at
     database, never per store**: the same four members exist on `IMartenDatabase` (through
     `Weasel.Core.Migrations.IDatabase`) and answer only for the database the visitor resolved, whereas
     `store.Storage`'s apply reaches *every* database a `DynamicMultiple` store knows about.
+    Enumerating a dynamic tenancy's databases is not read-only either — D27's known limit, whose call sites
+    `TenancyEnumerationCallTests` fences.
     And the wording half of the rule, because it was got wrong once: **`AutoCreate.CreateOrUpdate` is not
     additive.** Weasel's `TableDelta.WriteUpdate` — which is what an `Update` delta writes, and `Update` is
     exactly what `CreateOrUpdate` allows — "emits `drop index` for every physical index the configuration
@@ -454,7 +456,7 @@ SQLSTATE, not Postgres' words, which stay in event 9206; row reads do not pin `s
 bare `=` must find `citext`'s own operator, and a name printed unqualified names no schema. The "could
 not be built" notice names another store only to a visitor that store's policy passes, and other stores'
 databases are enumerated only when a store policy — or a write policy, while `BrowseDatabase` is on —
-will be asked.
+will be asked, and never for a `DynamicMultiple` store.
 **Reach, not scope.** An operation Marten runs over a whole database — a progression correction, a
 rebuild, a high-water restart, a store-global agent, cancelling a rebuild, the dead-letter "Rewind
 subscription", a schema apply — is authorized as `(store, database, null)` unless the database is
@@ -462,13 +464,13 @@ exclusively the selected tenant's (never on a sharded tenancy, which pools tenan
 console, the Mode A subquery lift and `EXPLAIN` are always asked with `TenantId = null`, because nothing
 narrows a typed statement to a tenant. A tenant's database is found without asking a dynamic tenancy for a
 tenant it does not have (`DatabaseReach.FindTenantDatabaseAsync`). Enumerating a dynamic tenancy's
-databases is never a read, at any Marten through 9.50.2: `AllDatabases()`, `Tenancy.DescribeDatabasesAsync()`
-and 9.50.1's `IEventStore.TryDescribeDatabasesAsync()` all run `Tenancy.BuildDatabases()`. Once per process,
-that applies a master-table or sharded tenancy's lookup table under the store's `AutoCreateSchemaObjects`.
-That includes `All`, which drops and recreates a table it cannot alter, and `None` is promoted to
-`CreateOrUpdate` when the tenancy's own `AutoCreate` is set. It also upserts the tenancy's seed rows. On a
-single-server tenancy it creates every configured database that does not exist yet, under no `AutoCreate` at
-all. The studio enumerates on the first navigation, so in a process that runs no daemon of its own it can be
+databases is not read-only, at any Marten through 9.50.2: `AllDatabases()`, `Tenancy.DescribeDatabasesAsync()`
+and 9.50.1's `IEventStore.TryDescribeDatabasesAsync()` all run `Tenancy.BuildDatabases()`. Once per store
+instance, that applies a master-table or sharded tenancy's lookup table under the store's
+`AutoCreateSchemaObjects`. That includes `All`, which drops and recreates a table it cannot alter, and `None`
+is promoted to `CreateOrUpdate` when the tenancy's own `AutoCreate` is set to anything but `None`. It also
+upserts the tenancy's seed rows. On a single-server tenancy it creates every configured database that does
+not exist yet, under no `AutoCreate` at all. The studio enumerates on the first navigation, so in a process that runs no daemon of its own it can be
 that first caller; a host whose daemon runs in-process, or that applies on startup, has always enumerated
 before it. A known limit, not a per-poll cost.
 

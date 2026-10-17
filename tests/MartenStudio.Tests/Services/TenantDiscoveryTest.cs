@@ -49,7 +49,7 @@ public class TenantDiscoveryTest
         var (store, provider) = BuildStore(x => x.Connection(DummyConnectionString));
         using var _ = provider;
 
-        var tenants = await Create(options).DiscoverAsync("default", store, store.Storage.Database, Token);
+        var tenants = await Create(options).DiscoverAsync("default", store, store.Storage.Database, [store.Storage.Database], Token);
 
         tenants.Source.Should().Be(TenantListSource.Configured);
         tenants.Ids.Should().Equal("acme", "globex");
@@ -64,7 +64,7 @@ public class TenantDiscoveryTest
         var (store, provider) = BuildStore(x => x.Connection(DummyConnectionString));
         using var _ = provider;
 
-        var tenants = await Create(options).DiscoverAsync("default", store, store.Storage.Database, Token);
+        var tenants = await Create(options).DiscoverAsync("default", store, store.Storage.Database, [store.Storage.Database], Token);
 
         tenants.Source.Should().Be(TenantListSource.Unavailable,
             "'cannot report' is a value, drawn differently from 'there are none'");
@@ -94,7 +94,7 @@ public class TenantDiscoveryTest
         var databases = await store.Storage.AllDatabases();
         var first = databases.Single(x => x.Id.Server.Equals("h1.invalid", StringComparison.OrdinalIgnoreCase));
 
-        var tenants = await Create(new MartenStudioOptions()).DiscoverAsync("default", store, first, Token);
+        var tenants = await Create(new MartenStudioOptions()).DiscoverAsync("default", store, first, databases, Token);
 
         tenants.Source.Should().Be(TenantListSource.Descriptor);
         tenants.Ids.Should().Equal("acme", "globex");
@@ -114,7 +114,7 @@ public class TenantDiscoveryTest
         var databases = await store.Storage.AllDatabases();
         var second = databases.Single(x => x.Id.Server.Equals("h2.invalid", StringComparison.OrdinalIgnoreCase));
 
-        var tenants = await Create(new MartenStudioOptions()).DiscoverAsync("default", store, second, Token);
+        var tenants = await Create(new MartenStudioOptions()).DiscoverAsync("default", store, second, databases, Token);
 
         tenants.Ids.Should().Equal("initech");
     }
@@ -130,7 +130,7 @@ public class TenantDiscoveryTest
         var (store, provider) = BuildStore(x => x.Connection(DummyConnectionString));
         using var _ = provider;
 
-        var tenants = await Create(new MartenStudioOptions()).DiscoverAsync("default", store, store.Storage.Database, Token);
+        var tenants = await Create(new MartenStudioOptions()).DiscoverAsync("default", store, store.Storage.Database, [store.Storage.Database], Token);
 
         tenants.Source.Should().Be(TenantListSource.Unavailable);
     }
@@ -148,14 +148,14 @@ public class TenantDiscoveryTest
         var discovery = Create(options, time);
         var database = (await store.Storage.AllDatabases())[0];
 
-        var first = await discovery.DiscoverAsync("default", store, database, Token);
-        var second = await discovery.DiscoverAsync("default", store, database, Token);
+        var first = await discovery.DiscoverAsync("default", store, database, [database], Token);
+        var second = await discovery.DiscoverAsync("default", store, database, [database], Token);
 
         second.Should().BeSameAs(first, "the second call inside the window is the cached list");
 
         time.Advance(TimeSpan.FromSeconds(61));
 
-        var third = await discovery.DiscoverAsync("default", store, database, Token);
+        var third = await discovery.DiscoverAsync("default", store, database, [database], Token);
         third.Should().NotBeSameAs(first, "the window has passed");
         third.Ids.Should().Equal(first.Ids);
     }
@@ -171,9 +171,9 @@ public class TenantDiscoveryTest
         var discovery = Create(options, new FakeTimeProvider(DateTimeOffset.UnixEpoch));
         var database = (await store.Storage.AllDatabases())[0];
 
-        var first = await discovery.DiscoverAsync("default", store, database, Token);
+        var first = await discovery.DiscoverAsync("default", store, database, [database], Token);
         discovery.Invalidate();
-        var second = await discovery.DiscoverAsync("default", store, database, Token);
+        var second = await discovery.DiscoverAsync("default", store, database, [database], Token);
 
         second.Should().NotBeSameAs(first);
     }

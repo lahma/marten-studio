@@ -88,15 +88,17 @@ internal sealed class StudioScopeResolver
         }
 
         // 4. The database, matched against what Marten already knows.
-        IMartenDatabase database = await FindDatabaseAsync(store, scope.DatabaseId).ConfigureAwait(false)
+        IReadOnlyList<IMartenDatabase> databases = await store.Storage.AllDatabases().ConfigureAwait(false);
+        IMartenDatabase database = MatchDatabase(databases, scope.DatabaseId)
             ?? throw new KeyNotFoundException(
                 $"Marten store '{registration.Key}' has no database with identity '{scope.DatabaseId}'.");
 
-        // 5. The tenant, which is only ever one the store could actually answer for.
+        // 5. The tenant, which is only ever one the store could actually answer for - asked with the list
+        //    just read, so that a database's same-identity twins answer for their tenants too.
         if (scope.TenantId is not null)
         {
             TenantList tenants = await tenantDiscovery
-                .DiscoverAsync(registration.Key, store, database, cancellationToken)
+                .DiscoverAsync(registration.Key, store, database, databases, cancellationToken)
                 .ConfigureAwait(false);
 
             if (!TenantDiscovery.IsAcceptable(tenants, scope.TenantId))
@@ -109,10 +111,8 @@ internal sealed class StudioScopeResolver
         return new ResolvedScope(scope, registration, store, database);
     }
 
-    private static async ValueTask<IMartenDatabase?> FindDatabaseAsync(IDocumentStore store, string databaseId)
+    private static IMartenDatabase? MatchDatabase(IReadOnlyList<IMartenDatabase> databases, string databaseId)
     {
-        IReadOnlyList<IMartenDatabase> databases = await store.Storage.AllDatabases().ConfigureAwait(false);
-
         // An empty identity means "whatever this store's single database is", which is the shape every
         // single-tenant store has and the one a link without a ?db= carries.
         if (string.IsNullOrEmpty(databaseId))

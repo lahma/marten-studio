@@ -123,15 +123,26 @@ internal sealed record FirstNavigation(
     IReadOnlyList<string> Tenants);
 
 /// <summary>
-/// Everything a first navigation could change: the databases on the server, every object in the schemas a
-/// test names, and the rows of a lookup table.
+/// Everything a first navigation could change: the databases on the server, every object in every
+/// non-system schema of the databases a test owns, and the rows of a lookup table.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Read from <c>pg_catalog</c> on a connection of the test's own, so nothing of the studio's is in the
-/// measurement. An object is printed with its oid, so a table that was dropped and created again - what
-/// <c>AutoCreate.All</c> does to one it cannot alter - reads as changed even though its name is the same; a
-/// relation also carries its columns and their types, so an <c>alter table</c> reads as changed too.
+/// <b>Every schema, because each test owns its databases.</b> A test here creates the databases its stores use
+/// and drops them afterwards, so nothing else on the shared container writes to them - other test classes run
+/// in parallel, but against databases of their own - and the snapshot can read every schema that is not
+/// Postgres' own rather than only those a test thought to name. A store that created a schema nobody expected
+/// is then a difference too.
+/// </para>
+/// <para>
+/// Read from <c>pg_catalog</c> on an unpooled connection of the test's own, so nothing of the studio's is in
+/// the measurement and no pooled connection outlives a database the test drops. Each object is printed with
+/// its oid, so a table dropped and created again - what <c>AutoCreate.All</c> does to one it cannot alter -
+/// reads as changed under the same name. A relation also carries its owner, grants, storage options,
+/// partition bound and index definition, and each column its type, nullability and default, so an
+/// <c>alter table</c> of any of those reads as changed. Constraints, triggers (with whether they are
+/// enabled), routines (by source digest), domains, enums and ranges, row-security policies, extensions, and
+/// the comments on any object a user made (oid 16384 and up - Postgres' own are below) are read as well.
 /// </para>
 /// <para>
 /// A lookup table's rows carry their <c>xmin</c>, so a write that leaves every value as it was - the
@@ -141,7 +152,7 @@ internal sealed record FirstNavigation(
 /// <para>
 /// Only databases whose names start with the prefix a test passes are listed: other test classes create and
 /// drop databases of their own on the same server, in parallel, so each class here names its own with a
-/// prefix of its own (<see cref="FirstNavigationPrefix" />, <see cref="EnumerationPrefix" />).
+/// prefix of its own. <c>ServerSnapshotLiveTests</c> is this type's anti-vacuity: each part is seen to move.
 /// </para>
 /// </remarks>
 internal sealed record ServerSnapshot(IReadOnlyList<string> Databases, IReadOnlyList<string> Objects, IReadOnlyList<string> Rows)
@@ -152,23 +163,57 @@ internal sealed record ServerSnapshot(IReadOnlyList<string> Databases, IReadOnly
     /// <summary>The prefix of every database <c>EnumerationAppliesLiveTests</c> creates.</summary>
     public const string EnumerationPrefix = "f8d3_apply_";
 
+    /// <summary>The prefix of every database <c>ServerSnapshotLiveTests</c> creates.</summary>
+    public const string SnapshotPrefix = "f8d3_snap_";
+
     private const string ObjectsSql =
-        "select 'schema ' || n.nspname || ' ' || n.oid::text "
-        + "from pg_namespace n where n.nspname = any(@schemas) "
+        "with schemas as (select oid, nspname from pg_namespace where nspname <> 'information_schema' and nspname !~ '^pg_') "
+        + "select 'schema ' || n.nspname || ' ' || n.oid::text || ' owner=' || pg_get_userbyid(n.nspowner) "
+        + "|| ' acl=' || coalesce(n.nspacl::text, '') "
+        + "from pg_namespace n join schemas s on s.oid = n.oid "
         + "union all "
-        + "select 'relation ' || n.nspname || '.' || c.relname || ' ' || c.relkind::text || ' ' || c.oid::text || ' ' "
-        + "|| coalesce((select string_agg(a.attname || ':' || format_type(a.atttypid, a.atttypmod), ',' order by a.attnum) "
-        + "from pg_attribute a where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped), '') "
-        + "from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = any(@schemas) "
+        + "select 'relation ' || s.nspname || '.' || c.relname || ' ' || c.relkind::text || ' ' || c.oid::text "
+        + "|| ' owner=' || pg_get_userbyid(c.relowner) "
+        + "|| ' acl=' || coalesce(c.relacl::text, '') "
+        + "|| ' options=' || coalesce(array_to_string(c.reloptions, ','), '') "
+        + "|| ' bound=' || coalesce(pg_get_expr(c.relpartbound, c.oid), '') "
+        + "|| ' index=' || case when c.relkind in ('i', 'I') then pg_get_indexdef(c.oid) else '' end "
+        + "|| ' columns=' || coalesce((select string_agg(a.attname || ':' || format_type(a.atttypid, a.atttypmod) "
+        + "|| case when a.attnotnull then ' not null' else '' end "
+        + "|| coalesce(' default ' || pg_get_expr(d.adbin, d.adrelid), ''), ',' order by a.attnum) "
+        + "from pg_attribute a left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum "
+        + "where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped), '') "
+        + "from pg_class c join schemas s on s.oid = c.relnamespace "
         + "union all "
-        + "select 'routine ' || n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ') ' "
-        + "|| p.oid::text || ' ' || md5(coalesce(p.prosrc, '')) "
-        + "from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = any(@schemas) "
+        + "select 'constraint ' || s.nspname || '.' || coalesce(r.relname, '-') || '.' || k.conname || ' ' || k.oid::text "
+        + "|| ' ' || pg_get_constraintdef(k.oid) "
+        + "from pg_constraint k join schemas s on s.oid = k.connamespace left join pg_class r on r.oid = k.conrelid "
+        + "union all "
+        + "select 'trigger ' || s.nspname || '.' || r.relname || '.' || t.tgname || ' ' || t.oid::text || ' ' "
+        + "|| t.tgenabled::text || ' ' || pg_get_triggerdef(t.oid) "
+        + "from pg_trigger t join pg_class r on r.oid = t.tgrelid join schemas s on s.oid = r.relnamespace "
+        + "where not t.tgisinternal "
+        + "union all "
+        + "select 'routine ' || s.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ') ' "
+        + "|| p.oid::text || ' ' || md5(coalesce(p.prosrc, '')) || ' acl=' || coalesce(p.proacl::text, '') "
+        + "from pg_proc p join schemas s on s.oid = p.pronamespace "
+        + "union all "
+        + "select 'type ' || s.nspname || '.' || t.typname || ' ' || t.typtype::text || ' ' || t.oid::text "
+        + "from pg_type t join schemas s on s.oid = t.typnamespace where t.typtype in ('d', 'e', 'r', 'm') "
+        + "union all "
+        + "select 'policy ' || s.nspname || '.' || r.relname || '.' || p.polname || ' ' || p.oid::text "
+        + "from pg_policy p join pg_class r on r.oid = p.polrelid join schemas s on s.oid = r.relnamespace "
+        + "union all "
+        + "select 'extension ' || e.extname || ' ' || e.extversion from pg_extension e "
+        + "union all "
+        + "select 'comment ' || d.classoid::regclass::text || ' ' || d.objoid::text || ' ' || d.objsubid::text "
+        + "|| ' ' || md5(d.description) "
+        + "from pg_description d where d.objoid >= 16384 "
         + "order by 1";
 
     /// <summary>Reads the snapshot.</summary>
     /// <param name="databases">
-    /// Each database to read objects from, as a connection string, with the schemas to read in it.
+    /// The connection string of each database the test owns, every non-system schema of which is read.
     /// </param>
     /// <param name="databasePrefix">The prefix of the server's databases to list.</param>
     /// <param name="lookupTable">
@@ -177,7 +222,7 @@ internal sealed record ServerSnapshot(IReadOnlyList<string> Databases, IReadOnly
     /// </param>
     /// <param name="cancellationToken">Cancels the reads.</param>
     public static async Task<ServerSnapshot> ReadAsync(
-        IReadOnlyList<(string ConnectionString, string[] Schemas)> databases,
+        IReadOnlyList<string> databases,
         string databasePrefix,
         string? lookupTable,
         CancellationToken cancellationToken)
@@ -190,13 +235,11 @@ internal sealed record ServerSnapshot(IReadOnlyList<string> Databases, IReadOnly
 
         for (int i = 0; i < databases.Count; i++)
         {
-            (string connectionString, string[] schemas) = databases[i];
-
-            await using var connection = new NpgsqlConnection(connectionString);
+            await using var connection = new NpgsqlConnection(TenancyDatabases.Unpooled(databases[i]));
             await connection.OpenAsync(cancellationToken);
 
             string name = connection.Database;
-            foreach (string line in await ReadAsync(connection, ObjectsSql, [("schemas", schemas)], cancellationToken))
+            foreach (string line in await ReadAsync(connection, ObjectsSql, [], cancellationToken))
             {
                 objects.Add(name + ": " + line);
             }
@@ -347,6 +390,74 @@ internal static class TenancyDatabases
         await using NpgsqlConnection connection = await postgres.OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand(sql, connection);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>A statement that returns nothing, on a database a test owns, over an unpooled connection.</summary>
+    public static async Task ExecuteAsync(string connectionString, string sql, CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(Unpooled(connectionString));
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// The connection string without pooling: a test drops the databases it owns, and a pooled connection to
+    /// one would outlive it and be handed to the next reader as a dead session.
+    /// </summary>
+    public static string Unpooled(string connectionString) =>
+        new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString;
+}
+
+/// <summary>
+/// Databases a test creates for itself and drops when it is done: what lets a <see cref="ServerSnapshot" /> read
+/// every schema in them while other test classes run alongside against databases of their own.
+/// </summary>
+internal sealed class OwnedDatabases : IAsyncDisposable
+{
+    private readonly PostgresFixture postgres;
+    private readonly string[] names;
+    private readonly string[] connectionStrings;
+
+    private OwnedDatabases(PostgresFixture postgres, string[] names, string[] connectionStrings)
+    {
+        this.postgres = postgres;
+        this.names = names;
+        this.connectionStrings = connectionStrings;
+    }
+
+    /// <summary>Each database's connection string, in the order the names were given.</summary>
+    public IReadOnlyList<string> ConnectionStrings => connectionStrings;
+
+    /// <summary>The connection string of the database named at this position.</summary>
+    public string this[int index] => connectionStrings[index];
+
+    /// <summary>Creates each database, dropping whatever a previous run left under the same name.</summary>
+    public static async Task<OwnedDatabases> CreateAsync(
+        PostgresFixture postgres,
+        IReadOnlyList<string> names,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(postgres);
+        ArgumentNullException.ThrowIfNull(names);
+
+        string[] connectionStrings = new string[names.Count];
+        for (int i = 0; i < names.Count; i++)
+        {
+            connectionStrings[i] = await TenancyDatabases.CreateAsync(postgres, names[i], cancellationToken);
+        }
+
+        return new OwnedDatabases(postgres, [.. names], connectionStrings);
+    }
+
+    /// <summary>Drops every database, ending whatever sessions are left on them.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        foreach (string name in names)
+        {
+            await TenancyDatabases.DropAsync(postgres, name, CancellationToken.None);
+        }
     }
 }
 

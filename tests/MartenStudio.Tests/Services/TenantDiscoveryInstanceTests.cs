@@ -7,7 +7,10 @@ using Marten.Storage;
 
 using MartenStudio.Services;
 using MartenStudio.Tests.Projections;
+using MartenStudio.Tests.Support;
 
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -39,6 +42,8 @@ public class TenantDiscoveryInstanceTests
 
     private const string UnreachableTenant = "Host=f8d3-tenant.invalid;Database=tenant;Username=u;Password=p";
 
+    private const string OtherUnreachableTenant = "Host=f8d3-other-tenant.invalid;Database=other;Username=u;Password=p";
+
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     private static TenantDiscovery Create() =>
@@ -57,7 +62,7 @@ public class TenantDiscoveryInstanceTests
         await using var store = new DocumentStore(options);
         await using MartenDatabase database = TenantDatabase(options, "acme", ["acme"]);
 
-        TenantList tenants = await Create().DiscoverAsync("default", store, database, Token);
+        TenantList tenants = await Create().DiscoverAsync("default", store, database, [database], Token);
 
         tenants.Source.Should().Be(TenantListSource.Descriptor);
         tenants.Ids.Should().Equal("acme");
@@ -77,7 +82,7 @@ public class TenantDiscoveryInstanceTests
         await using var store = new DocumentStore(options);
         await using MartenDatabase shard = TenantDatabase(options, "shard-1", ["globex", "acme"]);
 
-        TenantList tenants = await Create().DiscoverAsync("default", store, shard, Token);
+        TenantList tenants = await Create().DiscoverAsync("default", store, shard, [shard], Token);
 
         tenants.Source.Should().Be(TenantListSource.Descriptor);
         tenants.Ids.Should().Equal(["acme", "globex"], "ordinal order, as every tier answers");
@@ -101,7 +106,7 @@ public class TenantDiscoveryInstanceTests
         await using var store = new DocumentStore(options);
         await using MartenDatabase database = TenantDatabase(options, "acme", []);
 
-        TenantList tenants = await Create().DiscoverAsync("default", store, database, Token);
+        TenantList tenants = await Create().DiscoverAsync("default", store, database, [database], Token);
 
         tenants.Source.Should().Be(TenantListSource.Unavailable, "nothing in this store has a tenant column to query");
         tenancy.Describes.Should().Be(0);
@@ -125,11 +130,89 @@ public class TenantDiscoveryInstanceTests
         IMartenDatabase database = (await store.Storage.AllDatabases()).Single();
         database.TenantIds.Should().BeEquivalentTo(["acme", "globex"], "the premise: the instance would have answered too");
 
-        TenantList tenants = await Create().DiscoverAsync("default", store, database, Token);
+        TenantList tenants = await Create().DiscoverAsync("default", store, database, [database], Token);
 
         tenants.Source.Should().Be(TenantListSource.Descriptor);
         tenants.Ids.Should().Equal("acme", "globex");
         counting.Describes.Should().Be(1, "a static tenancy describes from its configuration, and that is the call tier 2 makes for it");
+    }
+
+    /// <summary>
+    /// F8-D3-fix: two master-table rows with one connection string are two instances over one database, and
+    /// the studio resolves that database to the first of them. Each instance lists only its own row's tenant,
+    /// so discovery reads every instance in the caller's enumeration with that identity - and none with
+    /// another.
+    /// </summary>
+    [Fact]
+    public async Task Twin_master_table_databases_answer_for_each_others_tenants()
+    {
+        StoreOptions options = new();
+        options.MultiTenantedDatabasesWithMasterDatabaseTable(UnreachableMaster, "tenants");
+
+        var tenancy = new CountingMasterTableTenancy(options);
+        options.Tenancy = tenancy;
+
+        await using var store = new DocumentStore(options);
+        await using MartenDatabase first = TenantDatabase(options, "t1", ["t1"]);
+        await using MartenDatabase second = TenantDatabase(options, "t2", ["t2"]);
+        await using MartenDatabase elsewhere = TenantDatabase(options, "t3", ["t3"], OtherUnreachableTenant);
+
+        first.Id.Identity.Should().Be(second.Id.Identity, "the premise: one connection string, one identity");
+        elsewhere.Id.Identity.Should().NotBe(first.Id.Identity, "the premise: another database");
+
+        TenantList tenants = await Create().DiscoverAsync("default", store, first, [first, second, elsewhere], Token);
+
+        tenants.Source.Should().Be(TenantListSource.Descriptor);
+        tenants.Ids.Should().Equal(["t1", "t2"], "both rows' tenants live in this database, and t3's does not");
+        tenancy.Describes.Should().Be(0, "the siblings come from the caller's enumeration, not from another one");
+        tenancy.Builds.Should().Be(0);
+    }
+
+    /// <summary>
+    /// The same twins end to end: the header lists both tenants, and a link naming the second row's tenant -
+    /// <c>?db=…&amp;tenant=t2</c> - resolves rather than being refused as "not a tenant of this database", which
+    /// is what reading the first instance alone did.
+    /// </summary>
+    [Fact]
+    public async Task A_link_to_a_twin_rows_tenant_resolves_and_the_header_lists_it()
+    {
+        StoreOptions options = new();
+        options.MultiTenantedDatabasesWithMasterDatabaseTable(UnreachableMaster, "tenants");
+        options.Schema.For<TenantedNote>().MultiTenanted();
+
+        var tenancy = new CountingMasterTableTenancy(options);
+        options.Tenancy = tenancy;
+
+        await using var store = new DocumentStore(options);
+        await using MartenDatabase first = TenantDatabase(options, "t1", ["t1"]);
+        await using MartenDatabase second = TenantDatabase(options, "t2", ["t2"]);
+        tenancy.Listed = [first, second];
+
+        var users = new TestAuthenticationStateProvider();
+        users.SignIn("tester");
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthorization();
+        services.AddSingleton<IDocumentStore>(store);
+        services.AddMartenStudio(static _ => { });
+        services.AddScoped<AuthenticationStateProvider>(_ => users);
+
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        await using AsyncServiceScope circuit = provider.CreateAsyncScope();
+
+        string identity = first.Id.Identity;
+
+        ResolvedScope resolved = await circuit.ServiceProvider.GetRequiredService<StudioScopeResolver>()
+            .ResolveAsync(new StudioScope(MartenStoreRegistry.DefaultStoreKey, identity, "t2"), null, Token);
+
+        resolved.Database.Should().BeSameAs(first, "the database resolves to the first instance with its identity");
+
+        StoreScopeFacts facts = await circuit.ServiceProvider.GetRequiredService<IStudioScopeCatalog>()
+            .DescribeAsync(MartenStoreRegistry.DefaultStoreKey, identity, Token);
+
+        facts.Tenants.Ids.Should().Equal(["t1", "t2"], "the header offers both rows' tenants");
+        tenancy.Describes.Should().Be(0);
     }
 
     [Fact]
@@ -166,9 +249,13 @@ public class TenantDiscoveryInstanceTests
     }
 
     /// <summary>A database as a dynamic tenancy builds one, with the tenant list it reconciles onto it.</summary>
-    private static MartenDatabase TenantDatabase(StoreOptions options, string identifier, string[] tenantIds)
+    private static MartenDatabase TenantDatabase(
+        StoreOptions options,
+        string identifier,
+        string[] tenantIds,
+        string connectionString = UnreachableTenant)
     {
-        var database = new MartenDatabase(options, NpgsqlDataSource.Create(UnreachableTenant), identifier);
+        var database = new MartenDatabase(options, NpgsqlDataSource.Create(connectionString), identifier);
         foreach (string tenantId in tenantIds)
         {
             database.TenantIds.Add(tenantId);
@@ -184,7 +271,11 @@ public class TenantDiscoveryInstanceTests
         public Guid Id { get; set; }
     }
 
-    /// <summary>Marten's master-table tenancy, counting the two calls tier 2 must not make.</summary>
+    /// <summary>
+    /// Marten's master-table tenancy, counting the two calls tier 2 must not make, and listing from memory
+    /// whatever databases a test hands it - which is what its <c>BuildDatabases()</c> answers after reading the
+    /// master table.
+    /// </summary>
     private sealed class CountingMasterTableTenancy(StoreOptions options)
         : MasterTableTenancy(options, UnreachableMaster, "tenants"), ITenancy
     {
@@ -195,10 +286,13 @@ public class TenantDiscoveryInstanceTests
 
         public int Describes => Volatile.Read(ref describes);
 
+        /// <summary>What <c>BuildDatabases()</c> answers.</summary>
+        public IReadOnlyList<IMartenDatabase> Listed { get; set; } = [];
+
         public new ValueTask<IReadOnlyList<Weasel.Core.Migrations.IDatabase>> BuildDatabases()
         {
             Interlocked.Increment(ref builds);
-            return ValueTask.FromResult<IReadOnlyList<Weasel.Core.Migrations.IDatabase>>([]);
+            return ValueTask.FromResult<IReadOnlyList<Weasel.Core.Migrations.IDatabase>>([.. Listed]);
         }
 
         public new ValueTask<DatabaseUsage> DescribeDatabasesAsync(CancellationToken token)

@@ -15,10 +15,12 @@ namespace MartenStudio.Integration.Tests.Tenancy;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Each test prepares its database through a store instance of its own, reads a <see cref="ServerSnapshot" />,
-/// opens the studio over a cold instance of the same configuration, navigates (<see cref="TenancyStudio" />),
-/// and reads the snapshot again. The two must be equal: no database, no schema object - by name, oid and
-/// columns - and no row of a lookup table, by <c>xmin</c>.
+/// Each test creates the databases its stores use, prepares them through a store instance of its own, reads a
+/// <see cref="ServerSnapshot" />, opens the studio over a cold instance of the same configuration, navigates
+/// (<see cref="TenancyStudio" />), and reads the snapshot again. The two must be equal: no database, no object
+/// in any non-system schema of those databases - by name, oid, columns, constraints, triggers and comments - and
+/// no row of a lookup table, by <c>xmin</c>. The databases are the test's own, which is what lets the snapshot
+/// read every schema while other test classes run alongside; they are dropped afterwards.
 /// </para>
 /// <para>
 /// Run at the floor and at the latest Marten (<c>-p:MartenStudioMartenVersion=9.50.2</c>, or
@@ -26,8 +28,8 @@ namespace MartenStudio.Integration.Tests.Tenancy;
 /// </para>
 /// <para>
 /// <b>Deliberately absent:</b> a master-table tenancy whose table is <em>not</em> there yet, and a single-server
-/// tenancy whose databases are not. There the first enumeration in the process applies the table, or creates
-/// the databases, and the studio can be that first caller - AGENTS.md D27's known limit, which
+/// tenancy whose databases are not. There the first enumeration per store instance applies the table, or
+/// creates the databases, and the studio can be that first caller - AGENTS.md D27's known limit, which
 /// <see cref="EnumerationAppliesLiveTests" /> pins rather than hides. A sharded tenancy is absent for the
 /// same reason as the master table, and because its pool needs more than one database to mean anything.
 /// </para>
@@ -40,6 +42,12 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
 
     private const string Initech = "initech";
 
+    /// <summary>The document schema, inside each test's own database.</summary>
+    private const string Schema = "app";
+
+    /// <summary>The event schema, inside each test's own database.</summary>
+    private const string Events = "app_events";
+
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     /// <summary>
@@ -48,16 +56,20 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
     [PostgresFact]
     public async Task A_single_database_over_empty_schemas_is_left_empty()
     {
-        (string schema, string events) = await SchemasAsync("f8d3_nav_single_cold");
-        void Configure(StoreOptions options) => SingleDatabase(options, schema, events);
+        await using OwnedDatabases owned = await OwnAsync("single_cold");
+        string database = owned[0];
 
-        IReadOnlyList<(string, string[])> databases = [(postgres.ConnectionString, new[] { schema, events })];
-        ServerSnapshot before = await SnapshotAsync(databases, lookupTable: null);
-        before.Objects.Should().HaveCount(2, "the premise: two empty schemas and nothing in them");
+        await TenancyDatabases.ExecuteAsync(database, $"create schema {Schema}; create schema {Events};", Token);
+        void Configure(StoreOptions options) => SingleDatabase(options, database);
+
+        ServerSnapshot before = await SnapshotAsync(owned, lookupTable: null);
+        before.Objects.Should().NotContain(
+            static x => x.Contains(": relation ", StringComparison.Ordinal),
+            "the premise: two empty schemas and nothing in them");
 
         FirstNavigation navigation = await NavigateAsync(Configure);
 
-        before.ShouldBeUnchangedIn(await SnapshotAsync(databases, lookupTable: null));
+        before.ShouldBeUnchangedIn(await SnapshotAsync(owned, lookupTable: null));
 
         navigation.Databases.Should().ContainSingle();
         navigation.Overview.Stores.Should().ContainSingle().Which.Databases.Should().ContainSingle();
@@ -66,8 +78,9 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
     [PostgresFact]
     public async Task A_single_database_with_data_is_left_as_it_was()
     {
-        (string schema, string events) = await SchemasAsync("f8d3_nav_single");
-        void Configure(StoreOptions options) => SingleDatabase(options, schema, events);
+        await using OwnedDatabases owned = await OwnAsync("single");
+        string database = owned[0];
+        void Configure(StoreOptions options) => SingleDatabase(options, database);
 
         await using (DocumentStore seed = DocumentStore.For(Configure))
         {
@@ -75,12 +88,11 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
             await WriteAsync(seed, Globex);
         }
 
-        IReadOnlyList<(string, string[])> databases = [(postgres.ConnectionString, new[] { schema, events })];
-        ServerSnapshot before = await SnapshotAsync(databases, lookupTable: null);
+        ServerSnapshot before = await SnapshotAsync(owned, lookupTable: null);
 
         FirstNavigation navigation = await NavigateAsync(Configure);
 
-        before.ShouldBeUnchangedIn(await SnapshotAsync(databases, lookupTable: null));
+        before.ShouldBeUnchangedIn(await SnapshotAsync(owned, lookupTable: null));
 
         navigation.TenantLists.Should().ContainSingle().Which.Source.Should().Be(
             TenantListSource.Queried, "a single database's tenants exist only as data");
@@ -90,10 +102,12 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
     [PostgresFact]
     public async Task A_single_database_with_tenant_partitioned_events_is_left_as_it_was()
     {
-        (string schema, string events) = await SchemasAsync("f8d3_nav_partitioned");
+        await using OwnedDatabases owned = await OwnAsync("partitioned");
+        string database = owned[0];
+
         void Configure(StoreOptions options)
         {
-            SingleDatabase(options, schema, events);
+            SingleDatabase(options, database);
 
             // What UseTenantPartitionedEvents requires: conjoined event tenancy and a quick append mode.
             options.Events.TenancyStyle = TenancyStyle.Conjoined;
@@ -113,12 +127,11 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
             await WriteAsync(seed, Globex);
         }
 
-        IReadOnlyList<(string, string[])> databases = [(postgres.ConnectionString, new[] { schema, events })];
-        ServerSnapshot before = await SnapshotAsync(databases, lookupTable: null);
+        ServerSnapshot before = await SnapshotAsync(owned, lookupTable: null);
 
         FirstNavigation navigation = await NavigateAsync(Configure);
 
-        before.ShouldBeUnchangedIn(await SnapshotAsync(databases, lookupTable: null));
+        before.ShouldBeUnchangedIn(await SnapshotAsync(owned, lookupTable: null));
 
         navigation.Databases.Should().ContainSingle();
         navigation.Tenants.Should().Equal(Acme, Globex);
@@ -127,54 +140,41 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
     [PostgresFact]
     public async Task A_static_multi_tenancy_is_left_as_it_was()
     {
-        (string schema, string events) = await SchemasAsync("f8d3_nav_static");
-        string secondName = ServerSnapshot.FirstNavigationPrefix + "static_b";
-        string second = await TenancyDatabases.CreateAsync(postgres, secondName, Token);
+        await using OwnedDatabases owned = await OwnAsync("static_a", "static_b");
+        string first = owned[0];
+        string second = owned[1];
 
         void Configure(StoreOptions options)
         {
             options.MultiTenantedDatabases(tenancy =>
             {
-                tenancy.AddMultipleTenantDatabase(postgres.ConnectionString, "f8d3-static-a").ForTenants(Acme, Globex);
+                tenancy.AddMultipleTenantDatabase(first, "f8d3-static-a").ForTenants(Acme, Globex);
                 tenancy.AddMultipleTenantDatabase(second, "f8d3-static-b").ForTenants(Initech);
             });
 
-            Documents(options, schema, events);
+            Documents(options);
         }
 
-        try
+        await using (DocumentStore seed = DocumentStore.For(Configure))
         {
-            await using (DocumentStore seed = DocumentStore.For(Configure))
-            {
-                await seed.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
-                await WriteAsync(seed, Acme);
-                await WriteAsync(seed, Globex);
-                await WriteAsync(seed, Initech);
-            }
-
-            IReadOnlyList<(string, string[])> databases =
-            [
-                (postgres.ConnectionString, new[] { schema, events }),
-                (second, new[] { schema, events }),
-            ];
-
-            ServerSnapshot before = await SnapshotAsync(databases, lookupTable: null);
-
-            FirstNavigation navigation = await NavigateAsync(Configure);
-
-            before.ShouldBeUnchangedIn(await SnapshotAsync(databases, lookupTable: null));
-
-            navigation.Databases.Should().HaveCount(2);
-            navigation.Overview.Stores.Should().ContainSingle().Which.Databases.Should().HaveCount(2);
-            navigation.TenantLists.Should().OnlyContain(
-                static x => x.Source == TenantListSource.Descriptor,
-                "a static multi-tenancy describes its tenants from its configuration");
-            navigation.Tenants.Should().BeEquivalentTo([Acme, Globex, Initech]);
+            await seed.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
+            await WriteAsync(seed, Acme);
+            await WriteAsync(seed, Globex);
+            await WriteAsync(seed, Initech);
         }
-        finally
-        {
-            await TenancyDatabases.DropAsync(postgres, secondName, CancellationToken.None);
-        }
+
+        ServerSnapshot before = await SnapshotAsync(owned, lookupTable: null);
+
+        FirstNavigation navigation = await NavigateAsync(Configure);
+
+        before.ShouldBeUnchangedIn(await SnapshotAsync(owned, lookupTable: null));
+
+        navigation.Databases.Should().HaveCount(2);
+        navigation.Overview.Stores.Should().ContainSingle().Which.Databases.Should().HaveCount(2);
+        navigation.TenantLists.Should().OnlyContain(
+            static x => x.Source == TenantListSource.Descriptor,
+            "a static multi-tenancy describes its tenants from its configuration");
+        navigation.Tenants.Should().BeEquivalentTo([Acme, Globex, Initech]);
     }
 
     /// <summary>
@@ -185,80 +185,69 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
     [PostgresFact]
     public async Task A_master_table_tenancy_whose_table_is_applied_is_left_as_it_was()
     {
-        (string schema, string events) = await SchemasAsync("f8d3_nav_master");
-        string master = await postgres.CreateSchemaAsync("f8d3_nav_master_tenants", Token);
-        string lookupTable = SqlIdentifier.Qualify(master, "mt_tenant_databases");
+        await using OwnedDatabases owned = await OwnAsync("master", "master_globex");
+        string master = owned[0];
+        string globex = owned[1];
 
-        string globexName = ServerSnapshot.FirstNavigationPrefix + "master_globex";
-        string globex = await TenancyDatabases.CreateAsync(postgres, globexName, Token);
+        const string tenants = "tenants";
+        string lookupTable = SqlIdentifier.Qualify(tenants, "mt_tenant_databases");
 
         void Configure(StoreOptions options)
         {
             options.MultiTenantedDatabasesWithMasterDatabaseTable(tenancy =>
             {
-                tenancy.ConnectionString = postgres.ConnectionString;
-                tenancy.SchemaName = master;
+                tenancy.ConnectionString = master;
+                tenancy.SchemaName = tenants;
             });
 
-            Documents(options, schema, events);
+            Documents(options);
         }
 
-        try
+        // Prepared through a store of its own. Its first enumeration applies the lookup table - the known limit,
+        // and not what this test is about - then the tenants are registered and their databases built.
+        await using (DocumentStore seed = DocumentStore.For(Configure))
         {
-            // Prepared through a store of its own. Its first enumeration applies the lookup table - the known
-            // limit, and not what this test is about - then the tenants are registered and their databases built.
-            await using (DocumentStore seed = DocumentStore.For(Configure))
-            {
-                _ = await seed.Storage.AllDatabases();
+            _ = await seed.Storage.AllDatabases();
 
-                var tenancy = (MasterTableTenancy) seed.Options.Tenancy;
-                await tenancy.AddDatabaseRecordAsync(Acme, postgres.ConnectionString);
-                await tenancy.AddDatabaseRecordAsync(Globex, globex);
+            var tenancy = (MasterTableTenancy) seed.Options.Tenancy;
+            await tenancy.AddDatabaseRecordAsync(Acme, master);
+            await tenancy.AddDatabaseRecordAsync(Globex, globex);
 
-                await seed.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
-                await WriteAsync(seed, Acme);
-                await WriteAsync(seed, Globex);
-            }
-
-            IReadOnlyList<(string, string[])> databases =
-            [
-                (postgres.ConnectionString, new[] { master, schema, events }),
-                (globex, new[] { schema, events }),
-            ];
-
-            ServerSnapshot before = await SnapshotAsync(databases, lookupTable);
-            before.Rows.Should().HaveCount(2, "the premise: two registered tenants");
-            (await TenancyDatabases.RelationExistsAsync(postgres, lookupTable, Token)).Should().BeTrue("the premise: the table is applied");
-
-            FirstNavigation navigation = await NavigateAsync(Configure);
-
-            before.ShouldBeUnchangedIn(await SnapshotAsync(databases, lookupTable));
-
-            navigation.Databases.Should().HaveCount(2);
-            navigation.Overview.Stores.Should().ContainSingle()
-                .Which.Databases.Should().HaveCount(2, "one card per tenant database, from one enumeration");
-            navigation.TenantLists.Should().OnlyContain(
-                static x => x.Source == TenantListSource.Descriptor,
-                "each database's own tenant list, which the enumeration just reconciled (F8-D3 C4)");
-            navigation.Tenants.Should().BeEquivalentTo([Acme, Globex]);
+            await seed.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
+            await WriteAsync(seed, Acme);
+            await WriteAsync(seed, Globex);
         }
-        finally
-        {
-            await TenancyDatabases.DropAsync(postgres, globexName, CancellationToken.None);
-        }
+
+        ServerSnapshot before = await SnapshotAsync(owned, lookupTable);
+        before.Rows.Should().HaveCount(2, "the premise: two registered tenants");
+        before.Objects.Should().Contain(
+            static x => x.Contains("relation tenants.mt_tenant_databases ", StringComparison.Ordinal),
+            "the premise: the table is applied");
+
+        FirstNavigation navigation = await NavigateAsync(Configure);
+
+        before.ShouldBeUnchangedIn(await SnapshotAsync(owned, lookupTable));
+
+        navigation.Databases.Should().HaveCount(2);
+        navigation.Overview.Stores.Should().ContainSingle()
+            .Which.Databases.Should().HaveCount(2, "one card per tenant database, from one enumeration");
+        navigation.TenantLists.Should().OnlyContain(
+            static x => x.Source == TenantListSource.Descriptor,
+            "each database's own tenant list, which the enumeration just reconciled (F8-D3 C4)");
+        navigation.Tenants.Should().BeEquivalentTo([Acme, Globex]);
     }
 
     /// <summary>A single-database store: a conjoined document, and an event store that is not.</summary>
-    private void SingleDatabase(StoreOptions options, string schema, string events)
+    private static void SingleDatabase(StoreOptions options, string connectionString)
     {
-        options.Connection(postgres.ConnectionString);
-        Documents(options, schema, events);
+        options.Connection(connectionString);
+        Documents(options);
     }
 
-    private static void Documents(StoreOptions options, string schema, string events)
+    private static void Documents(StoreOptions options)
     {
-        options.DatabaseSchemaName = schema;
-        options.Events.DatabaseSchemaName = events;
+        options.DatabaseSchemaName = Schema;
+        options.Events.DatabaseSchemaName = Events;
         options.Schema.For<TenancyNote>().MultiTenanted();
         options.Events.AddEventType<TenancyNoteWritten>();
     }
@@ -278,9 +267,10 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
         return await studio.FirstNavigationAsync(Token);
     }
 
-    private async Task<(string Schema, string Events)> SchemasAsync(string name) =>
-        (await postgres.CreateSchemaAsync(name, Token), await postgres.CreateSchemaAsync(name + "_events", Token));
+    /// <summary>Databases of this test's own, named under <see cref="ServerSnapshot.FirstNavigationPrefix" />.</summary>
+    private Task<OwnedDatabases> OwnAsync(params string[] names) =>
+        OwnedDatabases.CreateAsync(postgres, [.. names.Select(static x => ServerSnapshot.FirstNavigationPrefix + x)], Token);
 
-    private static Task<ServerSnapshot> SnapshotAsync(IReadOnlyList<(string, string[])> databases, string? lookupTable) =>
-        ServerSnapshot.ReadAsync(databases, ServerSnapshot.FirstNavigationPrefix, lookupTable, Token);
+    private static Task<ServerSnapshot> SnapshotAsync(OwnedDatabases owned, string? lookupTable) =>
+        ServerSnapshot.ReadAsync(owned.ConnectionStrings, ServerSnapshot.FirstNavigationPrefix, lookupTable, Token);
 }

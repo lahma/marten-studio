@@ -734,8 +734,8 @@ internal sealed class DatabaseAccess
     /// ignoring case, and returns the match, so all it can change is the case that store spells it in. That
     /// is worth an in-memory walk and nothing more. A <c>Single</c> or <c>StaticMultiple</c> store's
     /// <c>AllDatabases()</c> answers from memory. A <c>DynamicMultiple</c> one runs
-    /// <c>Tenancy.BuildDatabases()</c>, which reads its master or pool table every time - and the first time in
-    /// the process applies that table and upserts its seed rows, or on a single-server tenancy creates every
+    /// <c>Tenancy.BuildDatabases()</c>, which reads its master or pool table every time - and the first time per
+    /// store instance applies that table and upserts its seed rows, or on a single-server tenancy creates every
     /// configured database that does not exist yet (AGENTS.md D27). So a dynamic store, and one whose
     /// cardinality cannot be read, is never enumerated here: the identity is used as given.
     /// </remarks>

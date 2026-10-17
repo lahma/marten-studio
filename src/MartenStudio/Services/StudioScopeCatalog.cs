@@ -172,7 +172,8 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         try
         {
             IMartenDatabase? database = null;
-            foreach (IMartenDatabase candidate in await store.Storage.AllDatabases().ConfigureAwait(false))
+            IReadOnlyList<IMartenDatabase> databases = await store.Storage.AllDatabases().ConfigureAwait(false);
+            foreach (IMartenDatabase candidate in databases)
             {
                 if (string.Equals(candidate.Id.Identity, databaseId, StringComparison.OrdinalIgnoreCase))
                 {
@@ -187,8 +188,10 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
             }
 
             identity = database.Id.Identity;
+
+            // With the list just read, so that the database's same-identity twins answer for their tenants too.
             discovered = await tenantDiscovery
-                .DiscoverAsync(registration.Key, store, database, cancellationToken)
+                .DiscoverAsync(registration.Key, store, database, databases, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

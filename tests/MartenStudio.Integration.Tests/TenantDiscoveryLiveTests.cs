@@ -82,7 +82,7 @@ public class TenantDiscoveryLiveTests(PostgresFixture fixture) : PostgresTestBas
 
         IMartenDatabase database = (await store.Storage.AllDatabases()).Single();
 
-        TenantList tenants = await CreateDiscovery().DiscoverAsync("default", store, database, Token);
+        TenantList tenants = await CreateDiscovery().DiscoverAsync("default", store, database, [database], Token);
 
         tenants.Source.Should().Be(TenantListSource.Queried);
         tenants.Ids.Should().Equal("acme", "globex");
@@ -120,7 +120,7 @@ public class TenantDiscoveryLiveTests(PostgresFixture fixture) : PostgresTestBas
         TenantDiscovery discovery = CreateDiscovery(options =>
             options.IsDocumentTypeVisible = static type => type != typeof(TenantedInvoice));
 
-        TenantList tenants = await discovery.DiscoverAsync("default", store, database, Token);
+        TenantList tenants = await discovery.DiscoverAsync("default", store, database, [database], Token);
 
         tenants.Source.Should().Be(TenantListSource.Unavailable, "nothing tenanted is left to read");
     }
@@ -140,7 +140,7 @@ public class TenantDiscoveryLiveTests(PostgresFixture fixture) : PostgresTestBas
 
         TenantDiscovery discovery = CreateDiscoveryWithKnownTenants("alpha", "beta");
 
-        TenantList tenants = await discovery.DiscoverAsync("default", store, database, Token);
+        TenantList tenants = await discovery.DiscoverAsync("default", store, database, [database], Token);
 
         tenants.Source.Should().Be(TenantListSource.Configured);
         tenants.Ids.Should().Equal("alpha", "beta");
