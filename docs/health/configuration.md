@@ -134,9 +134,10 @@ opts.Events.UseAdvisoryLockTransaction = true;
 
 With the transaction-scoped lock the leader keeps one transaction open for as long as it leads. A
 transaction-mode pooler keeps that transaction on one server connection, at the cost of the connection and of
-an open transaction that holds back vacuum (C04, T14). A direct connection for the daemon's node avoids the
-pooler altogether; Neon's and Supabase's documentation both send anything session-scoped to the direct
-connection string.
+an open transaction - which with `Events.UseMonitoredAdvisoryLock` on (the default) at read committed holds a
+snapshot about a minute at a time, and with the monitor off or under repeatable read holds back vacuum for as
+long as it leads (C04, T14). A direct connection for the daemon's node avoids the pooler altogether; Neon's and
+Supabase's documentation both send anything session-scoped to the direct connection string.
 
 The finding, the daemon mode and the lock setting are shown to anybody the store policy passes for the scope. The
 host and port that look pooled are shown only at the database-wide gate, as the Configuration page shows a

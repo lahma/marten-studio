@@ -46,11 +46,12 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
         HealthReport first = await ReportAsync(host);
         first.Findings.Should().NotContain(static x => TableCodes.Contains(x.Code), string.Join(" | ", first.Findings.Select(static x => x.Finding.Title)));
 
-        // The cost budget: the ten regular table checks share one table read and one index read through the
-        // sweep's memo, so the whole area is five statements - those two, T10's pg_stats read for the soft-deleted
-        // Order, and T11's mt_hilo existence check and one-row read for the int-id Invoice.
+        // The cost budget: the regular table checks share one table read and one index read through the sweep's
+        // memo, so the whole area is eight statements - those two, T10's pg_stats read for the soft-deleted Order,
+        // T11's mt_hilo existence check and one-row read for the int-id Invoice, and H9's three: the wraparound read
+        // T12, T13 and T14 share, T14's holders read and the replication slots read it shares with R01.
         first.Checks.Where(static x => x.Code.StartsWith('T')).SelectMany(static x => x.Statements).Select(static x => x.Sql)
-            .Distinct(StringComparer.Ordinal).Should().HaveCount(5, "the regular table checks' whole catalog cost on the sample store");
+            .Distinct(StringComparer.Ordinal).Should().HaveCount(8, "the regular table checks' whole catalog cost on the sample store");
 
         await using (IQuerySession session = host.Store.QuerySession())
         {

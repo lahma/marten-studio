@@ -2,9 +2,10 @@
 
 These checks answer: **why is the app slow, and what is going to bite us?** They read the catalog and the
 statistics views (`pg_class`, `pg_index`, `pg_inherits`, `pg_depend`, `pg_stats`, `pg_stat_user_tables`,
-`pg_stat_user_indexes`, `pg_stat_progress_create_index`) - tier 1, at every sweep - except T09, which reads a bounded sample of the data behind
+`pg_stat_user_indexes`, `pg_stat_progress_create_index`, `pg_database`) - tier 1, at every sweep - except T09, which reads a bounded sample of the data behind
 **Run deeper checks**, and T02, T22 and T23, which read `pg_stat_statements` behind **Run statement checks** (tier 3,
-[below](#the-statement-checks-t02-t22-t23)). Back to the [index](../health.md).
+[below](#the-statement-checks-t02-t22-t23)); T14 also reads who holds the vacuum horizon back (`pg_stat_activity`,
+`pg_locks`, `pg_prepared_xacts`, `pg_replication_slots`, `pg_stat_replication`). Back to the [index](../health.md).
 
 What every check here has in common:
 
@@ -253,19 +254,171 @@ Which types use HiLo is read from the mappings, never from `database.Sequences`,
 `mt_hilo` (hard rule 14's own trap). `mt_hilo` is read only once the catalog says it exists; when it does not,
 no HiLo id has been issued yet, and the check says so.
 
+## Wraparound and the vacuum horizon (T12, T13, T14)
+
+These three share one database-wide read, `pg_database` and a scan of `pg_class` - a catalog read that locks
+nothing it lists - and T14 adds one of `pg_stat_activity`, `pg_locks` and `pg_prepared_xacts` and one of
+`pg_replication_slots` and `pg_stat_replication`. All three run in the regular sweep, at `HealthInterval`, never on a
+poll.
+
+- **The whole database counts, and only the store's tables are named.** Wraparound protection acts on the
+  database's `datfrozenxid` - the oldest table in it, the store's or not - and Postgres refuses writes to *every*
+  database once the server's oldest reaches its line. So a never-frozen legacy table, another library's job store, a
+  temporary table or a document type the studio hides holds the age up as much as a Marten table, and is counted;
+  only the store's own, visible tables are named (D27). A temporary table is called out: autovacuum cannot freeze
+  one, only the session that created it can.
+- **A forecast, and only what the window supports.** Each sweep samples `pg_snapshot_xmax(pg_current_snapshot())`
+  (the next transaction id, read without assigning one; PostgreSQL 13+) and the next multixact id
+  (`datminmxid + mxid_age(datminmxid)`, from shared memory, needing no privilege). Two samples give a rate, and the
+  forecast is the time to the *forced-vacuum line* (`autovacuum_freeze_max_age`) and to the *write-refusal line* - a
+  margin short of 2^31: three million on PostgreSQL 14 and later, one million on 13 (the PostgreSQL documentation's
+  "Routine Vacuuming"). Every forecast says "at the rate of the last N minutes", with N the run of samples the
+  in-memory history really holds; below two samples, or when the counter did not move, there is none; and nothing is
+  forecast more than 90 days out. The forecast is linear and assumes nothing freezes in between - which is false
+  before the forced line (autovacuum is about to freeze), so there the time to the forced line is only a status note,
+  and past it a forecast alone is a finding only once the age has stayed past the line for half of what the in-memory
+  history is sure to hold - `(60 - 1) x HealthInterval / 2`, and never more than 30 minutes: 29 min 30 s at the default
+  `HealthInterval` of a minute, 14 min 45 s at 30 seconds, 7 min 22 s at 15 (the same bound D03's window takes). A
+  routine anti-wraparound vacuum, or `template0` and `postgres` reaching the line, cross it and come back sooner.
+- **The lines are the server's own** (kept from H4): Warning 40% and Critical two-thirds of the way from the forced
+  line to wraparound.
+
 ## T12 Transaction-id age
 
 **Warning** 40% of the way from the server's `autovacuum_freeze_max_age` to wraparound, **Critical** two-thirds
-of the way - about 1.0 and 1.5 billion at the default of 200 million. The oldest `age(relfrozenxid)` among the
-store's tables, their TOAST tables and their partitions.
+of the way - about 1.0 and 1.5 billion at the default of 200 million. The age judged is the oldest of three: the
+store's tables (their own `age(relfrozenxid)`, their TOAST tables' and their partitions'), this database's
+`age(datfrozenxid)`, and the server's oldest database's (a database `DROP DATABASE` left invalid is not counted).
+And, from the forecast: **Warning** when the age has stayed past `autovacuum_freeze_max_age` for that half of the
+history (29 min 30 s of samples at the default `HealthInterval`) and, at the rate of the last N minutes, writes would be
+refused within 90 days - **Critical** within seven - even below the Warning age.
 
-Postgres must freeze every row before its 32-bit transaction counter wraps, and refuses writes to the whole
-database at about 2.1 billion. Autovacuum forces a freeze at `autovacuum_freeze_max_age`, so a table this far
-past it is one autovacuum has not managed to freeze - usually a transaction, a replication slot or a prepared
-transaction holding the horizon back. The lines are measured from the server's own setting, read with the
-tables, because a DBA who raised it to a billion and a half has a server on which a table at 1.2 billion has not
-yet been asked to freeze. One finding for the database, naming the oldest tables and both lines. The cure is a
-DBA's `VACUUM (FREEZE)`, once whatever holds the horizon is gone.
+Postgres must freeze every row before its 32-bit transaction counter wraps, and refuses writes to the whole server
+at about 2.1 billion. Autovacuum forces a freeze at `autovacuum_freeze_max_age`, so a table this far past it is one
+autovacuum has not managed to freeze - usually a transaction, a replication slot or a prepared transaction holding
+the horizon back (T14 names it). The lines are measured from the server's own setting, read with the tables,
+because a DBA who raised it to a billion and a half has a server on which a table at 1.2 billion has not yet been
+asked to freeze. One finding for the database, naming the oldest of the store's tables and both lines, and counting
+the other tables past `autovacuum_freeze_max_age` (how many are temporary) without naming them. Past the forced line
+the forecast is the time left if the freeze autovacuum has been asked for never finishes. The cure is a DBA's
+`VACUUM (FREEZE)`, once whatever holds the horizon is gone.
+
+## T13 Multixact age
+
+**Warning** 40% of the way from `autovacuum_multixact_freeze_max_age` (400 million by default) to wraparound,
+**Critical** two-thirds of the way or at `vacuum_multixact_failsafe_age` (PostgreSQL 14+, 1.6 billion by default),
+whichever comes first - and the same forecast as T12, over the multixact counter. The age judged is the oldest of
+the store's tables' `mxid_age(relminmxid)`, this database's `mxid_age(datminmxid)` and the server's oldest. A forecast
+alone waits, as T12's does, for the age to stay past the forced line for half of what the history holds (29 min 30 s
+at the default `HealthInterval`).
+
+A multixact is the id Postgres gives a set of transactions that lock one row at the same time. Multixacts are 32-bit
+and frozen by vacuum like transaction ids, and past their own stop limit Postgres refuses every write that needs a
+shared row lock. A row lock that two transactions hold at once - `FOR SHARE`, `FOR KEY SHARE`, the lock a
+foreign-key check takes on the row it references - is a multixact, so concurrent inserts of documents whose type
+declares a foreign key to one parent row make them steadily. **Marten's own event appends do not**, measured at
+Marten 9.39 and 9.50.2: an append inserts into `mt_events` under a foreign key to `mt_streams`, but concurrent Quick
+appends to one stream serialise on `pk_mt_events_stream_and_version`, and every loser fails there, before its
+foreign-key check would share the stream's row.
+
+Multixacts are held back by a long transaction that is itself a member of one, or a prepared transaction; unlike
+transaction ids, replication slots do not hold them back. Multixact *member* storage, which can run out before the
+ids do (about 20 GB), is not read: Postgres has no view of it.
+
+## T14 Vacuum held back
+
+**Warning** when the oldest thing holding back vacuum of the store's tables has held it for an hour, **Critical** at
+24 hours, or at an hour while the database is near T12's line. Whatever its age in time, a holder further back than
+`autovacuum_freeze_max_age` is a **Warning** - the forced freeze cannot get past it - and past T12's Warning age
+**Critical**.
+
+Vacuum removes a dead row, and freezes a live one, only once no transaction could still see it; the oldest
+transaction id or snapshot anything holds is that line, the *horizon*. Four kinds of thing hold it, and the check
+reads each where Postgres keeps it and names the most severe holder - with the oldest of all stated beside it, when
+that one is further back:
+
+| Holder | Read from | Holds back |
+|---|---|---|
+| A session's open transaction or snapshot | `pg_stat_activity.backend_xid`, `backend_xmin` | this database's tables |
+| A prepared transaction | `pg_prepared_xacts` | this database's tables |
+| A replication slot | `pg_replication_slots.xmin` (every table), `catalog_xmin` (the system catalogs) | every database |
+| A standby's `hot_standby_feedback` | `pg_stat_replication.backend_xmin` | every database |
+
+A session or a prepared transaction in *another* database, and a logical slot's `catalog_xmin`, hold back only the
+system catalogs - but every database's `datfrozenxid` counts the shared ones, so they stop every database's freeze.
+They are judged only by how far back they hold it, and another database's holder is never named - nor counted, and a
+logical slot of another database is "a logical slot of another database on this server" at every gate.
+
+A lazy `VACUUM` is not a holder, although it shows a `backend_xmin`: Postgres marks it `PROC_IN_VACUUM` and leaves it
+out of the horizon, so autovacuum, and a DBA's `VACUUM (FREEZE)` - T12's own cure - are skipped (by their row in
+`pg_stat_progress_vacuum`). So are a manual `VACUUM`'s parallel workers, which have no row there: a role that may read
+them sees `backend_type = 'parallel worker'`, which is not a client session; a role that may not sees a withheld row,
+which is skipped when it holds only a snapshot at a running `VACUUM`'s `backend_xmin`, under that `VACUUM`'s role and in
+its database - `leader_pid` would say it outright, but Postgres withholds it from such a role. `VACUUM FULL` and
+`ANALYZE` do hold the horizon, and are holders.
+
+An invalidated replication slot is not a holder either: Postgres leaves its `xmin` and `catalog_xmin` in
+`pg_replication_slots` and skips the slot when it computes the horizon. One it reports `lost` but has not invalidated
+yet - its WAL is gone, no consumer can use it again, and the next checkpoint will invalidate it - still holds, and is
+called a lost slot: drop it.
+
+The finding gives the holder's age in xids and in time and joins it to T07: the dead rows in the store's tables,
+and how many of them sit in tables vacuumed since the holder began - rows vacuum ran and could not remove.
+
+- **Age in time, never a transaction's age alone.** A read-committed transaction takes a fresh snapshot with every
+  statement, so a transaction open for a day can hold the horizon back by a minute. Marten's own HotCold leader is
+  one, measured at Marten 9.39 with the defaults: it holds its leadership lock in a transaction it never ends
+  (`Events.UseAdvisoryLockTransaction`), and its lock monitor (`Events.UseMonitoredAdvisoryLock`) runs `pg_sleep(60)`
+  in it, so at read committed its `backend_xmin` is never more than a minute old. So the age is a lower bound, from
+  Postgres' own timestamps - a running statement's age, the time a session has been idle in its transaction, each
+  capped at the transaction's own age (a `DO` that commits in a loop, or a concurrent index build, is one statement
+  across many short transactions), a prepared transaction's age, an inactive slot's `inactive_since` (PostgreSQL 17) -
+  or, where it is longer, from the advisor's own samples of the transaction-id counter, worded "at least 45 min (by the
+  advisor's samples of the transaction-id counter)". Plainly:
+  - **Only an id the holder owns is dated from the samples**: a session's own transaction id (`backend_xid`), or a
+    prepared transaction's. The date is the first sample already past it - a bound, never an estimate from a rate, so
+    a burst of ids cannot make a minute-old hold look old, and a gap in the samples can only make it shorter - and it is
+    never more than the holder's transaction has been open.
+  - **That dating reaches no further back than the in-memory history**: its oldest sample, 60 samples back - about an
+    hour at the default `HealthInterval`. A transaction that has written and stayed open all day is "at least 59 min"
+    by the samples until something longer is known - its statement's age, its time idle in its transaction.
+  - **A snapshot is dated by Postgres' timestamps only.** A snapshot's `xmin` is the oldest transaction running
+    anywhere when it was taken - somebody else's id, which the counter dates for its owner and not for the snapshot.
+  - **A replication slot and a standby are judged by how far back they hold**, in transactions: Postgres records no
+    time for either, bar an inactive slot's `inactive_since` on PostgreSQL 17.
+- **Behind another.** A snapshot whose `xmin` is exactly an id another holder owns is *behind* that holder: it moves on
+  the moment the owner ends. It is never the holder named - the owner is, with "Behind it, at the same point" saying
+  what waits on it - and the owner takes the reach and the longest age of what is behind it, because a snapshot that saw
+  it running was taken while it ran. The usual case is Marten's own HotCold leader, whose minute-old snapshot a
+  prepared transaction or a long writer pins at its own id; and a transaction in *another* database holds this
+  database's tables the same way, through the snapshots sessions here take while it runs. Among holders equally far
+  back the one that owns its id is named, and the daemon's leader is never named over another holder. A slot is read
+  in another statement, so it is never matched, and is judged as its own holder.
+- **Who it is** - the process id, role, application, client and connection time of a session, a prepared
+  transaction's gid and owner, a slot's name, plugin and database, a standby's address - is evidence behind
+  `MartenStudioOptions.Capabilities.ViewDatabaseActivity`. The kind and the age are shown at the database-wide gate.
+- **Without `pg_read_all_stats`** Postgres still shows a role every session's transaction ids, role and application
+  name - measured on PostgreSQL 17 - and withholds their state, timings, client address and statement. So another
+  role's session is still found and judged by how far back it holds the horizon; the caveat says how many sessions the
+  role cannot see the start of. One that has written is dated from the counter's samples past its own transaction id;
+  one that holds only a snapshot has no age in time.
+- **Marten's angle.** A long rebuild batch and an open transaction that has written are one mechanism with two
+  symptoms: the writer pins the high-water mark (D01) and its transaction pins the horizon - the finding links D01's
+  Explain, which names the transaction. A session holding one of the store's daemon locks is named as the store's own
+  HotCold leader - but never for another holder's transaction (see *Behind another*), and with the defaults at read
+  committed it is never old enough alone to raise. At Marten 9.39 and 9.40 with `Events.UseMonitoredAdvisoryLock` off,
+  the leader sits idle in its leadership transaction and its snapshot is never refreshed - measured - so it really
+  does hold the horizon for as long as it leads, and T14 says so after an hour (the time idle in a transaction is
+  Postgres' own), with `opts.Events.UseAdvisoryLockTransaction = false;` as the remedy - or, for a host that must keep
+  the transaction lock behind a pooler, `Events.UseMonitoredAdvisoryLock = true`, which at read committed - Postgres'
+  default - bounds the hold to about a minute. Under `default_transaction_isolation = 'repeatable read'` or
+  `'serializable'` the snapshot is the transaction's own and the monitor does not move it; only the session lock helps.
+  From 9.41 the lock is the session's and the leader keeps no transaction open: its lock monitor's statement holds a
+  snapshot for at most about a minute at a time.
+
+The cure is in the application or with a DBA, never a button: end the transaction (dispose every session); commit or
+roll back the prepared transaction (C07); restart a slot's consumer or drop a slot nothing uses (R01 watches the WAL
+it retains); end the long query on the standby.
 
 ## The statement checks (T02, T22, T23)
 

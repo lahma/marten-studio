@@ -41,6 +41,16 @@ public class ActivityViewsOffThePollPathTests
     /// </summary>
     private const string DaemonBuilder = "src/MartenStudio/Internal/Sql/HealthDaemonQueries.cs";
 
+    /// <summary>
+    /// The horizon checks' builder (packet H9): T14 reads <c>pg_stat_activity</c>, <c>pg_locks</c> and
+    /// <c>pg_prepared_xacts</c> for the age of what holds the vacuum horizon back. It needed a read of its own rather than
+    /// H3's because the horizon is a transaction id: H3's statements say whether a session has one, and this one how old it
+    /// is, across this database's sessions, the oldest of the other databases' and the prepared transactions. It runs only
+    /// in the regular sweep, at <c>HealthInterval</c>, and only T14 calls it (the third net below), with H3's own session
+    /// predicate (<c>HealthConnectionQueries.ClientSession</c>), which is why it is the one builder that may name H3's.
+    /// </summary>
+    private const string HorizonBuilder = "src/MartenStudio/Internal/Sql/HealthHorizonQueries.cs";
+
     /// <summary>SQL that reads one of the views: from or join it, or call <c>pg_blocking_pids</c>.</summary>
     internal static readonly Regex ReadsAnActivityView = new(
         @"\b(from|join)\s+(pg_catalog\.)?pg_(stat_activity|locks|prepared_xacts)\b(?!\.)|\bpg_blocking_pids\s*\(",
@@ -56,7 +66,7 @@ public class ActivityViewsOffThePollPathTests
         List<string> offenders =
         [
             .. files
-                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder))
+                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder))
                 .Where(static file => ReadsAnActivityView.IsMatch(File.ReadAllText(file)))
                 .Select(SourceScanner.Relative),
         ];
@@ -67,6 +77,36 @@ public class ActivityViewsOffThePollPathTests
             .Should().BeTrue("the builder itself reads them, so a scan that found nothing there would be a scan that finds nothing");
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(DaemonBuilder.Split('/'))))
             .Should().BeTrue("the daemon builder reads pg_locks for D02, so its exemption is not an exemption for nothing");
+        ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(HorizonBuilder.Split('/'))))
+            .Should().BeTrue("the horizon builder reads pg_stat_activity and pg_prepared_xacts for T14, so its exemption is not an exemption for nothing");
+    }
+
+    [Fact]
+    public void The_horizon_builder_is_called_only_by_the_horizon_checks()
+    {
+        List<string> callers =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(static file => SourceScanner.Relative(file) != HorizonBuilder)
+                .Where(static file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains("HealthHorizonQueries.", StringComparison.Ordinal))
+                .Select(SourceScanner.Relative),
+        ];
+
+        callers.Should().NotBeEmpty("a scan that found no caller would pass for the wrong reason");
+        callers.Should().OnlyContain(
+            static x => x.StartsWith("src/MartenStudio/Services/Health/Checks/", StringComparison.Ordinal),
+            "every other caller would be a new path to the process array and the lock table");
+    }
+
+    [Fact]
+    public void The_horizon_checks_run_in_the_regular_sweep_at_the_health_interval()
+    {
+        IReadOnlySet<HealthCostTier> regular = HealthSweeper.TiersOf(HealthSweepKind.Regular);
+
+        HealthCheckDescriptor[] checks = [.. new HealthCheckRegistry().All.Where(static x => x.Info.Code is "T12" or "T13" or "T14")];
+
+        checks.Should().HaveCount(3);
+        checks.Should().OnlyContain(x => regular.Contains(x.Info.Tier), "a regular sweep is cached for HealthInterval, never RefreshInterval");
     }
 
     [Fact]
@@ -83,8 +123,9 @@ public class ActivityViewsOffThePollPathTests
         callers.Should().NotBeEmpty();
         callers.Should().OnlyContain(
             static x => x.StartsWith("src/MartenStudio/Services/Health/Checks/", StringComparison.Ordinal)
-                || x == "src/MartenStudio/Services/Database/SessionActivityReader.cs",
-            "every other caller would be a new path to the process array and the lock table");
+                || x == "src/MartenStudio/Services/Database/SessionActivityReader.cs"
+                || x == HorizonBuilder,
+            "every other caller would be a new path to the process array and the lock table; the horizon builder takes only H3's session predicate");
     }
 
     [Fact]

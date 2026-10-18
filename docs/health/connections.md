@@ -299,9 +299,10 @@ opts.Events.UseAdvisoryLockTransaction = true;
 ```
 
 The transaction-scoped lock keeps one transaction open on one server connection for as long as the leader
-leads, which the pooler cannot hand away - at the cost of that connection and of an open transaction that
-holds back vacuum (C04, T14). Neon's and Supabase's documentation both send anything session-scoped to the
-direct connection.
+leads, which the pooler cannot hand away - at the cost of that connection and of an open transaction, which
+with `Events.UseMonitoredAdvisoryLock` on (the default) at read committed holds a snapshot about a minute at a
+time, and with the monitor off or under repeatable read holds back vacuum for as long as it leads (C04, T14).
+Neon's and Supabase's documentation both send anything session-scoped to the direct connection.
 
 Never probed for `Solo` (no lock), `ExternallyManaged` (not Marten's lock), a process that runs no daemon,
 or a transaction-scoped lock. The two process ids are the studio's own sessions, and still behind
