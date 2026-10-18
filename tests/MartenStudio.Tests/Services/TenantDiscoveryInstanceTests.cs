@@ -138,6 +138,65 @@ public class TenantDiscoveryInstanceTests
     }
 
     /// <summary>
+    /// CL1 item 8: a tenant-partitioned single database lists its tenants on the main descriptor, which its describe
+    /// fills from <c>mt_tenant_partitions</c> - and tier 2 used to read only <c>Databases</c>, throw that answer away and
+    /// fall through to a scan of the tenanted tables. Now the main descriptor answers, capped at
+    /// <see cref="TenantDiscovery.MaxListedTenants" /> like tier 3, and an empty one still falls through (here to a query
+    /// against an unreachable host, which is "unavailable" - the proof that nothing else answered).
+    /// </summary>
+    [Theory]
+    [InlineData(3, 3, false, true)]
+    [InlineData(250, TenantDiscovery.MaxListedTenants, true, true)]
+    [InlineData(0, 0, false, false)]
+    public async Task A_tenant_partitioned_single_database_answers_from_its_main_descriptor(
+        int registered,
+        int listed,
+        bool truncated,
+        bool fromDescriptor)
+    {
+        StoreOptions options = new();
+        options.Connection(UnreachableTenant);
+        options.Events.TenancyStyle = JasperFx.MultiTenancy.TenancyStyle.Conjoined;
+        options.Events.UseTenantPartitionedEvents = true;
+        options.Events.AppendMode = JasperFx.Events.EventAppendMode.QuickWithServerTimestamps;
+        options.Schema.For<TenantedNote>().MultiTenanted();
+
+        // Built with Marten's own tenancy, which is what initialises its database (DefaultTenancy.Initialize, by type).
+        await using var store = new DocumentStore(options);
+
+        ITenancy partitioned = options.Tenancy;
+        partitioned.GetType().Name.Should().Be("TenantPartitionedSingleDatabaseTenancy", "the premise");
+        partitioned.Cardinality.Should().Be(DatabaseCardinality.Single, "the premise: nothing to enumerate");
+        IMartenDatabase database = (await store.Storage.AllDatabases()).Single();
+
+        // Then counted, and answered as the tenancy's own describe answers once mt_tenant_partitions has: DefaultTenancy's
+        // usage - one main descriptor, no Databases - with the main descriptor's TenantIds filled (read at V9.39.0 and
+        // V9.50.2). Disposing the store disposes the tenancy through the proxy.
+        DescribeCountingTenancy counting = DescribeCountingTenancy.Over(partitioned);
+        counting.Answer = () =>
+        {
+            DatabaseDescriptor main = database.Describe();
+            main.TenantIds.AddRange(Enumerable.Range(0, registered).Select(static x => "t" + x.ToString("000", System.Globalization.CultureInfo.InvariantCulture)));
+            return new DatabaseUsage { Cardinality = DatabaseCardinality.Single, MainDatabase = main };
+        };
+        options.Tenancy = (ITenancy) (object) counting;
+        store.Options.Tenancy.Should().BeSameAs(counting, "the premise: discovery asks the store's tenancy, which is now the proxy");
+
+        TenantList tenants = await Create().DiscoverAsync("default", store, database, [database], Token);
+
+        tenants.Source.Should().Be(fromDescriptor ? TenantListSource.Descriptor : TenantListSource.Unavailable);
+        tenants.Ids.Should().HaveCount(listed);
+        tenants.IsTruncated.Should().Be(truncated, "a list of more than the selector shows turns it into a free-text box");
+        counting.Describes.Should().Be(1, "the describe the tier always made, and nothing more");
+
+        if (listed > 0)
+        {
+            tenants.Ids[0].Should().Be("t000");
+            tenants.Ids[^1].Should().Be("t" + (listed - 1).ToString("000", System.Globalization.CultureInfo.InvariantCulture), "the first in ordinal order are kept");
+        }
+    }
+
+    /// <summary>
     /// F8-D3-fix: two master-table rows with one connection string are two instances over one database, and
     /// the studio resolves that database to the first of them. Each instance lists only its own row's tenant,
     /// so discovery reads every instance in the caller's enumeration with that identity - and none with
@@ -213,6 +272,49 @@ public class TenantDiscoveryInstanceTests
 
         facts.Tenants.Ids.Should().Equal(["t1", "t2"], "the header offers both rows' tenants");
         tenancy.Describes.Should().Be(0);
+    }
+
+    /// <summary>
+    /// CL1 item 7: the same twins in the database picker. Two master-table rows naming one connection string are one
+    /// database to the studio, which the picker listed twice - two options with one value - and the policy was asked
+    /// about twice. It lists it once, as the first instance, and a database elsewhere is still its own entry.
+    /// </summary>
+    [Fact]
+    public async Task The_database_picker_lists_a_twin_rows_database_once()
+    {
+        StoreOptions options = new();
+        options.MultiTenantedDatabasesWithMasterDatabaseTable(UnreachableMaster, "tenants");
+
+        var tenancy = new CountingMasterTableTenancy(options);
+        options.Tenancy = tenancy;
+
+        await using var store = new DocumentStore(options);
+        await using MartenDatabase first = TenantDatabase(options, "t1", ["t1"]);
+        await using MartenDatabase second = TenantDatabase(options, "t2", ["t2"]);
+        await using MartenDatabase elsewhere = TenantDatabase(options, "t3", ["t3"], OtherUnreachableTenant);
+        tenancy.Listed = [first, second, elsewhere];
+
+        first.Id.Identity.Should().Be(second.Id.Identity, "the premise: one connection string, one identity");
+
+        var users = new TestAuthenticationStateProvider();
+        users.SignIn("tester");
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAuthorization();
+        services.AddSingleton<IDocumentStore>(store);
+        services.AddMartenStudio(static _ => { });
+        services.AddScoped<AuthenticationStateProvider>(_ => users);
+
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        await using AsyncServiceScope circuit = provider.CreateAsyncScope();
+
+        IReadOnlyList<DatabaseListing> listings = await circuit.ServiceProvider.GetRequiredService<IStudioScopeCatalog>()
+            .ListDatabasesAsync(MartenStoreRegistry.DefaultStoreKey, Token);
+
+        listings.Select(static x => x.Identity).Should().Equal(
+            [first.Id.Identity, elsewhere.Id.Identity],
+            "one entry per identity, ignoring case - the first twin, which is the one the resolver matches");
     }
 
     [Fact]
@@ -340,6 +442,12 @@ public class DescribeCountingTenancy : DispatchProxy
     /// <summary>How many times anything asked the tenancy to describe its databases.</summary>
     public int Describes => Volatile.Read(ref describes);
 
+    /// <summary>
+    /// What the describe call answers instead of the tenancy's own, when set - for a tenancy whose own describe would
+    /// read a table this suite has no database for.
+    /// </summary>
+    public Func<DatabaseUsage>? Answer { get; set; }
+
     internal static DescribeCountingTenancy Over(ITenancy tenancy)
     {
         ITenancy proxy = Create<ITenancy, DescribeCountingTenancy>();
@@ -355,6 +463,12 @@ public class DescribeCountingTenancy : DispatchProxy
         if (targetMethod.Name == "DescribeDatabasesAsync")
         {
             Interlocked.Increment(ref describes);
+
+            if (Answer is { } answer)
+            {
+                // Constructed rather than returned from a call, so it is handed back - boxed, as a proxy must - unconsumed.
+                return new ValueTask<DatabaseUsage>(answer());
+            }
         }
 
         return UnlistableStore.Forward(targetMethod, inner!, args);

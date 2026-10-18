@@ -285,6 +285,28 @@ public class OverviewTests
         page.StatCardClasses("Dead letters").Should().Contain("ms-stat-card-warning");
     }
 
+    /// <summary>
+    /// CL1 item 4: a host that hides <c>DeadLetterEvent</c> - or whose delegate throws for it - has no dead-letter tile at
+    /// all, rather than an amber "unknown" calling its own configuration a problem, and the count is not asked for.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_hidden_dead_letter_type_has_no_tile_and_is_not_counted(bool throws)
+    {
+        using StudioComponentContext context = await ScopedAsync();
+        context.EventData.DeadLetterCount = 3;
+        context.Options.IsDocumentTypeVisible = throws
+            ? static type => type == typeof(JasperFx.Events.Daemon.DeadLetterEvent) ? throw new InvalidOperationException("broken") : true
+            : static type => type != typeof(JasperFx.Events.Daemon.DeadLetterEvent);
+
+        var page = context.Render<Overview>();
+
+        page.WaitForAssertion(() => page.StatCardValue("Streams").Should().Be("~1,200"), TimeSpan.FromSeconds(5));
+        page.FindAll(".ms-stat-card-title").Select(static x => x.TextContent.Trim()).Should().NotContain("Dead letters");
+        context.EventData.DeadLetterCountReads.Should().Be(0, "a hidden type's count is not asked for");
+    }
+
     // -----------------------------------------------------------------------------------------------
     // Projection health
     // -----------------------------------------------------------------------------------------------

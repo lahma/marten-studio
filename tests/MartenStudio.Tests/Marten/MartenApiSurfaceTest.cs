@@ -636,6 +636,10 @@ public class MartenApiSurfaceTest
 
         RequireProperty(typeof(DatabaseUsage), "Databases").PropertyType.Should().Be<List<DatabaseDescriptor>>();
         RequireProperty(typeof(DatabaseDescriptor), "TenantIds").PropertyType.Should().Be<List<string>>();
+
+        // CL1 item 8: a tenant-partitioned single database lists its tenants on the main descriptor and on no other
+        // (TenantPartitionedSingleDatabaseTenancy, #4862, read at V9.39.0 and V9.50.2).
+        RequireProperty(typeof(DatabaseUsage), "MainDatabase").PropertyType.Should().Be<DatabaseDescriptor>();
     }
 
     // --------------------------------------------------------------------------------------------

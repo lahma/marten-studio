@@ -398,51 +398,6 @@ internal sealed record DaemonCheckConfiguration(
     internal static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
 }
 
-/// <summary>Which of the event store's objects this database has, from the catalog.</summary>
-/// <param name="HasProgression">Whether <c>mt_event_progression</c> exists.</param>
-/// <param name="HasSequence">Whether <c>mt_events_sequence</c> exists.</param>
-/// <param name="HasEvents">Whether <c>mt_events</c> exists.</param>
-/// <param name="HasDeadLetters">Whether <c>mt_doc_deadletterevent</c> exists.</param>
-/// <param name="ProgressionColumns">The progression table's columns.</param>
-internal sealed record EventStoreShape(
-    bool HasProgression,
-    bool HasSequence,
-    bool HasEvents,
-    bool HasDeadLetters,
-    IReadOnlyList<string> ProgressionColumns)
-{
-    /// <summary>What a check says when the high-water objects are not all there - a value, not a fault.</summary>
-    public const string NoEventStoreReason =
-        "This database has no event store yet (no mt_events, mt_events_sequence or mt_event_progression). Marten creates them on "
-        + "the first append or daemon run, and the studio never does.";
-
-    /// <summary>Whether everything the high-water reading reads is there.</summary>
-    public bool HasHighWater => HasProgression && HasSequence && HasEvents;
-
-    /// <summary>Reads the shape - once per sweep, whichever daemon check asks first (<see cref="HealthCheckContext.Shared{T}" />).</summary>
-    public static Task<EventStoreShape> ReadAsync(HealthCheckContext context, string eventSchema, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        return context.Shared("daemon.event-store-shape:" + eventSchema, async token =>
-        {
-            IReadOnlyList<EventStoreShape> rows = await context.Sql.QueryAsync(
-                    HealthDaemonQueries.EventStoreShape(eventSchema),
-                    static reader => new EventStoreShape(
-                        reader.GetBoolean(0),
-                        reader.GetBoolean(1),
-                        reader.GetBoolean(2),
-                        reader.GetBoolean(3),
-                        reader.IsDBNull(4) ? [] : reader.GetFieldValue<string[]>(4)),
-                    token)
-                .ConfigureAwait(false);
-
-            return rows.Count == 0 ? new EventStoreShape(false, false, false, false, []) : rows[0];
-        });
-    }
-}
-
 /// <summary>The high-water reading: one snapshot of the mark, its bookkeeping and the sequence.</summary>
 /// <param name="ServerNow">The server's <c>transaction_timestamp()</c> - every age below is measured against it.</param>
 /// <param name="HighestSequence">The sequence's handed-out ceiling (0 for a sequence nothing drew from).</param>
@@ -515,7 +470,7 @@ internal sealed record HighWaterReading(
 
     /// <summary>
     /// Reads it - once per sweep, whichever daemon check asks first, so D01, D02 and D03 judge one snapshot. The shape must
-    /// have <see cref="EventStoreShape.HasHighWater" />.
+    /// have <see cref="EventStoreRelations.HasHighWater" />.
     /// </summary>
     public static Task<HighWaterReading> ReadAsync(HealthCheckContext context, string eventSchema, CancellationToken cancellationToken)
     {
@@ -591,7 +546,7 @@ internal sealed record DaemonShardRow(
     /// <summary>The registered shards' rows (<see cref="HealthDaemonQueries.ShardRows" />).</summary>
     public static Task<IReadOnlyList<DaemonShardRow>> ReadAsync(
         HealthCheckContext context,
-        EventStoreShape shape,
+        EventStoreRelations shape,
         DaemonCheckConfiguration configuration,
         bool extendedProgressionTracking,
         CancellationToken cancellationToken)
@@ -614,7 +569,7 @@ internal sealed record DaemonShardRow(
     /// <summary>Every row the extended tracking says is not running or carries a failure (<see cref="HealthDaemonQueries.ProblemShardRows" />).</summary>
     public static Task<IReadOnlyList<DaemonShardRow>> ReadProblemsAsync(
         HealthCheckContext context,
-        EventStoreShape shape,
+        EventStoreRelations shape,
         string eventSchema,
         CancellationToken cancellationToken)
     {

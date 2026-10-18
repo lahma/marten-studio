@@ -1,5 +1,3 @@
-using System.Reflection;
-
 using JasperFx.Events.Daemon;
 using JasperFx.Events.Projections;
 
@@ -120,10 +118,6 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
 
     /// <summary>The <c>mode</c> value a rebuilding shard would carry (<c>ShardMode.rebuilding</c>).</summary>
     internal static readonly string RebuildingMode = ShardMode.rebuilding.ToString();
-
-    /// <summary><c>IProjectionDaemon.IsRebuilding(ShardName)</c>, on a JasperFx that has it (2.86+).</summary>
-    private static readonly MethodInfo? IsRebuildingMethod =
-        typeof(IProjectionDaemon).GetMethod("IsRebuilding", BindingFlags.Public | BindingFlags.Instance, [typeof(ShardName)]);
 
     /// <summary>The history series of one shard's position.</summary>
     internal static string Series(string shard) => PositionSeries + shard;
@@ -595,6 +589,11 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
     /// Asks the in-process daemon whether it is rebuilding the shards that are behind - Marten 9.50+ only, and only for
     /// those, so a caught-up store asks nothing.
     /// </summary>
+    /// <remarks>
+    /// Through <see cref="DaemonLightUp" />, the one place <c>IsRebuilding</c> is reached by reflection, as
+    /// <c>DaemonCheckFacts</c> reaches it: a JasperFx that lacks it, or a daemon that throws from it, answers
+    /// <see langword="false" />, which here proves nothing either way.
+    /// </remarks>
     private static async Task<bool> AskDaemonAsync(
         HealthCheckContext context,
         IReadOnlyList<ShardProgressReading> readings,
@@ -602,9 +601,7 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
         HashSet<string> rebuilding,
         CancellationToken cancellationToken)
     {
-        MethodInfo? isRebuilding = IsRebuildingMethod;
-
-        if (isRebuilding is null
+        if (!DaemonLightUp.CanTellRebuilding
             || !RuntimeFeature.DaemonIsRebuilding.IsAvailable(context.Runtime)
             || context.Services.GetService<DaemonAccessor>() is not { } accessor)
         {
@@ -639,16 +636,10 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
                 continue;
             }
 
-            try
+            // A daemon that cannot answer has said nothing; false proves nothing anyway.
+            if (DaemonLightUp.IsRebuilding(daemon, name))
             {
-                if (isRebuilding.Invoke(daemon, [name]) is true)
-                {
-                    rebuilding.Add(shard.Shard);
-                }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                // A daemon that cannot answer has said nothing; false proves nothing anyway.
+                rebuilding.Add(shard.Shard);
             }
         }
 

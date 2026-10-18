@@ -120,8 +120,9 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
         {
             await seed.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
 
-            // An append for an unregistered tenant is refused: there is no partition and no sequence for it.
-            await seed.Advanced.AddMartenManagedTenantsAsync(Token, Acme, Globex);
+            // An append for an unregistered tenant is refused: there is no partition and no sequence for it. Initech is
+            // registered and has written nothing, so only the tenant-partition table knows it.
+            await seed.Advanced.AddMartenManagedTenantsAsync(Token, Acme, Globex, Initech);
 
             await WriteAsync(seed, Acme);
             await WriteAsync(seed, Globex);
@@ -134,7 +135,13 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
         before.ShouldBeUnchangedIn(await SnapshotAsync(owned, lookupTable: null));
 
         navigation.Databases.Should().ContainSingle();
-        navigation.Tenants.Should().Equal(Acme, Globex);
+
+        // CL1 item 8: the describe already read mt_tenant_partitions onto the main descriptor, and that answer is the
+        // listing now - it used to be thrown away for a scan of the tenanted tables, which never sees a tenant that has
+        // written nothing.
+        navigation.TenantLists.Should().ContainSingle().Which.Source.Should().Be(
+            TenantListSource.Descriptor, "the tenancy's own registered list answers, as it does for every other shape that has one");
+        navigation.Tenants.Should().Equal(Acme, Globex, Initech);
     }
 
     [PostgresFact]

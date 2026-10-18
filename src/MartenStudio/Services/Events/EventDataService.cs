@@ -1011,6 +1011,13 @@ internal sealed partial class EventDataService : IEventDataService
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
+            // A host that hides DeadLetterEvent hides this list, before anything is read (D27: a hidden document type is
+            // absent). The page says DeadLetterVisibility.HiddenMessage, which names no alias and no table.
+            if (!DeadLettersVisible(scope))
+            {
+                return DeadLetterPage.Hidden;
+            }
+
             int pageSize = Math.Clamp(query.PageSize, 1, MaxDeadLetterPageSize);
 
             // The studio's own SQL, never session.Query<DeadLetterEvent>(): every Marten LINQ terminal opens with
@@ -1123,6 +1130,56 @@ internal sealed partial class EventDataService : IEventDataService
         return physical.Exists ? table.WithPhysicalColumns(physical) : null;
     }
 
+    /// <summary>
+    /// Whether the host lets the studio show <c>DeadLetterEvent</c> (<see cref="MartenStudioOptions.IsDocumentTypeVisible" />),
+    /// failing closed: a delegate that throws hides it, and says so in the log.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One gate for the dead-letter screen's four paths</b> - the list, the badge's count, Discard and Rewind - so a host
+    /// that hides the type, as D27 says a hidden type is hidden, hides it here as well: the list is
+    /// <see cref="DeadLetterPage.Hidden" />, the count is no number, and the two writes are refused with
+    /// <see cref="DeadLetterVisibility.HiddenMessage" />. The navigation entry, the Overview tile and the advisor's D06 ask
+    /// the same question (<see cref="DeadLetterVisibility" />).
+    /// </para>
+    /// <para>
+    /// A throwing delegate is the host's fault and is reported once a window per store and database as event 9217, Debug in
+    /// between, because the badge asks on every poll. Nothing here asks the database anything.
+    /// </para>
+    /// </remarks>
+    private bool DeadLettersVisible(StudioScope scope)
+    {
+        if (DeadLetterVisibility.IsVisible(options.Value.IsDocumentTypeVisible, out Exception? failure))
+        {
+            return true;
+        }
+
+        if (failure is not null)
+        {
+            LogReadFailure(scope, failure, DeadLetterVisibilityRead, sqlState: null);
+        }
+
+        return false;
+    }
+
+    /// <summary>What the log says could not be done when the visibility delegate throws for <c>DeadLetterEvent</c>.</summary>
+    internal const string DeadLetterVisibilityRead =
+        "ask MartenStudioOptions.IsDocumentTypeVisible about DeadLetterEvent, so the dead letters are treated as hidden,";
+
+    /// <summary>
+    /// Refuses a dead-letter write when the host hides <c>DeadLetterEvent</c>, with the page's own sentence
+    /// (<see cref="DeadLetterVisibility.HiddenMessage" />) - never the type's alias, which a host that re-aliased the type
+    /// it hides would not want printed.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The type is hidden; <c>MutateAsync</c> audits it as a refused action.</exception>
+    private void RequireDeadLettersVisible(ResolvedScope resolved)
+    {
+        if (!DeadLettersVisible(resolved.Scope))
+        {
+            throw new InvalidOperationException(DeadLetterVisibility.HiddenMessage);
+        }
+    }
+
     /// <inheritdoc />
     public async Task<long?> CountDeadLettersAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
@@ -1131,6 +1188,12 @@ internal sealed partial class EventDataService : IEventDataService
         try
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+            // A hidden DeadLetterEvent has no number on the badge, as a hidden collection has none on the rail.
+            if (!DeadLettersVisible(scope))
+            {
+                return null;
+            }
 
             // Marten registers DeadLetterEvent into the *event* store's schema, single-tenanted
             // (StoreOptions.ApplyConfiguration: Schema.For<DeadLetterEvent>().DatabaseSchemaName(
@@ -1275,6 +1338,9 @@ internal sealed partial class EventDataService : IEventDataService
             id.ToString(),
             async (resolved, token) =>
             {
+                // Before the session: a hidden type is refused, audited as refused, and nothing of it is read.
+                RequireDeadLettersVisible(resolved);
+
                 await using IDocumentSession session = OpenWriteSession(resolved);
 
                 IQueryable<DeadLetterEvent> queryable = session.Query<DeadLetterEvent>().Where(x => x.Id == id);
@@ -1394,7 +1460,11 @@ internal sealed partial class EventDataService : IEventDataService
             projectionName + " to #" + eventSequence.ToString(CultureInfo.InvariantCulture),
             async (resolved, token) =>
             {
-                // First, what the rewind reaches, which is not the tenant in the scope. Marten 9.31's
+                // Before anything else: Marten deletes the projection's dead letters on the way, so a rewind is a write to
+                // DeadLetterEvent, and a hidden type is refused - audited as refused - before any policy is asked of it.
+                RequireDeadLettersVisible(resolved);
+
+                // Then, what the rewind reaches, which is not the tenant in the scope. Marten 9.31's
                 // RewindSubscriptionProgressAsync opens its session with AllowAnyTenant = true, rewrites
                 // every shard's progression row of the projection and deletes the projection's dead
                 // letters at or above the floor with no tenant predicate; the daemon then restarts every

@@ -49,8 +49,10 @@ internal sealed record ShardStalledFacts(
 /// </para>
 /// <para>
 /// <b>Not a heartbeat.</b> <c>mt_event_progression.heartbeat</c> is written at status changes (JasperFx documents it
-/// so), and is never read as a sign of life - K02's rule. A shard the extended tracking or the daemon here says is
-/// paused or failed is D05's; one being rebuilt is moving in a replay of its own.
+/// so), and is never read as a sign of life - K02's rule. Even a periodic one would say only that the shard's agent loop
+/// runs: a heartbeat, the high-water agent's restamp included, is liveness of a loop and never progress, which is why
+/// "alive" is the daemon's here and "not moving" is <c>last_updated</c>'s. A shard the extended tracking or the daemon
+/// here says is paused or failed is D05's; one being rebuilt is moving in a replay of its own.
 /// </para>
 /// </remarks>
 [HealthCheck("D03", HealthArea.Daemon, HealthCostTier.Catalog, "Shard alive but not moving")]
@@ -66,11 +68,11 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
             throw new HealthCheckUnavailableException(DaemonCheckConfiguration.TenantPartitionedReason);
         }
 
-        EventStoreShape shape = await EventStoreShape.ReadAsync(context, configuration.EventSchema, cancellationToken).ConfigureAwait(false);
+        EventStoreRelations shape = await EventHealth.ShapeAsync(context, cancellationToken).ConfigureAwait(false);
 
         if (!shape.HasHighWater)
         {
-            throw new HealthCheckUnavailableException(EventStoreShape.NoEventStoreReason);
+            throw new HealthCheckUnavailableException(EventStoreRelations.NoEventStoreReason);
         }
 
         HighWaterReading reading = await HighWaterReading.ReadAsync(context, configuration.EventSchema, cancellationToken).ConfigureAwait(false);
@@ -174,7 +176,8 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
                 Title = "Shard " + shard + " has not moved for " + DaemonCheckConfiguration.Format(still) + " while the daemon runs",
                 WhyItMatters =
                     "The high-water mark is " + DaemonCheckConfiguration.Number(behindMark) + " events ahead of this shard, so there "
-                    + "are committed events for it to process, and the daemon is alive - yet the shard has written no progress for "
+                    + "are committed events for it to process, and the daemon is alive - its loop is, which is all a sign of life can "
+                    + "say, and never that a shard moves - yet the shard has written no progress for "
                     + DaemonCheckConfiguration.Format(still) + ", well past the longest a page of it has been seen to take. One that "
                     + "does not move is usually blocked inside its own handler: a lock it waits on, a call that never returns, a page "
                     + "too large to finish. Everything that reads this projection is that far behind, and nothing says so on its own.",

@@ -63,6 +63,48 @@ public class HealthHistoryTests
         view.Describe(Start.AddMinutes(4)).Should().StartWith("Watching for 4 min").And.Contain("No check here measures a rate yet");
     }
 
+    /// <summary>
+    /// CL1 item 2, the fail-closed branch: a series whose writer's gate was never recorded is read as
+    /// <see cref="HealthGate.Activity" />. A sample with numbers and no gates map at all is therefore invisible to an
+    /// evaluator at <see cref="HealthGate.None" /> or <see cref="HealthGate.Database" /> - the sample itself is dropped,
+    /// because nothing in it is left - and whole at <see cref="HealthGate.Activity" />.
+    /// </summary>
+    [Fact]
+    public void A_series_with_no_recorded_gate_is_read_only_at_the_activity_gate()
+    {
+        HealthSample ungated = Sample(0, ("connections.by-role:reporting", 4), ("tables.rows", 1_000));
+        ungated.Gates.Should().BeEmpty("the premise: nobody stamped a gate on this sample");
+        ungated.GateOf("tables.rows").Should().Be(HealthGate.Activity, "an unknown writer is the strictest gate");
+
+        HealthHistoryView history = new([ungated], Start);
+
+        history.VisibleAt(HealthGate.None).Samples.Should().BeEmpty("no series in it is known to be readable at None");
+        history.VisibleAt(HealthGate.Database).Samples.Should().BeEmpty("nor at Database");
+        history.VisibleAt(HealthGate.None).Since.Should().Be(Start, "hiding the numbers does not move when watching began");
+
+        HealthSample whole = history.VisibleAt(HealthGate.Activity).Samples.Should().ContainSingle().Subject;
+        whole.Values.Should().BeEquivalentTo(ungated.Values);
+    }
+
+    /// <summary>The same rule series by series: the stamped series is read at its gate, the unstamped one is not.</summary>
+    [Fact]
+    public void Only_the_series_whose_gate_was_recorded_cross_a_looser_gate()
+    {
+        HealthSample mixed = Sample(0, ("tables.rows", 1_000), ("connections.by-role:reporting", 4)) with
+        {
+            Gates = new Dictionary<string, HealthGate>(StringComparer.Ordinal) { ["tables.rows"] = HealthGate.None },
+        };
+
+        HealthHistoryView history = new([mixed]);
+
+        HealthSample atNone = history.VisibleAt(HealthGate.None).Samples.Should().ContainSingle().Subject;
+        atNone.Values.Keys.Should().Equal("tables.rows");
+        atNone.GateOf("tables.rows").Should().Be(HealthGate.None);
+
+        history.VisibleAt(HealthGate.Database).Samples.Single().Values.Keys.Should().Equal("tables.rows");
+        history.VisibleAt(HealthGate.Activity).Samples.Single().Values.Should().HaveCount(2);
+    }
+
     [Fact]
     public void Two_databases_are_two_histories()
     {

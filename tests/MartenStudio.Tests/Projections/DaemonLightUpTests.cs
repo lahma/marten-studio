@@ -26,6 +26,31 @@ public class DaemonLightUpTests
     }
 
     /// <summary>
+    /// CL1 item 5: <c>IsRebuilding</c> is named by its string in two files - the probe that says whether it exists
+    /// (<c>RuntimeFeature</c>) and the one helper that calls it (<see cref="DaemonLightUp" />). D08 kept a private
+    /// <c>GetMethod("IsRebuilding")</c> of its own, which a JasperFx that moved the member would have left answering
+    /// "absent" while the probe and the helper failed loudly.
+    /// </summary>
+    [Fact]
+    public void IsRebuilding_is_reflected_in_the_probe_and_the_helper_and_nowhere_else()
+    {
+        string[] files = Conventions.SourceScanner.ShippedSourceFiles();
+        files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
+
+        List<string> naming =
+        [
+            .. files
+                .Where(static file => File.ReadAllText(file).Contains("\"IsRebuilding\"", StringComparison.Ordinal))
+                .Select(Conventions.SourceScanner.Relative)
+                .Order(StringComparer.Ordinal),
+        ];
+
+        naming.Should().Equal(
+            "src/MartenStudio/Services/Configuration/RuntimeFeature.cs",
+            "src/MartenStudio/Services/Projections/DaemonLightUp.cs");
+    }
+
+    /// <summary>
     /// A refusal's classification where JasperFx classifies (2.76+): Faulted and not transient for an outright fault;
     /// at the floor, the message alone. The exception is made through its (exception) constructor, which exists at both
     /// ends - internal at 2.74, public from 2.76.

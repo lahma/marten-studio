@@ -9,7 +9,10 @@ namespace MartenStudio.Internal.Sql;
 
 /// <summary>One of the event store's tables, as the catalog describes it.</summary>
 /// <param name="Name">The table's name - one of Marten's own constants.</param>
-/// <param name="Kind"><c>pg_class.relkind</c>: <c>r</c> for a table, <c>p</c> for a partitioned one.</param>
+/// <param name="Kind">
+/// <c>pg_class.relkind</c>: <c>r</c> for a table, <c>p</c> for a partitioned one - and <c>S</c> for the event sequence,
+/// which <see cref="HealthEventQueries.EventStoreShape" /> lists beside them.
+/// </param>
 /// <param name="Columns">Its columns, in order.</param>
 /// <param name="Partitions">How many partitions hang directly off it; 0 for a plain table.</param>
 internal sealed record EventStoreRelation(string Name, string Kind, IReadOnlyList<string> Columns, int Partitions)
@@ -20,6 +23,11 @@ internal sealed record EventStoreRelation(string Name, string Kind, IReadOnlyLis
     /// <summary>Whether the table has <paramref name="column" />.</summary>
     public bool Has(string column) => Columns.Contains(column, StringComparer.Ordinal);
 }
+
+/// <summary>One object <see cref="HealthEventQueries.EventStoreShape" /> listed, and the schema it is in.</summary>
+/// <param name="Schema">The schema: the event store's, or the dead-letter table's when that is elsewhere.</param>
+/// <param name="Relation">The object. Its <see cref="EventStoreRelation.Kind" /> is <c>S</c> for the event sequence.</param>
+internal sealed record EventStoreShapeRow(string Schema, EventStoreRelation Relation);
 
 /// <summary>
 /// One relation of the event store's tables and what <c>pg_stats</c> holds for one of its columns.
@@ -175,6 +183,9 @@ internal static class HealthEventQueries
     /// <summary>The progression table.</summary>
     public const string ProgressionTable = ProjectionProgressQueries.ProgressionTable;
 
+    /// <summary>The event sequence, which <see cref="EventStoreShape" /> asks the catalog about beside the tables.</summary>
+    public const string EventsSequence = ProjectionProgressQueries.EventsSequence;
+
     /// <summary>
     /// Every gap the high-water detector skipped (<c>EventProgressionSkippingTable.Name</c>, verified at
     /// <c>V9.39.0</c> and <c>V9.50.2</c>): <c>ending_sequence</c> (primary key), <c>starting_sequence</c> and a
@@ -245,51 +256,94 @@ internal static class HealthEventQueries
     internal static readonly string[] StatisticsTables = [EventsTable, StreamsTable];
 
     /// <summary>
-    /// Which of the event store's tables exist, their kind, their columns and how many partitions each has: a
-    /// catalog read, so every check can answer "not here" as a value before it builds a statement against a
-    /// table or a column that is not there.
+    /// Which of the event store's objects exist - its tables with their kind, their columns and how many partitions
+    /// each has, its sequence, and the dead-letter table - as one catalog read, so every daemon and event check can
+    /// answer "not here" as a value before it builds a statement against a table or a column that is not there.
     /// </summary>
     /// <param name="eventSchema">The event store's schema.</param>
-    /// <remarks>Columns: <c>relname</c>, <c>relkind</c>, <c>columns</c> (<c>text[]</c>), <c>partitions</c>.</remarks>
-    public static HealthQuery EventStoreShape(string eventSchema)
+    /// <param name="deadLetterSchema">
+    /// The dead-letter table's schema, as <c>DeadLetterQueries.TableFor</c> finds it - or <see langword="null" />, with
+    /// <paramref name="deadLetterTable" />, when the caller may not name the table (the host hides
+    /// <c>DeadLetterEvent</c>): then it is not asked about at all.
+    /// </param>
+    /// <param name="deadLetterTable">The dead-letter table's name, likewise.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>One statement for two areas (CL1 item 6).</b> The daemon checks (D01-D03, D05, D06) and the event checks (E05-E08,
+    /// D07, D08) each used to ask the catalog about the event store in a statement of their own, in the same regular
+    /// sweep - one by <c>exists</c> per object, one by listing the tables. This is the union of what both read, shared
+    /// through the sweep's memo as one fact (<c>EventHealth.ShapeAsync</c>).
+    /// </para>
+    /// <para>
+    /// <b>The dead-letter table is where the store says it is</b> - a host's <c>Schema.For&lt;DeadLetterEvent&gt;()</c>
+    /// may give it an alias of its own - so it is asked about by the schema and name <c>DeadLetterQueries.TableFor</c>
+    /// returns, which is why every row carries its schema.
+    /// </para>
+    /// <para>
+    /// Columns: <c>nspname</c>, <c>relname</c>, <c>relkind</c> (<c>r</c>, <c>p</c>, or <c>S</c> for the sequence),
+    /// <c>columns</c> (<c>text[]</c>, empty for the sequence) and <c>partitions</c>.
+    /// </para>
+    /// </remarks>
+    public static HealthQuery EventStoreShape(string eventSchema, string? deadLetterSchema = null, string? deadLetterTable = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(eventSchema);
 
-        const string Sql =
+        bool deadLetters = deadLetterSchema is not null || deadLetterTable is not null;
+        if (deadLetters)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(deadLetterSchema);
+            ArgumentException.ThrowIfNullOrWhiteSpace(deadLetterTable);
+        }
+
+        var sql = new StringBuilder(
             """
-            select c.relname::text as relname,
+            select n.nspname::text as nspname,
+                   c.relname::text as relname,
                    c.relkind::text as relkind,
-                   coalesce(
+                   case when c.relkind in ('r', 'p') then coalesce(
                      (select pg_catalog.array_agg(a.attname::text order by a.attnum)
                         from pg_catalog.pg_attribute a
                        where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped),
-                     '{}'::text[]) as columns,
+                     '{}'::text[]) else '{}'::text[] end as columns,
                    (select pg_catalog.count(*) from pg_catalog.pg_inherits i where i.inhparent = c.oid)::integer as partitions
               from pg_catalog.pg_class c
               join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-             where n.nspname = @schema
-               and c.relname = any(@tables)
-               and c.relkind in ('r', 'p')
-             order by c.relname
-            """;
+             where (n.nspname = @schema and c.relname = any(@tables) and c.relkind in ('r', 'p'))
+                or (n.nspname = @schema and c.relname = @sequence and c.relkind = 'S')
 
-        return new HealthQuery(Sql,
+            """);
+
+        List<NpgsqlParameter> parameters =
         [
             Text("schema", eventSchema),
             TextArray("tables", ShapeTables),
-        ]);
+            Text("sequence", EventsSequence),
+        ];
+
+        if (deadLetters)
+        {
+            sql.Append("    or (n.nspname = @dead_letter_schema and c.relname = @dead_letter_table and c.relkind in ('r', 'p'))\n");
+            parameters.Add(Text("dead_letter_schema", deadLetterSchema!));
+            parameters.Add(Text("dead_letter_table", deadLetterTable!));
+        }
+
+        sql.Append(" order by n.nspname, c.relname");
+
+        return new HealthQuery(sql.ToString(), parameters);
     }
 
-    /// <summary>Reads one row of <see cref="EventStoreShape" />.</summary>
-    public static EventStoreRelation ReadRelation(NpgsqlDataReader reader)
+    /// <summary>Reads one row of <see cref="EventStoreShape" />: the relation, and the schema it is in.</summary>
+    public static EventStoreShapeRow ReadShapeRow(NpgsqlDataReader reader)
     {
         ArgumentNullException.ThrowIfNull(reader);
 
-        return new EventStoreRelation(
+        return new EventStoreShapeRow(
             reader.GetString(0),
-            reader.GetString(1),
-            reader.IsDBNull(2) ? [] : reader.GetFieldValue<string[]>(2),
-            reader.GetInt32(3));
+            new EventStoreRelation(
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.IsDBNull(3) ? [] : reader.GetFieldValue<string[]>(3),
+                reader.GetInt32(4)));
     }
 
     /// <summary>

@@ -46,7 +46,10 @@ model, the phased delivery plan — lives in the approved plan at
 4. **No raw SQL outside `src/MartenStudio/Internal/Sql/`.** Identifiers are quoted through the builder,
    values are always parameters. Marten only ever hands the studio a runtime `Type`, so the reads *are*
    generated SQL — which means there is exactly one place where an interpolated identifier could become an
-   injection, and it is small enough to review.
+   injection, and it is small enough to review. The compiled fence in `HealthQueryConventionTests` exempts
+   that folder's namespace, `MartenStudio.Internal.Sql`, by name, so the same test refuses a declaration of that
+   namespace, or of one inside it, in any `.cs` or `.razor` file under `src/` outside the folder, comparing
+   names as C# does (a leading `@` removed, Unicode escapes decoded, formatting characters removed).
 5. **Every mutating operation is capability-gated in the service layer, and audited.** Hiding a button is
    a UI convenience; the refusal has to live where the operation does, because a Blazor circuit is a
    long-lived object a client can drive. `StudioCapabilityGuard.Require(…)` → scope resolution (with

@@ -1,6 +1,8 @@
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
+using Microsoft.Extensions.DependencyInjection;
+
 namespace MartenStudio.Integration.Tests.Events;
 
 /// <summary>
@@ -175,5 +177,81 @@ public class DeadLetterLiveTests(PoisonStoreFixture fixture) : IClassFixture<Poi
 
         Events.Audit.GetLatest().Should().Contain(x =>
             x.Action == "Skip event" && x.Succeeded && x.Message == "marked as skipped");
+    }
+
+    /// <summary>
+    /// CL1 item 4, live: a host that hides <c>DeadLetterEvent</c> gets no dead-letter list, no number on the badge and
+    /// no discard - over real dead letters the daemon recorded, which a studio that shows the type still lists, and
+    /// which the refused discard leaves exactly as they were.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_host_that_hides_DeadLetterEvent_gets_no_list_no_count_and_no_discard()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+
+        DeadLetterPage shown = await Events.Service.ListDeadLettersAsync(Events.Scope, new DeadLetterQuery(), token);
+        shown.Rows.Should().NotBeEmpty("the premise: the daemon recorded dead letters, and a studio that shows the type lists them");
+        Guid id = shown.Rows[0].Id;
+        long before = await CountRowsAsync(token);
+
+        await using ServiceProvider provider = StudioHiding(Events.Store);
+        await using AsyncServiceScope circuit = provider.CreateAsyncScope();
+        IEventDataService hidden = circuit.ServiceProvider.GetRequiredService<IEventDataService>();
+
+        DeadLetterPage page = await hidden.ListDeadLettersAsync(Events.Scope, new DeadLetterQuery(), token);
+        page.IsHidden.Should().BeTrue("the page says the dead letters are hidden, and reads none of them");
+        page.Rows.Should().BeEmpty();
+        page.Error.Should().BeNull();
+
+        (await hidden.CountDeadLettersAsync(Events.Scope, token)).Should().BeNull("a hidden type has no number on the badge");
+
+        Func<Task> discard = () => hidden.DiscardDeadLetterAsync(Events.Scope, id, token);
+        (await discard.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Be("Dead letters are hidden by MartenStudioOptions.IsDocumentTypeVisible.");
+
+        StudioActionLogEntry refused = provider.GetRequiredService<StudioActionLogService>().GetLatest().Should().ContainSingle().Subject;
+        refused.Action.Should().Be("Discard dead letter");
+        refused.Target.Should().Be(id.ToString());
+        refused.Succeeded.Should().BeFalse("audited as refused");
+
+        Func<Task> rewind = () => hidden.RewindSubscriptionAsync(Events.Scope, shown.Rows[0].ProjectionName, shown.Rows[0].EventSequence, token);
+        (await rewind.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Be("Dead letters are hidden by MartenStudioOptions.IsDocumentTypeVisible.", "refused before the daemon is asked");
+        provider.GetRequiredService<StudioActionLogService>().GetLatest().Should().HaveCount(2)
+            .And.OnlyContain(static x => !x.Succeeded);
+
+        (await CountRowsAsync(token)).Should().Be(before, "the refusals deleted nothing");
+        (await Events.Service.ListDeadLettersAsync(Events.Scope, new DeadLetterQuery(), token)).Rows
+            .Should().Contain(x => x.Id == id, "and the studio that shows the type still lists it");
+    }
+
+    /// <summary>Every dead letter in the table, counted raw - what the refusal must not have changed.</summary>
+    private async Task<long> CountRowsAsync(CancellationToken token)
+    {
+        await using Npgsql.NpgsqlConnection connection = await Events.OpenAsync(token);
+        await using Npgsql.NpgsqlCommand command = new(
+            "select count(*) from " + MartenStudio.Internal.Sql.SqlIdentifier.Qualify(Events.Schema, "mt_doc_deadletterevent"), connection);
+
+        return (long) (await command.ExecuteScalarAsync(token))!;
+    }
+
+    /// <summary>A studio over the same store whose host hides <c>DeadLetterEvent</c>, with every capability on.</summary>
+    private static ServiceProvider StudioHiding(Marten.IDocumentStore store)
+    {
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+        services.AddAuthorization();
+        services.AddSingleton<Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider, StubAuthenticationStateProvider>();
+        services.AddSingleton(store);
+
+        services.AddMartenStudio(options =>
+        {
+            options.Capabilities = MartenStudioCapabilities.All();
+            options.DiscoverTenantIds = false;
+            options.IsDocumentTypeVisible = static type => type != typeof(JasperFx.Events.Daemon.DeadLetterEvent);
+        });
+
+        return services.BuildServiceProvider();
     }
 }

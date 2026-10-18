@@ -114,9 +114,10 @@ builder.Services.AddMarten(opts => { /* ... */ })
 
 ## D03 Shard alive but not moving
 
-**Warning.** The daemon is alive, the high-water mark is ahead of a shard, and the shard has written no progress
+**Warning.** The daemon is running, the high-water mark is ahead of a shard, and the shard has written no progress
 for longer than its window - and the advisor has seen the mark ahead of it, with the shard where it is, for that
-whole window.
+whole window. "Running" is about the daemon's loops, never about this shard: nothing D03 reads as a sign of life says
+that a shard moves, and the finding is exactly the case where something is alive and the shard is not moving.
 
 **The window is the shard's own:** at least 5 minutes (and at least `5 x SlowPollingTime`), and three times its
 typical page - the median of the runs in which the advisor saw it hold still with work to do before it moved on. A
@@ -132,20 +133,25 @@ its agent is alive. "Not moving" alone is a shard on an idle store, so D03 also 
 mark to have been ahead of the shard for the whole window, which a mark that moved a second ago is not.
 
 **The 9.43 rule** changes what is believed, not only what is said. From Marten 9.43 the high-water agent restamps
-its own row on every poll (#5541, `HighWaterMarkLivenessStamp` in the probe table), so that row's age *is* the
-agent's liveness: fresh is alive, old is stopped - D02's question, not D03's - whatever the allocation fence or the
-advisor's history of the mark say, because those are only older news from the same agent. Below 9.43 that row is the
-mark's last move and freezes on a caught-up idle store, so an old one says nothing: the daemon is believed alive if
-it is hosted here and running, its row or allocation fence was written within `2 x SlowPollingTime + 1 min`, or its
-mark moved while the advisor watched - and without any of them D03 says it cannot tell instead of reporting a stall.
+its own row on every poll (#5541, `HighWaterMarkLivenessStamp` in the probe table), so that row's age says whether
+the high-water agent's loop is alive: fresh is running, old is stopped - D02's question, not D03's - whatever the
+allocation fence or the advisor's history of the mark say, because those are only older news from the same agent.
+It is a heartbeat of that one agent, and like any heartbeat it says the loop runs, not that anything moves: not that
+a shard advances, and not that this shard's own agent is running. Below 9.43 that row is the mark's last move and
+freezes on a caught-up idle store, so an old one says nothing: the daemon is believed to be running if it is hosted
+here and says so, its row or allocation fence was written within `2 x SlowPollingTime + 1 min`, or its mark moved
+while the advisor watched - and without any of them D03 says it cannot tell instead of reporting a stall.
 
 **Not a heartbeat.** The extended tracking's `heartbeat` column is written when a shard's status changes, as JasperFx
-documents it, and is never read as a sign of life (K02 reads it the same way). A shard the extended tracking or the
-daemon here says is paused or failed is D05's; one being rebuilt is moving in a replay of its own.
+documents it, and is never read as a sign of life (K02 reads it the same way). Even made periodic with
+`ExtendedProgressionHeartbeatInterval`, a fresh heartbeat would say the shard's agent loop is alive and nothing about
+whether the shard moves - which is the question D03 asks of `last_updated`, the shard's own last progress. A shard the
+extended tracking or the daemon here says is paused or failed is D05's; one being rebuilt is moving in a replay of its
+own.
 
 ## D04 Falling behind, with an ETA
 
-**Warning.** A shard's lag is past its warning threshold and grew at each of the last two steps between the
+**Warning.** A shard's lag is past the warning threshold and grew at each of the last two steps between the
 advisor's samples: events arrived faster than the shard processed them, twice running.
 
 Tier 0: it runs no statement, and judges the sequence, the mark and the shard positions D01 and D03 recorded in the
@@ -161,9 +167,10 @@ rebuilt (the position starts again from zero), while its agent here is paused or
 while the advisor watched (stalled, D03, or not run, D02), or when the high-water mark has not moved (held behind a
 gap, D01). The status line says which.
 
-Thresholds: a progression row's `warning_behind_threshold` and `critical_behind_threshold` win when set. Marten
-creates those columns and **writes nothing to them** (#5173, at `V9.39.0` and `V9.50.2`), so in practice they are the
-projections screen's 1,000 and 100,000; a host that writes its own is honoured.
+Thresholds: the projections screen's - 1,000 events behind for the warning, 100,000 for critical - unless a
+progression row's own `warning_behind_threshold` or `critical_behind_threshold` is set. A threshold a host writes
+itself is honoured; Marten writes none (#5173, at `V9.39.0` and `V9.50.2`: it creates the two columns and leaves them
+empty) and the studio offers no way to set one. The finding's evidence says which threshold it used.
 
 ## D05 Shard failed or paused
 
@@ -216,8 +223,11 @@ never see. The finding names the projection; the dead-letter screen, filtered to
 
 Counted raw, grouped by the JSON property the serializer's casing stores `ProjectionName` under: Marten's own
 `FetchDeadLetterCountsAsync` applies the table's migration first, which a health read never does (hard rule 14).
-`DeadLetterEvent` is single-tenanted, so the count is every tenant's. A host that hides `DeadLetterEvent` with
-`IsDocumentTypeVisible` gets no read at all.
+The table is the one the dead-letter screen reads - the store's own mapping of `DeadLetterEvent`, so a host that gave
+it an alias of its own (`Schema.For<DeadLetterEvent>().DocumentAlias(...)`) is counted there - and every row is
+counted, soft-deleted or not. `DeadLetterEvent` is single-tenanted, so the count is every tenant's. A host that
+hides `DeadLetterEvent` with `IsDocumentTypeVisible` - or whose delegate throws for it - gets no read at all, and the
+dead-letter screen is hidden with it.
 
 ## D07 Gaps were skipped
 

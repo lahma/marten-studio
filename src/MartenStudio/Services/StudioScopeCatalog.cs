@@ -282,6 +282,14 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         return tenants with { Ids = allowed, IsTruncated = true };
     }
 
+    /// <summary>The databases of one store the visitor may see, one per identity.</summary>
+    /// <remarks>
+    /// <b>One per <c>Id.Identity</c>, ignoring case</b>, as the Overview's cards are (<c>StoreInfoService</c>). Two
+    /// master-table rows with one connection string are two <c>MartenDatabase</c> objects over one database, and the
+    /// studio scopes by that identity and resolves it to the first match - so the picker offered the same database
+    /// twice, as two options with one value, and the policy was asked about it twice. The first is kept, which is the
+    /// one the resolver matches.
+    /// </remarks>
     private async Task<IReadOnlyList<DatabaseListing>> ListDatabasesAsync(
         string storeKey,
         IDocumentStore store,
@@ -290,9 +298,14 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
         List<DatabaseListing> listings = [];
         try
         {
+            HashSet<string> identities = new(StringComparer.OrdinalIgnoreCase);
+
             foreach (IMartenDatabase database in await store.Storage.AllDatabases().ConfigureAwait(false))
             {
-                listings.Add(new DatabaseListing(database.Id.Identity, database.Id.Name, database.Id.Server));
+                if (identities.Add(database.Id.Identity))
+                {
+                    listings.Add(new DatabaseListing(database.Id.Identity, database.Id.Name, database.Id.Server));
+                }
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

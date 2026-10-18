@@ -109,7 +109,10 @@ internal interface IEventDataService
         long version,
         CancellationToken cancellationToken = default);
 
-    /// <summary>One page of dead letters.</summary>
+    /// <summary>
+    /// One page of dead letters - or, when <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> hides
+    /// <c>DeadLetterEvent</c> (or throws for it), <see cref="DeadLetterPage.Hidden" />, read from nothing.
+    /// </summary>
     Task<DeadLetterPage> ListDeadLettersAsync(
         StudioScope scope,
         DeadLetterQuery query,
@@ -117,7 +120,7 @@ internal interface IEventDataService
 
     /// <summary>
     /// How many dead letters there are, for the badge. Zero and "no number" are different answers, so
-    /// both a failure and a refusal are <see langword="null" /> rather than zero.
+    /// a failure, a refusal and a hidden <c>DeadLetterEvent</c> are all <see langword="null" /> rather than zero.
     /// </summary>
     /// <remarks>
     /// The number is the whole database's: <c>mt_doc_deadletterevent</c> is single-tenanted on every
@@ -205,6 +208,9 @@ internal interface IEventDataService
     /// </summary>
     /// <exception cref="StudioCapabilityDeniedException">The capability is not enabled.</exception>
     /// <exception cref="StudioNotAuthorizedException">The write policy refused this scope.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The host hides <c>DeadLetterEvent</c> (<see cref="MartenStudioOptions.IsDocumentTypeVisible" />); audited as refused.
+    /// </exception>
     Task DiscardDeadLetterAsync(StudioScope scope, Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -270,6 +276,9 @@ internal interface IEventDataService
     /// </exception>
     /// <exception cref="KeyNotFoundException">
     /// This store registers no async projection by that name.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The host hides <c>DeadLetterEvent</c>, which the rewind deletes from; audited as refused, before anything else is asked.
     /// </exception>
     Task RewindSubscriptionAsync(
         StudioScope scope,

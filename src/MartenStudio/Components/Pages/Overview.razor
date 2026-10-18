@@ -57,9 +57,14 @@
                 <StatCard Title="Daemon" Value="@DaemonValue" Color="@DaemonColor" />
             </a>
 
-            <a class="ms-stat-link" href="@Link(EventLinks.DeadLettersRoute)">
-                <StatCard Title="Dead letters" Value="@DeadLetterValue" Color="@DeadLetterColor" />
-            </a>
+            @* Absent, not "unknown", for a host that hides DeadLetterEvent: a hidden type is absent (D27), and an amber
+               tile would call the host's own configuration a problem. *@
+            @if (DeadLettersShown)
+            {
+                <a class="ms-stat-link" href="@Link(EventLinks.DeadLettersRoute)">
+                    <StatCard Title="Dead letters" Value="@DeadLetterValue" Color="@DeadLetterColor" />
+                </a>
+            }
 
             <a class="ms-stat-link ms-overview-health-tile" href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">
                 <StatCard Title="Health" Value="@HealthValue" Color="@HealthColor" />
@@ -633,6 +638,9 @@
         _ => deadLetters > 0 ? "danger" : "success",
     };
 
+    /// <summary>Whether the host lets the studio show DeadLetterEvent - the dead-letter screen's own rule, failing closed.</summary>
+    private bool DeadLettersShown => DeadLetterVisibility.IsVisible(Options.Value.IsDocumentTypeVisible, out _);
+
     private static string CountColor(EventStoreCount count) => count.Value is null ? "warning" : "info";
 
     private static string SeverityClass(LagSeverity severity) => severity switch
@@ -889,7 +897,10 @@
         projections = readProjections;
 
         long? readDeadLetters = deadLetters;
-        await deadLettersRegion.RunAsync(async token => readDeadLetters = await Events.CountDeadLettersAsync(scope, token));
+        if (DeadLettersShown)
+        {
+            await deadLettersRegion.RunAsync(async token => readDeadLetters = await Events.CountDeadLettersAsync(scope, token));
+        }
 
         if (HasMovedOn(scope))
         {

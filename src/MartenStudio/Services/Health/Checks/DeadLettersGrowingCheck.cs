@@ -33,11 +33,19 @@ internal sealed record DeadLettersFacts(IReadOnlyDictionary<string, long> Counts
 /// readers will never see. The sample store has a dead letter on purpose, and this check is quiet about it.
 /// </para>
 /// <para>
-/// <b>Read raw, and only when visible.</b> <c>DeadLetterEvent</c> is a Marten document in the event store's schema,
-/// single-tenanted. Marten's own <c>FetchDeadLetterCountsAsync</c> applies the table's migration first, which a health
-/// read never does (hard rule 14), so this counts the table grouped by the JSON property the serializer's casing
-/// stores <c>ProjectionName</c> under. A host that hides <c>DeadLetterEvent</c> with <c>IsDocumentTypeVisible</c> gets
-/// no read at all - its table name never goes into a statement - and a status row that says why.
+/// <b>Read raw, and only when visible.</b> <c>DeadLetterEvent</c> is a Marten document, by default in the event store's
+/// schema and single-tenanted. Marten's own <c>FetchDeadLetterCountsAsync</c> applies the table's migration first, which
+/// a health read never does (hard rule 14), so this counts the table grouped by the JSON property the serializer's
+/// casing stores <c>ProjectionName</c> under. A host that hides <c>DeadLetterEvent</c> with <c>IsDocumentTypeVisible</c>
+/// - or whose delegate throws for it, which is read the same way (<see cref="DeadLetterVisibility" />) - gets no read at
+/// all, its table name never goes into a statement, and a status row says why.
+/// </para>
+/// <para>
+/// <b>The table is found the way the dead-letter list finds it</b> (CL1 item 3): <c>DeadLetterQueries.TableFor</c>, its
+/// schema and its name, so a host's <c>Schema.For&lt;DeadLetterEvent&gt;().DocumentAlias(...)</c> is counted where the
+/// screen reads it, rather than looked for as <c>mt_doc_deadletterevent</c> and reported as zero. (The schema is the event
+/// store's whatever the host says: Marten's <c>ApplyConfiguration</c> registers the type after the host's configuration,
+/// read at <c>V9.39.0</c>.) Every row is counted, soft-deleted or not: what grows is how many failures have been recorded.
 /// </para>
 /// </remarks>
 [HealthCheck("D06", HealthArea.Daemon, HealthCostTier.Catalog, "Dead letters accumulating")]
@@ -46,17 +54,24 @@ internal sealed class DeadLettersGrowingCheck : HealthCheck<DeadLettersFacts>
     /// <summary>The property <c>DeadLetterEvent</c> names its projection by.</summary>
     private const string ProjectionNameProperty = nameof(DeadLetterEvent.ProjectionName);
 
+    /// <summary>What D06 says when the host hides <c>DeadLetterEvent</c>.</summary>
+    internal const string HiddenReason =
+        "MartenStudioOptions.IsDocumentTypeVisible hides DeadLetterEvent, so the advisor does not read the dead letters.";
+
+    /// <summary>What D06 says when the host's visibility delegate throws for <c>DeadLetterEvent</c>.</summary>
+    internal const string VisibilityFailedReason =
+        "MartenStudioOptions.IsDocumentTypeVisible threw for DeadLetterEvent, so the advisor treats it as hidden and does not read "
+        + "the dead letters.";
+
     /// <inheritdoc />
     public override async Task<DeadLettersFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        if (!context.IsDocumentTypeVisible(typeof(DeadLetterEvent)))
+        if (!DeadLetterVisibility.IsVisible(context.StudioOptions.IsDocumentTypeVisible, out Exception? failure))
         {
-            throw new HealthCheckUnavailableException(
-                "MartenStudioOptions.IsDocumentTypeVisible hides DeadLetterEvent, so the advisor does not read the dead letters.");
+            throw new HealthCheckUnavailableException(failure is null ? HiddenReason : VisibilityFailedReason);
         }
 
-        string schema = context.StoreOptions.Events.DatabaseSchemaName;
-        EventStoreShape shape = await EventStoreShape.ReadAsync(context, schema, cancellationToken).ConfigureAwait(false);
+        EventStoreRelations shape = await EventHealth.ShapeAsync(context, cancellationToken).ConfigureAwait(false);
 
         IReadOnlyDictionary<string, IReadOnlyList<Type>> published = DaemonCheckConfiguration.PublishedTypesOf(context.Store);
 
@@ -69,7 +84,7 @@ internal sealed class DeadLettersGrowingCheck : HealthCheck<DeadLettersFacts>
         JsonNamingPolicy? policy = DocumentDataService.NamingPolicyFor(context.Store);
         string key = policy?.ConvertName(ProjectionNameProperty) ?? ProjectionNameProperty;
 
-        var query = HealthDaemonQueries.DeadLettersByProjection(schema, key);
+        var query = HealthDaemonQueries.DeadLettersByProjection(shape.DeadLetterSchema!, shape.DeadLetters!.Name, key);
         IReadOnlyList<(string Projection, long Count)> rows = await context.Sql.QueryAsync(
                 query,
                 static reader => (reader.IsDBNull(0) ? string.Empty : reader.GetString(0), reader.GetInt64(1)),

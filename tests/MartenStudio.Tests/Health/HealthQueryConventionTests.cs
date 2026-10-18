@@ -36,6 +36,18 @@ namespace MartenStudio.Tests.Health;
 /// the same instruction in a method whose outermost type is the check.</item>
 /// </list>
 /// <para>
+/// <b>And the namespace is the folder.</b> The source fence exempts the builders by folder and the compiled fence by
+/// namespace, so a file elsewhere that declared <c>namespace MartenStudio.Internal.Sql</c> passed the compiled fence with
+/// any construction it liked, and the source fence with one it could spell around (a conditional handed to the runner,
+/// <c>QueryAsync(ok ? new(...) : null!, ...)</c>), CL1 item 1. So a third fence, over source, refuses a declaration of
+/// that namespace, or of one nested inside it, in any <c>.cs</c> or <c>.razor</c> file under <c>src/</c> outside
+/// <c>Internal/Sql/</c>. It reads file-scoped and block declarations, a block nested in another, and Razor's
+/// <c>@namespace</c>, after comments and strings are blanked, and compares a name as C# compares identifiers: a leading
+/// <c>@</c> removed, <c>\u</c> and <c>\U</c> escapes decoded, formatting characters removed
+/// (<see cref="DeclaredNamespaces" />, <see cref="NormalizeName" />). What it does not see: a file compiled in from
+/// outside <c>src/</c>, and a namespace a source generator emits.
+/// </para>
+/// <para>
 /// The source scan strips comments and strings first, which is what lets prose quote the pattern - and what
 /// could make it vacuous; each fence has a theory or fact that proves it still catches an offender.
 /// </para>
@@ -74,6 +86,30 @@ public class HealthQueryConventionTests
     /// that the two properties have no setter (<see cref="A_query_cannot_be_rewritten_by_a_with_expression" />).
     /// </summary>
     private static readonly Regex Rewrite = new(@"\bwith\s*\{[^}]*\b(?:Sql|Parameters)\s*=", RegexOptions.None, TimeSpan.FromSeconds(5));
+
+    /// <summary>A C# Unicode escape in an identifier: <c>\uXXXX</c> or <c>\UXXXXXXXX</c>.</summary>
+    private const string IdentifierEscape = @"\\u[0-9A-Fa-f]{4}|\\U[0-9A-Fa-f]{8}";
+
+    /// <summary>
+    /// One C# identifier as the spec spells it: an optional verbatim <c>@</c>, then a letter, a letter number, an
+    /// underscore or an escape, then letters, numbers, combining and connecting characters, formatting characters and
+    /// escapes.
+    /// </summary>
+    private const string CSharpIdentifier =
+        @"@?(?:[\p{L}\p{Nl}_]|" + IdentifierEscape + @")(?:[\p{L}\p{Nl}\p{Mn}\p{Mc}\p{Nd}\p{Pc}\p{Cf}]|" + IdentifierEscape + ")*";
+
+    /// <summary>
+    /// A namespace declaration: the keyword (or Razor's <c>@namespace</c>), a dotted name of
+    /// <see cref="CSharpIdentifier" />s, and the brace that opens a block, if there is one. Not preceded by an identifier
+    /// character or a dot, so a member named <c>namespace</c> through a verbatim identifier (<c>x.@namespace</c>) is not one.
+    /// </summary>
+    private static readonly Regex NamespaceDeclaration = new(
+        @"(?<![\w@.])@?namespace\s+(?<name>" + CSharpIdentifier + @"(?:\s*\.\s*" + CSharpIdentifier + @")*)\s*(?:(?<open>\{)|;)?",
+        RegexOptions.None,
+        TimeSpan.FromSeconds(5));
+
+    /// <summary>An escape inside a name, decoded by <see cref="NormalizeName" />.</summary>
+    private static readonly Regex NameEscape = new(IdentifierEscape, RegexOptions.None, TimeSpan.FromSeconds(5));
 
     [Fact]
     public void No_shipped_file_outside_the_builders_names_or_builds_a_health_query()
@@ -195,6 +231,202 @@ public class HealthQueryConventionTests
         found.Should().Contain(static x => x.DeclaringType != typeof(Offenders), "a lambda's body is a method of a compiler-generated nested type");
         found.Select(static x => x.Name).Should().NotContain(nameof(Offenders.NotAnOffender), "reading a query is not building one");
     }
+
+    /// <summary>
+    /// CL1 item 1: the compiled fence's exemption is a namespace, so the namespace has to mean the folder. No shipped
+    /// file outside <c>Internal/Sql/</c> declares <c>MartenStudio.Internal.Sql</c> or a namespace nested inside it.
+    /// </summary>
+    [Fact]
+    public void Only_the_builders_folder_declares_the_builders_namespace()
+    {
+        string[] files = SourceScanner.ShippedSourceFiles();
+        files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
+
+        // Not vacuous: the walk finds the declarations the builders really make, so a rule it passes is one it applied.
+        files.Where(static x => SourceScanner.Relative(x).StartsWith(Builders, StringComparison.Ordinal))
+            .Should().NotBeEmpty()
+            .And.OnlyContain(
+                static x => DeclaredNamespaces(File.ReadAllText(x)).Contains(BuildersNamespace),
+                "every file in the folder is in the namespace, which is what the walk must be able to see");
+
+        List<string> offenders =
+        [
+            .. files
+                .Select(static file => (Path: SourceScanner.Relative(file), Text: File.ReadAllText(file)))
+                .Where(static x => DeclaresBuildersNamespaceOutsideTheFolder(x.Path, x.Text))
+                .Select(static x => x.Path),
+        ];
+
+        offenders.Should().BeEmpty(
+            "the compiled fence exempts every type in MartenStudio.Internal.Sql, so that namespace is the builders' folder "
+            + "and nothing else (hard rule 4): " + string.Join(", ", offenders));
+    }
+
+    /// <summary>The namespace fence's anti-vacuity: every spelling of the declaration is found, and prose is not.</summary>
+    [Theory]
+    [InlineData("namespace MartenStudio.Internal.Sql;\nclass C { }", true)]
+    [InlineData("namespace MartenStudio.Internal.Sql { class C { } }", true)]
+    [InlineData("namespace MartenStudio.Internal.Sql\n{\n    class C { }\n}", true)]
+    [InlineData("namespace MartenStudio.Internal.Sql.Health;\nclass C { }", true)]
+    [InlineData("namespace  MartenStudio . Internal . Sql ;\nclass C { }", true)]
+    [InlineData("namespace MartenStudio { namespace Internal.Sql { class C { } } }", true)]
+    [InlineData("namespace MartenStudio.Internal { class A { void M() { } } namespace Sql { class C { } } }", true)]
+    [InlineData("@namespace MartenStudio.Internal.Sql\n<p>a component</p>", true)]
+    [InlineData("@using MartenStudio.Services\n@namespace MartenStudio.Internal.Sql.Pages\n<p>a component</p>", true)]
+    // The CL1 review's three, each compiled: C# compares an identifier after removing '@' and decoding its escapes. An
+    // escape is written %u / %U here and made a real one by Escaped, so no tool or editor decodes it in this file.
+    [InlineData("namespace MartenStudio.Internal.@Sql;\nclass C { }", true)]
+    [InlineData("namespace @MartenStudio.Internal.Sql;\nclass C { }", true)]
+    [InlineData("namespace MartenStudio.Internal.%u0053ql;\nclass C { }", true)]
+    // And their kin: the long escape, and a formatting character - written (U+00AD, soft hyphen), or escaped - which C#
+    // removes before it compares.
+    [InlineData("namespace MartenStudio.Internal.%U00000053ql;\nclass C { }", true)]
+    [InlineData("namespace MartenStudio.Internal.S­ql;\nclass C { }", true)]
+    [InlineData("namespace MartenStudio.Internal.S%u00ADql;\nclass C { }", true)]
+    [InlineData("namespace MartenStudio.Internal./**/Sql;\nclass C { }", true)]
+    [InlineData("namespace MartenStudio\n.Internal\n.Sql\n{ class C { } }", true)]
+    [InlineData("namespace @MartenStudio { namespace Internal.%u0053ql { class C { } } }", true)]
+    // What a file outside the folder may write.
+    [InlineData("using MartenStudio.Internal.Sql;\nnamespace MartenStudio.Services.Health;\nclass C { }", false)]
+    [InlineData("// namespace MartenStudio.Internal.Sql;\nnamespace MartenStudio.Services;\nclass C { }", false)]
+    [InlineData("/// <see cref=\"MartenStudio.Internal.Sql.HealthQuery\" />, as in namespace MartenStudio.Internal.Sql\nnamespace X;\nclass C { }", false)]
+    [InlineData("/* namespace MartenStudio.Internal.Sql { } */\nnamespace X;\nclass C { }", false)]
+    [InlineData("namespace X;\nclass C { string s = \"namespace MartenStudio.Internal.Sql;\"; }", false)]
+    [InlineData("namespace MartenStudio.Internal.SqlHelpers;\nclass C { }", false)]
+    [InlineData("namespace MartenStudio.Internal.%u0053qlHelpers;\nclass C { }", false)]
+    [InlineData("namespace MartenStudio.Internal { class Sql { } }", false)]
+    [InlineData("namespace MartenStudio.Internal { class A { } }\nnamespace Sql { class C { } }", false)]
+    [InlineData("@* @namespace MartenStudio.Internal.Sql *@\n@namespace MartenStudio.Components\n<p>a component</p>", false)]
+    [InlineData("namespace X;\nclass C { void M() { var x = MartenStudio.Internal.Sql.SqlIdentifier.Quote(\"a\"); } }", false)]
+    public void The_namespace_fence_finds_every_spelling_and_ignores_prose(string source, bool offends)
+    {
+        string code = Escaped(source);
+
+        DeclaresBuildersNamespaceOutsideTheFolder("src/MartenStudio/Services/Health/Checks/SomeCheck.cs", code)
+            .Should().Be(offends, code);
+    }
+
+    /// <summary>The theory's escapes made real: <c>%u</c> and <c>%U</c> become a backslash and the letter.</summary>
+    private static string Escaped(string source)
+    {
+        string backslash = ((char) 92).ToString();
+        return source.Replace("%u", backslash + "u", StringComparison.Ordinal).Replace("%U", backslash + "U", StringComparison.Ordinal);
+    }
+
+    /// <summary>Not vacuous about escapes: the placeholder really does become a C# escape the walk decodes.</summary>
+    [Fact]
+    public void An_escaped_name_is_decoded_as_csharp_decodes_it()
+    {
+        string code = Escaped("namespace @MartenStudio.Internal.%u0053ql;\nclass C { }");
+
+        code.Should().Contain(((char) 92) + "u0053", "the source holds the six characters of an escape, not an S");
+        DeclaredNamespaces(code).Should().Equal(BuildersNamespace);
+        NormalizeName(Escaped("S%u00ADq%U0000006C")).Should().Be("Sql", "a formatting character is removed, a long escape decoded");
+    }
+
+    /// <summary>The folder itself is the one place the namespace may be declared, by its folder and not by its name.</summary>
+    [Theory]
+    [InlineData(Builders + "HealthTableQueries.cs", false)]
+    [InlineData(Builders + "Nested/Deeper.cs", false)]
+    [InlineData("src/MartenStudio/Internal/SqlHelpers/Stray.cs", true)]
+    [InlineData("src/MartenStudio/Internal/Stray.cs", true)]
+    [InlineData("src/MartenStudio/Services/Health/HealthCheckContext.cs", true)]
+    public void The_namespace_may_be_declared_under_the_folder_and_nowhere_else(string path, bool offends)
+    {
+        DeclaresBuildersNamespaceOutsideTheFolder(path, "namespace MartenStudio.Internal.Sql;\nclass C { }").Should().Be(offends);
+    }
+
+    /// <summary>
+    /// The namespaces <paramref name="source" /> declares, each in full and normalized as C# compares names
+    /// (<see cref="NormalizeName" />): a file-scoped one, a block one, a block one nested inside another
+    /// (<c>namespace A { namespace B.C { } }</c> declares <c>A</c> and <c>A.B.C</c>), and Razor's <c>@namespace</c>
+    /// directive. Comments and strings are blanked first (<see cref="SourceScanner" />), and the dots of a name may have
+    /// whitespace or a blanked comment around them, as C# allows.
+    /// </summary>
+    internal static IReadOnlyList<string> DeclaredNamespaces(string source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        string code = SourceScanner.StripCommentsAndStrings(source);
+        Dictionary<int, Match> declarations = NamespaceDeclaration.Matches(code).ToDictionary(static x => x.Index);
+
+        List<string> declared = [];
+        Stack<string?> blocks = new();
+        string fileScoped = string.Empty;
+        int index = 0;
+
+        while (index < code.Length)
+        {
+            if (declarations.TryGetValue(index, out Match? match))
+            {
+                string name = NormalizeName(match.Groups["name"].Value);
+                string full = string.Join('.', new[] { fileScoped }.Concat(blocks.Reverse().OfType<string>()).Append(name).Where(static x => x.Length > 0));
+
+                declared.Add(full);
+
+                if (match.Groups["open"].Success)
+                {
+                    // The block's own brace: the names it encloses are prefixed by this one until it closes.
+                    blocks.Push(name);
+                }
+                else
+                {
+                    // A file-scoped declaration, or Razor's directive, which ends at the line.
+                    fileScoped = full;
+                }
+
+                index = match.Index + match.Length;
+                continue;
+            }
+
+            if (code[index] == '{')
+            {
+                blocks.Push(null);
+            }
+            else if (code[index] == '}' && blocks.Count > 0)
+            {
+                blocks.Pop();
+            }
+
+            index++;
+        }
+
+        return declared;
+    }
+
+    /// <summary>
+    /// A dotted name as C# compares it (spec, identifiers): each <c>@</c> prefix removed, each Unicode escape decoded, and
+    /// every formatting character removed - and the whitespace C# allows around the dots, too.
+    /// </summary>
+    internal static string NormalizeName(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        string decoded = NameEscape.Replace(name, static escape =>
+        {
+            int code = int.Parse(escape.Value.AsSpan(2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+
+            // A lone surrogate half is a char of its own, which ConvertFromUtf32 refuses; nothing that compiles has one here.
+            return code is >= 0xD800 and <= 0xDFFF ? ((char) code).ToString() : char.ConvertFromUtf32(code);
+        });
+
+        var normalized = new System.Text.StringBuilder(decoded.Length);
+        foreach (char c in decoded)
+        {
+            if (c != '@' && !char.IsWhiteSpace(c) && char.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.Format)
+            {
+                normalized.Append(c);
+            }
+        }
+
+        return normalized.ToString();
+    }
+
+    private static bool DeclaresBuildersNamespaceOutsideTheFolder(string path, string source) =>
+        !path.StartsWith(Builders, StringComparison.Ordinal)
+        && DeclaredNamespaces(source).Any(static x =>
+            string.Equals(x, BuildersNamespace, StringComparison.Ordinal)
+            || x.StartsWith(BuildersNamespace + ".", StringComparison.Ordinal));
 
     private static bool Offends(string path, string source)
     {

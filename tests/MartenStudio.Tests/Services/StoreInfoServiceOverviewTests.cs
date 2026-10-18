@@ -179,6 +179,85 @@ public class StoreInfoServiceOverviewTests
             "event 9213, a Warning the first time in its window");
     }
 
+    /// <summary>
+    /// CL1 item 9: a store with no default database has no store-wide server version, and that is a configured state
+    /// rather than an anomaly. A static multi-tenancy with nothing marked <c>AsDefault()</c> (the default store here)
+    /// and a master-table-shaped tenancy whose <c>Default</c> throws <see cref="NotSupportedException" /> (the second
+    /// store) are both "unknown" without a read, and event 9214 is Debug for each. It used to be a Warning once a
+    /// window for every such host.
+    /// </summary>
+    [Fact]
+    public async Task A_store_with_no_default_database_has_no_version_and_says_so_only_at_Debug()
+    {
+        await using Harness harness = Harness.Create(
+            static tenancy => tenancy.AddMultipleTenantDatabase(FirstConnectionString, "tenants-a").ForTenants("acme"),
+            static services => services.AddMartenStore<IVersionlessStore>(options =>
+            {
+                options.MultiTenantedDatabases(tenancy =>
+                    tenancy.AddMultipleTenantDatabase(SecondConnectionString, "pooled").ForTenants("globex"));
+                options.DatabaseSchemaName = "versionless";
+
+                // A master table's shape: no default, a dynamic cardinality - and an enumeration that answers.
+                options.Tenancy = (ITenancy) (object) ObservedTenancy.Over(options.Tenancy, masterTableShape: true);
+            }));
+
+        StudioOverview overview = await harness.Overview.GetOverviewAsync(Token);
+
+        overview.Stores.Select(static x => x.Key).Should().BeEquivalentTo([MartenStoreRegistry.DefaultStoreKey, nameof(IVersionlessStore)]);
+        overview.Stores.Should().OnlyContain(static x => x.IsAvailable && x.PostgresVersion == null);
+
+        harness.Logs.Entries.Where(static x => x.EventId.Id == 9214).Should()
+            .HaveCount(2, "once per store per circuit")
+            .And.OnlyContain(static x => x.Level == LogLevel.Debug, "a tenancy with no default database is a state the host configured");
+        harness.Logs.Entries.Should().NotContain(static x => x.Level >= LogLevel.Warning, "nothing here is wrong");
+    }
+
+    /// <summary>
+    /// The positive control: a store that has a default database and cannot be read is still the throttled Warning,
+    /// so the rule above is about the configuration and not about swallowing a failure.
+    /// </summary>
+    [Fact]
+    public async Task A_default_database_that_cannot_be_read_is_still_a_throttled_Warning()
+    {
+        await using Harness harness = Harness.Create(static tenancy =>
+            tenancy.AddMultipleTenantDatabase(FirstConnectionString, "tenants-a").ForTenants("acme").AsDefault());
+
+        StudioOverview overview = await harness.Overview.GetOverviewAsync(Token);
+
+        overview.Stores.Should().ContainSingle().Which.PostgresVersion.Should().BeNull("the host does not answer");
+        harness.Logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9214)
+            .Which.Level.Should().Be(LogLevel.Warning, "the first failure in its window, against a database that should have answered");
+    }
+
+    /// <summary>
+    /// What <see cref="StoreInfoService.HasDefaultDatabase" /> answers for each of Marten's tenancies, from memory - of a
+    /// built store, as the Overview always has one: <c>DefaultTenancy</c> makes its database when the store initialises it.
+    /// </summary>
+    [Fact]
+    public async Task Only_a_tenancy_that_holds_a_default_database_is_asked_for_a_version()
+    {
+        (await HasDefaultAsync(static x => x.Connection(FirstConnectionString))).Should().BeTrue("a single database is its own default");
+        (await HasDefaultAsync(static x => x.MultiTenantedDatabases(t => t.AddMultipleTenantDatabase(FirstConnectionString, "a").ForTenants("acme").AsDefault())))
+            .Should().BeTrue();
+        (await HasDefaultAsync(static x => x.MultiTenantedDatabases(t => t.AddMultipleTenantDatabase(FirstConnectionString, "a").ForTenants("acme"))))
+            .Should().BeFalse("nothing was marked AsDefault()");
+        (await HasDefaultAsync(static x => x.MultiTenantedDatabasesWithMasterDatabaseTable(FirstConnectionString, "tenants")))
+            .Should().BeFalse("a master-table tenancy needs a tenant for everything");
+        (await HasDefaultAsync(static x => x.MultiTenantedWithShardedDatabases(t => t.ConnectionString = FirstConnectionString)))
+            .Should().BeFalse("so does a sharded one");
+
+        static async Task<bool> HasDefaultAsync(Action<StoreOptions> configure)
+        {
+            await using DocumentStore store = DocumentStore.For(options =>
+            {
+                options.DatabaseSchemaName = "overview";
+                configure(options);
+            });
+
+            return StoreInfoService.HasDefaultDatabase(store.Options.Tenancy);
+        }
+    }
+
     /// <summary>A real studio container over stores that never connect.</summary>
     private sealed class Harness : IAsyncDisposable
     {
@@ -228,7 +307,9 @@ public class StoreInfoServiceOverviewTests
             var builds = new BuildCounter();
 
             var services = new ServiceCollection();
-            services.AddLogging(builder => builder.AddProvider(logs));
+
+            // Debug included, so a test can say that something was logged and only at Debug.
+            services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
             services.AddMarten(options =>
             {
                 options.MultiTenantedDatabases(databases);
@@ -277,3 +358,6 @@ public class StoreInfoServiceOverviewTests
 /// <c>IElsewhereStore</c> is, because Marten generates the ancillary store's implementation from it.
 /// </summary>
 public interface IUnlistableDatabasesStore : IDocumentStore;
+
+/// <summary>A store an application registered whose tenancy has no default database (CL1 item 9).</summary>
+public interface IVersionlessStore : IDocumentStore;

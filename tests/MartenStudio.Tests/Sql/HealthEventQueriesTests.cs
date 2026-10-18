@@ -25,7 +25,7 @@ public class HealthEventQueriesTests
     {
         TheoryData<string> data = new();
 
-        foreach (string name in (string[]) ["shape", "statistics", "traffic", "traffic-tenants", "skips", "progression", "dcb"])
+        foreach (string name in (string[]) ["shape", "shape-dead-letters", "statistics", "traffic", "traffic-tenants", "skips", "progression", "dcb"])
         {
             data.Add(name);
         }
@@ -36,6 +36,7 @@ public class HealthEventQueriesTests
     private static HealthQuery Build(string name) => name switch
     {
         "shape" => HealthEventQueries.EventStoreShape(Schema),
+        "shape-dead-letters" => HealthEventQueries.EventStoreShape(Schema, Schema, "mt_doc_failures"),
         "statistics" => HealthEventQueries.EventStatistics(Schema),
         "traffic" => HealthEventQueries.TrafficProfile(Plain),
         "traffic-tenants" => HealthEventQueries.TrafficProfile(Plain with { ByTenant = true, HasBinaryData = true }),
@@ -87,6 +88,42 @@ public class HealthEventQueriesTests
         query.Sql.Should().Contain("pg_catalog.pg_class").And.Contain("pg_catalog.pg_attribute").And.Contain("pg_catalog.pg_inherits");
         query.Sql.Should().NotContain(Schema).And.NotContain("mt_events", "names are parameters, never text");
         query.Parameters.Single(static x => x.ParameterName == "tables").Value.Should().BeEquivalentTo(ShapeTableNames);
+    }
+
+    /// <summary>
+    /// CL1 item 6: the one statement the daemon checks and the event checks share - the event store's tables, its sequence
+    /// (which the daemon checks' own statement used to ask about), and the dead-letter table by its own schema and name
+    /// (item 3) - and every row says which schema it came from, so the dead letters can live elsewhere.
+    /// </summary>
+    [Fact]
+    public void The_shape_asks_about_the_sequence_and_the_dead_letters_where_the_store_keeps_them()
+    {
+        HealthQuery query = HealthEventQueries.EventStoreShape(Schema, "ops", "mt_doc_failures");
+
+        query.Sql.Should().StartWith("select n.nspname::text as nspname,", "a row says which schema it is in");
+        query.Sql.Should().Contain("c.relname = @sequence and c.relkind = 'S'");
+        query.Sql.Should().Contain("n.nspname = @dead_letter_schema and c.relname = @dead_letter_table and c.relkind in ('r', 'p')");
+        query.Sql.Should().NotContain("ops").And.NotContain("mt_doc_failures", "names are parameters, never text");
+
+        query.Parameters.Single(static x => x.ParameterName == "sequence").Value.Should().Be("mt_events_sequence");
+        query.Parameters.Single(static x => x.ParameterName == "dead_letter_schema").Value.Should().Be("ops");
+        query.Parameters.Single(static x => x.ParameterName == "dead_letter_table").Value.Should().Be("mt_doc_failures");
+    }
+
+    /// <summary>
+    /// A host that hides <c>DeadLetterEvent</c> gets a shape that does not name its table at all: the caller passes no
+    /// dead-letter table, and the statement has no clause and no parameter for one.
+    /// </summary>
+    [Fact]
+    public void Without_a_dead_letter_table_the_shape_names_none()
+    {
+        HealthQuery query = HealthEventQueries.EventStoreShape(Schema);
+
+        query.Sql.Should().NotContain("dead_letter");
+        query.ParameterNames.Should().BeEquivalentTo("@schema", "@tables", "@sequence");
+
+        Action half = () => HealthEventQueries.EventStoreShape(Schema, "ops", null);
+        half.Should().Throw<ArgumentException>("a dead-letter table is named by its schema and its name, or not at all");
     }
 
     [Fact]

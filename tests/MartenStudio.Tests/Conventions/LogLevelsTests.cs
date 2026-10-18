@@ -145,7 +145,7 @@ public class LogLevelsTests
         ["src/MartenStudio/Services/StudioLog.cs : 9213 StoreDatabasesUnreadable"] = (Verdict.Throttled,
             "A store's databases could not be listed; asked by every Overview load and every scope listing in every circuit."),
         ["src/MartenStudio/Services/StudioLog.cs : 9214 PostgresVersionUnreadable"] = (Verdict.Throttled,
-            "The server version could not be read; asked once per circuit per store, and every circuit asks."),
+            "The server version of a store with a default database could not be read; asked once per circuit per store, and every circuit asks. A tenancy with no default database (master-table, sharded, static without AsDefault) is Debug."),
         ["src/MartenStudio/Services/StudioLog.cs : 9215 ShardTrackerUnobservable"] = (Verdict.Throttled,
             "The in-process tracker refused an observer; asked again by every visit to the projections page."),
         ["src/MartenStudio/Services/StudioLog.cs : 9216 ProjectionSummaryUnreadable"] = (Verdict.Throttled,

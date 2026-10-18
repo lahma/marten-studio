@@ -1,6 +1,8 @@
 using JasperFx.Events.Daemon;
 using JasperFx.Events.Projections;
 
+using Marten;
+
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Health.Checks;
 
@@ -24,7 +26,7 @@ public class HealthDaemonQueriesTests
     {
         TheoryData<string> data = new();
 
-        foreach (string name in (string[]) ["shape", "high-water", "shards", "problems", "locks", "dead-letters", "explain-sessions", "explain-prepared", "explain-hidden"])
+        foreach (string name in (string[]) ["high-water", "shards", "problems", "locks", "dead-letters", "explain-sessions", "explain-prepared", "explain-hidden"])
         {
             data.Add(name);
         }
@@ -34,12 +36,11 @@ public class HealthDaemonQueriesTests
 
     private static HealthQuery Build(string name) => name switch
     {
-        "shape" => HealthDaemonQueries.EventStoreShape("studio_events"),
         "high-water" => HealthDaemonQueries.HighWater("studio_events"),
         "shards" => HealthDaemonQueries.ShardRows("studio_events", Migrated, true, ["DailySales:All"]),
         "problems" => HealthDaemonQueries.ProblemShardRows("studio_events", Migrated),
         "locks" => HealthDaemonQueries.DaemonLocks([4444, 12345]),
-        "dead-letters" => HealthDaemonQueries.DeadLettersByProjection("studio_events", "projectionName"),
+        "dead-letters" => HealthDaemonQueries.DeadLettersByProjection("studio_events", "mt_doc_deadletterevent", "projectionName"),
         "explain-sessions" => HealthDaemonQueries.ExplainSessions("studio_events", [4444], DateTimeOffset.UnixEpoch, null),
         "explain-prepared" => HealthDaemonQueries.ExplainPreparedTransactions(),
         "explain-hidden" => HealthDaemonQueries.ExplainHiddenWriters(),
@@ -71,14 +72,15 @@ public class HealthDaemonQueriesTests
         first.Parameters.Where(x => second.Parameters.Any(y => ReferenceEquals(x, y))).Should().BeEmpty();
     }
 
+    /// <summary>
+    /// CL1 item 6: the daemon checks have no shape statement of their own any more - they read the one the event checks
+    /// share (<see cref="HealthEventQueries.EventStoreShape" />, tested in <c>HealthEventQueriesTests</c>), so a sweep that
+    /// runs both areas asks the catalog once.
+    /// </summary>
     [Fact]
-    public void The_shape_is_a_catalog_read_with_every_name_a_value()
+    public void The_daemon_checks_build_no_shape_statement_of_their_own()
     {
-        HealthQuery query = HealthDaemonQueries.EventStoreShape("studio_events");
-
-        query.Sql.Should().Contain("pg_catalog.pg_class").And.Contain("pg_catalog.pg_attribute");
-        query.Sql.Should().NotContain("studio_events").And.NotContain("mt_event_progression", "names are parameters, never text");
-        query.ParameterNames.Should().BeEquivalentTo("@schema", "@progression", "@sequence", "@events", "@dead_letters");
+        typeof(HealthDaemonQueries).GetMethods().Select(static x => x.Name).Should().NotContain("EventStoreShape");
     }
 
     [Fact]
@@ -146,10 +148,38 @@ public class HealthDaemonQueriesTests
     [Fact]
     public void The_dead_letter_count_takes_the_json_key_as_a_value()
     {
-        HealthQuery query = HealthDaemonQueries.DeadLettersByProjection("studio_events", "projection_name");
+        HealthQuery query = HealthDaemonQueries.DeadLettersByProjection("studio_events", "mt_doc_deadletterevent", "projection_name");
 
         query.Sql.Should().Contain("d.data ->> @projection_key").And.Contain("from \"studio_events\".\"mt_doc_deadletterevent\" d");
         query.Sql.Should().NotContain("projection_name");
+    }
+
+    /// <summary>
+    /// CL1 item 3: D06 counts the table the dead-letter list reads - <c>DeadLetterQueries.TableFor</c>, its schema and its
+    /// name - so a host that re-aliased <c>DeadLetterEvent</c> is counted in <c>mt_doc_failures</c>, quoted, and the default
+    /// name is not asked for. (Marten re-pins the type's schema to the event store's - <c>ApplyConfiguration</c> registers
+    /// it after the host's own configuration, read at <c>V9.39.0</c> - so the alias is what a host can really move.)
+    /// </summary>
+    [Fact]
+    public void The_dead_letter_count_reads_the_table_the_store_maps_quoted()
+    {
+        using DocumentStore store = DocumentStore.For(static options =>
+        {
+            options.Connection(SqlTestStore.Unreachable);
+            options.DatabaseSchemaName = "studio_dl";
+            options.Events.DatabaseSchemaName = "studio_dl_events";
+            options.Events.AddEventType<DeadLetterQueriesTests.SomethingHappened>();
+            options.Schema.For<DeadLetterEvent>().DocumentAlias("failures");
+        });
+
+        DocumentTableInfo table = DeadLetterQueries.TableFor(store.Options);
+        table.Schema.Should().Be("studio_dl_events", "the premise: the event store's schema");
+        table.Table.Should().Be("mt_doc_failures", "the premise: the host's own alias is honoured");
+
+        HealthQuery query = HealthDaemonQueries.DeadLettersByProjection(table.Schema, table.Table, "projectionName");
+
+        query.Sql.Should().Contain("from \"studio_dl_events\".\"mt_doc_failures\" d");
+        query.Sql.Should().NotContain("mt_doc_deadletterevent");
     }
 
     /// <summary>Marten's GapLivenessProbe questions (V9.39.0, V9.50.2), with its two exclusions.</summary>

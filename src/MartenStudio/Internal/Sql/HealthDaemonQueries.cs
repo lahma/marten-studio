@@ -19,10 +19,11 @@ namespace MartenStudio.Internal.Sql;
 /// <para>
 /// <b>What each one locks.</b> They run inside the health runner's read-only transaction with
 /// <c>search_path</c> pinned to <c>pg_catalog</c>, so everything Marten owns is schema-qualified here and every
-/// function is resolved from <c>pg_catalog</c>. <see cref="EventStoreShape" /> reads the catalog alone. The
-/// others read <c>mt_event_progression</c> (a few dozen rows, by primary key or whole), the
+/// function is resolved from <c>pg_catalog</c>. Which of these objects exist is asked first, of the catalog alone,
+/// by the statement the event checks share (<see cref="HealthEventQueries.EventStoreShape" />, CL1 item 6). These
+/// read <c>mt_event_progression</c> (a few dozen rows, by primary key or whole), the
 /// <c>mt_events_sequence</c> sequence, one primary-key probe of <c>mt_events</c> (<c>min(seq_id)</c> above the
-/// mark - a single index descent) and, for D06, <c>mt_doc_deadletterevent</c>: each takes the
+/// mark - a single index descent) and, for D06, the dead-letter table where the store says it is: each takes the
 /// <c>AccessShareLock</c> a plain read takes on what it reads, and nothing it does not read. None calls a
 /// function that locks what it lists (D27). <see cref="DaemonLocks" /> and the Explain statements read
 /// <c>pg_locks</c> and <c>pg_stat_activity</c>, which are proc-array and lock-table scans: they run at the
@@ -86,49 +87,6 @@ internal static class HealthDaemonQueries
     private static readonly string[] ThresholdColumns = ["warning_behind_threshold", "critical_behind_threshold"];
 
     /// <summary>
-    /// Which of the event store's objects exist, and the progression table's columns: a catalog read, so a check can
-    /// answer "no event store here" as a value before it builds a statement against a table that is not there.
-    /// </summary>
-    /// <param name="eventSchema">The event store's schema.</param>
-    /// <remarks>
-    /// Columns: <c>has_progression</c>, <c>has_sequence</c>, <c>has_events</c>, <c>has_dead_letters</c> (booleans)
-    /// and <c>progression_columns</c> (<c>text[]</c>, empty without the table).
-    /// </remarks>
-    public static HealthQuery EventStoreShape(string eventSchema)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(eventSchema);
-
-        const string Sql =
-            """
-            select
-              exists (select 1 from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-                       where n.nspname = @schema and c.relname = @progression and c.relkind in ('r', 'p')) as has_progression,
-              exists (select 1 from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-                       where n.nspname = @schema and c.relname = @sequence and c.relkind = 'S') as has_sequence,
-              exists (select 1 from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-                       where n.nspname = @schema and c.relname = @events and c.relkind in ('r', 'p')) as has_events,
-              exists (select 1 from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-                       where n.nspname = @schema and c.relname = @dead_letters and c.relkind in ('r', 'p')) as has_dead_letters,
-              coalesce(
-                (select pg_catalog.array_agg(a.attname::text order by a.attnum)
-                   from pg_catalog.pg_attribute a
-                   join pg_catalog.pg_class c on c.oid = a.attrelid
-                   join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-                  where n.nspname = @schema and c.relname = @progression and a.attnum > 0 and not a.attisdropped),
-                '{}'::text[]) as progression_columns
-            """;
-
-        return new HealthQuery(Sql,
-        [
-            Text("schema", eventSchema),
-            Text("progression", ProgressionTable),
-            Text("sequence", EventsSequence),
-            Text("events", EventTableInfo.EventsTable),
-            Text("dead_letters", EventTableInfo.DeadLetterTable),
-        ]);
-    }
-
-    /// <summary>
     /// The high-water facts, from one snapshot: the server's clock, the sequence's handed-out ceiling, the mark's
     /// own row, the stuck-gap and allocation-fence rows, the latest write to the table, and the first committed
     /// sequence above the mark.
@@ -186,7 +144,7 @@ internal static class HealthDaemonQueries
     /// writes them, the extended-tracking columns and the per-row thresholds.
     /// </summary>
     /// <param name="eventSchema">The event store's schema.</param>
-    /// <param name="physicalColumns">What the catalog says <c>mt_event_progression</c> has (<see cref="EventStoreShape" />).</param>
+    /// <param name="physicalColumns">What the catalog says <c>mt_event_progression</c> has (<see cref="HealthEventQueries.EventStoreShape" />).</param>
     /// <param name="extendedProgressionTracking">
     /// <c>Events.EnableExtendedProgressionTracking</c>. Marten creates the extended columns on every migrated table
     /// and writes them only under the flag, so without it they are not asked for (the projections screen's rule).
@@ -321,7 +279,11 @@ internal static class HealthDaemonQueries
     }
 
     /// <summary>How many dead letters each projection has.</summary>
-    /// <param name="eventSchema">The event store's schema, where Marten keeps <c>DeadLetterEvent</c>.</param>
+    /// <param name="deadLetterSchema">
+    /// The dead-letter table's schema, as <c>DeadLetterQueries.TableFor</c> finds it - the event store's, where Marten
+    /// keeps <c>DeadLetterEvent</c>.
+    /// </param>
+    /// <param name="deadLetterTable">Its name, likewise: <c>mt_doc_deadletterevent</c>, unless the host re-aliased the type.</param>
     /// <param name="projectionNameKey">
     /// The JSON property <c>DeadLetterEvent.ProjectionName</c> is stored under - the serializer's casing decides it
     /// (<c>ProjectionName</c>, <c>projectionName</c>, <c>projection_name</c>). A parameter, never text.
@@ -335,14 +297,15 @@ internal static class HealthDaemonQueries
     /// </para>
     /// <para>Columns: <c>projection</c> (text, possibly null), <c>dead_letters</c> (bigint).</para>
     /// </remarks>
-    public static HealthQuery DeadLettersByProjection(string eventSchema, string projectionNameKey)
+    public static HealthQuery DeadLettersByProjection(string deadLetterSchema, string deadLetterTable, string projectionNameKey)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(eventSchema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(deadLetterSchema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(deadLetterTable);
         ArgumentException.ThrowIfNullOrWhiteSpace(projectionNameKey);
 
         string sql =
             "select d.data ->> @projection_key as projection, pg_catalog.count(*) as dead_letters\n"
-            + "from " + SqlIdentifier.Qualify(eventSchema, EventTableInfo.DeadLetterTable) + " d\n"
+            + "from " + SqlIdentifier.Qualify(deadLetterSchema, deadLetterTable) + " d\n"
             + "group by 1\n"
             + "order by 1\n"
             + "limit " + MaxShardRows.ToString(System.Globalization.CultureInfo.InvariantCulture);

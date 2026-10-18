@@ -334,9 +334,21 @@ internal sealed class StoreInfoService : IStoreInfoService
     /// The server version, read once per store per circuit.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>GetPostgresVersion()</c> is synchronous and opens a connection, so it is pushed onto the thread
     /// pool rather than run on the circuit's renderer. It answers for the store's default connection, so
     /// it is a fact about the store rather than about each of its databases.
+    /// </para>
+    /// <para>
+    /// <b>A store with no default database has no store-wide version, and that is a value</b>
+    /// (<see cref="HasDefaultDatabase" />). Marten's <c>GetPostgresVersion</c> opens
+    /// <c>Tenancy.Default.Database</c>, which a master-table or sharded tenancy refuses with
+    /// <see cref="NotSupportedException" /> - every operation there needs a tenant - and a static multi-tenancy with no
+    /// database marked <c>AsDefault()</c> does not have; its databases may sit on servers of different versions. So the
+    /// version is "unknown" without a read, at Debug: it used to be event 9214 at Warning, once a window for every such
+    /// host, for a state the host configured. A store that has a default database and cannot be read is still 9214,
+    /// throttled - that is an anomaly.
+    /// </para>
     /// </remarks>
     private async Task<string?> PostgresVersionAsync(string storeKey, IDocumentStore store, CancellationToken cancellationToken)
     {
@@ -345,20 +357,62 @@ internal sealed class StoreInfoService : IStoreInfoService
             return cached;
         }
 
-        string? version = await ReadPostgresVersionAsync(
-            store.Diagnostics.GetPostgresVersion,
-            options.Value.QueryTimeout,
-            cancellationToken).ConfigureAwait(false);
+        bool noDefaultDatabase = !HasDefaultDatabase(store.Options.Tenancy);
+
+        string? version = noDefaultDatabase
+            ? null
+            : await ReadPostgresVersionAsync(
+                store.Diagnostics.GetPostgresVersion,
+                options.Value.QueryTimeout,
+                cancellationToken).ConfigureAwait(false);
 
         if (version is null)
         {
-            // Once per circuit per store, and every circuit asks: event 9214, throttled across them.
-            LogLevel level = throttle.WarningOrDebug("Store.PostgresVersion", storeKey, null, kind: null);
+            // Once per circuit per store, and every circuit asks: event 9214, throttled across them - and Debug for a
+            // tenancy that has no default database to read, which is the host's configuration rather than a fault.
+            LogLevel level = noDefaultDatabase
+                ? LogLevel.Debug
+                : throttle.WarningOrDebug("Store.PostgresVersion", storeKey, null, kind: null);
             logger.PostgresVersionUnreadable(level, null, storeKey);
         }
 
         postgresVersions[storeKey] = version;
         return version;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="tenancy" /> has a default database for <c>GetPostgresVersion</c> to open - asked of the
+    /// tenancy's memory, never of a database.
+    /// </summary>
+    /// <remarks>
+    /// <c>Tenancy.Default</c> is a field or an in-memory lookup on every Marten tenancy (read at <c>V9.39.0</c> and
+    /// <c>V9.50.2</c>): <c>DefaultTenancy</c> and its tenant-partitioned subclass hold one; <c>StaticMultiTenancy</c> holds
+    /// the database marked <c>AsDefault()</c>, or none; <c>SingleServerMultiTenancy</c> takes the first tenant it has
+    /// built; <c>MasterTableTenancy</c> and <c>ShardedTenancy</c> throw <see cref="NotSupportedException" />. Nothing
+    /// here enumerates, builds or connects.
+    /// <para>
+    /// Anything else a host's own tenancy throws from <c>Default</c> is not an answer, so it is read as "has one": the
+    /// version read is attempted, fails the way it always did, and is event 9214 at the throttled Warning. It must never
+    /// leave here - this runs outside the version read's own guard, and a throw would take the Overview's stores region
+    /// with it.
+    /// </para>
+    /// </remarks>
+    internal static bool HasDefaultDatabase(ITenancy tenancy)
+    {
+        ArgumentNullException.ThrowIfNull(tenancy);
+
+        try
+        {
+            return tenancy.Default?.Database is not null;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return true;
+        }
     }
 
     /// <summary>

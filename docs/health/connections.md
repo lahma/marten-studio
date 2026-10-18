@@ -176,17 +176,22 @@ Wolverine's lock listeners are such sessions - and is counted in the status row,
 
 Marten's own HotCold leader, as Marten configures it by default, is not raised either, for a different reason. At
 Marten 9.39 and 9.40 (`Events.UseAdvisoryLockTransaction` on by default) it holds its leadership with
-`pg_try_advisory_xact_lock` in a transaction it never ends, with a snapshot - measured live. What keeps that
-transaction busy is `Events.UseMonitoredAdvisoryLock`, also on by default: Weasel's lock monitoring keeps using the
-leader's connection (measured live: a statement about once a second at a one-second `LeadershipPollingTime`, and a
-`pg_sleep` that runs on at a ten-second one), so the leader is never idle in its transaction for a minute. With
-monitoring turned off it sits idle in that transaction for as long as it leads, and C04 raises it after a minute -
-rightly, because its snapshot holds back vacuum; `Events.UseAdvisoryLockTransaction = false`, or Marten 9.41, is the
-change that ends it. From 9.41 the lock is the session's and the leader is not in a transaction at all.
+`pg_try_advisory_xact_lock` in a transaction it never ends, with a snapshot - measured live. With
+`Events.UseMonitoredAdvisoryLock` on, also the default, that session is `idle in transaction` from taking the lock
+until about 0.9 s after the first leadership poll that follows - five seconds or so at the default
+`LeadershipPollingTime` of 5,000 ms - and from then on `active`, running the lock monitor's `pg_sleep(60)` inside the
+same transaction, the next sleep beginning as the last one ends (measured live at 9.39). So it is idle in its
+transaction for a few seconds once, when it takes the lead, and never for a minute - unless `LeadershipPollingTime`
+is set near a minute or more, when that first stretch is raised like any other. C04 has no rule of its own for the
+leader: it is quiet because the session is busy, not because of whose it is. With monitoring turned off the leader
+sits idle in that transaction for as long as it leads, and C04 raises it after a minute - rightly, because its
+snapshot holds back vacuum; `Events.UseAdvisoryLockTransaction = false`, or Marten 9.41, is the change that ends it.
+From 9.41 the lock is the session's and the leader is not in a transaction at all.
 
 The fix is in the application: dispose every session (`await using`), and end what it began. A server-wide
-`idle_in_transaction_session_timeout` is the DBA's backstop - and on Marten 9.39 and 9.40, with lock monitoring
-off, it would also end the HotCold daemon's leadership session.
+`idle_in_transaction_session_timeout` is the DBA's backstop - and on Marten 9.39 and 9.40 it can also end the HotCold
+daemon's leadership session: a timeout shorter than the few seconds the leader sits idle after taking the lead, or
+any timeout with lock monitoring off.
 
 ## C05 Long-running statement
 

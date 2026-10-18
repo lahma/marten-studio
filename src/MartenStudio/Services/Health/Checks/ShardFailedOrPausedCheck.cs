@@ -58,9 +58,9 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
             return new ShardFailedOrPausedFacts(configuration, null, inProcess);
         }
 
-        EventStoreShape shape = await EventStoreShape.ReadAsync(context, configuration.EventSchema, cancellationToken).ConfigureAwait(false);
+        EventStoreRelations shape = await EventHealth.ShapeAsync(context, cancellationToken).ConfigureAwait(false);
 
-        if (!shape.HasProgression || !shape.ProgressionColumns.Contains("agent_status", StringComparer.Ordinal))
+        if (shape.Progression is null || !shape.ProgressionColumns.Contains("agent_status", StringComparer.Ordinal))
         {
             return new ShardFailedOrPausedFacts(configuration, null, inProcess);
         }

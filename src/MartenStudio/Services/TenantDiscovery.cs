@@ -207,10 +207,9 @@ internal sealed class TenantDiscovery
         // assigned rather than inferred from data - a tenant with no rows yet included.
         try
         {
-            IReadOnlyList<string> listed = await ListedTenantsAsync(store, database, enumerated, cancellationToken).ConfigureAwait(false);
-            if (listed.Count > 0)
+            if (await ListedTenantsAsync(store, database, enumerated, cancellationToken).ConfigureAwait(false) is { } listed)
             {
-                return new TenantList(listed, IsTruncated: false, TenantListSource.Descriptor);
+                return listed;
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -292,7 +291,7 @@ internal sealed class TenantDiscovery
 
     /// <summary>
     /// The tenants Marten itself lists for <paramref name="database" />, in ordinal order and without
-    /// duplicates; empty when it lists none.
+    /// duplicates; <see langword="null" /> when it lists none.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -320,9 +319,24 @@ internal sealed class TenantDiscovery
     /// single-server one from its configured tenant-to-database map, which only the descriptors carry: its
     /// databases list no tenants. Neither reads a lookup table. A single-server describe call does run
     /// <c>BuildDatabases()</c>, but after the caller's own enumeration every database it names is built.
+    /// Their lists are the host's configuration and are kept whole, so the resolver can refuse a tenant that is
+    /// another database's.
+    /// </para>
+    /// <para>
+    /// <b>A tenant-partitioned single database lists its tenants on the main descriptor</b>, and on no other
+    /// (CL1 item 8). <c>TenantPartitionedSingleDatabaseTenancy.DescribeDatabasesAsync</c> is <c>DefaultTenancy</c>'s -
+    /// one <c>MainDatabase</c>, no <c>Databases</c> - with that descriptor's <c>TenantIds</c> filled by
+    /// <c>FetchManagedTenantIdsAsync</c>, one plain <c>select partition_value from mt_tenant_partitions</c> on its own
+    /// connection, and empty when the table is not there (read at <c>V9.39.0</c> and <c>V9.50.2</c>). Reading only
+    /// <c>Databases</c> threw that answer away and fell through to tier 3's scan of the tenanted tables, for a list
+    /// the describe had already read - one that also misses a registered tenant with no rows yet. The main
+    /// descriptor is read, then, when it describes this database and no per-database descriptor named a tenant:
+    /// read-only, no call added, and no enumeration - this tenancy is <c>Single</c> and has nothing to build. That
+    /// list is data and grows with the tenants, so it is capped like tier 3's: the first
+    /// <see cref="MaxListedTenants" />, and truncated beyond them, which turns the selector into a free-text box.
     /// </para>
     /// </remarks>
-    private static async ValueTask<IReadOnlyList<string>> ListedTenantsAsync(
+    private static async ValueTask<TenantList?> ListedTenantsAsync(
         IDocumentStore store,
         IMartenDatabase database,
         IReadOnlyList<IMartenDatabase> enumerated,
@@ -345,7 +359,7 @@ internal sealed class TenantDiscovery
                 }
             }
 
-            return [.. tenants];
+            return Whole();
         }
 
         DatabaseUsage usage = await tenancy.DescribeDatabasesAsync(cancellationToken).ConfigureAwait(false);
@@ -357,7 +371,32 @@ internal sealed class TenantDiscovery
             }
         }
 
-        return [.. tenants];
+        if (tenants.Count > 0)
+        {
+            return Whole();
+        }
+
+        if (usage.MainDatabase is { } main && DescribesSameDatabase(main, database))
+        {
+            // Known limit: this is the list of tenants Marten has registered partitions for, and a tenant can hold rows
+            // without one. A conjoined document type configured with DisablePartitioningIfAny keeps every tenant's rows
+            // in one unpartitioned table, so a tenant that has written only there is in no mt_tenant_partitions row -
+            // and, while this list is complete (200 or fewer), IsAcceptable refuses it as "not a tenant of this
+            // database". Tier 3's scan of the tenanted tables would have found it; it is not run once this answers.
+            Add(main.TenantIds);
+
+            if (tenants.Count > 0)
+            {
+                return new TenantList(
+                    [.. tenants.Take(MaxListedTenants)],
+                    IsTruncated: tenants.Count > MaxListedTenants,
+                    TenantListSource.Descriptor);
+            }
+        }
+
+        return null;
+
+        TenantList? Whole() => tenants.Count > 0 ? new TenantList([.. tenants], IsTruncated: false, TenantListSource.Descriptor) : null;
 
         void Add(IEnumerable<string> tenantIds)
         {

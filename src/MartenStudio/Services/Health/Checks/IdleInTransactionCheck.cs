@@ -61,16 +61,25 @@ internal sealed record IdleInTransactionFacts(
 /// <para>
 /// <b>Marten's own daemon, as Marten configures it by default, is not one.</b> At the floor (Marten 9.39 and 9.40,
 /// where <c>Events.UseAdvisoryLockTransaction</c> is on by default) the HotCold leader holds its leadership with
-/// <c>pg_try_advisory_xact_lock</c> in a transaction it never ends - with a snapshot, measured live. What keeps that
-/// transaction from sitting idle is <c>Events.UseMonitoredAdvisoryLock</c>, on by default: Weasel's lock monitoring
-/// keeps using the leader's connection - measured live, a statement about once a second at a one-second
-/// <c>LeadershipPollingTime</c>, and a <c>pg_sleep</c> that runs on at a ten-second one - so the leader is never idle in
-/// its transaction for the minute this check waits for. With monitoring off it is idle in that transaction for as long
-/// as it leads, and this check raises it after a minute, because its snapshot does hold back vacuum. From 9.41 the
-/// lock is the session's and the leader is not in a transaction at all. Marten's own <c>GapLivenessProbe</c> rules the
-/// leader out too (#5125). A session that has no transaction id, no snapshot and no relation lock pins nothing, whoever
-/// it is - Wolverine's lock listeners - and is counted in the status row rather than raised; Marten's daemon lock ids
-/// are read too, so the row can say when it is the daemon's.
+/// <c>pg_try_advisory_xact_lock</c> in a transaction it never ends - with a snapshot, measured live. What that session
+/// then does, measured live at 9.39 with <c>Events.UseMonitoredAdvisoryLock</c> on (the default): it is
+/// <c>idle in transaction</c> from taking the lock until about 0.9 s after the first leadership poll that follows - five
+/// seconds or so at the default <c>LeadershipPollingTime</c> of 5,000 ms - and from then on <c>active</c>, running the
+/// lock monitor's <c>pg_sleep(60)</c> inside that same transaction, the next sleep beginning as the last one ends. So
+/// it is idle in its transaction for a few seconds once, when it takes the lead, and never for the minute this check
+/// waits for - unless <c>LeadershipPollingTime</c> is set near a minute or more, when that first stretch reaches the
+/// minute and the leader is raised, rightly, for as long as its snapshot sits idle. With monitoring off it is idle in
+/// that transaction for as long as it leads, and this check raises it after a minute, because its snapshot does hold
+/// back vacuum. From 9.41 the lock is the session's and the leader is not in a transaction at all. Marten's own
+/// <c>GapLivenessProbe</c> rules the leader out too (#5125). A session that has no transaction id, no snapshot and no
+/// relation lock pins nothing, whoever it is - Wolverine's lock listeners - and is counted in the status row rather
+/// than raised; Marten's daemon lock ids are read too, so the row can say when it is the daemon's.
+/// </para>
+/// <para>
+/// <b>Nothing here exempts the leader by name.</b> It is quiet because of what the session does - <c>active</c> in its
+/// monitor's sleep, not idle - so C04 needs no rule of its own for it, and a leader that really does sit idle in its
+/// transaction (monitoring off, or a polling interval of a minute) is raised like any other session holding a
+/// snapshot.
 /// </para>
 /// <para>
 /// Who the sessions are - process id, role, application, client, when they connected - is evidence behind the
@@ -88,7 +97,7 @@ internal sealed class IdleInTransactionCheck : HealthCheck<IdleInTransactionFact
     /// <summary>
     /// The gatherer's read, of sessions idle in a transaction for at least <paramref name="floor" />: the check reads
     /// from <see cref="ConnectionThresholds.CandidateFloor" />, and a live test from zero, to read a session that is
-    /// idle for less than a second at a time, as the HotCold leader is.
+    /// idle only for a few seconds, as the HotCold leader is at 9.39 and 9.40 before its lock monitor starts.
     /// </summary>
     internal static async Task<IdleInTransactionFacts> ReadAsync(HealthCheckContext context, TimeSpan floor, CancellationToken cancellationToken)
     {
@@ -198,8 +207,9 @@ internal sealed class IdleInTransactionCheck : HealthCheck<IdleInTransactionFact
                 await session.SaveChangesAsync(cancellationToken);
                 """,
                 "The studio never ends another session. Find the code path from the application name and the time it went idle; "
-                + "a server-wide idle_in_transaction_session_timeout is the DBA's backstop, and with Marten 9.39 and 9.40 it would "
-                + "also end the HotCold daemon's leadership session, which is idle in a transaction by design."),
+                + "a server-wide idle_in_transaction_session_timeout is the DBA's backstop. With Marten 9.39 and 9.40 it can also "
+                + "end the HotCold daemon's leadership session, which holds its lock in a transaction: one shorter than the few "
+                + "seconds the leader sits idle after taking the lead, or any timeout with Events.UseMonitoredAdvisoryLock off."),
         });
     }
 

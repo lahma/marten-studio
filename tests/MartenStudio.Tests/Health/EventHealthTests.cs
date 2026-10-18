@@ -116,6 +116,64 @@ public class EventHealthTests
         missing.Should().Throw<HealthCheckUnavailableException>("an empty database is an expected state, not a failure");
     }
 
+    /// <summary>
+    /// CL1 items 3 and 6: the one shape both areas read, sorted. The daemon checks' facts - the sequence, the progression
+    /// columns, "is there a high-water store at all" - come off the same rows as the event checks', and the dead-letter
+    /// table is the one <c>DeadLetterQueries.TableFor</c> names: a host that re-aliased <c>DeadLetterEvent</c> has its
+    /// <c>mt_doc_failures</c> found, and a stray <c>mt_doc_deadletterevent</c> beside it is not mistaken for it.
+    /// </summary>
+    [Fact]
+    public void The_shared_shape_answers_the_daemon_checks_and_finds_a_re_aliased_dead_letter_table()
+    {
+        using DocumentStore store = DocumentStore.For(static options =>
+        {
+            options.Connection(MartenStudio.Tests.Sql.SqlTestStore.Unreachable);
+            options.DatabaseSchemaName = "studio_dl";
+            options.Events.DatabaseSchemaName = "events";
+            options.Events.AddEventType<MartenStudio.Tests.Sql.DeadLetterQueriesTests.SomethingHappened>();
+            options.Schema.For<JasperFx.Events.Daemon.DeadLetterEvent>().DocumentAlias("failures");
+        });
+
+        DocumentTableInfo deadLetters = DeadLetterQueries.TableFor(store.Options);
+        deadLetters.Table.Should().Be("mt_doc_failures", "the premise: the host's alias");
+
+        EventStoreRelations shape = EventHealth.Shape("events", deadLetters,
+        [
+            Row("events", HealthEventQueries.EventsTable, "r", "seq_id"),
+            Row("events", HealthEventQueries.ProgressionTable, "r", "name", "last_seq_id", "agent_status"),
+            Row("events", HealthEventQueries.EventsSequence, "S"),
+            Row("events", "mt_doc_deadletterevent", "r", "id", "data"),
+            Row("events", "mt_doc_failures", "r", "id", "data"),
+        ]);
+
+        shape.HasSequence.Should().BeTrue();
+        shape.HasHighWater.Should().BeTrue("mt_events, the sequence and the progression table are all there");
+        shape.ProgressionColumns.Should().Equal("name", "last_seq_id", "agent_status");
+        shape.HasDeadLetters.Should().BeTrue();
+        shape.DeadLetters!.Name.Should().Be("mt_doc_failures");
+        shape.DeadLetterSchema.Should().Be("events");
+        shape.Relations.Keys.Should().BeEquivalentTo(
+            [HealthEventQueries.EventsTable, HealthEventQueries.ProgressionTable],
+            "the sequence and the dead letters are their own facts, not event tables");
+
+        EventStoreRelations withoutSequence = EventHealth.Shape("events", deadLetters,
+        [
+            Row("events", HealthEventQueries.EventsTable, "r", "seq_id"),
+            Row("events", HealthEventQueries.ProgressionTable, "r", "name"),
+            Row("events", "mt_doc_deadletterevent", "r", "id", "data"),
+        ]);
+
+        withoutSequence.HasHighWater.Should().BeFalse("no sequence, no high-water reading");
+        withoutSequence.HasDeadLetters.Should().BeFalse("the default name is not the table this store maps");
+
+        EventStoreRelations hidden = EventHealth.Shape("events", deadLetters: null, [Row("events", "mt_doc_failures", "r", "id")]);
+        hidden.HasDeadLetters.Should().BeFalse("a table that was not asked about is never found");
+        hidden.DeadLetterSchema.Should().BeNull();
+
+        static EventStoreShapeRow Row(string schema, string name, string kind, params string[] columns) =>
+            new(schema, new EventStoreRelation(name, kind, columns, 0));
+    }
+
     [Theory]
     [InlineData(500d, "500 bytes")]
     [InlineData(65_536d, "64 KB")]

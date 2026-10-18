@@ -8,14 +8,29 @@ using JasperFx.MultiTenancy;
 using Marten.Events;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Events;
 
 namespace MartenStudio.Services.Health.Checks;
 
-/// <summary>Which of the event store's tables exist in this database, and their shape.</summary>
+/// <summary>
+/// Which of the event store's objects exist in this database, and their shape: the one catalog read every daemon and
+/// event check shares in a sweep (<see cref="EventHealth.ShapeAsync" />).
+/// </summary>
 /// <param name="Schema">The event store's schema.</param>
-/// <param name="Relations">What the catalog listed, by table name.</param>
+/// <param name="Relations">The event store's tables the catalog listed, by table name.</param>
+/// <remarks>
+/// It used to be two facts read by two statements in the same regular sweep - this, for the event checks, and the
+/// daemon checks' <c>EventStoreShape</c> of booleans and progression columns (CL1 item 6) - and is one of each now:
+/// the daemon checks read <see cref="HasHighWater" />, <see cref="ProgressionColumns" /> and
+/// <see cref="HasDeadLetters" /> off the same record. The Events screen's own <c>EventStoreShape</c> is unrelated.
+/// </remarks>
 internal sealed record EventStoreRelations(string Schema, IReadOnlyDictionary<string, EventStoreRelation> Relations)
 {
+    /// <summary>What a daemon check says when the high-water objects are not all there - a value, not a fault.</summary>
+    public const string NoEventStoreReason =
+        "This database has no event store yet (no mt_events, mt_events_sequence or mt_event_progression). Marten creates them on "
+        + "the first append or daemon run, and the studio never does.";
+
     /// <summary><c>mt_events</c>, or <see langword="null" />.</summary>
     public EventStoreRelation? Events => Relations.GetValueOrDefault(HealthEventQueries.EventsTable);
 
@@ -30,6 +45,28 @@ internal sealed record EventStoreRelations(string Schema, IReadOnlyDictionary<st
 
     /// <summary><c>mt_dcb_tag_version</c>, or <see langword="null" />.</summary>
     public EventStoreRelation? DcbTagVersion => Relations.GetValueOrDefault(HealthEventQueries.DcbTagVersionTable);
+
+    /// <summary>Whether <c>mt_events_sequence</c> exists.</summary>
+    public bool HasSequence { get; init; }
+
+    /// <summary>
+    /// The dead-letter table, found where the store says it is (<c>DeadLetterQueries.TableFor</c>), or
+    /// <see langword="null" /> when it is not there - or was not asked about, because the host hides
+    /// <c>DeadLetterEvent</c>.
+    /// </summary>
+    public EventStoreRelation? DeadLetters { get; init; }
+
+    /// <summary>The schema <see cref="DeadLetters" /> is in, when it was asked about.</summary>
+    public string? DeadLetterSchema { get; init; }
+
+    /// <summary>Whether everything the high-water reading reads is there: the progression table, the sequence and <c>mt_events</c>.</summary>
+    public bool HasHighWater => Progression is not null && HasSequence && Events is not null;
+
+    /// <summary>Whether the dead-letter table is there (and was asked about).</summary>
+    public bool HasDeadLetters => DeadLetters is not null && DeadLetterSchema is not null;
+
+    /// <summary>The progression table's columns, or none without the table.</summary>
+    public IReadOnlyList<string> ProgressionColumns => Progression?.Columns ?? [];
 }
 
 /// <summary>One column's statistics in one relation, as the planner's last <c>ANALYZE</c> left them.</summary>
@@ -388,8 +425,15 @@ internal static class EventHealth
         typeof(EventGraph).GetField("_byEventName", BindingFlags.Instance | BindingFlags.NonPublic);
 
     /// <summary>
-    /// Which event-store tables exist and their columns - one catalog statement per sweep, however many checks ask.
+    /// Which event-store objects exist and their columns - one catalog statement per sweep, however many checks ask,
+    /// the daemon checks' and the event checks' alike.
     /// </summary>
+    /// <remarks>
+    /// The dead-letter table is asked about where <c>DeadLetterQueries.TableFor</c> says it is - the list's own rule,
+    /// so a host's alias or schema for <c>DeadLetterEvent</c> is honoured - and only while the host lets the studio show
+    /// <c>DeadLetterEvent</c>: a hidden type's table name never goes into a statement. A visibility delegate that throws
+    /// is read as hiding it (<see cref="DeadLetterVisibility" />), so it costs D06 its read and no other check anything.
+    /// </remarks>
     public static Task<EventStoreRelations> ShapeAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -402,13 +446,76 @@ internal static class EventHealth
             ShapeKey,
             async token =>
             {
-                var query = HealthEventQueries.EventStoreShape(schema);
-                IReadOnlyList<EventStoreRelation> relations = await context.Sql
-                    .QueryAsync(query, HealthEventQueries.ReadRelation, token)
+                DocumentTableInfo? deadLetters = ShapeDeadLetters(context);
+                var query = HealthEventQueries.EventStoreShape(schema, deadLetters?.Schema, deadLetters?.Table);
+                IReadOnlyList<EventStoreShapeRow> rows = await context.Sql
+                    .QueryAsync(query, HealthEventQueries.ReadShapeRow, token)
                     .ConfigureAwait(false);
 
-                return new EventStoreRelations(schema, relations.ToDictionary(static x => x.Name, StringComparer.Ordinal));
+                return Shape(schema, deadLetters, rows);
             });
+    }
+
+    /// <summary>
+    /// The dead-letter table the shape statement asks about - where <c>DeadLetterQueries.TableFor</c> says it is - or
+    /// <see langword="null" />, which leaves the statement's dead-letter clause out, while the host hides
+    /// <c>DeadLetterEvent</c> or its delegate throws for it.
+    /// </summary>
+    internal static DocumentTableInfo? ShapeDeadLetters(HealthCheckContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        return DeadLetterVisibility.IsVisible(context.StudioOptions.IsDocumentTypeVisible, out _)
+            ? DeadLetterQueries.TableFor(context.StoreOptions)
+            : null;
+    }
+
+    /// <summary>The shape's rows, sorted into what each check asks of them.</summary>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="deadLetters">Where the dead-letter table was asked about, or <see langword="null" /> when it was not.</param>
+    /// <param name="rows">What the catalog listed.</param>
+    internal static EventStoreRelations Shape(string schema, DocumentTableInfo? deadLetters, IReadOnlyList<EventStoreShapeRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        Dictionary<string, EventStoreRelation> tables = new(StringComparer.Ordinal);
+        bool hasSequence = false;
+        EventStoreRelation? deadLetterTable = null;
+
+        foreach (EventStoreShapeRow row in rows)
+        {
+            EventStoreRelation relation = row.Relation;
+            bool isTable = relation.Kind is "r" or "p";
+
+            if (deadLetters is not null
+                && isTable
+                && string.Equals(row.Schema, deadLetters.Schema, StringComparison.Ordinal)
+                && string.Equals(relation.Name, deadLetters.Table, StringComparison.Ordinal))
+            {
+                deadLetterTable = relation;
+            }
+
+            if (!string.Equals(row.Schema, schema, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (relation.Kind == "S")
+            {
+                hasSequence |= string.Equals(relation.Name, HealthEventQueries.EventsSequence, StringComparison.Ordinal);
+            }
+            else if (isTable && HealthEventQueries.ShapeTables.Contains(relation.Name, StringComparer.Ordinal))
+            {
+                tables[relation.Name] = relation;
+            }
+        }
+
+        return new EventStoreRelations(schema, tables)
+        {
+            HasSequence = hasSequence,
+            DeadLetters = deadLetterTable,
+            DeadLetterSchema = deadLetterTable is null ? null : deadLetters!.Schema,
+        };
     }
 
     /// <summary>The planner's statistics of <c>mt_events</c> and <c>mt_streams</c> - one statement per sweep.</summary>

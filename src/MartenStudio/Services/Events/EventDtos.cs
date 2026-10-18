@@ -404,6 +404,15 @@ internal sealed record DeadLetterPage(
 
     /// <summary>An empty page that succeeded.</summary>
     public static DeadLetterPage Empty { get; } = new([], false);
+
+    /// <summary>
+    /// The page of a host that hides <c>DeadLetterEvent</c>: nothing was read, and the screen says
+    /// <see cref="DeadLetterVisibility.HiddenMessage" />. Not a failure - it is the host's configuration.
+    /// </summary>
+    public static DeadLetterPage Hidden { get; } = new([], false) { IsHidden = true };
+
+    /// <summary>Whether the host hides <c>DeadLetterEvent</c>, so nothing was read (<see cref="Hidden" />).</summary>
+    public bool IsHidden { get; init; }
 }
 
 /// <summary>What the dead-letter list is asking for.</summary>

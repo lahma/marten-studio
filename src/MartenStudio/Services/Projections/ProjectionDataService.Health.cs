@@ -261,11 +261,11 @@ internal sealed partial class ProjectionDataService
         HealthCheckContext context = new(
             resolved, studio, MartenRuntime.Current, NoServices.Instance, sql, DateTimeOffset.UtcNow, new HealthSweepMemo(), cancellationToken);
 
-        EventStoreShape shape = await EventStoreShape.ReadAsync(context, schema, cancellationToken).ConfigureAwait(false);
+        EventStoreRelations shape = await EventHealth.ShapeAsync(context, cancellationToken).ConfigureAwait(false);
 
         if (!shape.HasHighWater)
         {
-            return new HighWaterExplainRead(EventStoreShape.NoEventStoreReason, null, [], [], 0, sql.Statements);
+            return new HighWaterExplainRead(EventStoreRelations.NoEventStoreReason, null, [], [], 0, sql.Statements);
         }
 
         HighWaterReading reading = await HighWaterReading.ReadAsync(context, schema, cancellationToken).ConfigureAwait(false);

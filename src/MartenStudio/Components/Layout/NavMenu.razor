@@ -27,7 +27,7 @@
         {
             <li class="ms-sidebar-section" @key="section.Title">@section.Title</li>
 
-            @foreach (NavItem item in section.Items)
+            @foreach (NavItem item in section.Items.Where(Shown))
             {
                 <li class="ms-nav-item" @key="item.Label">
                     @if (item.Route is null)
@@ -151,6 +151,15 @@
             new("Activity", "activity", "list")
         ])
     ];
+
+    /// <summary>
+    /// Whether an entry is drawn: every one, except Dead letters while the host hides <c>DeadLetterEvent</c>
+    /// (<see cref="MartenStudio.Services.Events.DeadLetterVisibility" />, failing closed) - a hidden document type is
+    /// absent (D27), as the Overview's tile is, and the page it would link to says why if it is reached by its address.
+    /// </summary>
+    private bool Shown(NavItem item) =>
+        item.Badge != NavBadgeKind.DeadLetters
+        || MartenStudio.Services.Events.DeadLetterVisibility.IsVisible(Options.Value.IsDocumentTypeVisible, out _);
 
     private readonly CancellationTokenSource cancellation = new();
 

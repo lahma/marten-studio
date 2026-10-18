@@ -28,6 +28,16 @@
         stopped or still skipping: discarding the record forgets the failure, it does not fix it.
     </p>
 
+    @* Reached by its address while the host hides DeadLetterEvent (the nav entry is gone): the one sentence that
+       says why, and nothing that would read, filter or change a dead letter. *@
+    @if (Hidden)
+    {
+        <div class="ms-empty ms-dead-letters-hidden">
+            <p class="ms-empty-title">@DeadLetterVisibility.HiddenMessage</p>
+        </div>
+    }
+    else
+    {
     <div class="ms-event-filters">
         <div class="ms-event-filter">
             <label class="ms-event-filter-label" for="ms-dl-projection">Projection</label>
@@ -249,6 +259,7 @@
             }
         </nav>
     }
+    }
 </div>
 
 <ConfirmDialog IsOpen="@(dialog is not DialogKind.None)"
@@ -352,6 +363,13 @@
     private bool working;
     private string? actionError;
     private string? signature;
+
+    /// <summary>
+    /// Whether the host hides <c>DeadLetterEvent</c>: asked of the options, failing closed
+    /// (<see cref="DeadLetterVisibility" />), or said by the service. The service refuses either way; this is what
+    /// keeps a page reached by its address from reading anything and from offering what it would refuse.
+    /// </summary>
+    private bool Hidden => !DeadLetterVisibility.IsVisible(Options.Value.IsDocumentTypeVisible, out _) || page?.IsHidden == true;
 
     /// <summary>
     /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor
@@ -612,6 +630,17 @@
         StudioScope? scope = State.ActiveScope;
         if (scope is null)
         {
+            loading = false;
+            return;
+        }
+
+        // A hidden type is read by nothing on this page - not the shape, not the list, not the projections.
+        if (!DeadLetterVisibility.IsVisible(Options.Value.IsDocumentTypeVisible, out _))
+        {
+            page = DeadLetterPage.Hidden;
+            shape = null;
+            projections = null;
+            mayManage = false;
             loading = false;
             return;
         }

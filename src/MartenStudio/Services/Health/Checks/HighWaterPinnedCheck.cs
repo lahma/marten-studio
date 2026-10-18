@@ -62,11 +62,11 @@ internal sealed class HighWaterPinnedCheck : HealthCheck<HighWaterPinnedFacts>
             throw new HealthCheckUnavailableException(DaemonCheckConfiguration.TenantPartitionedReason);
         }
 
-        EventStoreShape shape = await EventStoreShape.ReadAsync(context, configuration.EventSchema, cancellationToken).ConfigureAwait(false);
+        EventStoreRelations shape = await EventHealth.ShapeAsync(context, cancellationToken).ConfigureAwait(false);
 
         if (!shape.HasHighWater)
         {
-            throw new HealthCheckUnavailableException(EventStoreShape.NoEventStoreReason);
+            throw new HealthCheckUnavailableException(EventStoreRelations.NoEventStoreReason);
         }
 
         HighWaterReading reading = await HighWaterReading.ReadAsync(context, configuration.EventSchema, cancellationToken).ConfigureAwait(false);

@@ -30,7 +30,59 @@ public class EventHealthSweepLiveTests(PostgresFixture postgres)
         typeof(DcbTagVersionChurnCheck),
     ];
 
-    private async Task<(EventHealthHost Host, StatementLog Probe)> HostAsync(string schema)
+    /// <summary>The daemon checks that read the event store's shape (D04 judges in process and reads none).</summary>
+    private static readonly Type[] ShapeReadingDaemonChecks =
+    [
+        typeof(HighWaterPinnedCheck),
+        typeof(DaemonNotRunningCheck),
+        typeof(ShardStalledCheck),
+        typeof(ShardFailedOrPausedCheck),
+        typeof(DeadLettersGrowingCheck),
+    ];
+
+    /// <summary>
+    /// CL1 item 6, the cost budget: a regular sweep that runs both areas' checks asks the catalog about the event store
+    /// once. The daemon checks (D01-D03, D05, D06) and the event checks (E05-E08, D07, D08) used to read it in a statement
+    /// each - H2's <c>exists</c> per object (<c>... as has_progression</c>) and H6's list of tables - memoised under two
+    /// keys, so every such sweep paid for two. Now they share one statement and one fact.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_daemon_and_the_event_checks_share_one_shape_statement_per_sweep()
+    {
+        (EventHealthHost host, StatementLog probe) = await HostAsync("health_events_one_shape", [.. ShapeReadingDaemonChecks, .. EventChecks]);
+        await using EventHealthHost _ = host;
+
+        HealthReport regular = await host.ReportAsync();
+
+        regular.Checks.Where(static x => x.Code is "D01" or "D03" or "D05" or "D06" or "D07" or "D08" or "E05" or "E06" or "E07")
+            .Should().HaveCount(9).And.OnlyContain(static x => x.Outcome != HealthCheckOutcome.Failed, "every reader of the shape ran");
+
+        List<string> shapes = [.. probe.Statements.Where(IsShape)];
+        shapes.Should().ContainSingle("both areas read one shape statement, once per sweep");
+        shapes[0].Should().Contain("c.relkind = 'S'", "it answers the daemon checks' question about the sequence as well");
+        probe.Statements.Should().NotContain(static x => x.Contains("as has_progression", StringComparison.Ordinal),
+            "the daemon checks' own shape statement is gone");
+
+        // The budget, as a number: nine statements, where the two shape reads made it ten (measured at 9.39.0 and 9.50.2).
+        probe.Statements.Should().HaveCount(9,
+            "one sweep of these checks over the sample store runs nine statements, one of them the shape; it was ten. Ran: "
+            + string.Join(" || ", probe.Statements.Select(static x => x[..Math.Min(60, x.Length)])));
+
+        // The one read is every reader's: the memo attributes it to each check that asked, so each one's Show SQL has it.
+        foreach (string code in (string[]) ["D01", "D03", "D06"])
+        {
+            HealthCheckStatus status = EventHealthHost.Status(regular, code);
+            status.Outcome.Should().Be(HealthCheckOutcome.Checked, "{0} runs on the sample store: {1}", code, status.Problem);
+            status.Statements.Select(static x => x.Sql).Any(IsShape).Should().BeTrue("{0} read the shared shape", code);
+        }
+
+        static bool IsShape(string sql) =>
+            sql.Contains("pg_catalog.pg_inherits", StringComparison.Ordinal) && sql.Contains("as nspname", StringComparison.Ordinal);
+    }
+
+    private Task<(EventHealthHost Host, StatementLog Probe)> HostAsync(string schema) => HostAsync(schema, EventChecks);
+
+    private async Task<(EventHealthHost Host, StatementLog Probe)> HostAsync(string schema, Type[] checks)
     {
         StatementLog probe = new(new HealthSweepProbe(postgres));
 
@@ -40,7 +92,7 @@ public class EventHealthSweepLiveTests(PostgresFixture postgres)
             store: static options => options.Projections.LiveStreamAggregation<HealthCounter>(),
             services: services => services
                 .AddSingleton<IHealthStatementObserver>(probe)
-                .AddSingleton(HealthCheckRegistry.ForTypes(EventChecks)));
+                .AddSingleton(HealthCheckRegistry.ForTypes(checks)));
 
         await EventHealthData.GenerateSampleAsync(host.Store);
         await EventHealthData.AppendAsync(host.Store, streams: 3, eventsPerStream: 1_100);

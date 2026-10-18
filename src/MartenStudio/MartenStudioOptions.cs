@@ -196,6 +196,14 @@ public sealed class MartenStudioOptions
     /// time; a delegate that consults mutable state can hand the rail one set of collections and the
     /// counts another.
     /// </para>
+    /// <para>
+    /// <b>Marten's own <c>DeadLetterEvent</c> is asked too.</b> Hiding it hides the dead-letter screen's navigation
+    /// entry and Overview tile, its list, Discard and Rewind - the page, reached by its address, says the dead letters
+    /// are hidden - and the health advisor's D06. A delegate written as an
+    /// allow-list of the application's own types therefore hides the dead letters as well: answer
+    /// <see langword="true" /> for <c>typeof(JasperFx.Events.Daemon.DeadLetterEvent)</c> to keep them. A delegate
+    /// that throws for it is read as hiding it.
+    /// </para>
     /// </remarks>
     public Func<Type, bool>? IsDocumentTypeVisible { get; set; }
 
