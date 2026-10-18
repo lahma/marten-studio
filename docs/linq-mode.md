@@ -121,17 +121,28 @@ A visitor the policies refuse the plan still gets the rows. The panel says why t
 
 ## The audit
 
-- **Every refusal is recorded**, at every stage: capability, policy, availability, type, the screen, the parse, the
-  guard, Marten's translation, Postgres.
+- **Every refusal is recorded**, at every stage: capability, policy, a scope that names no store, database or tenant
+  the process has, a store that will not build, availability, type (a visibility delegate that throws is refused as
+  the type it was asked about, and recorded), the screen, the parse, the guard, Marten's translation, Postgres.
 - **A success is recorded once per signature** in a circuit, on whichever page it starts. A signature is the store,
   the database, the tenant, the type, the predicate, the ordering and the deleted filter. A page turn, or a re-run of
   the same query, is not a new opening. This follows the database browser's first-read rule (D27).
-- The Activity ring keeps 200 characters of the query. The application log keeps all of it:
+- **What is written down is the query, capped.** The Activity entry's target is the type's alias, the predicate and
+  the ordering on one line, cut at 200 characters. The application log carries the same text cut the same way - the
+  alias, the predicate and the ordering each at 200 characters - and never the whole of it:
   - event **9260**: a run;
   - event **9261**: a refusal, naming its stage;
   - event **9262**: a Postgres failure, by SQLSTATE;
   - event **9263**: an unexpected failure, with its stack;
   - event **9264** (Debug): index advice that could not be read, which costs the advice and nothing else.
+- **The literals are part of it.** A value typed into a predicate - an email address, an order number, a name - is
+  in the Activity entry and in 9260 and 9261, as a value typed into a SQL console statement is in that statement's
+  entry and in 9204 and 9205. Grant `RunLinqQueries` with that in mind, and treat the application log as holding what
+  people searched for.
+- **A refusal at the capability stage records no text.** With `RunLinqQueries` off the page offers no Run button, so
+  a run that reaches the service anyway was sent by a scripted circuit. Its entry names the alias only, and 9261 says
+  `(text not recorded)` where the predicate and the ordering would be. Event 9202 names the capability, as it does for
+  every capability refusal.
 - An entry is recorded under `RunLinqQueries`, so the Activity screen shows it only to a visitor who may make the
   same read. For a collection not divided by tenant, read from a tenant scope, the entry is recorded against the
   database as a whole (`TenantId = null`), because that is the read it was.

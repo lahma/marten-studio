@@ -48,6 +48,28 @@ public class EventTypesTests
     }
 
     /// <summary>
+    /// SEC1-fix4: under per-tenant sequences with "All tenants", the lowest and highest seq_id across tenants name no
+    /// event, so the two columns say "per tenant" rather than a number.
+    /// </summary>
+    [Fact]
+    public async Task Under_per_tenant_sequences_with_all_tenants_the_sequence_range_is_labelled_per_tenant()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.TypesWithoutCounts = new EventTypeList(
+            [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true)], false);
+        context.EventData.TypesWithCounts = new EventTypeList(
+            [new EventTypeInfo("OrderPlaced", "Sample.OrderPlaced", true, 1234, 1, 9000)], true) { SequencesPerTenant = true };
+
+        IRenderedComponent<EventTypes> page = context.Render<EventTypes>();
+
+        await page.Find(".ms-page-header button").ClickAsync(new());
+
+        page.Markup.Should().Contain("1,234", "the count is still a count").And.NotContain("#9000");
+        page.FindAll(".ms-event-types-per-tenant").Should().HaveCount(2)
+            .And.OnlyContain(static x => x.TextContent == "per tenant");
+    }
+
+    /// <summary>
     /// The two flags the screen exists for: a type nobody registered, and a registered type nothing ever
     /// appended. The second is only meaningful once the counts have been loaded.
     /// </summary>

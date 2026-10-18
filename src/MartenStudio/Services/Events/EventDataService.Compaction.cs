@@ -57,7 +57,13 @@ internal sealed partial class EventDataService
         // Capability, then the scope with the write policy asked about (store, database, tenant,
         // CompactStreams), then the operation, then the audit - on failure as well as on success (hard
         // rule 5). The scope's own tenant is the right resource: compaction reaches one stream of one
-        // tenant, never the database as a whole, so DatabaseReach has nothing to widen here.
+        // tenant, never the database as a whole, so DatabaseReach has nothing to widen here. On a conjoined
+        // event store Marten keeps it to that tenant itself - every statement on the session path carries the
+        // session's tenant. On any other store it does not: Marten fetches the stream by id alone and deletes and
+        // replaces the sequences that fetch returned with no tenant predicate (ConjoinedEventFilter, read at
+        // V9.39.0 and V9.50.2), while every append records its session's tenant in mt_streams.tenant_id. There it is step 1's
+        // read - narrowed to the scope's tenant whenever mt_streams has the column - that keeps a compaction to
+        // one tenant's stream: another tenant's stream of a typed id is not found, and is refused as missing.
         return await MutateAsync(
             scope,
             StudioCapability.CompactStreams,
@@ -81,7 +87,10 @@ internal sealed partial class EventDataService
                 // 1. The stream, read again here rather than trusted from the page: what is refused is decided
                 //    where the operation is (hard rule 5), and the page's plan may be a minute old. On the
                 //    primary, as the read-back in step 5 is: a standby's row can be behind, and both the
-                //    cutoff check and the watermark the verdict is measured from have to be the primary's.
+                //    cutoff check and the watermark the verdict is measured from have to be the primary's. And
+                //    in the scope: this read, not Marten, is what keeps a compaction on a store with
+                //    single-tenanted events to the scope's tenant's stream (see above) - a stream it does not find
+                //    is StreamMissing, whose refusal names no tenant and is the one a stream that does not exist gets.
                 StreamState stream = await ReadStreamOnPrimaryAsync(resolved.Scope, target, token).ConfigureAwait(false);
                 (CompactionPlan plan, CompactionAggregate? aggregate) = Assess(resolved, stream);
 
@@ -102,6 +111,12 @@ internal sealed partial class EventDataService
                 {
                     throw new InvalidOperationException(StreamCompactionRules.TenantRequired(plan.StreamTenantId));
                 }
+
+                // 2b. Reach, not scope: on a store whose events are not conjoined Marten compacts every event of the
+                //     stream, whichever tenant's session appended it, so one with another tenant's events asks for the
+                //     database as a whole as well (SEC1-fix F1).
+                await RequireReachOverOtherTenantsEventsAsync(resolved, parsed.Value!, StudioCapability.CompactStreams, token)
+                    .ConfigureAwait(false);
 
                 // 3. What the visitor typed, against the stream's id as the database holds it. The dialog
                 //    checks this too; this is the check that counts, because a circuit is a long-lived object

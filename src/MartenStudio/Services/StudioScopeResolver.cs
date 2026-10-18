@@ -95,7 +95,7 @@ internal sealed class StudioScopeResolver
 
         // 5. The tenant, which is only ever one the store could actually answer for - asked with the list
         //    just read, so that a database's same-identity twins answer for their tenants too.
-        if (scope.TenantId is not null)
+        if (scope.TenantId is { } tenantId)
         {
             TenantList tenants = await tenantDiscovery
                 .DiscoverAsync(registration.Key, store, database, databases, cancellationToken)
@@ -106,9 +106,63 @@ internal sealed class StudioScopeResolver
                 throw new KeyNotFoundException(
                     $"'{scope.TenantId}' is not a tenant of database '{scope.DatabaseId}' in Marten store '{registration.Key}'.");
             }
+
+            // 6. And the instance that tenant was built from, when the database has twins.
+            database = InstanceFor(databases, database, tenantId);
         }
 
         return new ResolvedScope(scope, registration, store, database);
+    }
+
+    /// <summary>
+    /// Of the instances that share <paramref name="database" />'s identity, the one whose own tenant list holds
+    /// <paramref name="tenantId" /> - or <paramref name="database" /> itself, the first of them, when it does or none
+    /// does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Twins.</b> Two master-table rows with one connection string are two <c>MartenDatabase</c> objects with one
+    /// <c>Id.Identity</c>, each listing its own row's tenant (<c>MasterTableTenancy.BuildDatabases</c>). The studio scopes by
+    /// identity, so the database matched above is the first of them, and tenant discovery answers for every twin's
+    /// tenants (<see cref="TenantDiscovery" />). A scope naming the second row's tenant then opened every session, and
+    /// every connection, on the <em>first</em> row's instance: its data source - that row's role, its
+    /// <c>Options=-c</c>, its pool - and not the one Marten itself would use for that tenant. For a host that gives
+    /// each tenant a role of its own, or row-level security keyed on one, that is the wrong tenant's connection under
+    /// the right tenant's header (SEC1 L1). The policies were asked the right question; only the instance was wrong.
+    /// </para>
+    /// <para>
+    /// A scope with no tenant keeps the first instance, which is what the picker lists. Matched ordinally, as
+    /// <see cref="TenantDiscovery.IsAcceptable" /> matched the tenant against the same lists, each copied before it is
+    /// read because a sharded tenancy reconciles them from whichever thread enumerates.
+    /// </para>
+    /// </remarks>
+    internal static IMartenDatabase InstanceFor(IReadOnlyList<IMartenDatabase> databases, IMartenDatabase database, string tenantId)
+    {
+        ArgumentNullException.ThrowIfNull(databases);
+        ArgumentNullException.ThrowIfNull(database);
+
+        if (Lists(database, tenantId))
+        {
+            return database;
+        }
+
+        foreach (IMartenDatabase twin in databases)
+        {
+            if (!ReferenceEquals(twin, database)
+                && string.Equals(twin.Id.Identity, database.Id.Identity, StringComparison.OrdinalIgnoreCase)
+                && Lists(twin, tenantId))
+            {
+                return twin;
+            }
+        }
+
+        return database;
+
+        static bool Lists(IMartenDatabase instance, string tenantId)
+        {
+            string[] tenants = [.. instance.TenantIds];
+            return tenants.Contains(tenantId, StringComparer.Ordinal);
+        }
     }
 
     private static IMartenDatabase? MatchDatabase(IReadOnlyList<IMartenDatabase> databases, string databaseId)

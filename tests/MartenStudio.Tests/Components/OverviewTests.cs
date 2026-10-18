@@ -381,6 +381,44 @@ public class OverviewTests
         context.EventData.FeedRequests[^1].PageSize.Should().Be(15);
     }
 
+    /// <summary>
+    /// SEC1-fix4: on a store that numbers events per tenant, "All tenants" has no latest events, which is the host's
+    /// configuration rather than a fault - a muted note, not a red alert with a Retry that would ask the same question.
+    /// Rows are keyed by tenant and sequence, as the feed's are.
+    /// </summary>
+    [Fact]
+    public async Task Latest_events_under_per_tenant_sequences_is_a_note_and_a_failure_that_cannot_be_retried_offers_no_retry()
+    {
+        using StudioComponentContext context = await ScopedAsync();
+        context.EventData.Feed = EventPage.Failed(new EventDataError(StreamCompactionRules.ReadNeedsTenant("the feed"), null, false) { NeedsTenant = true });
+
+        var page = context.Render<Overview>();
+
+        page.Find(".ms-overview-events .ms-overview-events-tenant").TextContent.Should().Be(StreamCompactionRules.ReadNeedsTenant("the feed"));
+        page.FindAll(".ms-overview-events .ms-error-alert").Should().BeEmpty();
+
+        context.EventData.Feed = EventPage.Failed(new EventDataError("permission denied for table mt_events", "42501", false));
+        var refused = context.Render<Overview>();
+
+        refused.Find(".ms-overview-events .ms-error-alert").TextContent.Should().Contain("permission denied");
+        refused.FindAll(".ms-overview-events .ms-error-alert button").Should().BeEmpty("a failure that is not retryable offers no Retry");
+    }
+
+    [Fact]
+    public async Task Two_tenants_latest_events_with_one_sequence_are_two_rows()
+    {
+        using StudioComponentContext context = await ScopedAsync();
+        context.EventData.Feed = new EventPage(
+            [FakeEventDataService.Event(5) with { TenantId = "acme" }, FakeEventDataService.Event(5) with { TenantId = "globex" }],
+            5,
+            false);
+
+        var page = context.Render<Overview>();
+
+        page.FindAll(".ms-overview-events .ms-overview-list-item").Should().HaveCount(2);
+        page.Invoking(static x => x.Render()).Should().NotThrow("a re-render diffs the keys, which is where a duplicate throws");
+    }
+
     [Fact]
     public async Task The_audit_ring_is_shown_beside_the_events_and_is_filtered_the_way_Activity_filters_it()
     {

@@ -99,7 +99,10 @@
         <div class="ms-timeline">
             @foreach (EventRow row in rows)
             {
-                <div class="ms-timeline-item" @key="row.Sequence">
+                @* Keyed by tenant and sequence: under UseTenantPartitionedEvents each tenant draws seq_id from a sequence
+                   of its own, so with "All tenants" two rows of one window can share a seq_id - and two siblings under
+                   one @key end the circuit, not the render (SEC1-fix2). *@
+                <div class="ms-timeline-item" @key="(row.TenantId, row.Sequence)">
                     <EventCard Sequence="row.Sequence"
                                Version="row.Version"
                                EventType="@row.EventType"
@@ -279,7 +282,14 @@
     private bool FollowFlag => EventLinks.ReadFlag(Follow) && CanFollow;
 
     /// <summary>Follow mode only makes sense on the newest page: an older page has a fixed top.</summary>
-    private bool CanFollow => After is null;
+    private bool CanFollow => After is null && !FeedNeedsTenant;
+
+    /// <summary>
+    /// Whether the feed waits for a tenant: events numbered per tenant have no order across tenants, so with "All
+    /// tenants" the service reads nothing and says why, and follow mode does not start (SEC1-fix3).
+    /// </summary>
+    private bool FeedNeedsTenant =>
+        shape is { PerTenantSequences: true } && string.IsNullOrEmpty(State.ActiveScope?.TenantId);
 
     private IReadOnlyList<string> SelectedTypes =>
         string.IsNullOrWhiteSpace(Types)

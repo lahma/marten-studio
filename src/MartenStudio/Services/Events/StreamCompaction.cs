@@ -314,8 +314,42 @@ internal static class StreamCompactionRules
     public const string ConfirmationMismatch = "The typed confirmation did not match the stream id.";
 
     /// <summary>The refusal for a conjoined store's stream compacted from an "all tenants" scope.</summary>
-    public static string TenantRequired(string? streamTenantId) =>
-        "This event store is tenanted per event, and a compaction runs as exactly one tenant: pick "
+    public static string TenantRequired(string? streamTenantId) => WriteNeedsTenant("a compaction", streamTenantId);
+
+    /// <summary>
+    /// The one sentence for a read that has no order across tenants on a store whose events are numbered per tenant
+    /// (<c>UseTenantPartitionedEvents</c>), when no tenant is selected: the feed's (SEC1-fix3).
+    /// </summary>
+    /// <param name="read">What cannot be read, as the sentence names it: "the feed".</param>
+    public static string ReadNeedsTenant(string read) =>
+        "This store numbers events per tenant (UseTenantPartitionedEvents): choose a tenant to read " + read + ".";
+
+    /// <summary>
+    /// Why Skip event is refused on a store whose events are numbered per tenant (<c>UseTenantPartitionedEvents</c>):
+    /// Marten skips by sequence alone (SEC1-fix4). The service's refusal and the disabled button's title, word for word.
+    /// </summary>
+    public const string SkipNeedsOneSequence =
+        "Marten marks events skipped by sequence alone, and this store numbers events per tenant "
+        + "(UseTenantPartitionedEvents): skipping this event would skip every tenant's event with the same number, "
+        + "so Marten Studio does not skip events on this store.";
+
+    /// <summary>
+    /// Why Rewind subscription is refused on such a store: the daemon rewinds to one sequence for every tenant
+    /// (SEC1-fix4). The service's refusal and the disabled button's title, word for word.
+    /// </summary>
+    public const string RewindNeedsOneSequence =
+        "Marten rewinds a subscription to one sequence for every tenant, and this store numbers events per tenant "
+        + "(UseTenantPartitionedEvents): the floor would name a different event in each tenant, so Marten Studio does "
+        + "not rewind subscriptions on this store.";
+
+    /// <summary>
+    /// The one sentence Stream detail draws beside a write that a conjoined event store runs as exactly one tenant, when
+    /// no tenant is selected: Compact's and Archive's (SEC1-fix F5).
+    /// </summary>
+    /// <param name="write">The write, as the sentence names it: "a compaction", "an archive".</param>
+    /// <param name="streamTenantId">The stream's own tenant, when the read knows it.</param>
+    public static string WriteNeedsTenant(string write, string? streamTenantId) =>
+        "This event store is tenanted per event, and " + write + " runs as exactly one tenant: pick "
         + (string.IsNullOrEmpty(streamTenantId) ? "the stream's tenant" : "tenant " + streamTenantId)
         + " in the header first.";
 
@@ -441,9 +475,14 @@ internal static class StreamCompactionRules
             CompactedVersion = Math.Max(stream.CompactedVersion, 0),
             EventsToFold = events,
 
-            // Only a conjoined store's tenant narrows anything. A single-tenanted store's mt_streams.tenant_id
-            // holds *DEFAULT* on every row, and Marten's tenant filter is a no-op there - naming it would be
-            // the dialog claiming a narrowing that does not happen.
+            // Only a conjoined store's tenant narrows anything Marten does. A store with single-tenanted events
+            // still records the appending session's tenant in mt_streams.tenant_id (EventGraph.Actions and the
+            // quick-append function write session.TenantId on every store; read at V9.39.0 and V9.50.2), but
+            // Marten's compaction fetches the stream by id alone there, and deletes and replaces the sequences
+            // that fetch returned with no tenant predicate (ConjoinedEventFilter adds one only on a conjoined
+            // store) - so naming the tenant would be the dialog claiming a narrowing Marten does not make. What keeps a compaction on such a
+            // store to the scope's own stream is the service's read of it, narrowed to the scope's tenant
+            // (EventDataService.CompactStreamAsync, step 1), and a stream of another tenant is never planned.
             StreamTenantId = isConjoined ? stream.TenantId : null,
             NeedsTenant = isConjoined && scopeTenantId is null,
             TagTablesMayRefuse = tags == EventTagStorage.TagTables,
@@ -597,7 +636,7 @@ internal static class StreamCompactionRules
     /// <summary>Why a stream is not offered, in a sentence.</summary>
     public static string Explain(CompactionUnavailableReason reason) => reason switch
     {
-        CompactionUnavailableReason.StreamMissing => "There is no such stream in this scope.",
+        CompactionUnavailableReason.StreamMissing => EventDataService.StreamNotInScopeMessage,
         CompactionUnavailableReason.Archived =>
             "This stream is archived, and Marten's stream fetch never returns archived events, so compacting it would do nothing.",
         CompactionUnavailableReason.Untyped =>

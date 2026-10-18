@@ -23,7 +23,9 @@ internal sealed record ReplayEventsQuery
     public long Version { get; init; }
 
     /// <summary>
-    /// The tenant the session would have filtered on, on a conjoined event store; <see langword="null" /> on any other.
+    /// The tenant to narrow to, or <see langword="null" /> for none: on a conjoined event store the session's, as Marten's
+    /// <c>EventStatement</c> binds it; on any other whose <c>mt_events</c> carries <c>tenant_id</c>, the scope's - as the
+    /// timeline narrows, and as Marten does not (the caller decides; SEC1 M1).
     /// </summary>
     public string? TenantId { get; init; }
 
@@ -93,8 +95,10 @@ internal static partial class StreamReadQueries
     /// The filters are <c>EventStatement</c>'s, for the properties <c>FetchStreamAsync</c> sets: <c>is_archived = false</c>
     /// always (<c>IsNotArchivedFilter</c>), <c>is_skipped = false</c> when skipping is enabled, <c>version &lt;=</c> for a
     /// version other than zero, <c>tenant_id =</c> the session's tenant on a conjoined event store, the stream - and
-    /// <c>order by seq_id</c>. One difference, on purpose: <c>EventStatement</c> leaves the stream predicate out for an
-    /// empty GUID or an empty key, which reads the whole log; this one always emits it.
+    /// <c>order by seq_id</c>. Two differences, on purpose: <c>EventStatement</c> leaves the stream predicate out for an
+    /// empty GUID or an empty key, which reads the whole log, and this one always emits it; and it emits
+    /// <c>tenant_id =</c> for whatever <see cref="ReplayEventsQuery.TenantId" /> it is handed, which on a store with
+    /// single-tenanted events is the scope's tenant, where Marten narrows nothing.
     /// </para>
     /// <para>
     /// No row limit: the aggregate needs every event up to the version. The caller's command timeout is the bound,
@@ -198,6 +202,74 @@ internal static partial class StreamReadQueries
             }
 
             sql.Append("limit 1");
+
+            command.CommandText = sql.ToString();
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>How many tenants have a stream of this id, counted to two at most - one number.</summary>
+    /// <param name="table">The event tables as the catalog describes them; <c>mt_streams</c> must carry <c>tenant_id</c>.</param>
+    /// <param name="streamId">The stream, already parsed against the store's stream identity.</param>
+    /// <remarks>
+    /// Under per-tenant sequences two tenants' streams of one id interleave by their own counters in a timeline read with
+    /// no tenant, so such a read asks for a tenant whenever this answers more than one (SEC1-fix3).
+    /// </remarks>
+    public static NpgsqlCommand BuildStreamTenantCount(EventTableInfo table, object streamId)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(streamId);
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var sql = new StringBuilder("select count(*) from (select 1 from ");
+            sql.Append(table.QualifiedStreams).Append(" as " + StreamAlias + " where ")
+                .Append(Column(StreamAlias, "id")).Append(" = ").Append(Add(command, "id", table.StreamIdDbType, streamId))
+                .Append(" group by ").Append(Column(StreamAlias, "tenant_id")).Append(" limit 2) as tenants");
+
+            command.CommandText = sql.ToString();
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Whether any event of the stream was appended under a tenant other than <paramref name="tenantId" /> - one boolean.
+    /// </summary>
+    /// <param name="table">The event tables as the catalog describes them; <c>mt_events</c> must carry <c>tenant_id</c>.</param>
+    /// <param name="streamId">The stream, already parsed against the store's stream identity.</param>
+    /// <param name="tenantId">The scope's tenant.</param>
+    /// <remarks>
+    /// On a store with single-tenanted events Marten archives and compacts a stream by id alone, every event of it
+    /// whichever session appended it, so a write from one tenant's scope reaches another tenant's events whenever this
+    /// answers true (SEC1-fix F1). <c>is distinct from</c>, so an event with no tenant counts as another's.
+    /// </remarks>
+    public static NpgsqlCommand BuildStreamHasOtherTenantsEvents(EventTableInfo table, object streamId, string tenantId)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(streamId);
+        ArgumentNullException.ThrowIfNull(tenantId);
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var sql = new StringBuilder("select exists(select 1 from ");
+            sql.Append(table.QualifiedEvents).Append(" as " + Alias + " where ")
+                .Append(Column(Alias, "stream_id")).Append(" = ").Append(Add(command, "id", table.StreamIdDbType, streamId))
+                .Append(" and ").Append(Column(Alias, "tenant_id")).Append(" is distinct from ")
+                .Append(Add(command, "tenant", NpgsqlDbType.Varchar, tenantId)).Append(')');
 
             command.CommandText = sql.ToString();
             return command;

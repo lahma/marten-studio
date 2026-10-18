@@ -58,6 +58,18 @@ internal sealed partial class EventDataService : IEventDataService
     /// <summary>The action names the audit ring records these operations under.</summary>
     internal const string ArchiveStreamAction = "Archive stream";
 
+    /// <summary>
+    /// What a write by stream id is told when the stream is not this scope's: the same sentence for a stream that
+    /// does not exist and for one that belongs to a tenant the scope does not name, so the refusal reveals neither.
+    /// </summary>
+    internal const string StreamNotInScopeMessage = "There is no such stream in this scope.";
+
+    /// <summary>What an archive on a conjoined event store is told when no tenant is selected.</summary>
+    internal const string ArchiveTenantRequiredMessage =
+        "This event store is tenanted per event, and Marten archives a stream as exactly one tenant. Pick the stream's "
+        + "tenant in the header and archive it there: with \"All tenants\" selected, Marten would archive the default "
+        + "tenant's stream of this id instead.";
+
     /// <summary>The action name for discarding a dead letter.</summary>
     internal const string DiscardDeadLetterAction = "Discard dead letter";
 
@@ -133,6 +145,8 @@ internal sealed partial class EventDataService : IEventDataService
                 Schema = table.Schema,
                 EventTablesExist = table.EventColumns.Count > 0 && table.StreamColumns.Count > 0,
                 HasTenantId = table.HasTenantId,
+                EventsConjoined = resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined,
+                PerTenantSequences = resolved.Store.Options.Events.UseTenantPartitionedEvents,
                 HasIsArchived = table.HasIsArchived,
                 HasIsSkipped = table.HasIsSkipped,
                 HasBinaryData = table.HasBinaryData,
@@ -356,6 +370,27 @@ internal sealed partial class EventDataService : IEventDataService
 
             int pageSize = Math.Clamp(take, 1, options.Value.MaxPageSize);
 
+            // Per-tenant sequences and no tenant: one id's streams of two tenants would interleave by their own counters
+            // in one timeline, so such a stream asks for a tenant; an id only one tenant has reads as before (SEC1-fix3).
+            if (scope.TenantId is null
+                && resolved.Store.Options.Events.UseTenantPartitionedEvents
+                && table.HasStreamColumn("tenant_id")
+                && table.ParseStreamId(streamId ?? string.Empty) is { Success: true } id)
+            {
+                await using NpgsqlCommand count = StreamReadQueries.BuildStreamTenantCount(table, id.Value!);
+                count.Connection = connection;
+                count.CommandTimeout = CommandTimeoutSeconds;
+
+                if (Convert.ToInt64(await count.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture) > 1)
+                {
+                    return EventPage.Failed(new EventDataError(
+                        StreamCompactionRules.ReadNeedsTenant("this stream: more than one tenant has a stream with this id"), null, false)
+                    {
+                        NeedsTenant = true,
+                    });
+                }
+            }
+
             if (!EventQueryBuilder.TryBuildStreamEvents(
                     table, streamId ?? string.Empty, afterVersion, pageSize + 1, scope.TenantId,
                     out NpgsqlCommand? command, out string? error))
@@ -400,6 +435,15 @@ internal sealed partial class EventDataService : IEventDataService
         try
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+            // Per-tenant sequences and no tenant: the feed pages and follows on seq_id, which then orders each tenant's
+            // events and nothing across them - two tenants' pages interleave by their own counters, a page's cursor
+            // skips the other tenants' events with the same number, and follow mode never sees a tenant whose counter is
+            // behind (SEC1-fix3). Nothing correct to page through, so nothing is read, and the page says why.
+            if (resolved.TenantId is null && resolved.Store.Options.Events.UseTenantPartitionedEvents)
+            {
+                return EventPage.Failed(new EventDataError(StreamCompactionRules.ReadNeedsTenant("the feed"), null, false) { NeedsTenant = true });
+            }
 
             await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
             EventTableInfo table = await DescribeTablesAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
@@ -722,7 +766,12 @@ internal sealed partial class EventDataService : IEventDataService
                 }
             }
 
-            return new EventTypeList(Order(merged.Values), CountsLoaded: true, IsTruncated: truncated);
+            // Under per-tenant sequences with no tenant selected, min(seq_id) and max(seq_id) are taken across counters that
+            // each tenant runs on its own, and name no event: the page labels them rather than show them (SEC1-fix4).
+            return new EventTypeList(Order(merged.Values), CountsLoaded: true, IsTruncated: truncated)
+            {
+                SequencesPerTenant = resolved.TenantId is null && resolved.Store.Options.Events.UseTenantPartitionedEvents,
+            };
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
@@ -823,6 +872,13 @@ internal sealed partial class EventDataService : IEventDataService
                 return AggregateSnapshot.Failed(candidate.Name, version, refusal);
             }
 
+            // Not a stream of this scope: the answer a stream that does not exist gets, word for word, so a guessed
+            // id of another tenant's stream learns nothing - and nothing of it was read.
+            if (replay.NotInScope)
+            {
+                return AggregateSnapshot.NotFound(candidate.Name, version, AggregateMissingReason.StreamMissing);
+            }
+
             object? aggregate = await AggregateStreamInvoker
                 .AggregateAtVersionAsync(session, candidate.Type, parsed.Value!, replay.Events, version, cancellationToken)
                 .ConfigureAwait(false);
@@ -919,10 +975,25 @@ internal sealed partial class EventDataService : IEventDataService
     /// <para>
     /// <b>What is still Marten's.</b> The select list and the reading of each row: <c>IMartenSession.EventStorage()</c>
     /// is the very storage <c>FetchStreamAsync</c> resolves rows through - public, and it runs nothing - so upcasters,
-    /// binary payloads and every configured metadata column are read exactly as Marten reads them. The tenant is the
-    /// session's own on a conjoined event store, as <c>EventStatement</c> binds it; with no tenant in scope that is
-    /// Marten's <c>*DEFAULT*</c>, which is why such a replay still reads nothing and the caller still says a tenant is
-    /// needed.
+    /// binary payloads and every configured metadata column are read exactly as Marten reads them.
+    /// </para>
+    /// <para>
+    /// <b>The stream is proved to be this scope's before one event of it is read</b> (<see cref="StreamInScopeAsync" />),
+    /// and the events are narrowed to the scope's tenant exactly as the timeline narrows them
+    /// (<c>EventQueryBuilder.TryBuildStreamEvents</c>) - <em>whatever the tenancy style</em>. Marten writes the session's
+    /// tenant into <c>mt_streams.tenant_id</c> and <c>mt_events.tenant_id</c> on every append, on a single-tenanted event
+    /// store too (<c>EventGraph.Actions</c>, <c>StreamsTable</c>, the quick-append function; read at <c>V9.39.0</c> and
+    /// <c>V9.50.2</c>), so a store whose documents are conjoined and whose events are not still records whose stream each
+    /// one is; and Marten's own <c>EventStatement</c> narrows only a conjoined store. Replaying by id alone there handed
+    /// an <c>acme</c> visitor the aggregate of any <c>globex</c> stream whose id they could guess - read by the studio,
+    /// for a scope that may not see it. On a conjoined store the tenant is still the session's own, as
+    /// <c>EventStatement</c> binds it; with no tenant in scope that is Marten's <c>*DEFAULT*</c>, which is why such a
+    /// replay still reads nothing and the caller still says a tenant is needed. On any other store with a tenant column
+    /// it is the scope's, and with no tenant in scope nothing narrows, as nothing narrows the timeline. From any tenant's
+    /// scope but the stream's owner's the stream is out of scope and nothing is folded at all; from the owner's, a stream
+    /// some of whose events another tenant's session appended folds only the owner's events - which is what the timeline
+    /// beside the panel shows, rather than what Marten folds, the one difference from Marten's aggregate this read
+    /// allows, and the panel says so (SEC1-fix F2).
     /// </para>
     /// <para>
     /// An event store that is not there is no events, read as a stream that does not exist - never created to find
@@ -945,6 +1016,11 @@ internal sealed partial class EventDataService : IEventDataService
             return ReplayEvents.None;
         }
 
+        if (!await StreamInScopeAsync(resolved, connection, table, streamId, cancellationToken).ConfigureAwait(false))
+        {
+            return ReplayEvents.OutOfScope;
+        }
+
         Marten.Events.IEventStorage storage = ((Marten.Internal.IMartenSession) session).EventStorage();
 
         var query = new ReplayEventsQuery
@@ -954,7 +1030,7 @@ internal sealed partial class EventDataService : IEventDataService
             Version = version,
             TenantId = resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined
                 ? session.TenantId
-                : null,
+                : table.HasTenantId ? resolved.TenantId : null,
             IgnoreSkipped = resolved.Store.Options.Events.EnableEventSkippingInProjectionsOrSubscriptions,
         };
 
@@ -989,13 +1065,104 @@ internal sealed partial class EventDataService : IEventDataService
         return new ReplayEvents(events, null);
     }
 
+    /// <summary>
+    /// For a write by stream id from a tenant's scope on a store whose events are not conjoined: the database as a whole is
+    /// asked as well (<see cref="DatabaseReachAuthorization.RequireWholeDatabaseAsync" />, D27 "reach, not scope") whenever
+    /// an event of the stream was appended under another tenant - because Marten archives and compacts such a stream by id,
+    /// every event of it, and the tenant in scope narrows nothing it does (SEC1-fix F1).
+    /// </summary>
+    /// <remarks>
+    /// Run after the stream has been proved to be the scope's, on the primary as that read is. A refusal is a
+    /// <see cref="StudioNotAuthorizedException" /> against <c>(store, database, null)</c>, which <c>MutateAsync</c> audits
+    /// as the scope denial it is. A conjoined event store, a scope with no tenant and a table with no <c>tenant_id</c> ask
+    /// nothing more: there the write is either narrowed by Marten or already authorized for every tenant.
+    /// <para>
+    /// <b>A residual window, for Archive.</b> Archive is by stream id with no version bound, and on a store whose events
+    /// are not conjoined Marten's <c>mt_archive_stream</c> has no tenant predicate either. So an event another tenant's
+    /// session appends between this check and the archive's <c>SaveChangesAsync</c> is archived with the rest. Only
+    /// <c>EventAppendMode.Rich</c> can append one: the quick-append function refuses a session whose tenant does not
+    /// match the stream's row. The way to close it is to take the stream's <c>mt_streams</c> row <c>for update</c> on the
+    /// write session's own connection, run this check under that lock, and archive in the same transaction - not done
+    /// here. Compaction has no such window past its cutoff: Marten folds only through the version the dialog described.
+    /// </para>
+    /// </remarks>
+    private async Task RequireReachOverOtherTenantsEventsAsync(
+        ResolvedScope resolved,
+        object streamId,
+        StudioCapability capability,
+        CancellationToken cancellationToken)
+    {
+        if (resolved.TenantId is not { } tenant
+            || resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined)
+        {
+            return;
+        }
+
+        bool othersEvents;
+
+        await using (NpgsqlConnection connection = await OpenAsync(resolved, ConnectionUsage.ReadWrite, cancellationToken).ConfigureAwait(false))
+        {
+            EventTableInfo table = await DescribeTablesAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
+
+            if (!table.HasTenantId)
+            {
+                return;
+            }
+
+            await using NpgsqlCommand command = StreamReadQueries.BuildStreamHasOtherTenantsEvents(table, streamId, tenant);
+            command.Connection = connection;
+            command.CommandTimeout = CommandTimeoutSeconds;
+
+            othersEvents = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is true;
+        }
+
+        if (othersEvents)
+        {
+            await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, capability, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="streamId" /> is a stream of this scope, archived or not: one row of <c>mt_streams</c>,
+    /// narrowed to the scope's tenant whenever the table carries <c>tenant_id</c>, whatever the tenancy style
+    /// (<see cref="StreamReadQueries.BuildStreamExists" />, the predicate the stream list and the document's stream
+    /// link use). The proof a read by id makes before it reads anything of the stream.
+    /// </summary>
+    /// <remarks>
+    /// No <c>mt_streams</c> to prove it against, beside an <c>mt_events</c> that is there, is a table somebody dropped
+    /// or never created - and it fails closed, as a stream that is not this scope's.
+    /// </remarks>
+    private async Task<bool> StreamInScopeAsync(
+        ResolvedScope resolved,
+        NpgsqlConnection connection,
+        EventTableInfo table,
+        object streamId,
+        CancellationToken cancellationToken)
+    {
+        if (table.StreamColumns.Count == 0)
+        {
+            return false;
+        }
+
+        await using NpgsqlCommand command = StreamReadQueries.BuildStreamExists(table, streamId, resolved.TenantId);
+        command.Connection = connection;
+        command.CommandTimeout = CommandTimeoutSeconds;
+
+        object? found = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return found is not null and not DBNull;
+    }
+
     /// <summary>What the replay read: the events, or why it could not read them.</summary>
     /// <param name="Events">The stream's events in sequence order.</param>
     /// <param name="Refusal">Why nothing was read, when the table cannot be read the way Marten would read it.</param>
-    private sealed record ReplayEvents(IReadOnlyList<IEvent> Events, EventDataError? Refusal)
+    /// <param name="NotInScope">The stream is not one of this scope's, so nothing of it was read.</param>
+    private sealed record ReplayEvents(IReadOnlyList<IEvent> Events, EventDataError? Refusal, bool NotInScope = false)
     {
         /// <summary>No event store in this database, so no events.</summary>
         public static ReplayEvents None { get; } = new([], null);
+
+        /// <summary>No stream of that id in this scope - missing, or another tenant's.</summary>
+        public static ReplayEvents OutOfScope { get; } = new([], null, NotInScope: true);
     }
 
     /// <inheritdoc />
@@ -1303,6 +1470,40 @@ internal sealed partial class EventDataService : IEventDataService
                     throw new InvalidOperationException(parsed.Error ?? "That stream id is not usable.");
                 }
 
+                // One tenant or none, as compaction's NeedsTenant: a conjoined event store's session always runs as
+                // exactly one tenant, and with "All tenants" selected that is Marten's *DEFAULT* - so mt_archive_stream,
+                // which takes the session's tenant, archived *DEFAULT*'s stream of this id, or nothing, and the studio
+                // reported "archived" either way. Refused before anything is read, and audited as failed.
+                if (resolved.TenantId is null
+                    && resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined)
+                {
+                    throw new InvalidOperationException(ArchiveTenantRequiredMessage);
+                }
+
+                // The stream, proved to be this scope's before it is archived - read on the primary, as compaction's
+                // check is, because the write depends on the answer. Marten's mt_archive_stream narrows by tenant only
+                // on a conjoined event store (ArchiveStreamFunction, read at V9.39.0 and V9.50.2), while every append
+                // records its session's tenant in mt_streams on any store; so on a store with single-tenanted events
+                // and tenanted sessions, archiving by id alone reached any tenant's stream whose id was typed - since
+                // 0.3. This read is narrowed to the scope's tenant whenever mt_streams carries the column, and a stream
+                // it does not find is refused with the sentence a stream that does not exist gets, so the refusal says
+                // nothing about whether it exists elsewhere. Refused before the session, and audited as failed (hard
+                // rule 5): nothing was written.
+                StreamState stream = await ReadStreamOnPrimaryAsync(resolved.Scope, target, token).ConfigureAwait(false);
+
+                if (stream.Error is { } error)
+                {
+                    throw new InvalidOperationException(error.Display);
+                }
+
+                if (!stream.Exists)
+                {
+                    throw new InvalidOperationException(StreamNotInScopeMessage);
+                }
+
+                await RequireReachOverOtherTenantsEventsAsync(resolved, parsed.Value!, StudioCapability.ArchiveStreams, token)
+                    .ConfigureAwait(false);
+
                 await using IDocumentSession session = OpenWriteSession(resolved);
 
                 // Queued on the session, applied by SaveChangesAsync - which is why it takes no token
@@ -1359,11 +1560,13 @@ internal sealed partial class EventDataService : IEventDataService
 
                 if (letter is null)
                 {
-                    // Nothing in scope under that id, which is two different facts. Somebody else
-                    // discarding the same row first is routine and is not a refusal; asking for a row
-                    // that belongs to another tenant is. The unscoped re-read costs one query on the miss
-                    // path only, and it never tells the visitor which of the two it was - the refusal
-                    // message says nothing about what exists (D5).
+                    // Nothing in scope under that id, which is two different facts, and they are answered
+                    // differently on purpose. Somebody else discarding the same row first is routine and is
+                    // not a refusal: "already gone". Asking for a row that belongs to another tenant is, and is
+                    // refused and audited as a scope denial (9203). So the two can be told apart by whoever
+                    // asks - a visitor learns that a dead letter of that id exists in another tenant, though
+                    // never whose or what it holds: the refusal names no tenant and nothing of the row (D5).
+                    // The unscoped re-read costs one query on the miss path only.
                     if (resolved.TenantId is not null
                         && await session.Query<DeadLetterEvent>()
                             .AnyAsync(x => x.Id == id, token)
@@ -1400,6 +1603,16 @@ internal sealed partial class EventDataService : IEventDataService
             sequence.ToString(CultureInfo.InvariantCulture),
             async (resolved, token) =>
             {
+                // First, before anything is read: Marten's MarkEventsAsSkipped is `update mt_events set is_skipped = TRUE
+                // where seq_id = ANY(:sequences)` with no tenant predicate (MartenDatabase.EventStorage.cs, read at V9.39.0
+                // and V9.50.2), and under UseTenantPartitionedEvents every tenant numbers seq_id on its own - so skipping
+                // acme's #42 skipped every tenant's #42, whatever the proof below found (SEC1-fix4). Refused, and audited
+                // as failed; the page disables the button with the same sentence.
+                if (resolved.Store.Options.Events.UseTenantPartitionedEvents)
+                {
+                    throw new InvalidOperationException(StreamCompactionRules.SkipNeedsOneSequence);
+                }
+
                 await using (NpgsqlConnection connection = await OpenAsync(resolved, token).ConfigureAwait(false))
                 {
                     EventTableInfo table = await DescribeTablesAsync(resolved, connection, token).ConfigureAwait(false);
@@ -1463,6 +1676,21 @@ internal sealed partial class EventDataService : IEventDataService
                 // Before anything else: Marten deletes the projection's dead letters on the way, so a rewind is a write to
                 // DeadLetterEvent, and a hidden type is refused - audited as refused - before any policy is asked of it.
                 RequireDeadLettersVisible(resolved);
+
+                // Then, before the whole-database question: under UseTenantPartitionedEvents a rewind has no floor that means one
+                // thing. The daemon's RewindSubscriptionAsync (JasperFxAsyncDaemon, read at JasperFx V2.74.0 and V2.87.1)
+                // stops every agent of the subscription - each tenant's, since the agents are distributed per tenant there
+                // (IEventStore.DistributesAgentsPerTenant) - has Marten write the floor into the store-global shards'
+                // progression rows only (RewindSubscriptionProgressAsync over Options.Projections.AllShards(), and deletes
+                // the projection's dead letters at or above the floor in every tenant, read at V9.39.0 and V9.50.2), then
+                // starts store-global agents, whose event loader has no tenant filter, from that floor: one tenant's event
+                // number applied to every tenant's events. The per-tenant overload IProjectionDaemon declares
+                // (jasperfx#407) throws for a tenant by default and the daemon does not override it at either version.
+                // Refused, and audited as failed; the page disables the button with the same sentence (SEC1-fix4).
+                if (resolved.Store.Options.Events.UseTenantPartitionedEvents)
+                {
+                    throw new InvalidOperationException(StreamCompactionRules.RewindNeedsOneSequence);
+                }
 
                 // Then, what the rewind reaches, which is not the tenant in the scope. Marten 9.31's
                 // RewindSubscriptionProgressAsync opens its session with AllowAnyTenant = true, rewrites
@@ -1679,6 +1907,15 @@ internal sealed partial class EventDataService : IEventDataService
         catch (StudioNotAuthorizedException denied)
         {
             audit.RecordScopeDenied(denied.Scope, options.Value.WriteAuthorizationPolicy ?? "(none)", action, target);
+            throw;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A scope the policies passed that names no store, database or tenant this process has
+            // (KeyNotFoundException), a store that will not build (StudioStoreUnavailableException), or an enumeration
+            // that failed on the way: the write was refused before it began, and an audit that skipped it would not
+            // say what somebody tried (hard rule 5). Still thrown - it fails closed, and the page says why.
+            audit.Record(action, target, succeeded: false, exception.Message, capability, scope);
             throw;
         }
 

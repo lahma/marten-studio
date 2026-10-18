@@ -241,9 +241,13 @@ public class LinqHostileInputTests
     [InlineData(nameof(LinqCollide), "Code < \"probe\"")]
     [InlineData(nameof(LinqValueHolder), "it.Value > \"probe\"")]
     [InlineData(nameof(LinqValueHolder), "Value > \"probe\"")]
+    [InlineData(nameof(LinqStructHolder), "Code == \"probe\"")]
+    [InlineData(nameof(LinqStructHolder), "Code != \"probe\"")]
+    [InlineData(nameof(LinqStructHolder), "\"probe\" == Code")]
     public void The_whole_pipeline_never_runs_a_host_converter_on_the_visitors_text(string document, string text)
     {
         int before = LinqCodeConverter.Conversions;
+        int structBefore = LinqStructCodeConverter.Conversions;
 
         ComposedLinqQuery? composed = Pipeline(DocumentType(document), text, out LinqRefusal? screened);
 
@@ -251,6 +255,7 @@ public class LinqHostileInputTests
         screened!.Stage.Should().Be(LinqStage.Screen);
         composed.Should().BeNull("nothing is parsed once the screen has refused");
         LinqCodeConverter.Conversions.Should().Be(before, "a host converter must never run on visitor text");
+        LinqStructCodeConverter.Conversions.Should().Be(structBefore, "a struct's no more than a class's");
     }
 
     /// <summary>The control for the shapes above: the name the graph does allow, on the type that has it, goes through.</summary>
@@ -289,11 +294,64 @@ public class LinqHostileInputTests
         refusal.Position.Should().Be(position);
     }
 
+    /// <summary>
+    /// SEC1 (b): a <em>value-type</em> member whose type carries a converter of the host's own, compared with <c>==</c>. A
+    /// class compared with a string under <c>==</c> takes Dynamic LINQ's class-equality branch and never meets a converter
+    /// (1.7.4, <c>ExpressionParser.ParseComparisonOperator</c>, the first branch); a struct skips that branch and is
+    /// converted through <c>TypeDescriptor.GetConverter(memberType)</c> while it parses (the branch after the enums). So
+    /// <c>Code == "probe"</c> on a struct is the equality shape <see cref="ConverterShapes" /> cannot cover with a class.
+    /// </summary>
+    public static TheoryData<string> StructConverterShapes() => ["Code == \"probe\"", "Code != \"probe\"", "\"probe\" == Code"];
+
+    /// <summary>The anti-vacuity half: without the screen, the parse runs the host's converter on a struct member's literal.</summary>
+    [DynamicLinqTheory]
+    [MemberData(nameof(StructConverterShapes))]
+    public void Without_the_screen_the_parser_runs_a_struct_members_converter_on_an_equality(string text)
+    {
+        int before = LinqStructCodeConverter.Conversions;
+
+        try
+        {
+            ParseWithoutScreen(nameof(LinqStructHolder), text);
+        }
+        catch (System.Reflection.TargetInvocationException)
+        {
+            // Whatever the allow-list says after the parse, the conversion has already happened by then.
+        }
+
+        LinqStructCodeConverter.Conversions.Should().BeGreaterThan(before,
+            "'{0}' compares a struct member with a string, and Dynamic LINQ converts the literal through the struct's converter while it parses", text);
+    }
+
+    /// <summary>And the screen refuses every one, with a nullable of the struct beside them, and the converter never runs.</summary>
+    [Theory]
+    [MemberData(nameof(StructConverterShapes))]
+    [InlineData("MaybeCode == \"probe\"")]
+    [InlineData("MaybeCode.Value == \"probe\"")]
+    public void A_struct_member_with_a_host_converter_is_never_reachable(string text)
+    {
+        int before = LinqStructCodeConverter.Conversions;
+
+        LinqDocumentGraph graph = LinqDocumentGraph.For(typeof(LinqStructHolder), new HashSet<Type>());
+        LinqRefusal? refusal = LinqTextScreen.Check(LinqClause.Where, text, graph);
+
+        refusal.Should().NotBeNull("'{0}' names a member whose type the graph leaves out for its converter", text);
+        refusal!.Stage.Should().Be(LinqStage.Screen);
+        refusal.Message.Should().NotContain(nameof(LinqStructCode), "a refusal never names a type the graph excludes");
+        LinqDocumentGraph.Classify(typeof(LinqStructCode)).Should().Be(LinqTypeKind.Excluded);
+        LinqDocumentGraph.Classify(typeof(LinqStructCode?)).Should().Be(LinqTypeKind.Excluded);
+        LinqStructCodeConverter.Conversions.Should().Be(before);
+
+        LinqTextScreen.Check(LinqClause.Where, "Name == \"probe\"", graph)
+            .Should().BeNull("the control: the same document's plain member goes through");
+    }
+
     private static Type DocumentType(string name) => name switch
     {
         nameof(LinqCollide) => typeof(LinqCollide),
         nameof(LinqValueHolder) => typeof(LinqValueHolder),
         nameof(LinqTypedRoot) => typeof(LinqTypedRoot),
+        nameof(LinqStructHolder) => typeof(LinqStructHolder),
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, null),
     };
 
@@ -479,6 +537,38 @@ public sealed class LinqValueHolder
     public string Name { get; set; } = string.Empty;
 
     public LinqCode Value { get; set; } = new();
+}
+
+/// <summary>A value type with a converter of the host's own - the struct twin of <see cref="LinqCode" /> (SEC1 b).</summary>
+[TypeConverter(typeof(LinqStructCodeConverter))]
+public readonly record struct LinqStructCode(string Text);
+
+/// <summary>Counts every conversion to <see cref="LinqStructCode" />; only the struct shapes use it.</summary>
+public sealed class LinqStructCodeConverter : TypeConverter
+{
+    private static int conversions;
+
+    public static int Conversions => Volatile.Read(ref conversions);
+
+    public override bool CanConvertFrom(ITypeDescriptorContext? context, Type sourceType) => sourceType == typeof(string);
+
+    public override object? ConvertFrom(ITypeDescriptorContext? context, CultureInfo? culture, object value)
+    {
+        Interlocked.Increment(ref conversions);
+        return new LinqStructCode(value as string ?? string.Empty);
+    }
+}
+
+/// <summary>A document whose struct-typed members the graph leaves out for their converter, beside a plain one.</summary>
+public sealed class LinqStructHolder
+{
+    public Guid Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public LinqStructCode Code { get; set; }
+
+    public LinqStructCode? MaybeCode { get; set; }
 }
 
 /// <summary>An element with a plain <c>Guid Id</c>.</summary>

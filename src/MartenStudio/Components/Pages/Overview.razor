@@ -234,9 +234,15 @@
                     {
                         <ErrorAlert Message="@eventsError" OnRetry="RefreshAsync" />
                     }
+                    else if (recentEvents.Error is { NeedsTenant: true } quiet)
+                    {
+                        @* The host's configuration, not a fault: a store that numbers events per tenant has no latest
+                           events across tenants (SEC1-fix3/4). *@
+                        <p class="ms-muted ms-overview-events-tenant">@quiet.Message</p>
+                    }
                     else if (recentEvents.Error is { } feedError)
                     {
-                        <ErrorAlert Message="@feedError.Display" OnRetry="RefreshAsync" />
+                        <ErrorAlert Message="@feedError.Display" OnRetry="@(feedError.CanRetry ? EventCallback.Factory.Create(this, RefreshAsync) : default)" />
                     }
                     else if (recentEvents.Rows.Count == 0)
                     {
@@ -247,7 +253,7 @@
                         <ul class="ms-overview-list">
                             @foreach (EventRow row in recentEvents.Rows)
                             {
-                                <li class="ms-overview-list-item" @key="row.Sequence">
+                                <li class="ms-overview-list-item" @key="(row.TenantId, row.Sequence)">
                                     <span class="ms-overview-list-seq ms-mono">#@row.Sequence.ToString(CultureInfo.InvariantCulture)</span>
                                     <a class="ms-overview-list-name" href="@TypeHref(row.EventType)">@row.EventType</a>
                                     <a class="ms-overview-list-stream ms-mono ms-truncate" href="@StreamHref(row.StreamId)" title="@row.StreamId">@row.StreamId</a>

@@ -93,10 +93,18 @@ namespace MartenStudio.Services.Query;
 /// one more row than the page is read to know whether another page exists.
 /// </para>
 /// <para>
-/// <b>Audited by signature.</b> Every refusal is recorded, at every stage. A success is recorded once per
-/// circuit for each store, database, tenant, type, predicate, ordering and deleted filter - the first page, or the
-/// first page a pasted link opens on - and a page turn or a re-run of the same query is not a new opening, as the
-/// database browser records its first row read (D27).
+/// <b>Audited by signature.</b> Every refusal is recorded, at every stage: the capability, the policies, a scope that
+/// names nothing this process has or a store that will not build, the type (a visibility delegate that throws
+/// included), the availability, the page, the screen, the parse, the guard, Marten's translation and Postgres. A
+/// success is recorded once per circuit for each store, database, tenant, type, predicate, ordering and deleted
+/// filter - the first page, or the first page a pasted link opens on - and a page turn or a re-run of the same query
+/// is not a new opening, as the database browser records its first row read (D27).
+/// </para>
+/// <para>
+/// <b>Capped where it is written down.</b> The ring's target and events 9260 and 9261 carry the alias, the predicate
+/// and the ordering cut by <see cref="QueryService.Target" /> - one line, 200 characters - and never whole: a predicate
+/// is up to a thousand characters of the visitor's own text, and the log is Information. A refusal at the capability
+/// stage carries none of it, because nothing authorized it and only a scripted circuit reaches it.
 /// </para>
 /// </remarks>
 internal sealed class LinqQueryService : ILinqQueryService
@@ -117,6 +125,9 @@ internal sealed class LinqQueryService : ILinqQueryService
     internal const string WholeDatabaseRefusedMessage =
         "Your account may not run LINQ queries against this database as a whole, and this collection is not " +
         "divided by tenant, so a query on it is not limited to the tenant you selected.";
+
+    /// <summary>What the ring and the log say in place of a predicate and an ordering that were not recorded.</summary>
+    internal const string TextNotRecorded = "(text not recorded)";
 
     private const char Separator = '\u001f';
 
@@ -232,15 +243,17 @@ internal sealed class LinqQueryService : ILinqQueryService
             request.OrderBy ?? string.Empty,
             Math.Clamp(request.PageSize ?? value.DefaultPageSize, 1, value.MaxPageSize));
 
-        // 1. The capability: refused before anything is resolved, parsed or asked of a policy.
+        // 1. The capability: refused before anything is resolved, parsed or asked of a policy - and with none of the
+        //    text recorded. The page offers no Run button while the capability is off, so a run that gets here was
+        //    sent by a scripted circuit, and text nothing has authorized is not written to the ring or the log.
         try
         {
             capabilities.Require(StudioCapability.RunLinqQueries);
         }
         catch (StudioCapabilityDeniedException denied)
         {
-            audit.RecordCapabilityDenied(denied, LinqQueryAction, run.Target);
-            logger.LinqQueryRefused(run.User, request.Alias, scope.StoreKey, scope.DatabaseId, "capability", denied.Message, run.Where, run.OrderBy);
+            audit.RecordCapabilityDenied(denied, LinqQueryAction, run.CapabilityTarget);
+            logger.LinqQueryRefused(run.User, run.LoggedAlias, scope.StoreKey, scope.DatabaseId, "capability", denied.Message, TextNotRecorded, TextNotRecorded);
             throw;
         }
 
@@ -254,15 +267,37 @@ internal sealed class LinqQueryService : ILinqQueryService
         catch (StudioNotAuthorizedException denied)
         {
             audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), LinqQueryAction, run.Target, StudioCapability.RunLinqQueries);
-            logger.LinqQueryRefused(run.User, request.Alias, scope.StoreKey, scope.DatabaseId, "authorization", "not authorized for this scope", run.Where, run.OrderBy);
+            logger.LinqQueryRefused(run.User, run.LoggedAlias, scope.StoreKey, scope.DatabaseId, "authorization", "not authorized for this scope", run.LoggedWhere, run.LoggedOrderBy);
             throw;
         }
-
-        // 3. The type: a visible root or a visible subclass, by alias. A hidden one is the same answer as none.
-        if (FindType(resolved, request.Alias) is not { } target)
+        catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
         {
-            return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None,
-                $"Marten store '{scope.StoreKey}' has no visible document type with alias '{request.Alias}'."));
+            // The policies passed a scope that names no store, database or tenant this process has, or a store that
+            // will not build. A refusal like any other, recorded like any other, rather than an exception that left
+            // the ring without a trace of what was tried; the page shows the resolver's own sentence, as it did.
+            return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, exception.Message));
+        }
+
+        // 3. The type: a visible root or a visible subclass, by alias. A hidden one is the same answer as none - and
+        //    so is one the host's IsDocumentTypeVisible threw for, which fails closed rather than escaping unaudited.
+        //    The hidden set is taken here too, for the same reason: it asks the same delegate of every type.
+        LinqTarget? found;
+        IReadOnlySet<Type> hidden;
+
+        try
+        {
+            found = FindType(resolved, request.Alias);
+            hidden = HiddenDocumentTypes(resolved);
+        }
+        catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
+        {
+            logger.LinqQueryUnexpected(exception, run.LoggedAlias, scope.StoreKey);
+            return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, NoVisibleType(scope, run)));
+        }
+
+        if (found is not { } target)
+        {
+            return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, NoVisibleType(scope, run)));
         }
 
         DocumentTableInfo table = DocumentTableInfo.FromDocumentType(target.Root);
@@ -284,8 +319,8 @@ internal sealed class LinqQueryService : ILinqQueryService
             catch (StudioNotAuthorizedException denied)
             {
                 audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), LinqQueryAction, run.Target, StudioCapability.RunLinqQueries);
-                logger.LinqQueryRefused(run.User, request.Alias, scope.StoreKey, scope.DatabaseId, "authorization",
-                    "not authorized for this database as a whole", run.Where, run.OrderBy);
+                logger.LinqQueryRefused(run.User, run.LoggedAlias, scope.StoreKey, scope.DatabaseId, "authorization",
+                    "not authorized for this database as a whole", run.LoggedWhere, run.LoggedOrderBy);
                 throw;
             }
         }
@@ -308,7 +343,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         }
 
         // 7. The screen, over both boxes, against the document's own graph.
-        LinqDocumentGraph graph = LinqDocumentGraph.For(target.ClrType, HiddenDocumentTypes(resolved));
+        LinqDocumentGraph graph = LinqDocumentGraph.For(target.ClrType, hidden);
 
         if ((LinqTextScreen.Check(LinqClause.Where, run.Where, graph)
              ?? LinqTextScreen.Check(LinqClause.OrderBy, run.OrderBy, graph)) is { } screened)
@@ -940,9 +975,16 @@ internal sealed class LinqQueryService : ILinqQueryService
 
         if (logger.IsEnabled(LogLevel.Information))
         {
-            logger.LinqQueryRefused(run.User, run.Request.Alias, run.Scope.StoreKey, run.Scope.DatabaseId, stage.ToString(), reason, run.Where, run.OrderBy);
+            logger.LinqQueryRefused(run.User, run.LoggedAlias, run.Scope.StoreKey, run.Scope.DatabaseId, stage.ToString(), reason, run.LoggedWhere, run.LoggedOrderBy);
         }
     }
+
+    /// <summary>
+    /// The refusal for an alias that names no visible type - and for one the host's visibility delegate threw for, which
+    /// must not read differently. The alias is capped as the log caps it: it is the visitor's text too.
+    /// </summary>
+    private static string NoVisibleType(StudioScope scope, Run run) =>
+        $"Marten store '{scope.StoreKey}' has no visible document type with alias '{run.LoggedAlias}'.";
 
     /// <summary>
     /// One ring entry, and event 9260, for the first success of this signature in this circuit - whichever page it
@@ -965,8 +1007,8 @@ internal sealed class LinqQueryService : ILinqQueryService
                          (string.Equals(plan?.UnavailableReason, PlanRefusedMessage, StringComparison.Ordinal) ? "; plan withheld" : string.Empty) + ".";
 
         audit.Record(LinqQueryAction, run.Target, succeeded: true, outcome, StudioCapability.RunLinqQueries, run.AuditScope);
-        logger.LinqQueryExecuted(run.User, run.Request.Alias, run.Scope.StoreKey, run.Scope.DatabaseId, run.Scope.TenantId ?? "(all)",
-            elapsed, rows, run.Where, run.OrderBy);
+        logger.LinqQueryExecuted(run.User, run.LoggedAlias, run.Scope.StoreKey, run.Scope.DatabaseId, run.Scope.TenantId ?? "(all)",
+            elapsed, rows, run.LoggedWhere, run.LoggedOrderBy);
     }
 
     private static string WritePolicyName(MartenStudioOptions value) =>
@@ -990,6 +1032,27 @@ internal sealed class LinqQueryService : ILinqQueryService
         /// <summary>The audit ring's target: the alias and the text, on one line, capped.</summary>
         public string Target { get; } = QueryService.Target(
             Request.Alias + ": " + (Where.Length == 0 ? "(all)" : Where) + (OrderBy.Length == 0 ? string.Empty : " order by " + OrderBy));
+
+        /// <summary>
+        /// The ring's target for a run refused at the capability stage: the alias alone, capped. Nothing has authorized
+        /// the text, and the ring's entry is logged as well (9201), so none of it is recorded at all.
+        /// </summary>
+        public string CapabilityTarget { get; } = QueryService.Target(Request.Alias + ": " + TextNotRecorded);
+
+        /// <summary>
+        /// The alias as events 9260 and 9261 carry it: capped and on one line, as <see cref="Target" /> is, because it is
+        /// the visitor's text too - a scripted circuit can send any string as an alias.
+        /// </summary>
+        public string LoggedAlias { get; } = QueryService.Target(Request.Alias);
+
+        /// <summary>
+        /// The predicate as events 9260 and 9261 carry it: <see cref="QueryService.Target" />'s cap and one line, exactly
+        /// as the ring's target is cut, never the text whole. Literals are in it, as a console statement's are in 9204.
+        /// </summary>
+        public string LoggedWhere { get; } = QueryService.Target(Where);
+
+        /// <summary>The ordering as events 9260 and 9261 carry it, capped as <see cref="LoggedWhere" /> is.</summary>
+        public string LoggedOrderBy { get; } = QueryService.Target(OrderBy);
     }
 
     /// <summary>A document type LINQ mode may query: the mapping whose table it reads, and the CLR type it closes over.</summary>

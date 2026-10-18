@@ -28,6 +28,13 @@ internal sealed record EventDataError(string Message, string? SqlState, bool Can
 
     /// <summary>The error as one line, with the SQLSTATE in front when there is one.</summary>
     public string Display => SqlState is null ? Message : $"[{SqlState}] {Message}";
+
+    /// <summary>
+    /// Whether this is not a failure at all but the answer for a read that needs a tenant selected - a store that numbers
+    /// events per tenant has no feed across tenants (<c>StreamCompactionRules.ReadNeedsTenant</c>). A page draws it as a
+    /// note, not an alert.
+    /// </summary>
+    public bool NeedsTenant { get; init; }
 }
 
 /// <summary>
@@ -61,6 +68,18 @@ internal sealed record EventStoreShape
 
     /// <summary>Whether events carry a tenant.</summary>
     public bool HasTenantId { get; init; }
+
+    /// <summary>
+    /// Whether the event store is conjoined (<c>Events.TenancyStyle</c>): Marten then narrows its own stream reads and
+    /// writes by the session's tenant, and runs one with no tenant as <c>*DEFAULT*</c>.
+    /// </summary>
+    public bool EventsConjoined { get; init; }
+
+    /// <summary>
+    /// Whether each tenant numbers its events from a sequence of its own (<c>Events.UseTenantPartitionedEvents</c>), so
+    /// that <c>seq_id</c> orders one tenant's events and nothing across tenants.
+    /// </summary>
+    public bool PerTenantSequences { get; init; }
 
     /// <summary>Whether events can be archived.</summary>
     public bool HasIsArchived { get; init; }
@@ -369,6 +388,12 @@ internal sealed record EventTypeList(
 {
     /// <summary>An empty list that failed.</summary>
     public static EventTypeList Failed(EventDataError error) => new([], false, error);
+
+    /// <summary>
+    /// Whether the first and last sequences were taken across tenants that number their events on their own
+    /// (<c>UseTenantPartitionedEvents</c> with no tenant selected), so that neither names an event.
+    /// </summary>
+    public bool SequencesPerTenant { get; init; }
 }
 
 /// <summary>One dead letter.</summary>

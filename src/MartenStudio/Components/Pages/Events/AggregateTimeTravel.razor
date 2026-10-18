@@ -107,10 +107,25 @@
             <code>Apply</code> method that loads other documents does so through the session it is handed,
             as your code wrote it.
         </p>
+
+        @if (FoldsOnlyTheTenant)
+        {
+            <p class="ms-time-travel-note ms-time-travel-tenant-note" role="note">
+                Folds only the events appended under this tenant, as the timeline shows; Marten's own aggregate folds
+                every event of the stream. Choose All tenants to replay it as Marten does.
+            </p>
+        }
     }
 </aside>
 
 @code {
+    /// <summary>
+    /// Whether the replay is narrowed to the selected tenant's events where Marten's own aggregate is not: a tenant is
+    /// selected and the event store is not conjoined (SEC1-fix F2).
+    /// </summary>
+    [Parameter]
+    public bool FoldsOnlyTheTenant { get; set; }
+
     /// <summary>The stream's current version, which is the top of the stepper.</summary>
     [Parameter]
     public long MaxVersion { get; set; }

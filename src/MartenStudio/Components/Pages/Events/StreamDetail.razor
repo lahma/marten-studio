@@ -116,9 +116,14 @@
                    archive streams and your account may not" is a different fact from "this studio cannot
                    archive streams", and somebody who cannot see the first goes and asks the wrong
                    question. `IEventDataService` refuses regardless (AGENTS.md hard rule 5). *@
+                @if (ArchiveNeedsTenant)
+                {
+                    <p class="ms-stream-compact-tenant ms-stream-archive-tenant" role="note">@StreamCompactionRules.WriteNeedsTenant("an archive", stream.TenantId)</p>
+                }
+
                 <button type="button"
                         class="ms-button ms-button-danger ms-stream-archive"
-                        disabled="@(archiving || !mayArchive)"
+                        disabled="@(archiving || !mayArchive || ArchiveNeedsTenant)"
                         title="@ArchiveTitle"
                         @onclick="OpenArchiveDialog">
                     @(archiving ? "Archiving..." : "Archive this stream")
@@ -214,7 +219,9 @@
                                     ShowEnd="@(timeline.Count > 0)">
                         @foreach (EventRow row in timeline)
                         {
-                            <div class="@TimelineItemClass(row)" @key="row.Sequence">
+                            @* By tenant and sequence, as the feed is: per-tenant sequences repeat a seq_id across the
+                               same id's streams of two tenants, which "All tenants" lists together (SEC1-fix2). *@
+                            <div class="@TimelineItemClass(row)" @key="(row.TenantId, row.Sequence)">
                                 <EventCard Sequence="row.Sequence"
                                            Version="row.Version"
                                            EventType="@row.EventType"
@@ -256,6 +263,7 @@
                                  IsLoading="replaying"
                                  Error="@snapshot?.Error?.Display"
                                  NotFoundMessage="@NotFoundMessage"
+                                 FoldsOnlyTheTenant="@(shape is { EventsConjoined: false, HasTenantId: true } && !string.IsNullOrEmpty(State.ActiveScope?.TenantId))"
                                  OnLoad="ReplayAsync" />
         </div>
     }
@@ -366,9 +374,19 @@
 
     private string ArchiveRefusal => WritePolicyRefusal.For(StudioCapability.ArchiveStreams);
 
-    private string ArchiveTitle => mayArchive
-        ? "Archive this stream and every one of its events"
-        : ArchiveRefusal;
+    private string ArchiveTitle => !mayArchive
+        ? ArchiveRefusal
+        : ArchiveNeedsTenant
+            ? StreamCompactionRules.WriteNeedsTenant("an archive", stream?.TenantId)
+            : "Archive this stream and every one of its events";
+
+    /// <summary>
+    /// Whether Archive needs a tenant selected first: a conjoined event store runs the archive as the session's one
+    /// tenant, <c>*DEFAULT*</c> with "All tenants" - the service refuses it, and the page says so beside a disabled
+    /// button, as it does for Compact (SEC1-fix F5).
+    /// </summary>
+    private bool ArchiveNeedsTenant =>
+        shape is { EventsConjoined: true } && string.IsNullOrEmpty(State.ActiveScope?.TenantId);
 
     /// <summary>The stream id. In the query string, not the route (D9).</summary>
     [SupplyParameterFromQuery(Name = "id")]
@@ -472,13 +490,18 @@
             return;
         }
 
-        bool sameStream = signature is not null && current.StartsWith(StreamSignature(), StringComparison.Ordinal);
+        // Whether the stream on screen is this one - compared exactly, against what was loaded. The first version
+        // compared `current`, which always starts with StreamSignature() because it is built from it, so every change of
+        // id read as "only the version moved" and the page kept the last stream's header, timeline and panel, never
+        // reloading, with the new id behind every handler (SEC1 M1).
+        bool sameStream = signature is not null && string.Equals(loadedStream, StreamSignature(), StringComparison.Ordinal);
         signature = current;
 
         if (sameStream)
         {
-            // Only the version or the aggregate type moved: the timeline is still the right one.
-            snapshot = null;
+            // Only the version or the aggregate type moved: the timeline is still the right one, and a replay still
+            // running answers the last question, not this one.
+            ForgetReplay();
             return;
         }
 
@@ -510,6 +533,13 @@
     {
         signature = Signature();
         ClearCompactResult();
+
+        // A dialog opened under the last scope's header confirms nothing about this one. The archive dialog's
+        // phrase is the id, which a conjoined store's other tenant can share, so one left open - with the id
+        // already typed - archived the new tenant's stream on a click (SEC1 L2). Closed here, a dialog starts from
+        // an empty box when it is next opened (ConfirmDialog clears what was typed on every open).
+        CloseDialogs();
+
         await LoadAsync();
         await InvokeAsync(StateHasChanged);
     }
@@ -520,8 +550,56 @@
         return LoadAsync();
     }
 
+    /// <summary>
+    /// The stream <see cref="stream" /> and everything drawn from it were read for: the scope and the id, as
+    /// <see cref="StreamSignature" /> spells them.
+    /// </summary>
+    private string? loadedStream;
+
+    /// <summary>How many loads have started: a load a newer one overtook writes nothing of what it read.</summary>
+    private int loads;
+
+    /// <summary>
+    /// Drops everything read for the stream on screen, and closes every dialog over it - for another stream, or the
+    /// same id in another scope, before any of it is read.
+    /// </summary>
+    /// <remarks>
+    /// The header, the Archive and Compact buttons and the time-travel panel are all drawn from <see cref="stream" />,
+    /// and every handler they carry acts on <see cref="Id" /> - which is already the new one when this runs. Left on
+    /// screen while the new stream loaded, they were the previous stream's controls aimed at the next stream's id: a
+    /// version step on the time-travel panel replayed the new id under the old stream's panel (SEC1 M1). With
+    /// <see cref="stream" /> null the page draws the spinner until the new stream is read, and the handlers that
+    /// remain refuse to act without one.
+    /// </remarks>
+    private void ForgetStream()
+    {
+        stream = null;
+        shape = null;
+        compaction = null;
+        snapshot = null;
+        archiveError = null;
+        CloseDialogs();
+    }
+
+    private void CloseDialogs()
+    {
+        archiveDialogOpen = false;
+        compactDialogOpen = false;
+    }
+
     private async Task LoadAsync()
     {
+        string requested = StreamSignature();
+        if (!string.Equals(requested, loadedStream, StringComparison.Ordinal))
+        {
+            ForgetStream();
+            loadedStream = requested;
+        }
+
+        // Numbered, so that a load a newer one overtook while it waited - the previous id's, finishing after the
+        // next id's started - writes nothing of what it read: the last load started is the one the page shows.
+        int load = ++loads;
+
         StudioScope? scope = State.ActiveScope;
         if (scope is null || string.IsNullOrWhiteSpace(Id))
         {
@@ -529,13 +607,20 @@
             return;
         }
 
+        string id = Id;
+
         loading = true;
         timeline.Clear();
         timelineError = null;
-        snapshot = null;
+        ForgetReplay();
         compaction = null;
         tagLoad = EventTagLoad.NotApplicable;
+        loadingTags = false;
         lastVersionLoaded = 0;
+
+        // With the timeline cleared there is no "more" until this load's first window says so: a Load more against the
+        // stale flag would fetch that first window twice.
+        hasMoreEvents = false;
         StateHasChanged();
 
         try
@@ -545,20 +630,35 @@
             // First, and before anything that can fail: a read that throws must not leave the archive
             // button showing the last visitor's answer. Per visitor rather than per process, so it is
             // asked here rather than read off the guard, and never memoised.
-            mayArchive = await Authorization.IsAuthorizedAsync(scope, StudioCapability.ArchiveStreams, token);
-            mayCompact = await Authorization.IsAuthorizedAsync(scope, StudioCapability.CompactStreams, token);
+            bool archive = await Authorization.IsAuthorizedAsync(scope, StudioCapability.ArchiveStreams, token);
+            bool compact = await Authorization.IsAuthorizedAsync(scope, StudioCapability.CompactStreams, token);
 
-            shape = await Events.DescribeAsync(scope, token);
-            stream = await Events.GetStreamAsync(scope, Id, token);
+            if (load != loads)
+            {
+                return;
+            }
+
+            mayArchive = archive;
+            mayCompact = compact;
+
+            EventStoreShape readShape = await Events.DescribeAsync(scope, token);
+            StreamState read = await Events.GetStreamAsync(scope, id, token);
 
             // Only for a stream that is there: the plan is what decides whether a Compact section exists. It is
             // made from the read just above rather than a second read of the same row.
-            if (stream.Exists)
-            {
-                compaction = await Events.DescribeCompactionAsync(scope, stream, token);
-            }
+            CompactionPlan? plan = read.Exists ? await Events.DescribeCompactionAsync(scope, read, token) : null;
 
             IReadOnlyList<AggregateTypeCandidate> candidates = await Events.ListAggregateCandidatesAsync(scope, token);
+
+            if (load != loads)
+            {
+                return;
+            }
+
+            shape = readShape;
+            stream = read;
+            compaction = plan;
+
             // The two sources are two different promises, and the labels say which is which. A registered
             // single-stream projection is what the store already aggregates this stream into; anything
             // else is the manual picker, where Marten builds an aggregator for a type nothing says can
@@ -569,9 +669,9 @@
                     ? x.Name + " (single-stream projection)"
                     : x.Name + " (try any type - may fail)"))];
 
-            if (stream.Exists)
+            if (read.Exists)
             {
-                await LoadWindowAsync(scope, token);
+                await LoadWindowAsync(scope, id, load, token);
             }
         }
         catch (OperationCanceledException)
@@ -579,17 +679,28 @@
         }
         catch (Exception exception)
         {
-            timelineError = new EventDataError(exception.Message, null, true);
+            if (load == loads)
+            {
+                timelineError = new EventDataError(exception.Message, null, true);
+            }
         }
         finally
         {
-            loading = false;
+            if (load == loads)
+            {
+                loading = false;
+            }
         }
     }
 
-    private async Task LoadWindowAsync(StudioScope scope, CancellationToken token)
+    private async Task LoadWindowAsync(StudioScope scope, string id, int load, CancellationToken token)
     {
-        EventPage window = await Events.GetStreamEventsAsync(scope, Id!, lastVersionLoaded, WindowSize, token);
+        EventPage window = await Events.GetStreamEventsAsync(scope, id, lastVersionLoaded, WindowSize, token);
+
+        if (load != loads)
+        {
+            return;
+        }
 
         if (window.Error is { } error)
         {
@@ -616,24 +727,30 @@
 
     private async Task LoadMoreAsync()
     {
+        // Not while a load is running: its first window is still to come, and a window asked for now would be that one
+        // again - two rows under one @key="row.Sequence", which ends the circuit rather than the render.
         StudioScope? scope = State.ActiveScope;
-        if (scope is null || string.IsNullOrWhiteSpace(Id) || loadingMore)
+        if (scope is null || string.IsNullOrWhiteSpace(Id) || loading || loadingMore || stream is not { Exists: true })
         {
             return;
         }
 
         loadingMore = true;
+        int load = loads;
 
         try
         {
-            await LoadWindowAsync(scope, pageCancellation.Token);
+            await LoadWindowAsync(scope, Id, load, pageCancellation.Token);
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception exception)
         {
-            timelineError = new EventDataError(exception.Message, null, true);
+            if (load == loads)
+            {
+                timelineError = new EventDataError(exception.Message, null, true);
+            }
         }
         finally
         {
@@ -656,8 +773,9 @@
 
     private async Task ReplayAsync()
     {
+        // Not without the stream it is about: between an id changing and the new stream's read, there is none.
         StudioScope? scope = State.ActiveScope;
-        if (scope is null || string.IsNullOrWhiteSpace(Id) || string.IsNullOrWhiteSpace(SelectedAggregate))
+        if (scope is null || string.IsNullOrWhiteSpace(Id) || string.IsNullOrWhiteSpace(SelectedAggregate) || stream is not { Exists: true })
         {
             return;
         }
@@ -665,27 +783,60 @@
         replaying = true;
         snapshot = null;
 
+        // The answer is this load's, for this version and this type: one that arrives after the stream, the scope, the
+        // version or the type has moved is the previous question's, and drawing it would put one aggregate under another
+        // stream's header.
+        int load = loads;
+        int replay = ++replays;
+        string aggregate = SelectedAggregate;
+        long version = SelectedVersion;
+
         try
         {
-            snapshot = await Events.AggregateAtVersionAsync(
-                scope, Id, SelectedAggregate, SelectedVersion, pageCancellation.Token);
+            AggregateSnapshot read = await Events.AggregateAtVersionAsync(scope, Id, aggregate, version, pageCancellation.Token);
+
+            if (load == loads && replay == replays)
+            {
+                snapshot = read;
+            }
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception exception)
         {
-            snapshot = AggregateSnapshot.Failed(
-                SelectedAggregate, SelectedVersion, new EventDataError(exception.Message, null, false));
+            if (load == loads && replay == replays)
+            {
+                snapshot = AggregateSnapshot.Failed(aggregate, version, new EventDataError(exception.Message, null, false));
+            }
         }
         finally
         {
-            replaying = false;
+            if (replay == replays)
+            {
+                replaying = false;
+            }
         }
+    }
+
+    /// <summary>How many replays have started, or been made stale by a change of version, type, stream or scope.</summary>
+    private int replays;
+
+    /// <summary>Drops a replay's answer that has not arrived yet, and the panel's spinner with it.</summary>
+    private void ForgetReplay()
+    {
+        replays++;
+        replaying = false;
+        snapshot = null;
     }
 
     private void OpenArchiveDialog()
     {
+        if (stream is not { Exists: true } || ArchiveNeedsTenant)
+        {
+            return;
+        }
+
         archiveError = null;
         archiveDialogOpen = true;
     }
@@ -697,7 +848,7 @@
         StudioScope? scope = State.ActiveScope;
         archiveDialogOpen = false;
 
-        if (scope is null || string.IsNullOrWhiteSpace(Id))
+        if (scope is null || string.IsNullOrWhiteSpace(Id) || stream is not { Exists: true })
         {
             return;
         }
@@ -729,6 +880,11 @@
 
     private void OpenCompactDialog()
     {
+        if (compaction is not { IsOffered: true })
+        {
+            return;
+        }
+
         ClearCompactResult();
         compactDialogOpen = true;
     }
@@ -803,10 +959,18 @@
 
         loadingTags = true;
 
+        // The tags are this load's timeline's: a reload or another stream that started while they were read drops them.
+        int load = loads;
+
         try
         {
             EventTagRead read = await Events.GetEventTagsAsync(
                 scope, [.. timeline.Select(static x => x.Sequence)], pageCancellation.Token);
+
+            if (load != loads)
+            {
+                return;
+            }
 
             if (read.Error is { } failure)
             {
@@ -824,11 +988,17 @@
         }
         catch (Exception exception)
         {
-            tagLoad = EventTagLoad.Failed(exception.Message);
+            if (load == loads)
+            {
+                tagLoad = EventTagLoad.Failed(exception.Message);
+            }
         }
         finally
         {
-            loadingTags = false;
+            if (load == loads)
+            {
+                loadingTags = false;
+            }
         }
     }
 

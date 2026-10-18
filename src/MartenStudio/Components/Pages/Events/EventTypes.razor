@@ -106,8 +106,18 @@
                             <td class="ms-table-cell ms-table-cell-mono">
                                 @(type.Count is { } count ? count.ToString("N0", CultureInfo.InvariantCulture) : "not counted")
                             </td>
-                            <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.FirstSequence)</td>
-                            <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.LastSequence)</td>
+                            @if (list.SequencesPerTenant)
+                            {
+                                @* Each tenant numbers its own events here, so the lowest and highest across tenants
+                                   name no event (SEC1-fix4). *@
+                                <td class="ms-table-cell ms-muted ms-event-types-per-tenant" title="@PerTenantSequenceTitle">per tenant</td>
+                                <td class="ms-table-cell ms-muted ms-event-types-per-tenant" title="@PerTenantSequenceTitle">per tenant</td>
+                            }
+                            else
+                            {
+                                <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.FirstSequence)</td>
+                                <td class="ms-table-cell ms-table-cell-mono">@Sequence(type.LastSequence)</td>
+                            }
                             <td class="ms-table-cell">
                                 @if (type.IsUnregistered)
                                 {
@@ -401,6 +411,8 @@
             counting = false;
         }
     }
+
+    private static string PerTenantSequenceTitle => StreamCompactionRules.ReadNeedsTenant("each type's first and last sequence");
 
     private static string Sequence(long? value) =>
         value is { } sequence ? "#" + sequence.ToString(CultureInfo.InvariantCulture) : "-";

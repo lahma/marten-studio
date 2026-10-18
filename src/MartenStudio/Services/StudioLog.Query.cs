@@ -8,9 +8,12 @@ namespace MartenStudio.Services;
 /// <remarks>
 /// <para>
 /// Information, all but the advice's 9264, and none on a polled path: a LINQ query runs because somebody pressed Run. They are
-/// the application log's half of the audit - the ring keeps two hundred characters and is gone at the next
-/// restart, and these carry the predicate and the ordering whole, as 9204 and 9205 carry a console statement.
-/// A run is logged on the first page of its signature, as the ring records it; a page turn is not a new run.
+/// the application log's half of the audit - the ring is gone at the next restart, and these are not. They carry the
+/// alias, the predicate and the ordering cut exactly as the ring's target is (<c>QueryService.Target</c>: one line,
+/// two hundred characters each), unlike 9204 and 9205, which carry a console statement whole; the literals a visitor
+/// typed are in them, as a statement's are. A refusal at the capability stage carries none of the text: it reads
+/// <c>(text not recorded)</c> in their place. A run is logged on the first page of its signature, as the ring records
+/// it; a page turn is not a new run.
 /// </para>
 /// </remarks>
 internal static partial class StudioLog

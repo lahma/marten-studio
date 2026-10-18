@@ -116,8 +116,10 @@ internal sealed record StreamListQuery
 /// would push megabytes of protobuf down a SignalR circuit to render as nothing.
 /// </para>
 /// <para>
-/// The feed pages on <c>seq_id</c> descending, which is a total order by construction, so unlike the
-/// document list it needs no tiebreaker. <c>(@afterSeq is null or seq_id &lt; @afterSeq)</c> keeps one
+/// The feed pages on <c>seq_id</c> descending, which is a total order by construction - without per-tenant sequences,
+/// or with a tenant selected - so unlike the document list it needs no tiebreaker. Under
+/// <c>UseTenantPartitionedEvents</c> each tenant numbers its own events, and across tenants <c>seq_id</c> is neither
+/// unique nor time order: the service reads no feed there without a tenant (SEC1-fix3). <c>(@afterSeq is null or seq_id &lt; @afterSeq)</c> keeps one
 /// statement — and therefore one plan — for the first page and every page after it.
 /// </para>
 /// </remarks>

@@ -795,6 +795,38 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
         await compact.Should().ThrowAsync<InvalidOperationException>().WithMessage("*archived*");
     }
 
+    /// <summary>
+    /// SEC1-fix3, live: under per-tenant sequences two tenants' streams of one id share their <c>seq_id</c>s, so with "All
+    /// tenants" neither the feed nor that stream's timeline reads anything - each says to choose a tenant - while a
+    /// tenant's scope reads its own, and an id only one tenant has reads with "All tenants" as before.
+    /// </summary>
+    [PostgresFact]
+    public async Task Under_tenant_partitioned_events_all_tenants_reads_no_feed_and_no_shared_stream()
+    {
+        IServiceProvider studio = fixture.Studio(fixture.Partitioned, capabilities: false);
+        IEventDataService events = studio.GetRequiredService<IEventDataService>();
+
+        Guid shared = Guid.CreateVersion7();
+        Guid alone = Guid.CreateVersion7();
+        await StreamCompactionFixture.StartAsync(fixture.Partitioned, StreamCompactionFixture.TenantA, shared);
+        await StreamCompactionFixture.StartAsync(fixture.Partitioned, StreamCompactionFixture.TenantB, shared);
+        await StreamCompactionFixture.StartAsync(fixture.Partitioned, StreamCompactionFixture.TenantA, alone);
+
+        MartenStudio.Services.Events.EventPage feed = await events.GetFeedAsync(Everyone, new EventFeedRequest(), Token);
+        feed.Rows.Should().BeEmpty();
+        feed.Error!.Message.Should().Be(StreamCompactionRules.ReadNeedsTenant("the feed"));
+
+        MartenStudio.Services.Events.EventPage timeline = await events.GetStreamEventsAsync(Everyone, shared.ToString(), 0, 50, Token);
+        timeline.Rows.Should().BeEmpty("two tenants' streams of this id would interleave by their own counters");
+        timeline.Error!.Message.Should().Contain("choose a tenant");
+
+        StudioScope acme = Everyone with { TenantId = StreamCompactionFixture.TenantA };
+        (await events.GetFeedAsync(acme, new EventFeedRequest(), Token)).Rows.Should().NotBeEmpty("a tenant's own feed is read");
+        (await events.GetStreamEventsAsync(acme, shared.ToString(), 0, 50, Token)).Rows.Should().HaveCount(3);
+        (await events.GetStreamEventsAsync(Everyone, alone.ToString(), 0, 50, Token)).Rows
+            .Should().HaveCount(3, "an id only one tenant has keeps working with All tenants");
+    }
+
     private static StudioActionLogEntry Latest(IServiceProvider studio) =>
         studio.GetRequiredService<StudioActionLogService>().GetLatest()[0];
 }

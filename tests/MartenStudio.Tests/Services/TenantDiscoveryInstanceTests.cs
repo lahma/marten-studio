@@ -230,7 +230,8 @@ public class TenantDiscoveryInstanceTests
     /// <summary>
     /// The same twins end to end: the header lists both tenants, and a link naming the second row's tenant -
     /// <c>?db=…&amp;tenant=t2</c> - resolves rather than being refused as "not a tenant of this database", which
-    /// is what reading the first instance alone did.
+    /// is what reading the first instance alone did. And it resolves to the <em>second</em> instance, the one built
+    /// from t2's row (SEC1 L1): resolving it to the first opened every session for t2 on t1's row's data source.
     /// </summary>
     [Fact]
     public async Task A_link_to_a_twin_rows_tenant_resolves_and_the_header_lists_it()
@@ -262,16 +263,54 @@ public class TenantDiscoveryInstanceTests
 
         string identity = first.Id.Identity;
 
-        ResolvedScope resolved = await circuit.ServiceProvider.GetRequiredService<StudioScopeResolver>()
+        StudioScopeResolver resolver = circuit.ServiceProvider.GetRequiredService<StudioScopeResolver>();
+
+        ResolvedScope resolved = await resolver
             .ResolveAsync(new StudioScope(MartenStoreRegistry.DefaultStoreKey, identity, "t2"), null, Token);
 
-        resolved.Database.Should().BeSameAs(first, "the database resolves to the first instance with its identity");
+        resolved.Database.Should().BeSameAs(second, "t2 resolves to the instance built from t2's row, whose tenant list holds it");
+
+        (await resolver.ResolveAsync(new StudioScope(MartenStoreRegistry.DefaultStoreKey, identity, "t1"), null, Token))
+            .Database.Should().BeSameAs(first, "and t1 to t1's");
+        (await resolver.ResolveAsync(new StudioScope(MartenStoreRegistry.DefaultStoreKey, identity, null), null, Token))
+            .Database.Should().BeSameAs(first, "with no tenant, the first instance with the identity - the one the picker lists");
 
         StoreScopeFacts facts = await circuit.ServiceProvider.GetRequiredService<IStudioScopeCatalog>()
             .DescribeAsync(MartenStoreRegistry.DefaultStoreKey, identity, Token);
 
         facts.Tenants.Ids.Should().Equal(["t1", "t2"], "the header offers both rows' tenants");
         tenancy.Describes.Should().Be(0);
+    }
+
+    /// <summary>
+    /// SEC1 L1, the rule on its own: of the instances with the matched database's identity, the one whose own list holds
+    /// the tenant - never an instance of another database, whatever it lists - and the matched one when none does.
+    /// </summary>
+    [Fact]
+    public async Task Only_a_twin_of_the_matched_database_answers_for_a_tenant()
+    {
+        StoreOptions options = new();
+        options.MultiTenantedDatabasesWithMasterDatabaseTable(UnreachableMaster, "tenants");
+
+        var tenancy = new CountingMasterTableTenancy(options);
+        options.Tenancy = tenancy;
+
+        await using var store = new DocumentStore(options);
+        await using MartenDatabase first = TenantDatabase(options, "t1", ["t1"]);
+        await using MartenDatabase second = TenantDatabase(options, "t2", ["t2"]);
+        await using MartenDatabase elsewhere = TenantDatabase(options, "t3", ["t3", "t2"], OtherUnreachableTenant);
+
+        first.Id.Identity.Should().Be(second.Id.Identity, "the premise: twins");
+        elsewhere.Id.Identity.Should().NotBe(first.Id.Identity, "the premise: another database");
+
+        StudioScopeResolver.InstanceFor([elsewhere, first, second], first, "t2").Should().BeSameAs(second);
+        StudioScopeResolver.InstanceFor([elsewhere, first, second], first, "t1").Should().BeSameAs(first);
+        StudioScopeResolver.InstanceFor([elsewhere, first, second], first, "t3")
+            .Should().BeSameAs(first, "a database elsewhere is not a twin, whatever it lists");
+        StudioScopeResolver.InstanceFor([first, second], first, "nobody").Should().BeSameAs(first, "none lists it: the matched one");
+        StudioScopeResolver.InstanceFor([first, second], first, "T2").Should().BeSameAs(first, "ordinal, as IsAcceptable matched it");
+        tenancy.Describes.Should().Be(0);
+        tenancy.Builds.Should().Be(0, "the lists are the caller's enumeration; nothing is enumerated again");
     }
 
     /// <summary>
