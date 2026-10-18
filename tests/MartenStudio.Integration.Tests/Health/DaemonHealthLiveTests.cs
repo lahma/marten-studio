@@ -664,6 +664,23 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
     // ---- D05 -----------------------------------------------------------------------------------------------------
 
     /// <summary>The sample's poison event with SkipApplyErrors off: the shard is paused or stopped by its failure.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Waited for on the agent the sweep reads.</b> The wait used to pass when the shard's agent was not running
+    /// <em>or was not there at all</em> - and it is not there until the coordinator's first poll has started it, so the
+    /// wait was true before the shard had run, and the sweep found a daemon with nothing paused (seen at 9.50.2). It
+    /// now waits for the agent to exist and to be <c>Paused</c> by its failure, which is what
+    /// <c>SubscriptionAgent.ReportCriticalFailureAsync</c> leaves for an apply error (JasperFx 2.74 and 2.87.1 alike).
+    /// </para>
+    /// <para>
+    /// <b>And the pause is held still for the sweep.</b> The coordinator restarts a paused agent once
+    /// <c>HealthCheckPollingTime</c> (five seconds by default) has passed since it paused; the restarted agent reads
+    /// <c>Running</c> until it reaches the poison event again, and D05 drops a shard the daemon here says is running.
+    /// A sweep that landed in that moment found nothing. Ten minutes is longer than the test, so the agent the wait saw
+    /// is the agent the sweep reads. The high-water agent's own health timer runs at the same interval, and nothing
+    /// here depends on it.
+    /// </para>
+    /// </remarks>
     [PostgresFact]
     [HealthFires("D05")]
     public async Task A_projection_that_throws_without_skipping_is_failed_or_paused()
@@ -677,13 +694,13 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
             {
                 options.Projections.Errors.SkipApplyErrors = false;
                 options.Events.EnableExtendedProgressionTracking = true;
+                options.Projections.HealthCheckPollingTime = TimeSpan.FromMinutes(10);
             });
 
         await host.WaitForDaemonAsync();
         await Projections.ProjectionsFixture.WaitForAsync(
-            () => Task.FromResult(host.Daemon.CurrentAgents().Any(x => x.Name.Identity == shard && x.Status != JasperFx.AgentStatus.Running)
-                || !host.Daemon.CurrentAgents().Any(x => x.Name.Identity == shard)),
-            "the poison event to stop the shard",
+            () => Task.FromResult(host.Daemon.CurrentAgents().Any(x => x.Name.Identity == shard && x.Status == JasperFx.AgentStatus.Paused)),
+            "the poison event to pause the shard's agent",
             TimeSpan.FromSeconds(60),
             Token);
 

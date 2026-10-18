@@ -13,9 +13,18 @@ namespace MartenStudio.Integration.Tests.Health;
 /// correlation (the H6 review, PostgreSQL 17, 3,000,000 rows).
 /// </summary>
 /// <remarks>
+/// <para>
 /// The window is the builder's statement with <c>@window</c> bound to <see cref="Window" /> rather than to the real
 /// 100,000, over a table a tenth the size the review measured: the ratio the planner weighs is the same, and the
 /// suite does not write three million rows to prove it.
+/// </para>
+/// <para>
+/// <b>Under load.</b> Both tests write 300,000 rows and then read a plan, and both depend on the planner having this
+/// test's own statistics. So each analyses exactly its own tables - never the database, which would take another
+/// class's never-analysed table with it (the 0.3.0 lesson) - and waits until every table the plan reads shows that
+/// analysis before it explains anything (<see cref="WaitUntilAnalyzedAsync" />). The write itself is cheap enough for a
+/// loaded machine: see <c>EventHealthData.InsertSyntheticAsync</c>, which a full run had taken past Npgsql's 30 s.
+/// </para>
 /// </remarks>
 public class EventTrafficPlanLiveTests(PostgresFixture postgres)
 {
@@ -34,6 +43,7 @@ public class EventTrafficPlanLiveTests(PostgresFixture postgres)
 
         await EventHealthData.InsertSyntheticAsync(postgres, host.EventSchema, Events, archivedShare: 0.7);
         await EventHealthData.AnalyzeAsync(postgres, host.EventSchema);
+        await WaitUntilAnalyzedAsync(host.EventSchema);
 
         IReadOnlyList<PlanNode> plan = await ExplainAsync(host.EventSchema);
 
@@ -55,6 +65,7 @@ public class EventTrafficPlanLiveTests(PostgresFixture postgres)
         // the heap stops being in seq_id order, which is what made the planner give up on the key.
         await EventHealthData.ExecuteAsync(postgres, $"update {events} set is_archived = true where seq_id % 3 = 0");
         await EventHealthData.AnalyzeAsync(postgres, host.EventSchema);
+        await WaitUntilAnalyzedAsync(host.EventSchema);
 
         double correlation = await CorrelationAsync(host.EventSchema);
         correlation.Should().BeLessThan(0.99, "the precondition: archiving in place moved a third of the rows out of seq_id order");
@@ -73,6 +84,38 @@ public class EventTrafficPlanLiveTests(PostgresFixture postgres)
         plan.Should().NotContain(static x => x.Type == "Seq Scan", Describe(plan));
         plan.Should().ContainSingle(static x => x.Relation == HealthEventQueries.EventsTable, Describe(plan))
             .Which.Should().Match<PlanNode>(static x => x.Type == "Index Scan" && x.Direction == "Backward", Describe(plan));
+    }
+
+    /// <summary>
+    /// Waits until every leaf of <c>mt_events</c> and <c>mt_streams</c> - the tables themselves, or their partitions - shows an
+    /// analysis in <c>pg_stat_user_tables</c>, and every leaf of <c>mt_events</c> has <c>seq_id</c> statistics in
+    /// <c>pg_statistic</c>, which is what the planner costs the key's scans with. An explicit <c>ANALYZE</c> has written both
+    /// by the time it returns; this is the proof, so a plan that is wrong cannot be a plan made without them.
+    /// </summary>
+    private Task WaitUntilAnalyzedAsync(string eventSchema)
+    {
+        const string Unanalysed =
+            """
+            select count(*)
+              from (select t.relid, true as events from pg_catalog.pg_partition_tree(@events::regclass) t where t.isleaf
+                    union all
+                    select t.relid, false from pg_catalog.pg_partition_tree(@streams::regclass) t where t.isleaf) r
+              left join pg_catalog.pg_stat_user_tables s on s.relid = r.relid
+             where s.last_analyze is null
+                or (r.events and not exists (
+                       select 1
+                         from pg_catalog.pg_statistic st
+                         join pg_catalog.pg_attribute a on a.attrelid = st.starelid and a.attnum = st.staattnum
+                        where st.starelid = r.relid and a.attname = 'seq_id'))
+            """;
+
+        string events = SqlIdentifier.Qualify(eventSchema, HealthEventQueries.EventsTable);
+        string streams = SqlIdentifier.Qualify(eventSchema, "mt_streams");
+
+        return EventHealthData.WaitForAsync(
+            async () => await LiveWait.ScalarAsync<long>(postgres.ConnectionString, Unanalysed, ("events", events), ("streams", streams)) == 0,
+            "every table the plan reads to show this test's ANALYZE, with seq_id statistics on each of mt_events' leaves",
+            TimeSpan.FromSeconds(30));
     }
 
     /// <summary><c>EXPLAIN (FORMAT JSON)</c> of the builder's statement, its parameters bound as the runner binds them.</summary>

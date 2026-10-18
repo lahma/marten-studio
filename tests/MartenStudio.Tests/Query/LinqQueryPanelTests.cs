@@ -5,6 +5,8 @@ using MartenStudio.Services;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
 
+using Microsoft.AspNetCore.Components.Web;
+
 using QueryPage = MartenStudio.Components.Pages.Query.Query;
 
 namespace MartenStudio.Tests.Query;
@@ -161,8 +163,16 @@ public class LinqQueryPanelTests
         panel.Find(".ms-query-linq-range").TextContent.Should().Contain("more follow");
     }
 
+    /// <summary>
+    /// Both clicks are awaited. bUnit's <c>Click()</c> discards the dispatch task, and the dispatch runs inline only
+    /// while the renderer's dispatcher is idle - so a click that lands while the dispatcher is busy is queued, and
+    /// <c>Click()</c> returns before its handler has run. The panel's own "Running… N ms" ticker makes it busy: the
+    /// first run starts a 200 ms <see cref="PeriodicTimer" /> whose one tick, after the run has ended, re-renders the
+    /// panel on the dispatcher. On a loaded machine the second click can land inside that render, and the request it
+    /// makes then arrives after the assertion - the failure seen once in a full fast run.
+    /// </summary>
     [Fact]
-    public void Next_asks_for_the_following_page_and_keeps_the_first_pages_plan()
+    public async Task Next_asks_for_the_following_page_and_keeps_the_first_pages_plan()
     {
         var linq = new FakeLinqQueryService().WithType("order");
         linq.Result = new LinqQueryResult("order", [new LinqQueryRow("1", "{}")], true, 0, 1, "select 1", [], TimeSpan.Zero,
@@ -171,10 +181,10 @@ public class LinqQueryPanelTests
         using StudioComponentContext context = CreateContext(linq);
 
         var panel = context.Render<LinqQueryPanel>();
-        panel.Find(".ms-query-run").Click();
+        await panel.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
 
         linq.Result = linq.Result with { Offset = 1, Plan = null };
-        panel.FindAll(".ms-query-linq-pager button")[1].Click();
+        await panel.FindAll(".ms-query-linq-pager button")[1].ClickAsync(new MouseEventArgs());
 
         linq.Requests.Should().HaveCount(2);
         linq.Requests[1].Offset.Should().Be(1);

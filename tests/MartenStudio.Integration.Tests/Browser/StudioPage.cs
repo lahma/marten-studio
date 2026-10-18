@@ -135,6 +135,27 @@ internal sealed class StudioPage : IAsyncDisposable
     /// <summary>
     /// Signs in with an explicit per-step timeout, and says which step ran out of it.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The landing is waited for in the page, never through Playwright's navigation events.</b> The form posts,
+    /// the sample answers 302, and the browser loads <c>/</c>. This used to be
+    /// <c>WaitForURLAsync("/", DOMContentLoaded)</c>, which timed out at 60 s in scenarios and at 180 s in the
+    /// fixture's warm-up under load - with Playwright's own log saying <c>"Load" event fired</c> and
+    /// <c>"NetworkIdle" event fired</c>: the page had loaded, and the wait had missed it. Playwright's .NET client
+    /// raises its frame events on the connection's read loop, while a caller's continuation runs on the thread pool,
+    /// and <c>Frame.WaitForLoadStateAsync</c> checks <c>_loadStates.Contains(state)</c> and only then subscribes to
+    /// <c>LoadState</c>. When the click's reply lets the caller in just after the navigation commits - its URL is
+    /// already <c>/</c>, so <c>WaitForURLAsync</c> goes straight to that check - the read loop can add
+    /// DOMContentLoaded and raise its event between the check and the subscription. The wait then sees only
+    /// <c>Load</c> and <c>NetworkIdle</c>, and never the state it asked for. The race is in the client, which is
+    /// why a loaded machine finds it and a warm host would not have helped.
+    /// </para>
+    /// <para>
+    /// A locator wait has no such window: the driver evaluates it in the page, and it holds once the landing page
+    /// says who is signed in - which is the condition the step is about. A wrong password lands on
+    /// <c>/login?error=1</c>, which does not say it, so it still fails, naming this step.
+    /// </para>
+    /// </remarks>
     internal static async Task<StudioPage> SignInAsync(IBrowser browser, SampleHost host, string user, TimeSpan timeout)
     {
         ArgumentNullException.ThrowIfNull(browser);
@@ -162,8 +183,18 @@ internal sealed class StudioPage : IAsyncDisposable
             await page.FillAsync("#password", user, new PageFillOptions { Timeout = ms });
         });
         await Step("submit", () => page.ClickAsync("form[action='/login'] button[type=submit]", new PageClickOptions { Timeout = ms }));
-        await Step("land on /", () => page.WaitForURLAsync(
-            host.Url("/"), new PageWaitForURLOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = ms }));
+
+        // The landing page's own words, waited for by the driver in the page (see the remarks).
+        ILocator signedIn = page.Locator("p", new PageLocatorOptions { HasTextString = "Signed in as" });
+        await Step("land on /", () => signedIn.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = ms }));
+
+        string said = await signedIn.InnerTextAsync(new LocatorInnerTextOptions { Timeout = ms });
+        if (!said.StartsWith("Signed in as " + user + " ", StringComparison.Ordinal)
+            || !string.Equals(page.Url, host.Url("/"), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Signing in as '{user}' at {host.BaseAddress} landed on {page.Url}, which says \"{said}\".");
+        }
 
         return studio;
 
@@ -175,8 +206,11 @@ internal sealed class StudioPage : IAsyncDisposable
             }
             catch (TimeoutException exception)
             {
+                // The host's side of the step, which is the half a browser-side timeout cannot show: whether the
+                // requests reached it, and what it answered.
                 throw new TimeoutException(
-                    $"Signing in as '{user}' at {host.BaseAddress} timed out at step '{name}' after {timeout.TotalSeconds:0} s.",
+                    $"Signing in as '{user}' at {host.BaseAddress} timed out at step '{name}' after {timeout.TotalSeconds:0} s. "
+                    + $"The page is at {page.Url}. The sample host's (pid {host.ProcessId}) log, last 30 lines:{Environment.NewLine}{host.LogTail(30)}",
                     exception);
             }
         }
@@ -229,11 +263,17 @@ internal sealed class StudioPage : IAsyncDisposable
     /// state, so the assertion failed about half the time and only on the slower of the two hosts. Wait
     /// on the condition, never on a delay.
     /// </para>
+    /// <para>
+    /// The condition is read in the page by the driver, not with <c>WaitForURLAsync</c>: that call follows the
+    /// URL match with a client-side load-state wait that checks and then subscribes, and can miss an event raised
+    /// between the two (see <see cref="SignInAsync(IBrowser, SampleHost, string, TimeSpan)" />).
+    /// </para>
     /// </remarks>
     public Task WaitForScopeInUrlAsync() =>
-        Page.WaitForURLAsync(
-            static url => url.Contains("store=", StringComparison.Ordinal),
-            new PageWaitForURLOptions { Timeout = 30_000 });
+        Page.WaitForFunctionAsync(
+            "() => window.location.search.includes('store=')",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
 
     /// <summary>
     /// Waits until the page is interactive, not merely prerendered.

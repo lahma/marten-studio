@@ -78,15 +78,33 @@ internal sealed class EventHealthHost : IAsyncDisposable
     /// <param name="store">Changes on top of the sample domain's configuration.</param>
     /// <param name="studio">The studio's options.</param>
     /// <param name="services">Anything else the container needs.</param>
-    public static async Task<EventHealthHost> CreateAsync(
+    public static Task<EventHealthHost> CreateAsync(
         PostgresFixture postgres,
         string schema,
         Action<StoreOptions>? store = null,
         Action<MartenStudioOptions>? studio = null,
         Action<IServiceCollection>? services = null)
     {
-        await postgres.CreateSchemaAsync(schema);
-        await postgres.CreateSchemaAsync(schema + "_events");
+        ArgumentNullException.ThrowIfNull(postgres);
+
+        return CreateAsync(postgres.ConnectionString, schema, store, studio, services);
+    }
+
+    /// <summary>The same host on a server the caller chose - one of a test class's own, for a condition the shared one cannot hold.</summary>
+    /// <param name="connectionString">The database to use.</param>
+    /// <param name="schema">A schema of the test's own; created empty, with an <c>_events</c> twin.</param>
+    /// <param name="store">Changes on top of the sample domain's configuration.</param>
+    /// <param name="studio">The studio's options.</param>
+    /// <param name="services">Anything else the container needs.</param>
+    public static async Task<EventHealthHost> CreateAsync(
+        string connectionString,
+        string schema,
+        Action<StoreOptions>? store = null,
+        Action<MartenStudioOptions>? studio = null,
+        Action<IServiceCollection>? services = null)
+    {
+        await CreateSchemaAsync(connectionString, schema);
+        await CreateSchemaAsync(connectionString, schema + "_events");
 
         LogCapture logs = new();
         ServiceCollection collection = new();
@@ -103,7 +121,7 @@ internal sealed class EventHealthHost : IAsyncDisposable
 
         collection.AddMarten(options =>
         {
-            SampleStore.Configure(options, postgres.ConnectionString);
+            SampleStore.Configure(options, connectionString);
             options.DatabaseSchemaName = schema;
             options.Events.DatabaseSchemaName = schema + "_events";
             options.Events.AddEventType<HealthPing>();
@@ -118,6 +136,17 @@ internal sealed class EventHealthHost : IAsyncDisposable
         // The tables the checks read, created the way a deploy creates them - by the test, never by the studio.
         await host.Store.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
         return host;
+    }
+
+    /// <summary>An empty schema of this name, as <see cref="PostgresFixture.CreateSchemaAsync" /> makes one, on any server.</summary>
+    private static async Task CreateSchemaAsync(string connectionString, string name)
+    {
+        string quoted = SqlIdentifier.Quote(name);
+
+        await using NpgsqlConnection connection = new(connectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using NpgsqlCommand command = new($"drop schema if exists {quoted} cascade; create schema {quoted};", connection);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
     /// <summary>The visitor's report, through a circuit-shaped scope of its own.</summary>
@@ -270,6 +299,17 @@ internal static class EventHealthData
     /// and the rest in a live one. Two stream rows, because an archived event's stream is archived too, and under
     /// <c>UseArchivedStreamPartitioning</c> the foreign key is <c>(stream_id, is_archived)</c>.
     /// </summary>
+    /// <remarks>
+    /// <b>Without the foreign-key triggers.</b> Every event row's foreign key to <c>mt_streams</c> is checked by a trigger,
+    /// one lookup per row, and that check was nearly all of the statement's cost: 300,000 rows into an archive-partitioned
+    /// table took 15.0 s with it and 1.2 s without (PostgreSQL 17, measured with nothing else of the run's going), and under a
+    /// full run's load the 15 s went past Npgsql's 30 s command timeout, which is how <c>EventTrafficPlanLiveTests</c> failed. The rows
+    /// satisfy the key by construction - both stream rows are written first - so the check proves nothing here.
+    /// <c>session_replication_role = replica</c>, the setting logical replication applies changes under, does not fire
+    /// them; it is <c>SET LOCAL</c>, so it ends with this transaction and never reaches a pooled connection. The constraint
+    /// itself stays, and so does everything the planner reads. (The container's user is a superuser, which the setting
+    /// needs.)
+    /// </remarks>
     public static async Task InsertSyntheticAsync(PostgresFixture postgres, string eventSchema, int events, double archivedShare = 0)
     {
         string streams = SqlIdentifier.Qualify(eventSchema, "mt_streams");
@@ -278,8 +318,10 @@ internal static class EventHealthData
         int archived = (int) (events * archivedShare);
 
         await using NpgsqlConnection connection = await postgres.OpenAsync(Token);
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync(Token);
         await using NpgsqlCommand command = new(
             $$"""
+            set local session_replication_role = replica;
             insert into {{streams}} (id, version, is_archived) values (@live, @events - @archived, false), (@gone, @archived, true);
             insert into {{table}} (seq_id, id, stream_id, version, data, type, mt_dotnet_type, is_archived)
             select nextval('{{sequence}}'), gen_random_uuid(),
@@ -288,7 +330,8 @@ internal static class EventHealthData
                    '{"Number": 1}'::jsonb, 'health_ping', @dotnet, g <= @archived
               from generate_series(1, @events) g;
             """,
-            connection);
+            connection,
+            transaction);
 
         command.Parameters.AddWithValue("live", Guid.NewGuid());
         command.Parameters.AddWithValue("gone", Guid.NewGuid());
@@ -297,6 +340,7 @@ internal static class EventHealthData
         command.Parameters.AddWithValue("dotnet", typeof(HealthPing).FullName + ", " + typeof(HealthPing).Assembly.GetName().Name);
 
         await command.ExecuteNonQueryAsync(Token);
+        await transaction.CommitAsync(Token);
     }
 
     /// <summary>Has PostgreSQL sample the event store's tables now, as autovacuum eventually would.</summary>

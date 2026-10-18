@@ -176,10 +176,13 @@ internal static class HorizonLive
 
         long[] ids = [.. SessionLockLabels.For(store, "default", null).DaemonLockIds];
 
+        // Held to this database: pg_locks is the server's, and every store built from the sample's configuration computes
+        // the same lock ids, so on the shared server another class's HotCold leader would otherwise answer for this one.
         await LiveWait.UntilAsync(
             async () => await LiveWait.ScalarAsync<bool>(
                 database,
                 "select exists (select 1 from pg_catalog.pg_locks l where l.locktype = 'advisory' and l.granted"
+                + " and l.database = (select d.oid from pg_catalog.pg_database d where d.datname = pg_catalog.current_database())"
                 + " and ((l.classid::bigint << 32) | l.objid::bigint) = any(@ids))",
                 ("ids", ids)),
             TimeSpan.FromSeconds(60),
@@ -371,7 +374,8 @@ public class HorizonServerLiveTests(HorizonServerFixture server) : IClassFixture
                 async () => await LiveWait.ScalarAsync<bool>(
                     database,
                     "select exists (select 1 from pg_catalog.pg_stat_activity a join pg_catalog.pg_locks l on l.pid = a.pid"
-                    + " where l.locktype = 'advisory' and l.granted and ((l.classid::bigint << 32) | l.objid::bigint) = any(@ids)"
+                    + " where a.datname = pg_catalog.current_database()"
+                    + " and l.locktype = 'advisory' and l.granted and ((l.classid::bigint << 32) | l.objid::bigint) = any(@ids)"
                     + " and a.backend_xid is null and a.backend_xmin::text::bigint = @xid)",
                     ("ids", ids),
                     ("xid", xid)),

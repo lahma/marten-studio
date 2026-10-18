@@ -5,14 +5,49 @@ using MartenStudio.Services.Health;
 
 using Microsoft.Extensions.DependencyInjection;
 
+using Testcontainers.PostgreSql;
+
 namespace MartenStudio.Integration.Tests.Health;
+
+/// <summary>
+/// A Postgres server of <see cref="DaemonEventChecksLiveTests" />' own, for the one condition the shared server cannot
+/// hold: that no transaction anywhere on it began before a gap was seen and is still open. Never reused.
+/// </summary>
+public sealed class GapSkipServerFixture : IAsyncLifetime
+{
+    private readonly PostgreSqlContainer container = new PostgreSqlBuilder("postgres:17-alpine")
+        .WithReuse(false)
+        .Build();
+
+    private bool started;
+
+    /// <summary>The server's superuser connection string.</summary>
+    public string ConnectionString => started
+        ? container.GetConnectionString()
+        : throw new InvalidOperationException("The gap-skip server is not running; a test that needs it must be a [PostgresFact].");
+
+    public async ValueTask InitializeAsync()
+    {
+        DockerAvailability.ThrowIfMissingOnContinuousIntegration();
+
+        if (!DockerAvailability.IsAvailable)
+        {
+            return;
+        }
+
+        await container.StartAsync();
+        started = true;
+    }
+
+    public async ValueTask DisposeAsync() => await container.DisposeAsync();
+}
 
 /// <summary>
 /// D07 and D08 live: a real skip made by a real daemon, a configuration that turns it into a warning, a shard
 /// position that falls between two sweeps, a progression row that says it is rebuilding - and the healthy sample
 /// store, quiet.
 /// </summary>
-public class DaemonEventChecksLiveTests(PostgresFixture postgres)
+public class DaemonEventChecksLiveTests(PostgresFixture postgres, GapSkipServerFixture gapServer) : IClassFixture<GapSkipServerFixture>
 {
     // ---------------------------------------------------------------------------------------------------
     // D07
@@ -23,17 +58,28 @@ public class DaemonEventChecksLiveTests(PostgresFixture postgres)
     /// mark for <c>StaleSequenceThreshold</c>, sees nothing alive that could fill it, and skips it - which advanced
     /// async tracking records.
     /// </summary>
+    /// <remarks>
+    /// <b>On a server of this class's own.</b> "Nothing alive that could fill it" is Marten's
+    /// <c>GapLivenessProbe</c>, and it is a question about the whole server: it holds the gap while any client
+    /// transaction in the database began before the gap was first seen, or while any write transaction anywhere on the
+    /// server - <c>pg_snapshot_xip(pg_current_snapshot())</c> - is older than the snapshot it took then. A daemon started
+    /// over a gap it never saw open has no allocation fence, so neither clause excludes anyone. On the shared server, a
+    /// full run always has some other class's long transaction open - a 300,000-row insert, a transaction held idle for a
+    /// minute on purpose - and the detector rightly waited behind it, past this test's minute. Alone it skips in seconds.
+    /// </remarks>
     [PostgresFact]
     [HealthFires("D07")]
     public async Task A_gap_the_daemon_skipped_is_D07_and_an_info_under_the_defaults()
     {
+        string server = gapServer.ConnectionString;
+
         await using EventHealthHost host = await EventHealthHost.CreateAsync(
-            postgres,
+            server,
             "health_d07_fires",
             store: static options => options.Projections.StaleSequenceThreshold = TimeSpan.FromSeconds(1));
 
         await EventHealthData.AppendAsync(host.Store, streams: 5, eventsPerStream: 2);
-        await EventHealthData.ScalarAsync(postgres, $"select nextval('{SqlIdentifier.Qualify(host.EventSchema, "mt_events_sequence")}')");
+        await LiveWait.ScalarAsync<long>(server, $"select nextval('{SqlIdentifier.Qualify(host.EventSchema, "mt_events_sequence")}')");
         await EventHealthData.AppendAsync(host.Store, streams: 5, eventsPerStream: 2);
 
         // A daemon of the test's own - the studio never starts one (hard rule 11).
@@ -43,7 +89,7 @@ public class DaemonEventChecksLiveTests(PostgresFixture postgres)
 
             string skips = $"select count(*) from {SqlIdentifier.Qualify(host.EventSchema, HealthEventQueries.HighWaterSkipsTable)}";
             await EventHealthData.WaitForAsync(
-                async () => await EventHealthData.ScalarAsync(postgres, skips) > 0,
+                async () => await LiveWait.ScalarAsync<long>(server, skips) > 0,
                 "the high-water detector to skip the gap and record it");
 
             await daemon.StopAllAsync();
