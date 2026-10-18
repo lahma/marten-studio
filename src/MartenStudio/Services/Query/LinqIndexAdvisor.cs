@@ -1,6 +1,5 @@
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Text.Json;
 
 using MartenStudio.Internal.Sql;
 
@@ -27,7 +26,7 @@ namespace MartenStudio.Services.Query;
 internal static class LinqIndexAdvisor
 {
     /// <summary>The most scans read out of one plan.</summary>
-    internal const int MaxScans = 20;
+    internal const int MaxScans = ExplainPlanScans.MaxScans;
 
     /// <summary>The advice for a composed query.</summary>
     /// <param name="composed">The expression JasperFx composed, already through the guard.</param>
@@ -94,62 +93,9 @@ internal static class LinqIndexAdvisor
         return new LinqIndexAdvice(worst, verdicts, scans, Note(worst, verdicts.Count, scans, table.Table));
     }
 
-    /// <summary>The scans in an <c>EXPLAIN (FORMAT JSON)</c> plan, outermost first.</summary>
-    internal static IReadOnlyList<LinqPlanScan> ReadScans(string planJson)
-    {
-        List<LinqPlanScan> scans = [];
-
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(planJson);
-            JsonElement root = document.RootElement;
-
-            if (root.ValueKind == JsonValueKind.Array)
-            {
-                foreach (JsonElement statement in root.EnumerateArray())
-                {
-                    if (statement.TryGetProperty("Plan", out JsonElement plan))
-                    {
-                        Walk(plan, scans, 0);
-                    }
-                }
-            }
-        }
-        catch (JsonException)
-        {
-            // A plan that is not the JSON Postgres writes says nothing the panel can draw.
-        }
-
-        return scans;
-    }
-
-    private static void Walk(JsonElement node, List<LinqPlanScan> scans, int depth)
-    {
-        if (scans.Count >= MaxScans || depth > 64 || node.ValueKind != JsonValueKind.Object)
-        {
-            return;
-        }
-
-        string? type = Text(node, "Node Type");
-        string? relation = Text(node, "Relation Name");
-        string? index = Text(node, "Index Name");
-
-        if (type is not null && (relation is not null || index is not null))
-        {
-            scans.Add(new LinqPlanScan(type, relation, index));
-        }
-
-        if (node.TryGetProperty("Plans", out JsonElement children) && children.ValueKind == JsonValueKind.Array)
-        {
-            foreach (JsonElement child in children.EnumerateArray())
-            {
-                Walk(child, scans, depth + 1);
-            }
-        }
-    }
-
-    private static string? Text(JsonElement node, string property) =>
-        node.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    /// <summary>The scans in an <c>EXPLAIN (FORMAT JSON)</c> plan, outermost first - read by the shared <see cref="ExplainPlanScans" />.</summary>
+    internal static IReadOnlyList<LinqPlanScan> ReadScans(string planJson) =>
+        [.. ExplainPlanScans.Read(planJson).Select(static x => new LinqPlanScan(x.NodeType, x.Relation, x.Index))];
 
     private static string? Note(IndexVerdictLevel worst, int verdicts, IReadOnlyList<LinqPlanScan> scans, string table)
     {

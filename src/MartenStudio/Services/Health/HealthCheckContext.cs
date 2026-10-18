@@ -25,7 +25,11 @@ namespace MartenStudio.Services.Health;
 /// <b>SQL only through <see cref="Sql" />.</b> Its statements come from the builders under
 /// <c>Internal/Sql/</c>, and it runs each in a read-only transaction under the studio's
 /// <c>statement_timeout</c> and <c>lock_timeout</c>, as <c>SqlConsoleRole</c> when one is set - the role the
-/// catalog reads use. Opening a connection, a Marten session or a Weasel migration of any kind is not
+/// catalog reads use. The one exception is the statement checks' read of <c>pg_stat_statements</c>, which is the
+/// store's own role's by design (<see cref="HealthSqlRunner.QueryAsApplicationRoleAsync{T}" /> says why); and one
+/// statement runs outside a transaction, the second try at taking T02's plan back
+/// (<see cref="HealthSqlRunner.ExecuteOutsideTransactionAsync" />), which reads nothing. Opening a
+/// connection, a Marten session or a Weasel migration of any kind is not
 /// something a gatherer does; nor is anything hard rule 14 names.
 /// </para>
 /// <para>
@@ -272,6 +276,7 @@ internal sealed class HealthSqlRunner
 
     private readonly HealthConnection connection;
     private readonly ReadOnlySqlSession session;
+    private readonly ReadOnlySqlSession applicationRoleSession;
     private readonly int commandTimeoutSeconds;
     private readonly IHealthStatementObserver? observer;
     private readonly List<HealthStatement> statements = [];
@@ -283,6 +288,7 @@ internal sealed class HealthSqlRunner
     {
         this.connection = connection;
         session = new ReadOnlySqlSession(sessionOptions);
+        applicationRoleSession = new ReadOnlySqlSession(sessionOptions with { Role = null });
         this.observer = observer;
 
         // A little past the server-side statement_timeout, which is what should fire: it produces 57014 with
@@ -295,7 +301,49 @@ internal sealed class HealthSqlRunner
 
     /// <summary>Runs <paramref name="query" /> and maps every row.</summary>
     /// <exception cref="HealthSweepRuleException">It returned more than <see cref="MaxRows" /> rows.</exception>
-    public async Task<IReadOnlyList<T>> QueryAsync<T>(
+    public Task<IReadOnlyList<T>> QueryAsync<T>(
+        HealthQuery query,
+        Func<NpgsqlDataReader, T> map,
+        CancellationToken cancellationToken) =>
+        QueryAsync(session, query, map, cancellationToken);
+
+    /// <summary>
+    /// Runs <paramref name="query" /> as the store's own Postgres role - the role its data source connects as -
+    /// rather than as <c>SqlConsoleRole</c>, in the same read-only transaction under the same timeouts.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>For <c>pg_stat_statements</c>, and nothing else</b> (the statement checks, T02, T22 and T23; R1 decision 3).
+    /// Every other health read takes <c>SqlConsoleRole</c>, which is how a host narrows what the studio can see. This
+    /// one departs from that on purpose: the statements the advisor is about are Marten's, which run as the store's
+    /// own role, and <c>pg_stat_statements</c> shows a role that is neither a superuser, a member of
+    /// <c>pg_read_all_stats</c> nor the statement's own user only <c>&lt;insufficient privilege&gt;</c> and a null
+    /// <c>queryid</c> for them. A narrowed console role - the very configuration a careful host has - would make the
+    /// checks see nothing of the store at all.
+    /// </para>
+    /// <para>
+    /// <b>What keeps it narrow.</b> Only <c>StatementReads</c> calls this, and only with <c>HealthStatementQueries</c>'
+    /// <c>Counters</c> and <c>Texts</c> (<c>StatementChecksFenceTests</c> holds both, in source and in IL), which read
+    /// <c>pg_stat_statements</c> and its info view, and only the rows whose <c>userid</c> is this same role and whose
+    /// <c>dbid</c> is this database - the statements this role ran here, which it could read anyway. So reading as it
+    /// shows no other role's statements; an application that connects as the same role is the same role to Postgres,
+    /// and its statements are among them. Everything else the checks do stays under <c>SqlConsoleRole</c>: the catalog
+    /// reads, and the plan of a statement, which is planned with the console role's privileges exactly as the Query
+    /// page's is. A text that still carries a string or dollar-quoted constant as written, or is not a plain query or
+    /// write, is withheld outright (<c>StatementReads.Withheld</c>; a numeric constant in a text Postgres kept
+    /// un-normalised is the residual it does not catch); every other text is shown with its comments masked, only behind
+    /// <c>ViewDatabaseActivity</c>, and through each visitor's own mask (<c>StatementScreen</c>).
+    /// </para>
+    /// </remarks>
+    /// <exception cref="HealthSweepRuleException">It returned more than <see cref="MaxRows" /> rows.</exception>
+    public Task<IReadOnlyList<T>> QueryAsApplicationRoleAsync<T>(
+        HealthQuery query,
+        Func<NpgsqlDataReader, T> map,
+        CancellationToken cancellationToken) =>
+        QueryAsync(applicationRoleSession, query, map, cancellationToken);
+
+    private async Task<IReadOnlyList<T>> QueryAsync<T>(
+        ReadOnlySqlSession readOnly,
         HealthQuery query,
         Func<NpgsqlDataReader, T> map,
         CancellationToken cancellationToken)
@@ -303,14 +351,14 @@ internal sealed class HealthSqlRunner
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(map);
 
-        HealthStatement statement = new(query.Sql, query.ParameterNames);
+        HealthStatement statement = new(query.Shown ?? query.Sql, query.ParameterNames);
         statements.Add(statement);
 
         NpgsqlConnection open = await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
-            return await session.InTransactionAsync(
+            return await readOnly.InTransactionAsync(
                     open,
                     async (transaction, token) =>
                     {
@@ -370,6 +418,50 @@ internal sealed class HealthSqlRunner
         return rows.Count == 0 ? default : rows[0];
     }
 
+    /// <summary>
+    /// Runs <paramref name="query" /> on the sweep's connection outside any transaction - for the one statement that
+    /// must still work when a transaction did not: the <c>deallocate</c> of T02's plan, after the one in a read-only
+    /// transaction failed (<c>ExpensiveStatementsCheck.ForgetAsync</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Fenced, like <see cref="QueryAsApplicationRoleAsync{T}" />.</b> Only <c>ExpensiveStatementsCheck</c> calls this,
+    /// and only with <c>HealthStatementQueries.Deallocate()</c> (<c>StatementChecksFenceTests</c>, in source and in IL). A
+    /// <c>deallocate</c> is session-level: it reads and writes no relation, takes no lock and needs no role, so it is the
+    /// one health statement that runs without <c>SET TRANSACTION READ ONLY</c>, <c>SET LOCAL ROLE</c> or a pinned
+    /// <c>search_path</c>. The command timeout and the caller's own bound still apply, and "Show SQL" records it.
+    /// </para>
+    /// <para>
+    /// A connection that broke under it is dropped, as <see cref="QueryAsync{T}(HealthQuery, Func{NpgsqlDataReader, T}, CancellationToken)" />
+    /// drops one; a broken connection is never returned to the pool, and its session's prepared statements end with it.
+    /// </para>
+    /// </remarks>
+    internal async Task ExecuteOutsideTransactionAsync(HealthQuery query, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        statements.Add(new HealthStatement(query.Shown ?? query.Sql, query.ParameterNames));
+
+        NpgsqlConnection open = await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await using NpgsqlCommand command = new(query.Sql, open) { CommandTimeout = commandTimeoutSeconds };
+
+            foreach (NpgsqlParameter parameter in query.Parameters)
+            {
+                command.Parameters.Add(parameter.Clone());
+            }
+
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception) when (open.State is not System.Data.ConnectionState.Open)
+        {
+            await connection.ResetAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
     /// <summary>Adds statements a shared read ran for somebody else to this check's "Show SQL".</summary>
     internal void Attribute(IEnumerable<HealthStatement> shared)
     {
@@ -387,7 +479,7 @@ internal sealed class HealthSqlRunner
 /// <remarks>
 /// <para>
 /// <b>The primary.</b> It is opened for <c>ConnectionUsage.ReadWrite</c>, which on a multi-host data source
-/// targets the host Marten writes to, even though every statement on it runs inside a read-only transaction.
+/// targets the host Marten writes to, even though every read on it runs inside a read-only transaction.
 /// A health read describes the database the application writes to - its sessions, its locks, its counters -
 /// and a standby's would be a different database's numbers under this one's name.
 /// </para>

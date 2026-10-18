@@ -341,12 +341,19 @@ public class TableHealthHelpersTests
 
     /// <summary>The registry finds all eleven, and every one is well formed.</summary>
     [Fact]
-    public void The_studio_ships_T01_and_T03_to_T12()
+    public void The_studio_ships_T01_to_T12_and_the_statement_checks_T22_and_T23()
     {
         new HealthCheckRegistry().All.Select(static x => x.Info.Code)
-            .Should().Contain(["T01", "T03", "T04", "T05", "T06", "T07", "T08", "T09", "T10", "T11", "T12"])
-            .And.NotContain("T02", "statements are a later packet's");
+            .Should().Contain(["T01", "T03", "T04", "T05", "T06", "T07", "T08", "T09", "T10", "T11", "T12"]);
 
         new HealthCheckRegistry().Find("T09")!.Info.Tier.Should().Be(HealthCostTier.BoundedData);
+
+        // H7's statement checks: tier 3, behind the activity gate, as the registry requires of a statement check.
+        foreach (string code in (string[]) ["T02", "T22", "T23"])
+        {
+            HealthCheckInfo info = new HealthCheckRegistry().Find(code)!.Info;
+            info.Tier.Should().Be(HealthCostTier.Statements, code);
+            info.Gate.Should().Be(HealthGate.Activity, code);
+        }
     }
 }

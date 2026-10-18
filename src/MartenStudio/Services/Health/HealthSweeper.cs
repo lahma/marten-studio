@@ -306,14 +306,17 @@ internal sealed class HealthSweeper
                 : await GatherAsync(descriptor).ConfigureAwait(false);
         }
 
-        // Phase 2: one sample, from every check that read something - regular sweeps only, so that nothing a
-        // gated tier reads becomes history an ungated evaluator can see.
-        if (kind == HealthSweepKind.Regular)
+        // Phase 2: one sample, from every check that read something - a regular sweep's into the database's history,
+        // a statement sweep's into a history of its own that only statement sweeps read, and a deeper sweep's nowhere -
+        // so that nothing a gated tier reads becomes history an ungated evaluator can see.
+        string ring = HealthHistory.RingOf(databaseId, kind);
+
+        if (kind is HealthSweepKind.Regular or HealthSweepKind.Statements)
         {
-            history.Append(storeKey, databaseId, new HealthSample(now, sample) { Gates = sampleGates }, value.EffectiveHealthInterval / 2);
+            history.Append(storeKey, ring, new HealthSample(now, sample) { Gates = sampleGates }, value.EffectiveHealthInterval / 2);
         }
 
-        HealthHistoryView view = history.Read(storeKey, databaseId);
+        HealthHistoryView view = history.Read(storeKey, ring);
 
         // Phase 3: every evaluator, pure, with the history in hand - each with only the series written at or below
         // its own check's gate, so no number crosses a gate on its way from one check to another.

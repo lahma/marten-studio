@@ -25,6 +25,18 @@
                     title="@DeeperTitle">
                 Run deeper checks
             </button>
+            @if (report?.StatementChecksExist == true)
+            {
+                @* The service runs the statement checks only for a visitor through the activity gate, whatever this
+                   button says; the disabled state is so the refusal is not a surprise. *@
+                <button type="button"
+                        class="ms-button ms-health-statements"
+                        @onclick="RunStatementsAsync"
+                        disabled="@(!interactive || busy || report?.StatementChecksAllowed != true)"
+                        title="@StatementsTitle">
+                    Run statement checks
+                </button>
+            }
         </div>
     </div>
 
@@ -97,6 +109,25 @@
             else if (report.DeeperMeasuredAt is { } deeper)
             {
                 <p class="ms-health-summary-line">Deeper checks last ran @State.FormatInSelectedTimeZone(deeper).</p>
+            }
+
+            @if (report.StatementChecksExist && !report.StatementChecksAllowed)
+            {
+                <p class="ms-health-summary-line ms-health-statements-note">
+                    "Run statement checks" is off for you: it reads pg_stat_statements - statements' text, and the plans of
+                    the store's own - so it @report.StatementChecksRefused. Its findings are not shown to you either.
+                </p>
+            }
+            else if (report.StatementsMeasuredAt is { } statementsAt)
+            {
+                <p class="ms-health-summary-line ms-health-statements-note">Statement checks last ran @State.FormatInSelectedTimeZone(statementsAt).</p>
+            }
+            else if (report.StatementChecksExist)
+            {
+                <p class="ms-health-summary-line ms-health-statements-note">
+                    "Run statement checks" reads pg_stat_statements as the store's own role and plans the store's most
+                    expensive statements, on demand and cached for five minutes. It has not run here recently.
+                </p>
             }
         </div>
 
@@ -219,6 +250,12 @@
         _ => "Reads a bounded slice of the data; cached for five minutes",
     };
 
+    private string StatementsTitle => report switch
+    {
+        { StatementChecksAllowed: false } => "Reads pg_stat_statements: it " + report.StatementChecksRefused,
+        _ => "Reads pg_stat_statements and plans the store's most expensive statements; cached for five minutes",
+    };
+
     protected override void OnInitialized()
     {
         // Nothing is read here: this runs during prerendering too, and the sweep waits for the circuit.
@@ -274,6 +311,8 @@
     private async Task RefreshAsync() => await LoadAsync(HealthReportRequest.Regular);
 
     private async Task RunDeeperAsync() => await LoadAsync(new HealthReportRequest(Deeper: HealthDeeperChecks.Run));
+
+    private async Task RunStatementsAsync() => await LoadAsync(new HealthReportRequest(Statements: HealthDeeperChecks.Run));
 
     private async Task OnScopeChangedAsync()
     {

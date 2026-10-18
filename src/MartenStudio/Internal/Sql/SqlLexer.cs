@@ -14,6 +14,20 @@ internal enum SqlTokenKind
     /// cannot go on, and every caller refuses rather than guessing.
     /// </summary>
     Unreadable,
+
+    /// <summary>
+    /// A string literal (<c>'…'</c>, and so the quoted part of <c>E'…'</c>, <c>U&amp;'…'</c>, <c>B'…'</c> or
+    /// <c>X'…'</c>) or a dollar-quoted body - returned only by a lexer made to report them
+    /// (<see cref="SqlLexer(string, bool)" />); every other lexer walks over them as it always has.
+    /// </summary>
+    Literal,
+
+    /// <summary>
+    /// A <c>/* … */</c> comment, nested ones included, or a <c>--</c> comment up to but not including its line break -
+    /// returned only by a lexer made to report them (<see cref="SqlLexer(string, bool, bool)" />); every other lexer
+    /// walks over them as it always has.
+    /// </summary>
+    Comment,
 }
 
 /// <summary>Which thing never closed, when a walk hit <see cref="SqlTokenKind.Unreadable" />.</summary>
@@ -119,8 +133,36 @@ internal readonly record struct SqlToken(
 /// <param name="text">The text to walk. Never null.</param>
 internal struct SqlLexer(string text)
 {
+    private readonly bool reportLiterals;
+    private readonly bool reportComments;
     private int position;
     private int depth;
+
+    /// <summary>
+    /// A lexer that also returns every string literal and dollar-quoted body as a
+    /// <see cref="SqlTokenKind.Literal" /> token, for a caller that has to know whether a text still carries a
+    /// string or dollar-quoted constant as it was written - the statement checks, about the text
+    /// <c>pg_stat_statements</c> recorded.
+    /// </summary>
+    /// <param name="text">The text to walk. Never null.</param>
+    /// <param name="reportLiterals">Whether literals come back as tokens rather than being walked over.</param>
+    public SqlLexer(string text, bool reportLiterals) : this(text)
+    {
+        this.reportLiterals = reportLiterals;
+    }
+
+    /// <summary>
+    /// A lexer that can also return every comment as a <see cref="SqlTokenKind.Comment" /> token, for a caller that
+    /// prints another program's text and must not print its comments - the statement checks, which mask them.
+    /// </summary>
+    /// <param name="text">The text to walk. Never null.</param>
+    /// <param name="reportLiterals">Whether literals come back as tokens rather than being walked over.</param>
+    /// <param name="reportComments">Whether comments come back as tokens rather than being walked over.</param>
+    public SqlLexer(string text, bool reportLiterals, bool reportComments) : this(text)
+    {
+        this.reportLiterals = reportLiterals;
+        this.reportComments = reportComments;
+    }
 
     /// <summary>Where the walk has got to, zero-based.</summary>
     public readonly int Position => position;
@@ -130,7 +172,8 @@ internal struct SqlLexer(string text)
 
     /// <summary>
     /// Reads the next thing: a bare word, one character of punctuation, or a fault. Whitespace, comments,
-    /// string literals, quoted identifiers and dollar-quoted bodies are walked over rather than returned.
+    /// string literals, quoted identifiers and dollar-quoted bodies are walked over rather than returned - except
+    /// literals and comments for a lexer made to report them.
     /// </summary>
     /// <param name="token">What was found, when something was.</param>
     /// <returns>
@@ -153,7 +196,16 @@ internal struct SqlLexer(string text)
 
             if (c == '-' && Peek(1) == '-')
             {
+                int start = position;
+
                 SkipLineComment();
+
+                if (reportComments)
+                {
+                    token = new SqlToken(SqlTokenKind.Comment, text[start..position], start, position, depth, SqlLexFault.None);
+                    return true;
+                }
+
                 continue;
             }
 
@@ -167,6 +219,12 @@ internal struct SqlLexer(string text)
                     return true;
                 }
 
+                if (reportComments)
+                {
+                    token = new SqlToken(SqlTokenKind.Comment, text[start..position], start, position, depth, SqlLexFault.None);
+                    return true;
+                }
+
                 continue;
             }
 
@@ -177,6 +235,12 @@ internal struct SqlLexer(string text)
                 if (!TrySkipQuoted())
                 {
                     token = Fault(SqlLexFault.UnterminatedString, c.ToString(), start);
+                    return true;
+                }
+
+                if (reportLiterals && c == '\'')
+                {
+                    token = new SqlToken(SqlTokenKind.Literal, text[start..position], start, position, depth, SqlLexFault.None);
                     return true;
                 }
 
@@ -203,6 +267,12 @@ internal struct SqlLexer(string text)
                 if (!TrySkipDollarQuoted(tag!))
                 {
                     token = Fault(SqlLexFault.UnterminatedDollarQuote, tag!, start);
+                    return true;
+                }
+
+                if (reportLiterals)
+                {
+                    token = new SqlToken(SqlTokenKind.Literal, text[start..position], start, position, depth, SqlLexFault.None);
                     return true;
                 }
 

@@ -8,6 +8,7 @@ using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Health;
+using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
@@ -216,6 +217,10 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddSingleton<HealthHistory>();
         services.TryAddSingleton<HealthSweeper>();
         services.TryAddSingleton<HealthSweepCache>();
+
+        // H7: the statement checks' memory of the texts they have read, so a statement sweep whose statements are all
+        // known makes no text call - each one costs pg_stat_statements its whole query-text file.
+        services.TryAddSingleton<StatementTextCache>();
         services.TryAddScoped<HealthMutes>();
         services.TryAddScoped<HealthAlerts>();
         services.TryAddScoped<IHealthService, HealthService>();

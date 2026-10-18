@@ -46,7 +46,7 @@ Checks come in four cost tiers:
 | 0 | The store's configuration and the process's own state. No I/O. | With every sweep |
 | 1 | The catalog and the statistics views (`pg_class`, `pg_stat_*`, `pg_locks`, `pg_stat_activity`). | With every sweep |
 | 2 | A bounded slice of the data itself. | Only behind **Run deeper checks**, for a visitor the store policy allows the database as a whole; cached for five minutes |
-| 3 | `pg_stat_statements` and `EXPLAIN`. | Only for a visitor through the activity gate, cached for five minutes |
+| 3 | `pg_stat_statements` and `EXPLAIN`. | Only behind **Run statement checks**, for a visitor through the activity gate (`ViewDatabaseActivity`); a run is reused for five minutes |
 
 Who may *start* a costlier sweep is decided by the studio's service, not by the page's button: a tier-2 sweep
 reads a slice of every table it checks, so a visitor the store policy admits for one tenant only cannot start

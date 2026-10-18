@@ -42,11 +42,43 @@ internal sealed record HealthQuery(string Sql, IReadOnlyList<NpgsqlParameter> Pa
     {
     }
 
+    /// <summary>
+    /// A statement whose "Show SQL" is <paramref name="shown" /> rather than its own text - for a statement that
+    /// carries text the studio did not write and must not print unmasked.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three builders need it, all in <see cref="HealthStatementQueries" />, and <c>StatementChecksFenceTests</c> holds
+    /// it to them in the compiled assembly. <see cref="HealthStatementQueries.Explain" /> plans a statement
+    /// <c>pg_stat_statements</c> recorded, and that text is another program's - it can name a hidden document
+    /// type's table or a schema the visitor may not see, and "Show SQL" is drawn for everybody the finding is
+    /// shown to, without the per-visitor mask its evidence goes through. So what is recorded for it is the
+    /// EXPLAIN's shape and where the text came from.
+    /// </para>
+    /// <para>
+    /// <see cref="HealthStatementQueries.Counters" /> and <see cref="HealthStatementQueries.Texts" /> call the
+    /// extension's function by its schema, because <c>search_path</c> is pinned to <c>pg_catalog</c>; "Show SQL"
+    /// prints that schema as <c>WithheldNames.Token</c>, as any qualifier a visitor may not be allowed to see is
+    /// printed, and is otherwise the statement as it runs.
+    /// </para>
+    /// </remarks>
+    /// <param name="sql">The statement.</param>
+    /// <param name="parameters">What it binds.</param>
+    /// <param name="shown">What "Show SQL" prints in its place.</param>
+    public HealthQuery(string sql, IReadOnlyList<NpgsqlParameter> parameters, string shown) : this(sql, parameters)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(shown);
+        Shown = shown;
+    }
+
     /// <summary>The statement - get-only, so no <c>with</c> expression can rewrite it.</summary>
     public string Sql { get; } = Sql;
 
     /// <summary>What it binds - get-only for the same reason.</summary>
     public IReadOnlyList<NpgsqlParameter> Parameters { get; } = Parameters;
+
+    /// <summary>What "Show SQL" prints instead of <see cref="Sql" />, or <see langword="null" /> to print the statement.</summary>
+    public string? Shown { get; }
 
     /// <summary>The parameter names as the statement spells them, for "Show SQL" - never their values.</summary>
     public IReadOnlyList<string> ParameterNames =>

@@ -3,7 +3,8 @@
 These checks answer: **why is the app slow, and what is going to bite us?** They read the catalog and the
 statistics views (`pg_class`, `pg_index`, `pg_inherits`, `pg_depend`, `pg_stats`, `pg_stat_user_tables`,
 `pg_stat_user_indexes`, `pg_stat_progress_create_index`) - tier 1, at every sweep - except T09, which reads a bounded sample of the data behind
-**Run deeper checks**. Back to the [index](../health.md).
+**Run deeper checks**, and T02, T22 and T23, which read `pg_stat_statements` behind **Run statement checks** (tier 3,
+[below](#the-statement-checks-t02-t22-t23)). Back to the [index](../health.md).
 
 What every check here has in common:
 
@@ -265,3 +266,162 @@ transaction holding the horizon back. The lines are measured from the server's o
 tables, because a DBA who raised it to a billion and a half has a server on which a table at 1.2 billion has not
 yet been asked to freeze. One finding for the database, naming the oldest tables and both lines. The cure is a
 DBA's `VACUUM (FREEZE)`, once whatever holds the horizon is gone.
+
+## The statement checks (T02, T22, T23)
+
+T02, T22 and T23 read `pg_stat_statements`, the extension that counts every statement the server has run - tier 3.
+What they have in common:
+
+- **Only behind Run statement checks, and only through the activity gate.** They read other people's statements,
+  so they run only when a visitor with `MartenStudioOptions.Capabilities.ViewDatabaseActivity` (and the write
+  policy for the database as a whole) asks, and their result is cached for five minutes. A visitor without the gate
+  sees the button off, the setting or policy it needs, and none of their findings - not even a count. Every
+  statement shown is masked for the visitor reading it with Database › Sessions' own rule: a withheld schema's name
+  is masked, and a statement that names a hidden document type's table, a Marten document table no registered store
+  declares while types may be hidden, or a table of a store the visitor may not see is withheld outright.
+- **Read as the store's own role, and only its own statements.** Every other health read takes `SqlConsoleRole`.
+  This one does not, on purpose: Marten's statements run as the store's role, and `pg_stat_statements` shows a role
+  that is neither a superuser, a member of `pg_read_all_stats` nor the statement's own user only `<insufficient
+  privilege>` for them - so a narrowed console role, the configuration a careful host has, would see nothing of the
+  store. The reads are bounded to `userid = current_user` and this database, so what is read is what the store's
+  role ran here itself - which includes any other application that connects as the same role, and no other role's
+  statements. The plan of a statement still runs as `SqlConsoleRole`, like the Query page's.
+- **Not every text is shown.** `pg_stat_statements` replaces a plannable statement's constants with `$n`, but not
+  every statement's: a utility statement can keep its own as they were written - `copy (select ... where
+  data->>'ssn' = '123-45-6789') to stdout` on PostgreSQL 17, `CALL`, `DECLARE` and `select ... into` on 13 to 15.
+  Read as the store's role, such a text could show a value the host's narrowed `SqlConsoleRole` would have hidden on
+  Database › Sessions. So a text is withheld when it still carries a string or dollar-quoted constant (`'...'`,
+  `E'...'`, `U&'...'`, `$tag$...$tag$`), when its first word is not `select`, `with`, `insert`, `update`, `delete`,
+  `merge`, `values` or `table`, or when it is a `select ... into`: the finding stays, with its numbers, and its
+  Statement says why the text is not shown. The text is read with the studio's own SQL lexer, so a comment cannot
+  hide a literal from the rule. What it does not catch is a **numeric** constant in a text Postgres kept
+  un-normalised - an entry re-created after an eviction or a reset can keep every constant as written - because
+  `order by 1` and a type's `(10)` look the same; such a number is shown.
+- **Comments are never shown.** A comment in a statement is another application's free text - a
+  sqlcommenter-style `/* user='alice@example.com' */` tag from any application that connects as the same role - so
+  every comment in a shown text is printed as `/* ‹withheld› */`, a `--` comment keeping its line break.
+- **Counters first, then text - and what that saves.** The counters are read with
+  `pg_stat_statements(showtext := false)`, which never opens the extension's query-text file, and only each check's
+  top few are kept, ranked on the server: at most 20 statements, in shares that sum to 20 (10 by time, 4 by mean, 3
+  guarded writes, 3 by JIT time). The text call asks for those statements by `queryid` - but the filter bounds only
+  the rows returned: the extension loads its whole text file and fetches every entry's text before the filter sees a
+  row (PostgreSQL 17's `pg_stat_statements_internal` with `showtext := true`), so one text call costs what reading
+  the plain view costs. The studio therefore keeps each text it has read, per database (up to 200 texts of at most
+  4,096 characters, in memory, for the life of the process - so the memory grows with the number of databases whose
+  statement checks were run), and asks only for the ones it does not hold: a run whose statements are all known makes
+  no text call at all.
+- **A window, once there is one.** Each check samples its statements' counters into a statement history of their
+  own (beside the database's, read only by these checks) and, from the second run of the statement checks on, judges
+  the change between runs. Before that it judges the totals since the statement's counters began - the entry's own
+  `stats_since` on PostgreSQL 17, the extension's `stats_reset` before it - and the finding says which.
+- **What it cannot see.** `pg_stat_statements` records a statement when it completes, so a statement that failed is
+  never counted. Another role's statements are not read. When the extension evicted entries in the window
+  (`pg_stat_statements.max`, 5,000 by default; `pg_stat_statements_info.dealloc` rose) the finding says that a
+  statement's counters may have restarted inside it.
+- **Expected absences are values.** The extension not installed in this database, its library not in
+  `shared_preload_libraries` (the view then fails with `55000`), a version older than 1.8, or no statement of the
+  store's role recorded yet: each is a "not checked" row saying what would enable the checks, and a Debug line. A DBA
+  enables it by adding `pg_stat_statements` to `shared_preload_libraries`, restarting, and creating the extension in
+  the store's database; managed platforms switch it on in their parameter settings.
+
+## T02 Expensive statements
+
+**Warning** for a statement of the store's own role on one of its tables whose execution time over the window was 10%
+of the window's length or more (six minutes an hour), or that averaged 500 ms a call over at least 10 calls; **Info**
+from 2% (72 seconds an hour). Several connections running a statement at once can add up to more than the window
+itself, and the finding then says how many times the window's length it took. A share is judged only on at least 10
+seconds of execution in the window: an entry whose counters began a few seconds ago has spent a large share of its
+short life on any burst, and a share of so little is not a cost. At most five findings a run, worst first. The statement must name a table the store's
+configuration declares - a hidden document type's table is never one - and be the application's workload: a
+migration's DDL, a transaction's `begin` or an `explain`, which `pg_stat_statements` records too, is not judged.
+
+The finding carries the statement (masked for you), its calls, execution time and mean, its share of the role's
+statement time, rows per call - a read that returns a thousand rows or more each time is often a `ToListAsync()` with
+no `Take()` - the temporary blocks it spilled to disk (C08 counts the database's temporary files), its share of the
+role's WAL, and its plan:
+
+```csharp
+opts.Schema.For<Order>().Index(x => x.Status);
+// or, where it is also sorted on or compared as a column:
+opts.Schema.For<Order>().Duplicate(x => x.Status);
+```
+
+**The plan, and what it can say.** The five most expensive statements are planned without their values: the text is
+prepared as `marten_studio_plan` - always that name, so that the plans add a fixed handful of entries to the host's
+`pg_stat_statements` rather than a new one each time - explained under `plan_cache_mode = force_generic_plan` in
+`FORMAT JSON`, and deallocated. A prepared statement outlives the transaction it was made in, so a plan that stops
+early - refused, cancelled, cut off - takes it back in a transaction of its own, and once more outside any
+transaction if that fails. If both fail, that session goes back to the host's pool holding at most the one
+`marten_studio_plan` name - a prepared read that runs nothing unless it is executed by name - until Npgsql resets the
+session with `DISCARD ALL` (which it does while it has no prepared statements of its own on it) or the studio's next
+plan on it meets the name, deallocates it and plans again; a Debug line (9281) says so. The studio never clears the
+host's pool, terminates a session or runs `DISCARD ALL` on one. A statement whose text is withheld is never planned,
+because its plan would show what the text hides. It is never `ANALYZE`, nothing is executed, and only a plain
+`select` is planned: planning an `insert`, `update`, `delete` or a `select ... for update` takes the lock its
+execution would, where planning a read takes the
+`AccessShareLock` a read takes, under the studio's `lock_timeout`. That is the plan `EXPLAIN (GENERIC_PLAN)` prints on
+PostgreSQL 16, read on any version: `GENERIC_PLAN` itself cannot be used from Npgsql, whose extended protocol either
+binds no values (and fails) or binds values that the planner then folds in as constants. The plan is of the text
+`pg_stat_statements` recorded, in which a plannable statement's constants are placeholders - including the JSON
+member names Marten writes into its SQL as constants, so `d.data ->> 'Status'` is recorded as `d.data ->> $2`. A
+generic plan can never use an expression index for a filter whose key is a placeholder (measured on PostgreSQL 17:
+the same statement is a sequential scan with the key as `$2` and an index scan with the key written out). So a
+sequential scan filtering on such a member is **not** taken as a missing index: the finding says the member cannot be
+named, gives the line with a placeholder member to add if no index on that member exists already, and links to Query
+in Marten mode on the collection, whose index advice names the member and says whether an index serves it. What the
+plan does say soundly - a whole-table read filtering on a duplicated column, a containment (`@>`) test, a JSON path
+written with literal keys, or no filter at all - goes to the same index advisor the Query page uses, and its line is
+the remedy. A statement that was not planned - not a plain `select`, cut, or one
+`SqlConsoleRole` may not read - says why.
+
+The studio's own reads run as the store's role too when `SqlConsoleRole` is not set, and a **Run deeper checks**
+read of a large event table is a statement on the store's tables; such a statement can appear here.
+
+## T22 Optimistic-concurrency conflicts
+
+**Info** when any of a document type's guarded writes conflicted in the window, **Warning** at a conflict rate of 5%
+or more, over at least 1,000 guarded writes. The rate is `1 - rows / calls`, summed over every guarded statement of
+one table: Marten writes a document whose type uses `UseOptimisticConcurrency(true)` (or numeric revisions) with
+`insert into ... on conflict (...) do update set ... where {table}.mt_version = $n returning mt_version`, or
+`update ... where id = $n and mt_version = $m returning mt_version`, and checks a rich append's expected version with
+`update {schema}.mt_streams set version = $1 where id = $2 and version = $3 ... returning version`. Each returns its
+row when the version matched and none when somebody else wrote first, so the calls that returned nothing are the
+conflicts - each a `ConcurrencyException`, or an `EventStreamUnexpectedMaxEventIdException`, thrown from
+`SaveChangesAsync`. The shapes were read from Marten's sources at both ends, 9.39.0 and 9.50.2, where the
+closed-shape write path that builds them is the only one and is unchanged.
+
+A statement is matched to its table by the table it writes, which must be one of the store's visible tables.
+A quick append's conflict is a unique violation that fails its statement, and `pg_stat_statements` never counts a
+statement that failed - so quick appends are not counted here; E02 counts the tombstones a failed rich append leaves,
+and C08 the rollbacks. A projected document that takes its version from its stream
+(`UseVersionFromMatchingStream`) is guarded on the stream's version rather than on `mt_version`, and is not counted.
+
+The remedy is modelling, not configuration: keep aggregates small, so fewer commands touch the same one; serialise
+the writers of a hot one rather than letting them collide and retry, which locks the stream's `mt_streams` row until
+the session commits; and give a long-lived, busy aggregate a stream per period (a day, a month) rather than one
+stream for ever.
+
+```csharp
+var stream = await session.Events.FetchForExclusiveWriting<Order>(orderId);
+```
+
+## T23 JIT compilation share
+
+**Warning** when JIT compilation takes more than 20% of a store statement's execution time, over 100 calls or more
+in the window. PostgreSQL compiles a statement to machine code when its estimated cost passes `jit_above_cost`, and
+compiles it again on every execution. That pays off for a long analytical query and costs a short one more than it
+saves; Marten's statements are short, and a large table's cost estimates push them over the line. JIT time is what
+`pg_stat_statements` records from extension 1.10 (PostgreSQL 15) - generation, inlining, optimisation and emission,
+and from 17 deforming - so below 1.10 the check says it has nothing to judge. One finding for the database, naming
+the three statements that spend the most time compiling.
+
+```csharp
+opts.ConfigureNpgsqlDataSourceBuilder(b =>
+    b.ConnectionStringBuilder.Options = ((b.ConnectionStringBuilder.Options ?? string.Empty) + " -c jit=off").Trim());
+```
+
+That turns JIT off for the store's own connections - every data source Marten builds, tenant databases included -
+and nobody else's (`ConfigureNpgsqlDataSourceBuilder` is on `StoreOptions` at Marten 9.39.0 and 9.50.2, and
+`NpgsqlConnectionStringBuilder.Options` passes `-c` settings to each connection at Npgsql 9.0.4). A data source the
+host builds itself (`UseNpgsqlDataSource`) takes the same `Options` on its own builder. To keep JIT for the occasional
+long query, a DBA can raise `jit_above_cost` for the store's role instead.

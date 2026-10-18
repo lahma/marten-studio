@@ -12,7 +12,40 @@ namespace MartenStudio.Services.Health;
 /// check can say "3 sessions idle in transaction" to everybody and name them only behind
 /// <see cref="HealthGate.Activity" />.
 /// </param>
-internal sealed record HealthEvidence(string Label, string Value, HealthGate Gate = HealthGate.None);
+internal sealed record HealthEvidence(string Label, string Value, HealthGate Gate = HealthGate.None)
+{
+    /// <summary>What <see cref="Value" /> says in a sweep, for a statement's text not yet masked for anybody.</summary>
+    public const string StatementPending = "withheld - a statement's text is shown only once it is masked for you";
+
+    /// <summary>
+    /// Another program's statement, carried apart from <see cref="Value" />: it is shown only after the report masks it
+    /// for the visitor it is drawn for, and <see cref="Value" /> holds <see cref="StatementPending" /> until then.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A finding is shared by every visitor of the database, and what one of them may read of a statement depends on
+    /// the schemas, the document types and the stores their own gates let them see (<c>StatementScreen</c>). So the
+    /// sweep never puts the text where a page draws it: the report replaces <see cref="Value" /> with
+    /// <c>SessionQueryText.Present</c>'s answer for that visitor - masked, withheld or cut - and drops this. Anything
+    /// that shows evidence without going through the report shows the placeholder, which is the safe failure.
+    /// </para>
+    /// </remarks>
+    public HealthStatementText? Statement { get; init; }
+
+    /// <summary>
+    /// A statement's text as evidence: behind <see cref="HealthGate.Activity" />, and masked per visitor when shown.
+    /// </summary>
+    /// <param name="label">What it is.</param>
+    /// <param name="text">The text, as read.</param>
+    /// <param name="truncated">Whether the read cut it.</param>
+    public static HealthEvidence StatementText(string label, string text, bool truncated) =>
+        new(label, StatementPending, HealthGate.Activity) { Statement = new HealthStatementText(text, truncated) };
+}
+
+/// <summary>A statement's text, unmasked, inside a sweep - never on a page as it is.</summary>
+/// <param name="Text">The text.</param>
+/// <param name="Truncated">Whether the read cut it.</param>
+internal sealed record HealthStatementText(string Text, bool Truncated);
 
 /// <summary>One statement a check ran, for "Show SQL" (D14): the text and its parameter names, never values.</summary>
 /// <param name="Sql">The statement, exactly as it was sent.</param>

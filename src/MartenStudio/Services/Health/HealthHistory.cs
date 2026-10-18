@@ -197,17 +197,25 @@ internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, Da
 /// ordinary store, up to a few megabytes for one with hundreds of shards or slots. A store with a database per
 /// tenant keeps a ring per database it has been swept for, each carrying the same server's slots, so R01's part is
 /// bounded by <c>MaxSlots</c> × the databases swept × <see cref="Capacity" /> - the one place this grows with the
-/// deployment.
+/// deployment. A database whose statement checks were run has a second ring (<see cref="RingOf" />), of at most
+/// <c>HealthStatementQueries.MaxTexts</c> (20) statements' few series a sample, written only when a visitor runs the
+/// statement checks: kilobytes, never a number per statement the extension holds. Beside it, the statement checks'
+/// <c>StatementTextCache</c> holds up to 200 texts of at most 4,096 characters per database whose statement checks
+/// have run, for the life of the process - about 1.6 MB a database at its worst - so it, too, grows with the number
+/// of databases swept, and with nothing else.
 /// </para>
 /// <para>
 /// Singleton. Two circuits watching one database are watching one history: the sweep is shared, so its
 /// sample is too.
 /// </para>
 /// <para>
-/// <b>Regular sweeps only, and read per gate.</b> A deeper or statement sweep adds nothing here: a number only a
-/// gated tier-3 sweep could read must not become readable to an ungated evaluator through
-/// <see cref="HealthEvaluation.History" />, which would be a channel across the gates. Within a regular sweep the
-/// same holds check by check: every series carries its writer's gate, and an evaluator reads only the series at
+/// <b>Regular sweeps only, and read per gate.</b> A deeper or statement sweep adds nothing to a database's history: a
+/// number only a gated tier-3 sweep could read must not become readable to an ungated evaluator through
+/// <see cref="HealthEvaluation.History" />, which would be a channel across the gates. A statement sweep keeps a
+/// history of its own instead - a second ring per database (<see cref="RingOf" />), which only statement sweeps
+/// append to and read, so the statement checks can judge a window rather than the totals since a reset, and every
+/// check that reads it is behind the activity gate (the registry refuses a tier-3 check that is not). Within a
+/// regular sweep the same holds check by check: every series carries its writer's gate, and an evaluator reads only the series at
 /// or below its own (<see cref="HealthSamplePart" />). And a sample is kept only if it is newer than the newest one
 /// already held and at least <c>minimumSpacing</c> after it - the sweeper passes half of
 /// <c>EffectiveHealthInterval</c> - so a page and the opt-in health check sweeping the same database do not
@@ -291,6 +299,19 @@ internal sealed class HealthHistory
                 : HealthHistoryView.Empty;
         }
     }
+
+    /// <summary>
+    /// Which ring a sweep of <paramref name="kind" /> appends to and reads: the database's own, or - for a statement
+    /// sweep - the statement history beside it, which nothing else reads.
+    /// </summary>
+    public static string RingOf(string databaseId, HealthSweepKind kind)
+    {
+        ArgumentNullException.ThrowIfNull(databaseId);
+        return kind == HealthSweepKind.Statements ? databaseId + StatementsRingSuffix : databaseId;
+    }
+
+    /// <summary>What a statement history's ring is keyed by after the database's identity.</summary>
+    internal const string StatementsRingSuffix = "|statements";
 
     private static string KeyFor(string storeKey, string databaseId) => storeKey + "|" + databaseId;
 

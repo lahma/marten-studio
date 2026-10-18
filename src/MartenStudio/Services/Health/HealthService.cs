@@ -212,8 +212,13 @@ internal sealed class HealthService : IHealthService
         results.AddRange(deeper?.Results ?? []);
         results.AddRange(statements?.Results ?? []);
 
+        // A statement's text is masked for this visitor, with the database browser's own gate - read once per report,
+        // and only if a finding this visitor is shown carries one.
+        Task<StatementScreen>? screenRead = null;
+        Task<StatementScreen> Screen() => screenRead ??= StatementScreenAsync(whole.Scope, whole, cancellationToken);
+
         (List<HealthReportFinding> findings, int withheld, IReadOnlyList<string> reasons) =
-            await ShowAsync(results, gate, scope.StoreKey, databaseId, scope).ConfigureAwait(false);
+            await ShowAsync(results, gate, scope.StoreKey, databaseId, scope, Screen).ConfigureAwait(false);
 
         IReadOnlyList<HealthCheckStatus> statuses = await StatusesAsync(results, findings, gate, scope, resolved, cancellationToken)
             .ConfigureAwait(false);
@@ -241,6 +246,7 @@ internal sealed class HealthService : IHealthService
             DeeperChecksRefused = deeperExist && !deeperAllowed ? gate.WhyNot(HealthGate.Database) : null,
             StatementChecksExist = registry.HasTier(HealthCostTier.Statements),
             StatementChecksAllowed = statementsAllowed,
+            StatementChecksRefused = registry.HasTier(HealthCostTier.Statements) && !statementsAllowed ? gate.WhyNot(HealthGate.Activity) : null,
         };
     }
 
@@ -328,8 +334,11 @@ internal sealed class HealthService : IHealthService
         }
 
         VisitorGate gate = new(this, scope);
+
+        // No screen: a cached read resolves no scope, so a statement's text cannot be masked for this visitor and is
+        // withheld (fail closed). The Health page itself goes through GetReportAsync, which masks it.
         (List<HealthReportFinding> findings, _, _) = await ShowAsync(
-                sweep.Results.Where(wanted), gate, scope.StoreKey, sweep.DatabaseId, audit ? scope : null)
+                sweep.Results.Where(wanted), gate, scope.StoreKey, sweep.DatabaseId, audit ? scope : null, screen: null)
             .ConfigureAwait(false);
 
         return (sweep, [.. findings.Where(x => !mutes.IsMuted(x.MuteKey))]);
@@ -367,12 +376,17 @@ internal sealed class HealthService : IHealthService
     /// The scope the visitor asked with, when what is shown is to be audited (<see cref="RecordActivityShown" />);
     /// <see langword="null" /> for a read that shows no evidence.
     /// </param>
+    /// <param name="screen">
+    /// What this visitor's statements are checked against, read on first use; <see langword="null" /> withholds every
+    /// statement's text (<see cref="HealthEvidence.Statement" />).
+    /// </param>
     private async Task<(List<HealthReportFinding> Findings, int Withheld, IReadOnlyList<string> Reasons)> ShowAsync(
         IEnumerable<HealthCheckResult> results,
         VisitorGate gate,
         string storeKey,
         string databaseId,
-        StudioScope? audited)
+        StudioScope? audited,
+        Func<Task<StatementScreen>>? screen)
     {
         List<HealthReportFinding> shown = [];
         int withheld = 0;
@@ -411,9 +425,25 @@ internal sealed class HealthService : IHealthService
                     bool passes = await gate.PassesAsync(item.Gate).ConfigureAwait(false);
                     revealsActivity |= passes && item.Gate == HealthGate.Activity;
 
-                    evidence.Add(passes
-                        ? item
-                        : item with { Value = "withheld - " + gate.WhyNot(item.Gate) });
+                    if (!passes)
+                    {
+                        evidence.Add(item with { Value = "withheld - " + gate.WhyNot(item.Gate), Statement = null });
+                    }
+                    else if (item.Statement is { } statement)
+                    {
+                        // Another program's text, masked for this visitor by Database › Sessions' own rule - and never
+                        // handed on as it is: the item a page receives carries only what this visitor may read.
+                        StatementScreen visitor = screen is null
+                            ? StatementScreen.Unchecked(options.Value.IsDocumentTypeVisible is not null)
+                            : await screen().ConfigureAwait(false);
+
+                        SessionStatementText masked = SessionQueryText.Present(statement.Text, statement.Truncated, visitor);
+                        evidence.Add(item with { Value = masked.Text ?? masked.Note ?? HealthEvidence.StatementPending, Statement = null });
+                    }
+                    else
+                    {
+                        evidence.Add(item);
+                    }
                 }
 
                 if (revealsActivity)
@@ -604,6 +634,32 @@ internal sealed class HealthService : IHealthService
         {
             logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask a health check's error");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// What this visitor's statements are checked against - the database browser's gate for the database as a whole,
+    /// as Database › Sessions reads it - or <see cref="StatementScreen.Unchecked" /> when it cannot be read, which
+    /// withholds every statement's text.
+    /// </summary>
+    private async Task<StatementScreen> StatementScreenAsync(StudioScope whole, ResolvedScope resolved, CancellationToken cancellationToken)
+    {
+        bool hidesDocumentTypes = options.Value.IsDocumentTypeVisible is not null;
+
+        if (services.GetService<DatabaseAccess>() is not { } access)
+        {
+            return StatementScreen.Unchecked(hidesDocumentTypes);
+        }
+
+        try
+        {
+            DatabaseGateRead read = await access.GateAsync(whole, resolved, cancellationToken).ConfigureAwait(false);
+            return StatementScreen.Of(read, hidesDocumentTypes);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask a health finding's statement");
+            return StatementScreen.Unchecked(hidesDocumentTypes);
         }
     }
 

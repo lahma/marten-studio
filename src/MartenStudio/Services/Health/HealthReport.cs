@@ -171,6 +171,12 @@ internal sealed record HealthReport
     /// <summary>Whether this visitor may run the statement checks (the activity gate).</summary>
     public bool StatementChecksAllowed { get; init; }
 
+    /// <summary>
+    /// What running the statement checks would take, naming the setting or the policy, when they exist and this
+    /// visitor may not - the service's refusal, said on the page so a disabled button is not a mystery.
+    /// </summary>
+    public string? StatementChecksRefused { get; init; }
+
     /// <summary>The worst severity among the findings, or <see langword="null" /> for none.</summary>
     public HealthSeverity? Worst => Findings.Count == 0 ? null : Findings.Min(static x => x.Severity);
 
