@@ -64,8 +64,9 @@ public static class MartenStudioHealthChecksBuilderExtensions
     /// <param name="tags">Tags a health endpoint can filter on - to put the check on a readiness probe only, say.</param>
     /// <param name="timeout">
     /// How long a probe waits for the check before ASP.NET Core reports it as having timed out, or
-    /// <see langword="null" /> for no limit of the check's own. Only the process's first probe can wait for a run;
-    /// giving up cancels that probe's wait and never the run.
+    /// <see langword="null" /> for no limit of the check's own. A probe waits for a run only when there is no
+    /// result yet, or the latest is two intervals old or older; giving up cancels that probe's wait and never
+    /// the run.
     /// </param>
     /// <returns>The same builder, so calls can be chained.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="builder" /> or <paramref name="name" /> is null.</exception>

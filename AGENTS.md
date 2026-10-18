@@ -181,7 +181,7 @@ model, the phased delivery plan — lives in the approved plan at
     that disposal with it, leaving the `DotNetObjectReference` that pins the component undisposed and the
     page's `CancellationTokenSource` uncancelled. A filter still rethrows anything that is a real bug.
 
-## Design decisions (D1–D27)
+## Design decisions (D1–D28)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the
 rationale is not.
@@ -483,6 +483,25 @@ upserts the tenancy's seed rows. On a single-server tenancy it creates every con
 not exist yet, under no `AutoCreate` at all. The studio enumerates on the first navigation, so in a process that runs no daemon of its own it can be
 that first caller; a host whose daemon runs in-process, or that applies on startup, has always enumerated
 before it. A known limit, not a per-poll cost.
+
+**D28 — LINQ mode is its own capability, parsed by JasperFx's Dynamic LINQ, built without `ToCommand`, and
+lit up at run time from Marten 9.48.** The Query page's third mode hands the predicate a host's code would
+write to Marten's own `Query<T>()` on a pinned session, so tenancy and soft deletes stay Marten's. It sits
+behind `RunLinqQueries`, off by default and authorized like a write, rather than riding Mode A's
+no-capability read, because its risk is of another kind: Marten's provider compiles and invokes every
+subtree that does not reference the document, so anything past a literal that reaches it is code running in
+the host. It is parsed by JasperFx's `DynamicQuery` under `DynamicQueryPolicy`, not by a parser of our own,
+because that is the allow-list JasperFx keeps for this threat and the dialect Marten's own diagnostics read
+speaks, and a C# expression parser written here would be one more parser to get exactly right
+(System.Linq.Dynamic.Core is not ours to reference either: hard rule 1). No one allow-list is trusted alone:
+a lexical screen in front of the parse and the studio's own walk of the parsed tree behind it leave Marten
+nothing to evaluate but literals. The statement comes from `BuildLinqParser()` and `BuildDiagnosticCommand`,
+never `ToCommand`, which runs `EnsureStorageExists` - DDL on a read path (hard rule 14); a Marten that moves
+those internals makes the mode absent, never a fallback. And 9.48 (JasperFx 2.84, the first with
+`DynamicQuery`) is a light-up, not a floor: nothing else needs it, and a host on 9.39-9.47 must not be
+dragged forward for one mode, so the adapter is reached by reflection behind the `DynamicLinqQuery` probe,
+pinned at both ends by `MartenRuntimeProbeTests` and `MartenLinqCommandTests`, and its absence is a line
+naming the Marten it needs. `docs/linq-mode.md` is the threat model.
 
 ## Package budget
 

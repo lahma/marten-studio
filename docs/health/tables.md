@@ -13,9 +13,10 @@ What every check here has in common:
   tables, a projection's or an `ExtendedSchemaObjects` table, and `mt_hilo`. The list comes from the
   configuration alone, never from `AllObjects()` or `AllSchemaNames()` (which migrate), and a document type
   `IsDocumentTypeVisible` hides is left out of it - its table is not even a parameter of a statement.
-- **One read, shared.** The ten regular checks share one read of the tables and one of their indexes per
-  sweep, so the whole area costs a regular sweep five catalog statements on the sample store - those two, T10's
-  `pg_stats` read and T11's two.
+- **One read, shared.** The regular checks share one read of the tables and one of their indexes per sweep,
+  so the whole area costs a regular sweep eight statements on the sample store - those two, T10's `pg_stats`
+  read, T11's two (whether `mt_hilo` exists, then its one row), and three for T12-T14: the wraparound read the
+  three share, T14's read of who holds the horizon, and the replication-slot read it shares with R01.
 - **A list locks nothing it lists.** Sizes are `relpages` estimates, never `pg_relation_size`, which opens the
   table and queues behind any migration's lock on it; partitions are walked through `pg_inherits`, never
   `pg_partition_tree()`, which holds a lock on every partition. A tenant-partitioned table is one row, its

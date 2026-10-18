@@ -88,16 +88,19 @@ application is being built.
 
 ## The capability model
 
-Ten flags on `MartenStudioCapabilities`, every one `false` by default:
+Thirteen flags on `MartenStudioCapabilities`, every one `false` by default:
 
 `EditDocuments`, `DeleteDocuments`, `ArchiveStreams`, `ManageDeadLetters`, `ControlDaemon`,
-`RebuildProjections`, `CorrectProgression`, `ApplySchemaChanges`, `RunSql`, `BrowseDatabase`.
+`RebuildProjections`, `CorrectProgression`, `ApplySchemaChanges`, `RunSql`, `BrowseDatabase`,
+`ViewDatabaseActivity`, `CompactStreams`, `RunLinqQueries`.
 
-Two of them are reads rather than writes — `RunSql` and `BrowseDatabase` read beyond what Marten declares —
-and they are treated as writes for authorization, because they are the dangerous reads.
+Four of them are reads rather than writes — `RunSql` and `BrowseDatabase` read beyond what Marten declares,
+`ViewDatabaseActivity` reads other sessions and their statements, and `RunLinqQueries` evaluates an
+expression somebody typed — and they are treated as writes for authorization, because they are the dangerous
+reads. `CompactStreams` is a write that deletes events: what it does is in [`compaction.md`](compaction.md).
 
 `MartenStudioCapabilities.All()` is the one-line, greppable opt-in. `MartenStudioOptions.ReadOnly`
-overrides all ten whatever they say.
+overrides all thirteen whatever they say.
 
 This is Hangfire's [GHSA-7rq6-7gv8-c37h](https://github.com/advisories/GHSA-7rq6-7gv8-c37h) applied to
 the write axis: the dashboard that is dangerous by default is the one somebody maps without reading the
@@ -141,13 +144,19 @@ declares are named to nobody, details included. A session the studio's role cann
 said to be one it cannot see into, never left out.
 
 The refusal lives in the service (`ISessionActivityService.GetDetailsAsync` refuses as a value, and every
-refusal is audited); on the Health page each such piece of evidence is withheld per visitor. Statements are
-never part of a health finding at all: they appear only on Database › Sessions and in the Projections screen's
-high-water Explain, by one rule for both — masked for the schemas that visitor may not see, cut before a
-half-written name, and withheld outright when the visitor's schemas cannot be checked, when the statement names a
-document type `IsDocumentTypeVisible` hides, while hiding is configured when it names a Marten document table no
+refusal is audited); on the Health page each such piece of evidence is withheld per visitor. Statements
+appear on Database › Sessions, in the Projections screen's high-water Explain and in the findings of the
+statement checks T02 and T23 (behind **Run statement checks**; T22 shows only counts by kind of write), by
+one rule for all three — masked for the schemas that visitor may not see, cut before a half-written name,
+and withheld outright when the visitor's schemas cannot be checked, when the statement names a document type
+`IsDocumentTypeVisible` hides, while hiding is configured when it names a Marten document table no
 registered store declares, or when it names a document table of another registered store whose store policy
-refuses the visitor (its alias is in the table's name).
+refuses the visitor (its alias is in the table's name). A statement check reads `pg_stat_statements` as the
+store's own role, so its texts are held to more: a text is shown only with every comment printed as
+`/* ‹withheld› */`, and is withheld outright, with the finding and its numbers kept and nothing planned,
+while it still carries a string or dollar-quoted constant as written, or is not a plain query or write (a
+`COPY`, `CALL`, `DECLARE`, `FETCH` or `select … into`). A numeric constant in a text Postgres kept
+un-normalised is not caught, and is shown.
 
 What a shown statement can still carry is everything that is not a schema's or a table's name: literals and
 bound values as the application wrote them — a tenant id in `where tenant_id = 'acme'`, an e-mail address, an
@@ -161,6 +170,49 @@ any evidence behind the activity gate for a store and database is one Activity e
 `ViewDatabaseActivity` (event 9200, with the checks it came from), and another is recorded only when the set
 of checks showing it changes; the sidebar's health badge shows no evidence and records nothing. A read that
 fails for a reason nobody chose is event 9246, throttled. The studio never cancels or terminates a session.
+
+### `RunLinqQueries`
+
+LINQ mode ([`linq-mode.md`](linq-mode.md)) takes a predicate somebody typed, such as
+`Status == "Open" && Total > 100`, and hands it to Marten's own `Query<T>()`. It changes nothing, but its
+risk is not the SQL console's. Marten's LINQ provider evaluates **in this process** every part of an
+expression that does not reference the document — it compiles the subtree and invokes it to get a constant —
+so a parsed `Status == System.IO.File.ReadAllText("c:/x")` would be code running inside your application.
+That is why it is a capability of its own: off by default, included in `All()`, off under `ReadOnly`,
+authorized as a write (the write policy asked with `Capability = "RunLinqQueries"`), and present only on
+Marten 9.48 or later, which brings JasperFx 2.84 and its `DynamicQuery`.
+
+**What it can read.** Any document of a type the visitor can see — never one `IsDocumentTypeVisible` hides,
+directly or through a navigation — as Marten's own `Query<T>()` reads it, on a session opened with
+`SessionOptions.ForDatabase(tenant, database)`. Marten writes its own tenant predicate and soft-delete
+filter, and nothing in a predicate can widen them: `AnyTenant()`, `TenantIsOneOf()` and `MatchesSql()` are
+extension methods, which the parser cannot call. So the rows of a conjoined collection are asked for with
+the tenant, and the rows of a collection not divided by tenant, read from a tenant scope, and the plan of
+any query are asked with `TenantId = null`, because they reach the database as a whole. A hidden subclass
+under a visible root is read through the root, as on the Documents screen. The read runs in the console's
+read-only transaction under `QueryTimeout` and `SqlConsoleRole`, and no page starts past row 10,000.
+
+**Where its guard lives.** Not in one library. Before Marten sees anything, the text passes the studio's own
+lexical screen — every name bound to a member of the document's graph where the parser will bind it, size
+and depth caps, no type names, no `new`, `iif`, `@`, indexers or casts — then JasperFx's Dynamic LINQ under
+its allow-list (`DynamicQueryPolicy`, with the studio's guard as its first shape rule and `SqlNullSemantics`
+after it), then the studio's own walk of the whole composed expression, which refuses every node that is not
+on a closed list. The only parts of an accepted expression that do not reference the document are literals,
+so the most Marten can evaluate in this process is a constant. The mode refuses to run on a
+System.Linq.Dynamic.Core older than 1.7.4, the version JasperFx 2.84 requires and one past the fixes for
+CVE-2023-32571 (code execution through reflection) and CVE-2024-51417.
+
+**What it never runs.** Never `ANALYZE`: the plan is `EXPLAIN` of Marten's statement, which plans without
+executing. And never `ToCommand`: at Marten 9.39 and 9.50 alike, `ToCommand` — like every LINQ execution
+path — runs `EnsureStorageExists` for the queried type, which under the database's `AutoCreate` creates or
+migrates its table and, through `AllObjects()`, `mt_hilo`. The studio builds Marten's statement the way
+`ToCommand` builds it, minus that call, through Marten's own LINQ parser reached by reflection; a Marten
+that changes it makes the mode absent rather than falling back to `ToCommand`. Marten's statement must then
+pass the console's `ReadOnlySqlGuard` as well.
+
+Every refusal, and the first run of each query in a circuit, is audited (events 9260 to 9262), and the
+predicate is in your logs from then on. **Grant `RunLinqQueries` to people you would trust with the store's
+data.**
 
 ## The SQL console
 
@@ -420,9 +472,9 @@ A checklist for a deployment that is not a demo:
 
 ## Audit events
 
-Ids **9200–9299** are reserved for Marten Studio. Twelve are in use, and the numbers are fixed: an
-operator's log query is written against the number, and renumbering one later would silently change what
-a saved query matches.
+Ids **9200–9299** are reserved for Marten Studio. The audit events are these, and the numbers are fixed:
+an operator's log query is written against the number, and renumbering one later would silently change what
+a saved query matches. The README lists the operational ones, which say something went wrong.
 
 | Id | Event | Level |
 |---|---|---|
@@ -438,6 +490,10 @@ a saved query matches.
 | 9209 | `DaemonControlRequested` — the operation and its target | Information |
 | 9210 | `StoreUnavailable` — a registered store that would not build, and why | Warning |
 | 9211 | `DocumentWriteRoundTripDropped` — a save whose round trip dropped properties, counted and named | Warning |
+| 9245 | `SessionDetailsRead` — the first read of other sessions' details per circuit, store and database | Information |
+| 9260 | `LinqQueryExecuted` — a LINQ mode query's first run in a circuit: type, scope, rows, the predicate and ordering | Information |
+| 9261 | `LinqQueryRefused` — a LINQ mode refusal, naming its stage | Information |
+| 9262 | `LinqQueryFailed` — a LINQ mode query Postgres failed, by SQLSTATE | Information |
 
 ## Reporting a vulnerability
 
