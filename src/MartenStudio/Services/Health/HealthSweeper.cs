@@ -287,18 +287,23 @@ internal sealed class HealthSweeper
 
         HealthSweepMemo memo = new();
 
-        // Phase 1: every gatherer, in order. All of the sweep's I/O happens here.
-        List<Gathered> gathered = [];
+        // Phase 1: every gatherer. All of the sweep's I/O happens here. Tier by tier - the in-process checks first, then
+        // the catalog's - so that a slow catalog read can only ever cost the checks after it, and a configuration check,
+        // which costs nothing, is never the one the sweep's budget runs out on. The results keep the registry's area and
+        // code order, which is the order the page draws them in.
+        HealthCheckDescriptor[] run = [.. registry.All.Where(x => tiers.Contains(x.Info.Tier))];
+        Gathered[] gathered = new Gathered[run.Length];
         Dictionary<string, double> sample = new(StringComparer.Ordinal);
         Dictionary<string, HealthGate> sampleGates = new(StringComparer.Ordinal);
 
-        foreach (HealthCheckDescriptor descriptor in registry.All.Where(x => tiers.Contains(x.Info.Tier)))
+        foreach (int index in Enumerable.Range(0, run.Length).OrderBy(i => run[i].Info.Tier))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            gathered.Add(sweepBudget.IsCancellationRequested
+            HealthCheckDescriptor descriptor = run[index];
+            gathered[index] = sweepBudget.IsCancellationRequested
                 ? Gathered.Without(descriptor, HealthCheckOutcome.Unavailable, null, OutOfSweepBudget, [], Stopwatch.GetTimestamp())
-                : await GatherAsync(descriptor).ConfigureAwait(false));
+                : await GatherAsync(descriptor).ConfigureAwait(false);
         }
 
         // Phase 2: one sample, from every check that read something - regular sweeps only, so that nothing a
@@ -353,15 +358,17 @@ internal sealed class HealthSweeper
                 // Checked whole before any of it is kept, so a check that breaks the rule leaves no part behind.
                 List<HealthSamplePart> parts = [.. descriptor.Check.Sample(facts)];
                 HashSet<string> own = new(StringComparer.Ordinal);
+                List<string> twice = [.. parts.Select(static x => x.Series).Where(series => sample.ContainsKey(series) || !own.Add(series))];
 
-                foreach (HealthSamplePart part in parts)
+                if (twice.Count > 0)
                 {
-                    if (sample.ContainsKey(part.Series) || !own.Add(part.Series))
-                    {
-                        throw new HealthSweepRuleException(
-                            $"{info.Code} wrote a health series that was already written in this sweep; a series has one writer.",
-                            $"Health series '{part.Series}' was written twice in one sweep; {info.Code} is the second writer.");
-                    }
+                    // The log names each series' family and how many, never a qualifier: a qualifier can be a projection, a
+                    // tenant, or another database's replication slot (R01), and a log line is read by more people than the page.
+                    throw new HealthSweepRuleException(
+                        $"{info.Code} wrote a health series that was already written in this sweep; a series has one writer.",
+                        $"{info.Code} wrote {twice.Count} health series already written in this sweep, of "
+                        + string.Join(", ", twice.Select(SeriesFamily).Distinct(StringComparer.Ordinal))
+                        + "; a series has one writer, and the second is this one.");
                 }
 
                 foreach (HealthSamplePart part in parts)
@@ -457,6 +464,18 @@ internal sealed class HealthSweeper
 
             return new HealthCheckResult(info, HealthCheckOutcome.Failed, [], null, problem, gathered.Statements, gathered.Elapsed);
         }
+    }
+
+    /// <summary>
+    /// A series' family - <c>replication.slot-idle-retained:…</c> for <c>replication.slot-idle-retained:debezium</c> - which is
+    /// what a log line may name of it: the part before the qualifier.
+    /// </summary>
+    internal static string SeriesFamily(string series)
+    {
+        ArgumentNullException.ThrowIfNull(series);
+
+        int colon = series.IndexOf(':', StringComparison.Ordinal);
+        return colon >= 0 ? series[..(colon + 1)] + "…" : series;
     }
 
     /// <summary>

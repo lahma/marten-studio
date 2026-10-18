@@ -16,9 +16,17 @@ internal enum HealthSeverity
 
 /// <summary>Which part of the store a check is about - how the Health page groups its findings.</summary>
 /// <remarks>
-/// The plan's whole catalogue fits in these five, so a later packet adds a check to an area that already
-/// exists. Declared in the order the page draws them: the daemon first, because "why aren't my projections
-/// moving" is the question people ask most.
+/// <para>
+/// Declared in the order the page draws them: the daemon first, because "why aren't my projections moving" is
+/// the question people ask most; then the store's own data; then the server the store runs on; and the store's
+/// configuration last. The value is never persisted - a mute key, a history series and a docs link all name an
+/// area by its code or its file - so a member added in the middle moves nothing a visitor kept.
+/// </para>
+/// <para>
+/// <see cref="Replication" /> and <see cref="Server" /> were added in 0.4 (R1, decision 1): what a replication
+/// slot holds and what the server is configured to risk are neither the store's tables nor its sessions, and
+/// <see cref="Configuration" /> stays the store's own, read with no I/O.
+/// </para>
 /// </remarks>
 internal enum HealthArea
 {
@@ -33,6 +41,12 @@ internal enum HealthArea
 
     /// <summary>Connections, sessions and locks (C codes).</summary>
     Connections,
+
+    /// <summary>Replication slots and the WAL they hold (R codes).</summary>
+    Replication,
+
+    /// <summary>The Postgres server itself: its version, its settings, its storage (S codes).</summary>
+    Server,
 
     /// <summary>The store's own configuration (K codes).</summary>
     Configuration,

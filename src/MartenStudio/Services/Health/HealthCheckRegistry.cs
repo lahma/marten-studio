@@ -206,6 +206,8 @@ internal sealed partial class HealthCheckRegistry
         'E' => HealthArea.Events,
         'T' => HealthArea.Tables,
         'C' => HealthArea.Connections,
+        'R' => HealthArea.Replication,
+        'S' => HealthArea.Server,
         'K' => HealthArea.Configuration,
         _ => null,
     };
@@ -223,6 +225,6 @@ internal sealed partial class HealthCheckRegistry
         return false;
     }
 
-    [GeneratedRegex("^[DETCK][0-9]{2}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^[DETCRSK][0-9]{2}$", RegexOptions.CultureInvariant)]
     private static partial Regex CodeShape();
 }

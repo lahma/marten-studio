@@ -40,6 +40,8 @@ internal static class HealthPresentation
         HealthArea.Events => "Events",
         HealthArea.Tables => "Tables and indexes",
         HealthArea.Connections => "Connections and sessions",
+        HealthArea.Replication => "Replication and WAL",
+        HealthArea.Server => "Server",
         _ => "Configuration",
     };
 

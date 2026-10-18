@@ -2,7 +2,8 @@
 
 These checks look at who is connected to the store's database and what they hold: this process's connection
 pool (C01, C09), the server's connection budget (C02, C03), sessions and statements that hold things back (C04,
-C05, C06, C07), and the database's own counters (C08). Back to the [index](../health.md).
+C05, C06, C07), the database's own counters (C08), and whether a transaction-mode pooler stands between the
+HotCold daemon and its lock (C10). Back to the [index](../health.md).
 
 ## What these checks read, and when
 
@@ -262,6 +263,50 @@ system, is a value: the check says so and finds nothing.
 opts.ConfigureNpgsqlDataSourceBuilder(b => b.ConnectionStringBuilder.MaxPoolSize = 100);
 // or run the daemon on nodes of its own: AddAsyncDaemon(DaemonMode.HotCold) only there
 ```
+
+## C10 HotCold daemon behind a transaction pooler, proven
+
+**Critical** when two consecutive transactions on one of this database's connections run on two different
+Postgres server processes, this process runs the async daemon `HotCold`, and its leadership lock is
+session-scoped (`opts.Events.UseAdvisoryLockTransaction` false - Marten's default from 9.41).
+
+The probe is `select pg_backend_pid()` in two read-only transactions, one after the other, on the sweep's own
+connection, which comes from the store database's data source with its pooling as configured. Postgres gives
+a connection one server process for its whole life, so a direct connection answers the same process twice. A
+pooler that pools by transaction - PgBouncer with `pool_mode = transaction`, Neon's `-pooler` endpoint,
+Supabase's Supavisor or PgBouncer on 6543, Azure's PgBouncer on 6432 - may run each transaction on another
+server connection, and when it does, the two answers differ. Nothing is locked or written, and each
+statement runs under the sweep's `statement_timeout`.
+
+A different process is proof; the same one is **inconclusive**, and quiet. A pooler with one idle server
+connection, or one that hands back the most recently released connection first (PgBouncer's default,
+`server_round_robin = 0`), answers the same both times. A data source with `Multiplexing=true` sends each
+command over whichever physical connection is free, so there two processes would prove nothing, and the
+check says it was not checked.
+
+Why it is Critical: a session-scoped advisory lock belongs to the server process that took it, and a
+transaction-mode pooler lends that process to other clients between transactions. PgBouncer's feature map
+lists session-level advisory locks as "never" working in transaction pooling. The lock then belongs to
+whoever borrows the process next, the leader cannot release it from its own connection, and two nodes can
+run the same projection, or none can take it over.
+
+What to change (the same as [K04](configuration.md#k04-hotcold-daemon-behind-a-transaction-pooler)):
+
+```csharp
+opts.Events.UseAdvisoryLockTransaction = true;
+
+// ...and, on the node that runs the daemon, a direct connection rather than the pooler's
+```
+
+The transaction-scoped lock keeps one transaction open on one server connection for as long as the leader
+leads, which the pooler cannot hand away - at the cost of that connection and of an open transaction that
+holds back vacuum (C04, T14). Neon's and Supabase's documentation both send anything session-scoped to the
+direct connection.
+
+Never probed for `Solo` (no lock), `ExternallyManaged` (not Marten's lock), a process that runs no daemon,
+or a transaction-scoped lock. The two process ids are the studio's own sessions, and still behind
+`ViewDatabaseActivity`. This measures what this process's configuration meets; a daemon node with another
+connection string may not go through the pooler.
 
 ## Database › Sessions
 

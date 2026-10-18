@@ -13,6 +13,8 @@ heading is the anchor the page's "About" link opens:
 | Events | `E` | [`health/events.md`](health/events.md) |
 | Tables and indexes | `T` | [`health/tables.md`](health/tables.md) |
 | Connections and sessions | `C` | [`health/connections.md`](health/connections.md) |
+| Replication and WAL | `R` | [`health/replication.md`](health/replication.md) |
+| Server | `S` | [`health/server.md`](health/server.md) |
 | Configuration | `K` | [`health/configuration.md`](health/configuration.md) |
 
 An area's file is written by the packet that adds its first check; until then its link has nothing behind it.
@@ -73,8 +75,11 @@ The sweep is about the database; what each visitor is shown of it is decided per
 
 - A configuration finding (tier 0) is shown to anybody the store policy lets see the scope they selected -
   it says nothing the Configuration page does not. That is a rule the page is kept to rather than a hope:
-  what K01 prints (the database's `AutoCreate` and the host's environment name) and what K02 and K03 print
-  (the two tracking switches) are on the Configuration page's store, Events and Runtime cards.
+  what K01 prints (the database's `AutoCreate` and the host's environment name), what K02 and K03 print
+  (the two tracking switches) and what K04 prints (the daemon mode and the leadership lock's scope) are on the
+  Configuration page's store, Events, daemon and Runtime cards. K04's host and port are evidence at the
+  database-wide gate, as the Configuration page's database list is. S01, a catalog read, is shown at the same
+  gate as K01: the server's version is on the Overview already.
 - A database-wide number needs the store policy for the database as a whole, asked with `TenantId = null`.
 - Anything that names a session, a process id, a role, a client address, an application, a statement or a
   tenant needs `MartenStudioOptions.Capabilities.ViewDatabaseActivity` - off by default, off under

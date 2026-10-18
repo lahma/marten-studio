@@ -22,7 +22,7 @@ namespace MartenStudio.Services.Health;
 /// </remarks>
 /// <param name="code">
 /// The code: the area's letter (<c>D</c>aemon, <c>E</c>vents, <c>T</c>ables, <c>C</c>onnections,
-/// configuration <c>K</c>) and two digits. Unique across the studio.
+/// <c>R</c>eplication, <c>S</c>erver, configuration <c>K</c>) and two digits. Unique across the studio.
 /// </param>
 /// <param name="area">The area, which must be the one the code's letter names.</param>
 /// <param name="tier">What it costs, and so when it runs.</param>

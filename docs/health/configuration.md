@@ -2,8 +2,11 @@
 
 These checks read the store's configuration and the host's environment, and nothing else: tier 0, no I/O.
 They are shown to anybody the store policy lets see the scope they selected, because they say nothing the
-Configuration page does not: its store card shows `AutoCreate`, its Events card both tracking switches, and
-its Runtime card the host's environment name. Back to the [index](../health.md).
+Configuration page does not: its store card shows `AutoCreate`, its Events card both tracking switches, the
+daemon mode and the leadership lock's scope, and its Runtime card the host's environment name. The one exception
+is K04's host and port, which are evidence at the database-wide gate - the store policy for the database as a
+whole - because that is what the Configuration page asks before it lists a database's server and port. Back to the
+[index](../health.md).
 
 ## K01 AutoCreate in Production
 
@@ -90,3 +93,56 @@ opts.Events.EnableAdvancedAsyncTracking = true;
 
 Turning it on adds `mt_high_water_skips` and its bookkeeping to the event schema, created by the next schema
 apply.
+
+## K04 HotCold daemon behind a transaction pooler
+
+**Warning**, worded "looks like". This process runs the async daemon `HotCold`, its leadership lock is
+session-scoped (`opts.Events.UseAdvisoryLockTransaction` is false), and the host or port of the database's data
+source looks like a transaction-mode pooler:
+
+- a host with `-pooler.` in it - Neon's pooled endpoint is the direct one with `-pooler` after the endpoint
+  id, and runs PgBouncer with `pool_mode=transaction` (Neon, *Connection pooling*);
+- port `6543` - "Port 6543 reaches PgBouncer for the dedicated pooler and Supavisor for shared transaction
+  mode" (Supabase, *Connect to your database*). Supabase's shared pooler on 5432 is session mode, and is not
+  flagged;
+- port `6432` - PgBouncer's default `listen_port` (pgbouncer.org, *Configuration*), and the port of Azure's
+  built-in PgBouncer, whose `pgbouncer.pool_mode` defaults to `transaction` (Microsoft Learn, *PgBouncer in
+  Azure Database for PostgreSQL*). A PgBouncer of your own pools by session unless told otherwise.
+
+HotCold leadership is a Postgres advisory lock. A session-scoped one (`pg_try_advisory_lock`) belongs to the
+server process that took it, and a transaction-mode pooler hands that process to another client as soon as the
+transaction that took the lock ends. The lock then belongs to whoever uses that server connection next, the
+leader's release lands on another connection and fails, and two nodes can end up running the same projection,
+or none. PgBouncer's feature map says session-level advisory locks never work in transaction pooling.
+
+**What changed in Marten 9.41.** `UseAdvisoryLockTransaction` defaults to `false` from 9.41.0, so the lock is
+session-scoped unless the host says otherwise. Marten's migration guide (V9.50.2, *Key Changes in 9.41.0*) says
+"The one deployment that needs action is a daemon running behind PgBouncer in transaction pooling mode". On
+9.39 and 9.40 (the studio's floor and the release after it) the default is `true`, so the lock is
+transaction-scoped and this fires only for a host that turned it off. From 9.41 it fires for every HotCold host
+behind such a pooler that has not turned it on. The finding says which default applies to the Marten the host
+runs.
+
+What to change:
+
+```csharp
+opts.Events.UseAdvisoryLockTransaction = true;
+
+// ...and, on the node that runs the daemon, a direct connection to Postgres rather than the pooler's:
+// opts.Connection(directConnectionString);
+```
+
+With the transaction-scoped lock the leader keeps one transaction open for as long as it leads. A
+transaction-mode pooler keeps that transaction on one server connection, at the cost of the connection and of
+an open transaction that holds back vacuum (C04, T14). A direct connection for the daemon's node avoids the
+pooler altogether; Neon's and Supabase's documentation both send anything session-scoped to the direct
+connection string.
+
+The finding, the daemon mode and the lock setting are shown to anybody the store policy passes for the scope. The
+host and port that look pooled are shown only at the database-wide gate, as the Configuration page shows a
+database's server and port, and the status row names neither.
+
+Tier 0, no I/O: the host and port are all it has to go on, so it is a likeness and not a proof, and a pooler on a
+port of its own choosing is not recognised. [C10](connections.md#c10-hotcold-daemon-behind-a-transaction-pooler-proven)
+tests the connection itself. Never raised for `Solo` (it takes no lock), `ExternallyManaged` (the lock is not
+Marten's) or a process that runs no daemon.

@@ -149,6 +149,9 @@ internal static class ConfigurationDescriber
             new("Stale sequence threshold", Duration(daemon.StaleSequenceThreshold), "StoreOptions.Events.Daemon.StaleSequenceThreshold"),
             new("High water staleness", Duration(daemon.HighWaterStalenessThreshold), "StoreOptions.Events.Daemon.HighWaterStalenessThreshold"),
             new("Stop and drain timeout", Duration(daemon.StopAndDrainTimeout), "StoreOptions.Events.Daemon.StopAndDrainTimeout"),
+
+            // What health check K04 prints beside the mode: a configuration finding says nothing this page does not.
+            new("Transaction-scoped leadership lock", YesNo(events.UseAdvisoryLockTransaction), "StoreOptions.Events.UseAdvisoryLockTransaction"),
         ];
 
         return new EventStoreConfiguration(

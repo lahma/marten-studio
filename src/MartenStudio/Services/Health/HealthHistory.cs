@@ -185,9 +185,19 @@ internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, Da
 /// <remarks>
 /// <para>
 /// <b>Filled only by a sweep</b>, and a sweep runs only when a page asks (plan §3.5): a ring of
-/// <see cref="Capacity" /> samples per store and database - an hour at the default interval, a few
-/// kilobytes - kept in memory and lost on a restart, deliberately. There is no timer here and nothing
-/// that outlives the process's interest in it.
+/// <see cref="Capacity" /> samples per store and database - an hour at the default interval - kept in memory
+/// and lost on a restart, deliberately. There is no timer here and nothing that outlives the process's
+/// interest in it.
+/// </para>
+/// <para>
+/// <b>What it costs.</b> A sample holds one number per series its checks write: a few per check, one per async
+/// shard or projection for the daemon checks, and one per replication slot on the server for R01 - every slot,
+/// another database's included, at most <c>HealthServerQueries.MaxSlots</c> (200), most WAL first. So a database's
+/// ring is <see cref="Capacity" /> times that many numbers and their series names: tens of kilobytes for an
+/// ordinary store, up to a few megabytes for one with hundreds of shards or slots. A store with a database per
+/// tenant keeps a ring per database it has been swept for, each carrying the same server's slots, so R01's part is
+/// bounded by <c>MaxSlots</c> × the databases swept × <see cref="Capacity" /> - the one place this grows with the
+/// deployment.
 /// </para>
 /// <para>
 /// Singleton. Two circuits watching one database are watching one history: the sweep is shared, so its

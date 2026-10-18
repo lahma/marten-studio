@@ -60,13 +60,20 @@ public class HealthExportLiveTests(PostgresFixture postgres)
     /// K01 on a real store: AutoCreate.All in Production is a Warning, so the probe reports Degraded and names
     /// the code - and nothing else about the store.
     /// </summary>
+    /// <remarks>
+    /// The registry is K01 alone. The shared server is a Testcontainers one, started with <c>fsync</c> and
+    /// <c>full_page_writes</c> off, which S02 rightly calls Critical in Production (H10) - so with every check the
+    /// probe would be Unhealthy, and this test is about how a Warning reaches the probe, not about that server.
+    /// </remarks>
     [PostgresFact]
     public async Task A_store_that_migrates_on_first_use_in_Production_reports_Degraded_with_K01()
     {
         await using HealthLiveHost host = await HostAsync(
             "health_export_k01",
             Environments.Production,
-            static options => options.AutoCreateSchemaObjects = AutoCreate.All);
+            static options => options.AutoCreateSchemaObjects = AutoCreate.All,
+            static services => services.AddSingleton(global::MartenStudio.Services.Health.HealthCheckRegistry.ForTypes(
+                [typeof(global::MartenStudio.Services.Health.Checks.AutoCreateInProductionCheck)])));
 
         HealthReportEntry entry = await ProbeAsync(host);
 
@@ -245,7 +252,11 @@ public class HealthExportLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>A host of the test's own, with a data source of its own and the export opted into.</summary>
-    private Task<HealthLiveHost> HostAsync(string schema, string environment, Action<StoreOptions>? store = null)
+    private Task<HealthLiveHost> HostAsync(
+        string schema,
+        string environment,
+        Action<StoreOptions>? store = null,
+        Action<IServiceCollection>? services = null)
     {
         // A pool that is this test's alone: two pools with one connection string are one pool to Postgres, and
         // a connections check would be counting another test's sessions as this store's.
@@ -263,6 +274,12 @@ public class HealthExportLiveTests(PostgresFixture postgres)
                 options.Connection(connectionString);
                 store?.Invoke(options);
             },
-            services: static services => services.AddHealthChecks().AddMartenStudio(name: Name, tags: ["marten"]));
+            services: collection =>
+            {
+                collection.AddHealthChecks().AddMartenStudio(name: Name, tags: ["marten"]);
+
+                // After AddMartenStudio's own registration, so a test's narrower registry is the one resolved.
+                services?.Invoke(collection);
+            });
     }
 }

@@ -1,6 +1,7 @@
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Health;
 
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
@@ -320,7 +321,8 @@ public class HealthSweeperTests
         await using HealthHarness harness = HealthHarness.Create();
         harness.Sweeper.SweepBudget = TimeSpan.FromMilliseconds(300);
 
-        // Daemon checks run first (D90 is not applicable here), then T90, C90, K90, K91: T90 outlives the budget.
+        // Tier by tier (H10): the in-process K90 and K91 first, then the catalog's D90 (not applicable here), T90 and C90.
+        // T90 outlives the budget, so C90 - whose turn comes after it - is the one not started.
         harness.Script.Gather["T90"] = static async (_, token) =>
         {
             await Task.Delay(Timeout.Infinite, token);
@@ -330,11 +332,20 @@ public class HealthSweeperTests
         HealthSweep sweep = await harness.SweepAsync();
 
         sweep.Results.Single(static x => x.Check.Code == "T90").Outcome.Should().Be(HealthCheckOutcome.Unavailable);
-        HealthCheckResult skipped = sweep.Results.Single(static x => x.Check.Code == "K91");
+        HealthCheckResult skipped = sweep.Results.Single(static x => x.Check.Code == "C90");
         skipped.Outcome.Should().Be(HealthCheckOutcome.Unavailable);
         skipped.Problem!.Reason.Should().Contain("ran out of its budget");
-        harness.Script.Runs.Should().NotContainKey("K91", "it was never started");
+        harness.Script.Runs.Should().NotContainKey("C90", "it was never started");
         harness.Warnings.Should().BeEmpty("running out of the budget is the budget working");
+
+        // The configuration checks cost nothing and ran before any catalog read could use the budget up.
+        sweep.Results.Where(static x => x.Check.Tier == HealthCostTier.InProcess)
+            .Should().OnlyContain(static x => x.Outcome == HealthCheckOutcome.Checked);
+        harness.Script.Runs.Should().ContainKeys("K90", "K91");
+
+        // ...and the results are still in the registry's area and code order, the order the page draws.
+        sweep.Results.Select(static x => x.Check.Code).Should().Equal(harness.Services.GetRequiredService<HealthCheckRegistry>().All
+            .Where(static x => x.Info.Tier is HealthCostTier.InProcess or HealthCostTier.Catalog).Select(static x => x.Info.Code));
     }
 
     /// <summary>Review item 6: a deeper sweep adds nothing to the history an ungated evaluator reads.</summary>
