@@ -368,9 +368,13 @@ and how many of them sit in tables vacuumed since the holder began - rows vacuum
 
 - **Age in time, never a transaction's age alone.** A read-committed transaction takes a fresh snapshot with every
   statement, so a transaction open for a day can hold the horizon back by a minute. Marten's own HotCold leader is
-  one, measured at Marten 9.39 with the defaults: it holds its leadership lock in a transaction it never ends
-  (`Events.UseAdvisoryLockTransaction`), and its lock monitor (`Events.UseMonitoredAdvisoryLock`) runs `pg_sleep(60)`
-  in it, so at read committed its `backend_xmin` is never more than a minute old. So the age is a lower bound, from
+  one, with its lock transaction-scoped (`Events.UseAdvisoryLockTransaction`, the default at 9.39 and 9.40): it holds
+  its leadership lock in a transaction it never ends, and its lock monitor (`Events.UseMonitoredAdvisoryLock`) runs a
+  statement in it about once a minute - `pg_sleep(60)` at Marten 9.39 (Weasel 9.33); at 9.50.2 (Weasel 9.45,
+  Patched.DistributedLock.Postgres 1.3.3) no sleep at all, but DistributedLock's keepalive (`SELECT 0`) about 61 s
+  after the lock and every minute on, the session idle in its transaction in between - or, where the connection string
+  sets Npgsql's `Keepalive` or `Multiplexing`, `pg_sleep(60)` again, the session `active`, as at 9.39 - so at read
+  committed its `backend_xmin` is never more than about a minute old, measured at both. So the age is a lower bound, from
   Postgres' own timestamps - a running statement's age, the time a session has been idle in its transaction, each
   capped at the transaction's own age (a `DO` that commits in a loop, or a concurrent index build, is one statement
   across many short transactions), a prepared transaction's age, an inactive slot's `inactive_since` (PostgreSQL 17) -
@@ -412,7 +416,17 @@ and how many of them sit in tables vacuumed since the holder began - rows vacuum
   does hold the horizon for as long as it leads, and T14 says so after an hour (the time idle in a transaction is
   Postgres' own), with `opts.Events.UseAdvisoryLockTransaction = false;` as the remedy - or, for a host that must keep
   the transaction lock behind a pooler, `Events.UseMonitoredAdvisoryLock = true`, which at read committed - Postgres'
-  default - bounds the hold to about a minute. Under `default_transaction_isolation = 'repeatable read'` or
+  default - bounds the hold to about a minute (measured at 9.39 and 9.50.2). At 9.50.2 the monitor is the keepalive
+  (read by decompiling Patched.DistributedLock.Core 1.0.11 and Patched.DistributedLock.Postgres 1.3.3):
+  `ConnectionMonitor` starts its worker only when a keepalive cadence is set - infinite, so never, by default - or a
+  monitoring handle (`HandleLostToken`) is registered, and a monitoring handle makes it call the connection's
+  `SleepAsync` for at most a minute at a time. Postgres 1.3.3's `SleepAsync` waits on the client
+  (`NpgsqlConnection.WaitAsync`), the session idle in its transaction meanwhile, then runs
+  `SELECT 0 /* DistributedLock connection keepalive */`. On a connection whose connection string sets Npgsql's
+  `Keepalive` or `Multiplexing` it falls back to 9.39's shape: `SAVEPOINT`, `pg_sleep(@sleepTimeSeconds)` and
+  `ROLLBACK TO SAVEPOINT`, the session `active` in the sleep - the same bound on the hold, read as a running statement
+  rather than an idle transaction. (A connection a caller hands DistributedLock is not monitored at all; Weasel's come
+  from a data source, so they are its own.) With monitoring off nothing runs in the leader's transaction at all. Under `default_transaction_isolation = 'repeatable read'` or
   `'serializable'` the snapshot is the transaction's own and the monitor does not move it; only the session lock helps.
   From 9.41 the lock is the session's and the leader keeps no transaction open: its lock monitor's statement holds a
   snapshot for at most about a minute at a time.

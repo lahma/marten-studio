@@ -108,14 +108,65 @@ public class SessionChecksTests
         }
     }
 
+    /// <summary>
+    /// A daemon-lock holder that has written or locked a relation is not the leader's shape, so it is raised even inside the
+    /// leader's bound - two minutes idle here. One holding only its lock and a snapshot is the leader, inside the bound
+    /// (<see cref="C04_does_not_raise_Martens_leader_inside_the_keepalive_bound_and_raises_it_past_it" />).
+    /// </summary>
     [Theory]
     [InlineData(true, false, 0)]
-    [InlineData(false, true, 0)]
+    [InlineData(true, true, 0)]
     [InlineData(false, false, 2)]
-    public void C04_raises_a_session_that_holds_a_transaction_id_a_snapshot_or_a_relation_lock(bool written, bool snapshot, long relationLocks)
+    [InlineData(false, true, 2)]
+    public void C04_raises_a_daemon_lock_holder_that_has_written_or_locked_a_relation_inside_the_leaders_bound(bool written, bool snapshot, long relationLocks)
     {
         new IdleInTransactionCheck().Evaluate(
-            IdleFacts(Idle(TimeSpan.FromMinutes(3), written, snapshot, relationLocks, daemon: true)), At()).Findings.Should().ContainSingle();
+            IdleFacts(Idle(TimeSpan.FromMinutes(2), written, snapshot, relationLocks, daemon: true)), At()).Findings.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// Marten's own HotCold leader with a transaction-scoped lock at Weasel 9.45: idle in its leadership transaction, with a
+    /// snapshot, for about 61 s between DistributedLock's keepalives. Recognised by the daemon lock it holds; quiet inside the
+    /// bound, raised past it.
+    /// </summary>
+    [Fact]
+    public void C04_does_not_raise_Martens_leader_inside_the_keepalive_bound_and_raises_it_past_it()
+    {
+        ConnectionThresholds.DaemonLeaderIdleBound.Should().Be(TimeSpan.FromMinutes(3));
+
+        IdleInTransactionFacts leader = IdleFacts(Idle(TimeSpan.FromSeconds(61), written: false, snapshot: true, daemon: true));
+
+        HealthVerdict inside = new IdleInTransactionCheck().Evaluate(leader, At());
+        inside.Findings.Should().BeEmpty("an idle stretch between keepalives is the leader's expected state");
+        inside.Note.Should().Contain("holding Marten's own daemon leadership lock").And.Contain("T14 judges the snapshot it holds");
+
+        foreach (string value in Identifying)
+        {
+            inside.Note.Should().NotContain(value, "a status row names no session");
+        }
+
+        new IdleInTransactionCheck().Evaluate(leader, At(Now.AddMinutes(2))).Findings.Should().ContainSingle(
+            "61 s idle when read and two minutes since is past the bound: a leader whose keepalive has stopped holds back vacuum");
+    }
+
+    [Fact]
+    public void C04_still_raises_a_session_idle_in_its_transaction_that_holds_no_daemon_lock()
+    {
+        new IdleInTransactionCheck().Evaluate(IdleFacts(Idle(TimeSpan.FromSeconds(61), written: false, snapshot: true, daemon: false)), At())
+            .Findings.Should().ContainSingle().Which.Severity.Should().Be(HealthSeverity.Warning);
+    }
+
+    [Fact]
+    public void C04_still_raises_the_other_sessions_beside_a_leader_inside_the_bound()
+    {
+        HealthFinding finding = new IdleInTransactionCheck().Evaluate(
+            IdleFacts(
+                Idle(TimeSpan.FromSeconds(61), written: false, snapshot: true, daemon: true, pid: 1),
+                Idle(TimeSpan.FromMinutes(2), pid: 2)),
+            At()).Findings.Single();
+
+        finding.Evidence.Should().Contain(new HealthEvidence("Sessions idle in a transaction", "1"));
+        finding.WhyItMatters.Should().Contain("holding Marten's own daemon leadership lock");
     }
 
     [Fact]

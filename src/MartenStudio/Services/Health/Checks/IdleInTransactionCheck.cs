@@ -67,19 +67,30 @@ internal sealed record IdleInTransactionFacts(
 /// seconds or so at the default <c>LeadershipPollingTime</c> of 5,000 ms - and from then on <c>active</c>, running the
 /// lock monitor's <c>pg_sleep(60)</c> inside that same transaction, the next sleep beginning as the last one ends. So
 /// it is idle in its transaction for a few seconds once, when it takes the lead, and never for the minute this check
-/// waits for - unless <c>LeadershipPollingTime</c> is set near a minute or more, when that first stretch reaches the
-/// minute and the leader is raised, rightly, for as long as its snapshot sits idle. With monitoring off it is idle in
-/// that transaction for as long as it leads, and this check raises it after a minute, because its snapshot does hold
-/// back vacuum. From 9.41 the lock is the session's and the leader is not in a transaction at all. Marten's own
+/// waits for - unless <c>LeadershipPollingTime</c> is set to minutes, when that first stretch passes the bound below and
+/// the leader is raised, rightly, for as long as its snapshot sits idle. With monitoring off it is idle in that
+/// transaction for as long as it leads, and this check raises it once it passes the bound, because its snapshot does hold
+/// back vacuum. From 9.41 the lock is the session's by default and the leader is not in a transaction at all. Marten's own
 /// <c>GapLivenessProbe</c> rules the leader out too (#5125). A session that has no transaction id, no snapshot and no
 /// relation lock pins nothing, whoever it is - Wolverine's lock listeners - and is counted in the status row rather
 /// than raised; Marten's daemon lock ids are read too, so the row can say when it is the daemon's.
 /// </para>
 /// <para>
-/// <b>Nothing here exempts the leader by name.</b> It is quiet because of what the session does - <c>active</c> in its
-/// monitor's sleep, not idle - so C04 needs no rule of its own for it, and a leader that really does sit idle in its
-/// transaction (monitoring off, or a polling interval of a minute) is raised like any other session holding a
-/// snapshot.
+/// <b>The leader is recognised by its leadership lock, never by its name.</b> At Weasel 9.45 (Marten 9.50.2) with the lock
+/// transaction-scoped there is no <c>pg_sleep</c> monitor: the leader sits idle in its leadership transaction, holding a
+/// snapshot, until DistributedLock's keepalive runs in it about 61 s after the lock and every minute on (measured, CL3) -
+/// which reaches this check's minute. So a listed session that holds one of the store's daemon lock ids
+/// (<c>SessionLockLabels.DaemonLockIds</c>, granted, in this database) and is idle in a transaction - <c>pg_locks</c> cannot
+/// say which scope the lock has - with the leader's shape, no transaction id and no relation lock, is not raised while it
+/// has been idle for less than
+/// <see cref="ConnectionThresholds.DaemonLeaderIdleBound" />: the expected state of a supported configuration is not a
+/// Warning, and T14 already judges the horizon its snapshot holds. No Info either - one would appear every minute on every
+/// page of a healthy host; the status row says the leader was seen. Past the bound it is raised like any other session
+/// holding a snapshot, because a leader whose keepalive or monitor has stopped - monitoring off, a polling interval of
+/// minutes - really does hold back vacuum. Where the connection string sets Npgsql's <c>Keepalive</c> or
+/// <c>Multiplexing</c>, Patched.DistributedLock.Postgres 1.3.3 falls back to 9.39's <c>SAVEPOINT</c> and <c>pg_sleep</c>
+/// (decompiled, CL3): the leader is <c>active</c> in the sleep, not idle, and this check does not judge it. (A connection a
+/// caller hands DistributedLock is not monitored at all; Weasel's come from a data source, so they are its own.)
 /// </para>
 /// <para>
 /// Who the sessions are - process id, role, application, client, when they connected - is evidence behind the
@@ -131,8 +142,21 @@ internal sealed class IdleInTransactionCheck : HealthCheck<IdleInTransactionFact
                 .OrderByDescending(static x => x.Idle),
         ];
 
-        List<(IdleSession Session, TimeSpan Idle)> pinning = [.. idle.Where(static x => x.Session.PinsSomething)];
-        int harmless = idle.Count - pinning.Count;
+        // Marten's own HotCold leader between DistributedLock's keepalives: recognised by the leadership lock it holds, never
+        // by a name, and only while its idle stretch is inside the bound.
+        List<(IdleSession Session, TimeSpan Idle)> leaders =
+            [.. idle.Where(static x => x.Session.PinsSomething && IsLeaderBetweenKeepalives(x.Session, x.Idle))];
+        List<(IdleSession Session, TimeSpan Idle)> pinning =
+            [.. idle.Where(static x => x.Session.PinsSomething && !IsLeaderBetweenKeepalives(x.Session, x.Idle))];
+        int harmless = idle.Count - pinning.Count - leaders.Count;
+
+        string leaderNote = leaders.Count == 0
+            ? string.Empty
+            : " " + SessionText.Count(leaders.Count, "session") + " holding Marten's own daemon leadership lock "
+              + (leaders.Count == 1 ? "has" : "have") + " been idle in the leadership transaction for less than "
+              + SessionText.Duration(ConnectionThresholds.DaemonLeaderIdleBound) + ": a HotCold leader with a transaction-scoped lock "
+              + "waits there between DistributedLock's keepalives, about a minute apart, by design, so "
+              + (leaders.Count == 1 ? "it is" : "they are") + " not raised. T14 judges the snapshot it holds.";
 
         string harmlessNote = harmless == 0
             ? string.Empty
@@ -145,7 +169,7 @@ internal sealed class IdleInTransactionCheck : HealthCheck<IdleInTransactionFact
         {
             return HealthVerdict.Quiet(
                 "No session has been idle inside a transaction holding anything back for "
-                + SessionText.Duration(ConnectionThresholds.IdleInTransactionWarning) + " or more." + harmlessNote);
+                + SessionText.Duration(ConnectionThresholds.IdleInTransactionWarning) + " or more." + harmlessNote + leaderNote);
         }
 
         TimeSpan longest = pinning[0].Idle;
@@ -195,7 +219,7 @@ internal sealed class IdleInTransactionCheck : HealthCheck<IdleInTransactionFact
                 + "it has a snapshot, and once it has written it holds a transaction id that Marten's high-water detection can wait "
                 + "behind, so async projections stop moving (D01). It is nearly always application code that began a transaction "
                 + "and never finished it: a session that was never disposed, an exception path that skipped SaveChangesAsync, a "
-                + "debugger paused at a breakpoint." + harmlessNote,
+                + "debugger paused at a breakpoint." + harmlessNote + leaderNote,
             Evidence = evidence,
             Caveat = SessionEvidence.Caveat(facts.Visibility, facts.ReadAt, SessionEvidence.StatementsOnSessionsPage),
             Link = SessionEvidence.SessionsLink,
@@ -207,10 +231,30 @@ internal sealed class IdleInTransactionCheck : HealthCheck<IdleInTransactionFact
                 await session.SaveChangesAsync(cancellationToken);
                 """,
                 "The studio never ends another session. Find the code path from the application name and the time it went idle; "
-                + "a server-wide idle_in_transaction_session_timeout is the DBA's backstop. With Marten 9.39 and 9.40 it can also "
-                + "end the HotCold daemon's leadership session, which holds its lock in a transaction: one shorter than the few "
-                + "seconds the leader sits idle after taking the lead, or any timeout with Events.UseMonitoredAdvisoryLock off."),
+                + "a server-wide idle_in_transaction_session_timeout is the DBA's backstop. With the HotCold leadership lock "
+                + "transaction-scoped (Events.UseAdvisoryLockTransaction, the default at Marten 9.39 and 9.40) it can also end the "
+                + "daemon's leadership session: one shorter than the minute or so the leader sits idle in its transaction - after "
+                + "taking the lead at 9.39, between DistributedLock's keepalives at 9.50.2 - or any timeout with "
+                + "Events.UseMonitoredAdvisoryLock off."),
         });
+    }
+
+    /// <summary>
+    /// Whether a listed session is Marten's own HotCold leader waiting between keepalives: it holds one of the store's daemon
+    /// lock ids (granted, in this database - <see cref="IdleSession.HoldsDaemonLock" />) and is idle in a transaction
+    /// (<c>pg_locks</c> cannot say which scope the lock has), has the leader's shape - no transaction id, no relation lock - and
+    /// has been idle for less than <see cref="ConnectionThresholds.DaemonLeaderIdleBound" />. Recognised by its lock, never by
+    /// its name.
+    /// </summary>
+    internal static bool IsLeaderBetweenKeepalives(IdleSession session, TimeSpan idle)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        // The leader's shape: it holds its lock and a snapshot, and has written nothing and locked no relation.
+        return session.HoldsDaemonLock
+            && !session.HasTransactionId
+            && session.RelationLocks == 0
+            && idle < ConnectionThresholds.DaemonLeaderIdleBound;
     }
 
     private static (SessionVisibility Visibility, IdleSession? Session, long Total) Map(NpgsqlDataReader reader)

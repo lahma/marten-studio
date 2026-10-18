@@ -103,9 +103,9 @@ internal static class DaemonThresholds
 /// <summary>The history series the daemon checks write and read (<see cref="HealthHistory" />).</summary>
 /// <remarks>
 /// One writer per series, as the sweep requires: D01 writes the sequence, the mark and whether a committed event
-/// waits behind it, D03 the shard positions and per-row thresholds, D06 the dead-letter counts. D04 and the
-/// projections screen only read. Every writer is a <see cref="HealthGate.Database" /> check, so every series here is
-/// read at that gate.
+/// waits behind it, D03 the shard positions and per-row thresholds, D05 where each shard it saw failed or paused stood
+/// and how, D06 the dead-letter counts. D04 and the projections screen only read. Every writer is a
+/// <see cref="HealthGate.Database" /> check, so every series here is read at that gate.
 /// </remarks>
 internal static class DaemonSeries
 {
@@ -138,6 +138,18 @@ internal static class DaemonSeries
 
     /// <summary>The prefix every dead-letter series shares.</summary>
     public const string DeadLettersPrefix = "daemon.dead-letters:";
+
+    /// <summary>
+    /// D05: the position a shard stood at when a sweep saw it failed or paused - what a later sweep, which may land after
+    /// the coordinator has restarted it and before it fails again, when its agent reads Running, judges its progress by.
+    /// </summary>
+    public static string ShardFailedAt(string shard) => "daemon.shard-failed-at:" + shard;
+
+    /// <summary>D05: when that pause began, in Unix milliseconds of the daemon's own clock - a later pause is a later attempt.</summary>
+    public static string ShardPausedAt(string shard) => "daemon.shard-paused-at:" + shard;
+
+    /// <summary>D05: how it failed, as the number of its <c>ShardFailureCategory</c>, so that a finding made from memory names its remedy.</summary>
+    public static string ShardFailureCategory(string shard) => "daemon.shard-failure-category:" + shard;
 }
 
 /// <summary>What the store's configuration says about its daemon - configuration only, no connection.</summary>
@@ -622,12 +634,21 @@ internal sealed record DaemonShardRow(
 /// <param name="FailureCategory">The failure that paused or stopped it, as JasperFx classifies it.</param>
 /// <param name="FailureMessage">That failure's message.</param>
 /// <param name="PausedAt">When it was paused.</param>
+/// <param name="Position">
+/// <c>ISubscriptionAgent.Position</c>: the last sequence it committed. An agent the coordinator has just built reads 0
+/// until its start has been processed, and then the floor it resumed from.
+/// </param>
+/// <param name="FailureEventSequence">The event its failure was attributed to (<c>ShardFailure.Event</c>), when there is one.</param>
+/// <param name="FailureEventType">That event's type.</param>
 internal sealed record DaemonAgentFact(
     string ShardName,
     string Status,
     string? FailureCategory,
     string? FailureMessage,
-    DateTimeOffset? PausedAt);
+    DateTimeOffset? PausedAt,
+    long? Position = null,
+    long? FailureEventSequence = null,
+    string? FailureEventType = null);
 
 /// <summary>What this process knows about the daemon: whether it hosts one, and what that one is doing.</summary>
 /// <param name="Hosting">The accessor's answer.</param>
@@ -785,7 +806,10 @@ internal sealed record DaemonInProcess(
                 Read(() => agent.Status.ToString(), "Unknown"),
                 failure?.Category.ToString(),
                 failure?.Message,
-                Read(() => agent.PausedTime, null)));
+                Read(() => agent.PausedTime, null),
+                Read<long?>(() => agent.Position, null),
+                failure?.Event?.Sequence,
+                failure?.Event?.EventTypeName));
         }
 
         List<string> rebuilding = [];

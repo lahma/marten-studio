@@ -175,12 +175,31 @@ empty) and the studio offers no way to set one. The finding's evidence says whic
 ## D05 Shard failed or paused
 
 **Critical** for a shard that failed and stopped - the error policy gave up and nothing restarts it. **Warning** for
-a paused one - Marten restarts it after the policy's pause, so a pause the advisor sees is one still in effect.
+a paused one - Marten's coordinator starts it again once `Projections.HealthCheckPollingTime` (5 s by default) has
+passed, so a pause the advisor sees is one still in effect - and a Warning, titled "keeps failing and being
+restarted", for one that fails again every time it is started.
 
 Two sources: the daemon hosted in this process says what each agent is doing now; the progression table says what
 the node that ran the shard last wrote, under `Events.EnableExtendedProgressionTracking` only (off by default:
 K02). A stop with no failure - the studio's own coordinator pause, a host shutting down - is not reported, and
 whether anything runs the daemon at all is D02's.
+
+**A shard that keeps failing reads Running between attempts.** What the coordinator starts is a new agent, which
+reads `Running` with no failure until it reaches the failing event again, and its start clears the progression
+row's failure columns - at JasperFx 2.74 and 2.87.1, Marten 9.39 and 9.50.2. So the advisor remembers: each check
+that sees a shard failed or paused records where it stood, and a later check that finds the agent in this process
+running at exactly that position (where a restart resumes) - or at 0, before its start is processed - still reports
+it, as do later pauses no further on. The shard's next committed progress past that position ends it - any later
+check that saw its position beyond it, so a shard that failed once and got past the event is quiet from its next page
+and a rewind below it is not reported - and so does a stretch with no check that saw it fail, or still standing where
+it failed: ten minutes, or three `HealthInterval`s where that is longer (three hours at an hourly interval). A store
+that partitions its events by tenant, where D03 records no positions, renews the memory only by its failures, and
+progress never ends it there: a shard that recovered and is then restarted for another reason is reported again until
+the memory runs out - a known limit of 0.4. Two
+moments it cannot see: the first check after somebody opens a page, if it lands between a restart and the next
+failure, and - for a studio beside a daemon in another process,
+which has only the row - every check that lands there. The memory is the advisor's own, kept only while a page is
+open.
 
 Classified where JasperFx classifies: a start Marten Studio asked for and the daemon refused carries
 `ShardStartException.Reason` (`AgentPaused`, `HighWaterNotRunning`, `ShardNotRegistered`, `StartRace`, `Faulted`,

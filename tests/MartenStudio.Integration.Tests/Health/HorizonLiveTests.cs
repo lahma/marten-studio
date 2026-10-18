@@ -153,21 +153,31 @@ internal static class HorizonLive
     public static string Unpooled(string connectionString) =>
         new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false }.ConnectionString;
 
-    /// <summary>The first Marten whose HotCold leader holds its lock for the session rather than in a transaction.</summary>
-    public static readonly Version LeadershipLockIsTheSessions = new(9, 41);
-
-    /// <summary>The Marten this run resolved.</summary>
+    /// <summary>The Marten this run resolved, for the measurements the HotCold tests write to their output.</summary>
     public static Version Marten => MartenRuntime.Current.VersionOf(RuntimePackage.Marten) ?? throw new InvalidOperationException("No Marten version.");
+
+    /// <summary>
+    /// The leadership lock in a transaction: Marten's default at 9.39 and 9.40, and from 9.41 the setting a host behind a
+    /// transaction-mode pooler keeps - <c>EventGraph.cs:290</c> at V9.50.2, read into Weasel's
+    /// <c>AdvisoryLockOptions.TransactionalLockEnabled</c> - so the leader's own transaction is measured at every Marten.
+    /// </summary>
+    public static void TransactionScoped(StoreOptions options) => options.Events.UseAdvisoryLockTransaction = true;
 
     /// <summary>
     /// A host whose HotCold daemon leads <paramref name="database" />, started and waited on until its leader holds one of the
     /// store's daemon locks; the caller stops it.
     /// </summary>
-    public static async Task<(IHost Daemon, long[] LockIds)> LeadAsync(string database)
+    public static async Task<(IHost Daemon, long[] LockIds)> LeadAsync(string database, Action<StoreOptions>? configure = null)
     {
         HostApplicationBuilder builder = Host.CreateApplicationBuilder();
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
-        builder.Services.AddMarten(options => SampleStore.Configure(options, database)).AddAsyncDaemon(DaemonMode.HotCold);
+        builder.Services
+            .AddMarten(options =>
+            {
+                SampleStore.Configure(options, database);
+                configure?.Invoke(options);
+            })
+            .AddAsyncDaemon(DaemonMode.HotCold);
 
         IHost daemon = builder.Build();
         IDocumentStore store = daemon.Services.GetRequiredService<IDocumentStore>();
@@ -340,22 +350,22 @@ public class HorizonServerLiveTests(HorizonServerFixture server) : IClassFixture
     }
 
     /// <summary>
-    /// Blocking 1, live. Marten 9.39's HotCold leader takes a fresh snapshot every minute in its lock monitor's
-    /// <c>pg_sleep(60)</c>, and a snapshot's <c>xmin</c> is the oldest transaction running anywhere - so while a prepared
+    /// Blocking 1, live. A transaction-scoped HotCold leader takes a fresh snapshot about once a minute - in its lock
+    /// monitor's <c>pg_sleep(60)</c> at Weasel 9.33 (Marten 9.39), in DistributedLock's keepalive at Weasel 9.45 (Marten
+    /// 9.50.2, measured by CL3) - on each of its sessions, one per lock; and a snapshot's <c>xmin</c> is the oldest
+    /// transaction running anywhere - so while a prepared
     /// transaction stands, the leader's minute-old snapshot is pinned at that transaction's id, exactly as far back. Judged two
     /// hours on, both are over an hour old: T14 names the prepared transaction and says the leader is behind it. Anti-vacuity:
-    /// the same read without the prepared transaction names the leader. From 9.41 the leader keeps no transaction of its
-    /// own, so this case is 9.39's and 9.40's.
+    /// the same read without the prepared transaction names the leader. The leader's lock is transaction-scoped here at every
+    /// Marten (<see cref="HorizonLive.TransactionScoped" />): from 9.41 that is a setting rather than the default, and the
+    /// case is the one a host keeps behind a pooler.
     /// </summary>
     [PostgresFact]
     [HealthFires("T14")]
     public async Task A_HotCold_leader_pinned_at_a_prepared_transactions_id_is_never_the_holder_named()
     {
-        Assert.SkipWhen(HorizonLive.Marten >= HorizonLive.LeadershipLockIsTheSessions,
-            "From Marten 9.41 the HotCold leader holds its lock for the session and keeps no transaction open; this is 9.39's and 9.40's case.");
-
         string database = await ConnectionsLiveHost.CreateDatabaseAsync(server.ConnectionString, "h9_pinned_leader");
-        (IHost daemon, long[] ids) = await HorizonLive.LeadAsync(database);
+        (IHost daemon, long[] ids) = await HorizonLive.LeadAsync(database, HorizonLive.TransactionScoped);
 
         const string Gid = "h9_probe";
         bool prepared = false;
@@ -373,14 +383,14 @@ public class HorizonServerLiveTests(HorizonServerFixture server) : IClassFixture
             await LiveWait.UntilAsync(
                 async () => await LiveWait.ScalarAsync<bool>(
                     database,
-                    "select exists (select 1 from pg_catalog.pg_stat_activity a join pg_catalog.pg_locks l on l.pid = a.pid"
+                    "select count(*) > 0 and coalesce(bool_and(a.backend_xid is null and a.backend_xmin::text::bigint = @xid), false)"
+                    + " from pg_catalog.pg_stat_activity a join pg_catalog.pg_locks l on l.pid = a.pid"
                     + " where a.datname = pg_catalog.current_database()"
-                    + " and l.locktype = 'advisory' and l.granted and ((l.classid::bigint << 32) | l.objid::bigint) = any(@ids)"
-                    + " and a.backend_xid is null and a.backend_xmin::text::bigint = @xid)",
+                    + " and l.locktype = 'advisory' and l.granted and ((l.classid::bigint << 32) | l.objid::bigint) = any(@ids)",
                     ("ids", ids),
                     ("xid", xid)),
                 TimeSpan.FromSeconds(90),
-                "the leader's next snapshot, taken by its lock monitor, to be pinned at the prepared transaction's id");
+                "every leader session's next snapshot - its lock monitor's sleep at Weasel 9.33, DistributedLock's keepalive at 9.45 - to be pinned at the prepared transaction's id");
 
             HorizonHeldCheck check = new();
             HorizonFacts? pinned = null;
@@ -391,11 +401,12 @@ public class HorizonServerLiveTests(HorizonServerFixture server) : IClassFixture
                 {
                     HorizonFacts facts = await studio.GatherAsync(check);
                     HorizonHolder? transaction = facts.Holders.FirstOrDefault(static x => x.Kind == HealthHorizonHolderKind.Prepared);
-                    pinned = transaction is not null && facts.Holders.Any(x => x.HoldsDaemonLock && x.XidAge == transaction.XidAge) ? facts : null;
+                    HorizonHolder[] leaders = [.. facts.Holders.Where(static x => x.HoldsDaemonLock)];
+                    pinned = transaction is not null && leaders.Length > 0 && leaders.All(x => x.XidAge == transaction.XidAge) ? facts : null;
                     return pinned is not null;
                 },
                 TimeSpan.FromSeconds(90),
-                "a read that sees the leader and the prepared transaction equally far back");
+                "a read that sees every session of the leader's and the prepared transaction equally far back");
 
             HorizonHolder holder = pinned!.Holders.Single(static x => x.Kind == HealthHorizonHolderKind.Prepared);
             HorizonHolder leader = pinned.Holders.First(x => x.HoldsDaemonLock && x.XidAge == holder.XidAge);
@@ -866,30 +877,35 @@ public class HorizonLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>
-    /// The HotCold leader, as Marten configures it by default and at read committed, is never old enough alone to raise -
-    /// however long it leads (and <see cref="HorizonServerLiveTests" /> shows it is never named for another holder's
-    /// transaction). At Marten 9.39 and
-    /// 9.40 it holds its leadership in a transaction it never ends (<c>Events.UseAdvisoryLockTransaction</c>), and its lock
+    /// The HotCold leader, with its lock monitor on (the default) and at read committed, is never old enough alone to raise -
+    /// however long it leads, with its leadership lock in a transaction or on the session (and
+    /// <see cref="HorizonServerLiveTests" /> shows it is never named for another holder's transaction). Each scope is set,
+    /// at every Marten: <c>Events.UseAdvisoryLockTransaction</c> is on by default at 9.39 and 9.40 and off from 9.41, and a
+    /// setting at both ends. In a transaction, the leader holds its leadership in a transaction it never ends, and its lock
     /// monitor (<c>Events.UseMonitoredAdvisoryLock</c>) runs <c>pg_sleep(60)</c> in that transaction - measured: the
-    /// transaction grows older by the minute while the snapshot it holds the horizon with is never more than a minute old.
-    /// So T14 reads it as a holder whose transaction is older than its horizon, and judges it by the lower bound. From 9.41
-    /// the lock is the session's, and no transaction outlives a statement: the lock monitor's statement still holds a
-    /// snapshot while it runs, for at most about a minute at a time, so a daemon-lock holder may be read, and is never old.
+    /// transaction grows older by the minute while the snapshot it holds the horizon with is never more than a minute old,
+    /// which is the bound T14's remedy states. So T14 reads it as a holder whose transaction is older than its horizon, and
+    /// judges it by the lower bound. On the session, no transaction outlives a statement: the lock monitor's statement still
+    /// holds a snapshot while it runs, for at most about a minute at a time, so a daemon-lock holder may be read, and is never
+    /// old.
     /// </summary>
-    [PostgresFact]
+    [PostgresTheory]
+    [InlineData(true)]
+    [InlineData(false)]
     [HealthQuiet("T14")]
-    public async Task The_HotCold_leaders_open_transaction_is_never_raised_however_long_it_leads()
+    public async Task The_HotCold_leaders_open_transaction_is_never_raised_however_long_it_leads(bool transactionScopedLock)
     {
-        string database = await ConnectionsLiveHost.CreateDatabaseAsync(postgres.ConnectionString, "h9_hotcold");
+        string database = await ConnectionsLiveHost.CreateDatabaseAsync(
+            postgres.ConnectionString, "h9_hotcold_" + (transactionScopedLock ? "xact" : "session"));
 
-        (IHost daemon, _) = await HorizonLive.LeadAsync(database);
+        (IHost daemon, _) = await HorizonLive.LeadAsync(database, options => options.Events.UseAdvisoryLockTransaction = transactionScopedLock);
 
         try
         {
             await using ConnectionsLiveHost studio = await ConnectionsLiveHost.CreateAsync(database);
             HorizonHeldCheck check = new();
 
-            if (HorizonLive.Marten < HorizonLive.LeadershipLockIsTheSessions)
+            if (transactionScopedLock)
             {
                 // Wait until the leader's transaction is older than its monitor's sleep: then its transaction's age and its
                 // horizon's have parted.
@@ -906,8 +922,10 @@ public class HorizonLiveTests(PostgresFixture postgres)
                     "the HotCold leader's transaction to be older than its lock monitor's minute");
 
                 HorizonHolder leader = seen!.Holders.First(static x => x.HoldsDaemonLock && x.AtMost > TimeSpan.FromSeconds(75));
+                TestContext.Current.TestOutputHelper?.WriteLine(
+                    $"Marten {HorizonLive.Marten}: the leader's transaction is {leader.AtMost?.TotalSeconds:0.0} s old and the snapshot it holds the horizon with {leader.AtLeast?.TotalSeconds:0.0} s.");
                 leader.AtLeast.Should().NotBeNull().And.BeLessThan(TimeSpan.FromSeconds(65),
-                    "its snapshot is its pg_sleep(60)'s, taken afresh every minute");
+                    "its snapshot is its lock monitor's latest statement's - pg_sleep(60) at Weasel 9.33, DistributedLock's keepalive at 9.45 - taken afresh about every minute");
                 HorizonHeldCheck.KindText(leader).Should().Be("the store's own HotCold daemon leader");
                 check.Evaluate(seen, HealthEvaluation.At(seen.ReadAt)).Findings.Should().BeEmpty("a transaction's age is only the most the horizon can be held");
             }
@@ -915,8 +933,8 @@ public class HorizonLiveTests(PostgresFixture postgres)
             {
                 HorizonFacts facts = await studio.GatherAsync(check);
 
-                // From 9.41 the leadership lock is the session's and the leader keeps no transaction open - but its lock
-                // monitor's statement holds a snapshot while it runs, so a read may find it, and never older than a minute.
+                // A session-scoped leadership lock leaves no transaction open - but the lock monitor's statement holds a
+                // snapshot while it runs, so a read may find it, and never older than a minute.
                 facts.Holders.Where(static x => x.HoldsDaemonLock).Should().AllSatisfy(static x =>
                 {
                     x.AtLeast.Should().NotBeNull().And.BeLessThan(TimeSpan.FromSeconds(65), "a statement's snapshot, at most about a minute old");

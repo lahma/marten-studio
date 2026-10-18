@@ -181,17 +181,28 @@ Marten 9.39 and 9.40 (`Events.UseAdvisoryLockTransaction` on by default) it hold
 until about 0.9 s after the first leadership poll that follows - five seconds or so at the default
 `LeadershipPollingTime` of 5,000 ms - and from then on `active`, running the lock monitor's `pg_sleep(60)` inside the
 same transaction, the next sleep beginning as the last one ends (measured live at 9.39). So it is idle in its
-transaction for a few seconds once, when it takes the lead, and never for a minute - unless `LeadershipPollingTime`
-is set near a minute or more, when that first stretch is raised like any other. C04 has no rule of its own for the
-leader: it is quiet because the session is busy, not because of whose it is. With monitoring turned off the leader
-sits idle in that transaction for as long as it leads, and C04 raises it after a minute - rightly, because its
-snapshot holds back vacuum; `Events.UseAdvisoryLockTransaction = false`, or Marten 9.41, is the change that ends it.
-From 9.41 the lock is the session's and the leader is not in a transaction at all.
+transaction for a few seconds once, when it takes the lead. From 9.41 the lock is the session's by default and the
+leader is not in a transaction at all.
+
+At Marten 9.50.2 (Weasel 9.45, Patched.DistributedLock.Postgres 1.3.3) with `Events.UseAdvisoryLockTransaction = true`
+- what a host behind a transaction-mode pooler keeps - there is no `pg_sleep` monitor: the leader sits `idle in
+transaction`, with a snapshot, until DistributedLock's keepalive (`SELECT 0`) runs in it about 61 s after the lock,
+and again every minute (measured live). Where the connection string sets Npgsql's `Keepalive` or `Multiplexing`,
+DistributedLock falls back to 9.39's `pg_sleep` instead: the leader is `active` in it, not idle, and C04 does not judge
+it. That reaches C04's minute, so **the leader is recognised by its leadership
+lock, never by its name**: a session that holds one of the store's daemon advisory lock ids, granted, in this
+database, and is idle in a transaction (`pg_locks` cannot say which scope the lock has), with the leader's shape - no
+transaction id and no relation lock - is not raised while it has been idle for less than three minutes
+(`ConnectionThresholds.DaemonLeaderIdleBound`, about three keepalive intervals, so a late one on a loaded host is no
+finding). The status row says it saw the leader; there is no Info, which would appear every minute on a healthy
+host, and T14 already judges the horizon its snapshot holds. Past three minutes it is raised like any other session -
+a leader whose keepalive or monitor has stopped, with monitoring turned off or a `LeadershipPollingTime` of minutes,
+really does hold back vacuum; `Events.UseAdvisoryLockTransaction = false` is the change that ends it.
 
 The fix is in the application: dispose every session (`await using`), and end what it began. A server-wide
-`idle_in_transaction_session_timeout` is the DBA's backstop - and on Marten 9.39 and 9.40 it can also end the HotCold
-daemon's leadership session: a timeout shorter than the few seconds the leader sits idle after taking the lead, or
-any timeout with lock monitoring off.
+`idle_in_transaction_session_timeout` is the DBA's backstop - and with the leadership lock transaction-scoped it can
+also end the HotCold daemon's leadership session: a timeout shorter than the minute or so the leader sits idle in its
+transaction (after taking the lead at 9.39, between keepalives at 9.50.2), or any timeout with lock monitoring off.
 
 ## C05 Long-running statement
 

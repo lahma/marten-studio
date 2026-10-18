@@ -895,9 +895,12 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
             HealthHorizonHolderKind.Session when leader && facts.LeaderLockInTransaction =>
                 " This session is the store's own HotCold daemon leader. With Events.UseAdvisoryLockTransaction on - the default at "
                 + "Marten 9.39 and 9.40 - it holds its leadership lock in a transaction it keeps open for as long as it leads. With "
-                + "Events.UseMonitoredAdvisoryLock on (the default) its lock monitor runs pg_sleep(60) in that transaction; at read "
-                + "committed, Postgres' default isolation, each of those statements takes a fresh snapshot, so it holds the horizon "
-                + "back by about a minute at a time - measured at Marten 9.39. Under default_transaction_isolation = 'repeatable read' "
+                + "Events.UseMonitoredAdvisoryLock on (the default) its lock monitor runs a statement in that transaction about once a "
+                + "minute - pg_sleep(60) at Marten 9.39; at 9.50.2 DistributedLock's keepalive, the session idle in between, or "
+                + "pg_sleep(60) again, the session active, where the connection string sets Npgsql's Keepalive or Multiplexing; at "
+                + "read committed, Postgres' default "
+                + "isolation, each of those statements takes a fresh snapshot, so it holds the horizon back by about a minute at a "
+                + "time - measured at Marten 9.39 and 9.50.2. Under default_transaction_isolation = 'repeatable read' "
                 + "or 'serializable' the snapshot is the transaction's own, and the monitor does not move it. With the monitor off "
                 + "nothing refreshes it, and the leader holds the horizon for as long as it leads - measured at Marten 9.39.",
             HealthHorizonHolderKind.Session when leader =>
@@ -964,9 +967,12 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
                 "Takes HotCold leadership with a session-scoped advisory lock, so the leader keeps no transaction open; it is the "
                 + "default from Marten 9.41. A host that must keep the transaction lock - behind a transaction-mode pooler, where a "
                 + "session lock is not safe - keeps Events.UseMonitoredAdvisoryLock = true instead: its lock monitor runs a statement "
-                + "every minute, and at read committed - Postgres' default - each takes a fresh snapshot, which bounds the leader's "
-                + "hold to about a minute (measured at Marten 9.39). Under default_transaction_isolation = 'repeatable read' or "
-                + "'serializable' the snapshot is the transaction's own and the monitor does not move it; only the session lock helps.");
+                + "in the leader's transaction about once a minute (pg_sleep(60) at Marten 9.39; at 9.50.2 DistributedLock's keepalive, "
+                + "the session idle in its transaction in between - or, where the connection string sets Npgsql's Keepalive or "
+                + "Multiplexing, pg_sleep(60) as at 9.39, the session active), and at read committed - Postgres' default - each takes a fresh "
+                + "snapshot, which bounds the leader's hold to about a minute (measured at Marten 9.39 and 9.50.2). Under "
+                + "default_transaction_isolation = 'repeatable read' or 'serializable' the snapshot is the transaction's own and the "
+                + "monitor does not move it; only the session lock helps.");
         }
 
         if (leader)

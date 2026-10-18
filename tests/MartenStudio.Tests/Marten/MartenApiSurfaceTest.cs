@@ -1283,6 +1283,26 @@ public class MartenApiSurfaceTest
             "the lazy per-database observer in plan §4.5 subscribes to the tracker directly");
     }
 
+    /// <summary>
+    /// D05 reads an agent of the daemon hosted here by its status, its failure, when it paused and where it stands, and a
+    /// failure by the event it was attributed to (read at JasperFx V2.74.0 and V2.87.1). The coordinator restarts a paused
+    /// agent as a new one, which reads Running with none of the failure, so <c>Position</c> - the last sequence the agent
+    /// committed, 0 until its start is processed - is what tells a restarted shard short of its failure from one past it.
+    /// </summary>
+    [Fact]
+    public void A_daemon_agent_says_where_it_stands_and_a_failure_names_its_event()
+    {
+        RequireProperty(typeof(ISubscriptionAgent), "Status").PropertyType.Should().Be<JasperFx.AgentStatus>();
+        RequireProperty(typeof(ISubscriptionAgent), "Position").PropertyType.Should().Be<long>();
+        RequireProperty(typeof(ISubscriptionAgent), "PausedTime").PropertyType.Should().Be<DateTimeOffset?>();
+        RequireProperty(typeof(ISubscriptionAgent), "Failure").PropertyType.Should().Be<ShardFailure>();
+
+        RequireProperty(typeof(ShardFailure), "Category").PropertyType.Should().Be<ShardFailureCategory>();
+        RequireProperty(typeof(ShardFailure), "Event").PropertyType.Should().Be<EventFailureDetails>();
+        RequireProperty(typeof(EventFailureDetails), "Sequence").PropertyType.Should().Be<long>();
+        RequireProperty(typeof(EventFailureDetails), "EventTypeName").PropertyType.Should().Be<string>();
+    }
+
     // --------------------------------------------------------------------------------------------
     // Diagnostics and LINQ
     // --------------------------------------------------------------------------------------------

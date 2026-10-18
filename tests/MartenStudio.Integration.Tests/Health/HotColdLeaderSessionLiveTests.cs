@@ -12,8 +12,9 @@ using Microsoft.Extensions.Hosting;
 namespace MartenStudio.Integration.Tests.Health;
 
 /// <summary>
-/// The HotCold leader's own session at Marten 9.39 and 9.40, where it holds its lock in a transaction it never ends, as
-/// C04 and C05 read it - with its lock monitor (<c>Events.UseMonitoredAdvisoryLock</c>) on, the default, and off.
+/// The HotCold leader's own session with its leadership lock transaction-scoped, where it holds the lock in a transaction
+/// it never ends, as C04 and C05 read it - with its lock monitor (<c>Events.UseMonitoredAdvisoryLock</c>) on, the default,
+/// and off.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -25,14 +26,17 @@ namespace MartenStudio.Integration.Tests.Health;
 /// moves.
 /// </para>
 /// <para>
-/// From 9.41 the leadership lock is the session's (<c>Events.UseAdvisoryLockTransaction</c> defaults to false), the leader
-/// keeps no transaction open, and neither case exists: both tests skip, saying so.
+/// <b>At every Marten.</b> From 9.41 the lock is the session's by default (<c>Events.UseAdvisoryLockTransaction</c> is
+/// false, #5526), but the setting is still there - <c>EventGraph.cs:290</c> at V9.50.2, read by
+/// <c>ProjectionCoordinator.buildLockFactory</c> into Weasel's <c>AdvisoryLockOptions.TransactionalLockEnabled</c> - and it
+/// is what a host behind a transaction-mode pooler keeps. So both tests set it, rather than skip the versions whose default
+/// is the other one, and each writes what it measured to the test output with the Marten it ran on.
 /// </para>
 /// </remarks>
 public class HotColdLeaderSessionLiveTests(PostgresFixture postgres)
 {
-    private const string SessionScopedFromNineFortyOne =
-        "From Marten 9.41 the HotCold leader holds its lock for the session and keeps no transaction open; this is 9.39's and 9.40's case.";
+    /// <summary>The leadership lock in a transaction: 9.39's and 9.40's default, a setting from 9.41.</summary>
+    private static void TransactionScoped(StoreOptions options) => options.Events.UseAdvisoryLockTransaction = true;
 
     /// <summary>
     /// C05 beside the leader with its lock monitor on: the monitor's statement is the only long one the leader runs, C05's
@@ -44,17 +48,42 @@ public class HotColdLeaderSessionLiveTests(PostgresFixture postgres)
     [HealthQuiet("C05")]
     public async Task With_the_lock_monitor_on_the_leaders_sleep_never_runs_for_C05s_five_minutes()
     {
-        Assert.SkipWhen(ConnectionDaemonLiveTests.Marten >= ConnectionDaemonLiveTests.LeadershipLockIsTheSessions, SessionScopedFromNineFortyOne);
-
         string database = await ConnectionsLiveHost.CreateDatabaseAsync(postgres.ConnectionString, "health_c05_hotcold");
 
-        using IHost host = await ConnectionDaemonLiveTests.StartAsync(database, DaemonMode.HotCold);
+        using IHost host = await ConnectionDaemonLiveTests.StartAsync(database, DaemonMode.HotCold, TransactionScoped);
 
         try
         {
             long[] ids = DaemonLockIds(host);
             await using ConnectionsLiveHost studio = await ConnectionsLiveHost.CreateAsync(
                 database, studio: static options => options.Capabilities = MartenStudioCapabilities.All());
+
+            if (ConnectionDaemonLiveTests.LeaderKeepsItsTransactionWithAKeepalive)
+            {
+                // Weasel 9.45: no monitor statement at all - the leader runs nothing long for C05 to judge, and what keeps its
+                // snapshot about a minute old is DistributedLock's keepalive, inside the leadership transaction. Measured here.
+                await LiveWait.UntilAsync(
+                    async () => await LiveWait.ScalarAsync<bool>(
+                        database,
+                        "select count(*) > 0 and bool_and(a.query like '%DistributedLock connection keepalive%' and a.xact_start < a.query_start)"
+                        + " from " + ConnectionDaemonLiveTests.LeaderSessions,
+                        ("ids", ids)),
+                    TimeSpan.FromSeconds(120),
+                    "DistributedLock's keepalive to run inside every leadership transaction");
+
+                double keptAfter = await LiveWait.ScalarAsync<double>(
+                    database,
+                    "select max(extract(epoch from a.query_start - a.xact_start))::float8 from " + ConnectionDaemonLiveTests.LeaderSessions,
+                    ("ids", ids));
+                TestContext.Current.TestOutputHelper?.WriteLine(
+                    $"Marten {ConnectionDaemonLiveTests.Marten}: no lock monitor statement; the keepalive refreshed the leader's snapshot {keptAfter:0.0} s into its leadership transaction.");
+                keptAfter.Should().BeLessThan(75, "the keepalive runs about once a minute");
+
+                HealthReport quiet = await studio.ReportAsync();
+                quiet.Findings.Should().NotContain(static x => x.Code == "C05");
+                ConnectionsLiveHost.Status(quiet, "C05").Outcome.Should().Be(HealthCheckOutcome.Checked, ConnectionsLiveHost.Status(quiet, "C05").Problem);
+                return;
+            }
 
             await ConnectionDaemonLiveTests.WaitForTheLeaderInItsMonitorAsync(database, ids);
 
@@ -99,7 +128,8 @@ public class HotColdLeaderSessionLiveTests(PostgresFixture postgres)
 
             DateTime next = await LiveWait.ScalarAsync<DateTime>(
                 database, "select a.query_start from pg_catalog.pg_stat_activity a where a.pid = @pid", ("pid", statement.ProcessId));
-            TestContext.Current.TestOutputHelper?.WriteLine($"The leader's sleep ran {(next - started).TotalSeconds:0.0} s before the next began.");
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"Marten {ConnectionDaemonLiveTests.Marten}: the leader's sleep ran {(next - started).TotalSeconds:0.0} s before the next began, in the same transaction.");
             (next - started).Should().BeLessThan(ConnectionThresholds.LongRunningWarning, "the monitor re-issues its one-minute sleep, so no statement of the leader's lives for five minutes");
 
             HealthReport report = await studio.ReportAsync();
@@ -115,7 +145,8 @@ public class HotColdLeaderSessionLiveTests(PostgresFixture postgres)
     /// <summary>
     /// C04 beside the leader with its lock monitor off: nothing uses the leader's connection once it holds its lock, so it
     /// sits idle in its leadership transaction - with a snapshot, which holds back vacuum - for as long as it leads. After a
-    /// real minute of that, C04's read lists it holding Marten's daemon lock and raises it. This is the anti-vacuity half of
+    /// real minute of that, C04's read lists it holding Marten's daemon lock - inside the leader's bound, so not raised - and,
+    /// judged past <c>ConnectionThresholds.DaemonLeaderIdleBound</c>, raises it. This is the anti-vacuity half of
     /// <see cref="ConnectionDaemonLiveTests.The_HotCold_daemons_leadership_session_is_never_raised_as_idle_in_a_transaction" />:
     /// C04 sees this leader, and is quiet there only because the monitor keeps it working.
     /// </summary>
@@ -123,12 +154,16 @@ public class HotColdLeaderSessionLiveTests(PostgresFixture postgres)
     [HealthFires("C04")]
     public async Task With_the_lock_monitor_off_C04_raises_the_HotCold_leader_after_a_minute()
     {
-        Assert.SkipWhen(ConnectionDaemonLiveTests.Marten >= ConnectionDaemonLiveTests.LeadershipLockIsTheSessions, SessionScopedFromNineFortyOne);
-
         string database = await ConnectionsLiveHost.CreateDatabaseAsync(postgres.ConnectionString, "health_c04_hotcold_unmonitored");
 
         using IHost host = await ConnectionDaemonLiveTests.StartAsync(
-            database, DaemonMode.HotCold, static options => options.Events.UseMonitoredAdvisoryLock = false);
+            database,
+            DaemonMode.HotCold,
+            static options =>
+            {
+                TransactionScoped(options);
+                options.Events.UseMonitoredAdvisoryLock = false;
+            });
 
         try
         {
@@ -161,14 +196,24 @@ public class HotColdLeaderSessionLiveTests(PostgresFixture postgres)
                 leader.IdleAtRead.Should().BeGreaterThanOrEqualTo(ConnectionThresholds.IdleInTransactionWarning);
             });
 
-            HealthFinding finding = check.Evaluate(facts, HealthEvaluation.At(facts.ReadAt)).Findings.Should().ContainSingle().Subject;
+            TestContext.Current.TestOutputHelper?.WriteLine(
+                $"Marten {ConnectionDaemonLiveTests.Marten}: {listed.Length} leader session(s), idle in the leadership transaction with a snapshot for "
+                + string.Join(", ", listed.Select(static x => x.IdleAtRead.TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " s")) + ".");
+
+            // Recognised by its daemon lock: a minute idle is inside the leader's bound, and is not raised.
+            check.Evaluate(facts, HealthEvaluation.At(facts.ReadAt)).Findings.Should().BeEmpty(
+                "a leader idle in its transaction for a minute is inside ConnectionThresholds.DaemonLeaderIdleBound");
+
+            // With the monitor off nothing refreshes it, so had nothing changed it would pass the bound - and be raised.
+            HealthFinding finding = check.Evaluate(facts, HealthEvaluation.At(facts.ReadAt + ConnectionThresholds.DaemonLeaderIdleBound))
+                .Findings.Should().ContainSingle().Subject;
             finding.Code.Should().Be("C04");
-            finding.Severity.Should().Be(HealthSeverity.Warning, "a minute and more, not ten");
+            finding.Severity.Should().Be(HealthSeverity.Warning, "past the bound, not ten minutes");
             string longest = finding.Evidence.Single(static x => x.Label == "Session 1 (longest)").Value;
             leaders.Should().Contain(pid => longest.StartsWith("pid " + pid + ",", StringComparison.Ordinal), "the longest is one of the leader's sessions, named by pid");
 
             HealthReport report = await studio.ReportAsync();
-            report.Findings.Should().ContainSingle(static x => x.Code == "C04", "the sweep raises it too, from its own read");
+            report.Findings.Should().NotContain(static x => x.Code == "C04", "the sweep, a minute in, is inside the leader's bound too");
         }
         finally
         {
