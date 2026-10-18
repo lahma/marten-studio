@@ -638,12 +638,21 @@ internal static class EventQueryBuilder
     }
 
     /// <summary>
-    /// How many dead letters there are. A plain count of Marten's own document table, which is the one
-    /// place the studio counts a document table by name rather than through a mapping.
+    /// How many dead letters there are: a count of Marten's own document table, the very rows the dead-letter
+    /// list reads.
     /// </summary>
-    /// <param name="schema">The event store's schema.</param>
+    /// <param name="table">
+    /// The dead-letter table, as <see cref="DeadLetterQueries.TableFor" /> resolved it and settled against the
+    /// catalog with <c>WithPhysicalColumns</c> - so its name is the mapping's and its soft delete is the table's.
+    /// </param>
     /// <param name="commandTimeout">A bound on how long the count may cost, when the caller sets one.</param>
     /// <remarks>
+    /// <para>
+    /// <b>The same rows as the list.</b> A soft-deleted dead letter - <c>Policies.AllDocumentsSoftDeleted()</c>
+    /// reaches <c>DeadLetterEvent</c> too - is counted out exactly as <see cref="DeadLetterQueries.BuildPage" />
+    /// leaves it out, through the one predicate both share; otherwise the badge kept counting every letter a
+    /// Discard had soft-deleted while the page it links to showed none of them.
+    /// </para>
     /// <para>
     /// <b>There is no tenant parameter, and there cannot be one.</b> Marten registers
     /// <c>DeadLetterEvent</c> into the event schema <c>SingleTenanted()</c> unconditionally
@@ -652,18 +661,21 @@ internal static class EventQueryBuilder
     /// or not. This builder used to take one and emit <c>where "tenant_id" = @tenant</c>, which could only
     /// ever raise <c>42703 undefined_column</c>; a parameter whose only reachable behaviour is to throw is
     /// not a feature. The dead-letter <em>list</em> narrows by the document's own <c>TenantId</c>
-    /// <em>property</em> instead, which is stored inside the JSON body and is queryable through Marten's
-    /// LINQ — see <c>EventDataService.ListDeadLettersAsync</c>.
+    /// <em>property</em> instead, which is stored inside the JSON body — see
+    /// <see cref="DeadLetterQueries.BuildPage" />.
     /// </para>
     /// </remarks>
-    public static NpgsqlCommand BuildDeadLetterCount(string schema, TimeSpan? commandTimeout = null)
+    public static NpgsqlCommand BuildDeadLetterCount(DocumentTableInfo table, TimeSpan? commandTimeout = null)
     {
+        ArgumentNullException.ThrowIfNull(table);
+
         var command = new NpgsqlCommand();
 
         try
         {
-            command.CommandText =
-                "select count(*) from " + SqlIdentifier.Qualify(schema, EventTableInfo.DeadLetterTable);
+            command.CommandText = DeadLetterQueries.LiveRows(table, alias: null) is { } live
+                ? "select count(*) from " + table.QualifiedName + " where " + live
+                : "select count(*) from " + table.QualifiedName;
             ApplyTimeout(command, commandTimeout);
 
             return command;

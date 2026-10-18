@@ -185,7 +185,7 @@ public class EventQueryBuilderEventsTests
     [Fact]
     public void The_dead_letter_count_is_scoped_by_the_schema_it_is_given()
     {
-        using var command = EventQueryBuilder.BuildDeadLetterCount("studio_events");
+        using var command = EventQueryBuilder.BuildDeadLetterCount(DeadLetterQueries.MartensRegistration("studio_events"));
 
         command.CommandText.Should().Be("select count(*) from \"studio_events\".\"mt_doc_deadletterevent\"");
         command.Parameters.Should().BeEmpty(

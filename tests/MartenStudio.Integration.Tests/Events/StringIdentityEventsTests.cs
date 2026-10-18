@@ -322,8 +322,9 @@ public class StringIdentityEventsTests(StringIdentityStoreFixture fixture) : ICl
     }
 
     /// <summary>
-    /// Time travel closes <c>AggregateStreamAsync&lt;T&gt;</c> over the <em>string</em> overload here, which
-    /// is a different method from the GUID one and is picked by the parsed id's runtime type.
+    /// Time travel reads a <em>string</em> key's stream here - the key bound as <c>varchar</c>, not <c>uuid</c> - and sets
+    /// the replayed aggregate's identity with <c>SetIdentityFromString</c>, which the parsed id's runtime type picks over
+    /// the GUID setter.
     /// </summary>
     [PostgresFact]
     public async Task A_string_keyed_stream_can_be_replayed_into_its_aggregate()

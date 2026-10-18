@@ -638,15 +638,15 @@
             // information_schema question, through the studio's own cached column catalog, with no Marten
             // call in it.
             //
-            // The list is a Marten session query over DeadLetterEvent, and every Marten query opens with
-            // EnsureStorageExistsAsync for the document type - which on a database that has never run the
-            // daemon creates mt_doc_deadletterevent and Marten's whole helper-function set under the
-            // database's own AutoCreate. Proven live by NavIndicatorNoDdlLiveTests: a studio that wrote
-            // twenty functions and a table because somebody opened a tab.
+            // The list used to be a Marten session query over DeadLetterEvent, and every Marten LINQ
+            // terminal opens with EnsureStorageExistsAsync for the document type - which on a database
+            // that has never run the daemon created mt_doc_deadletterevent and Marten's whole
+            // helper-function set under the database's own AutoCreate (NavIndicatorNoDdlLiveTests). It is
+            // the studio's own SQL now (DeadLetterQueries), and safe on its own; this branch is an
+            // optimisation, not the guard.
             //
             // Nothing is lost by not asking. A dead letter is recorded by the async daemon while it
-            // applies an event, so a database with no event tables has never had one - the list would
-            // have been empty, at the cost of a migration.
+            // applies an event, so a database with no event tables has never had one.
             if (shape.EventTablesExist)
             {
                 page = await Events.ListDeadLettersAsync(scope, new DeadLetterQuery

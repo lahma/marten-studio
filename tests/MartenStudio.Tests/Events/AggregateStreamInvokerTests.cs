@@ -213,7 +213,7 @@ public class AggregateStreamInvokerTests
     public void Replaying_into_a_value_type_is_refused_with_the_reason()
     {
         Action replay = () => AggregateStreamInvoker.AggregateAtVersionAsync(
-            SessionFor(static _ => { }), typeof(int), Guid.NewGuid(), 1, CancellationToken.None);
+            SessionFor(static _ => { }), typeof(int), Guid.NewGuid(), [], 1, CancellationToken.None);
 
         replay.Should().Throw<ArgumentException>().WithMessage("*reference types*");
     }

@@ -414,8 +414,10 @@ read-only SQL against the whole database, is gated on `RunSql`, and is limited b
 it never appends a `LIMIT` to your statement. See [Security model and limits](#security-model-and-limits).
 
 **Events** — *Streams* lists and filters streams; *stream detail* draws the timeline with each event's
-JSON, headers and metadata, offers aggregate **time travel** (replayed on demand with
-`AggregateStreamAsync<T>(id, version:)`, writing nothing and running no projection), and archives the
+JSON, headers and metadata, offers aggregate **time travel** (replayed on demand by Marten's own
+aggregator over the events up to a version, writing nothing and running no projection; the studio's own
+read of the events creates and migrates nothing, though an `Apply` method that loads data through the
+session it is handed is the host's code and reads as the host wrote it), and archives the
 stream with `ArchiveStreams`. *Feed* is the global sequence, newest first, filtered by event type,
 sequence range, stream, tenant and the archived/skipped flags the store actually has, with a follow
 mode. *Event types* counts what the store has seen. *Dead letters* lists the daemon's failures with the

@@ -428,7 +428,7 @@ internal sealed record DeadLetterQuery
 /// <summary>
 /// An aggregate type the stream detail page can replay a stream into.
 /// </summary>
-/// <param name="Type">The CLR type the generic <c>AggregateStreamAsync</c> is closed over.</param>
+/// <param name="Type">The CLR type Marten's generic aggregator is closed over.</param>
 /// <param name="Name">Its short name, for the picker.</param>
 /// <param name="FullName">Its full name, for the tooltip.</param>
 /// <param name="Source">
@@ -454,9 +454,9 @@ internal enum AggregateCandidateSource
 /// Why a replay produced no aggregate. Four different facts that used to render as one sentence.
 /// </summary>
 /// <remarks>
-/// Marten's <c>AggregateStreamAsync&lt;T&gt;</c> answers <see langword="null" /> for all four (verified
-/// against 9.35's <c>QueryEventStore</c>): the stream's events are fetched through an
-/// <c>EventStatement</c> that always applies <c>IsNotArchivedFilter</c>, so an archived stream fetches
+/// The replay answers <see langword="null" /> for all four, as Marten's <c>AggregateStreamAsync&lt;T&gt;</c> - whose
+/// logic it follows - does (read at <c>V9.39.0</c> and <c>V9.50.2</c>, <c>QueryEventStore</c>): the stream's events are
+/// read with <c>EventStatement</c>'s filters, which always leave archived events out, so an archived stream reads
 /// empty; a version past the stream's last one is an explicit
 /// <c>if (version != 0 &amp;&amp; version &gt; events[^1].Version) return null</c>; and an aggregator that
 /// never creates — or that deletes — returns null of its own accord. Telling the visitor "produced

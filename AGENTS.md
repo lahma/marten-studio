@@ -121,7 +121,14 @@ model, the phased delivery plan — lives in the approved plan at
     database's own `AutoCreate`, the default being `CreateOrUpdate`. **A single `AllSchemaNames()` call on
     an empty schema creates `mt_hilo` and `mt_get_next_hi`** — proven live by the P7 review, 2026-09-14,
     which is a studio that wrote DDL because somebody opened a tab. The last two are merely slow and
-    connection-hungry. Schema names, declared indexes, managed tables and installed functions all come
+    connection-hungry. **Nor does a read path run a Marten LINQ terminal** (`ToListAsync`, `CountAsync`,
+    `FirstOrDefaultAsync` and the rest), `ToCommand`, `ExplainAsync` or `ToPreviewCommand` - nor `LoadAsync`,
+    `LoadManyAsync` or a `session.Events` read such as `FetchStreamAsync` or `AggregateStreamAsync` - because each
+    calls `EnsureStorageExistsAsync` for its type (read at 9.39.0 and 9.50.2), which under the database's own
+    `AutoCreate` creates or migrates that storage, and through `AllObjects()` `mt_hilo`, the first time the
+    process asks; reads use the studio's own SQL, and `StorageEnsuringCallTests` allows the remaining calls only
+    to the capability-gated writes and to F7's LINQ composition, which `MartenLinqCommand` builds into SQL
+    without it. Schema names, declared indexes, managed tables and installed functions all come
     from `SchemaDeclarationReader`, which reads `IReadOnlyStoreOptions`, `IDocumentType` and the event
     store's own feature schema and touches no connection; `CheckAsync`, `PreviewAsync` and `DdlAsync` are
     behind buttons and say on the button what they may create. Everything schema-related is **per

@@ -101,9 +101,11 @@
         }
 
         <p class="ms-time-travel-note">
-            The aggregate is replayed on demand with
-            <code>AggregateStreamAsync&lt;T&gt;(id, version:)</code> and serialized with this store's own
-            serializer. Nothing is written, and no projection is run.
+            The aggregate is replayed on demand: the stream's events up to this version are folded by
+            Marten's own aggregator and serialized with this store's own serializer. Nothing is written and
+            no projection is run. The studio reads the events without creating or migrating any table; an
+            <code>Apply</code> method that loads other documents does so through the session it is handed,
+            as your code wrote it.
         </p>
     }
 </aside>

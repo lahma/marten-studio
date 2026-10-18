@@ -27,7 +27,7 @@ namespace MartenStudio.Services.Events;
 /// <para>
 /// <b>The call.</b> <see cref="MethodInfo.MakeGenericMethod" /> over one compiled generic body, cached as a
 /// strongly typed delegate per aggregate type, the pattern <see cref="AggregateStreamInvoker" /> uses for
-/// <c>AggregateStreamAsync&lt;T&gt;</c>: the signature Marten owns is resolved by the compiler here, and only
+/// Marten's aggregator: the signature Marten owns is resolved by the compiler here, and only
 /// the closing over a runtime type is reflection.
 /// </para>
 /// </remarks>

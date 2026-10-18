@@ -84,6 +84,10 @@ internal sealed class ConjoinedEventsFixture : IAsyncDisposable
     /// <summary>The data service with every capability enabled.</summary>
     public IEventDataService Service => serviceScope.ServiceProvider.GetRequiredService<IEventDataService>();
 
+    /// <summary>The documents service, for the detail page's "view stream" check.</summary>
+    public MartenStudio.Services.Documents.IDocumentDataService Documents =>
+        serviceScope.ServiceProvider.GetRequiredService<MartenStudio.Services.Documents.IDocumentDataService>();
+
     /// <summary>The audit ring.</summary>
     public StudioActionLog Audit => serviceScope.ServiceProvider.GetRequiredService<StudioActionLog>();
 
@@ -632,6 +636,40 @@ public class ConjoinedEventsTests(ConjoinedStoreFixture fixture) : IClassFixture
         scoped.Error.Should().BeNull();
         scoped.Found.Should().BeTrue();
         scoped.Json.Should().Contain("acme-customer");
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // The documents page's "view stream" link, which follows the stream page it opens
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// With no tenant selected the stream page shows every tenant's streams, so the link is offered for tenant B's
+    /// stream too. Marten's <c>FetchStreamStateAsync</c>, which the check used to be, filtered a conjoined store on the
+    /// session's tenant - <c>*DEFAULT*</c> with none selected - and never offered it.
+    /// </summary>
+    [PostgresFact]
+    public async Task With_no_tenant_selected_the_stream_link_is_offered_for_any_tenants_stream()
+    {
+        StudioScope everyone = ConjoinedEventsFixture.ScopeFor(null);
+
+        (await Events.Documents.StreamExistsAsync(everyone, Events.StreamB.ToString(), Token)).Should().BeTrue(
+            "the link is offered exactly when the stream page it opens finds the stream");
+        (await Events.Service.GetStreamAsync(everyone, Events.StreamB.ToString(), Token)).Exists.Should().BeTrue(
+            "and the stream page does find it");
+    }
+
+    /// <summary>With tenant A selected, tenant B's stream is never linked - and the stream page agrees it is not there.</summary>
+    [PostgresFact]
+    public async Task With_a_tenant_selected_the_stream_link_is_never_offered_for_another_tenants_stream()
+    {
+        StudioScope tenantA = ConjoinedEventsFixture.ScopeFor(ConjoinedEventsFixture.TenantA);
+
+        (await Events.Documents.StreamExistsAsync(tenantA, Events.StreamB.ToString(), Token)).Should().BeFalse(
+            "tenant B's stream is not tenant A's to link to");
+        (await Events.Service.GetStreamAsync(tenantA, Events.StreamB.ToString(), Token)).Exists.Should().BeFalse();
+
+        (await Events.Documents.StreamExistsAsync(tenantA, Events.StreamA.ToString(), Token)).Should().BeTrue(
+            "its own stream is linked");
     }
 
     private static long Count(EventTypeList list, string name)

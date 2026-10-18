@@ -49,7 +49,7 @@ public class PostgresFailureTests
 
     /// <summary>
     /// Item 4: back on the throttled-Warning path. Every event read asks the column catalog - or
-    /// <c>DeadLetterTableExistsAsync</c> - before it touches a table, so an event store that has not been
+    /// <c>DescribeDeadLettersAsync</c> - before it touches a table, so an event store that has not been
     /// created yet is an empty answer and never one of these.
     /// </summary>
     [Theory]
