@@ -25,9 +25,12 @@
   at Debug. A database-wide number needs the store policy for the database with `TenantId = null`, asked
   about the store by its registered key and the database by the identity the scope resolved to (an empty
   `?db=` included). Anything that names a session, a role, an address, a statement or a tenant needs
-  `Capabilities.ViewDatabaseActivity`, and a document type `IsDocumentTypeVisible` hides is in no finding.
-  The navigation badge and the inline banners show a sweep only to a scope the report would be shown to, its
-  tenant included.
+  `Capabilities.ViewDatabaseActivity`, and a document type `IsDocumentTypeVisible` hides is in no finding. A
+  finding that names a table in a schema outside the store's own also needs the database browser's gate for
+  that schema (`Capabilities.BrowseDatabase`, the write policy and a `BrowsableSchemas` entry); the
+  navigation badge, the banners and the Critical toast withhold it, and T12 and T13 name such a table
+  generically. The navigation badge and the inline banners show a sweep only to a scope the report would be
+  shown to, its tenant included.
 - Health, daemon and high water: D01 committed events held behind a gap in the event sequence (with Explain
   on the Projections screen, which names the sessions that could be holding it only with
   `ViewDatabaseActivity` and asks the database at most once a minute), D02 async projections behind with
@@ -51,18 +54,23 @@
   without partitioning, from PostgreSQL's statistics with no scan; and E08 DCB tag-version churn, whose
   remedy needs Marten 9.47+. See `docs/health/events.md`.
 - Health, tables and indexes: T01 sequential scans of a large table (a tenant-partitioned table judged by
-  its largest partition and worded "partition-wide"), T03 invalid index (a build still running is named
-  with its phase instead, a Warning rather than a Critical while another role's builds are hidden, and a
-  build of another index never hides an older failure), T04 redundant index (never an exclusion index, a
-  `NULLS NOT DISTINCT` unique index or an immediate unique index made redundant by one that enforces less),
-  T05 unused index on a write-heavy table (Info while its counters were never reset or were reset less than
-  a day ago, until a day of the advisor's own samples has seen it unscanned, and Info always on a
-  multi-host data source), T06 low HOT-update ratio (saying so when an index on a column every upsert
-  changes means fillfactor cannot help, and counting BRIN indexes as blocking HOT before PostgreSQL 16),
-  T07 vacuum falling behind, T08 never analysed or stale statistics, T09 large documents (behind Run deeper
-  checks), T10 soft deletes accumulating, and T11 HiLo `int` id headroom. The regular ones read the catalog
-  and the statistics views (T11 also `mt_hilo`'s one row, once the catalog says it exists), lock no
-  partition and never create `mt_hilo`; a `FillFactor` or `StorageParameter` remedy needs Marten 9.47+. See
+  its largest partition and worded "partition-wide"), T03 invalid index (a build still running is named with
+  its phase instead, a Warning rather than a Critical while another role's builds are hidden, and a build of
+  another index never hides an older failure), T04 redundant index (never an exclusion index, a `NULLS NOT
+  DISTINCT` unique index or an immediate unique index made redundant by one that enforces less), T05 unused
+  index on a write-heavy table (Info while its counters were never reset or were reset less than a day ago,
+  until a day of the advisor's own samples has seen it unscanned, and Info always on a multi-host data
+  source), T06 low HOT-update ratio (saying so when an index on a column every upsert changes means
+  fillfactor cannot help, and counting BRIN indexes as blocking HOT before PostgreSQL 16), T07 vacuum
+  falling behind, T08 never analysed or stale statistics (for a table that is not a document table, the way
+  to switch autovacuum back on is said in words), T09 large documents (behind Run deeper checks), T10 soft
+  deletes accumulating, and T11 HiLo `int` id headroom. The regular ones read the catalog and the statistics
+  views (T11 also `mt_hilo`'s one row, once the catalog says it exists), lock no partition and never create
+  `mt_hilo`; a Marten table is any the configuration declares, in whatever schema - an
+  `ExtendedSchemaObjects` table in a schema of its own included - and a finding that names one outside the
+  store's own schemas is shown only to a visitor the database browser's gate admits to that schema, counted
+  as not shown to anybody else; T12 and T13, which are about the whole database, name such a table
+  generically instead and stay visible; a `FillFactor` or `StorageParameter` remedy needs Marten 9.47+. See
   `docs/health/tables.md`.
 - Health, wraparound and the vacuum horizon: T12 transaction-id age and T13 multixact age judge the oldest
   of the store's tables, this database and the server's oldest database (one `DROP DATABASE` left invalid
@@ -111,6 +119,20 @@
   against what the configuration declares on Marten 9.47+. A partitioned table's parameters are the ones
   its partitions agree on, so a declared `FillFactor` matches, and a disagreement reads "partitions
   differ". Schema › Indexes marks invalid, redundant and unused indexes from the advisor's last check.
+- pgvector, read from the catalog and never from a value. Schema › Tables names each `vector`, `halfvec` and
+  `sparsevec` column under its table with the dimensions it declares ("embedding vector(1536)"), and the
+  database browser's Columns tab badges it; a type is pgvector's when the `vector` extension owns it,
+  whatever it is called. An HNSW or IVFFlat index - Marten.PgVector's `VectorIndex<T>()` makes one - says on
+  Schema › Indexes and on the browser's Keys tab what its definition only implies: each column's operator
+  class, the distance it serves and the operator a query has to order by, and `m`, `ef_construction` or
+  `lists` from `reloptions`, with pgvector's default (0.8.1: 16, 64, 100) where the index sets none, said to
+  be the default. The browser's rows, row detail and in-place expansion show a vector collapsed to its type
+  and first components (`vector(1536) [0.0123, -0.0441, 0.2, …]`) within the existing cell budgets, with
+  Expand and Copy of the whole value; the SQL console does not, because it cannot read a vector unless the
+  host called `UseVector()`. The JSON viewer collapses an embedding Marten.PgVector stores in a document: by
+  default an array of at least 128 numbers, not all of them whole - the smallest common embedding size, so
+  ids, counts and short lists of measurements open as they always did - and Expand all and search still
+  reach every element.
 - Health, connections and sessions: C01 this process's pool, read in process from Npgsql's observable
   instruments only (and not judged when two pools share Marten's connection string and disagree), C02 and
   C03 connection budgets, C04 idle in transaction, C05 long statements, C06 lock waits labelled in Marten's
@@ -224,6 +246,14 @@
   selector shows the first 200, then becomes a free-text box. A tenant whose rows are only in a conjoined
   document type that opts out of partitioning is not listed, and a link naming it is refused until the
   tenant is registered.
+- The sample's demo panel has switches that make the database unhealthy on purpose: a pinned gap (a
+  transaction holding a drawn event sequence number with one event committed above it - D01, C04), a session
+  idle in a transaction (C04), a bloated demo table with autovacuum off for it alone (T07) and a hogged
+  connection pool (C01). Each turns itself off after 10 minutes, can be turned off by hand, is turned off
+  when the host stops, and cleans up after itself - a clean-up that fails shows as Failed - and a host
+  killed with the table bloated puts autovacuum back when it next starts. The pinned gap and the pool hog
+  run only on the sample's throwaway database unless the host is started with `--allow-data-generation`. The
+  sample now starts healthy, with `Events.EnableExtendedProgressionTracking` on (K02).
 - The Marten floor is 9.39.0 (it was 9.31.0). Marten 9.39.0 fixes two critical SQL injections in Marten's
   LINQ provider, GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5. The studio reaches neither, but it should not
   pin a host to an injectable Marten, and once the advisories are published NuGet's audit flags every lower
