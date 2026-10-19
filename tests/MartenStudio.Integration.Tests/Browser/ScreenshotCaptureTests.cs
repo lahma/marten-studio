@@ -6,7 +6,7 @@ namespace MartenStudio.Integration.Tests.Browser;
 
 /// <summary>Whether the README screenshot set is retaken by this run.</summary>
 /// <remarks>
-/// Opt-in, and emphatically not part of an ordinary run: this writes thirteen tracked PNGs into
+/// Opt-in, and emphatically not part of an ordinary run: this writes fourteen tracked PNGs into
 /// <c>docs/screenshots/</c>. A suite that rewrote checked-in binaries on every <c>dotnet test</c> would
 /// put a diff in front of everybody who ran the tests and make "is this change intentional" unanswerable.
 /// </remarks>
@@ -49,8 +49,8 @@ public sealed class ScreenshotFactAttribute : FactAttribute
 }
 
 /// <summary>
-/// Retakes the screenshots <c>README.md</c> links to, from the real studio in a real browser: nine of the
-/// studio's screens, and four of the database browser.
+/// Retakes the screenshots <c>README.md</c> links to, from the real studio in a real browser: ten of the
+/// studio's screens - nine, and the Health page - and four of the database browser.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -66,14 +66,18 @@ public sealed class ScreenshotFactAttribute : FactAttribute
 /// are taller than 900 pixels, exactly as the originals are.
 /// </para>
 /// <para>
-/// <b>Two facts, so either set can be retaken alone.</b> The database browser's four arrived in 0.3.0; a
-/// run filtered to <see cref="Retake_the_database_browser_screenshots" /> rewrites those four and leaves the
-/// other nine byte for byte, so adding a screen never puts a diff on a screenshot nobody meant to change.
+/// <b>Three facts, so each set can be retaken alone.</b> The database browser's four arrived in 0.3.0 and the
+/// Health page in 0.4.0; a run filtered to <see cref="Retake_the_database_browser_screenshots" /> rewrites those
+/// four, and one filtered to <see cref="Retake_the_health_screenshot" /> rewrites <c>health.png</c>, and each leaves
+/// the other files byte for byte, so adding a screen never puts a diff on a screenshot nobody meant to change.
 /// </para>
 /// </remarks>
 [Collection(BrowserSuite.Name)]
 public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
 {
+    /// <summary>How far below the last findings area the Health capture ends, in CSS pixels: room for the card's shadow.</summary>
+    private const double FindingsMargin = 24;
+
     private static void Write(string line) => TestContext.Current.TestOutputHelper?.WriteLine(line);
 
     [ScreenshotFact]
@@ -198,11 +202,111 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
         studio.AssertClean("retaking the database browser's README screenshots");
     }
 
-    private static async Task CaptureAsync(StudioPage studio, string directory, string name)
+    /// <summary>
+    /// The Health page with real findings on it, in their area groups: T07 from the bloated-table switch and C04 from the
+    /// idle-in-transaction switch, beside the Info the suite's Postgres always earns (S02).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A fact of its own</b>, so the Health screenshot can be retaken without touching the other thirteen files. Both
+    /// switches are ones the suite's shared host allows on its configured database; the pinned gap and the pool hog are not.
+    /// </para>
+    /// <para>
+    /// <b>Waits for the findings, then for the sweep that shows them to settle</b>: each finding's card, by code, pressing
+    /// Refresh until the sweep that has it runs - C04 after its minute of idleness - and then the page with its summary
+    /// line drawn and Refresh enabled again, so the picture is of a report and never of a read in progress, and the
+    /// sidebar's badge counting the same findings, which it reads on its own poll a few seconds later. Both switches
+    /// are turned off again in a <c>finally</c>, on a page of their own and one step at a time
+    /// (<see cref="HealthBrowser.CleanUpAsync" />).
+    /// </para>
+    /// <para>
+    /// <b>The one capture that is clipped.</b> Taken whole, the page is some 5,400 pixels tall - most of it the forty-odd
+    /// rows of "What was checked" - which in the README's two-column table is a long strip beside screens of 900 to 2,160.
+    /// So it is cut at the bottom of the last findings area, measured from that element's own box rather than a pixel
+    /// count, plus <see cref="FindingsMargin" />: the findings, which are the point, and none of the status table below
+    /// them. Same width, theme and waits as every other capture.
+    /// </para>
+    /// </remarks>
+    [ScreenshotFact]
+    public async Task Retake_the_health_screenshot()
+    {
+        const string bloatedTable = "bloated-table";
+        const string idleInTransaction = "idle-in-transaction";
+
+        string directory = Path.Combine(SampleHost.RepositoryRoot(), "docs", "screenshots");
+        Directory.CreateDirectory(directory);
+
+        SampleHost host = fixture.Root;
+
+        await using StudioPage studio = await StudioPage.SignInAsync(fixture.Browser, host, "admin");
+        IPage page = studio.Page;
+        bool passed = false;
+
+        try
+        {
+            await HealthBrowser.TurnOnAsync(page, host, bloatedTable);
+            await HealthBrowser.TurnOnAsync(page, host, idleInTransaction);
+
+            await studio.GoAsync(host.StudioUrl("health"));
+            await studio.SetThemeAsync("light");
+
+            await HealthBrowser.UntilShownAsync(
+                page.Locator(HealthBrowser.Visible("t07")), HealthBrowser.HealthRefresh(page), HealthBrowser.NextSweep,
+                "T07 after the bloated-table switch was turned on");
+            await HealthBrowser.UntilShownAsync(
+                page.Locator(HealthBrowser.Visible("c04")), HealthBrowser.HealthRefresh(page), HealthBrowser.AfterAMinute,
+                "C04 a minute after the idle-in-transaction switch was turned on");
+
+            await page.Locator(".ms-health-summary-line").First.WaitForAsync();
+            await page.WaitForFunctionAsync(
+                """
+                () => {
+                  const refresh = [...document.querySelectorAll('.ms-health-actions button')].find(b => b.textContent.trim() === 'Refresh');
+                  return refresh !== undefined && !refresh.disabled
+                    && document.querySelector('.ms-health .ms-loading-spinner') === null
+                    && document.querySelector('.ms-health-area article[id^="finding-t07"]') !== null
+                    && document.querySelector('.ms-health-area article[id^="finding-c04"]') !== null;
+                }
+                """,
+                null,
+                new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+            // And the sidebar's badge caught up with it: it reads the same sweep on its own poll, a few seconds behind.
+            (await HealthBrowser.BadgeAgreesWithThePageAsync(page)).Should().BePositive("T07 and C04 are Warnings");
+
+            // From the top of the page to the bottom of the last findings area, in document coordinates, measured from the
+            // element itself once everything above has settled.
+            double findingsEnd = await page.EvaluateAsync<double>(
+                """
+                () => {
+                  const areas = document.querySelectorAll('.ms-health-area');
+                  return areas.length === 0 ? 0 : areas[areas.length - 1].getBoundingClientRect().bottom + window.scrollY;
+                }
+                """);
+            findingsEnd.Should().BePositive("the page draws its findings in area groups");
+
+            Clip findings = new() { X = 0, Y = 0, Width = StudioPage.ViewportWidth, Height = (float) Math.Ceiling(findingsEnd + FindingsMargin) };
+
+            await CaptureAsync(studio, directory, "health", findings);
+
+            studio.AssertClean("retaking the Health screenshot");
+            passed = true;
+        }
+        finally
+        {
+            await HealthBrowser.CleanUpAsync(
+                studio,
+                passed,
+                ("turn idle in transaction off", HealthBrowser.OnPage(cleanUp => HealthBrowser.TurnOffAsync(cleanUp, host, idleInTransaction))),
+                ("turn the bloated table off", HealthBrowser.OnPage(cleanUp => HealthBrowser.TurnOffAsync(cleanUp, host, bloatedTable))));
+        }
+    }
+
+    private static async Task CaptureAsync(StudioPage studio, string directory, string name, Clip? clip = null)
     {
         string path = Path.Combine(directory, name + ".png");
 
-        await studio.ScreenshotAsync(path);
+        await studio.ScreenshotAsync(path, clip: clip);
 
         Write(name + ".png -> " + path);
     }

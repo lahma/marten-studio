@@ -219,6 +219,38 @@ public class UnhealthySwitchesLiveTests(PostgresFixture postgres)
         (await host.ReportAsync()).Findings.Should().NotContain(static x => x.Code == "T07");
     }
 
+    /// <summary>
+    /// The bloated table is counted once: 30,000 live rows and 30,000 dead, so T07 says half the table is dead.
+    /// </summary>
+    /// <remarks>
+    /// The regression: an <c>ANALYZE</c> run by the backend that has just inserted and updated the rows, before it passed
+    /// their counts on, subtracts the pending dead count from what it writes but not the pending live one - in every
+    /// version - so the counts that follow add the inserted rows a second time: 60,000 live, 30,000 dead, and a T07 of 33%.
+    /// The switch forces the flush first where the server has a function for it (15 and later; the suite runs 17). The
+    /// wait is for the dead rows, which reach the view only with that flush when it is still pending, so the counts are
+    /// read after it either way.
+    /// </remarks>
+    [PostgresFact]
+    public async Task The_bloated_table_counts_each_row_once_half_live_and_half_dead()
+    {
+        string database = await ConnectionsLiveHost.CreateDatabaseAsync(postgres.ConnectionString, "unhealthy_bloat_counts");
+        await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(database, store: UnhealthyDemoStore.Configure);
+
+        await using SwitchRig rig = new(host.Store);
+        rig.TurnOn(UnhealthySwitchKind.BloatedTable);
+        await rig.WaitForAsync(UnhealthySwitchKind.BloatedTable, UnhealthySwitchState.On);
+
+        await LiveWait.UntilAsync(async () => await DeadRowsAsync(database) > 0, Settle, "pg_stat_user_tables to count the dead rows");
+
+        (await LiveRowsAsync(database)).Should().Be(BloatedTableSwitch.Rows, "every row the switch inserted is live once");
+        (await DeadRowsAsync(database)).Should().Be(BloatedTableSwitch.Rows, "and every one was updated once, leaving one dead version");
+
+        HealthReportFinding finding = (await host.ReportAsync()).Findings.Should().ContainSingle(static x => x.Code == "T07").Subject;
+        finding.Finding.Title.Should().StartWith("50% of ", "half the table is dead rows");
+        finding.Evidence.Should().Contain(new HealthEvidence("Live rows", "30,000"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Dead rows", "30,000 (50%)"));
+    }
+
     // ---- Pool hog: C01 -------------------------------------------------------------------------------------
 
     [PostgresFact]
@@ -501,6 +533,13 @@ public class UnhealthySwitchesLiveTests(PostgresFixture postgres)
         await LiveWait.ScalarAsync<long>(
             connectionString,
             "select coalesce(max(n_dead_tup), -1) from pg_catalog.pg_stat_user_tables where schemaname = @schema and relname = @table",
+            ("schema", SampleStore.DocumentSchema),
+            ("table", UnhealthyDemoStore.BloatTableName));
+
+    private static async Task<long> LiveRowsAsync(string connectionString) =>
+        await LiveWait.ScalarAsync<long>(
+            connectionString,
+            "select coalesce(max(n_live_tup), -1) from pg_catalog.pg_stat_user_tables where schemaname = @schema and relname = @table",
             ("schema", SampleStore.DocumentSchema),
             ("table", UnhealthyDemoStore.BloatTableName));
 

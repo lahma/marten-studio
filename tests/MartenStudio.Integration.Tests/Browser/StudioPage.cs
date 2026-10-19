@@ -390,11 +390,16 @@ internal sealed class StudioPage : IAsyncDisposable
     /// </remarks>
     /// <param name="path">Where to write it.</param>
     /// <param name="fullPage">Whether to capture past the viewport.</param>
-    public async Task ScreenshotAsync(string path, bool fullPage = true)
+    /// <param name="clip">
+    /// The part of the page to keep, or <see langword="null" /> for all of it - the default, so every capture that does not
+    /// ask for one is taken exactly as before. With <paramref name="fullPage" /> it is in document coordinates, so it may
+    /// reach below the viewport.
+    /// </param>
+    public async Task ScreenshotAsync(string path, bool fullPage = true, Clip? clip = null)
     {
         await Page.EvaluateAsync("() => (document.activeElement instanceof HTMLElement) && document.activeElement.blur()");
 
-        await Page.ScreenshotAsync(new PageScreenshotOptions { Path = path, FullPage = fullPage });
+        await Page.ScreenshotAsync(new PageScreenshotOptions { Path = path, FullPage = fullPage, Clip = clip });
     }
 
     /// <summary>

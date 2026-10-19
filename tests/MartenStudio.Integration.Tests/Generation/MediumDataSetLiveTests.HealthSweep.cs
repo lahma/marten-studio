@@ -66,13 +66,17 @@ public partial class MediumDataSetLiveTests
     private const int SweepStatementBudget = MeasuredSweepStatements + 2;
 
     /// <summary>
-    /// The database-time budget for one regular sweep of this set: 5 s, against 400-450 ms measured at the floor and
-    /// 456 ms at 9.50.2 on 2026-10-19 (500-570 ms wall clock). Ten times a measured sweep rather than a few milliseconds
-    /// over it, like every
-    /// budget in <see cref="ResponsivenessBudgets" />: the assembly runs four collections beside this one against the same
-    /// Postgres, and a budget a busy runner can miss measures the runner. A check whose cost grows with the data - a scan
-    /// of mt_events, an exact count - misses it by orders of magnitude, not by a margin.
+    /// The database-time ceiling for one regular sweep of this set: 5 s, against 400-450 ms measured at the floor and
+    /// 456 ms at 9.50.2 on 2026-10-19 (500-570 ms wall clock).
     /// </summary>
+    /// <remarks>
+    /// A ceiling, not a budget a regression must miss by a margin: ten times a measured sweep, because the assembly runs
+    /// four collections beside this one against the same Postgres and a line a busy runner can cross measures the runner.
+    /// What it catches is a sweep that runs into <c>statement_timeout</c> or multiplies its statements - per table, per
+    /// shard, per tenant. It does <em>not</em> catch one warm sequential scan: a hundred thousand rows of
+    /// <c>mt_events</c> scan in well under a second here, inside the ceiling. That a regular sweep reads no document
+    /// table at all, and only Marten's bookkeeping beyond the catalog, is asserted by the lock probe instead.
+    /// </remarks>
     private static readonly TimeSpan SweepDatabaseTimeBudget = TimeSpan.FromSeconds(5);
 
     [PostgresFact]
@@ -132,7 +136,7 @@ public partial class MediumDataSetLiveTests
         statements.Should().BeLessThanOrEqualTo(SweepStatementBudget,
             "one regular sweep of every area runs a bounded set of catalog statements, whatever the data set's size");
         databaseTime.Should().BeLessThanOrEqualTo(SweepDatabaseTimeBudget,
-            "a regular sweep reads the catalog and the statistics views, never the hundred thousand rows");
+            "a regular sweep neither runs into statement_timeout nor multiplies its statements over this set");
 
         // The locks: a second container over the same schemas, with the probe watching every statement's session.
         HealthSweepProbe probe = new(fixture.Postgres);
@@ -156,38 +160,33 @@ public partial class MediumDataSetLiveTests
 
         // Beyond the catalog and the statistics views, what a regular sweep reads is Marten's own bookkeeping, with the
         // plain AccessShareLock a read takes on the table, its sequence and its indexes: the daemon checks' progression,
-        // high-water and skip rows, the boundary of mt_events above the mark and the dead letters (D01-D08, E05), and
-        // T11's mt_hilo. Never a document table, where the hundred thousand documents are; never another mode; never an
-        // advisory lock.
+        // high-water and skip rows, the boundary of mt_events above the mark and the dead letters, and T11's mt_hilo -
+        // each relation allowed only to the statements of the checks that read it (SweepLockAllowList), so a table check
+        // that started reading mt_events, or a daemon check that read mt_hilo, fails here. Never a document table, where
+        // the hundred thousand documents are; never another mode; never an advisory lock.
         string events = schema + "_events";
-        Write("Locked beyond the catalog: " + string.Join(", ", probe.BeyondCatalogReads
-            .Select(static x => x.Mode + " " + x.Schema + "." + x.Relation).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)));
+        SweepLockAllowList allowed = SweepLockAllowList.From(probed, schema, events);
 
-        probe.BeyondCatalogReads.Where(x => !IsBookkeepingRead(x, schema, events)).Should().BeEmpty(
-            "a regular sweep holds nothing but AccessShareLocks on catalog and statistics relations and on Marten's own "
-            + "bookkeeping tables it reads, and its own virtual transaction id - on a hundred thousand rows as on none");
+        ILookup<string, string> codesBySql = probed.Results
+            .SelectMany(static x => x.Statements.Select(statement => (statement.Sql, x.Check.Code)))
+            .ToLookup(static x => x.Sql, static x => x.Code, StringComparer.Ordinal);
+
+        Write("Locked beyond the catalog, by the checks whose statement held it: " + string.Join(", ", probe.BeyondCatalogReads
+            .Where(static x => !x.IsOwnTransaction)
+            .Select(x => x.Mode + " " + x.Schema + "." + x.Relation + " <- " + string.Join("/", codesBySql[x.Statement].Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)));
+
+        probe.BeyondCatalogReads.Where(x => !allowed.Allows(x)).Should().BeEmpty(
+            "a regular sweep holds nothing but AccessShareLocks on catalog and statistics relations, its own virtual "
+            + "transaction id, and Marten's own bookkeeping tables - each read only by the checks that are about it - on a "
+            + "hundred thousand rows as on none");
         probe.Locks.Should().NotContain(x => x.Schema == schema && x.Relation != null && x.Relation.Contains("mt_doc_", StringComparison.Ordinal),
             "no check reads the generated documents' tables");
 
         IReadOnlySet<string> after = await HealthSweepProbe.SnapshotAsync(fixture.Postgres, schemas);
         after.Should().BeEquivalentTo(before, "two sweeps over the set created, dropped and altered nothing");
     }
-
-    /// <summary>The event store's bookkeeping tables a regular sweep reads, matched as their indexes and sequence are named.</summary>
-    private static readonly string[] EventBookkeeping = ["mt_event_progression", "mt_events", "mt_high_water_skips", "mt_doc_deadletterevent"];
-
-    /// <summary>
-    /// A lock a regular sweep may hold: a catalog read, its own transaction's, or a plain read of Marten's bookkeeping -
-    /// <see cref="EventBookkeeping" /> in the event schema, <c>mt_hilo</c> in the document schema. The daemon checks' own
-    /// allow-list (<see cref="DaemonSweeps.IsAllowedRead" />) plus the two tables only a whole sweep adds: D07's skips
-    /// and T11's HiLo rows.
-    /// </summary>
-    private static bool IsBookkeepingRead(HeldLock held, string schema, string events) =>
-        held.IsCatalogRead
-        || held.IsOwnTransaction
-        || (held is { LockType: "relation", Mode: "AccessShareLock", Relation: { } relation }
-            && ((held.Schema == events && Array.Exists(EventBookkeeping, table => relation.Contains(table, StringComparison.Ordinal)))
-                || (held.Schema == schema && relation.Contains("mt_hilo", StringComparison.Ordinal))));
 
     /// <summary>One regular sweep through the container's own sweeper, the scope resolved as a circuit resolves it.</summary>
     private static async Task<HealthSweep> RegularSweepAsync(IServiceProvider services, StudioScope scope)
@@ -232,5 +231,138 @@ public partial class MediumDataSetLiveTests
     {
         public override Task<AuthenticationState> GetAuthenticationStateAsync() =>
             Task.FromResult(new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity())));
+    }
+}
+
+/// <summary>
+/// The locks a regular sweep may hold, per relation and per statement: a catalog read and its own transaction's lock
+/// from any statement, and a plain read of one of Marten's bookkeeping tables only from a statement of a check that is
+/// about that table.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Per statement, as the daemon and table checks' own no-lock tests judge it</b> (<c>DaemonHealthLiveTests</c>,
+/// <c>TableHealthSweepLiveTests</c>): an allow-list by relation alone would let a table check start reading
+/// <c>mt_events</c>, or any check read <c>mt_hilo</c>, and stay green, because some other check reads the same table. The
+/// statements behind each reader are the sweep's own (<see cref="HealthCheckResult.Statements" />), matched by text to
+/// the statement the probe saw the lock under (<see cref="HeldLock.Statement" />).
+/// </para>
+/// <para>
+/// <b>The readers</b>, measured over the hundred-thousand-row set on 2026-10-19: the progression table D01, D02, D03, D05
+/// and D08; the boundary of <c>mt_events</c> above the mark and its sequence the high-water read D01, D02 and D03 share;
+/// the high-water skips D07; the dead letters D06 - each with the table's indexes, which the planner opens with it - and
+/// <c>mt_hilo</c> T11. The event checks of a regular sweep (E05, E07) read only the catalog and the statistics views, so a
+/// lock of theirs on <c>mt_events</c> fails this.
+/// </para>
+/// </remarks>
+internal sealed class SweepLockAllowList
+{
+    /// <summary>The event store's bookkeeping tables a regular sweep reads, matched as their indexes and sequence are named.</summary>
+    public static readonly string[] EventBookkeeping = ["mt_event_progression", "mt_events", "mt_high_water_skips", "mt_doc_deadletterevent"];
+
+    /// <summary>The checks whose statements may read <see cref="EventBookkeeping" />: the daemon checks, and no other.</summary>
+    public static readonly string[] EventBookkeepingReaders = ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08"];
+
+    /// <summary>The checks whose statements may read <c>mt_hilo</c>.</summary>
+    public static readonly string[] HiloReaders = ["T11"];
+
+    private readonly string documentSchema;
+    private readonly string eventSchema;
+    private readonly IReadOnlySet<string> eventReaders;
+    private readonly IReadOnlySet<string> hiloReaders;
+
+    /// <summary>An allow-list over two sets of statement texts.</summary>
+    public SweepLockAllowList(string documentSchema, string eventSchema, IReadOnlySet<string> eventReaders, IReadOnlySet<string> hiloReaders)
+    {
+        this.documentSchema = documentSchema;
+        this.eventSchema = eventSchema;
+        this.eventReaders = eventReaders;
+        this.hiloReaders = hiloReaders;
+    }
+
+    /// <summary>The allow-list for one sweep: the statements its readers ran.</summary>
+    public static SweepLockAllowList From(HealthSweep sweep, string documentSchema, string eventSchema)
+    {
+        ArgumentNullException.ThrowIfNull(sweep);
+
+        return new SweepLockAllowList(
+            documentSchema,
+            eventSchema,
+            StatementsOf(sweep, EventBookkeepingReaders),
+            StatementsOf(sweep, HiloReaders));
+    }
+
+    /// <summary>Whether a regular sweep may hold <paramref name="held" />.</summary>
+    public bool Allows(HeldLock held)
+    {
+        ArgumentNullException.ThrowIfNull(held);
+
+        if (held.IsCatalogRead || held.IsOwnTransaction)
+        {
+            return true;
+        }
+
+        if (held is not { LockType: "relation", Mode: "AccessShareLock", Relation: { } relation })
+        {
+            return false;
+        }
+
+        if (held.Schema == eventSchema && Array.Exists(EventBookkeeping, table => relation.Contains(table, StringComparison.Ordinal)))
+        {
+            return eventReaders.Contains(held.Statement);
+        }
+
+        return held.Schema == documentSchema
+            && relation.Contains("mt_hilo", StringComparison.Ordinal)
+            && hiloReaders.Contains(held.Statement);
+    }
+
+    private static HashSet<string> StatementsOf(HealthSweep sweep, string[] codes) =>
+        [.. sweep.Results
+            .Where(x => codes.Contains(x.Check.Code, StringComparer.Ordinal))
+            .SelectMany(static x => x.Statements)
+            .Select(static x => x.Sql)];
+}
+
+/// <summary>
+/// The anti-vacuity half of the whole-sweep lock assertion: <see cref="SweepLockAllowList" /> refuses a bookkeeping
+/// table read from a check that is not about it, a mode a read does not take, a lock on a document table and an
+/// advisory lock - and still admits what the sweep really holds. No database.
+/// </summary>
+public class SweepLockAllowListTests
+{
+    private const string DocumentSchema = "generation_medium";
+    private const string EventSchema = "generation_medium_events";
+    private const string DaemonStatement = "select ... from generation_medium_events.mt_event_progression";
+    private const string HiloStatement = "select ... from generation_medium.mt_hilo";
+    private const string TableStatement = "select ... from pg_catalog.pg_stat_user_tables";
+
+    private static readonly SweepLockAllowList Allowed = new(
+        DocumentSchema,
+        EventSchema,
+        new HashSet<string>(StringComparer.Ordinal) { DaemonStatement },
+        new HashSet<string>(StringComparer.Ordinal) { HiloStatement });
+
+    [Fact]
+    public void It_admits_what_a_sweep_holds_and_refuses_everything_else()
+    {
+        Allowed.Allows(new HeldLock("relation", "AccessShareLock", "pg_catalog", "pg_class", TableStatement)).Should().BeTrue("a catalog read");
+        Allowed.Allows(new HeldLock("virtualxid", "ExclusiveLock", null, null, TableStatement)).Should().BeTrue("the transaction's own lock");
+        Allowed.Allows(new HeldLock("relation", "AccessShareLock", EventSchema, "mt_events", DaemonStatement)).Should().BeTrue("a daemon check reads mt_events");
+        Allowed.Allows(new HeldLock("relation", "AccessShareLock", EventSchema, "pk_mt_events_stream_and_version", DaemonStatement))
+            .Should().BeTrue("the planner opens a table's indexes with it");
+        Allowed.Allows(new HeldLock("relation", "AccessShareLock", DocumentSchema, "mt_hilo", HiloStatement)).Should().BeTrue("T11 reads mt_hilo");
+
+        Allowed.Allows(new HeldLock("relation", "AccessShareLock", EventSchema, "mt_events", TableStatement))
+            .Should().BeFalse("a table check that reads mt_events is not a daemon check, whoever else reads the table");
+        Allowed.Allows(new HeldLock("relation", "AccessShareLock", DocumentSchema, "mt_hilo", DaemonStatement))
+            .Should().BeFalse("mt_hilo is T11's to read");
+        Allowed.Allows(new HeldLock("relation", "RowExclusiveLock", EventSchema, "mt_event_progression", DaemonStatement))
+            .Should().BeFalse("a read takes AccessShareLock and nothing stronger");
+        Allowed.Allows(new HeldLock("relation", "AccessShareLock", DocumentSchema, "mt_doc_customer", DaemonStatement))
+            .Should().BeFalse("no check reads a document table");
+        Allowed.Allows(new HeldLock("advisory", "ExclusiveLock", null, null, DaemonStatement)).Should().BeFalse("no check takes an advisory lock");
+        Allowed.Allows(new HeldLock("relation", "AccessShareLock", "elsewhere", "mt_events", DaemonStatement))
+            .Should().BeFalse("the bookkeeping is this store's, in its own event schema");
     }
 }

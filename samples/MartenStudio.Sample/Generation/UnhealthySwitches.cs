@@ -208,7 +208,9 @@ internal sealed class IdleInTransactionSwitch(IDocumentStore store) : UnhealthyS
 /// statement Marten's apply would write), which gives it fresh statistics; then switches autovacuum off for it, fills
 /// it, and updates every row once. The updated column is indexed, so no update can be HOT and every old version stays a
 /// dead row until a vacuum: half the table dead, against T07's line of 20% and 10,000 rows. <c>ANALYZE</c> last, so the
-/// planner's statistics are current and T08 (never analysed) stays out of this demo.
+/// planner's statistics are current and T08 (never analysed) stays out of this demo - after the backend has flushed the
+/// insert's and the update's counts where the server can be told to, or it may count the inserted rows twice
+/// (<see cref="FlushPendingStatisticsAsync" />).
 /// </para>
 /// <para>
 /// Turned off: <c>autovacuum_enabled</c> is reset, which is the table's own default, and the table is vacuumed.
@@ -276,6 +278,7 @@ internal sealed class BloatedTableSwitch(IDocumentStore store) : UnhealthySwitch
                 }
 
                 await ExecuteAsync(connection, "update " + quoted + " set revision = revision + 1", cancellationToken).ConfigureAwait(false);
+                await FlushPendingStatisticsAsync(connection, cancellationToken).ConfigureAwait(false);
                 await ExecuteAsync(connection, "analyze " + quoted, cancellationToken).ConfigureAwait(false);
             }
 
@@ -294,6 +297,57 @@ internal sealed class BloatedTableSwitch(IDocumentStore store) : UnhealthySwitch
                     await RestoreAsync(connection, table, quoted, token).ConfigureAwait(false);
                 }).ConfigureAwait(false);
             }
+        }
+    }
+
+    /// <summary>
+    /// Makes this backend flush the table statistics it still holds - the insert's and the update's, committed a moment
+    /// ago - before the <c>ANALYZE</c> that follows, so the table is counted once: 30,000 live rows and 30,000 dead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why.</b> A backend holds its table counters for a while before they reach shared statistics - from PostgreSQL 15
+    /// it flushes them when it goes idle, at most once a second; before 15 it sent them to the statistics collector at most
+    /// every 500 ms. <c>ANALYZE</c> writes its own counts, and to avoid counting twice what the same backend has not passed
+    /// on yet, <c>pgstat_report_analyze</c> subtracts that backend's pending <em>dead</em> count - but not its pending
+    /// <em>live</em> count, before 15 as after (REL_14_STABLE's has the same uneven subtraction; the miscount below was
+    /// measured on 17). Run
+    /// moments after the insert and the update on one connection, <c>ANALYZE</c> wrote 30,000 live and 0 dead, and the
+    /// counters that followed added the insert's 30,000 live rows and the update's 30,000 dead ones: 60,000 live, 30,000
+    /// dead, and T07 said 33% where the table is half dead. With nothing pending, <c>ANALYZE</c>'s counts are the table's.
+    /// </para>
+    /// <para>
+    /// <b>How, and from which version.</b> <c>pg_stat_force_next_flush()</c>, as a statement of its own, makes the backend
+    /// flush everything it holds when it next goes idle - which is before it answers that statement, so before the
+    /// <c>ANALYZE</c> arrives. The function exists from PostgreSQL 15, which is why the flush is asked for only there: below
+    /// 15 nothing can force it, and the counts may come out twice. The sample may run against a configured server, so the
+    /// version is asked first - a name the server does not know fails when the statement is parsed, whatever its
+    /// <c>WHERE</c> says. A role the server refuses the function to (42501), or a Postgres-compatible server that reports
+    /// 15 or later without it (42883), keeps the old count rather than failing the switch.
+    /// </para>
+    /// </remarks>
+    private static async Task FlushPendingStatisticsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        int version;
+
+        await using (NpgsqlCommand ask = new("select pg_catalog.current_setting('server_version_num')::int", connection))
+        {
+            version = (int) (await ask.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
+        }
+
+        if (version < 150000)
+        {
+            return;
+        }
+
+        try
+        {
+            await ExecuteAsync(connection, "select pg_catalog.pg_stat_force_next_flush()", cancellationToken).ConfigureAwait(false);
+        }
+        catch (PostgresException exception) when (
+            exception.SqlState is PostgresErrorCodes.InsufficientPrivilege or PostgresErrorCodes.UndefinedFunction)
+        {
+            // Possibly counted twice, then - a demo's numbers, not a reason to fail the switch.
         }
     }
 
