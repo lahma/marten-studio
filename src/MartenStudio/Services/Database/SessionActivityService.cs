@@ -13,10 +13,20 @@ namespace MartenStudio.Services.Database;
 /// <b>Two gates, in the database browser's order</b> (decision 4, D27). The summary needs the store policy for
 /// the database as a whole (<c>TenantId = null</c>): a session belongs to no tenant, so a visitor confined to one
 /// is refused it, as they should be. The details are <c>ViewDatabaseActivity</c>'s: <see cref="StudioCapabilityGuard.Require" />
-/// first, before anybody is asked who is asking; then the store policy and the write policy, one at a time and
-/// both tenant-less, so the refusal and event 9203 name the one that said no; then the scope, resolved with the
-/// capability named. Every refusal of the details is audited, under <c>ViewDatabaseActivity</c>, so the Activity
-/// screen shows it only to a visitor who may make the same read (<c>StudioActionLog.GetVisibleAsync</c>).
+/// first, before anybody is asked who is asking; then the scope, resolved with no tenant - the store policy, asked
+/// by the resolver before anything is looked up; then the store policy and the write policy, one at a time and
+/// both tenant-less, so the refusal and event 9203 name the one that said no. Every refusal of the details is
+/// audited, under <c>ViewDatabaseActivity</c>, so the Activity screen shows it only to a visitor who may make the
+/// same read (<c>StudioActionLog.GetVisibleAsync</c>).
+/// </para>
+/// <para>
+/// <b>About the store and database the scope resolved to, by their own names</b> (AGENTS.md D29). The resolver has to
+/// ask before it looks anything up, so its question carries the visitor's spelling - a store key matches in any case,
+/// and a database id is often empty, meaning the store's first. Every question after it, and every audit entry, names
+/// the store's registered key and <c>Id.Identity</c> of the database it resolved to, as the Health page and the
+/// high-water Explain do: one policy is asked one question about one database, and the audit never names a resource
+/// the policy was not shown. Where either spelling differs, the store policy is asked again about the resolved names,
+/// and both must pass.
 /// </para>
 /// <para>
 /// <b>Audited by signature, never per poll.</b> The first details read of a store's database in a circuit is
@@ -122,12 +132,12 @@ internal sealed class SessionActivityService : ISessionActivityService
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        StudioScope whole = scope with { TenantId = null };
+        StudioScope asked = scope with { TenantId = null };
         ResolvedScope resolved;
 
         try
         {
-            resolved = await resolver.ResolveAsync(whole, null, cancellationToken).ConfigureAwait(false);
+            resolved = await resolver.ResolveAsync(asked, null, cancellationToken).ConfigureAwait(false);
         }
         catch (StudioNotAuthorizedException)
         {
@@ -136,6 +146,14 @@ internal sealed class SessionActivityService : ISessionActivityService
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
         {
             return SessionActivitySummary.Refused(DatabaseRefusal.Unavailable, exception.Message);
+        }
+
+        // From here on, the store and database the scope resolved to, by the registered key and the identity (D29).
+        StudioScope whole = WholeDatabase(resolved);
+
+        if (!await StorePolicyPassesAsync(asked, whole, cancellationToken).ConfigureAwait(false))
+        {
+            return SessionActivitySummary.Refused(DatabaseRefusal.StorePolicy, StorePolicyDenial);
         }
 
         SessionDetailsAccess details = await AccessAsync(whole, cancellationToken).ConfigureAwait(false);
@@ -216,7 +234,7 @@ internal sealed class SessionActivityService : ISessionActivityService
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        StudioScope whole = scope with { TenantId = null };
+        StudioScope asked = scope with { TenantId = null };
         MartenStudioOptions value = options.Value;
 
         // 1. The capability, before anybody is asked who is asking.
@@ -233,8 +251,30 @@ internal sealed class SessionActivityService : ISessionActivityService
                 : SessionActivityDetails.Refused(DatabaseRefusal.CapabilityOff, CapabilityDenial);
         }
 
-        // 2. The two policies, of the database as a whole, one at a time so the refusal names the one that said no.
-        if (!await authorization.IsAuthorizedAsync(whole, capability: null, cancellationToken).ConfigureAwait(false))
+        // 2. The scope, resolved with no tenant: the store policy, which the resolver asks before it looks anything up -
+        //    with the visitor's spelling of the database, because nothing has been resolved to ask about yet.
+        ResolvedScope resolved;
+
+        try
+        {
+            resolved = await resolver.ResolveAsync(asked, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            audit.RecordScopeDenied(asked, DatabaseAccess.StorePolicyName(value), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
+            return SessionActivityDetails.Refused(DatabaseRefusal.StorePolicy, StorePolicyDenial);
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
+        {
+            audit.Record(DetailsAction, DetailsTarget, succeeded: false, exception.Message, StudioCapability.ViewDatabaseActivity, asked);
+            return SessionActivityDetails.Refused(DatabaseRefusal.Unavailable, exception.Message);
+        }
+
+        // 3. The two policies, of the store and database it resolved to, by their own names (D29), one at a time
+        //    so the refusal names the one that said no. The audit names that database too.
+        StudioScope whole = WholeDatabase(resolved);
+
+        if (!await StorePolicyPassesAsync(asked, whole, cancellationToken).ConfigureAwait(false))
         {
             audit.RecordScopeDenied(whole, DatabaseAccess.StorePolicyName(value), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
             return SessionActivityDetails.Refused(DatabaseRefusal.StorePolicy, StorePolicyDenial);
@@ -244,27 +284,6 @@ internal sealed class SessionActivityService : ISessionActivityService
         {
             audit.RecordScopeDenied(whole, DatabaseAccess.WritePolicyName(value), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
             return SessionActivityDetails.Refused(DatabaseRefusal.WritePolicy, WritePolicyDenial);
-        }
-
-        // 3. The scope, resolved with no tenant and the capability named. The resolver asks both policies again; a
-        //    policy that changed its mind in between is refused as the write policy.
-        ResolvedScope resolved;
-
-        try
-        {
-            resolved = await resolver
-                .ResolveAsync(whole, nameof(StudioCapability.ViewDatabaseActivity), cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (StudioNotAuthorizedException)
-        {
-            audit.RecordScopeDenied(whole, DatabaseAccess.WritePolicyName(value), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
-            return SessionActivityDetails.Refused(DatabaseRefusal.WritePolicy, WritePolicyDenial);
-        }
-        catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
-        {
-            audit.Record(DetailsAction, DetailsTarget, succeeded: false, exception.Message, StudioCapability.ViewDatabaseActivity, whole);
-            return SessionActivityDetails.Refused(DatabaseRefusal.Unavailable, exception.Message);
         }
 
         // 4. Only now anything about the database.
@@ -323,6 +342,22 @@ internal sealed class SessionActivityService : ISessionActivityService
 
         return details;
     }
+
+    /// <summary>
+    /// The database a resolved scope names, as a whole: the store's registered key - a scope's key matches in any case -
+    /// the database's own identity, and no tenant.
+    /// </summary>
+    private static StudioScope WholeDatabase(ResolvedScope resolved) =>
+        new(resolved.Registration.Key, resolved.Database.Id.Identity, null);
+
+    /// <summary>
+    /// The store policy for the resolved store and database. The resolver has asked it already when the visitor spelt
+    /// both that way, so it is asked again only when either spelling was another - an empty database, or another case.
+    /// </summary>
+    private async ValueTask<bool> StorePolicyPassesAsync(StudioScope asked, StudioScope whole, CancellationToken cancellationToken) =>
+        (string.Equals(asked.StoreKey, whole.StoreKey, StringComparison.Ordinal)
+            && string.Equals(asked.DatabaseId, whole.DatabaseId, StringComparison.Ordinal))
+        || await authorization.IsAuthorizedAsync(whole, capability: null, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
     /// The page's question, never audited: whether the details would be read. Asked the way

@@ -89,6 +89,7 @@ internal sealed class TenantDiscovery
     private readonly TimeProvider timeProvider;
     private readonly Lock gate = new();
     private readonly Dictionary<(string StoreKey, string DatabaseId), (DateTimeOffset At, TenantList List)> cache = [];
+    private long generation;
 
     public TenantDiscovery(IOptions<MartenStudioOptions> options, ILogger<TenantDiscovery> logger)
         : this(options, logger, TimeProvider.System)
@@ -193,6 +194,23 @@ internal sealed class TenantDiscovery
         lock (gate)
         {
             cache.Clear();
+            generation++;
+        }
+    }
+
+    /// <summary>
+    /// How many times <see cref="Invalidate" /> has run. A caller that remembers an answer it took from this discovery
+    /// - the health badge's tenant placement - keeps the generation it was read under and stops trusting the answer
+    /// when it moves, so the selector's refresh clears that answer too.
+    /// </summary>
+    public long Generation
+    {
+        get
+        {
+            lock (gate)
+            {
+                return generation;
+            }
         }
     }
 

@@ -86,6 +86,12 @@ internal sealed record HealthReportFinding(
 /// <param name="SqlState">The SQLSTATE, when Postgres said something.</param>
 /// <param name="DocsUrl">The check's docs anchor.</param>
 /// <param name="Statements">What it ran, for "Show SQL".</param>
+/// <param name="FindingsWithheld">
+/// Whether <paramref name="FindingCount" /> leaves findings out, so the row must not read "nothing found": always
+/// for a check whose gate this visitor is short of - whether or not it found anything, which the row does not say -
+/// and, for one they pass, when some of its findings were withheld one by one (a finding about a tenant needs the
+/// activity gate and that tenant's store policy).
+/// </param>
 internal sealed record HealthCheckStatus(
     string Code,
     string Title,
@@ -97,7 +103,8 @@ internal sealed record HealthCheckStatus(
     string? Problem,
     string? SqlState,
     string DocsUrl,
-    IReadOnlyList<HealthStatement> Statements);
+    IReadOnlyList<HealthStatement> Statements,
+    bool FindingsWithheld = false);
 
 /// <summary>Everything the Health page draws for one visitor and one database.</summary>
 internal sealed record HealthReport
@@ -197,7 +204,17 @@ internal sealed record HealthGlanceItem(string MuteKey, string Title);
 /// <param name="Critical">How many Critical findings.</param>
 /// <param name="Warning">How many Warnings.</param>
 /// <param name="Criticals">The Critical findings, for the toast.</param>
-internal sealed record HealthGlance(DateTimeOffset MeasuredAt, int Critical, int Warning, IReadOnlyList<HealthGlanceItem> Criticals)
+/// <param name="Withheld">
+/// How many of the last regular sweep's findings, of any severity, this visitor is not shown - the Health page's notice
+/// counts a recent deeper run's as well, so it can say more. Said beside the counts, never folded into them: a badge that
+/// coloured itself by findings the visitor may not see would tell them what the gate withholds.
+/// </param>
+internal sealed record HealthGlance(
+    DateTimeOffset MeasuredAt,
+    int Critical,
+    int Warning,
+    IReadOnlyList<HealthGlanceItem> Criticals,
+    int Withheld = 0)
 {
     /// <summary>The worst severity worth a badge, or <see langword="null" /> when there is nothing to draw.</summary>
     public HealthSeverity? Worst => Critical > 0 ? HealthSeverity.Critical : Warning > 0 ? HealthSeverity.Warning : null;

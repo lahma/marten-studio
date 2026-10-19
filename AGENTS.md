@@ -181,7 +181,7 @@ model, the phased delivery plan — lives in the approved plan at
     that disposal with it, leaving the `DotNetObjectReference` that pins the component undisposed and the
     page's `CancellationTokenSource` uncancelled. A filter still rethrows anything that is a real bug.
 
-## Design decisions (D1–D28)
+## Design decisions (D1–D29)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the
 rationale is not.
@@ -502,6 +502,29 @@ those internals makes the mode absent, never a fallback. And 9.48 (JasperFx 2.84
 dragged forward for one mode, so the adapter is reached by reflection behind the `DynamicLinqQuery` probe,
 pinned at both ends by `MartenRuntimeProbeTests` and `MartenLinqCommandTests`, and its absence is a line
 naming the Marten it needs. `docs/linq-mode.md` is the threat model.
+
+**D29 — The health advisor: one shared sweep, three gates, and two deliberate exceptions.** A sweep
+is the database's - once per interval, under no visitor's identity - and what each visitor is shown of it is
+decided finding by finding and piece of evidence by piece of evidence (`HealthService`). `None` is for what the
+Configuration page already says (K01–K04, S01): anyone the scope admits. `Database`, every other check's default,
+is for numbers about the database as a whole: the store policy asked with `TenantId = null`, about the store's
+registered key and the resolved database's own `Id.Identity` - never the visitor's spelling, a key in another case
+or an empty database id - so the gates, the audit, the mute keys and the high-water Explain name one resource.
+`Activity` is for other people's sessions and statements - process ids, roles, client addresses, statement text:
+`ViewDatabaseActivity` (off by default, off under `ReadOnly`), then that store policy, then the write policy with
+the capability named, as Database › Sessions asks. A finding about one tenant names it, so it needs `Activity`
+and that tenant's store policy too. A withheld finding is counted and never described, and a row below its check's
+gate reads "findings not shown to you" whether or not there are any; the badge and the banners read only a scope
+the report would be shown to. The first exception is to D13 and D27, which call `SqlConsoleRole` the real
+boundary: T02, T22 and T23 read `pg_stat_statements`' counters and texts as the store's own role, because the
+extension shows any other role `<insufficient privilege>` for Marten's statements and a narrowed console role - the
+careful host's configuration - would see nothing of the store. The reads are fenced to `userid = current_user` and
+this database (`StatementChecksFenceTests`), so they show what that role could read anyway; a text still carrying a
+literal as written, or that is not a plain query or write, is withheld; plans run as `SqlConsoleRole`. Every other
+health read, and every console statement, stays under it. The second is the opt-in ASP.NET Core health check,
+which runs with no visitor at all - every store, up to 25 databases, no policy - and is acceptable only because it
+reports codes, outcomes, severities and counts, never a name, a tenant, a statement or anything Postgres said: the
+host's own endpoint is its only gate (`docs/health.md`, `docs/security.md`).
 
 ## Package budget
 

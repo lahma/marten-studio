@@ -219,6 +219,79 @@ public class SessionActivityServiceTests
             "another store's alias is named to nobody");
     }
 
+    // ----------------------------------------------------------------------------------------------
+    // SEC2 L2: the tenant-less questions name the database the scope resolved to, not the visitor's spelling
+    // ----------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A link with no <c>?db=</c> means the store's first database. The resolver asks about that spelling - it must ask
+    /// before it looks anything up - and every question after it, and the audit, names the database's own identity, as
+    /// the Health page and the high-water Explain do. A policy keyed on the identity grants the details here, and was
+    /// asked about nothing else.
+    /// </summary>
+    [Fact]
+    public async Task The_gate_questions_and_the_audit_name_the_resolved_database_when_the_scope_spells_it_empty()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        string identity = harness.Identity;
+        harness.Policies.Allow(resource => resource.Capability is null || resource.DatabaseIdentifier == identity);
+
+        SessionActivitySummary summary = await harness.Service.GetSummaryAsync(Scope, Token);
+        SessionActivityDetails details = await harness.Service.GetDetailsAsync(Scope, Token);
+
+        summary.Details.IsOpen.Should().BeTrue("the page's question about the details is asked about the database the scope resolved to");
+        details.Refusal.Should().Be(DatabaseRefusal.None);
+
+        harness.Policies.Calls.Where(static x => x.Resource.Capability is not null).Should().NotBeEmpty()
+            .And.OnlyContain(x => x.Resource.DatabaseIdentifier == identity && x.Resource.TenantId == null);
+        harness.Policies.Calls.Where(x => x.Resource.Capability is null && x.Resource.DatabaseIdentifier == identity)
+            .Should().NotBeEmpty("the store policy is asked about the identity too, beside the resolver's own question");
+
+        harness.Ring.Should().ContainSingle().Which.DatabaseId.Should().Be(identity, "the audit names the resource the policy was shown");
+    }
+
+    /// <summary>The refusing half: a policy that grants only the empty spelling is not asked about it, and refuses.</summary>
+    [Fact]
+    public async Task A_policy_that_grants_only_the_visitors_spelling_refuses_the_details_and_the_refusal_names_the_identity()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        string identity = harness.Identity;
+        harness.Policies.Allow(static resource => resource.Capability is null || resource.DatabaseIdentifier.Length == 0);
+
+        SessionActivityDetails details = await harness.Service.GetDetailsAsync(Scope, Token);
+
+        details.Refusal.Should().Be(DatabaseRefusal.WritePolicy);
+        harness.Reader.Reads.Should().Be(0);
+
+        StudioActionLogEntry entry = harness.Ring.Should().ContainSingle().Subject;
+        entry.Succeeded.Should().BeFalse();
+        entry.DatabaseId.Should().Be(identity);
+    }
+
+    /// <summary>
+    /// SEC2-fix item 1: <c>?store=DEFAULT</c> reaches the store registered as <c>default</c>, and the questions after the
+    /// resolver's, and the audit, name the registered key - so a policy that compares keys ordinally grants the details.
+    /// </summary>
+    [Fact]
+    public async Task A_store_key_spelt_in_another_case_is_asked_and_audited_under_the_registered_key()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), policies: true);
+        harness.Policies.Allow(static resource =>
+            resource.Capability is null || string.Equals(resource.StoreName, "default", StringComparison.Ordinal));
+
+        StudioScope shouted = Scope with { StoreKey = "DEFAULT" };
+
+        SessionActivitySummary summary = await harness.Service.GetSummaryAsync(shouted, Token);
+        SessionActivityDetails details = await harness.Service.GetDetailsAsync(shouted, Token);
+
+        summary.Details.IsOpen.Should().BeTrue();
+        details.Refusal.Should().Be(DatabaseRefusal.None);
+
+        harness.Policies.Calls.Where(static x => x.Resource.Capability is not null).Should().NotBeEmpty()
+            .And.OnlyContain(static x => x.Resource.StoreName == "default");
+        harness.Ring.Should().ContainSingle().Which.StoreKey.Should().Be("default");
+    }
+
     [Fact]
     public async Task The_summary_and_the_details_share_one_read()
     {
@@ -283,6 +356,9 @@ public class SessionActivityServiceTests
         public ISessionActivityService Service => circuit.ServiceProvider.GetRequiredService<ISessionActivityService>();
 
         public IReadOnlyList<StudioActionLogEntry> Ring => Provider.GetRequiredService<StudioActionLogService>().GetLatest();
+
+        /// <summary>The store's one database's own identity, which an empty <c>?db=</c> resolves to.</summary>
+        public string Identity => Provider.GetRequiredService<IDocumentStore>().Storage.Database.Id.Identity;
 
         public static Harness Create(Action<MartenStudioOptions> configure, bool policies = false, bool otherStore = false)
         {

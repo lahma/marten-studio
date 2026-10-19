@@ -31,16 +31,18 @@ internal interface IHealthService
     Task<HealthReport> GetReportAsync(StudioScope scope, HealthReportRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// What the navigation badge shows: the last sweep's counts for this visitor, unmuted, or
-    /// <see langword="null" /> when there is no recent sweep. Never starts one, and opens no connection.
+    /// What the navigation badge shows: the last sweep's counts for this visitor, unmuted, and how many of its
+    /// findings they are not shown - or <see langword="null" /> when there is no recent sweep, or the scope's tenant
+    /// is not one of the swept database's. Never starts a sweep. With no tenant in the scope it opens no connection;
+    /// a tenant is placed in the swept database by the resolver's own check, which every page of that scope runs too.
     /// </summary>
     Task<HealthGlance?> GlanceAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// The findings with these codes that this visitor may see and has not muted, from the last regular sweep
     /// of the scope's database - for a banner on the screen a finding belongs to (D01 and D02 on Projections,
-    /// T03-T05 on Schema). <b>Cache-only</b>, like <see cref="GlanceAsync" />: it never starts a sweep and opens
-    /// no connection, so a page that polls it costs nothing; with no recent sweep it answers an empty list.
+    /// T03-T05 on Schema). <b>Cache-only</b>, like <see cref="GlanceAsync" />: it never starts a sweep, and asks
+    /// what the badge asks before it shows anything; with no recent sweep it answers an empty list.
     /// The gates are the Health page's, finding by finding and piece of evidence by piece of evidence.
     /// </summary>
     /// <param name="scope">The visitor's scope.</param>
@@ -67,6 +69,20 @@ internal interface IHealthService
 /// only with <c>ViewDatabaseActivity</c> on and the write policy passing, asked with the capability named
 /// against the same tenant-less resource. A finding about one tenant also needs the store policy for that
 /// tenant. Each question is asked at most once per report.
+/// </para>
+/// <para>
+/// <b>About the store and database the scope resolved to, by their own names</b> (AGENTS.md D29). Every tenant-less
+/// question names the store's registered key and <c>Id.Identity</c> of the swept database - never the visitor's
+/// spelling of either, a store key matching in any case and a database id often empty, meaning the store's first
+/// database - because that is the resource this report's audit records and the high-water Explain asks about, so
+/// one policy is asked one question about one database; the mute keys name it too. Only the resolver's own first
+/// question takes the spelling: it is asked before anything is looked up, which is the point of it.
+/// </para>
+/// <para>
+/// <b>Withheld is never "nothing found".</b> A finding a visitor is not shown is counted in the report's notice,
+/// and the check it came from says so on its row: below the check's gate, "findings not shown to you" whether or not
+/// there are any, so the row does not say which checks found something; through it, "N shown, others not shown to
+/// you" when findings about tenants were withheld one by one (<see cref="HealthCheckStatus.FindingsWithheld" />).
 /// </para>
 /// <para>
 /// <b>What the activity gate shows is audited, by signature.</b> Evidence behind <see cref="HealthGate.Activity" />
@@ -105,6 +121,22 @@ internal sealed class HealthService : IHealthService
     /// </summary>
     private readonly TableRowAuditLedger activityLedger = new();
 
+    /// <summary>
+    /// How long this circuit trusts its answer to "is this tenant one of this database's": tenant discovery's own
+    /// window (<see cref="TenantDiscovery" />). The answer is read through discovery's own minute-long list, so it can be
+    /// up to two minutes behind a tenant that moved; the scope selector's refresh, which clears discovery's list,
+    /// clears this as well (<see cref="TenantDiscovery.Generation" />).
+    /// </summary>
+    internal static readonly TimeSpan TenantPlacementTimeToLive = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Whether a tenant is one of a database's, by store key, identity and tenant, when that was read, and under which
+    /// of tenant discovery's generations.
+    /// </summary>
+    private readonly Dictionary<(string StoreKey, string DatabaseId, string TenantId), (DateTimeOffset At, long Generation, bool InDatabase)> placements = [];
+    private readonly Lock placementGate = new();
+    private int tenantPlacements;
+
     private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioScopeResolver resolver;
     private readonly StudioAuthorization authorization;
@@ -117,10 +149,12 @@ internal sealed class HealthService : IHealthService
     private readonly ILogger<HealthService> logger;
     private readonly MartenRuntime runtime;
     private readonly StudioDatabaseTime meter;
+    private readonly TenantDiscovery tenantDiscovery;
 
     public HealthService(
         IOptions<MartenStudioOptions> options,
         StudioScopeResolver resolver,
+        TenantDiscovery tenantDiscovery,
         StudioAuthorization authorization,
         StudioCapabilityGuard capabilities,
         HealthSweepCache cache,
@@ -134,6 +168,7 @@ internal sealed class HealthService : IHealthService
     {
         this.options = options;
         this.resolver = resolver;
+        this.tenantDiscovery = tenantDiscovery;
         this.authorization = authorization;
         this.capabilities = capabilities;
         this.cache = cache;
@@ -145,6 +180,9 @@ internal sealed class HealthService : IHealthService
         this.runtime = runtime ?? MartenRuntime.Current;
         this.meter = meter ?? StudioDatabaseTime.Shared;
     }
+
+    /// <summary>How many times this circuit has resolved a scope to place a tenant for a badge or a banner, for a test.</summary>
+    internal int TenantPlacements => Volatile.Read(ref tenantPlacements);
 
     /// <summary>How old the last sweep may be and still decorate the sidebar.</summary>
     internal TimeSpan GlanceFreshness
@@ -180,10 +218,13 @@ internal sealed class HealthService : IHealthService
             return HealthReport.Refused(HealthRefusal.Unavailable, exception.Message);
         }
 
+        // The store by its registered key and the database by its identity - not the visitor's spelling of either, a store
+        // key matching in any case and a database id often empty (D29) - for every question, the audit and the mute keys.
+        string storeKey = resolved.Registration.Key;
         string databaseId = resolved.Database.Id.Identity;
-        ResolvedScope whole = new(new StudioScope(scope.StoreKey, databaseId, null), resolved.Registration, resolved.Store, resolved.Database);
+        ResolvedScope whole = new(new StudioScope(storeKey, databaseId, null), resolved.Registration, resolved.Store, resolved.Database);
 
-        VisitorGate gate = new(this, scope);
+        VisitorGate gate = new(this, whole.Scope);
 
         HealthSweep regular = await cache.GetAsync(whole, HealthSweepKind.Regular, scope.DatabaseId, cancellationToken).ConfigureAwait(false);
 
@@ -218,9 +259,9 @@ internal sealed class HealthService : IHealthService
         Task<StatementScreen> Screen() => screenRead ??= StatementScreenAsync(whole.Scope, whole, cancellationToken);
 
         (List<HealthReportFinding> findings, int withheld, IReadOnlyList<string> reasons) =
-            await ShowAsync(results, gate, scope.StoreKey, databaseId, scope, Screen).ConfigureAwait(false);
+            await ShowAsync(results, gate, storeKey, databaseId, audit: true, Screen).ConfigureAwait(false);
 
-        IReadOnlyList<HealthCheckStatus> statuses = await StatusesAsync(results, findings, gate, scope, resolved, cancellationToken)
+        IReadOnlyList<HealthCheckStatus> statuses = await StatusesAsync(results, findings, gate, whole.Scope, resolved, cancellationToken)
             .ConfigureAwait(false);
 
         // The studio's own footprint in this database is a database-wide number, so it is shown at that gate.
@@ -228,7 +269,7 @@ internal sealed class HealthService : IHealthService
 
         return new HealthReport
         {
-            StoreKey = scope.StoreKey,
+            StoreKey = storeKey,
             DatabaseId = databaseId,
             MeasuredAt = regular.MeasuredAt,
             SweepDuration = regular.Duration,
@@ -238,7 +279,7 @@ internal sealed class HealthService : IHealthService
             WithheldCount = withheld,
             WithheldReason = reasons.Count == 0 ? null : string.Join("; ", reasons),
             Checks = statuses,
-            History = history.Read(scope.StoreKey, databaseId).Describe(cache.Now),
+            History = history.Read(storeKey, databaseId).Describe(cache.Now),
             Cost = database ? meter.Total(CostKey(resolved.Database)) : null,
             CostWithheld = database ? null : gate.WhyNot(HealthGate.Database),
             DeeperChecksExist = deeperExist,
@@ -256,7 +297,7 @@ internal sealed class HealthService : IHealthService
         ArgumentNullException.ThrowIfNull(scope);
 
         // A badge shows counts and titles, never evidence: nothing is revealed, so nothing is audited.
-        (HealthSweep? sweep, List<HealthReportFinding> unmuted) =
+        (HealthSweep? sweep, List<HealthReportFinding> unmuted, int withheld) =
             await CachedAsync(scope, static _ => true, audit: false, cancellationToken).ConfigureAwait(false);
 
         if (sweep is null)
@@ -268,7 +309,8 @@ internal sealed class HealthService : IHealthService
             sweep.MeasuredAt,
             unmuted.Count(static x => x.Severity == HealthSeverity.Critical),
             unmuted.Count(static x => x.Severity == HealthSeverity.Warning),
-            [.. unmuted.Where(static x => x.Severity == HealthSeverity.Critical).Select(static x => new HealthGlanceItem(x.MuteKey, x.Finding.Title))]);
+            [.. unmuted.Where(static x => x.Severity == HealthSeverity.Critical).Select(static x => new HealthGlanceItem(x.MuteKey, x.Finding.Title))],
+            withheld);
     }
 
     /// <inheritdoc />
@@ -285,7 +327,7 @@ internal sealed class HealthService : IHealthService
             return [];
         }
 
-        (_, List<HealthReportFinding> unmuted) = await CachedAsync(
+        (_, List<HealthReportFinding> unmuted, _) = await CachedAsync(
                 scope,
                 result => codes.Contains(result.Check.Code, StringComparer.Ordinal),
                 audit: true,
@@ -310,11 +352,11 @@ internal sealed class HealthService : IHealthService
     }
 
     /// <summary>
-    /// The last regular sweep, if it is recent, and the findings of the checks <paramref name="wanted" /> picks
-    /// that this visitor may see and has not muted - the badge's and the banners' shared read, which starts no
-    /// sweep and opens no connection.
+    /// The last regular sweep, if it is recent and the scope places this visitor in the database it swept, and the
+    /// findings of the checks <paramref name="wanted" /> picks that this visitor may see and has not muted - with how
+    /// many they are not shown. The badge's and the banners' shared read, which never starts a sweep.
     /// </summary>
-    private async Task<(HealthSweep? Sweep, List<HealthReportFinding> Unmuted)> CachedAsync(
+    private async Task<(HealthSweep? Sweep, List<HealthReportFinding> Unmuted, int Withheld)> CachedAsync(
         StudioScope scope,
         Func<HealthCheckResult, bool> wanted,
         bool audit,
@@ -325,23 +367,123 @@ internal sealed class HealthService : IHealthService
         if (sweep is null || cache.Now - sweep.MeasuredAt > GlanceFreshness)
         {
             // Nothing recent to say, and nothing is started to find out: a badge or a banner is a decoration.
-            return (null, []);
+            return (null, [], 0);
         }
 
-        if (!await authorization.IsAuthorizedAsync(scope, capability: null, cancellationToken).ConfigureAwait(false))
+        // The swept store and database as the sweep names them - the registered key and the identity, which the cache
+        // found under the visitor's spelling of either - so every question below names what the report's gates, its
+        // audit and its mute keys name (D29).
+        StudioScope whole = new(sweep.StoreKey, sweep.DatabaseId, null);
+
+        if (!await InSweptDatabaseAsync(scope, whole, cancellationToken).ConfigureAwait(false))
         {
-            return (null, []);
+            return (null, [], 0);
         }
 
-        VisitorGate gate = new(this, scope);
+        VisitorGate gate = new(this, whole);
 
         // No screen: a cached read resolves no scope, so a statement's text cannot be masked for this visitor and is
         // withheld (fail closed). The Health page itself goes through GetReportAsync, which masks it.
-        (List<HealthReportFinding> findings, _, _) = await ShowAsync(
-                sweep.Results.Where(wanted), gate, scope.StoreKey, sweep.DatabaseId, audit ? scope : null, screen: null)
+        (List<HealthReportFinding> findings, int withheld, _) = await ShowAsync(
+                sweep.Results.Where(wanted), gate, sweep.StoreKey, sweep.DatabaseId, audit, screen: null)
             .ConfigureAwait(false);
 
-        return (sweep, [.. findings.Where(x => !mutes.IsMuted(x.MuteKey))]);
+        return (sweep, [.. findings.Where(x => !mutes.IsMuted(x.MuteKey))], withheld);
+    }
+
+    /// <summary>
+    /// Whether the scope admits this visitor to the database <paramref name="whole" /> names: the store policy for
+    /// that database's own identity, and for a scope with a tenant, the resolver's own answer to "is this tenant one
+    /// of this database's" - exactly what <see cref="GetReportAsync" /> is told, so a badge or a banner is never shown
+    /// for <c>?db=B&amp;tenant=A</c> when A is not one of B's tenants and the report would be refused.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// With no tenant the question is the policy's alone, which is in-process, and the badge opens no connection.
+    /// With one, the store policy is asked about the swept database and the tenant on every call - it is this visitor's
+    /// answer, and may change - and then the tenant is placed in that database by resolving the scope against it: the
+    /// resolver's own check, with the same discovery every page of that scope runs.
+    /// </para>
+    /// <para>
+    /// <b>Placed once a minute, not once a poll.</b> Resolving enumerates the store's databases, which on a master-table
+    /// or sharded tenancy is a read of its lookup table, and the sidebar asks on its prerender, when it becomes
+    /// interactive, after every mute and at every <c>RefreshInterval</c>. So whether a tenant is one of a database's -
+    /// a fact about the database, not about the visitor - is remembered per store, database and tenant for
+    /// <see cref="TenantPlacementTimeToLive" />, tenant discovery's own window, and for this circuit only. It is read
+    /// through discovery's own minute-long list, so it can lag a tenant that moved by up to two minutes; the scope
+    /// selector's refresh moves <see cref="TenantDiscovery.Generation" />, and an answer read under an earlier generation
+    /// is read again. A refusal by the policy and a store that would not build are not facts about the database and are
+    /// never remembered. Anything that refuses or fails answers <see langword="false" /> - a decoration fails closed and
+    /// quietly.
+    /// </para>
+    /// </remarks>
+    private async Task<bool> InSweptDatabaseAsync(StudioScope scope, StudioScope whole, CancellationToken cancellationToken)
+    {
+        if (scope.TenantId is not { } tenantId)
+        {
+            return await authorization.IsAuthorizedAsync(whole, capability: null, cancellationToken).ConfigureAwait(false);
+        }
+
+        StudioScope placed = whole with { TenantId = tenantId };
+
+        if (!await authorization.IsAuthorizedAsync(placed, capability: null, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        (string StoreKey, string DatabaseId, string TenantId) key = (whole.StoreKey, whole.DatabaseId, tenantId);
+        DateTimeOffset now = cache.Now;
+
+        // Taken before the resolve: a refresh that lands while it runs leaves this answer a generation behind.
+        long generation = tenantDiscovery.Generation;
+
+        lock (placementGate)
+        {
+            if (placements.TryGetValue(key, out (DateTimeOffset At, long Generation, bool InDatabase) known)
+                && known.Generation == generation
+                && now - known.At < TenantPlacementTimeToLive)
+            {
+                return known.InDatabase;
+            }
+        }
+
+        bool inDatabase;
+
+        try
+        {
+            Interlocked.Increment(ref tenantPlacements);
+            await resolver.ResolveAsync(placed, null, cancellationToken).ConfigureAwait(false);
+            inDatabase = true;
+        }
+        catch (KeyNotFoundException)
+        {
+            // Not one of this database's tenants (or no longer a database of the store's): the fact this remembers.
+            inDatabase = false;
+        }
+        catch (Exception exception) when (exception is StudioNotAuthorizedException or StudioStoreUnavailableException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogDebug(exception, "Marten Studio could not place a tenant in a swept database for a health badge or banner");
+            return false;
+        }
+
+        lock (placementGate)
+        {
+            foreach ((string, string, string) stale in placements
+                         .Where(x => x.Value.Generation != generation || now - x.Value.At >= TenantPlacementTimeToLive)
+                         .Select(static x => x.Key)
+                         .ToList())
+            {
+                placements.Remove(stale);
+            }
+
+            placements[key] = (now, generation, inDatabase);
+        }
+
+        return inDatabase;
     }
 
     /// <summary>
@@ -360,7 +502,7 @@ internal sealed class HealthService : IHealthService
             return await cache.GetAsync(whole, kind, scope.DatabaseId, cancellationToken).ConfigureAwait(false);
         }
 
-        HealthSweep? recent = cache.Latest(scope.StoreKey, whole.Database.Id.Identity, kind);
+        HealthSweep? recent = cache.Latest(whole.Scope.StoreKey, whole.Scope.DatabaseId, kind);
         return recent is not null && cache.Now - recent.MeasuredAt < HealthSweepCache.DeeperTimeToLive ? recent : null;
     }
 
@@ -370,11 +512,11 @@ internal sealed class HealthService : IHealthService
     /// </summary>
     /// <param name="results">The checks' results.</param>
     /// <param name="gate">This visitor's gate.</param>
-    /// <param name="storeKey">The store.</param>
-    /// <param name="databaseId">The database.</param>
-    /// <param name="audited">
-    /// The scope the visitor asked with, when what is shown is to be audited (<see cref="RecordActivityShown" />);
-    /// <see langword="null" /> for a read that shows no evidence.
+    /// <param name="storeKey">The store, by its registered key.</param>
+    /// <param name="databaseId">The database, by its identity.</param>
+    /// <param name="audit">
+    /// Whether what is shown is to be audited (<see cref="RecordActivityShown" />); <see langword="false" /> for a read
+    /// that shows no evidence.
     /// </param>
     /// <param name="screen">
     /// What this visitor's statements are checked against, read on first use; <see langword="null" /> withholds every
@@ -385,7 +527,7 @@ internal sealed class HealthService : IHealthService
         VisitorGate gate,
         string storeKey,
         string databaseId,
-        StudioScope? audited,
+        bool audit,
         Func<Task<StatementScreen>>? screen)
     {
         List<HealthReportFinding> shown = [];
@@ -492,9 +634,9 @@ internal sealed class HealthService : IHealthService
             }
         }
 
-        if (audited is not null && activityShown.Count > 0)
+        if (audit && activityShown.Count > 0)
         {
-            RecordActivityShown(audited, storeKey, databaseId, activityShown);
+            RecordActivityShown(storeKey, databaseId, activityShown);
         }
 
         return (shown, withheld, reasons);
@@ -506,7 +648,7 @@ internal sealed class HealthService : IHealthService
     /// again only when the set of checks showing it changes: the Sessions page's first-read rule, by signature, so a
     /// page's interval reads record nothing more.
     /// </summary>
-    private void RecordActivityShown(StudioScope scope, string storeKey, string databaseId, SortedSet<string> codes)
+    private void RecordActivityShown(string storeKey, string databaseId, SortedSet<string> codes)
     {
         string signature = string.Join(",", codes);
 
@@ -525,7 +667,7 @@ internal sealed class HealthService : IHealthService
             succeeded: true,
             "Health findings shown with session details: " + string.Join(", ", codes) + ".",
             StudioCapability.ViewDatabaseActivity,
-            new StudioScope(scope.StoreKey, databaseId, null));
+            new StudioScope(storeKey, databaseId, null));
     }
 
     /// <summary>
@@ -533,9 +675,20 @@ internal sealed class HealthService : IHealthService
     /// this visitor is short of, nothing but its code, title, tier and outcome.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A status row carries the check's note, its failure and its statements, and a note can say what a
     /// finding would have said ("3 sessions of role reporting are idle"), so the row is shown at its check's
-    /// gate exactly as the findings are.
+    /// gate exactly as the findings are. Short of it the note is not drawn at all - not even as "withheld" - because
+    /// whether a check wrote one says something of what it saw (T03, S02, R01 and D04 write one only on some sweeps). A
+    /// failure stays as "withheld - ...": the outcome already says the check did not run.
+    /// </para>
+    /// <para>
+    /// <b>And its count is never a false "nothing found".</b> Short of the gate the row's count is 0 and it is marked
+    /// <see cref="HealthCheckStatus.FindingsWithheld" /> whatever the check found - so it reads "findings not shown to
+    /// you" and does not say which checks found something. Through the gate the count is what this visitor is shown,
+    /// and the mark says when findings about tenants were withheld one by one: every finding of a result is either
+    /// shown or withheld (<see cref="ShowAsync" />), and a code is one check's.
+    /// </para>
     /// </remarks>
     private async Task<IReadOnlyList<HealthCheckStatus>> StatusesAsync(
         IReadOnlyList<HealthCheckResult> results,
@@ -563,11 +716,12 @@ internal sealed class HealthService : IHealthService
                     result.Check.Tier,
                     result.Outcome,
                     0,
-                    result.Note is null ? null : reason,
+                    null,
                     result.Problem is null ? null : reason,
                     null,
                     result.Check.DocsUrl,
-                    []));
+                    [],
+                    FindingsWithheld: true));
 
                 continue;
             }
@@ -596,18 +750,21 @@ internal sealed class HealthService : IHealthService
                     : problem + " What the connection error said is withheld - " + gate.WhyNot(HealthGate.Database) + ".";
             }
 
+            int shownCount = shown.Count(x => string.Equals(x.Code, result.Check.Code, StringComparison.Ordinal));
+
             statuses.Add(new HealthCheckStatus(
                 result.Check.Code,
                 result.Check.Title,
                 result.Check.Area,
                 result.Check.Tier,
                 result.Outcome,
-                shown.Count(x => string.Equals(x.Code, result.Check.Code, StringComparison.Ordinal)),
+                shownCount,
                 result.Note,
                 problem,
                 result.Problem?.SqlState,
                 result.Check.DocsUrl,
-                result.Statements));
+                result.Statements,
+                FindingsWithheld: result.Findings.Count > shownCount));
         }
 
         return statuses;
@@ -666,6 +823,11 @@ internal sealed class HealthService : IHealthService
     /// <summary>
     /// One visitor's answers to the three gates, asked lazily and at most once each per report.
     /// </summary>
+    /// <remarks>
+    /// <c>scope</c> is the swept database as a whole, by the store's registered key and the database's identity and with
+    /// no tenant - never the visitor's spelling of either (D29) - so the gates' tenant-less questions and a finding's
+    /// tenant question name the database the report's audit records.
+    /// </remarks>
     private sealed class VisitorGate(HealthService owner, StudioScope scope)
     {
         private readonly Dictionary<string, bool> tenants = new(StringComparer.Ordinal);

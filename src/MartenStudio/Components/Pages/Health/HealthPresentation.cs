@@ -46,8 +46,17 @@ internal static class HealthPresentation
     };
 
     /// <summary>A status row's outcome, in words.</summary>
-    public static string OutcomeLabel(HealthCheckOutcome outcome, int findings) => outcome switch
+    /// <param name="outcome">How the check's last run ended.</param>
+    /// <param name="findings">How many of its findings this visitor is shown.</param>
+    /// <param name="withheld">
+    /// Whether the count leaves findings out (<see cref="HealthCheckStatus.FindingsWithheld" />). Such a row never
+    /// reads "nothing found": short of the check's gate it reads "findings not shown to you" whether or not there are
+    /// any, and through the gate it says how many are shown and that others are not.
+    /// </param>
+    public static string OutcomeLabel(HealthCheckOutcome outcome, int findings, bool withheld = false) => outcome switch
     {
+        HealthCheckOutcome.Checked when withheld && findings == 0 => "checked, findings not shown to you",
+        HealthCheckOutcome.Checked when withheld => "checked, " + findings.ToString(CultureInfo.InvariantCulture) + " shown, others not shown to you",
         HealthCheckOutcome.Checked when findings == 0 => "checked, nothing found",
         HealthCheckOutcome.Checked when findings == 1 => "checked, 1 finding",
         HealthCheckOutcome.Checked => "checked, " + findings.ToString(CultureInfo.InvariantCulture) + " findings",
@@ -83,4 +92,13 @@ internal static class HealthPresentation
     /// <summary>A findings count with its noun.</summary>
     public static string Count(int count, string noun) =>
         count.ToString(CultureInfo.InvariantCulture) + " " + noun + (count == 1 ? string.Empty : "s");
+
+    /// <summary>
+    /// "3 findings not shown to you: needs the store policy ...": what the Overview says where it would otherwise say
+    /// "nothing to report" - the Health page's notice, in the same words.
+    /// </summary>
+    /// <param name="count">How many findings this visitor is not shown.</param>
+    /// <param name="reason">What it would take to see them, or <see langword="null" />.</param>
+    public static string Withheld(int count, string? reason) =>
+        Count(count, "finding") + " not shown to you" + (reason is { Length: > 0 } why ? ": " + why : string.Empty) + ".";
 }

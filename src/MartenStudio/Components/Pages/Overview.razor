@@ -93,8 +93,11 @@
             }
             else if (TopFindings.Count == 0)
             {
-                <p class="ms-muted">
-                    Nothing to report. <a href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">See what was checked</a>
+                @* Not "nothing to report" while the advisor has findings this visitor is not shown: that would be an
+                   all-clear the visitor has no way to know is false. *@
+                <p class="ms-muted ms-overview-health-empty">
+                    @(health.WithheldCount > 0 ? HealthPresentation.Withheld(health.WithheldCount, health.WithheldReason) : "Nothing to report.")
+                    <a href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">See what was checked</a>
                 </p>
             }
             else
@@ -108,6 +111,11 @@
                         </li>
                     }
                 </ul>
+
+                @if (health.WithheldCount > 0)
+                {
+                    <p class="ms-muted ms-overview-health-withheld">@HealthPresentation.Withheld(health.WithheldCount, health.WithheldReason)</p>
+                }
 
                 <p class="ms-muted">
                     <a href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">Open the Health page</a>
@@ -550,14 +558,31 @@
                 return HealthPresentation.Count(warning, "warning");
             }
 
+            // Findings this visitor is not shown are not "nothing to report": the tile says they exist, with the count
+            // the Health page's notice gives - never their severity, which is the gate's to withhold.
+            if (health.WithheldCount > 0)
+            {
+                return HealthPresentation.Count(health.WithheldCount, "finding") + " not shown";
+            }
+
             return unmuted.Count > 0 ? HealthPresentation.Count(unmuted.Count, "suggestion") : "nothing to report";
         }
     }
 
-    private string HealthColor =>
-        healthError is not null || health is null || health.Refusal != HealthRefusal.None
-            ? "info"
-            : HealthPresentation.TileColor(health.Findings.Where(x => !HealthMutes.IsMuted(x.MuteKey)).Select(static x => (HealthSeverity?) x.Severity).Min());
+    /// <summary>The tile's colour: the worst finding the visitor may see, and never green while any is withheld.</summary>
+    private string HealthColor
+    {
+        get
+        {
+            if (healthError is not null || health is null || health.Refusal != HealthRefusal.None)
+            {
+                return "info";
+            }
+
+            HealthSeverity? worst = health.Findings.Where(x => !HealthMutes.IsMuted(x.MuteKey)).Select(static x => (HealthSeverity?) x.Severity).Min();
+            return worst is null && health.WithheldCount > 0 ? "info" : HealthPresentation.TileColor(worst);
+        }
+    }
 
     /// <summary>What the projection tiles show before anything has been read.</summary>
     private static ProjectionSummary EmptySummary { get; } = new(

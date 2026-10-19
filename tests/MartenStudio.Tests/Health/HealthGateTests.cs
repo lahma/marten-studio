@@ -170,7 +170,7 @@ public class HealthGateTests
 
         HealthCheckStatus activity = report.Checks.Single(static x => x.Code == "C90");
         activity.Outcome.Should().Be(HealthCheckOutcome.Checked);
-        activity.Note.Should().StartWith("withheld - ").And.Contain("ViewDatabaseActivity").And.NotContain("reporting");
+        activity.Note.Should().BeNull("short of the gate not even whether the check wrote a note is shown (SEC2-fix item 4)");
         activity.Statements.Should().BeEmpty();
 
         report.Checks.Single(static x => x.Code == "K90").Note.Should().Be("scripted: nothing to say", "an ungated row is shown whole");

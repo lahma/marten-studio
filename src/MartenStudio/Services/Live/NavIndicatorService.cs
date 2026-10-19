@@ -114,11 +114,14 @@ internal interface INavIndicatorService
 /// down with it, and the studio's answer to an unreadable region is always a value (plan §4.8).
 /// </para>
 /// <para>
-/// <b>The health badge costs no query.</b> It is <see cref="IHealthService.GlanceAsync" />: the last sweep a
+/// <b>The health badge starts no sweep.</b> It is <see cref="IHealthService.GlanceAsync" />: the last sweep a
 /// Health page or the Overview ran for this database, read from the sweep cache and shown through this
-/// visitor's gates - policy questions, no connection, and never a sweep of its own. With no recent sweep the
-/// entry carries no badge. It is read outside the snapshot cache, because what a visitor is shown of a sweep
-/// is that visitor's.
+/// visitor's gates, and never a sweep of its own. For a scope with no tenant that is policy questions and no
+/// connection. For a scope with a tenant it is also the resolver's own check that the tenant is one of the swept
+/// database's - the check every page of that scope runs, whose tenant list is cached for a minute, and which on a
+/// master-table or sharded tenancy reads the tenancy's lookup table as that page's resolution does. With no recent
+/// sweep the entry carries no badge. It is read outside the snapshot cache, because what a visitor is shown of a
+/// sweep is that visitor's.
 /// </para>
 /// </remarks>
 internal sealed class NavIndicatorService : INavIndicatorService

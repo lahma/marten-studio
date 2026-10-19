@@ -35,7 +35,9 @@ about, and the next `CreateOrUpdate` would take it away again. A remedy that nee
 studio's floor says so ("Marten 9.47+") and, on a host that runs an older one, what that host runs.
 
 "Mute in this browser" hides one finding on one database for you, in your browser's `localStorage`. It is
-never written to the database and never hides anything from anybody else.
+never written to the database and never hides anything from anybody else. What the browser keeps is a SHA-256 of
+the finding's key - its store, database, code and subject - never the key itself, which can name a tenant or a
+stream and would otherwise be readable by every script on the host's pages.
 
 ## What it costs
 

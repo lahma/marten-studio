@@ -84,8 +84,8 @@
         Projections,
 
         /// <summary>
-        /// A count of the last health sweep's unmuted Critical and Warning findings, red when one is
-        /// Critical - read from the sweep cache, never by sweeping.
+        /// A count of the last health sweep's unmuted Critical and Warning findings this visitor may see, red
+        /// when one is Critical - read from the sweep cache, never by sweeping.
         /// </summary>
         Health
     }
@@ -281,6 +281,10 @@
             "ms-nav-badge-dot ms-nav-badge-warning",
             indicators.ProjectionsExplanation ?? "A projection needs attention"),
 
+        // A count of what this visitor may see, coloured by the worst of it. Findings they are not shown are said in
+        // the tooltip and never counted or drawn on their own: their severity is the gate's to withhold, and a badge
+        // that cannot say how bad would sit on every page of a host whose visitors are short of a gate. An absent badge
+        // is no claim that all is well; the Health page and the Overview say what is withheld.
         NavBadgeKind.Health when indicators.Health is { Worst: not null } health => new NavBadge(
             (health.Critical + health.Warning).ToString("N0", System.Globalization.CultureInfo.InvariantCulture),
             health.Critical > 0 ? "ms-nav-badge-danger" : "ms-nav-badge-warning",
@@ -289,7 +293,7 @@
         _ => null,
     };
 
-    /// <summary>The health badge's tooltip and accessible name: what it counts, and as of when.</summary>
+    /// <summary>The health badge's tooltip and accessible name: what it counts, what it leaves out, and as of when.</summary>
     private string HealthBadgeTitle(HealthGlance health)
     {
         List<string> parts = [];
@@ -304,7 +308,14 @@
             parts.Add(health.Warning == 1 ? "1 warning" : $"{health.Warning:N0} warnings");
         }
 
-        return string.Join(" and ", parts) + ", as of " + State.FormatInSelectedTimeZone(health.MeasuredAt, "HH:mm");
+        string withheld = health.Withheld switch
+        {
+            0 => string.Empty,
+            1 => ", and 1 finding not shown to you",
+            _ => $", and {health.Withheld:N0} findings not shown to you",
+        };
+
+        return string.Join(" and ", parts) + withheld + ", as of " + State.FormatInSelectedTimeZone(health.MeasuredAt, "HH:mm");
     }
 
     private string Link(string subPath) => StudioLink.To(Options.Value, subPath);

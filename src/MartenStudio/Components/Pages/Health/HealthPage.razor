@@ -140,22 +140,18 @@
         {
             <div class="ms-alert ms-alert-info ms-health-withheld" role="status">
                 <div class="ms-alert-content">
-                    <p>
-                        @HealthPresentation.Count(report.WithheldCount, "finding") not shown: @report.WithheldReason.
-                    </p>
+                    <p>@HealthPresentation.Withheld(report.WithheldCount, report.WithheldReason)</p>
                 </div>
             </div>
         }
 
         @if (VisibleFindings.Count == 0)
         {
+            @* Never an all-clear while findings are withheld: the notice above counts them, and this must not then say
+               that no check found anything. *@
             <div class="ms-empty ms-health-empty">
-                <p class="ms-empty-title">Nothing to report</p>
-                <p class="ms-empty-description">
-                    @(MutedFindings.Count > 0
-                        ? "Every finding the advisor has is muted in this browser."
-                        : "No check found anything worth your attention in this database. The list below says what was checked.")
-                </p>
+                <p class="ms-empty-title">@(report.WithheldCount > 0 ? "Nothing to show you" : "Nothing to report")</p>
+                <p class="ms-empty-description">@EmptyDescription(report)</p>
             </div>
         }
         else
@@ -204,7 +200,7 @@
                                 <td class="ms-table-cell">@check.Title</td>
                                 <td class="ms-table-cell">@HealthPresentation.TierLabel(check.Tier)</td>
                                 <td class="ms-table-cell">
-                                    <span class="ms-health-outcome">@HealthPresentation.OutcomeLabel(check.Outcome, check.FindingCount)</span>
+                                    <span class="ms-health-outcome">@HealthPresentation.OutcomeLabel(check.Outcome, check.FindingCount, check.FindingsWithheld)</span>
                                     @if (check.Problem is { Length: > 0 } problem)
                                     {
                                         <span class="ms-health-outcome-detail">@problem</span>
@@ -475,6 +471,16 @@
                 </button>
             </footer>
         </article>
+    };
+
+    /// <summary>What the empty state says: muted, withheld, both, or genuinely nothing.</summary>
+    private string EmptyDescription(HealthReport shown) => (shown.WithheldCount > 0, MutedFindings.Count > 0) switch
+    {
+        (true, true) => "Every finding you may see is muted in this browser, and the findings counted above are not shown to you.",
+        (true, false) => "No finding you may see needs your attention here, and the findings counted above are not shown to you. "
+            + "The list below says what was checked.",
+        (false, true) => "Every finding the advisor has is muted in this browser.",
+        _ => "No check found anything worth your attention in this database. The list below says what was checked.",
     };
 
     /// <summary>"Marten 9.47+", and on a host without it, what this one runs.</summary>
