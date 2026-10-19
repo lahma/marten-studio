@@ -125,12 +125,17 @@ internal sealed class SampleHost : IAsyncDisposable
     /// <c>--no-daemon</c>: host no async daemon, the shape of a production host whose projections run
     /// elsewhere - the configuration whose log a UI validation run reads for warnings.
     /// </param>
+    /// <param name="environment">
+    /// The host's environment: Development unless a test is about what a host outside it maps. Outside Development a
+    /// build output has no static web assets (see below), so only HTTP endpoints can be tested there, not the studio.
+    /// </param>
     /// <param name="cancellationToken">Cancels the wait.</param>
     public static async Task<SampleHost> StartAsync(
         string connectionString,
         string? studioPath = null,
         bool allowDataGeneration = false,
         bool noDaemon = false,
+        string environment = "Development",
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
@@ -180,8 +185,8 @@ internal sealed class SampleHost : IAsyncDisposable
         // `GET {path}/_framework/blazor.web.js` answered 200 with an empty body. That is a fact about
         // running a build output rather than a publish, not about the studio, and pretending otherwise
         // would make this suite assert the wrong thing.
-        startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
-        startInfo.Environment["DOTNET_ENVIRONMENT"] = "Development";
+        startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = environment;
+        startInfo.Environment["DOTNET_ENVIRONMENT"] = environment;
         startInfo.Environment["ConnectionStrings__Marten"] = connectionString;
         startInfo.Environment["Logging__LogLevel__Default"] = "Information";
 

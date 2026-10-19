@@ -69,10 +69,10 @@ one whose projections the studio could not read.
 opts.Events.EnableExtendedProgressionTracking = true;
 ```
 
-**K02 fires on Marten's defaults, and on the sample host, by design.** A new store with an async projection
-and nothing else configured gets this Info, and so does `samples/MartenStudio.Sample`, which keeps Marten's
-defaults on purpose so that what the advisor says about it is what it says about a new host. It is an Info,
-not a Warning: nothing is wrong, and muting it in the browser is a reasonable answer.
+**K02 fires on Marten's defaults, by design.** A new store with an async projection and nothing else configured
+gets this Info. It is an Info, not a Warning: nothing is wrong, and muting it in the browser is a reasonable
+answer. `samples/MartenStudio.Sample` turns the switch on, so that the sample starts healthy and its landing page's
+"Make it unhealthy" switches are what makes the advisor speak.
 
 ## K03 Advanced async tracking
 

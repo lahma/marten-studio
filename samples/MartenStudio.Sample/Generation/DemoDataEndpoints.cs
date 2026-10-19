@@ -193,9 +193,9 @@ internal static class DemoDataEndpoints
     /// <remarks>
     /// Explicitly, for the same reason <c>LoginEndpoints</c> does it explicitly: the middleware only
     /// validates endpoints carrying <c>IAntiforgeryMetadata</c>, which a minimal-API handler that reads
-    /// its own form does not get.
+    /// its own form does not get. The "Make it unhealthy" endpoints validate theirs through this too.
     /// </remarks>
-    private static async Task<bool> IsRequestValidAsync(HttpContext context, IAntiforgery antiforgery)
+    internal static async Task<bool> IsRequestValidAsync(HttpContext context, IAntiforgery antiforgery)
     {
         try
         {

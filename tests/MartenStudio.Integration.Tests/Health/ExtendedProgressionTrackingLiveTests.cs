@@ -4,23 +4,22 @@ using MartenStudio.Services.Health;
 namespace MartenStudio.Integration.Tests.Health;
 
 /// <summary>
-/// K02 live: the sample store has async projections and, as Marten ships, extended progression tracking
-/// off - so K02 fires there as an Info; a store that follows K02's own advice, and one with nothing for the
-/// daemon to run, are quiet.
+/// K02 live: a store with async projections and, as Marten ships, extended progression tracking off is a K02 Info;
+/// the sample store, which turns it on, and one with nothing for the daemon to run, are quiet.
 /// </summary>
 /// <remarks>
-/// The quiet case is the sample store <em>with K02's recommendation applied</em>, not the sample store as it
-/// ships: <see cref="SampleStore.Configure" /> keeps Marten's defaults on purpose, so that what the advisor
-/// says about the sample is what it says about a new host - K02 firing there is intended, and
-/// <c>docs/health/configuration.md</c> says so.
+/// The firing case sets the switch off itself rather than relying on the sample: <see cref="SampleStore.Configure" />
+/// turns it on, so that the sample starts healthy and a demo makes it unhealthy on purpose (the landing page's
+/// switches). Off is Marten's default, so that store is any new host with an async projection.
 /// </remarks>
 public class ExtendedProgressionTrackingLiveTests(PostgresFixture postgres)
 {
     [PostgresFact]
     [HealthFires("K02")]
-    public async Task The_sample_store_as_Marten_ships_it_is_a_K02_suggestion()
+    public async Task A_store_on_Martens_default_is_a_K02_suggestion()
     {
-        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(postgres, "health_k02_fires");
+        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(
+            postgres, "health_k02_fires", store: static options => options.Events.EnableExtendedProgressionTracking = false);
 
         HealthReport report = await host.ReportAsync();
 
@@ -33,10 +32,11 @@ public class ExtendedProgressionTrackingLiveTests(PostgresFixture postgres)
 
     [PostgresFact]
     [HealthQuiet("K02")]
-    public async Task The_sample_store_with_extended_tracking_on_is_quiet()
+    public async Task The_sample_store_as_it_ships_is_quiet()
     {
-        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(
-            postgres, "health_k02_quiet", store: static options => options.Events.EnableExtendedProgressionTracking = true);
+        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(postgres, "health_k02_quiet");
+
+        host.Store.Options.Events.EnableExtendedProgressionTracking.Should().BeTrue("the sample turns it on");
 
         HealthReport report = await host.ReportAsync();
 
@@ -49,7 +49,13 @@ public class ExtendedProgressionTrackingLiveTests(PostgresFixture postgres)
     public async Task A_store_with_no_async_work_is_quiet()
     {
         await using HealthLiveHost host = await HealthLiveHost.CreateAsync(
-            postgres, "health_k02_quiet_noasync", store: static options => options.Projections.All.Clear());
+            postgres,
+            "health_k02_quiet_noasync",
+            store: static options =>
+            {
+                options.Events.EnableExtendedProgressionTracking = false;
+                options.Projections.All.Clear();
+            });
 
         HealthReport report = await host.ReportAsync();
 

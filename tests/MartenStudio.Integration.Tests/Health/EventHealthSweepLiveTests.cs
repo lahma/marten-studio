@@ -1,3 +1,5 @@
+using Marten;
+
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 
@@ -49,7 +51,12 @@ public class EventHealthSweepLiveTests(PostgresFixture postgres)
     [PostgresFact]
     public async Task The_daemon_and_the_event_checks_share_one_shape_statement_per_sweep()
     {
-        (EventHealthHost host, StatementLog probe) = await HostAsync("health_events_one_shape", [.. ShapeReadingDaemonChecks, .. EventChecks]);
+        // Extended progression tracking off, as Marten ships it and as the budget below was measured: the sample turns it
+        // on (DEMO), and then D05 also reads each shard's recorded status - a statement of D05's own, not the shape's.
+        (EventHealthHost host, StatementLog probe) = await HostAsync(
+            "health_events_one_shape",
+            [.. ShapeReadingDaemonChecks, .. EventChecks],
+            static options => options.Events.EnableExtendedProgressionTracking = false);
         await using EventHealthHost _ = host;
 
         HealthReport regular = await host.ReportAsync();
@@ -82,14 +89,18 @@ public class EventHealthSweepLiveTests(PostgresFixture postgres)
 
     private Task<(EventHealthHost Host, StatementLog Probe)> HostAsync(string schema) => HostAsync(schema, EventChecks);
 
-    private async Task<(EventHealthHost Host, StatementLog Probe)> HostAsync(string schema, Type[] checks)
+    private async Task<(EventHealthHost Host, StatementLog Probe)> HostAsync(string schema, Type[] checks, Action<StoreOptions>? store = null)
     {
         StatementLog probe = new(new HealthSweepProbe(postgres));
 
         EventHealthHost host = await EventHealthHost.CreateAsync(
             postgres,
             schema,
-            store: static options => options.Projections.LiveStreamAggregation<HealthCounter>(),
+            store: options =>
+            {
+                options.Projections.LiveStreamAggregation<HealthCounter>();
+                store?.Invoke(options);
+            },
             services: services => services
                 .AddSingleton<IHealthStatementObserver>(probe)
                 .AddSingleton(HealthCheckRegistry.ForTypes(checks)));

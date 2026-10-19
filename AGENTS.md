@@ -854,8 +854,10 @@ samples/MartenStudio.SampleDomain/Generation/  The demo data generator: size pre
 samples/MartenStudio.SampleDomain/Relational/  Non-Marten demo schemas beside the store: Quartz.NET's job
                                          store (vendored, Apache-2.0), the "legacy" catalog edge-case
                                          schema, studio_sample.app_settings, and their idempotent seeding
-samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpoints, progress, daemon lag
-tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in
+samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpoints, progress, daemon lag; and the
+                                         "make it unhealthy" switches, their board, endpoints and panel
+tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in; the
+                                         unhealthy switches' gates, markup, checks and clean-up
 docs/                                    Long-form documentation linked from README.md; never packed
 docs/screenshots/                        The thirteen README screenshots (ScreenshotCaptureTests retakes them)
 src/MartenStudio/Services/Relationships/      The relationship graph service, its DTOs and the SVG layout

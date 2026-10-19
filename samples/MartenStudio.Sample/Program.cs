@@ -49,6 +49,13 @@ builder.Services.AddAuthorization(SamplePolicies.Configure);
 builder.Services.AddSingleton<DemoDataJob>();
 builder.Services.AddHostedService(static services => services.GetRequiredService<DemoDataJob>());
 
+// The "make it unhealthy" switches, registered unconditionally for the same reason: the board is what turns every
+// switch off when the host stops. This also declares the bloated-table switch's demo table on the store. The two that
+// reach beyond the demo's own rows run only on the throwaway container, or with --allow-data-generation said outright.
+builder.Services.AddUnhealthySwitches(new UnhealthySwitchesDatabase(
+    IsThrowaway: EphemeralPostgres.IsThrowaway(connectionString),
+    AllowedExplicitly: sample.AllowDataGeneration));
+
 #region readme_register
 builder.Services
     .AddMarten(options => SampleStore.Configure(options, connectionString))
@@ -140,9 +147,10 @@ bool dataGeneration = sample.DataGenerationEnabled(app.Environment);
 if (dataGeneration)
 {
     app.MapDemoData();
+    app.MapUnhealthySwitches();
 }
 
-app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthorizationService authorization) =>
+app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthorizationService authorization, UnhealthySwitchBoard switches) =>
 {
     ClaimsPrincipal user = context.User;
     string who = user.Identity?.IsAuthenticated == true
@@ -178,6 +186,14 @@ app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthoriza
         tokens.RequestToken ?? string.Empty,
         context.Request.Query[DemoDataEndpoints.MessageQueryKey]);
 
+    string unhealthy = UnhealthySwitchesPanel.Render(
+        dataGeneration,
+        isAdmin,
+        tokens.RequestToken ?? string.Empty,
+        studioPath,
+        context.Request.Query[UnhealthySwitchEndpoints.MessageQueryKey],
+        switches);
+
     context.Response.ContentType = "text/html; charset=utf-8";
     await context.Response.WriteAsync($$"""
         <!DOCTYPE html>
@@ -191,6 +207,7 @@ app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthoriza
             body { font-family: system-ui, sans-serif; margin: 3rem auto; max-width: 48rem; line-height: 1.5; padding: 0 1rem; }
             code { background: #f1f5f9; padding: .1rem .3rem; border-radius: 3px; }
         {{DemoDataPanel.Styles}}
+        {{UnhealthySwitchesPanel.Styles}}
           </style>
         </head>
         <body>
@@ -208,6 +225,7 @@ app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthoriza
           <p>Switches: <code>--anonymous</code>, <code>--readonly</code>, <code>--path /ops/marten</code>,
             <code>--allow-data-generation</code>, <code>--no-daemon</code>.</p>
           {{demoData}}
+          {{unhealthy}}
         </body>
         </html>
         """);

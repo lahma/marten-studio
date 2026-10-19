@@ -25,7 +25,8 @@ namespace MartenStudio.Integration.Tests.Health;
 /// <para>
 /// <b>The healthy sample store</b> is <see cref="SampleStore.Configure" /> as it is, in a schema of the
 /// test's own, in the Development environment. A check's quiet test runs it unchanged unless the check's own
-/// recommendation is the change (K02's is a switch the sample does not set - see that test).
+/// recommendation is the change; a firing test that needs Marten's default where the sample departs from it says so
+/// (K02's: the sample turns extended progression tracking on - see that test).
 /// </para>
 /// <para>
 /// Everything goes through the studio's own services - <see cref="IHealthService" />, resolved in a DI scope

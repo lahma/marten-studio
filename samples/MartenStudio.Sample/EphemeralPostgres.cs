@@ -65,8 +65,21 @@ internal static class EphemeralPostgres
         Console.WriteLine("  └───────────────────────────────────────────────────────────────────────────┘");
         Console.WriteLine();
 
+        Started = connectionString;
         return connectionString;
     }
+
+    /// <summary>The connection string of the container this process started, or <see langword="null" /> when it started none.</summary>
+    private static string? Started { get; set; }
+
+    /// <summary>
+    /// Whether <paramref name="connectionString" /> is the throwaway container this process started - as opposed to a
+    /// database somebody configured, which may be shared. The "make it unhealthy" switches that reach beyond the demo's
+    /// own rows run only on this one unless the host was started with <c>--allow-data-generation</c>.
+    /// </summary>
+    /// <param name="connectionString">The store's connection string.</param>
+    public static bool IsThrowaway(string? connectionString) =>
+        Started is { } started && string.Equals(started, connectionString, StringComparison.Ordinal);
 
     /// <summary>The environment variable that turns container reuse off for one run.</summary>
     /// <remarks>

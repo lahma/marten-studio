@@ -31,8 +31,9 @@ namespace MartenStudio.Integration.Tests.Health;
 /// </para>
 /// <para>
 /// The healthy sample store is <see cref="MartenStudio.SampleDomain.SampleStore.Configure" /> as it is, in the
-/// Development environment. It leaves extended progression tracking and advanced async tracking off, so its
-/// findings are Info (K02, K03 and friends) - which is still Healthy.
+/// Development environment. It starts healthy - extended progression tracking on, advanced async tracking on as
+/// Marten 9 ships it - so what it does show are Infos about the server (S02's <c>synchronous_commit</c> on a
+/// Testcontainers Postgres) - which is still Healthy.
 /// </para>
 /// </remarks>
 public class HealthExportLiveTests(PostgresFixture postgres)
