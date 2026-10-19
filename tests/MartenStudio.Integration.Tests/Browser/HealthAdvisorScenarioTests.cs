@@ -1,0 +1,453 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
+
+using MartenStudio.Internal.Sql;
+using MartenStudio.Sample.Generation;
+using MartenStudio.SampleDomain;
+
+using Microsoft.Playwright;
+
+using Npgsql;
+
+namespace MartenStudio.Integration.Tests.Browser;
+
+/// <summary>
+/// The health advisor on real Kestrel, in Chromium, made unhealthy on purpose with the sample's own demo switches:
+/// a finding a switch raises, its mute and the badge, the toast for a new Critical, Database › Sessions for two
+/// audiences, the Projections screen's D01 and D02 banners, and what a visitor without <c>ViewDatabaseActivity</c> is
+/// not shown.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>The switches are pressed the way a person presses them</b>: on the sample's landing page, as <c>admin</c> (the
+/// only demo user the sample's <c>MartenStudioAdmin</c> policy passes), whose panel then reports the switch's state
+/// from its status endpoint. Every switch a scenario turns on it turns off again in a <c>finally</c>, so a failing
+/// scenario does not leave the next one an unhealthy database for the switch's ten-minute timeout.
+/// </para>
+/// <para>
+/// <b>Waits are on the page.</b> A regular sweep is cached for <c>HealthInterval</c> (a minute, as the sample ships), so
+/// a finding a switch causes appears on the first sweep after the cache expires: the scenarios press the page's own
+/// Refresh and wait, in the page, for the finding's card - never on a delay, and never on a load state. C04 and D01 also
+/// wait for their own thresholds, a minute of idleness and a minute of pinning, which run concurrently in one scenario
+/// because no test-only threshold reaches a sample host in a child process.
+/// </para>
+/// <para>
+/// <b>The toast's Critical is not a switch's.</b> None of the four reaches Critical within a scenario: the pool hog
+/// leaves two connections free, so C01 never sees its pool saturated; C04 and D01 are Critical only after ten minutes;
+/// T07 is a Warning; and the D02 a host without a daemon raises is Critical already on the first sweep, which is exactly
+/// the case the toast stays quiet about. So the toast scenario takes the cheapest real path to a new Critical: as
+/// another client of the server, it puts the sample's <c>Invoice</c> HiLo row past 80% of <c>int.MaxValue</c>, which T11
+/// judges Critical on the next sweep, and restores the row afterwards.
+/// </para>
+/// <para>Like every browser scenario, these skip locally when Chromium is not installed and throw on CI (D19).</para>
+/// </remarks>
+[Collection(BrowserSuite.Name)]
+public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
+{
+    private const string BloatedTable = "bloated-table";
+    private const string IdleInTransaction = "idle-in-transaction";
+    private const string PinnedGap = "pinned-gap";
+
+    /// <summary>What the idle-in-transaction switch calls its session in <c>pg_stat_activity</c>.</summary>
+    private const string IdleSessionName = UnhealthySwitch.ApplicationNamePrefix + "idle in transaction";
+
+    /// <summary>
+    /// Past T11's Critical line for a <c>MaxLo</c> of 1,000, Marten's default and the sample's: (2,100,000 + 1) x 1,000
+    /// ids is 98% of <c>int.MaxValue</c>.
+    /// </summary>
+    private const long NearTheCeiling = 2_100_000;
+
+    /// <summary>The label of an evidence line that describes one session: <c>Session 1 (longest)</c>, <c>Session 2</c>.</summary>
+    private static readonly Regex SessionLine = new(@"^Session \d+( \(.+\))?$", RegexOptions.None, TimeSpan.FromSeconds(5));
+
+    /// <summary>A sweep cached for a minute, plus the sweep itself and a slow runner.</summary>
+    private static readonly TimeSpan NextSweep = TimeSpan.FromSeconds(150);
+
+    /// <summary>A minute of a threshold, then <see cref="NextSweep" />.</summary>
+    private static readonly TimeSpan AfterAMinute = TimeSpan.FromSeconds(240);
+
+    // ------------------------------------------------------------------------------------------------
+    // A switch raises its finding; the mute and the badge; a new Critical toasts
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The bloated-table switch makes T07 appear after a refresh, with its evidence and its docs anchor; muting it drops
+    /// the badge by one and the mute is kept in the browser across a reload; and a Critical that appears while the page
+    /// is open raises a toast.
+    /// </summary>
+    [BrowserFact]
+    public async Task A_switch_raises_its_finding_a_mute_drops_the_badge_and_a_new_critical_raises_a_toast()
+    {
+        await BrowserScenario.RunAsync(fixture.Browser, "health-switch-mute-toast", fixture.Root, "admin", async studio =>
+        {
+            long? hiValue = null;
+
+            try
+            {
+                await SwitchAsync(studio, BloatedTable, on: true);
+
+                await studio.GoAsync(fixture.Root.StudioUrl("health"));
+
+                ILocator t07 = studio.Page.Locator(Visible("t07"));
+                await UntilShownAsync(studio, t07, HealthRefresh(studio), NextSweep, "T07 after the bloated-table switch was turned on");
+
+                (await t07.Locator(".ms-health-code").InnerTextAsync()).Trim().Should().Be("T07");
+                (await t07.Locator(".ms-health-severity").InnerTextAsync()).Trim().Should().Be("Warning");
+                (await t07.Locator(".ms-health-evidence-row").CountAsync()).Should().BePositive("a finding carries the facts behind it");
+                (await t07.InnerTextAsync()).Should().Contain(UnhealthyDemoStore.BloatTableName, "the finding names the table the switch bloated");
+                (await t07.Locator("a.ms-health-docs").GetAttributeAsync("href")).Should().Contain(
+                    "/docs/health/tables.md#t07-", "the finding links to its own anchor in the area's docs");
+
+                // The badge counts the same unmuted Warnings and Criticals the page shows - read once both agree, because
+                // the sidebar reads the glance on its own poll, a few seconds behind the page.
+                int before = await BadgeAgreesWithThePageAsync(studio);
+                before.Should().BePositive("T07 is a Warning");
+                int stored = await MutedInStorageAsync(studio);
+
+                await t07.Locator(".ms-health-mute").ClickAsync();
+                await studio.Page.Locator(Muted("t07")).WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Attached });
+
+                (await BadgeAgreesWithThePageAsync(studio)).Should().Be(before - 1, "a muted finding is not counted by the badge");
+                (await MutedInStorageAsync(studio)).Should().Be(stored + 1, "the mute is kept in this browser's localStorage");
+
+                // A Critical that appears while the page is open. The recorder keeps every toast the page shows, because a
+                // toast is on screen for four seconds and the finding's card and the toast come from the same sweep.
+                await RecordToastsAsync(studio);
+                hiValue = await SetInvoiceHiloAsync(NearTheCeiling);
+
+                ILocator t11 = studio.Page.Locator(Visible("t11"));
+                await UntilShownAsync(studio, t11, HealthRefresh(studio), NextSweep, "T11 after the Invoice HiLo row was put near its ceiling");
+                (await t11.Locator(".ms-health-severity").InnerTextAsync()).Trim().Should().Be("Critical");
+
+                IJSHandle recorded = await studio.Page.WaitForFunctionAsync(
+                    "() => (window.__msToasts || []).find(t => t.includes('ms-toast-error') && t.includes('Health: ') && t.includes('int ids')) || null",
+                    null,
+                    new PageWaitForFunctionOptions { Timeout = 30_000 });
+                (await recorded.JsonValueAsync<string>()).Should().Contain("see the Health page", "the toast says where to look");
+
+                // A new circuit: the mute is still there, read back from localStorage.
+                await studio.GoAsync(fixture.Root.StudioUrl("health"));
+                await studio.Page.Locator(".ms-health-muted > summary").WaitForAsync();
+                (await studio.Page.Locator(Muted("t07")).CountAsync()).Should().Be(1, "T07 is still muted after a reload");
+                (await studio.Page.Locator(Visible("t07")).CountAsync()).Should().Be(0);
+
+                studio.AssertClean("raising T07 with a demo switch, muting it, raising T11 and reloading the Health page");
+            }
+            finally
+            {
+                if (hiValue is { } original)
+                {
+                    await SetInvoiceHiloAsync(original);
+                }
+
+                await SwitchAsync(studio, BloatedTable, on: false);
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Sessions, the D01 banner, and what a viewer is not shown
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// With the idle-in-transaction and pinned-gap switches on: Database › Sessions lists the idle session by name for
+    /// <c>admin</c> and only by its state for <c>viewer</c>; C04 and D01 appear once their minute has passed; the
+    /// Projections screen draws the D01 banner; and the viewer's Health page shows C04 with every session withheld.
+    /// </summary>
+    /// <remarks>
+    /// <c>viewer</c> has no <c>studio:write</c>, so the sample's write policy refuses it <c>ViewDatabaseActivity</c>
+    /// (the capability is on: the sample sets <c>All()</c>). The sample sets no store policy, so the database-wide gate
+    /// passes for everybody and this is the activity gate alone.
+    /// <para>
+    /// <b>A host of its own, started with <c>--allow-data-generation</c>.</b> The pinned gap stalls every async projection
+    /// of the store, so the sample refuses it on a configured database - which every host in this suite has - unless the
+    /// host was started with that switch, which says the database is a demo's to break. A host and a database of the
+    /// scenario's own, rather than the flag on the shared host, so no other scenario runs beside a switch that may stall
+    /// it. The idle-in-transaction switch needs no flag.
+    /// </para>
+    /// </remarks>
+    [BrowserFact]
+    public async Task Sessions_name_an_idle_session_only_through_the_activity_gate_and_the_projections_screen_draws_D01()
+    {
+        string connectionString = await BrowserSuiteFixture.CreateDatabaseAsync(fixture.Postgres, "browser_switches");
+
+        await using SampleHost host = await SampleHost.StartAsync(connectionString, allowDataGeneration: true);
+        await SampleHost.WaitForSeedAsync(connectionString);
+        await BrowserSuiteFixture.WarmUpAsync(fixture.Browser, host);
+
+        await BrowserScenario.RunAsync(fixture.Browser, "health-sessions-admin", host, "admin", async admin =>
+        {
+            try
+            {
+                await SwitchAsync(admin, IdleInTransaction, on: true);
+                await SwitchAsync(admin, PinnedGap, on: true);
+
+                // Database › Sessions as admin: the summary, and the details that name the session.
+                await admin.GoAsync(host.StudioUrl("database/sessions"));
+                await admin.Page.Locator(".ms-sessions-stats").WaitForAsync();
+
+                ILocator named = admin.Page.Locator(".ms-sessions-table td", new PageLocatorOptions { HasTextString = IdleSessionName });
+                await UntilShownAsync(admin, named, SessionsRefresh(admin), NextSweep, "the idle session in admin's session details");
+
+                (await admin.Page.Locator(".ms-sessions-table th", new PageLocatorOptions { HasTextString = "pid" }).CountAsync())
+                    .Should().BePositive("admin passes the activity gate, so the details table is drawn");
+                (await admin.Page.Locator("#ms-sessions-locks").CountAsync()).Should().Be(1, "the page has its locks summary");
+
+                await BrowserScenario.RunAsync(fixture.Browser, "health-sessions-viewer", host, "viewer", async viewer =>
+                {
+                    await viewer.GoAsync(host.StudioUrl("database/sessions"));
+                    await viewer.Page.Locator(".ms-sessions-stats").WaitForAsync();
+
+                    ILocator idle = viewer.Page.Locator(".ms-sessions-table td", new PageLocatorOptions { HasTextString = "idle in transaction" });
+                    await UntilShownAsync(viewer, idle, SessionsRefresh(viewer), NextSweep, "an idle-in-transaction row in viewer's session summary");
+
+                    (await viewer.Page.Locator(".ms-sessions-gate").InnerTextAsync()).Should().Contain("Session details are not shown");
+                    (await viewer.Page.Locator(".ms-sessions-table th", new PageLocatorOptions { HasTextString = "pid" }).CountAsync())
+                        .Should().Be(0, "the summary has no process ids");
+                    (await viewer.Page.Locator(".ms-sessions").InnerTextAsync()).Should().NotContain(
+                        UnhealthySwitch.ApplicationNamePrefix, "an application name is a detail, and viewer does not pass the activity gate");
+
+                    viewer.AssertClean("opening Database › Sessions as viewer");
+                });
+
+                // C04 and D01, once their minute has passed - the two minutes run side by side.
+                await admin.GoAsync(host.StudioUrl("health"));
+
+                ILocator c04 = admin.Page.Locator(Visible("c04"));
+                ILocator d01 = admin.Page.Locator(Visible("d01"));
+                await UntilShownAsync(admin, c04, HealthRefresh(admin), AfterAMinute, "C04 a minute after the session went idle");
+                await UntilShownAsync(admin, d01, HealthRefresh(admin), AfterAMinute, "D01 a minute after the gap pinned the mark");
+
+                (await c04.InnerTextAsync()).Should().Contain(IdleSessionName, "admin passes the activity gate, so C04 names the session");
+
+                // The Projections screen draws D01 from the same sweep, without starting one.
+                await admin.GoAsync(host.StudioUrl("projections"));
+                ILocator banner = admin.Page.Locator("section.ms-health-banner-d01");
+                await banner.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+                (await banner.InnerTextAsync()).Should().Contain("D01");
+                (await banner.Locator("a.ms-health-banner-link").GetAttributeAsync("href")).Should().Contain("#finding-d01");
+
+                await BrowserScenario.RunAsync(fixture.Browser, "health-withheld-viewer", host, "viewer", async viewer =>
+                {
+                    await viewer.GoAsync(host.StudioUrl("health"));
+
+                    ILocator withheld = viewer.Page.Locator(Visible("c04"));
+                    await UntilShownAsync(viewer, withheld, HealthRefresh(viewer), NextSweep, "C04 on viewer's Health page");
+
+                    // The finding is the database's, so viewer sees it; who the sessions are is withheld, row by row: every
+                    // "Session n" line, which for admin names the process, role and application.
+                    int sessionRows = 0;
+
+                    foreach (ILocator row in await withheld.Locator(".ms-health-evidence-row").AllAsync())
+                    {
+                        string label = (await row.Locator("dt").InnerTextAsync()).Trim();
+
+                        if (SessionLine.IsMatch(label))
+                        {
+                            sessionRows++;
+                            (await row.Locator("dd").InnerTextAsync()).Trim().Should().StartWith("withheld - ", "nothing names a session to viewer");
+                        }
+                    }
+
+                    sessionRows.Should().BePositive("C04 lists the sessions it found, withheld");
+
+                    string page = await viewer.Page.Locator(".ms-health").InnerTextAsync();
+                    page.Should().NotContain(UnhealthySwitch.ApplicationNamePrefix, "no finding names a session's application to viewer");
+                    (await viewer.Page.Locator(".ms-health-statements-note").InnerTextAsync()).Should().Contain(
+                        "not shown to you", "the statement checks' findings are behind the activity gate too");
+
+                    viewer.AssertClean("opening the Health page as viewer");
+                });
+
+                admin.AssertClean("turning on two switches, opening Sessions, Health and Projections");
+            }
+            finally
+            {
+                await SwitchAsync(admin, PinnedGap, on: false);
+                await SwitchAsync(admin, IdleInTransaction, on: false);
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // D02 on a host with no daemon
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A sample host started with <c>--no-daemon</c> has async projections behind and nothing running them, so the first
+    /// sweep raises D02 as Critical and the Projections screen draws it as a banner.
+    /// </summary>
+    /// <remarks>
+    /// A host of its own, in a database of its own: the shared hosts run the daemon, and the one switch that makes a
+    /// daemon fall silent does it by pinning the mark, which is D01's. Starting a host costs this scenario about as much
+    /// as one sweep interval, which is the "cheaply" the plan asks for.
+    /// </remarks>
+    [BrowserFact]
+    public async Task A_host_whose_async_projections_nothing_runs_draws_the_D02_banner()
+    {
+        string connectionString = await BrowserSuiteFixture.CreateDatabaseAsync(fixture.Postgres, "browser_no_daemon");
+
+        await using SampleHost host = await SampleHost.StartAsync(connectionString, noDaemon: true);
+        await SampleHost.WaitForSeedAsync(connectionString);
+        await BrowserSuiteFixture.WarmUpAsync(fixture.Browser, host);
+
+        await BrowserScenario.RunAsync(fixture.Browser, "health-d02-banner", host, "admin", async studio =>
+        {
+            await studio.GoAsync(host.StudioUrl("health"));
+
+            ILocator d02 = studio.Page.Locator(Visible("d02"));
+            await UntilShownAsync(studio, d02, HealthRefresh(studio), NextSweep, "D02 on a host that runs no daemon");
+            (await d02.Locator(".ms-health-severity").InnerTextAsync()).Trim().Should().Be("Critical");
+
+            await studio.GoAsync(host.StudioUrl("projections"));
+            ILocator banner = studio.Page.Locator("section.ms-health-banner-d02");
+            await banner.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            (await banner.GetAttributeAsync("class")).Should().Contain("ms-alert-error", "D02 is Critical");
+
+            studio.AssertClean("opening Health and Projections on a host that runs no daemon");
+        });
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>A finding's card in the unmuted list, by code.</summary>
+    /// <remarks>The card itself, by element: its title's id starts the same way (<c>finding-t07-…-title</c>).</remarks>
+    private static string Visible(string code) => ".ms-health-area article[id^='finding-" + code + "']";
+
+    /// <summary>A finding's card in the muted list - drawn inside a closed <c>details</c>, so attached rather than visible.</summary>
+    private static string Muted(string code) => ".ms-health-muted article[id^='finding-" + code + "']";
+
+    private static ILocator HealthRefresh(StudioPage studio) =>
+        studio.Page.Locator(".ms-health-actions button", new PageLocatorOptions { HasTextString = "Refresh" });
+
+    private static ILocator SessionsRefresh(StudioPage studio) =>
+        studio.Page.Locator(".ms-sessions-actions button", new PageLocatorOptions { HasTextString = "Refresh" });
+
+    /// <summary>
+    /// Turns a demo switch on or off from the sample's landing page, and waits until its panel says so.
+    /// </summary>
+    /// <remarks>
+    /// The form posts, the endpoint redirects back to <c>/</c>, and the panel's own script reads the switch's state from
+    /// the status endpoint every two seconds and stamps it on the card - so the wait is on that attribute, in the page.
+    /// </remarks>
+    private static async Task SwitchAsync(StudioPage studio, string slug, bool on)
+    {
+        await studio.Page.GotoAsync(studio.Host.Url("/"), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+
+        ILocator card = studio.Page.Locator("#unhealthy-" + slug);
+        string want = on ? "On" : "Off";
+
+        if (await card.GetAttributeAsync("data-state") == want)
+        {
+            return;
+        }
+
+        await card.Locator("form[data-when='" + (on ? "off" : "on") + "'] button[type=submit]").ClickAsync();
+
+        await studio.Page.Locator("#unhealthy-" + slug + "[data-state='" + want + "']").WaitForAsync(
+            new LocatorWaitForOptions { Timeout = 90_000 });
+    }
+
+    /// <summary>
+    /// Presses the page's Refresh until <paramref name="target" /> is on the page: the sweep behind it is cached for a
+    /// minute, so the first press after that is the one that shows it.
+    /// </summary>
+    private static async Task UntilShownAsync(StudioPage studio, ILocator target, ILocator refresh, TimeSpan timeout, string what)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
+
+        while (await target.CountAsync() == 0)
+        {
+            if (DateTimeOffset.UtcNow > deadline)
+            {
+                throw new TimeoutException("Gave up after " + timeout + " waiting for " + what + ".");
+            }
+
+            if (await refresh.IsEnabledAsync())
+            {
+                await refresh.ClickAsync();
+            }
+
+            try
+            {
+                await target.First.WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Attached, Timeout = 5_000 });
+            }
+            catch (TimeoutException)
+            {
+                // Not on this sweep; the next press may run the one that has it.
+            }
+        }
+    }
+
+    /// <summary>
+    /// The health badge's count once it agrees with the Warnings and Criticals the page shows unmuted - the badge reads
+    /// the glance on the sidebar's own poll, so it can be a few seconds behind the page. No badge counts as 0.
+    /// </summary>
+    private static async Task<int> BadgeAgreesWithThePageAsync(StudioPage studio)
+    {
+        IJSHandle agreed = await studio.Page.WaitForFunctionAsync(
+            """
+            () => {
+              const page = document.querySelectorAll('.ms-health-area .ms-health-finding-warning, .ms-health-area .ms-health-finding-critical').length;
+              const link = [...document.querySelectorAll('.ms-nav-link')].find(a => a.textContent.includes('Health'));
+              const badge = link ? link.querySelector('.ms-nav-badge') : null;
+              const shown = badge ? parseInt(badge.textContent.trim(), 10) : 0;
+              return page === shown ? String(page) : null;
+            }
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        return int.Parse(await agreed.JsonValueAsync<string>(), CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>How many mute keys this browser keeps in <c>localStorage</c>.</summary>
+    private static Task<int> MutedInStorageAsync(StudioPage studio) =>
+        studio.Page.EvaluateAsync<int>("() => JSON.parse(window.localStorage.getItem('ms_health_muted') || '[]').length");
+
+    /// <summary>
+    /// Keeps every toast this page shows, class and text, in <c>window.__msToasts</c> - a toast is removed after four
+    /// seconds, and the assertion must not depend on catching it while it is there.
+    /// </summary>
+    private static async Task RecordToastsAsync(StudioPage studio) =>
+        await studio.Page.EvaluateAsync(
+            """
+            () => {
+              window.__msToasts = [];
+              const seen = () => document.querySelectorAll('.ms-toast').forEach(t => {
+                const entry = t.className + ' | ' + t.textContent;
+                if (!window.__msToasts.includes(entry)) { window.__msToasts.push(entry); }
+              });
+              new MutationObserver(seen).observe(document.body, { childList: true, subtree: true, characterData: true });
+              seen();
+            }
+            """);
+
+    /// <summary>
+    /// Sets the sample's <c>Invoice</c> HiLo row, as another client of the server would, and answers what it was. The
+    /// running host keeps the block it already holds and draws no new one during the scenario.
+    /// </summary>
+    private async Task<long> SetInvoiceHiloAsync(long value)
+    {
+        string table = SqlIdentifier.Qualify(SampleStore.DocumentSchema, "mt_hilo");
+
+        await using NpgsqlConnection connection = new(fixture.RootConnectionString);
+        await connection.OpenAsync();
+
+        await using NpgsqlCommand command = new(
+            "with old as (select hi_value from " + table + " where entity_name = @name for update) "
+            + "update " + table + " t set hi_value = @value from old where t.entity_name = @name returning old.hi_value",
+            connection);
+        command.Parameters.AddWithValue("name", "Invoice");
+        command.Parameters.AddWithValue("value", value);
+
+        object? previous = await command.ExecuteScalarAsync();
+
+        return previous is long was
+            ? was
+            : throw new InvalidOperationException(
+                "The sample database has no Invoice row in " + table + ": the seeder stores invoices, whose int ids Marten draws from HiLo.");
+    }
+}

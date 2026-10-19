@@ -6,14 +6,21 @@ namespace MartenStudio.Integration.Tests.Health;
 
 /// <summary>
 /// The Health page on real Kestrel, in Chromium, over the sample host: it renders through the real services
-/// once the circuit is attached, and "mute in this browser" survives a reload.
+/// once the circuit is attached - its findings in area groups, and the "What was checked" table - and "mute in this
+/// browser" survives a reload.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The sample host runs in Development with the sample domain's store as it ships, which starts healthy - no K01, and
 /// no K02, since the sample turns extended progression tracking on - against the suite's Testcontainers Postgres, which
 /// runs with <c>synchronous_commit = off</c>. So S02's Info about that setting is the finding it is guaranteed to show
 /// (docs/health/server.md says so). Like every browser scenario, it skips locally when Chromium is not installed and
 /// throws on CI (D19).
+/// </para>
+/// <para>
+/// What the demo switches make the page show - a finding a switch raises, the badge, the toast, Database › Sessions, the
+/// Projections screen's banners and what a viewer is not shown - is <see cref="HealthAdvisorScenarioTests" />'.
+/// </para>
 /// </remarks>
 [Collection(BrowserSuite.Name)]
 public class HealthBrowserScenarioTests(BrowserSuiteFixture fixture)
@@ -39,6 +46,22 @@ public class HealthBrowserScenarioTests(BrowserSuiteFixture fixture)
             (await s02.Locator(".ms-health-severity").InnerTextAsync()).Trim().Should().Be("Info");
             (await s02.Locator(".ms-health-remedy-code").InnerTextAsync()).Should().Contain("synchronous_commit = on");
             (await studio.Page.Locator(".ms-health-check-table tbody tr").CountAsync()).Should().BeGreaterThanOrEqualTo(3);
+
+            // The findings are drawn in area groups, each a labelled section with its own heading, and the status table
+            // is under its own: what was checked, whether or not it found anything.
+            ILocator areas = studio.Page.Locator("section.ms-health-area");
+            (await areas.CountAsync()).Should().BePositive();
+            foreach (ILocator area in await areas.AllAsync())
+            {
+                // The text, not the rendered text: a section title is drawn in capitals by the stylesheet.
+                string? label = await area.GetAttributeAsync("aria-label");
+                label.Should().NotBeNullOrWhiteSpace();
+                (await area.Locator("h2.ms-section-title").TextContentAsync())!.Trim().Should().Be(label);
+            }
+
+            (await areas.Filter(new LocatorFilterOptions { Has = studio.Page.Locator("#finding-s02-synchronous_commit") }).GetAttributeAsync("aria-label"))
+                .Should().Be("Server", "S02 is a Server finding");
+            (await studio.Page.Locator(".ms-health-checks h2.ms-section-title").TextContentAsync())!.Trim().Should().Be("What was checked");
             (await studio.Page.Locator("#finding-k01").CountAsync()).Should().Be(0, "the sample host runs in Development");
             (await studio.Page.Locator("#finding-k02").CountAsync()).Should().Be(0, "the sample turns extended progression tracking on");
 

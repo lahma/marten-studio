@@ -32,6 +32,12 @@ public abstract class GeneratedDataFixtureBase : IAsyncLifetime
     /// <summary>The schema this class owns.</summary>
     public abstract string Schema { get; }
 
+    /// <summary>
+    /// The assembly's Postgres, for a test that reads the database from a connection of its own - the whole-sweep cost
+    /// budget's lock probe and its no-DDL snapshot - or builds a second studio container over the same set.
+    /// </summary>
+    internal PostgresFixture Postgres => postgres;
+
     /// <summary>How much to generate.</summary>
     internal abstract DemoDataPlan Plan { get; }
 
