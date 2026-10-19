@@ -366,14 +366,21 @@ public class HealthPageTests
     {
         await using StudioComponentContext context = await ReadyAsync(static x => x.Options.RefreshInterval = TimeSpan.FromMilliseconds(20));
 
+        // Stamped with the scope they are read for, as the real health service stamps a glance: the toast ignores one
+        // read for any other scope.
+        MartenStudio.Services.StudioScope scope = context.State.ActiveScope!;
+
         // The first look at a database only takes note of what is there: a warning, and no Critical.
-        context.NavBadges.Health = new HealthGlance(DateTimeOffset.UtcNow, 0, 1, []);
+        context.NavBadges.Health = new HealthGlance(DateTimeOffset.UtcNow, 0, 1, []) { Scope = scope };
 
         var nav = context.Render<NavMenu>();
         nav.WaitForAssertion(() => context.NavBadges.Reads.Should().BeGreaterThan(2), TimeSpan.FromSeconds(5));
         context.Toasts.Messages.Should().BeEmpty();
 
-        context.NavBadges.Health = new HealthGlance(DateTimeOffset.UtcNow, 1, 0, [new HealthGlanceItem("default|db|D01", "The high-water mark is pinned")]);
+        context.NavBadges.Health = new HealthGlance(DateTimeOffset.UtcNow, 1, 0, [new HealthGlanceItem("default|db|D01", "The high-water mark is pinned")])
+        {
+            Scope = scope,
+        };
         int readsWhenItAppeared = context.NavBadges.Reads;
 
         nav.WaitForAssertion(() => context.Toasts.Messages.Should().ContainSingle(), TimeSpan.FromSeconds(5));

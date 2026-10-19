@@ -10,9 +10,11 @@
   check's gate a row says "findings not shown to you" whether or not there are any, a row that withheld some
   says "N shown, others not shown to you", and the Overview's tile is never a green "nothing to report"
   while any are withheld. The navigation entry carries a severity badge, the Overview a Health tile and the
-  three worst findings, a toast says when a Critical finding appears while somebody is watching, and a
-  Studio cost line shows the database time the studio's own read-only sessions took in the last five
-  minutes.
+  three worst findings, a toast says when a Critical finding appears while somebody is watching, once per
+  tab (one that clears and comes back toasts again only once a quarter of an hour, or three
+  `HealthInterval`s when that is longer, has passed since a sweep last found it, so a check sitting at its
+  threshold does not toast every other sweep), and a Studio cost line shows the database time the studio's
+  own read-only sessions took in the last five minutes.
 - The advisor does no background work. A sweep runs only when the Health page, the Overview or the opt-in
   health check (below) asks, and one sweep of a database serves every tab watching it for
   `MartenStudioOptions.HealthInterval`; the navigation badge never starts one. Every statement runs in the
@@ -328,6 +330,11 @@
 - Fix: on a master-table tenancy with two tenant rows on one connection string, a scope naming the second
   row's tenant opened its sessions and connections on the first row's instance, with that row's role and
   connection options. It now opens them on the instance built from its own row.
+- Fix: a refused query (a Mode A where clause, a SQL console statement, or LINQ mode's predicate or
+  ordering) puts the line it points at under the message, at the box's full width, whenever the box is
+  narrower than 40rem, and that line scrolls sideways within itself. At 390 px the two had shared one row:
+  the message wrapped every two or three words and the line was cut off. A tab in that line, and in the JSON
+  editor's, is now one column wide at every width, so the caret stays under the character it points at.
 
 # 0.3.0
 

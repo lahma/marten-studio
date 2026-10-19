@@ -313,7 +313,12 @@ internal sealed class HealthService : IHealthService
             unmuted.Count(static x => x.Severity == HealthSeverity.Critical),
             unmuted.Count(static x => x.Severity == HealthSeverity.Warning),
             [.. unmuted.Where(static x => x.Severity == HealthSeverity.Critical).Select(static x => new HealthGlanceItem(x.MuteKey, x.Finding.Title))],
-            withheld);
+            withheld)
+        {
+            // The visitor's scope as asked, not the swept names: the toast compares it with the scope the sidebar is on
+            // when the glance reaches it.
+            Scope = scope,
+        };
     }
 
     /// <inheritdoc />

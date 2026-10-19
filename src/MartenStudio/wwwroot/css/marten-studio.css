@@ -10766,3 +10766,60 @@ a.ms-schema-health-mark:focus-visible {
     font-family: var(--ms-font-mono);
     overflow-wrap: anywhere;
 }
+
+/* ==========================================================================
+   UX-8. A query refusal on a narrow screen
+
+   0.4's UI sweep, appended at the end on purpose (D26). A refused query - a
+   LINQ predicate or ordering, a Mode A where clause, a SQL console statement
+   - is one .ms-alert holding the message and, when there is a place to point
+   at, an excerpt: the line it is about with a caret under the character.
+   .ms-alert lays its children out in a row, so at 390 px the two shared
+   about 230 px between them: the message wrapped every two or three words
+   and the excerpt was cut off after "System.Diagnos". When the box is
+   narrower than 40rem the excerpt now goes under the message at the box's
+   full width, and scrolls sideways inside itself when it is still too wide.
+   Wider than that, where both have room, the row is unchanged.
+
+   What is narrow is the box, not the viewport - the sidebar alone changes
+   how much of the viewport the box gets - so the two places a refusal is
+   drawn are named query containers: the editor's status line (QueryEditor,
+   which all three modes use) and LINQ mode's Order by status. Neither moves
+   for it: both are block boxes as wide as their parent already, and the
+   inline-size containment only stops a long excerpt from widening anything
+   above them. The JSON editor's parse error (.ms-editor-error) and the
+   database browser's filter errors (.ms-row-filter-error) already put their
+   excerpt on a full-width line of its own at every width; the JSON editor's
+   caret line is built the same way as the query's, so it shares the tab rule
+   below. (The filter strip turns tabs into spaces before it draws.)
+   ========================================================================== */
+
+.ms-query-editor-status,
+.ms-query-linq-order-status {
+    container: ms-query-status / inline-size;
+}
+
+/* The caret line is the source line with every character before the error
+   turned into one space, so a tab in the source - a pasted SQL statement or
+   JSON document has them - must be one column wide as well, or the caret
+   lands to the left of the character it points at. The JSON editor counts
+   UTF-8 bytes, and a tab is one. */
+.ms-query-error > .ms-query-caret,
+.ms-editor-error > .ms-editor-caret {
+    tab-size: 1;
+}
+
+@container ms-query-status (max-width: 40rem) {
+    .ms-alert.ms-query-error {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    /* Stretched to the box's width and no wider. It is one unwrapped line
+       above its caret line (white-space: pre, in the QUERY section), so what
+       does not fit scrolls with overflow-x: auto rather than wrapping, and
+       the caret stays in its column. The alert's gap is the spacing now. */
+    .ms-alert.ms-query-error > .ms-query-caret {
+        margin: 0;
+    }
+}

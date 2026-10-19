@@ -95,26 +95,59 @@ public class HealthNavBadgeTests
         glance.Worst.Should().BeNull();
     }
 
+    /// <summary>
+    /// The toast compares a glance's stamp with the scope the sidebar is on, so the navigation service hands the health
+    /// service's stamp on exactly as it is. A glance re-stamped on the way - the tenant dropped, the database resolved -
+    /// would be ignored by the toast, and no Critical would ever toast again; nothing else would notice.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("acme")]
+    public async Task The_badge_hands_the_glance_on_stamped_with_the_scope_it_was_read_for(string? tenant)
+    {
+        await using HealthHarness harness = HealthHarness.Create(studio: static options => options.KnownTenantIds.Add("acme"));
+        harness.Script.Finds("K91", HealthSeverity.Critical, "One critical");
+        await harness.Health.GetReportAsync(harness.Scope, HealthReportRequest.Regular, Token);
+
+        Badge badge = await Badge.ReadyAsync(harness, static catalog => catalog.WithTenants(
+            "default",
+            new TenantList(["acme", "globex"], IsTruncated: false, TenantListSource.Configured)));
+        await badge.State.SetScopeAsync("default", harness.Scope.DatabaseId, tenant, Token);
+
+        badge.State.ActiveScope!.TenantId.Should().Be(tenant);
+
+        NavIndicators indicators = await badge.Service.ReadAsync(Token);
+
+        indicators.Health.Should().NotBeNull("there is a recent sweep, and this visitor may see its finding");
+        indicators.Health!.Scope.Should().Be(badge.State.ActiveScope);
+        indicators.Health.Criticals.Should().ContainSingle();
+    }
+
     /// <summary>The navigation service over the harness's health service, with the dead-letter and projection fakes.</summary>
     private sealed class Badge
     {
-        private Badge(NavIndicatorService service, FakeEventDataService events, FakeProjectionDataService projections)
+        private Badge(NavIndicatorService service, StudioState state, FakeEventDataService events, FakeProjectionDataService projections)
         {
             Service = service;
+            State = state;
             Events = events;
             Projections = projections;
         }
 
         public NavIndicatorService Service { get; }
 
+        /// <summary>The circuit's state the service reads its scope from, for a test that moves it.</summary>
+        public StudioState State { get; }
+
         public FakeEventDataService Events { get; }
 
         public FakeProjectionDataService Projections { get; }
 
-        public static async Task<Badge> ReadyAsync(HealthHarness harness)
+        public static async Task<Badge> ReadyAsync(HealthHarness harness, Action<FakeStudioScopeCatalog>? configureCatalog = null)
         {
             FakeStudioScopeCatalog catalog = new();
             catalog.WithStore("default", "Default", databaseIdentities: harness.Scope.DatabaseId);
+            configureCatalog?.Invoke(catalog);
 
             TestAuthenticationStateProvider users = new();
             users.SignIn("operator");
@@ -135,7 +168,7 @@ public class HealthNavBadgeTests
                 NullLogger<NavIndicatorService>.Instance,
                 harness.Health);
 
-            return new Badge(service, events, projections);
+            return new Badge(service, state, events, projections);
         }
     }
 }

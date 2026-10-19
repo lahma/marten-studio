@@ -218,4 +218,12 @@ internal sealed record HealthGlance(
 {
     /// <summary>The worst severity worth a badge, or <see langword="null" /> when there is nothing to draw.</summary>
     public HealthSeverity? Worst => Critical > 0 ? HealthSeverity.Critical : Warning > 0 ? HealthSeverity.Warning : null;
+
+    /// <summary>
+    /// The scope this glance was read for, exactly as the reader asked for it - so a glance that is handed on after the
+    /// visitor has moved to another scope can be told apart from one about the scope they are on
+    /// (<see cref="HealthAlerts.ObserveAsync" />). <see langword="null" /> for a glance nobody stamped, which is
+    /// observed as nothing.
+    /// </summary>
+    public StudioScope? Scope { get; init; }
 }

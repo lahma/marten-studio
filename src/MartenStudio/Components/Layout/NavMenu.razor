@@ -214,20 +214,26 @@
         await live.StartAsync(Options.Value.RefreshInterval, TickAsync, cancellation.Token);
     }
 
+    // The poll runs on the thread pool and a scope change on the renderer, and both write `indicators`. So each hands the
+    // toast the glance of the read it made itself, never the shared field, together with the scope the visitor is on now;
+    // HealthAlerts ignores a glance stamped with any other scope, so a read that the scope outran is not a first look.
     private async Task TickAsync(CancellationToken cancellationToken)
     {
-        await RefreshIndicatorsAsync(cancellationToken);
-        await HealthAlerts.ObserveAsync(State.ActiveScope, indicators.Health);
+        if (await RefreshIndicatorsAsync(cancellationToken) is { } read)
+        {
+            await HealthAlerts.ObserveAsync(State.ActiveScope, read.Health);
+        }
+
         await InvokeAsync(StateHasChanged);
     }
 
     private async Task OnScopeChangedAsync()
     {
-        await RefreshIndicatorsAsync(cancellation.Token);
+        NavIndicators? read = await RefreshIndicatorsAsync(cancellation.Token);
 
-        if (started)
+        if (started && read is not null)
         {
-            await HealthAlerts.ObserveAsync(State.ActiveScope, indicators.Health);
+            await HealthAlerts.ObserveAsync(State.ActiveScope, read.Health);
         }
 
         await InvokeAsync(StateHasChanged);
@@ -245,25 +251,44 @@
     }
 
     /// <summary>
-    /// Reads the indicators, and treats every failure as "no badge".
+    /// Reads the indicators for the active scope, treats every failure as "no badge", and answers what it read - or
+    /// <see langword="null" /> when the read was cancelled or the scope changed while it was in flight.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The service already answers <c>NavIndicators.None</c> rather than throwing; this is the second
     /// belt, because the one thing the navigation must never do is stop rendering.
+    /// </para>
+    /// <para>
+    /// A read the scope outran is not drawn: the scope change that outran it starts a read of its own for the new
+    /// scope, and a badge of the old database's counts under the new one would be wrong until the next poll.
+    /// </para>
     /// </remarks>
-    private async Task RefreshIndicatorsAsync(CancellationToken cancellationToken)
+    private async Task<NavIndicators?> RefreshIndicatorsAsync(CancellationToken cancellationToken)
     {
+        StudioScope? readFor = State.ActiveScope;
+        NavIndicators read;
+
         try
         {
-            indicators = await Indicators.ReadAsync(cancellationToken);
+            read = await Indicators.ReadAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
+            return null;
         }
         catch (Exception)
         {
-            indicators = NavIndicators.None;
+            read = NavIndicators.None;
         }
+
+        if (State.ActiveScope != readFor)
+        {
+            return null;
+        }
+
+        indicators = read;
+        return read;
     }
 
     /// <summary>The badge an entry wears right now, or <see langword="null" /> for none.</summary>

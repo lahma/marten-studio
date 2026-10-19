@@ -319,22 +319,35 @@ public partial class StylesheetTests
     /// <summary>
     /// The body of the <c>@media</c> block with the given condition that mentions <paramref name="marker" />.
     /// </summary>
+    private static string MediaBlock(string condition, string marker) =>
+        AtRuleBlock("@media (" + condition + ")", marker);
+
+    /// <summary>
+    /// The body of the <c>@container</c> block for the named container and condition that mentions
+    /// <paramref name="marker" />.
+    /// </summary>
+    private static string ContainerBlock(string container, string condition, string marker) =>
+        AtRuleBlock("@container " + container + " (" + condition + ")", marker);
+
+    /// <summary>
+    /// The body of the at-rule block that starts with <paramref name="prelude" /> and mentions <paramref name="marker" />.
+    /// </summary>
     /// <remarks>
     /// Braces are matched by counting rather than by a regular expression: a media query contains rules,
     /// which contain braces of their own, and a lazy match would stop at the first one.
     /// </remarks>
-    private static string MediaBlock(string condition, string marker)
+    private static string AtRuleBlock(string prelude, string marker)
     {
         string css = Css.Value;
         int search = 0;
 
         while (true)
         {
-            int start = css.IndexOf("@media (" + condition + ")", search, StringComparison.Ordinal);
+            int start = css.IndexOf(prelude, search, StringComparison.Ordinal);
             if (start < 0)
             {
                 throw new InvalidOperationException(
-                    $"{StylesheetPath} has no '@media ({condition})' block mentioning '{marker}'.");
+                    $"{StylesheetPath} has no '{prelude}' block mentioning '{marker}'.");
             }
 
             int open = css.IndexOf('{', start);

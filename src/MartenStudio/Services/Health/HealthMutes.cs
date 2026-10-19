@@ -4,6 +4,7 @@ using System.Text.Json;
 
 using MartenStudio.Services.Live;
 
+using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 
 namespace MartenStudio.Services.Health;
@@ -240,56 +241,155 @@ internal sealed class HealthMutes
 }
 
 /// <summary>
-/// The toast for a Critical finding that appears while somebody is watching: once per appearance, per
-/// circuit.
+/// The toast for a Critical finding that appears while somebody is watching: once per circuit, however often it comes
+/// and goes inside a cool-down.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The sidebar hands this whatever its badge read on every poll. The first look at a database only takes
-/// note of what is already Critical - those are on the page and in the badge, and a toast saying they just
-/// appeared would be false - and every later look toasts each Critical that was not there the time before.
-/// One that clears and comes back is a new appearance and toasts again; one that stays toasts once. A poll
-/// that knows nothing (no recent sweep) changes nothing, because "no information" is not "it went away".
-/// Muted findings are not in the glance, so they never toast.
+/// The sidebar hands this whatever its badge read on every poll. The first look at a database only takes note of what
+/// is already Critical - those are on the page and in the badge, and a toast saying they just appeared would be false -
+/// and every later look toasts each Critical that was not there the time before, unless this circuit has seen that
+/// finding Critical within the last <see cref="CoolDown" />. One that stays toasts once. One that clears and comes back
+/// toasts again only once it has stayed away for a whole cool-down, measured from the last sweep that found it to the
+/// sweep that finds it again: a check that sits at its threshold - C03 at about 95% of connections, a Warning one sweep
+/// and Critical the next - would otherwise toast every open tab every other sweep for as long as the usage hovers there.
+/// "Seen" includes the first look: a finding that was already Critical when the tab arrived and then flaps is the same
+/// flap, and the visitor already knows about it. Another finding - another code, or the same code about another subject
+/// - is in nobody else's cool-down and toasts at once. A poll that knows nothing (no recent sweep) changes nothing,
+/// because "no information" is not "it went away". Muted findings are not in the glance, so they never toast.
 /// </para>
-/// <para>Scoped: a toast is one circuit's.</para>
+/// <para>
+/// "The same finding" is its mute key - store, database, code and subject - which is what the glance, the mutes and the
+/// badge already know it by across sweeps (<see cref="HealthGlanceItem.MuteKey" />). The cool-down is the circuit's, not
+/// the database's watch: leaving for another database and coming back does not start it again. Time is the sweeps' own,
+/// <see cref="HealthGlance.MeasuredAt" />: a poll that reads the same sweep again moves nothing, and nothing here reads
+/// a clock.
+/// </para>
+/// <para>
+/// <b>A glance read for another scope is nothing.</b> The sidebar's poll runs on the thread pool and a scope change on
+/// the renderer, so a read that was in flight when the visitor moved from database A to B can arrive after the move.
+/// Taken as B's first look it would note A's Criticals as B's, and B's next real glance would toast B's existing
+/// Criticals as new; taken as A's it could toast something about A while the visitor reads B. So a glance whose
+/// <see cref="HealthGlance.Scope" /> - stamped by the read with the scope it was read for - is not the scope being
+/// observed changes nothing, exactly like a poll that knows nothing, and B's first real glance is B's first look.
+/// The check is here rather than only at the call site because this is the state the race corrupts, and every caller
+/// gets it.
+/// </para>
+/// <para>Scoped: a toast, and its cool-down, are one circuit's.</para>
 /// </remarks>
 internal sealed class HealthAlerts
 {
+    /// <summary>The shortest cool-down, whatever the health interval: a quarter of an hour.</summary>
+    internal static readonly TimeSpan MinimumCoolDown = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// How many health intervals the cool-down is at least. Measured from the last sweep that found it, a finding that
+    /// missed one sweep has been gone two intervals, so the cool-down has to be longer than two or a long
+    /// <c>HealthInterval</c> would still toast a one-sweep flap every other sweep.
+    /// </summary>
+    internal const int CoolDownIntervals = 3;
+
     private readonly ToastService toasts;
+    private readonly IOptions<MartenStudioOptions> options;
+    private readonly Lock gate = new();
+
+    /// <summary>When each Critical this circuit has seen was last in a glance, by mute key: the sweep's time.</summary>
+    private readonly Dictionary<string, DateTimeOffset> lastSeen = new(StringComparer.Ordinal);
+
     private string? watching;
     private HashSet<string> present = new(StringComparer.Ordinal);
 
-    public HealthAlerts(ToastService toasts) => this.toasts = toasts;
+    public HealthAlerts(ToastService toasts, IOptions<MartenStudioOptions> options)
+    {
+        ArgumentNullException.ThrowIfNull(toasts);
+        ArgumentNullException.ThrowIfNull(options);
+
+        this.toasts = toasts;
+        this.options = options;
+    }
+
+    /// <summary>
+    /// How long a finding that was Critical must stay away before its return toasts again: a quarter of an hour, or
+    /// <see cref="CoolDownIntervals" /> of the advisor's real cadence when that is longer.
+    /// </summary>
+    /// <remarks>
+    /// A quarter of an hour because a threshold flap is a pattern of many sweeps, not one - fifteen of them at the default
+    /// minute - and because nothing is lost by it: the badge and the Health page say what is Critical on every poll, and a
+    /// toast only says that something new happened, which a finding seen in the last quarter of an hour has not.
+    /// </remarks>
+    internal TimeSpan CoolDown
+    {
+        get
+        {
+            TimeSpan intervals = options.Value.EffectiveHealthInterval * CoolDownIntervals;
+            return intervals > MinimumCoolDown ? intervals : MinimumCoolDown;
+        }
+    }
 
     /// <summary>Takes note of one poll, and toasts what is newly Critical.</summary>
-    /// <param name="scope">The scope the glance is about.</param>
-    /// <param name="glance">What the badge read, or <see langword="null" /> when it knew nothing.</param>
+    /// <param name="scope">
+    /// The scope the visitor is on as the glance arrives - the circuit's active scope now, not when the read began.
+    /// </param>
+    /// <param name="glance">
+    /// What the badge read, or <see langword="null" /> when it knew nothing. One read for any scope but
+    /// <paramref name="scope" /> is ignored.
+    /// </param>
     public async Task ObserveAsync(StudioScope? scope, HealthGlance? glance)
     {
-        if (scope is null || glance is null)
+        if (scope is null || glance is null || glance.Scope != scope)
         {
             return;
         }
 
         string key = scope.StoreKey + "|" + scope.DatabaseId;
         HashSet<string> now = new(glance.Criticals.Select(static x => x.MuteKey), StringComparer.Ordinal);
+        DateTimeOffset at = glance.MeasuredAt;
+        TimeSpan coolDown = CoolDown;
+        List<string> toast = [];
 
-        if (!string.Equals(key, watching, StringComparison.OrdinalIgnoreCase))
+        // Decided and remembered under the lock, toasted after it: the sidebar's poll and a scope change can both be
+        // here, and neither may toast what the other already has.
+        lock (gate)
         {
+            if (string.Equals(key, watching, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (HealthGlanceItem critical in glance.Criticals)
+                {
+                    bool seenLately = lastSeen.TryGetValue(critical.MuteKey, out DateTimeOffset seen) && at - seen < coolDown;
+
+                    if (!present.Contains(critical.MuteKey) && !seenLately)
+                    {
+                        toast.Add(critical.Title);
+                    }
+                }
+            }
+
             watching = key;
             present = now;
-            return;
+            Remember(now, at, coolDown);
         }
 
-        foreach (HealthGlanceItem critical in glance.Criticals)
+        foreach (string title in toast)
         {
-            if (!present.Contains(critical.MuteKey))
-            {
-                await toasts.Error("Health: " + critical.Title + " - see the Health page.").ConfigureAwait(false);
-            }
+            await toasts.Error("Health: " + title + " - see the Health page.").ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Notes that every key in <paramref name="now" /> was Critical at <paramref name="at" />, and forgets the keys last
+    /// seen a whole cool-down ago - their return toasts whether they are remembered or not, so a long-lived circuit does
+    /// not keep them.
+    /// </summary>
+    private void Remember(HashSet<string> now, DateTimeOffset at, TimeSpan coolDown)
+    {
+        foreach (string muteKey in now)
+        {
+            lastSeen[muteKey] = lastSeen.TryGetValue(muteKey, out DateTimeOffset seen) && seen > at ? seen : at;
         }
 
-        present = now;
+        foreach (string stale in lastSeen.Where(x => at - x.Value >= coolDown).Select(static x => x.Key).ToList())
+        {
+            lastSeen.Remove(stale);
+        }
     }
 }

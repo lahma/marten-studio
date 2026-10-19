@@ -37,6 +37,14 @@ never written to the database and never hides anything from anybody else. What t
 the finding's key - its store, database, code and subject - never the key itself, which can name a tenant or a
 stream and would otherwise be readable by every script on the host's pages.
 
+A Critical finding that appears while a tab is open raises a toast in that tab, once. One that was already Critical
+when the tab first looked is not toasted - it is on the page and in the badge already - and one that stays Critical
+toasts once. One that clears and comes back toasts again only after it has stayed away for a quarter of an hour, or
+three `HealthInterval`s when that is longer, counted from the last sweep that found it: a check sitting at its
+threshold, Critical one sweep and a Warning the next, toasts once rather than every other sweep. That holds for a
+finding the tab's first look found Critical too. Another finding - another code, or the same code about another
+subject - toasts at once, and a muted finding never toasts.
+
 ## What it costs
 
 Checks come in four cost tiers:
