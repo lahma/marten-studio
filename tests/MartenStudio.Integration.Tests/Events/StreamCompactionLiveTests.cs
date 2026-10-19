@@ -161,7 +161,8 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
     /// <param name="store">The store.</param>
     /// <param name="capabilities">Every capability, or none.</param>
     /// <param name="isVisible">The host's <c>IsDocumentTypeVisible</c>, when a test sets one.</param>
-    public IServiceProvider Studio(IDocumentStore store, bool capabilities, Func<Type, bool>? isVisible = null)
+    /// <param name="tenants">Tenants the studio knows besides <see cref="TenantA" /> and <see cref="TenantB" />.</param>
+    public IServiceProvider Studio(IDocumentStore store, bool capabilities, Func<Type, bool>? isVisible = null, params string[] tenants)
     {
         var services = new ServiceCollection();
 
@@ -177,11 +178,31 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
             options.DiscoverTenantIds = false;
             options.KnownTenantIds.Add(TenantA);
             options.KnownTenantIds.Add(TenantB);
+
+            foreach (string tenant in tenants)
+            {
+                options.KnownTenantIds.Add(tenant);
+            }
         });
 
         ServiceProvider provider = services.BuildServiceProvider();
         providers.Add(provider);
         return provider.CreateScope().ServiceProvider;
+    }
+
+    /// <summary>
+    /// A tenant pair of a test's own on <see cref="Partitioned" />, registered as <see cref="InitializeAsync" /> registers
+    /// <see cref="TenantA" /> and <see cref="TenantB" /> - so each tenant's per-tenant sequence starts fresh, and a test
+    /// whose premise is that the two counters collide holds whatever ran on the store before it.
+    /// </summary>
+    public async Task<(string A, string B)> FreshPartitionedTenantsAsync()
+    {
+        string suffix = Guid.NewGuid().ToString("N")[..8];
+        (string a, string b) = ("acme" + suffix, "globex" + suffix);
+
+        await Partitioned.Advanced.AddMartenManagedTenantsAsync(CancellationToken.None, a, b);
+
+        return (a, b);
     }
 
     /// <summary>Starts an <c>OrderSummary</c> stream - typed, so <c>mt_streams.type</c> names the aggregate.</summary>
@@ -453,34 +474,38 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
     [PostgresFact]
     public async Task Under_tenant_partitioned_events_a_compaction_stays_in_its_own_tenant_even_where_sequences_collide()
     {
-        IServiceProvider studio = fixture.Studio(fixture.Partitioned, capabilities: true);
+        // A tenant pair of this test's own: the premise is that the two tenants' counters stand level, which another test
+        // appending to the class's shared tenants first would break (CI saw {4,5,6} against {7,8,9}).
+        (string tenantA, string tenantB) = await fixture.FreshPartitionedTenantsAsync();
+
+        IServiceProvider studio = fixture.Studio(fixture.Partitioned, capabilities: true, isVisible: null, tenantA, tenantB);
         IEventDataService events = studio.GetRequiredService<IEventDataService>();
 
         Guid id = Guid.CreateVersion7();
-        await StreamCompactionFixture.StartAsync(fixture.Partitioned, StreamCompactionFixture.TenantA, id);
-        await StreamCompactionFixture.StartAsync(fixture.Partitioned, StreamCompactionFixture.TenantB, id);
+        await StreamCompactionFixture.StartAsync(fixture.Partitioned, tenantA, id);
+        await StreamCompactionFixture.StartAsync(fixture.Partitioned, tenantB, id);
 
         IReadOnlyList<(long Sequence, long Version, string Type)> acmeBefore =
-            await fixture.EventsAsync(fixture.PartitionedSchema, id, StreamCompactionFixture.TenantA);
+            await fixture.EventsAsync(fixture.PartitionedSchema, id, tenantA);
         IReadOnlyList<(long Sequence, long Version, string Type)> globexBefore =
-            await fixture.EventsAsync(fixture.PartitionedSchema, id, StreamCompactionFixture.TenantB);
+            await fixture.EventsAsync(fixture.PartitionedSchema, id, tenantB);
 
         acmeBefore.Select(static x => x.Sequence).Should().Equal(globexBefore.Select(static x => x.Sequence),
             "each tenant draws from a sequence of its own, so the two streams' events share their numbers - the premise");
 
-        StudioScope acme = Everyone with { TenantId = StreamCompactionFixture.TenantA };
+        StudioScope acme = Everyone with { TenantId = tenantA };
         CompactionPlan plan = await PlanAsync(events, acme, id.ToString(), Token);
         plan.IsOffered.Should().BeTrue(plan.Explanation);
 
         await events.CompactStreamAsync(acme, id.ToString(), id.ToString(), plan.Version, Token);
 
-        (await fixture.EventsAsync(fixture.PartitionedSchema, id, StreamCompactionFixture.TenantA)).Should().ContainSingle();
+        (await fixture.EventsAsync(fixture.PartitionedSchema, id, tenantA)).Should().ContainSingle();
 
         IReadOnlyList<(long Sequence, long Version, string Type)> globexAfter =
-            await fixture.EventsAsync(fixture.PartitionedSchema, id, StreamCompactionFixture.TenantB);
+            await fixture.EventsAsync(fixture.PartitionedSchema, id, tenantB);
         globexAfter.Should().Equal(globexBefore,
             "globex's events with the same seq_id are neither deleted nor rewritten as acme's snapshot");
-        (await fixture.CompactedVersionAsync(fixture.PartitionedSchema, id, StreamCompactionFixture.TenantB)).Should().Be(0);
+        (await fixture.CompactedVersionAsync(fixture.PartitionedSchema, id, tenantB)).Should().Be(0);
     }
 
     /// <summary>
@@ -803,14 +828,17 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
     [PostgresFact]
     public async Task Under_tenant_partitioned_events_all_tenants_reads_no_feed_and_no_shared_stream()
     {
-        IServiceProvider studio = fixture.Studio(fixture.Partitioned, capabilities: false);
+        // A tenant pair of this test's own, so its appends move no counter another test's premise stands on.
+        (string tenantA, string tenantB) = await fixture.FreshPartitionedTenantsAsync();
+
+        IServiceProvider studio = fixture.Studio(fixture.Partitioned, capabilities: false, isVisible: null, tenantA, tenantB);
         IEventDataService events = studio.GetRequiredService<IEventDataService>();
 
         Guid shared = Guid.CreateVersion7();
         Guid alone = Guid.CreateVersion7();
-        await StreamCompactionFixture.StartAsync(fixture.Partitioned, StreamCompactionFixture.TenantA, shared);
-        await StreamCompactionFixture.StartAsync(fixture.Partitioned, StreamCompactionFixture.TenantB, shared);
-        await StreamCompactionFixture.StartAsync(fixture.Partitioned, StreamCompactionFixture.TenantA, alone);
+        await StreamCompactionFixture.StartAsync(fixture.Partitioned, tenantA, shared);
+        await StreamCompactionFixture.StartAsync(fixture.Partitioned, tenantB, shared);
+        await StreamCompactionFixture.StartAsync(fixture.Partitioned, tenantA, alone);
 
         MartenStudio.Services.Events.EventPage feed = await events.GetFeedAsync(Everyone, new EventFeedRequest(), Token);
         feed.Rows.Should().BeEmpty();
@@ -820,7 +848,7 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
         timeline.Rows.Should().BeEmpty("two tenants' streams of this id would interleave by their own counters");
         timeline.Error!.Message.Should().Contain("choose a tenant");
 
-        StudioScope acme = Everyone with { TenantId = StreamCompactionFixture.TenantA };
+        StudioScope acme = Everyone with { TenantId = tenantA };
         (await events.GetFeedAsync(acme, new EventFeedRequest(), Token)).Rows.Should().NotBeEmpty("a tenant's own feed is read");
         (await events.GetStreamEventsAsync(acme, shared.ToString(), 0, 50, Token)).Rows.Should().HaveCount(3);
         (await events.GetStreamEventsAsync(Everyone, alone.ToString(), 0, 50, Token)).Rows
