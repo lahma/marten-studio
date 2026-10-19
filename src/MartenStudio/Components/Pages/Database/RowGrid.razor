@@ -32,6 +32,10 @@
     cut on the server at a kilobyte (JSON at four, bytes at sixty-four), so a cell that was cut is read again
     whole through GetCellAsync - by its key, or by ctid for a heap relation with no key - once, and kept for
     as long as the page is on screen.
+
+    A pgvector column's cell (its column's Vector, from the catalog) is collapsed to its type and its first few
+    components out of the kilobyte the server sent, so a 1536-dimension embedding costs the page no more than any
+    other cut cell; its chip opens the whole value under the grid as text, with a copy button.
 *@
 
 @{
@@ -175,6 +179,7 @@
                                              Rich="true"
                                              DateHint="@DateHintFor(hints, columnIndex, cell)"
                                              DateHintTitle="@DateHintTitle(hints, columnIndex)"
+                                             Vector="column.Vector"
                                              OnOpen="() => OpenCellAsync(rowIndex, columnIndex)" />
                             }
                         </td>
@@ -206,6 +211,7 @@
                                                       Text="@cell.Text"
                                                       IsTruncated="cell.IsTruncated"
                                                       FullLength="cell.FullLength"
+                                                      Vector="column.Vector"
                                                       Compact="true" />
                                         </dd>
                                     </div>
@@ -260,9 +266,16 @@
             {
                 <p class="ms-row-value-note">@note</p>
             }
+            @if (shownPanel.Vector && !shownPanel.Cut)
+            {
+                <p class="ms-row-value-note ms-vector-panel-actions">
+                    <CopyButton Value="@text" Label="@($"Copy the whole value of {shownPanel.Column}")" />
+                    <span>The whole value, as Postgres prints it.</span>
+                </p>
+            }
             @* Its own labelled scroll region: a long value scrolls here rather than growing the page. *@
             <div class="ms-row-text-panel" role="region" aria-label="@shownPanel.Title" tabindex="0">
-                <pre class="ms-row-text-panel-body">@text</pre>
+                <pre class="@(shownPanel.Vector ? "ms-row-text-panel-body ms-vector-whole" : "ms-row-text-panel-body")">@text</pre>
             </div>
         }
     </div>
@@ -619,6 +632,15 @@
             return;
         }
 
+        // A pgvector value opens as its text, whole: from the page when the server did not cut it.
+        bool vector = column.Vector is not null;
+
+        if (vector && !cell.IsTruncated)
+        {
+            panel = new CellPanel(title, column.Name) { Text = cell.Text, Vector = true };
+            return;
+        }
+
         byte[]? prefix = cell.Kind == SqlCellKind.Binary ? SqlCellFormat.HexPrefix(cell.Text) : null;
         bool isText = prefix is not null && SqlCellFormat.Sniff(prefix, cell.FullLength).Shape == BinaryShape.Text;
 
@@ -651,8 +673,18 @@
                 { Refusal: not DatabaseRefusal.None } => new CellPanel(title, column.Name) { Error = value.Reason ?? "This value may not be read here." },
                 { Error: { } failure } => new CellPanel(title, column.Name) { Error = failure.Sentence },
                 { Found: false } => new CellPanel(title, column.Name) { Error = value.Reason ?? "The row is not there any more - it may have been deleted or changed." },
-                { IsNull: true } when isText => new CellPanel(title, column.Name) { Text = "NULL" },
+                { IsNull: true } when isText || vector => new CellPanel(title, column.Name) { Text = "NULL" },
                 { IsNull: true } => new CellPanel(title, column.Name) { Json = "null" },
+                _ when vector => new CellPanel(title, column.Name)
+                {
+                    Text = value.Text ?? string.Empty,
+                    Vector = true,
+                    Cut = value.Truncated,
+                    Note = value.Truncated
+                        ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
+                          " (MartenStudioOptions.MaxInlineDocumentBytes), so it is not offered for copying; the SQL console reads the rest."
+                        : null,
+                },
                 _ when isText => new CellPanel(title, column.Name)
                 {
                     Text = value.Text ?? (value.Bytes is { } read ? SqlCellFormat.DecodeText(read, value.Truncated) ?? Encoding.UTF8.GetString(read) : string.Empty),
@@ -698,8 +730,14 @@
 
         public string? Json { get; init; }
 
-        /// <summary>A bytea's UTF-8 text, drawn as text rather than through the JSON viewer.</summary>
+        /// <summary>A bytea's UTF-8 text, or a pgvector value's, drawn as text rather than through the JSON viewer.</summary>
         public string? Text { get; init; }
+
+        /// <summary>Whether <see cref="Text" /> is a pgvector value, which the panel offers to copy.</summary>
+        public bool Vector { get; init; }
+
+        /// <summary>Whether <see cref="Text" /> was cut at the inline cap, so it is not the value and is not offered for copying.</summary>
+        public bool Cut { get; init; }
 
         public string? Error { get; init; }
 

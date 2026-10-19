@@ -134,8 +134,10 @@ public class StudioLiveUpdatesTests
             return Task.CompletedTask;
         };
 
+        // Ticked by hand only: at the 25 ms interval the timer's own tick raced TickNowAsync under a loaded
+        // full-suite run and reported the failure twice.
         bool throwNext = true;
-        await updates.StartAsync(Interval, _ => throwNext
+        await updates.StartAsync(TimeSpan.FromHours(1), _ => throwNext
             ? Task.FromException(new InvalidOperationException("the database went away"))
             : Task.CompletedTask, Token);
 

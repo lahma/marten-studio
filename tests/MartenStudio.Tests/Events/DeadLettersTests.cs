@@ -17,6 +17,78 @@ public class DeadLettersTests
 {
     private static readonly Guid LetterId = new("22222222-2222-2222-2222-222222222222");
 
+    // ------------------------------------------------------------------------------------------------
+    // CL1 item 4 (and its review): a host that hides DeadLetterEvent
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Reached by its address while the host hides the type - the nav entry is gone - the page says the one sentence,
+    /// never "no collection called", and reads, filters and offers nothing. A delegate that throws hides it too.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_page_reached_by_its_address_while_the_type_is_hidden_says_so_and_reads_nothing(bool throws)
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId)], false);
+        context.Options.IsDocumentTypeVisible = Hiding(throws);
+
+        IRenderedComponent<DeadLetters> page = context.Render<DeadLetters>();
+
+        page.Find(".ms-dead-letters-hidden").TextContent.Trim()
+            .Should().Be("Dead letters are hidden by MartenStudioOptions.IsDocumentTypeVisible.");
+        page.Markup.Should().NotContain("no collection called").And.NotContain("deadletterevent");
+        page.FindAll("tbody tr").Should().BeEmpty();
+        page.FindAll("#ms-dl-projection").Should().BeEmpty("no filter for a list that is not read");
+        context.EventData.DeadLetterQueries.Should().BeEmpty("the page asks the service for nothing");
+    }
+
+    /// <summary>The service's own answer for a hidden type is drawn the same way, whatever the page asked.</summary>
+    [Fact]
+    public async Task The_services_hidden_answer_is_drawn_as_the_same_sentence()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.DeadLetters = DeadLetterPage.Hidden;
+
+        IRenderedComponent<DeadLetters> page = context.Render<DeadLetters>();
+
+        page.WaitForAssertion(() => page.Find(".ms-dead-letters-hidden").TextContent.Trim()
+            .Should().Be(DeadLetterVisibility.HiddenMessage), TimeSpan.FromSeconds(5));
+        page.FindAll(".ms-error-alert").Should().BeEmpty("the host's configuration is not a failure");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task The_navigation_has_no_dead_letters_entry_while_the_type_is_hidden(bool throws)
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.Options.IsDocumentTypeVisible = Hiding(throws);
+
+        var nav = context.Render<MartenStudio.Components.Layout.NavMenu>();
+
+        List<string?> links = [.. nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href"))];
+        links.Should().NotContain("events/dead-letters", "a hidden document type is absent (D27)");
+        links.Should().Contain("events/feed", "the rest of the Events section is still there");
+    }
+
+    /// <summary>The positive control: a host that shows the type, or sets no delegate, keeps the entry.</summary>
+    [Fact]
+    public async Task The_navigation_keeps_the_dead_letters_entry_while_the_type_is_shown()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.Options.IsDocumentTypeVisible = static type => type != typeof(Uri);
+
+        var nav = context.Render<MartenStudio.Components.Layout.NavMenu>();
+
+        nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Should().Contain("events/dead-letters");
+    }
+
+    private static Func<Type, bool> Hiding(bool throws) => throws
+        ? static type => type == typeof(JasperFx.Events.Daemon.DeadLetterEvent) ? throw new InvalidOperationException("broken") : true
+        : static type => type != typeof(JasperFx.Events.Daemon.DeadLetterEvent);
+
     [Fact]
     public async Task The_rows_carry_the_projection_the_shard_the_sequence_and_the_exception_type()
     {
@@ -498,6 +570,76 @@ public class DeadLettersTests
     /// A context in which the rewind is genuinely available: the capability is on, a daemon is hosted
     /// here, and the projection the dead letter names is registered and async.
     /// </summary>
+    /// <summary>
+    /// SEC1-fix5 (item 3 of fix4): under per-tenant sequences with "All tenants", #N names one event in each tenant, so the
+    /// offending event is looked up in the dead letter's own tenant - and its stream is linked there, so a stream id two
+    /// tenants share opens directly rather than the stream page's "choose a tenant".
+    /// </summary>
+    [Fact]
+    public async Task Under_per_tenant_sequences_with_all_tenants_the_event_is_read_and_linked_in_the_dead_letters_tenant()
+    {
+        using StudioComponentContext context = await RewindableAsync();
+        context.EventData.Shape = context.EventData.Shape with { PerTenantSequences = true, EventsConjoined = true, HasTenantId = true };
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId) with { TenantId = "acme" }], false);
+        context.EventData.EventBySequence = FakeEventDataService.Event(42, streamId: "order-42") with { TenantId = "acme" };
+
+        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
+
+        context.EventData.EventBySequenceScopes.Should().ContainSingle().Which.TenantId.Should().Be("acme");
+        page.FindAll("a").Select(static x => x.GetAttribute("href")).Should()
+            .Contain(static x => x!.Contains("id=order-42", StringComparison.Ordinal) && x.Contains("tenant=acme", StringComparison.Ordinal));
+    }
+
+    /// <summary>The first control: with a tenant selected, the lookup keeps the scope as selected.</summary>
+    [Fact]
+    public async Task With_a_tenant_selected_the_event_is_read_in_the_selected_scope()
+    {
+        using StudioComponentContext context = await RewindableAsync();
+        context.Catalog.WithTenants("default", new TenantList(["acme", "globex"], IsTruncated: false, TenantListSource.Configured));
+        await context.State.RefreshScopeListingsAsync(Xunit.TestContext.Current.CancellationToken);
+        await context.State.SetScopeAsync("default", "localhost.marten", "globex", Xunit.TestContext.Current.CancellationToken);
+        context.EventData.Shape = context.EventData.Shape with { PerTenantSequences = true, EventsConjoined = true, HasTenantId = true };
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId) with { TenantId = "acme" }], false);
+
+        await ExpandAsync(context);
+
+        context.EventData.EventBySequenceScopes.Should().ContainSingle().Which.Should().Be(context.State.ActiveScope);
+    }
+
+    /// <summary>The second control: with one sequence for the store, "All tenants" reads the store's #N as it always did.</summary>
+    [Fact]
+    public async Task Without_per_tenant_sequences_the_event_is_read_across_tenants()
+    {
+        using StudioComponentContext context = await RewindableAsync();
+        context.EventData.Shape = context.EventData.Shape with { PerTenantSequences = false, EventsConjoined = true, HasTenantId = true };
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId) with { TenantId = "acme" }], false);
+
+        await ExpandAsync(context);
+
+        context.EventData.EventBySequenceScopes.Should().ContainSingle().Which.TenantId.Should().BeNull();
+    }
+
+    /// <summary>
+    /// SEC1-fix4: on a store that numbers events per tenant, Skip and Rewind reach every tenant's event of a number, so
+    /// both are disabled with the service's own sentences.
+    /// </summary>
+    [Fact]
+    public async Task Under_per_tenant_sequences_skip_and_rewind_are_disabled_with_the_services_sentences()
+    {
+        using StudioComponentContext context = await RewindableAsync();
+        context.EventData.Shape = context.EventData.Shape with { HasIsSkipped = true, PerTenantSequences = true, EventsConjoined = true };
+
+        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
+
+        AngleSharp.Dom.IElement skip = SkipButton(page);
+        skip.HasAttribute("disabled").Should().BeTrue();
+        skip.GetAttribute("title").Should().Be(StreamCompactionRules.SkipNeedsOneSequence);
+
+        AngleSharp.Dom.IElement rewind = RewindButton(page);
+        rewind.HasAttribute("disabled").Should().BeTrue();
+        rewind.GetAttribute("title").Should().Be(StreamCompactionRules.RewindNeedsOneSequence);
+    }
+
     private static async Task<StudioComponentContext> RewindableAsync()
     {
         StudioComponentContext context = await NewContextAsync();

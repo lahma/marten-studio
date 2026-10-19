@@ -1,6 +1,7 @@
 using JasperFx.Events.Projections;
 
 using MartenStudio.Services;
+using MartenStudio.Services.Health;
 using MartenStudio.Services.Projections;
 
 namespace MartenStudio.Tests.Projections;
@@ -61,6 +62,49 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
 
     /// <summary>What <see cref="RebuildAsync" /> answers: whether this call is what started it.</summary>
     public bool RebuildStarts { get; set; } = true;
+
+    /// <summary>When set, <see cref="RebuildAsync" /> answers "already rebuilding elsewhere" with this reason.</summary>
+    public string? RebuildRefusal { get; set; }
+
+    /// <summary>What the Explain answers.</summary>
+    public HighWaterExplanation Explanation { get; set; } = HighWaterExplanation.Refused("Not scripted.");
+
+    /// <summary>How many times the Explain was asked.</summary>
+    public int Explains { get; private set; }
+
+    /// <summary>The resolved database the view names - what the health advisor's history is keyed by.</summary>
+    public string DatabaseId { get; set; } = "localhost.marten";
+
+    /// <summary>Says a shard last progressed <paramref name="ago" /> before the read, in server time.</summary>
+    public FakeProjectionDataService WithLastProgress(string shardName, TimeSpan ago)
+    {
+        int index = progress.FindIndex(x => x.ShardName == shardName);
+        progress[index] = progress[index] with { LastProgress = DateTimeOffset.UnixEpoch - ago, SinceLastProgress = ago };
+        return this;
+    }
+
+    /// <summary>Says a shard's progression row carries thresholds of its own.</summary>
+    public FakeProjectionDataService WithThresholds(string shardName, long? warning, long? critical)
+    {
+        int index = progress.FindIndex(x => x.ShardName == shardName);
+        progress[index] = progress[index] with { WarningThreshold = warning, CriticalThreshold = critical };
+        return this;
+    }
+
+    /// <summary>Says the daemon here is rebuilding these projections (JasperFx 2.86+), not Marten Studio.</summary>
+    public FakeProjectionDataService WithRebuildingHere(params string[] projectionNames)
+    {
+        Daemon = Daemon with { RebuildingProjections = projectionNames };
+        return this;
+    }
+
+    /// <inheritdoc />
+    public Task<HighWaterExplanation> ExplainHighWaterAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        Explains++;
+        Calls.Add("ExplainHighWater");
+        return Task.FromResult(Explanation);
+    }
 
     /// <summary>Adds one projection with a single shard and that shard's progress.</summary>
     public FakeProjectionDataService WithProjection(
@@ -213,8 +257,18 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
         List<ShardProgress> sorted = [.. progress.OrderByDescending(x => x.Lag).ThenBy(x => x.ShardName, StringComparer.OrdinalIgnoreCase)];
 
         return Task.FromResult(
-            new ProjectionsView(projections, sorted, Daemon, HighWaterMark, DateTimeOffset.UnixEpoch, HasEventStore));
+            new ProjectionsView(projections, sorted, Daemon, HighWaterMark, DateTimeOffset.UnixEpoch, HasEventStore, DatabaseId)
+            {
+                Trends = Trends,
+                HealthHistory = HealthHistory,
+            });
     }
+
+    /// <summary>The trends the view carries - what the real service judges from the advisor's samples behind the database gate.</summary>
+    public Dictionary<string, ShardTrend> Trends { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The advisor's samples the view carries, for the rebuild estimate.</summary>
+    public HealthHistoryView HealthHistory { get; set; } = HealthHistoryView.Empty;
 
     /// <inheritdoc />
     /// <remarks>
@@ -303,7 +357,10 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
     public async Task<OperationStart> RebuildAsync(StudioScope scope, string projectionName, CancellationToken cancellationToken = default)
     {
         await Record("Rebuild:" + projectionName);
-        return new OperationStart(new OperationHandle("op1", "Rebuild", projectionName), RebuildStarts);
+
+        return RebuildRefusal is { } refusal
+            ? OperationStart.Refused("Rebuild", projectionName, refusal)
+            : new OperationStart(new OperationHandle("op1", "Rebuild", projectionName), RebuildStarts);
     }
 
     /// <inheritdoc />

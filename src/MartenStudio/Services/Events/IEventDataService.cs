@@ -13,7 +13,7 @@ namespace MartenStudio.Services.Events;
 /// </para>
 /// <para>
 /// Reads return their failures as values - <see cref="EventDataError" /> on the page's own record - so a
-/// database that is down breaks one region and never navigation (plan §4.8). The three mutating methods
+/// database that is down breaks one region and never navigation (plan §4.8). The mutating methods
 /// throw instead: <see cref="StudioCapabilityDeniedException" /> when the capability is off and
 /// <see cref="StudioNotAuthorizedException" /> when the write policy refuses, both after the audit entry
 /// has been written.
@@ -109,7 +109,10 @@ internal interface IEventDataService
         long version,
         CancellationToken cancellationToken = default);
 
-    /// <summary>One page of dead letters.</summary>
+    /// <summary>
+    /// One page of dead letters - or, when <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> hides
+    /// <c>DeadLetterEvent</c> (or throws for it), <see cref="DeadLetterPage.Hidden" />, read from nothing.
+    /// </summary>
     Task<DeadLetterPage> ListDeadLettersAsync(
         StudioScope scope,
         DeadLetterQuery query,
@@ -117,7 +120,7 @@ internal interface IEventDataService
 
     /// <summary>
     /// How many dead letters there are, for the badge. Zero and "no number" are different answers, so
-    /// both a failure and a refusal are <see langword="null" /> rather than zero.
+    /// a failure, a refusal and a hidden <c>DeadLetterEvent</c> are all <see langword="null" /> rather than zero.
     /// </summary>
     /// <remarks>
     /// The number is the whole database's: <c>mt_doc_deadletterevent</c> is single-tenanted on every
@@ -135,6 +138,63 @@ internal interface IEventDataService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Every DCB tag type this store registers: how tags are kept, each tag table's estimate, and whether the
+    /// feed's <c>tag:</c> filter on it is index-backed.
+    /// </summary>
+    /// <remarks>
+    /// Estimates only (D8), and none for a tenant-scoped visitor on a conjoined store, whose whole-table
+    /// <c>reltuples</c> would be every tenant's tags (<see cref="EventTagText.CrossTenantEstimateNote" />).
+    /// Read from <c>StoreOptions</c>, <c>information_schema</c>, <c>pg_class</c> and <c>pg_indexes</c>; it
+    /// creates nothing.
+    /// </remarks>
+    Task<EventTagTypeList> ListTagTypesAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The tags of these events, for a page whose tags were deferred because reading them scans the tag
+    /// tables (<see cref="EventTagLoadState.Deferred" />).
+    /// </summary>
+    /// <remarks>
+    /// Narrowed to the scope's tenant in the statement itself, so sequences handed in from anywhere return
+    /// only tags the scope may see. At most <c>EventTagQueries.MaxSequences</c> events are looked up, under
+    /// the studio's <c>QueryTimeout</c>.
+    /// </remarks>
+    Task<EventTagRead> GetEventTagsAsync(
+        StudioScope scope,
+        IReadOnlyList<long> sequences,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The streams whose natural key equals what was typed into the Streams box: a primary-key lookup on
+    /// <c>mt_natural_key_&lt;aggregate&gt;</c> for every aggregate with a <c>NaturalKeyDefinition</c>.
+    /// </summary>
+    /// <param name="scope">The store, database and tenant; a tenant narrows the lookup to its own streams.</param>
+    /// <param name="value">What was typed.</param>
+    /// <param name="includeArchived">Whether archived streams are found too.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <remarks>
+    /// A lookup table that is declared but not in the database is skipped rather than created (hard rule 14).
+    /// Archival is read off <c>mt_streams</c>, as Marten's own natural-key fetch does (#5344).
+    /// </remarks>
+    Task<NaturalKeyLookup> FindStreamsByNaturalKeyAsync(
+        StudioScope scope,
+        string value,
+        bool includeArchived,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Whether one stream can be compacted from here, and every fact the confirmation dialog states.
+    /// </summary>
+    /// <remarks>
+    /// A read: it changes nothing and needs no capability. It takes the stream the page has already read with
+    /// <see cref="GetStreamAsync" /> rather than reading it a second time; what it offers is decided again,
+    /// from a fresh read, by <see cref="CompactStreamAsync" />, which is the refusal (hard rule 5).
+    /// </remarks>
+    Task<CompactionPlan> DescribeCompactionAsync(
+        StudioScope scope,
+        StreamState stream,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Archives one stream: <c>ArchiveStreams</c>, the write policy, <c>session.Events.ArchiveStream</c>
     /// and <c>SaveChangesAsync</c>, audited either way.
     /// </summary>
@@ -148,6 +208,9 @@ internal interface IEventDataService
     /// </summary>
     /// <exception cref="StudioCapabilityDeniedException">The capability is not enabled.</exception>
     /// <exception cref="StudioNotAuthorizedException">The write policy refused this scope.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The host hides <c>DeadLetterEvent</c> (<see cref="MartenStudioOptions.IsDocumentTypeVisible" />); audited as refused.
+    /// </exception>
     Task DiscardDeadLetterAsync(StudioScope scope, Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -214,9 +277,65 @@ internal interface IEventDataService
     /// <exception cref="KeyNotFoundException">
     /// This store registers no async projection by that name.
     /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The host hides <c>DeadLetterEvent</c>, which the rewind deletes from; audited as refused, before anything else is asked.
+    /// </exception>
     Task RewindSubscriptionAsync(
         StudioScope scope,
         string projectionName,
         long eventSequence,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Compacts one stream: <c>CompactStreams</c>, the write policy for the scope as selected - tenant
+    /// included - and the typed confirmation, then Marten's typed <c>CompactStreamAsync&lt;T&gt;</c> and
+    /// <c>SaveChangesAsync</c> on a session pinned to the scope's database and tenant, audited either way.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Marten folds the stream's events into one <c>Compacted&lt;T&gt;</c> written in place of the last,
+    /// deletes the rest, and records <c>mt_streams.compacted_version</c>, in one transaction and with no
+    /// archiver (<see cref="StreamCompactionRules" /> has the whole account). <c>T</c> is the registered
+    /// single-stream aggregate the stream's <c>mt_streams.type</c> names (<see cref="CompactionAggregates" />).
+    /// </para>
+    /// <para>
+    /// The store-level <c>IEventStore.CompactStreamAsync</c> overloads are not used: they open
+    /// <c>LightweightSession()</c> or <c>LightweightSession(tenantId)</c>, neither of which pins the
+    /// database (hard rule 15). On a conjoined store the scope must name the stream's tenant, and only that
+    /// tenant's stream of that id is touched - at every Marten from the 9.39.0 floor, because the
+    /// session-level path is tenant-filtered there already.
+    /// </para>
+    /// </remarks>
+    /// <param name="scope">The store, database and tenant.</param>
+    /// <param name="streamId">The stream, as the page names it.</param>
+    /// <param name="confirmation">What the visitor typed into the dialog; it has to be the stream's id.</param>
+    /// <param name="expectedVersion">
+    /// The version the dialog described (<see cref="CompactionPlan.Version" />). Marten is told to fold through
+    /// it and no further, so an event appended after the dialog opened stays after the snapshot.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the steps before the confirmation; the compaction runs to the end.</param>
+    /// <returns>
+    /// What happened, as audited: the version the stream is now compacted through, read back from
+    /// <c>mt_streams.compacted_version</c>. It can be below <paramref name="expectedVersion" /> on a store
+    /// that records skipped events, because Marten folds through the last event its fetch returned, and the
+    /// sentence then says so.
+    /// </returns>
+    /// <exception cref="StudioCapabilityDeniedException">The capability is not enabled.</exception>
+    /// <exception cref="StudioNotAuthorizedException">The write policy refused this scope.</exception>
+    /// <exception cref="StreamCompactionUnconfirmedException">
+    /// The save returned but its result could not be read back - "saved, not confirmed". Audited as a failure
+    /// with that message.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The stream is not one that can be compacted (its id is empty, it is archived, its aggregate is hidden or
+    /// not registered, there is nothing to fold), the scope names no tenant on a conjoined store, the
+    /// confirmation did not match, the version is past the stream's end or already compacted, Postgres refused
+    /// the delete (a tagged stream), or the save did not move <c>compacted_version</c> - nothing was compacted.
+    /// </exception>
+    Task<string> CompactStreamAsync(
+        StudioScope scope,
+        string streamId,
+        string confirmation,
+        long expectedVersion,
         CancellationToken cancellationToken = default);
 }

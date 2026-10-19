@@ -32,7 +32,7 @@ namespace MartenStudio.Integration.Tests.Generation;
 /// </para>
 /// </remarks>
 [Collection(GeneratedDataSuite.Name)]
-public class MediumDataSetLiveTests(MediumDataSetFixture fixture) : IClassFixture<MediumDataSetFixture>
+public partial class MediumDataSetLiveTests(MediumDataSetFixture fixture) : IClassFixture<MediumDataSetFixture>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 

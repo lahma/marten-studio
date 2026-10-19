@@ -59,13 +59,19 @@ internal static class SchemaTableAssembler
     /// Whether this visitor is past the database browser's gate, so a partition count - and the tenancy
     /// registry's row figures - may be shown.
     /// </param>
+    /// <param name="declaredParameters">
+    /// The storage parameters each of this store's visible document tables declares, keyed by
+    /// <see cref="SchemaKey.For(string, string)" />; a <see langword="null" /> value is a Marten that cannot
+    /// declare them (below 9.47), which is "unknown", never "none".
+    /// </param>
     public static IReadOnlyList<TableStats> Assemble(
         IReadOnlyList<TableStatsRow> rows,
         DatabaseObjectClassifier classifier,
         string storeKey,
         IReadOnlyDictionary<string, string> documentTypeNames,
-        bool partitionCountsShown) =>
-        Assemble(rows, SchemaClassification.Complete(classifier), storeKey, documentTypeNames, partitionCountsShown).Tables;
+        bool partitionCountsShown,
+        IReadOnlyDictionary<string, IReadOnlyList<KeyValuePair<string, string>>?>? declaredParameters = null) =>
+        Assemble(rows, SchemaClassification.Complete(classifier), storeKey, documentTypeNames, partitionCountsShown, declaredParameters).Tables;
 
     /// <summary>
     /// Classifies and shapes the Tables tab's rows, withholding what a store that could not be read might own.
@@ -81,12 +87,17 @@ internal static class SchemaTableAssembler
     /// Whether this visitor is past the database browser's gate, so a partition count - and the tenancy
     /// registry's row figures - may be shown.
     /// </param>
+    /// <param name="declaredParameters">
+    /// The storage parameters each of this store's visible document tables declares (F6), or
+    /// <see langword="null" /> to compare nothing.
+    /// </param>
     public static AssembledTables Assemble(
         IReadOnlyList<TableStatsRow> rows,
         SchemaClassification classification,
         string storeKey,
         IReadOnlyDictionary<string, string> documentTypeNames,
-        bool partitionCountsShown)
+        bool partitionCountsShown,
+        IReadOnlyDictionary<string, IReadOnlyList<KeyValuePair<string, string>>?>? declaredParameters = null)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(classification);
@@ -121,6 +132,12 @@ internal static class SchemaTableAssembler
 
             bool figuresWithheld = !partitionCountsShown && IsTenancyRegistry(row.Table);
 
+            IReadOnlyList<KeyValuePair<string, string>>? declared =
+                ours && declaredParameters is not null
+                     && declaredParameters.TryGetValue(SchemaKey.For(row.Schema, row.Table), out IReadOnlyList<KeyValuePair<string, string>>? found)
+                    ? found
+                    : null;
+
             tables.Add(new TableStats(
                 row.Schema,
                 row.Table,
@@ -140,7 +157,15 @@ internal static class SchemaTableAssembler
                 ours,
                 row.IsPartitioned,
                 row.IsPartitioned && partitionCountsShown ? row.PartitionCount : null,
-                figuresWithheld));
+                figuresWithheld)
+            {
+                Updates = figuresWithheld ? null : row.Updates,
+                HotUpdates = figuresWithheld ? null : row.HotUpdates,
+                LastAutovacuum = row.LastAutovacuum,
+                ToastBytes = row.ToastBytes,
+                StorageParameters = StorageParameters.Compare(declared, row.StorageOptions, row.DifferingStorageOptions),
+                DeclaredParametersKnown = declared is not null,
+            });
         }
 
         return new AssembledTables(tables, withheld);

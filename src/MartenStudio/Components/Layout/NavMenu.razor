@@ -1,4 +1,5 @@
 @using MartenStudio.Services
+@using MartenStudio.Services.Health
 @using MartenStudio.Services.Live
 @using Microsoft.Extensions.Options
 @implements IAsyncDisposable
@@ -7,6 +8,9 @@
 @inject StudioState State
 @inject INavIndicatorService Indicators
 @inject StudioLiveUpdatesFactory LiveFactory
+@inject HealthMutes HealthMutes
+@inject HealthAlerts HealthAlerts
+@inject IJSRuntime JsRuntime
 
 <div class="ms-sidebar-brand">
     <svg class="ms-sidebar-brand-logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -23,7 +27,7 @@
         {
             <li class="ms-sidebar-section" @key="section.Title">@section.Title</li>
 
-            @foreach (NavItem item in section.Items)
+            @foreach (NavItem item in section.Items.Where(Shown))
             {
                 <li class="ms-nav-item" @key="item.Label">
                     @if (item.Route is null)
@@ -77,7 +81,13 @@
         DeadLetters,
 
         /// <summary>An amber dot when a shard is lagging, paused or failed.</summary>
-        Projections
+        Projections,
+
+        /// <summary>
+        /// A count of the last health sweep's unmuted Critical and Warning findings this visitor may see, red
+        /// when one is Critical - read from the sweep cache, never by sweeping.
+        /// </summary>
+        Health
     }
 
     /// <summary>One entry.</summary>
@@ -125,6 +135,9 @@
         ]),
         new("Operations",
         [
+            // Health is first in its section: it is where a person starts when something is wrong, and its
+            // badge reads the last sweep a Health page or the Overview ran - it never starts one.
+            new("Health", HealthLinks.Route, "pulse", NavBadgeKind.Health),
             new("Projections", "projections", "projection", NavBadgeKind.Projections),
 
             // Schema deliberately carries no badge. Finding drift costs a CreateMigrationAsync, which is
@@ -138,6 +151,15 @@
             new("Activity", "activity", "list")
         ])
     ];
+
+    /// <summary>
+    /// Whether an entry is drawn: every one, except Dead letters while the host hides <c>DeadLetterEvent</c>
+    /// (<see cref="MartenStudio.Services.Events.DeadLetterVisibility" />, failing closed) - a hidden document type is
+    /// absent (D27), as the Overview's tile is, and the page it would link to says why if it is reached by its address.
+    /// </summary>
+    private bool Shown(NavItem item) =>
+        item.Badge != NavBadgeKind.DeadLetters
+        || MartenStudio.Services.Events.DeadLetterVisibility.IsVisible(Options.Value.IsDocumentTypeVisible, out _);
 
     private readonly CancellationTokenSource cancellation = new();
 
@@ -163,6 +185,7 @@
         UpdateCurrentRelativePath(Navigation.Uri);
         Navigation.LocationChanged += OnLocationChanged;
         State.ScopeChanged += OnScopeChangedAsync;
+        HealthMutes.Changed += OnHealthMutesChangedAsync;
 
         await RefreshIndicatorsAsync(cancellation.Token);
     }
@@ -176,6 +199,14 @@
 
         started = true;
 
+        // The browser's muted findings, once per circuit - a JS call, not a query - so the health badge counts
+        // only what this browser has not muted. Its Changed event re-reads the badge.
+        await HealthMutes.LoadAsync(JsRuntime, cancellation.Token);
+
+        // The first interactive look at the health glance only takes note of what is already Critical: those
+        // are on screen already, and a toast saying they just appeared would be false.
+        await HealthAlerts.ObserveAsync(State.ActiveScope, indicators.Health);
+
         live = LiveFactory.Create();
 
         // No Failed handler: a badge that could not be read is a badge that is not drawn, and the
@@ -183,38 +214,81 @@
         await live.StartAsync(Options.Value.RefreshInterval, TickAsync, cancellation.Token);
     }
 
+    // The poll runs on the thread pool and a scope change on the renderer, and both write `indicators`. So each hands the
+    // toast the glance of the read it made itself, never the shared field, together with the scope the visitor is on now;
+    // HealthAlerts ignores a glance stamped with any other scope, so a read that the scope outran is not a first look.
     private async Task TickAsync(CancellationToken cancellationToken)
     {
-        await RefreshIndicatorsAsync(cancellationToken);
+        if (await RefreshIndicatorsAsync(cancellationToken) is { } read)
+        {
+            await HealthAlerts.ObserveAsync(State.ActiveScope, read.Health);
+        }
+
         await InvokeAsync(StateHasChanged);
     }
 
     private async Task OnScopeChangedAsync()
     {
+        NavIndicators? read = await RefreshIndicatorsAsync(cancellation.Token);
+
+        if (started && read is not null)
+        {
+            await HealthAlerts.ObserveAsync(State.ActiveScope, read.Health);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnHealthMutesChangedAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
         await RefreshIndicatorsAsync(cancellation.Token);
         await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
-    /// Reads the indicators, and treats every failure as "no badge".
+    /// Reads the indicators for the active scope, treats every failure as "no badge", and answers what it read - or
+    /// <see langword="null" /> when the read was cancelled or the scope changed while it was in flight.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The service already answers <c>NavIndicators.None</c> rather than throwing; this is the second
     /// belt, because the one thing the navigation must never do is stop rendering.
+    /// </para>
+    /// <para>
+    /// A read the scope outran is not drawn: the scope change that outran it starts a read of its own for the new
+    /// scope, and a badge of the old database's counts under the new one would be wrong until the next poll.
+    /// </para>
     /// </remarks>
-    private async Task RefreshIndicatorsAsync(CancellationToken cancellationToken)
+    private async Task<NavIndicators?> RefreshIndicatorsAsync(CancellationToken cancellationToken)
     {
+        StudioScope? readFor = State.ActiveScope;
+        NavIndicators read;
+
         try
         {
-            indicators = await Indicators.ReadAsync(cancellationToken);
+            read = await Indicators.ReadAsync(cancellationToken);
         }
         catch (OperationCanceledException)
         {
+            return null;
         }
         catch (Exception)
         {
-            indicators = NavIndicators.None;
+            read = NavIndicators.None;
         }
+
+        if (State.ActiveScope != readFor)
+        {
+            return null;
+        }
+
+        indicators = read;
+        return read;
     }
 
     /// <summary>The badge an entry wears right now, or <see langword="null" /> for none.</summary>
@@ -232,8 +306,42 @@
             "ms-nav-badge-dot ms-nav-badge-warning",
             indicators.ProjectionsExplanation ?? "A projection needs attention"),
 
+        // A count of what this visitor may see, coloured by the worst of it. Findings they are not shown are said in
+        // the tooltip and never counted or drawn on their own: their severity is the gate's to withhold, and a badge
+        // that cannot say how bad would sit on every page of a host whose visitors are short of a gate. An absent badge
+        // is no claim that all is well; the Health page and the Overview say what is withheld.
+        NavBadgeKind.Health when indicators.Health is { Worst: not null } health => new NavBadge(
+            (health.Critical + health.Warning).ToString("N0", System.Globalization.CultureInfo.InvariantCulture),
+            health.Critical > 0 ? "ms-nav-badge-danger" : "ms-nav-badge-warning",
+            HealthBadgeTitle(health)),
+
         _ => null,
     };
+
+    /// <summary>The health badge's tooltip and accessible name: what it counts, what it leaves out, and as of when.</summary>
+    private string HealthBadgeTitle(HealthGlance health)
+    {
+        List<string> parts = [];
+
+        if (health.Critical > 0)
+        {
+            parts.Add(health.Critical == 1 ? "1 critical finding" : $"{health.Critical:N0} critical findings");
+        }
+
+        if (health.Warning > 0)
+        {
+            parts.Add(health.Warning == 1 ? "1 warning" : $"{health.Warning:N0} warnings");
+        }
+
+        string withheld = health.Withheld switch
+        {
+            0 => string.Empty,
+            1 => ", and 1 finding not shown to you",
+            _ => $", and {health.Withheld:N0} findings not shown to you",
+        };
+
+        return string.Join(" and ", parts) + withheld + ", as of " + State.FormatInSelectedTimeZone(health.MeasuredAt, "HH:mm");
+    }
 
     private string Link(string subPath) => StudioLink.To(Options.Value, subPath);
 
@@ -294,6 +402,7 @@
 
         Navigation.LocationChanged -= OnLocationChanged;
         State.ScopeChanged -= OnScopeChangedAsync;
+        HealthMutes.Changed -= OnHealthMutesChangedAsync;
 
         try
         {
@@ -336,6 +445,7 @@
             "projection" => """<rect x="1" y="3" width="6" height="12" rx="1" /><rect x="11" y="3" width="6" height="12" rx="1" /><line x1="7" y1="9" x2="11" y2="9" /><polyline points="9,7 11,9 9,11" />""",
             "schema" => """<rect x="2" y="2" width="14" height="4" rx="1" /><rect x="2" y="7" width="14" height="4" rx="1" /><rect x="2" y="12" width="14" height="4" rx="1" />""",
             "table" => """<rect x="1.5" y="2.5" width="15" height="13" rx="1.5" /><line x1="1.5" y1="6.5" x2="16.5" y2="6.5" /><line x1="1.5" y1="11" x2="16.5" y2="11" /><line x1="7" y1="6.5" x2="7" y2="15.5" />""",
+            "pulse" => """<polyline points="1,9 5,9 7,4 11,14 13,9 17,9" />""",
             "cog" => """<circle cx="9" cy="9" r="3" /><path d="M9 1v2M9 15v2M1 9h2M15 9h2M3.5 3.5l1.5 1.5M13 13l1.5 1.5M14.5 3.5 13 5M5 13l-1.5 1.5" />""",
             _ => """<line x1="3" y1="4" x2="15" y2="4" /><line x1="3" y1="9" x2="15" y2="9" /><line x1="3" y1="14" x2="15" y2="14" />"""
         };

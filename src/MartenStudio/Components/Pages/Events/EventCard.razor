@@ -134,6 +134,36 @@
         </div>
     }
 
+    @* DCB tags, one chip each, each a link to the feed filtered to that tag. A row of their own rather than
+       more metadata chips: a tag is what the event is *about* - the consistency boundary it belongs to - and
+       it is the one chip a reader follows somewhere. Only the tags of events the visitor may see ever reach
+       a card: the reads behind them are narrowed to the scope's tenant in the statement. *@
+    @if (Tags.Count > 0)
+    {
+        <div class="ms-event-tags" @onclick:stopPropagation="true">
+            <span class="ms-event-tags-label">tags</span>
+            @for (int index = 0; index < Tags.Count; index++)
+            {
+                KeyValuePair<string, string> tag = Tags[index];
+                string? href = TagHref?.Invoke(tag.Key, tag.Value);
+
+                @* Keyed by position: two tags can carry the same type and value, and a duplicate @key ends the
+                   circuit rather than the render. *@
+                <span class="ms-event-meta-chip ms-event-tag-chip" @key="index">
+                    <span class="ms-event-meta-key">@tag.Key</span>
+                    @if (string.IsNullOrEmpty(href))
+                    {
+                        <span class="ms-event-meta-value" title="@tag.Value">@tag.Value</span>
+                    }
+                    else
+                    {
+                        <a class="ms-event-meta-value" href="@href" title="@($"Every event tagged {tag.Key} = {tag.Value}")">@tag.Value</a>
+                    }
+                </span>
+            }
+        </div>
+    }
+
     @* The viewer has its own buttons - expand, copy, raw - and none of them means "select this event". *@
     <div class="ms-event-card-body" @onclick:stopPropagation="true">
         @if (!HasJson)
@@ -248,6 +278,21 @@
     [Parameter]
     public IReadOnlyDictionary<string, string?> Metadata { get; set; } =
         new Dictionary<string, string?>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The event's DCB tags, as (tag type, value) pairs - the type by its table suffix, which is what both of
+    /// Marten's storage modes key a tag on.
+    /// </summary>
+    /// <remarks>
+    /// Pairs of strings rather than the service's <c>EventTag</c> record, for the reason every other
+    /// parameter here is a BCL type: the record is internal and this component class is public.
+    /// </remarks>
+    [Parameter]
+    public IReadOnlyList<KeyValuePair<string, string>> Tags { get; set; } = [];
+
+    /// <summary>Where a tag's chip links to, given its type and value; no link when absent.</summary>
+    [Parameter]
+    public Func<string, string, string?>? TagHref { get; set; }
 
     /// <summary>Whether this card is the selected one.</summary>
     [Parameter]

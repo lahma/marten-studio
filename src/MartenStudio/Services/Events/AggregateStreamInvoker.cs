@@ -8,13 +8,15 @@ using JasperFx.Events.Subscriptions;
 
 using Marten;
 using Marten.Events.Aggregation;
+using Marten.Exceptions;
+using Marten.Internal;
 using Marten.Schema;
 
 namespace MartenStudio.Services.Events;
 
 /// <summary>
-/// Finds the aggregate types a stream can be replayed into, and calls the generic
-/// <c>AggregateStreamAsync&lt;T&gt;</c> for a <see cref="Type" /> only known at run time.
+/// Finds the aggregate types a stream can be replayed into, and folds a stream's events into one with Marten's own
+/// aggregator for a <see cref="Type" /> only known at run time.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -39,7 +41,7 @@ namespace MartenStudio.Services.Events;
 /// <b>"Whose stream matches".</b> A single-stream projection keyed by <see cref="Guid" /> cannot be
 /// replayed from a string-identified store and the reverse is equally meaningless, so a candidate is kept
 /// only when its identity type agrees with the store's <see cref="StreamIdentity" />. Value types are
-/// dropped as well: <c>AggregateStreamAsync&lt;T&gt;</c> is constrained <c>where T : class</c>.
+/// dropped as well: <c>AggregatorFor&lt;T&gt;</c> is constrained <c>where T : class</c>.
 /// </para>
 /// <para>
 /// Worth knowing about that check: Marten 9.35 refuses the mismatch itself, in
@@ -50,11 +52,22 @@ namespace MartenStudio.Services.Events;
 /// because the interface route may one day see a source Marten did not validate.
 /// </para>
 /// <para>
-/// <b>The call.</b> <c>AggregateStreamAsync&lt;T&gt;</c> is generic in the aggregate, and the studio only
-/// ever holds a <see cref="Type" />, so <see cref="MethodInfo.MakeGenericMethod" /> is the only route -
-/// which AGENTS.md allows here, and this is the one place it happens. It is paid once per aggregate type:
-/// the closed method becomes a strongly typed delegate that is cached process-wide, so the reflection cost
-/// is not on the version stepper's per-click path.
+/// <b>The call.</b> Marten's aggregator is generic in the aggregate, and the studio only ever holds a
+/// <see cref="Type" />, so <see cref="MethodInfo.MakeGenericMethod" /> is the only route - which AGENTS.md
+/// allows here, and this is the one place it happens. It is paid once per aggregate type: the closed method
+/// becomes a strongly typed delegate that is cached process-wide, so the reflection cost is not on the
+/// version stepper's per-click path.
+/// </para>
+/// <para>
+/// <b>Not <c>AggregateStreamAsync&lt;T&gt;</c> any more, and why.</b> That call reads the stream through
+/// <c>FetchStreamAsync</c>, which opens with <c>EnsureStorageExistsAsync(typeof(IEvent))</c> (read at Marten
+/// <c>V9.39.0</c> and <c>V9.50.2</c>): under the database's own <c>AutoCreate</c>, the event store's migration,
+/// its dependent features and - on a store with a HiLo id - <c>mt_hilo</c>, the first time the process asks
+/// (AGENTS.md hard rule 14). So the caller reads the events with the studio's own SQL and Marten's own event
+/// selector (<c>StreamReadQueries.BuildReplayEvents</c>), and this folds them exactly as
+/// <c>QueryEventStore.AggregateStreamAsync</c> does after its fetch: nothing for no events, nothing for a
+/// version past the end, <c>ProjectionGraph.AggregatorFor&lt;T&gt;().BuildAsync</c>, then the stream's id set on
+/// the aggregate through the type's own document storage when it has an identity.
 /// </para>
 /// </remarks>
 internal static class AggregateStreamInvoker
@@ -62,7 +75,7 @@ internal static class AggregateStreamInvoker
     private const BindingFlags PrivateStatic = BindingFlags.NonPublic | BindingFlags.Static;
 
     /// <summary>One cached delegate per aggregate type, closed over the generic method.</summary>
-    private static readonly ConcurrentDictionary<Type, Func<IQuerySession, object, long, CancellationToken, Task<object?>>>
+    private static readonly ConcurrentDictionary<Type, Func<IQuerySession, object, IReadOnlyList<IEvent>, long, CancellationToken, Task<object?>>>
         Invokers = new();
 
     private static readonly MethodInfo Definition =
@@ -74,6 +87,11 @@ internal static class AggregateStreamInvoker
     /// projection first, then every document type the store knows, as the manual fallback.
     /// </summary>
     /// <param name="options">The store's own configuration - nothing here is guessed.</param>
+    /// <param name="isVisible">
+    /// <c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> for every type. A type it
+    /// hides is not a candidate at all: the picker would print its name, and a replay would put its state on
+    /// the screen that the Documents browser never shows.
+    /// </param>
     /// <returns>The candidates, projections first, each type appearing once.</returns>
     /// <remarks>
     /// <para>
@@ -83,12 +101,14 @@ internal static class AggregateStreamInvoker
     /// projection that aggregates this type from a single stream keyed the way this store's streams are
     /// keyed: replaying into it is what the store already does on every append, and it will work.
     /// <see cref="AggregateCandidateSource.DocumentType" /> means only that the store knows the type -
-    /// <c>AggregateStreamAsync&lt;T&gt;</c> will ask Marten's <c>AggregatorFor&lt;T&gt;</c> to build an
+    /// the replay will ask Marten's <c>AggregatorFor&lt;T&gt;</c> to build an
     /// aggregator for it, which throws for a type with no <c>Create</c>/<c>Apply</c> for any of the
     /// stream's events. That is a "try any type (may fail)" affordance and the screen says so.
     /// </para>
     /// </remarks>
-    public static IReadOnlyList<AggregateTypeCandidate> Candidates(IReadOnlyStoreOptions options)
+    public static IReadOnlyList<AggregateTypeCandidate> Candidates(
+        IReadOnlyStoreOptions options,
+        Func<Type, bool>? isVisible = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -100,7 +120,7 @@ internal static class AggregateStreamInvoker
         foreach (ISubscriptionSource source in options.Events.Projections())
         {
             Type? aggregate = SingleStreamAggregateType(source, identity);
-            if (aggregate is not null && IsUsable(aggregate) && seen.Add(aggregate))
+            if (aggregate is not null && IsUsable(aggregate) && IsShown(aggregate, isVisible) && seen.Add(aggregate))
             {
                 candidates.Add(Describe(aggregate, AggregateCandidateSource.SingleStreamProjection));
             }
@@ -109,7 +129,7 @@ internal static class AggregateStreamInvoker
         foreach (IDocumentType documentType in options.AllKnownDocumentTypes())
         {
             Type candidate = documentType.DocumentType;
-            if (IsUsable(candidate) && seen.Add(candidate))
+            if (IsUsable(candidate) && IsShown(candidate, isVisible) && seen.Add(candidate))
             {
                 candidates.Add(Describe(candidate, AggregateCandidateSource.DocumentType));
             }
@@ -119,64 +139,120 @@ internal static class AggregateStreamInvoker
     }
 
     /// <summary>
-    /// Replays <paramref name="streamId" /> into <paramref name="aggregateType" /> as it stood at
-    /// <paramref name="version" />.
+    /// Folds <paramref name="events" /> - <paramref name="streamId" />'s events up to <paramref name="version" />,
+    /// already read - into <paramref name="aggregateType" />.
     /// </summary>
-    /// <param name="session">A session on the scope's own store and tenant.</param>
+    /// <param name="session">
+    /// A session on the scope's own store, database and tenant. It runs nothing itself: it is what Marten's aggregator
+    /// is handed, so an <c>Apply</c> method that reads reference data reads it where the replay is.
+    /// </param>
     /// <param name="aggregateType">The aggregate type, which must be a reference type.</param>
     /// <param name="streamId">The stream id, already parsed to a <see cref="Guid" /> or a string.</param>
-    /// <param name="version">The version to replay to; zero means the whole stream.</param>
+    /// <param name="events">The stream's events in sequence order, resolved by Marten's own event selector.</param>
+    /// <param name="version">The version replayed to; zero means the whole stream.</param>
     /// <param name="cancellationToken">Cancels the replay.</param>
     /// <returns>The aggregate, or <see langword="null" /> when the replay produced nothing.</returns>
     public static Task<object?> AggregateAtVersionAsync(
         IQuerySession session,
         Type aggregateType,
         object streamId,
+        IReadOnlyList<IEvent> events,
         long version,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(aggregateType);
         ArgumentNullException.ThrowIfNull(streamId);
+        ArgumentNullException.ThrowIfNull(events);
 
         if (!IsUsable(aggregateType))
         {
             throw new ArgumentException(
-                $"'{aggregateType.Name}' cannot be an aggregate: AggregateStreamAsync<T> is constrained to reference types.",
+                $"'{aggregateType.Name}' cannot be an aggregate: Marten's aggregator is constrained to reference types.",
                 nameof(aggregateType));
         }
 
-        Func<IQuerySession, object, long, CancellationToken, Task<object?>> invoker = Invokers.GetOrAdd(
+        Func<IQuerySession, object, IReadOnlyList<IEvent>, long, CancellationToken, Task<object?>> invoker = Invokers.GetOrAdd(
             aggregateType,
             static type => Definition
                 .MakeGenericMethod(type)
-                .CreateDelegate<Func<IQuerySession, object, long, CancellationToken, Task<object?>>>());
+                .CreateDelegate<Func<IQuerySession, object, IReadOnlyList<IEvent>, long, CancellationToken, Task<object?>>>());
 
-        return invoker(session, streamId, version, cancellationToken);
+        return invoker(session, streamId, events, version, cancellationToken);
     }
 
     /// <summary>The one generic body every closed delegate points at.</summary>
     /// <remarks>
-    /// Both overloads are named explicitly rather than left to overload resolution on <c>object</c>: the
-    /// id has already been parsed against the store's stream identity, so exactly one of them is right and
-    /// picking the other would be a silent empty result rather than an error.
+    /// <para>
+    /// <c>QueryEventStore.AggregateStreamAsync&lt;T&gt;</c> after its <c>FetchStreamAsync</c>, line for line, at
+    /// <c>V9.39.0</c> and <c>V9.50.2</c> (the file is identical): no events is no aggregate; a version past the
+    /// stream's last event is no aggregate, which the caller turns into "this stream never reached that version";
+    /// otherwise <c>Options.Projections.AggregatorFor&lt;T&gt;().BuildAsync(events, session, null, token)</c>.
+    /// </para>
+    /// <para>
+    /// The identity is set as Marten's <c>TryGetStorageForLiveAggregation</c> sets it - the type's document storage
+    /// when it has one, nothing when Marten refuses it with <see cref="InvalidDocumentException" /> (an aggregate with
+    /// no identity member). Marten also remembers that refusal on the host's <c>StoreOptions</c>, which is internal;
+    /// the studio asks again instead, and changes nothing about the host's store.
+    /// </para>
     /// </remarks>
     private static async Task<object?> AggregateAsync<T>(
         IQuerySession session,
         object streamId,
+        IReadOnlyList<IEvent> events,
         long version,
         CancellationToken cancellationToken) where T : class
     {
-        if (streamId is Guid guid)
+        if (events.Count == 0)
         {
-            return await session.Events
-                .AggregateStreamAsync<T>(guid, version, token: cancellationToken)
-                .ConfigureAwait(false);
+            return null;
         }
 
-        return await session.Events
-            .AggregateStreamAsync<T>((string) streamId, version, token: cancellationToken)
+        if (version != 0 && version > events[^1].Version)
+        {
+            return null;
+        }
+
+        IMartenSession marten = (IMartenSession) session;
+
+        T? aggregate = await marten.Options.Projections
+            .AggregatorFor<T>()
+            .BuildAsync(events, session, null, cancellationToken)
             .ConfigureAwait(false);
+
+        if (aggregate is null)
+        {
+            return null;
+        }
+
+        if (IdentityStorage<T>(marten) is { } storage)
+        {
+            // Both overloads named, as Marten's two AggregateStreamAsync overloads do: the id was parsed against
+            // the store's stream identity, so exactly one of them is right.
+            if (streamId is Guid guid)
+            {
+                storage.SetIdentityFromGuid(aggregate, guid);
+            }
+            else
+            {
+                storage.SetIdentityFromString(aggregate, (string) streamId);
+            }
+        }
+
+        return aggregate;
+    }
+
+    /// <summary>The aggregate type's document storage, or <see langword="null" /> when it has no identity to set.</summary>
+    private static Weasel.Storage.IDocumentStorage<T>? IdentityStorage<T>(IMartenSession session) where T : class
+    {
+        try
+        {
+            return session.StorageFor<T>();
+        }
+        catch (InvalidDocumentException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -267,11 +343,13 @@ internal static class AggregateStreamInvoker
             : identityType == typeof(Guid);
 
     /// <summary>
-    /// Whether a type can be an aggregate at all: <c>AggregateStreamAsync&lt;T&gt;</c> is
+    /// Whether a type can be an aggregate at all: <c>AggregatorFor&lt;T&gt;</c> is
     /// <c>where T : class</c>, and an open generic or an abstract type cannot be closed over.
     /// </summary>
     private static bool IsUsable(Type type) =>
         !type.IsValueType && !type.ContainsGenericParameters && !type.IsAbstract && !type.IsInterface;
+
+    private static bool IsShown(Type type, Func<Type, bool>? isVisible) => isVisible is null || isVisible(type);
 
     private static AggregateTypeCandidate Describe(Type type, AggregateCandidateSource source) =>
         new(type, type.Name, type.FullName ?? type.Name, source);

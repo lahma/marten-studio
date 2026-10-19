@@ -107,6 +107,16 @@ internal interface IProjectionDataService
     /// <summary>Pulls progression back to the highest real sequence. Requires <c>CorrectProgression</c>.</summary>
     Task CorrectProgressionAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// D01's Explain: who could be holding the high-water mark behind its gap - Marten's own gap-liveness questions plus
+    /// <c>pg_prepared_xacts</c>, asked once, now.
+    /// </summary>
+    /// <remarks>
+    /// On demand only: it reads <c>pg_locks</c> and <c>pg_stat_activity</c>. Counts and ages need the store policy for the
+    /// database as a whole; the sessions themselves need <c>ViewDatabaseActivity</c>. A refusal is a value, not a throw.
+    /// </remarks>
+    Task<HighWaterExplanation> ExplainHighWaterAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
     /// <summary>One long-running operation by its handle, or <see langword="null" />.</summary>
     StudioOperation? FindOperation(string? operationId);
 

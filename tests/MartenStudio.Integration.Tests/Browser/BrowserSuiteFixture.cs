@@ -58,6 +58,7 @@ public sealed class BrowserSuiteFixture(PostgresFixture postgres) : IAsyncLifeti
     private IBrowser? browser;
     private SampleHost? root;
     private SampleHost? subPath;
+    private string? rootConnectionString;
 
     /// <summary>The shared browser.</summary>
     public IBrowser Browser => browser
@@ -68,6 +69,16 @@ public sealed class BrowserSuiteFixture(PostgresFixture postgres) : IAsyncLifeti
     /// <summary>The host with the studio at its default <c>/marten</c>.</summary>
     internal SampleHost Root => root
         ?? throw new InvalidOperationException("The default-mount sample host was not started.");
+
+    /// <summary>
+    /// The default-mount host's database, for a scenario that has to change something as another client of the server
+    /// would - the health advisor's toast scenario puts a HiLo row near its ceiling, which no demo switch does.
+    /// </summary>
+    internal string RootConnectionString => rootConnectionString
+        ?? throw new InvalidOperationException("The default-mount sample host's database was not created.");
+
+    /// <summary>The assembly's Postgres, for a scenario that starts a sample host of its own.</summary>
+    internal PostgresFixture Postgres => postgres;
 
     /// <summary>The host with the studio at <see cref="SubPath" />.</summary>
     internal SampleHost SubPathHost => subPath
@@ -89,6 +100,7 @@ public sealed class BrowserSuiteFixture(PostgresFixture postgres) : IAsyncLifeti
 
         string rootConnection = await CreateDatabaseAsync(postgres, RootDatabase);
         string subPathConnection = await CreateDatabaseAsync(postgres, SubPathDatabase);
+        rootConnectionString = rootConnection;
 
         root = await SampleHost.StartAsync(rootConnection);
         subPath = await SampleHost.StartAsync(subPathConnection, SubPath);
@@ -103,7 +115,11 @@ public sealed class BrowserSuiteFixture(PostgresFixture postgres) : IAsyncLifeti
         await WarmUpAsync(browser, subPath);
     }
 
-    private static async Task WarmUpAsync(IBrowser browser, SampleHost host)
+    /// <summary>
+    /// Pays a freshly started host's first sign-in and first studio page outside any scenario's timeout - what the
+    /// fixture does for its own two hosts, for a scenario that starts one of its own.
+    /// </summary>
+    internal static async Task WarmUpAsync(IBrowser browser, SampleHost host)
     {
         await using StudioPage studio = await StudioPage.SignInAsync(browser, host, "admin", StudioPage.WarmUpTimeout);
         await studio.Page.GotoAsync(

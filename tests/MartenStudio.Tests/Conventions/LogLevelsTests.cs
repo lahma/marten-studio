@@ -145,7 +145,7 @@ public class LogLevelsTests
         ["src/MartenStudio/Services/StudioLog.cs : 9213 StoreDatabasesUnreadable"] = (Verdict.Throttled,
             "A store's databases could not be listed; asked by every Overview load and every scope listing in every circuit."),
         ["src/MartenStudio/Services/StudioLog.cs : 9214 PostgresVersionUnreadable"] = (Verdict.Throttled,
-            "The server version could not be read; asked once per circuit per store, and every circuit asks."),
+            "The server version of a store with a default database could not be read; asked once per circuit per store, and every circuit asks. A tenancy with no default database (master-table, sharded, static without AsDefault) is Debug."),
         ["src/MartenStudio/Services/StudioLog.cs : 9215 ShardTrackerUnobservable"] = (Verdict.Throttled,
             "The in-process tracker refused an observer; asked again by every visit to the projections page."),
         ["src/MartenStudio/Services/StudioLog.cs : 9216 ProjectionSummaryUnreadable"] = (Verdict.Throttled,
@@ -160,8 +160,14 @@ public class LogLevelsTests
             "A page's own refresh-failure handler threw: a studio bug, on a loop that runs every RefreshInterval."),
         ["src/MartenStudio/Services/StudioLog.cs : 9221 TenantPolicyFailed"] = (Verdict.Throttled,
             "The host's store policy threw while the header asked which discovered tenants to list; asked on every scope change in every circuit."),
+        ["src/MartenStudio/Services/StudioLog.cs : 9222 HealthCheckFailed"] = (Verdict.Throttled,
+            "A health check failed other than by an expected state (privilege, timeout, missing extension); the Health page and Overview re-check at HealthInterval."),
         ["src/MartenStudio/Services/StudioLog.cs : 9237 TableRowReadFailed"] = (Verdict.Throttled,
             "A row read failed by connection or an unexpected SQLSTATE; a timeout, privilege, RLS or unrefreshed view is Debug, and page turns repeat it."),
+        ["src/MartenStudio/Services/StudioLog.Sessions.cs : 9246 SessionActivityReadFailed"] = (Verdict.Throttled,
+            "A read of a database's sessions failed by connection or an unexpected SQLSTATE; privilege and timeouts are Debug, and the Sessions page re-reads every HealthInterval."),
+        ["src/MartenStudio/Services/StudioLog.Export.cs : 9270 HealthExportFailed"] = (Verdict.Throttled,
+            "The opt-in health export failed in the studio itself and reports Degraded; an orchestrator probes the health endpoint every few seconds, and the run repeats every HealthInterval."),
 
         // ---- Visitor-started reads and writes, one line per action ------------------------------------
         ["src/MartenStudio/Services/Configuration/ConfigurationService.cs : Marten Studio could not describe the databases of store {StoreKey}"] = (Verdict.VisitorAction,
@@ -356,7 +362,7 @@ public class LogLevelsTests
 
     /// <summary>
     /// The events the rule is about are exactly the ones the roster files as throttled in
-    /// <c>StudioLog.cs</c> - 9210, 9212-9221 and 9237 - so neither list can drift from the other.
+    /// <c>StudioLog.cs</c> - 9210, 9212-9222 and 9237 - so neither list can drift from the other.
     /// </summary>
     [Fact]
     public void The_throttled_events_are_the_ones_the_roster_files_as_throttled()

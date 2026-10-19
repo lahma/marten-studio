@@ -15,11 +15,19 @@
     (a grid cell at a kilobyte, a detail cell at 256 KB); a value that is merely long is unclamped in place. A
     relation with no key is read back by the row's ctid, which the caller passes as the key; a view with
     neither cannot be read back at all, and says so rather than offering a button that fails.
+
+    A pgvector value is collapsed - its type from the catalog and its first few components, "vector(1536)
+    [0.0123, -0.0441, 0.2, …]" - with Expand to show all of it (read again whole first when the server cut it)
+    and Copy for the whole value, which is offered only once the whole value is here.
 *@
 
 @if (IsKind(SqlCellView.NullKind))
 {
     <span class="ms-query-null" title="SQL NULL">NULL</span>
+}
+else if (Vector is PgVectorColumn vector && PgVector.Preview(whole ?? Text, VectorCut) is { } preview)
+{
+    @RenderVector(vector, preview)
 }
 else if (IsKind(SqlCellView.JsonKind))
 {
@@ -86,10 +94,74 @@ else
 
     private string? whole;
     private string? wholeNote;
+    private bool wholeCut;
     private string? error;
     private bool unclamped;
     private bool loading;
     private string? shownFor;
+
+    /// <summary>
+    /// For a pgvector column, its <c>PgVectorColumn</c> from the catalog, which shows the value collapsed. Typed
+    /// <see cref="object" /> for the reason <c>DocumentComponentModel</c> gives.
+    /// </summary>
+    [Parameter]
+    public object? Vector { get; set; }
+
+    /// <summary>Whether the vector text on hand is not the whole value: cut by the page's read, or by the inline cap.</summary>
+    private bool VectorCut => whole is not null ? wholeCut : IsTruncated;
+
+    private RenderFragment RenderVector(PgVectorColumn vector, PgVectorPreview preview) => __builder =>
+    {
+        string current = whole ?? Text;
+        bool cut = VectorCut;
+
+        <div class="ms-vector-value">
+            @if (unclamped)
+            {
+                <div class="ms-row-value-text ms-vector-whole">@current</div>
+            }
+            else
+            {
+                <span class="ms-vector-type" title="@vector.Description">@vector.Spelling</span>
+                <span class="ms-vector-preview" title="@PgVector.Describe(vector, preview)">@preview.Text</span>
+            }
+            <span class="ms-vector-actions">
+                @if (!cut || whole is not null)
+                {
+                    @if (!preview.Complete || unclamped)
+                    {
+                        <button type="button" class="ms-btn ms-btn-sm ms-vector-toggle" aria-expanded="@(unclamped ? "true" : "false")" @onclick="ToggleClamp" @onkeydown:stopPropagation="true">@(unclamped ? "Collapse" : "Expand")</button>
+                    }
+                    @if (!cut)
+                    {
+                        <CopyButton Value="@current" Label="@($"Copy the whole value of {Column}")" />
+                    }
+                }
+                else if (CanFetch)
+                {
+                    <button type="button" class="ms-btn ms-btn-sm ms-vector-toggle" aria-expanded="false" disabled="@loading" @onclick="ExpandVectorAsync" @onkeydown:stopPropagation="true">
+                        @(loading ? "Reading…" : "Expand (" + SqlCellFormat.Bytes(FullLength) + ")")
+                    </button>
+                }
+                else
+                {
+                    <span class="ms-row-value-note">Cut to fit at @SqlCellFormat.Bytes(Encoding.UTF8.GetByteCount(Text)) of @SqlCellFormat.Bytes(FullLength): a row with no key cannot be read again whole here.</span>
+                }
+            </span>
+        </div>
+        @WholeNote()
+    };
+
+    /// <summary>Reads a cut pgvector value whole, then shows all of it.</summary>
+    private async Task ExpandVectorAsync()
+    {
+        await FetchAsync();
+
+        if (whole is not null)
+        {
+            unclamped = true;
+        }
+    }
 
     /// <summary>The relation's schema.</summary>
     [Parameter]
@@ -146,6 +218,7 @@ else
             shownFor = key;
             whole = null;
             wholeNote = null;
+            wholeCut = false;
             error = null;
             unclamped = false;
         }
@@ -278,6 +351,7 @@ else
             else
             {
                 whole = value.Text ?? (value.Bytes is { } read ? Encoding.UTF8.GetString(read) : string.Empty);
+                wholeCut = value.Truncated;
                 wholeNote = value.Truncated
                     ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
                       " (MartenStudioOptions.MaxInlineDocumentBytes); the SQL console reads the rest."

@@ -263,7 +263,74 @@ internal sealed class DatabaseAccess
         ArgumentNullException.ThrowIfNull(registration);
         ArgumentNullException.ThrowIfNull(resolvedStore);
 
-        List<(string Key, IDocumentStore Store)> stores = [];
+        if (CollectStores(registry, provider, registration, resolvedStore, out List<(string Key, IDocumentStore Store)> stores) is { } unbuilt)
+        {
+            return unbuilt;
+        }
+
+        Func<Type, bool>? isVisible = options.Value.IsDocumentTypeVisible;
+
+        if (Fingerprint(stores) is not { } fingerprint)
+        {
+            // A type Marten cannot map is a configuration that cannot be read: fail closed, as below.
+            return Declare(stores, registration.Key, resolvedStore, isVisible);
+        }
+
+        if (declarations.TryGetValue(registration.Key, out var cached) && cached.Fingerprint == fingerprint)
+        {
+            return cached.Declarations;
+        }
+
+        DatabaseDeclarations result = Declare(stores, registration.Key, resolvedStore, isVisible);
+
+        if (result.Succeeded)
+        {
+            declarations[registration.Key] = (fingerprint, result);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Every registered store's declarations, with <paramref name="registration" /> as the resolved store, read
+    /// afresh and remembered nowhere - the classification <see cref="ReadDeclarations(ResolvedScope)" /> caches per
+    /// circuit, for a caller that has no circuit: a health check labelling the locks it reads (C06). Fails closed in
+    /// the same way, and touches no connection.
+    /// </summary>
+    /// <param name="registry">The store registry.</param>
+    /// <param name="provider">What the other stores are resolved from.</param>
+    /// <param name="registration">The resolved store's registration.</param>
+    /// <param name="resolvedStore">The resolved store.</param>
+    /// <param name="isDocumentTypeVisible"><see cref="MartenStudioOptions.IsDocumentTypeVisible" />.</param>
+    internal static DatabaseDeclarations DeclareEveryStore(
+        MartenStoreRegistry registry,
+        IServiceProvider provider,
+        MartenStoreRegistration registration,
+        IDocumentStore resolvedStore,
+        Func<Type, bool>? isDocumentTypeVisible)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(registration);
+        ArgumentNullException.ThrowIfNull(resolvedStore);
+
+        return CollectStores(registry, provider, registration, resolvedStore, out List<(string Key, IDocumentStore Store)> stores) is { } unbuilt
+            ? unbuilt
+            : Declare(stores, registration.Key, resolvedStore, isDocumentTypeVisible);
+    }
+
+    /// <summary>
+    /// Every registered store, ancillary ones included and <paramref name="resolvedStore" /> first-class among them -
+    /// or the failure that a store which will not build is.
+    /// </summary>
+    private static DatabaseDeclarations? CollectStores(
+        MartenStoreRegistry registry,
+        IServiceProvider provider,
+        MartenStoreRegistration registration,
+        IDocumentStore resolvedStore,
+        out List<(string Key, IDocumentStore Store)> stores)
+    {
+        stores = [];
 
         foreach (MartenStoreRegistration each in registry.Registrations(includeAncillaryStores: true))
         {
@@ -300,25 +367,7 @@ internal sealed class DatabaseAccess
             stores.Insert(0, (registration.Key, resolvedStore));
         }
 
-        if (Fingerprint(stores) is not { } fingerprint)
-        {
-            // A type Marten cannot map is a configuration that cannot be read: fail closed, as below.
-            return Declare(stores, registration.Key, resolvedStore);
-        }
-
-        if (declarations.TryGetValue(registration.Key, out var cached) && cached.Fingerprint == fingerprint)
-        {
-            return cached.Declarations;
-        }
-
-        DatabaseDeclarations result = Declare(stores, registration.Key, resolvedStore);
-
-        if (result.Succeeded)
-        {
-            declarations[registration.Key] = (fingerprint, result);
-        }
-
-        return result;
+        return null;
     }
 
     /// <summary>
@@ -346,12 +395,12 @@ internal sealed class DatabaseAccess
         return fingerprint.ToString();
     }
 
-    private DatabaseDeclarations Declare(
+    private static DatabaseDeclarations Declare(
         List<(string Key, IDocumentStore Store)> stores,
         string resolvedKey,
-        IDocumentStore resolvedStore)
+        IDocumentStore resolvedStore,
+        Func<Type, bool>? isVisible)
     {
-        Func<Type, bool>? isVisible = options.Value.IsDocumentTypeVisible;
         List<StoreDeclarations> declared = [];
         IReadOnlyList<string> storeSchemas = [];
 
@@ -613,11 +662,12 @@ internal sealed class DatabaseAccess
     /// of B's own database that is this one (<see cref="OtherStoreDatabaseIdAsync" />).
     /// </para>
     /// <para>
-    /// <b>And only when somebody will be asked.</b> Finding B's identity for this database means
-    /// <c>AllDatabases()</c> on B, which on a master-table or sharded tenancy is a query - and, the first time
-    /// in the process, B's own <c>CreateOrUpdate</c> of its pool or master table (D27). The identity is only
-    /// ever the resource a policy is shown, so with no store policy - and, while the capability is on, no
-    /// write policy either - nothing is enumerated, on this page or on any document open that reads the gate.
+    /// <b>And only when somebody will be asked, and only from memory.</b> Finding B's identity for this
+    /// database means <c>AllDatabases()</c> on B. The identity is only ever the resource a policy is shown, so
+    /// with no store policy - and, while the capability is on, no write policy either - nothing is enumerated,
+    /// on this page or on any document open that reads the gate. And a B whose enumeration is not an in-memory
+    /// walk is never enumerated at all, because the walk could only ever change the identity's case
+    /// (<see cref="OtherStoreDatabaseIdAsync" />).
     /// </para>
     /// </remarks>
     private async Task<IReadOnlyDictionary<string, DatabaseStoreAccess>> OtherStoresAsync(
@@ -679,6 +729,16 @@ internal sealed class DatabaseAccess
     /// identity, which at least names this database rather than that store's default. Remembered for the
     /// circuit.
     /// </summary>
+    /// <remarks>
+    /// The answer is always this database's own identity: the walk below matches by <c>Id.Identity</c>,
+    /// ignoring case, and returns the match, so all it can change is the case that store spells it in. That
+    /// is worth an in-memory walk and nothing more. A <c>Single</c> or <c>StaticMultiple</c> store's
+    /// <c>AllDatabases()</c> answers from memory. A <c>DynamicMultiple</c> one runs
+    /// <c>Tenancy.BuildDatabases()</c>, which reads its master or pool table every time - and the first time per
+    /// store instance applies that table and upserts its seed rows, or on a single-server tenancy creates every
+    /// configured database that does not exist yet (AGENTS.md D27). So a dynamic store, and one whose
+    /// cardinality cannot be read, is never enumerated here: the identity is used as given.
+    /// </remarks>
     private async Task<string> OtherStoreDatabaseIdAsync(string storeKey, Marten.Storage.IMartenDatabase database, CancellationToken cancellationToken)
     {
         string identity = database.Id.Identity;
@@ -694,7 +754,8 @@ internal sealed class DatabaseAccess
 
         if (registration is not null
             && registry.TryResolve(registration, provider, out IDocumentStore? store).IsAvailable
-            && store is not null)
+            && store is not null
+            && EnumeratesFromMemory(store))
         {
             try
             {
@@ -717,6 +778,25 @@ internal sealed class DatabaseAccess
 
         otherDatabaseIds[key] = answer;
         return answer;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="store" />'s <c>AllDatabases()</c> is a walk of what it already holds: a
+    /// <c>Single</c> or <c>StaticMultiple</c> tenancy. A <c>DynamicMultiple</c> one is not, and neither is a
+    /// tenancy whose cardinality cannot be read - the stricter answer.
+    /// </summary>
+    private static bool EnumeratesFromMemory(IDocumentStore store)
+    {
+        try
+        {
+            return store.Options.Tenancy.Cardinality
+                is JasperFx.Descriptors.DatabaseCardinality.Single
+                or JasperFx.Descriptors.DatabaseCardinality.StaticMultiple;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

@@ -32,6 +32,10 @@
     into a typed statement (QueryService.SqlScope) - checked by the statement guard, run inside a read-only
     transaction and audited statement by statement (D13). The README says it plainly: grant RunSql to
     people you would give psql to.
+
+    LINQ mode (F7) is a third thing: a typed predicate evaluated in this process under an allow-list and
+    translated by Marten's own Query<T>(), gated on RunLinqQueries. It is its own component with its own
+    service (LinqQueryPanel, ILinqQueryService), so neither mode above ever resolves it.
 *@
 
 <PageTitle>Query</PageTitle>
@@ -57,6 +61,14 @@
                 aria-selected="@(mode == QueryMode.Sql ? "true" : "false")"
                 @onclick="() => SwitchModeAsync(QueryMode.Sql)">
             SQL console
+        </button>
+        <button type="button"
+                role="tab"
+                id="ms-query-mode-linq"
+                class="ms-query-mode @(mode == QueryMode.Linq ? "ms-query-mode-active" : "")"
+                aria-selected="@(mode == QueryMode.Linq ? "true" : "false")"
+                @onclick="() => SwitchModeAsync(QueryMode.Linq)">
+            LINQ
         </button>
     </div>
 
@@ -221,6 +233,14 @@
                     }
                 </div>
             }
+            else if (mode == QueryMode.Linq)
+            {
+                @* F7: a component of its own, with its own service, so the two modes above never resolve it. *@
+                <LinqQueryPanel Alias="@linqAlias"
+                                Where="@linqWhere"
+                                OrderBy="@linqOrderBy"
+                                OnChanged="OnLinqChangedAsync" />
+            }
             else
             {
                 <div class="ms-query-mode-panel ms-query-panel-sql">
@@ -301,12 +321,15 @@
             }
         </div>
 
-        <aside class="ms-query-side" aria-label="Saved and recent queries">
-            <SavedQueryDrawer @ref="drawer"
-                              StoreKey="@State.ActiveScope?.StoreKey"
-                              Mode="@mode.ToString()"
-                              OnPick="OnPickedAsync" />
-        </aside>
+        @if (mode != QueryMode.Linq)
+        {
+            <aside class="ms-query-side" aria-label="Saved and recent queries">
+                <SavedQueryDrawer @ref="drawer"
+                                  StoreKey="@State.ActiveScope?.StoreKey"
+                                  Mode="@mode.ToString()"
+                                  OnPick="OnPickedAsync" />
+            </aside>
+        }
     </div>
 </div>
 
@@ -364,8 +387,14 @@
     private string? appliedType;
     private string? appliedWhere;
     private string? appliedSql;
+    private string? appliedPredicate;
+    private string? appliedOrderBy;
 
-    /// <summary>The mode from the deep link: <c>marten</c> or <c>sql</c>.</summary>
+    private string? linqAlias;
+    private string linqWhere = string.Empty;
+    private string linqOrderBy = string.Empty;
+
+    /// <summary>The mode from the deep link: <c>marten</c>, <c>sql</c> or <c>linq</c>.</summary>
     [Parameter]
     [SupplyParameterFromQuery(Name = "mode")]
     public string? ModeParameter { get; set; }
@@ -384,6 +413,16 @@
     [Parameter]
     [SupplyParameterFromQuery(Name = "sql")]
     public string? SqlParameter { get; set; }
+
+    /// <summary>The LINQ predicate from the deep link.</summary>
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "predicate")]
+    public string? PredicateParameter { get; set; }
+
+    /// <summary>The LINQ ordering from the deep link.</summary>
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "orderby")]
+    public string? OrderByParameter { get; set; }
 
     /// <summary>Whether the SQL console is available at all in this process.</summary>
     private bool SqlEnabled => Capabilities.IsEnabled(StudioCapability.RunSql);
@@ -436,6 +475,27 @@
             if (!string.IsNullOrWhiteSpace(TypeParameter))
             {
                 alias = TypeParameter;
+                linqAlias = TypeParameter;
+            }
+        }
+
+        if (!string.Equals(PredicateParameter, appliedPredicate, StringComparison.Ordinal))
+        {
+            appliedPredicate = PredicateParameter;
+
+            if (PredicateParameter is not null)
+            {
+                linqWhere = PredicateParameter;
+            }
+        }
+
+        if (!string.Equals(OrderByParameter, appliedOrderBy, StringComparison.Ordinal))
+        {
+            appliedOrderBy = OrderByParameter;
+
+            if (OrderByParameter is not null)
+            {
+                linqOrderBy = OrderByParameter;
             }
         }
 
@@ -941,9 +1001,16 @@
     private void PushUrl()
     {
         string modeValue = mode.ToString().ToLowerInvariant();
-        string? typeValue = mode == QueryMode.Marten ? NullIfBlank(alias) : null;
+        string? typeValue = mode switch
+        {
+            QueryMode.Marten => NullIfBlank(alias),
+            QueryMode.Linq => NullIfBlank(linqAlias),
+            _ => null,
+        };
         string? whereValue = mode == QueryMode.Marten ? Capped(whereText) : null;
         string? sqlValue = mode == QueryMode.Sql ? Capped(sqlText) : null;
+        string? predicateValue = mode == QueryMode.Linq ? Capped(linqWhere) : null;
+        string? orderByValue = mode == QueryMode.Linq ? Capped(linqOrderBy) : null;
 
         // Recorded before navigating, so OnParametersSet sees its own values arrive and leaves the editor
         // alone - including when the text was too long to travel and the parameter is absent.
@@ -951,6 +1018,8 @@
         appliedType = typeValue;
         appliedWhere = whereValue;
         appliedSql = sqlValue;
+        appliedPredicate = predicateValue;
+        appliedOrderBy = orderByValue;
 
         Navigation.NavigateTo(
             Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -959,8 +1028,21 @@
                 ["type"] = typeValue,
                 ["where"] = whereValue,
                 ["sql"] = sqlValue,
+                ["predicate"] = predicateValue,
+                ["orderby"] = orderByValue,
             }),
             replace: true);
+    }
+
+    /// <summary>The LINQ panel's type, predicate or ordering moved: keep the deep link in step.</summary>
+    private Task OnLinqChangedAsync((string? Alias, string Where, string OrderBy) changed)
+    {
+        linqAlias = changed.Alias;
+        linqWhere = changed.Where;
+        linqOrderBy = changed.OrderBy;
+
+        PushUrl();
+        return Task.CompletedTask;
     }
 
     private static string Summary(int rows, TimeSpan duration) =>
@@ -973,7 +1055,9 @@
     private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private static QueryMode ParseMode(string? value) =>
-        string.Equals(value, "sql", StringComparison.OrdinalIgnoreCase) ? QueryMode.Sql : QueryMode.Marten;
+        string.Equals(value, "sql", StringComparison.OrdinalIgnoreCase) ? QueryMode.Sql
+        : string.Equals(value, "linq", StringComparison.OrdinalIgnoreCase) ? QueryMode.Linq
+        : QueryMode.Marten;
 
     private string Describe(SqlError error)
     {

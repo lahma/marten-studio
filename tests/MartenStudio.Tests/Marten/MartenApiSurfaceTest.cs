@@ -61,12 +61,18 @@ namespace MartenStudio.Tests.Marten;
 /// <c>Directory.Packages.props</c> floor for this file to compile at all.
 /// </para>
 /// <para>
-/// <b>The floor is <c>Marten</c> 9.31.0</b> (AGENTS.md, <em>Package budget changes</em>, 2026-09-19), and
-/// this file is half of why it is where it is: below 9.22.4 it does not compile, because
-/// <c>ShardName.HighWaterMarkFor</c> - the member <see cref="ShardName_identities_tell_a_bookkeeping_row_from_a_real_shard" />
-/// uses to tell a bookkeeping progression row from a real shard - does not exist. <c>Marten</c> is a
-/// floor rather than an exact pin, so this test really is the contract; when the floor moves, it moves
-/// because something asserted here (or in the live suite) is absent below the new value.
+/// <b>The floor is <c>Marten</c> 9.39.0</b>, and it is a <em>security</em> floor (AGENTS.md,
+/// <em>Package budget changes</em>, 2026-10-15): 9.39.0 fixes GHSA-q4xm-rhx9-xjm4 and
+/// GHSA-frqq-p5g3-8jq5, and nothing asserted here is missing at 9.31.0, the lowest version the code itself
+/// needs (bisected 2026-09-19). This file is half of why that one is where it is: below 9.22.4 it does not
+/// compile, because <c>ShardName.HighWaterMarkFor</c> - the member
+/// <see cref="ShardName_identities_tell_a_bookkeeping_row_from_a_real_shard" /> uses to tell a bookkeeping
+/// progression row from a real shard - does not exist. <c>Marten</c> is a floor rather than an exact pin,
+/// so this test really is the contract; when the floor moves for an API reason, it moves because
+/// something asserted here (or in the live suite) is absent below the new value. The file also compiles
+/// and runs at the pinned latest-tested version (<c>MartenStudioMartenLatest</c>, the
+/// <c>marten-latest</c> workflow), so a member that moves upstream fails here on that leg before any host
+/// meets it.
 /// </para>
 /// </remarks>
 public class MartenApiSurfaceTest
@@ -630,6 +636,10 @@ public class MartenApiSurfaceTest
 
         RequireProperty(typeof(DatabaseUsage), "Databases").PropertyType.Should().Be<List<DatabaseDescriptor>>();
         RequireProperty(typeof(DatabaseDescriptor), "TenantIds").PropertyType.Should().Be<List<string>>();
+
+        // CL1 item 8: a tenant-partitioned single database lists its tenants on the main descriptor and on no other
+        // (TenantPartitionedSingleDatabaseTenancy, #4862, read at V9.39.0 and V9.50.2).
+        RequireProperty(typeof(DatabaseUsage), "MainDatabase").PropertyType.Should().Be<DatabaseDescriptor>();
     }
 
     // --------------------------------------------------------------------------------------------
@@ -785,6 +795,51 @@ public class MartenApiSurfaceTest
         sharded.MultiTenantedWithShardedDatabases(x => x.ConnectionString = DummyConnectionString);
         sharded.Tenancy.Cardinality.Should().Be(DatabaseCardinality.DynamicMultiple);
         FluentActions.Invoking(() => sharded.Tenancy.Default).Should().Throw<NotSupportedException>();
+    }
+
+    /// <summary>
+    /// H8-fix B1 and F3: what <c>HeldDatabases</c> lists a dynamic tenancy's databases with, so that neither the
+    /// health export nor a sweep is ever the call that makes a tenancy apply, seed, query or create anything.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read at tags <c>V9.39.0</c> and <c>V9.50.2</c>. <c>Storage.AllDatabases()</c> is <c>Tenancy.BuildDatabases()</c>:
+    /// on <c>MasterTableTenancy</c> and <c>ShardedTenancy</c> that applies the lookup tables' schema under the host's
+    /// <c>AutoCreate</c> on the first call, upserts the seed rows, and reads the whole master table on every call;
+    /// on <c>SingleServerMultiTenancy</c> it runs <c>CREATE DATABASE</c> for every configured tenant missing one.
+    /// </para>
+    /// <para>
+    /// So the held databases are read instead. <c>ITenantedSource&lt;string&gt;.AllActive()</c> is the tenancy's own
+    /// cache, from memory, and <c>ITenancy.TryFindDatabase(id)</c> (#5400, "for diagnostics and monitoring reads
+    /// that must not change what exists") answers a key of that cache from the cache - it reaches the master table
+    /// only on a miss. It must be <em>declared</em> by both tenancies: the interface's default body is
+    /// <c>FindOrCreateDatabase</c>, which provisions. A single-server tenancy is Weasel's
+    /// <c>SingleServerDatabaseCollection&lt;MartenDatabase&gt;</c>, whose own <c>AllDatabases()</c> is what it has
+    /// built, from memory. None of these connect: the tenancies below are built over a refused address.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_dynamic_tenancy_says_what_it_holds_without_building_anything()
+    {
+        RequireMethod(typeof(ITenancy), "TryFindDatabase", typeof(string)).ReturnType.Should().Be<ValueTask<IMartenDatabase>>();
+        RequireMethod(typeof(ITenantedSource<string>), "AllActive").ReturnType.Should().Be<IReadOnlyList<string>>();
+
+        foreach (Type dynamic in new[] { typeof(MasterTableTenancy), typeof(ShardedTenancy) })
+        {
+            typeof(ITenantedSource<string>).IsAssignableFrom(dynamic).Should().BeTrue("{0} names what it holds", dynamic.Name);
+            dynamic.GetMethod("TryFindDatabase", BindingFlags.Public | BindingFlags.Instance, [typeof(string)])
+                .Should().NotBeNull("{0} must declare its own read-only lookup, or ITenancy's default provisions", dynamic.Name)
+                .And.Subject.As<MethodInfo>().DeclaringType.Should().Be(dynamic);
+        }
+
+        var masterTable = new StoreOptions();
+        masterTable.MultiTenantedDatabasesWithMasterDatabaseTable(DummyConnectionString, "tenants");
+        ((ITenantedSource<string>) masterTable.Tenancy).AllActive().Should().BeEmpty("a tenancy nothing has asked holds nothing");
+
+        var singleServer = new StoreOptions();
+        singleServer.MultiTenantedWithSingleServer(DummyConnectionString, static x => x.WithTenants("a", "b"));
+        singleServer.Tenancy.Should().BeAssignableTo<Weasel.Postgresql.Migrations.SingleServerDatabaseCollection<MartenDatabase>>()
+            .Which.AllDatabases().Should().BeEmpty("nothing has been built, and asking what has is not building it");
     }
 
     // --------------------------------------------------------------------------------------------
@@ -1226,6 +1281,26 @@ public class MartenApiSurfaceTest
 
         typeof(IObservable<ShardState>).IsAssignableFrom(typeof(ShardStateTracker)).Should().BeTrue(
             "the lazy per-database observer in plan §4.5 subscribes to the tracker directly");
+    }
+
+    /// <summary>
+    /// D05 reads an agent of the daemon hosted here by its status, its failure, when it paused and where it stands, and a
+    /// failure by the event it was attributed to (read at JasperFx V2.74.0 and V2.87.1). The coordinator restarts a paused
+    /// agent as a new one, which reads Running with none of the failure, so <c>Position</c> - the last sequence the agent
+    /// committed, 0 until its start is processed - is what tells a restarted shard short of its failure from one past it.
+    /// </summary>
+    [Fact]
+    public void A_daemon_agent_says_where_it_stands_and_a_failure_names_its_event()
+    {
+        RequireProperty(typeof(ISubscriptionAgent), "Status").PropertyType.Should().Be<JasperFx.AgentStatus>();
+        RequireProperty(typeof(ISubscriptionAgent), "Position").PropertyType.Should().Be<long>();
+        RequireProperty(typeof(ISubscriptionAgent), "PausedTime").PropertyType.Should().Be<DateTimeOffset?>();
+        RequireProperty(typeof(ISubscriptionAgent), "Failure").PropertyType.Should().Be<ShardFailure>();
+
+        RequireProperty(typeof(ShardFailure), "Category").PropertyType.Should().Be<ShardFailureCategory>();
+        RequireProperty(typeof(ShardFailure), "Event").PropertyType.Should().Be<EventFailureDetails>();
+        RequireProperty(typeof(EventFailureDetails), "Sequence").PropertyType.Should().Be<long>();
+        RequireProperty(typeof(EventFailureDetails), "EventTypeName").PropertyType.Should().Be<string>();
     }
 
     // --------------------------------------------------------------------------------------------
@@ -1772,6 +1847,22 @@ public class MartenApiSurfaceTest
         {
             List<string> tenantIds = descriptor.TenantIds;
             _ = (descriptor.Identifier, tenantIds.Count, cardinality);
+        }
+
+        // HeldDatabases (H8-fix): what a dynamic tenancy holds, without building or reading anything.
+        if (tenancy is ITenantedSource<string> tenantedSource)
+        {
+            foreach (string held in tenantedSource.AllActive())
+            {
+                IMartenDatabase? found = await tenancy.TryFindDatabase(held);
+                _ = found?.Id.Identity;
+            }
+        }
+
+        if (tenancy is Weasel.Postgresql.Migrations.SingleServerDatabaseCollection<MartenDatabase> server)
+        {
+            IReadOnlyList<MartenDatabase> built = server.AllDatabases();
+            _ = built.Count;
         }
 
         // --- advanced operations and the daemon ----------------------------------------------------------

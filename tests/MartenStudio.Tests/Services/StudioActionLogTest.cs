@@ -220,9 +220,15 @@ public class StudioActionLogTest
         // 9212-9220 are DB-0's throttled anomalies and 9221 DB-0-fix-2's (a store policy that threw while the
         // tenant listing was filtered); 9230 is the database browser's startup warning (DB-1, 9230-9234);
         // 9235-9237 are its row reads (DB-3, 9235-9239): the filter and key values the ring never holds, and
-        // the throttled read failure.
+        // the throttled read failure. 9222 is the health advisor's throttled check failure (H1). 9245 and 9246
+        // are Database > Sessions' (H3, 9245-9249): the first details read, and the throttled read failure.
+        // 9260-9264 are LINQ mode's (F7): a run, a refusal, a Postgres failure, an unexpected exception, and the
+        // advice it could not give. 9270 is the opt-in health export's throttled failure (H8, 9270-9274). 9280 is
+        // the statement checks' (H7, 9280-9284): a statement T02 could not plan, and a plan's prepared statement it
+        // could not take back, both at Debug. 9290 is the server checks' platform detector (H10, 9290-9294), at Debug.
         declared.Should().Equal(
             9200, 9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211,
-            9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9221, 9230, 9235, 9236, 9237);
+            9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9221, 9222, 9230, 9235, 9236, 9237, 9245, 9246,
+            9260, 9261, 9262, 9263, 9264, 9270, 9280, 9281, 9290);
     }
 }

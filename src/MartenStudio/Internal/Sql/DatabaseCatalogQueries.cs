@@ -289,6 +289,9 @@ internal sealed record CatalogSequenceValue(bool CanReadValue, long? LastValue);
 /// <param name="Generated"><c>attgenerated</c>: empty or <c>s</c> (stored).</param>
 /// <param name="Sortable">Whether its type, or a domain's base type, has a default btree operator class.</param>
 /// <param name="Comment">The column comment.</param>
+/// <param name="TypeExtension">The extension that owns its type, or its domain's base type, from <c>pg_depend</c>.</param>
+/// <param name="BaseTypeName">Its type's - or its domain's base type's - <c>typname</c>, never qualified.</param>
+/// <param name="TypeModifier">Its <c>atttypmod</c>, or a domain's <c>typtypmod</c>; <c>-1</c> for none.</param>
 internal sealed record CatalogColumn(
     string Name,
     int Position,
@@ -298,7 +301,10 @@ internal sealed record CatalogColumn(
     string Identity,
     string Generated,
     bool Sortable,
-    string? Comment);
+    string? Comment,
+    string? TypeExtension = null,
+    string? BaseTypeName = null,
+    int TypeModifier = -1);
 
 /// <summary>One constraint that is not a foreign key.</summary>
 /// <param name="Name">The constraint name.</param>
@@ -318,6 +324,11 @@ internal sealed record CatalogConstraint(string Name, string Kind, string Defini
 /// The key columns only - the first <c>indnkeyatts</c> of <c>indkey</c>, so an <c>INCLUDE</c> column is
 /// never taken for a key - with <see langword="null" /> for an expression.
 /// </param>
+/// <param name="AccessMethod"><c>pg_am.amname</c>: <c>btree</c>, <c>gin</c>, <c>hnsw</c>...</param>
+/// <param name="AccessMethodIsPgVector">Whether the <c>vector</c> extension owns the access method.</param>
+/// <param name="OperatorClasses">For an <c>hnsw</c> or <c>ivfflat</c> index, each key column's operator class; otherwise <see langword="null" />.</param>
+/// <param name="KeyDefinitions">For the same, each key column as <c>pg_get_indexdef(oid, k, true)</c> prints it.</param>
+/// <param name="Options">For the same, the index's <c>reloptions</c>.</param>
 internal sealed record CatalogIndex(
     string Name,
     string Definition,
@@ -326,7 +337,12 @@ internal sealed record CatalogIndex(
     bool IsValid,
     bool HasPredicate,
     bool HasExpressions,
-    IReadOnlyList<string?> KeyColumns);
+    IReadOnlyList<string?> KeyColumns,
+    string AccessMethod = "btree",
+    bool AccessMethodIsPgVector = false,
+    IReadOnlyList<string?>? OperatorClasses = null,
+    IReadOnlyList<string?>? KeyDefinitions = null,
+    IReadOnlyList<string>? Options = null);
 
 /// <summary>Everything the detail view reads about one relation, in one transaction.</summary>
 /// <param name="Relation">The relation's own row.</param>
@@ -1240,9 +1256,17 @@ internal static class DatabaseCatalogQueries
     /// through the polymorphic array, enum and range classes.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The polymorphic types are looked up with <c>to_regtype</c>, which answers null rather than raising
     /// for <c>anymultirange</c> on PG 13, where it does not exist. A domain over a domain is followed one
     /// level only.
+    /// </para>
+    /// <para>
+    /// The last three columns are what makes a pgvector column known without reading a value: the extension
+    /// that owns the type (or the domain's base type), the base type's name, and the type modifier - a
+    /// domain's own, since a column of a domain has none - which is pgvector's dimensions
+    /// (<see cref="MartenStudio.Services.Database.PgVector.Column" />).
+    /// </para>
     /// </remarks>
     internal const string ColumnsSql =
         """
@@ -1270,7 +1294,17 @@ internal static class DatabaseCatalogQueries
                           or (oc.opcintype = pg_catalog.to_regtype('pg_catalog.anyenum') and bt.typtype = 'e')
                           or (oc.opcintype = pg_catalog.to_regtype('pg_catalog.anyrange') and bt.typtype = 'r')
                           or (oc.opcintype = pg_catalog.to_regtype('pg_catalog.anymultirange') and bt.typtype = 'm'))),
-               pg_catalog.col_description(a.attrelid, a.attnum)
+               pg_catalog.col_description(a.attrelid, a.attnum),
+               (select e.extname::text
+                  from pg_catalog.pg_depend d
+                  join pg_catalog.pg_extension e on e.oid = d.refobjid
+                  where d.classid = 'pg_catalog.pg_type'::pg_catalog.regclass
+                    and d.objid = bt.oid
+                    and d.refclassid = 'pg_catalog.pg_extension'::pg_catalog.regclass
+                    and d.deptype = 'e'
+                  limit 1),
+               bt.typname::text,
+               case when t.typtype = 'd' then t.typtypmod else a.atttypmod end
         from pg_catalog.pg_attribute a
         join pg_catalog.pg_type t on t.oid = a.atttypid
         join pg_catalog.pg_type bt on bt.oid = case when t.typtype = 'd' then t.typbasetype else t.oid end
@@ -1294,6 +1328,18 @@ internal static class DatabaseCatalogQueries
     /// One relation's indexes, with the key columns only: the first <c>indnkeyatts</c> entries of
     /// <c>indkey</c>, so an <c>INCLUDE</c> column is never mistaken for part of a key.
     /// </summary>
+    /// <remarks>
+    /// With each index's access method, and - for an <c>hnsw</c> or <c>ivfflat</c> index only - each key column's
+    /// operator class and definition and the index's <c>reloptions</c>, which is where pgvector keeps <c>m</c>,
+    /// <c>ef_construction</c> and <c>lists</c>; whether the <c>vector</c> extension owns the access method says the
+    /// parameters are pgvector's. All of it from the system catalogs - but not without a lock:
+    /// <c>pg_get_indexdef(oid, k, true)</c>, like <c>pg_get_indexdef(oid)</c> beside it, deparses through
+    /// <c>deparse_context_for</c>, whose <c>set_relation_column_names</c> opens the <em>indexed table</em> with
+    /// <c>AccessShareLock</c> and closes it again (PG 17's <c>ruleutils.c</c>). So each call briefly locks the table,
+    /// and queues behind somebody's <c>ACCESS EXCLUSIVE</c> lock on it, where the read-only session's
+    /// <c>lock_timeout</c> ends the wait (<c>PgVectorLiveTests</c> measures it); nothing is still held once a call returns.
+    /// This is a by-oid read of one relation, which may lock that relation briefly (see the class remarks), never a list.
+    /// </remarks>
     internal const string IndexesSql =
         """
         select ic.relname::text,
@@ -1306,9 +1352,31 @@ internal static class DatabaseCatalogQueries
                (select pg_catalog.array_agg(a.attname::text order by u.ord)
                   from pg_catalog.unnest(i.indkey::pg_catalog.int2[]) with ordinality as u(attnum, ord)
                   left join pg_catalog.pg_attribute a on a.attrelid = i.indrelid and a.attnum = u.attnum
-                  where u.ord <= i.indnkeyatts)
+                  where u.ord <= i.indnkeyatts),
+               am.amname::text,
+               exists (
+                   select 1
+                   from pg_catalog.pg_depend d
+                   join pg_catalog.pg_extension e on e.oid = d.refobjid
+                   where d.classid = 'pg_catalog.pg_am'::pg_catalog.regclass
+                     and d.objid = am.oid
+                     and d.refclassid = 'pg_catalog.pg_extension'::pg_catalog.regclass
+                     and d.deptype = 'e'
+                     and e.extname = 'vector'),
+               case when am.amname in ('hnsw', 'ivfflat') then
+                   (select pg_catalog.array_agg(oc.opcname::text order by u.ord)
+                      from pg_catalog.unnest(i.indclass::pg_catalog.oid[]) with ordinality as u(opclass, ord)
+                      join pg_catalog.pg_opclass oc on oc.oid = u.opclass
+                      where u.ord <= i.indnkeyatts)
+               end,
+               case when am.amname in ('hnsw', 'ivfflat') then
+                   (select pg_catalog.array_agg(pg_catalog.pg_get_indexdef(i.indexrelid, k, true) order by k)
+                      from pg_catalog.generate_series(1, i.indnkeyatts::int) as k)
+               end,
+               case when am.amname in ('hnsw', 'ivfflat') then ic.reloptions end
         from pg_catalog.pg_index i
         join pg_catalog.pg_class ic on ic.oid = i.indexrelid
+        join pg_catalog.pg_am am on am.oid = ic.relam
         where i.indrelid = @oid
         order by i.indisprimary desc, ic.relname
         """;
@@ -1886,7 +1954,10 @@ internal static class DatabaseCatalogQueries
                     reader.IsDBNull(5) ? string.Empty : reader.GetString(5),
                     reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
                     reader.GetBoolean(7),
-                    NullableString(reader, 8)),
+                    NullableString(reader, 8),
+                    NullableString(reader, 9),
+                    NullableString(reader, 10),
+                    reader.IsDBNull(11) ? -1 : reader.GetInt32(11)),
                 commandTimeoutSeconds,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -1917,7 +1988,12 @@ internal static class DatabaseCatalogQueries
                     reader.GetBoolean(4),
                     reader.GetBoolean(5),
                     reader.GetBoolean(6),
-                    reader.IsDBNull(7) ? [] : reader.GetFieldValue<string?[]>(7)),
+                    reader.IsDBNull(7) ? [] : reader.GetFieldValue<string?[]>(7),
+                    reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
+                    !reader.IsDBNull(9) && reader.GetBoolean(9),
+                    reader.IsDBNull(10) ? null : reader.GetFieldValue<string?[]>(10),
+                    reader.IsDBNull(11) ? null : reader.GetFieldValue<string?[]>(11),
+                    reader.IsDBNull(12) ? null : reader.GetFieldValue<string[]>(12)),
                 commandTimeoutSeconds,
                 cancellationToken)
             .ConfigureAwait(false);

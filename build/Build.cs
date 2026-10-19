@@ -21,10 +21,11 @@ using Project = Fallout.Solutions.Project;
 /// The Fallout orchestrator for marten-studio.
 /// </summary>
 /// <remarks>
-/// Restore / Compile / Test come from the Fallout.Components interfaces. Only three things are
+/// Restore / Compile / Test come from the Fallout.Components interfaces. Only four things are
 /// hand-written: the CHANGELOG-driven version (<see cref="OnBuildInitialized"/>), the NuGet leg in
-/// <c>Build.Publish.cs</c>, and the Playwright browser install in <c>Build.Browsers.cs</c>. There is no
-/// publish or archive target: MartenStudio ships as one NuGet package and nothing else.
+/// <c>Build.Publish.cs</c>, the Playwright browser install in <c>Build.Browsers.cs</c>, and the choice of
+/// Marten - the floor, or the latest-tested 9.x - in <c>Build.Marten.cs</c>. There is no publish or
+/// archive target: MartenStudio ships as one NuGet package and nothing else.
 /// </remarks>
 [ShutdownDotNetAfterServerBuild]
 partial class Build : FalloutBuild,
@@ -108,6 +109,10 @@ partial class Build : FalloutBuild,
 
         Version = LatestReleaseNotes.SemVersion.ToString();
         Log.Information("Version from {Changelog}: {Version}", ChangelogPath, Version);
+
+        // Build.Marten.cs: the floor, or the latest-tested Marten when --marten-version / MARTEN_VERSION
+        // asks for it. Settled here so a bad value fails before anything is restored.
+        ResolveMartenVersion();
     }
 
     Target Clean => _ => _
@@ -126,11 +131,17 @@ partial class Build : FalloutBuild,
 
     IEnumerable<Project> ITest.TestProjects => Solution.GetAllProjects("*.Tests");
 
+    // The Marten version goes to all three, the floor included (Build.Marten.cs says why).
+    Configure<DotNetRestoreSettings> IRestore.RestoreSettings => _ => _
+        .SetProperty(MartenVersionProperty, ResolvedMartenVersion);
+
     Configure<DotNetBuildSettings> ICompile.CompileSettings => _ => _
-        .SetProperty("Version", Version);
+        .SetProperty("Version", Version)
+        .SetProperty(MartenVersionProperty, ResolvedMartenVersion);
 
     Configure<DotNetTestSettings> ITest.TestSettings => _ => _
-        .SetProperty("Version", Version);
+        .SetProperty("Version", Version)
+        .SetProperty(MartenVersionProperty, ResolvedMartenVersion);
 
     string ICreateGitHubRelease.Name => $"v{Version}";
 

@@ -2,6 +2,8 @@ using System.Globalization;
 
 using JasperFx.Events.Projections;
 
+using MartenStudio.Services.Health;
+
 namespace MartenStudio.Services.Projections;
 
 /// <summary>
@@ -73,6 +75,12 @@ internal static class ProjectionLagThresholds
         > Amber => LagSeverity.Warning,
         _ => LagSeverity.Ok
     };
+
+    /// <summary>The severity of one lag against a shard's own thresholds, where its progression row carries them.</summary>
+    public static LagSeverity Severity(long lag, long? warning, long? critical) =>
+        lag > (critical ?? Red) ? LagSeverity.Critical
+        : lag > (warning ?? Amber) ? LagSeverity.Warning
+        : LagSeverity.Ok;
 }
 
 /// <summary>
@@ -100,6 +108,10 @@ internal static class ProjectionLagThresholds
 /// renamed: it still explains why a table is stale, so it is rendered in its own section rather than
 /// hidden (plan section 4.8 - "cannot report" and "nobody owns this" are values, not empty results).
 /// </param>
+/// <param name="LastProgress">When the shard last advanced, from its row's <c>last_updated</c> (server time).</param>
+/// <param name="SinceLastProgress">How long ago that was, in server time, at the moment of the read.</param>
+/// <param name="WarningThreshold">The row's own <c>warning_behind_threshold</c>, when one is written.</param>
+/// <param name="CriticalThreshold">The row's own <c>critical_behind_threshold</c>, when one is written.</param>
 internal sealed record ShardProgress(
     string ShardName,
     string ProjectionName,
@@ -113,13 +125,23 @@ internal sealed record ShardProgress(
     string? TenantId,
     bool HasProgressRow,
     bool IsLive,
-    bool IsRegistered = true)
+    bool IsRegistered = true,
+    DateTimeOffset? LastProgress = null,
+    TimeSpan? SinceLastProgress = null,
+    long? WarningThreshold = null,
+    long? CriticalThreshold = null)
 {
     /// <summary>How many events this shard has still to process. Never negative.</summary>
     public long Lag => Math.Max(0, HighWater - Sequence);
 
-    /// <summary>The colour this row wears.</summary>
-    public LagSeverity Severity => ProjectionLagThresholds.Severity(Lag);
+    /// <summary>The colour this row wears: against the row's own thresholds when it carries them, the studio's otherwise.</summary>
+    public LagSeverity Severity => ProjectionLagThresholds.Severity(Lag, WarningThreshold, CriticalThreshold);
+
+    /// <summary>The amber threshold that applies to this row.</summary>
+    public long EffectiveWarningThreshold => WarningThreshold ?? ProjectionLagThresholds.Amber;
+
+    /// <summary>The red threshold that applies to this row.</summary>
+    public long EffectiveCriticalThreshold => CriticalThreshold ?? ProjectionLagThresholds.Red;
 
     /// <summary>Whether the shard is paused, by whatever name the daemon gave it.</summary>
     public bool IsPaused =>
@@ -210,6 +232,11 @@ internal static class DaemonDefaults
     /// JasperFx.Events 2.69.3.
     /// </summary>
     public const int AgentPauseMilliseconds = 1_000;
+
+    /// <summary>
+    /// <c>DaemonSettings.StopAndDrainTimeout</c>'s default: five seconds. Verified at JasperFx.Events 2.74.0 and 2.87.1.
+    /// </summary>
+    public const int StopAndDrainMilliseconds = 5_000;
 }
 
 /// <summary>
@@ -308,6 +335,11 @@ internal static class DaemonControlMessages
 /// any shard is paused - one second by default, against five for the leadership interval. Both are
 /// carried because the refusal hint has to name whichever applies.
 /// </param>
+/// <param name="RebuildingProjections">The projections the daemon here says it is rebuilding right now (JasperFx 2.86+).</param>
+/// <param name="StopAndDrainMilliseconds">
+/// The store's <c>StopAndDrainTimeout</c>, which the Pause, Stop and Rebuild wording quotes - <c>0</c> when it is not
+/// positive (zero, negative, or <c>Timeout.InfiniteTimeSpan</c>), for which JasperFx applies no bound at all.
+/// </param>
 internal sealed record DaemonStatus(
     DaemonHostingState Hosting,
     bool IsRunning,
@@ -319,8 +351,23 @@ internal sealed record DaemonStatus(
     StudioDaemonPause? PausedByStudio = null,
     int LeadershipPollingMilliseconds = DaemonDefaults.LeadershipPollingMilliseconds,
     IReadOnlyList<string>? CoordinatedDatabases = null,
-    int AgentPauseMilliseconds = DaemonDefaults.AgentPauseMilliseconds)
+    int AgentPauseMilliseconds = DaemonDefaults.AgentPauseMilliseconds,
+    IReadOnlyList<string>? RebuildingProjections = null,
+    int StopAndDrainMilliseconds = DaemonDefaults.StopAndDrainMilliseconds)
 {
+    /// <summary>
+    /// Whether the daemon here says it is rebuilding <paramref name="projection" /> (JasperFx 2.86+). A no proves nothing:
+    /// below 2.86, and for a daemon that does not track it, the list is empty.
+    /// </summary>
+    public bool IsRebuildingHere(string projection) =>
+        (RebuildingProjections ?? []).Contains(projection, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How long a stopping shard may take to finish the page it is processing.</summary>
+    public TimeSpan StopAndDrainTimeout => TimeSpan.FromMilliseconds(StopAndDrainMilliseconds);
+
+    /// <summary>Whether a stop is bounded at all: JasperFx cancels a drain only after a timeout greater than zero.</summary>
+    public bool IsDrainBounded => StopAndDrainMilliseconds > 0;
+
     /// <summary>Whether this process can be asked to start, stop or rebuild anything.</summary>
     public bool IsHostedHere => Hosting == DaemonHostingState.Hosted;
 
@@ -409,13 +456,15 @@ internal sealed record DaemonStatus(
 /// is drawing the fact, not a failure.
 /// </para>
 /// </param>
+/// <param name="DatabaseId">The resolved database's identity, which the health advisor's history is keyed by.</param>
 internal sealed record ProjectionsView(
     IReadOnlyList<ProjectionInfo> Projections,
     IReadOnlyList<ShardProgress> Progress,
     DaemonStatus Daemon,
     long HighWaterMark,
     DateTimeOffset ReadAt,
-    bool HasEventStore = true)
+    bool HasEventStore = true,
+    string? DatabaseId = null)
 {
     /// <summary>An empty view, for a scope that could not be read.</summary>
     public static ProjectionsView Empty { get; } = new(
@@ -424,6 +473,20 @@ internal sealed record ProjectionsView(
         new DaemonStatus(DaemonHostingState.NotHostedInThisProcess, false, "Unknown", [], false, null, "Nothing has been read yet."),
         0,
         DateTimeOffset.MinValue);
+
+    private static readonly IReadOnlyDictionary<string, ShardTrend> NoTrends =
+        new Dictionary<string, ShardTrend>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Each shard's lag trend from the health advisor's samples, judged as D04 judges it (a pause, a rebuild, an agent
+    /// that is not running, a shard or a mark that has not moved withhold it) - only for a visitor the store policy
+    /// passes for the database as a whole, because the samples are database-wide numbers the advisor reads at that
+    /// gate, and only while the samples are recent. Empty otherwise: no arrow is drawn.
+    /// </summary>
+    public IReadOnlyDictionary<string, ShardTrend> Trends { get; init; } = NoTrends;
+
+    /// <summary>The advisor's samples as this visitor may read them, for the rebuild dialog's estimate.</summary>
+    public HealthHistoryView HealthHistory { get; init; } = HealthHistoryView.Empty;
 
     /// <summary>
     /// Whether to warn that nothing anywhere appears to be running these projections.

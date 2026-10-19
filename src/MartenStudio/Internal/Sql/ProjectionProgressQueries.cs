@@ -25,6 +25,10 @@ namespace MartenStudio.Internal.Sql;
 /// <param name="FailureEventSequence"><c>failure_event_sequence</c>, when one event can be blamed.</param>
 /// <param name="FailureEventType"><c>failure_event_type</c>.</param>
 /// <param name="FailureEventTenantId"><c>failure_event_tenant_id</c>.</param>
+/// <param name="LastUpdated"><c>last_updated</c>: when the shard last advanced - Marten stamps it on every progress write (#4981).</param>
+/// <param name="WarningBehindThreshold"><c>warning_behind_threshold</c>, when somebody wrote one (Marten does not, #5173).</param>
+/// <param name="CriticalBehindThreshold"><c>critical_behind_threshold</c>, likewise.</param>
+/// <param name="ReadAt">The server's <c>transaction_timestamp()</c> when the row was read, so an age is server time minus server time.</param>
 internal sealed record ProgressionRow(
     string Name,
     long Sequence,
@@ -35,7 +39,11 @@ internal sealed record ProgressionRow(
     string? FailureCategory = null,
     long? FailureEventSequence = null,
     string? FailureEventType = null,
-    string? FailureEventTenantId = null);
+    string? FailureEventTenantId = null,
+    DateTimeOffset? LastUpdated = null,
+    long? WarningBehindThreshold = null,
+    long? CriticalBehindThreshold = null,
+    DateTimeOffset? ReadAt = null);
 
 /// <summary>
 /// The event store's two progress reads - the projection progression rows and the high-water mark - as
@@ -80,7 +88,9 @@ internal sealed record ProgressionRow(
 /// is then still consulted, as the <c>42703</c> guard for the reverse case - a store whose flag was
 /// switched on without the migration having been applied, which Marten's own read raises rather than
 /// survives, and which a read path must never be the thing that fixes by migrating. There is no
-/// <c>select *</c> (hard rule 10).
+/// <c>select *</c> (hard rule 10). <c>last_updated</c> and the two per-row thresholds are read whatever the
+/// flag says, when the table has them: the first is stamped on every progress write, the other two are written
+/// by nobody but a host - and every row carries the server's own read time beside them.
 /// </para>
 /// </remarks>
 internal static class ProjectionProgressQueries
@@ -123,6 +133,16 @@ internal static class ProjectionProgressQueries
         "failure_event_type",
         "failure_event_tenant_id",
     ];
+
+    /// <summary>The server-time column every read carries, so the screen's "last progress 12 s ago" is in one clock.</summary>
+    private const string ReadAtColumn = "read_at";
+
+    /// <summary>
+    /// The columns read whatever <c>EnableExtendedProgressionTracking</c> says, when the table has them: when the shard last
+    /// advanced - stamped on every progress write since #4981, the projections screen's liveness column - and the two per-row
+    /// thresholds, which Marten creates and writes nothing to (#5173) and the screen honours when a host does.
+    /// </summary>
+    private static readonly string[] ProgressColumns = ["last_updated", "warning_behind_threshold", "critical_behind_threshold"];
 
     /// <summary>
     /// The two rows in <c>mt_event_progression</c> that are high-water bookkeeping and not shards.
@@ -174,9 +194,10 @@ internal static class ProjectionProgressQueries
             var sql = new System.Text.StringBuilder();
 
             sql.Append("select ").Append(SqlIdentifier.Quote(NameColumn))
-                .Append(", ").Append(SqlIdentifier.Quote(SequenceColumn));
+                .Append(", ").Append(SqlIdentifier.Quote(SequenceColumn))
+                .Append(", transaction_timestamp() as ").Append(SqlIdentifier.Quote(ReadAtColumn));
 
-            foreach (var column in SelectedOptionalColumns(physicalColumns, extendedProgressionTracking))
+            foreach (var column in SelectedColumns(physicalColumns, extendedProgressionTracking))
             {
                 sql.Append(", ").Append(SqlIdentifier.Quote(column));
             }
@@ -320,7 +341,7 @@ internal static class ProjectionProgressQueries
 
         // Which optional columns were selected decides what the ordinals after the first two mean, so the
         // reader walks the same list the builder did rather than asking the reader for names.
-        string[] selected = [.. SelectedOptionalColumns(columns, extendedProgressionTracking)];
+        string[] selected = [.. SelectedColumns(columns, extendedProgressionTracking)];
 
         List<ProgressionRow> rows = [];
 
@@ -391,14 +412,23 @@ internal static class ProjectionProgressQueries
     }
 
     /// <summary>
-    /// The optional columns this read asks for, in select order: none at all unless the store's own flag
+    /// Every column this read asks for after name, position and the read time, in select order: the progress
+    /// columns the table has (whatever the flag says), then the extended ones under the flag.
+    /// </summary>
+    /// <param name="physicalColumns">What <c>information_schema</c> says the table has.</param>
+    /// <param name="extendedProgressionTracking"><c>StoreOptions.Events.EnableExtendedProgressionTracking</c>.</param>
+    internal static IEnumerable<string> SelectedColumns(IReadOnlyCollection<string> physicalColumns, bool extendedProgressionTracking) =>
+        ProgressColumns.Where(x => physicalColumns.Contains(x, StringComparer.Ordinal))
+            .Concat(SelectedOptionalColumns(physicalColumns, extendedProgressionTracking));
+
+    /// <summary>
+    /// The extended-tracking columns this read asks for, in select order: none at all unless the store's own flag
     /// says something is writing them, and then only those the table really has.
     /// </summary>
     /// <param name="physicalColumns">What <c>information_schema</c> says the table has.</param>
     /// <param name="extendedProgressionTracking">
-    /// <c>StoreOptions.Events.EnableExtendedProgressionTracking</c>. The columns exist on every migrated
-    /// table regardless of it (Marten 9.35 #5309), so this is the half that decides whether the values
-    /// mean anything.
+    /// <c>StoreOptions.Events.EnableExtendedProgressionTracking</c>. The columns exist on every migrated table
+    /// regardless of it (Marten 9.35 #5309), so this is the half that decides whether the values mean anything.
     /// </param>
     internal static IEnumerable<string> SelectedOptionalColumns(
         IReadOnlyCollection<string> physicalColumns,
@@ -409,11 +439,11 @@ internal static class ProjectionProgressQueries
 
     private static ProgressionRow ReadRow(NpgsqlDataReader reader, string[] selected)
     {
-        var row = new ProgressionRow(reader.GetString(0), reader.GetInt64(1));
+        var row = new ProgressionRow(reader.GetString(0), reader.GetInt64(1)) { ReadAt = reader.GetFieldValue<DateTimeOffset>(2) };
 
         for (var i = 0; i < selected.Length; i++)
         {
-            var ordinal = i + 2;
+            var ordinal = i + 3;
 
             if (reader.IsDBNull(ordinal))
             {
@@ -422,6 +452,9 @@ internal static class ProjectionProgressQueries
 
             row = selected[i] switch
             {
+                "last_updated" => row with { LastUpdated = reader.GetFieldValue<DateTimeOffset>(ordinal) },
+                "warning_behind_threshold" => row with { WarningBehindThreshold = reader.GetInt64(ordinal) },
+                "critical_behind_threshold" => row with { CriticalBehindThreshold = reader.GetInt64(ordinal) },
                 "heartbeat" => row with { LastHeartbeat = reader.GetFieldValue<DateTimeOffset>(ordinal) },
                 "agent_status" => row with { AgentStatus = reader.GetString(ordinal) },
                 "pause_reason" => row with { PauseReason = reader.GetString(ordinal) },

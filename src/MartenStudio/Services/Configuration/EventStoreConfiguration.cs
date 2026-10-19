@@ -86,4 +86,26 @@ internal sealed record StudioConfiguration(
     StoreConfiguration Store,
     EventStoreConfiguration Events,
     IReadOnlyList<DocumentTypeConfiguration> DocumentTypes,
-    string? PostgresVersion);
+    string? PostgresVersion)
+{
+    /// <summary>The packages this process resolved, Marten first (F1).</summary>
+    public IReadOnlyList<RuntimeComponent> Runtime { get; init; } = [];
+
+    /// <summary>
+    /// The host's <c>IHostEnvironment.EnvironmentName</c> as the Runtime card prints it - the name, or a sentence
+    /// saying the host registers none or names none - or <see langword="null" /> when it was not read. Shown
+    /// because health check K01 prints it to every visitor of the scope, and a configuration finding says
+    /// nothing this page does not.
+    /// </summary>
+    public string? HostEnvironment { get; init; }
+
+    /// <summary>What the newer-than-floor features the studio can light up say on this host.</summary>
+    public IReadOnlyList<RuntimeFeatureStatus> Features { get; init; } = [];
+}
+
+/// <summary>One light-up feature, as the Configuration page lists it.</summary>
+/// <param name="Name">The feature's name.</param>
+/// <param name="Requirement">"Marten 9.47+".</param>
+/// <param name="Available">Whether this host has it - the probe's answer.</param>
+/// <param name="Summary">What it lets the studio do.</param>
+internal sealed record RuntimeFeatureStatus(string Name, string Requirement, bool Available, string Summary);

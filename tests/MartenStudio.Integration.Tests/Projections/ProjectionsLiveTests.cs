@@ -405,31 +405,96 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
     /// B3: two rebuilds of one projection would replay the same events into the same tables at once. The
     /// second request is answered with the first, and only one operation exists.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The first rebuild is <em>held</em> in flight until the second request has been answered, rather than
+    /// hoped to be slow. A rebuild of this store's projections takes tens of milliseconds, and once the first
+    /// had finished before the second request reached the operation tracker - which then, correctly, started a
+    /// new one - the test failed on the floor leg of CI without anything being wrong.
+    /// </para>
+    /// <para>
+    /// The hold is a <c>for key share</c> lock on the projection's own <c>mt_event_progression</c> row, in a
+    /// transaction of the test's own. Read at Marten <c>V9.39.0</c> / JasperFx <c>V2.74.0</c> and at
+    /// <c>V9.50.2</c> / <c>V2.87.1</c> alike, and measured at both: a rebuild stops the projection's agents,
+    /// checks the high-water mark and then tears the projection's state down in one transaction, which deletes
+    /// its progression row (<c>DeleteProjectionProgress</c>: <c>delete from mt_event_progression where name =
+    /// ?</c>) - and that delete waits for the lock, before anything is replayed. Nothing else does: the daemon's
+    /// other writes to the row update non-key columns, which a key-share lock admits, and no other row is
+    /// locked. Every projection's teardown deletes its progression row, which is why the hold is there rather
+    /// than on the document table, whose truncation depends on what the projection declares.
+    /// </para>
+    /// <para>
+    /// DailySales, because its rebuild succeeds. ShipmentTracker's fails on the poison SKU at both Marten
+    /// versions CI runs: the sample skips apply errors only for continuous agents (<c>Projections.Errors</c>),
+    /// and a rebuild runs under <c>Projections.RebuildErrors</c>, which skips nothing by default.
+    /// </para>
+    /// <para>
+    /// The test waits until that delete really is waiting on the lock before it asks again, and asserts that
+    /// the first operation is still running once the second request has been answered - the premise the
+    /// earlier version of this test never checked.
+    /// </para>
+    /// </remarks>
     [PostgresFact]
     public async Task Two_rebuilds_of_one_projection_in_quick_succession_yield_one_operation()
     {
-        await WaitUntilCaughtUpAsync(ShipmentTrackerName);
+        await WaitUntilCaughtUpAsync(DailySalesName);
+        string shard = await ShardOfAsync(DailySalesName);
 
         using IServiceScope scope = Fixture.CreateScope();
         IProjectionDataService service = ProjectionsFixture.ServiceIn(scope);
 
-        OperationStart first = await service.RebuildAsync(Fixture.Scope, ShipmentTrackerName, Token);
+        OperationStart first;
 
-        // A second circuit, resolved separately, asking for the same thing before the first has finished.
-        OperationStart second = await Fixture.UseAsync(other => other.RebuildAsync(Fixture.Scope, ShipmentTrackerName, Token));
+        await using (NpgsqlConnection holder = await OpenAsync())
+        {
+            await using NpgsqlTransaction hold = await holder.BeginTransactionAsync(Token);
 
-        second.Id.Should().Be(first.Id);
-        second.Started.Should().BeFalse("one rebuild of a projection runs at a time");
+            try
+            {
+                (await HoldProgressionRowAsync(holder, hold, shard))
+                    .Should().BeTrue($"{shard} has caught up, so its progression row is there to hold");
 
-        Fixture.Operations.All()
-            .Count(x => x.Kind == "Rebuild" && x.Target == ShipmentTrackerName)
-            .Should().Be(1);
+                first = await service.RebuildAsync(Fixture.Scope, DailySalesName, Token);
+                first.Started.Should().BeTrue();
+
+                await ProjectionsFixture.WaitForAsync(
+                    async () => await ProgressionDeletesWaitingOnAsync(holder.ProcessID) > 0,
+                    $"the rebuild of {DailySalesName} to wait on the test's lock on {shard}'s progression row",
+                    TimeSpan.FromSeconds(60),
+                    Token);
+
+                // A second circuit, resolved separately, asking for the same thing while the first is held.
+                OperationStart second = await Fixture.UseAsync(other => other.RebuildAsync(Fixture.Scope, DailySalesName, Token));
+
+                // The premise. An operation never goes back to running, so one that is running now was running
+                // for the whole of the second request.
+                Fixture.Operations.Find(first.Id)!.IsRunning
+                    .Should().BeTrue("the first rebuild is held at its teardown until the second request has been answered");
+
+                second.Id.Should().Be(first.Id);
+                second.Started.Should().BeFalse("one rebuild of a projection runs at a time");
+
+                Fixture.Operations.All()
+                    .Count(x => x.Kind == "Rebuild" && x.Target == DailySalesName)
+                    .Should().Be(1);
+            }
+            finally
+            {
+                // Before anything waits for the rebuild, and whether or not an assertion above failed.
+                await hold.RollbackAsync(CancellationToken.None);
+            }
+        }
 
         await ProjectionsFixture.WaitForAsync(
             () => Task.FromResult(Fixture.Operations.Find(first.Id)?.IsRunning == false),
-            $"the rebuild of {ShipmentTrackerName} to finish",
+            $"the rebuild of {DailySalesName} to finish",
             TimeSpan.FromMinutes(2),
             Token);
+
+        StudioOperation operation = Fixture.Operations.Find(first.Id)!;
+        operation.State.Should().Be(StudioOperationState.Succeeded, operation.Message);
+
+        await WaitUntilCaughtUpAsync(DailySalesName);
 
         Fixture.ActionLog.GetLatest()
             .Should().Contain(x => x.Action == "RebuildProjection" && x.Message!.Contains("Already running", StringComparison.Ordinal));
@@ -626,6 +691,48 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
         command.Parameters.AddWithValue("names", names.ToArray());
 
         await command.ExecuteNonQueryAsync(Token);
+    }
+
+    /// <summary>
+    /// Takes a key-share lock on one <c>mt_event_progression</c> row inside <paramref name="hold" />, and says
+    /// whether the row was there to lock.
+    /// </summary>
+    /// <remarks>
+    /// A key-share lock conflicts only with a delete of the row or a change to its key, so the daemon's
+    /// progress and telemetry updates to it go on while it is held.
+    /// </remarks>
+    private async Task<bool> HoldProgressionRowAsync(NpgsqlConnection connection, NpgsqlTransaction hold, string name)
+    {
+        await using NpgsqlCommand command = connection.CreateCommand();
+
+        command.Transaction = hold;
+        command.CommandText = $"select name from {Fixture.EventSchema}.mt_event_progression where name = @name for key share";
+        command.Parameters.AddWithValue("name", name);
+
+        return await command.ExecuteScalarAsync(Token) is string;
+    }
+
+    /// <summary>
+    /// How many statements deleting from this class's <c>mt_event_progression</c> are waiting on a lock the
+    /// backend <paramref name="holder" /> holds.
+    /// </summary>
+    /// <remarks>
+    /// Asked on a connection of its own, one statement at a time: a backend reads <c>pg_stat_activity</c>
+    /// once per transaction and keeps what it read, so the holding transaction would go on answering with
+    /// what was true when it began.
+    /// </remarks>
+    private async Task<long> ProgressionDeletesWaitingOnAsync(int holder)
+    {
+        await using NpgsqlConnection connection = await OpenAsync();
+        await using NpgsqlCommand command = connection.CreateCommand();
+
+        command.CommandText =
+            "select count(*) from pg_stat_activity " +
+            "where pid <> pg_backend_pid() and @holder = any(pg_blocking_pids(pid)) and query ilike @statement";
+        command.Parameters.AddWithValue("holder", holder);
+        command.Parameters.AddWithValue("statement", $"%delete from {Fixture.EventSchema}.mt_event_progression%");
+
+        return (long) (await command.ExecuteScalarAsync(Token))!;
     }
 
     private async Task<IReadOnlyList<string>> ProgressionNamesAsync()

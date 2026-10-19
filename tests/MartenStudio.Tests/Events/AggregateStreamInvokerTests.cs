@@ -32,6 +32,30 @@ public class AggregateStreamInvokerTests
         order.Name.Should().Be(nameof(TimeTravelOrder));
     }
 
+    /// <summary>
+    /// A type the host hides with <c>IsDocumentTypeVisible</c> is no candidate, from either half: the picker
+    /// would print its name and a replay would show its state.
+    /// </summary>
+    [Fact]
+    public void A_type_the_host_hides_is_offered_from_neither_half()
+    {
+        IDocumentStore store = DocumentStore.For(options =>
+        {
+            options.Connection(SqlTestStore.Unreachable);
+            options.DatabaseSchemaName = SqlTestStore.Schema;
+            options.Projections.Snapshot<TimeTravelOrder>(SnapshotLifecycle.Inline);
+            options.Schema.For<TimeTravelNote>();
+        });
+
+        AggregateStreamInvoker.Candidates(store.Options).Select(static x => x.Type)
+            .Should().Contain([typeof(TimeTravelOrder), typeof(TimeTravelNote)]);
+
+        AggregateStreamInvoker
+            .Candidates(store.Options, static type => type != typeof(TimeTravelOrder) && type != typeof(TimeTravelNote))
+            .Select(static x => x.Type)
+            .Should().NotContain(typeof(TimeTravelOrder)).And.NotContain(typeof(TimeTravelNote));
+    }
+
     [Fact]
     public void A_hand_written_single_stream_projection_is_offered_too()
     {
@@ -189,7 +213,7 @@ public class AggregateStreamInvokerTests
     public void Replaying_into_a_value_type_is_refused_with_the_reason()
     {
         Action replay = () => AggregateStreamInvoker.AggregateAtVersionAsync(
-            SessionFor(static _ => { }), typeof(int), Guid.NewGuid(), 1, CancellationToken.None);
+            SessionFor(static _ => { }), typeof(int), Guid.NewGuid(), [], 1, CancellationToken.None);
 
         replay.Should().Throw<ArgumentException>().WithMessage("*reference types*");
     }

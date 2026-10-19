@@ -74,7 +74,11 @@ internal sealed record EventTableInfo
     /// <summary>Whether the daemon's skipped-event marker column exists.</summary>
     public bool HasIsSkipped => HasEventColumn("is_skipped");
 
-    /// <summary>Whether the store tags events.</summary>
+    /// <summary>
+    /// Whether <c>mt_events</c> has the <c>tags</c> hstore column Marten adds in <c>DcbStorageMode.HStore</c>.
+    /// The default tag-table mode keeps tags in <c>mt_event_tag_&lt;suffix&gt;</c> tables instead, and has no
+    /// such column.
+    /// </summary>
     public bool HasTags => HasEventColumn("tags");
 
     /// <summary>Whether the event store is conjoined-tenanted.</summary>

@@ -6,6 +6,7 @@ using MartenStudio.Integration.Tests.Projections;
 using MartenStudio.Services;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Health;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 
@@ -53,6 +54,7 @@ internal static class StudioPolling
         var events = services.GetRequiredService<IEventDataService>();
         var projections = services.GetRequiredService<IProjectionDataService>();
         var navigation = services.GetRequiredService<INavIndicatorService>();
+        var health = services.GetRequiredService<IHealthService>();
 
         // The Overview's store cards, read once per page load.
         _ = await storeInfo.GetOverviewAsync(token);
@@ -74,6 +76,15 @@ internal static class StudioPolling
             // The projections screen's tick.
             _ = await projections.GetProjectionsAsync(scope, token);
             _ = await projections.RunningOperationsAsync(scope, token);
+
+            // H1: the Overview's Health region and the Health page - the same report, and a sweep whenever the
+            // interval has passed. Every expected state a check meets here (no daemon, an externally managed
+            // one, an environment nobody registered) must stay below Warning like the rest of the page.
+            HealthReport report = await health.GetReportAsync(scope, HealthReportRequest.Regular, token);
+            report.Refusal.Should().Be(HealthRefusal.None, report.Reason);
+            report.Checks.Should().NotBeEmpty("a host's registry holds every shipped check (review item 1)");
+            report.Checks.Should().OnlyContain(static x => x.Outcome != HealthCheckOutcome.Failed,
+                "a configuration check on a healthy host has nothing to fail on");
 
             // The navigation badges.
             _ = await navigation.ReadAsync(token);

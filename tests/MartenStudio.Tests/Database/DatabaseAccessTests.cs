@@ -418,6 +418,61 @@ public class DatabaseAccessTests
         }
     }
 
+    /// <summary>
+    /// F8-D3 C1: another store whose tenancy is <c>DynamicMultiple</c> is never enumerated to name this
+    /// database, even when a policy will be asked. The walk can only change the case of the identity it is
+    /// given, and on such a tenancy <c>AllDatabases()</c> is a master or pool table read - and, the first time
+    /// in the process, that table's apply (AGENTS.md D27). The theory above is the other half: the same store
+    /// with a static cardinality is walked, so the counter is seen to count.
+    /// </summary>
+    [Fact]
+    public async Task A_dynamic_stores_databases_are_never_enumerated_to_name_this_one()
+    {
+        int builds = 0;
+
+        await using Harness harness = Harness.Create(
+            static options => options.Capabilities.BrowseDatabase = true,
+            services => services.AddMartenStore<IElsewhereStore>(options =>
+            {
+                options.MultiTenantedDatabases(tenancy =>
+                    tenancy.AddMultipleTenantDatabase(DummyConnectionString, "elsewhere-db").ForTenants("acme"));
+                options.DatabaseSchemaName = "elsewhere";
+
+                // The theory's static tenancy, wearing a master table's cardinality: what is under test is
+                // that the cardinality alone keeps the walk from starting.
+                MartenStudio.Tests.Projections.ObservedTenancy observed =
+                    MartenStudio.Tests.Projections.ObservedTenancy.Over(options.Tenancy, masterTableShape: true);
+                observed.OnBuildDatabases = () => Interlocked.Increment(ref builds);
+                options.Tenancy = (global::Marten.Storage.ITenancy) (object) observed;
+            }));
+
+        ResolvedScope resolved = await harness.Resolve<StudioScopeResolver>()
+            .ResolveAsync(new StudioScope("default", string.Empty, null), null, Token);
+
+        harness.Resolve<IElsewhereStore>().Options.Tenancy.Cardinality
+            .Should().Be(global::JasperFx.Descriptors.DatabaseCardinality.DynamicMultiple, "the premise");
+
+        int before = Volatile.Read(ref builds);
+
+        try
+        {
+            await harness.Access.GateAsync(TenantScope, resolved, Token);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The schema list needs a database, which this test has none of; the other stores came first.
+        }
+
+        (Volatile.Read(ref builds) - before).Should().Be(0, "a dynamic store's enumeration is a query, and its answer would be the identity it was given");
+
+        MartenStoreResource asked = harness.Policies.Calls
+            .Select(static x => x.Resource)
+            .Last(static x => x.StoreName == nameof(IElsewhereStore));
+
+        asked.DatabaseIdentifier.Should().Be(resolved.Database.Id.Identity, "this database's own identity, as given");
+        asked.TenantId.Should().BeNull();
+    }
+
     [Fact]
     public async Task Every_registered_stores_declarations_are_read_and_the_resolved_stores_schemas_are_its_own()
     {

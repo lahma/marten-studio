@@ -62,6 +62,15 @@ internal sealed record IndexInfo(
 
     /// <summary>Whether dropping it would change what the schema enforces rather than only what it costs.</summary>
     public bool IsConstraint => IsPrimaryKey || IsUnique;
+
+    /// <summary>Its access method: <c>btree</c>, <c>gin</c>, <c>hnsw</c>, <c>ivfflat</c>...</summary>
+    public string AccessMethod { get; init; } = "btree";
+
+    /// <summary>
+    /// For a pgvector HNSW or IVFFlat index, each key column's operator class and the index's build parameters, set
+    /// or defaulted; otherwise <see langword="null" />.
+    /// </summary>
+    public MartenStudio.Services.Database.PgVectorIndex? Vector { get; init; }
 }
 
 /// <summary>An index the configuration asks for that is not in the database.</summary>

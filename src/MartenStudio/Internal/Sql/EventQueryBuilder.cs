@@ -54,6 +54,12 @@ internal sealed record EventFeedQuery
     /// </summary>
     public bool IncludeSkipped { get; init; } = true;
 
+    /// <summary>
+    /// Only events carrying this DCB tag. Index-backed in both storage modes - see
+    /// <see cref="EventTagQueries.AppendFeedPredicate" />.
+    /// </summary>
+    public EventTagPredicate? Tag { get; init; }
+
     /// <summary>How many events to return.</summary>
     public int PageSize { get; init; } = DefaultPageSize;
 }
@@ -110,8 +116,10 @@ internal sealed record StreamListQuery
 /// would push megabytes of protobuf down a SignalR circuit to render as nothing.
 /// </para>
 /// <para>
-/// The feed pages on <c>seq_id</c> descending, which is a total order by construction, so unlike the
-/// document list it needs no tiebreaker. <c>(@afterSeq is null or seq_id &lt; @afterSeq)</c> keeps one
+/// The feed pages on <c>seq_id</c> descending, which is a total order by construction - without per-tenant sequences,
+/// or with a tenant selected - so unlike the document list it needs no tiebreaker. Under
+/// <c>UseTenantPartitionedEvents</c> each tenant numbers its own events, and across tenants <c>seq_id</c> is neither
+/// unique nor time order: the service reads no feed there without a tenant (SEC1-fix3). <c>(@afterSeq is null or seq_id &lt; @afterSeq)</c> keeps one
 /// statement — and therefore one plan — for the first page and every page after it.
 /// </para>
 /// </remarks>
@@ -131,8 +139,15 @@ internal static class EventQueryBuilder
         ["tenant_id", "mt_dotnet_type", "is_archived", "is_skipped", "correlation_id", "causation_id", "headers", "user_name", "tags"];
 
     /// <summary>The columns the stream list selects, when they exist.</summary>
+    /// <remarks>
+    /// <c>compacted_version</c> is Marten 9's compaction watermark (<c>StreamsTable.CompactedVersionColumn</c>,
+    /// unconditional at 9.39.0): the stream detail page reads it to know whether there is anything left to fold.
+    /// </remarks>
     private static readonly string[] StreamColumns =
-        ["id", "type", "version", "timestamp", "created", "is_archived", "tenant_id"];
+        ["id", "type", "version", "timestamp", "created", "is_archived", "tenant_id", "compacted_version"];
+
+    /// <summary>The stream list's select list, for the other stream reads that render as stream rows.</summary>
+    internal static IReadOnlyList<string> StreamSelectColumns => StreamColumns;
 
     /// <summary>The global event feed, newest first.</summary>
     public static NpgsqlCommand BuildFeed(EventTableInfo table, EventFeedQuery query)
@@ -198,6 +213,13 @@ internal static class EventQueryBuilder
             {
                 sql.Append("  and (").Append(parameters.Add(NpgsqlDbType.Boolean, query.IncludeSkipped, "includeSkipped"))
                     .Append(" or ").Append(Column(Alias, "is_skipped")).Append(" = false)\n");
+            }
+
+            if (query.Tag is { } tag)
+            {
+                // @tenant exists exactly when the events table has tenant_id (above), and the predicate reuses it.
+                EventTagQueries.AppendFeedPredicate(
+                    sql, command, table.Schema, Alias, table.HasTenantId, hasTenantParameter: table.HasTenantId, tag);
             }
 
             sql.Append("order by ").Append(Column(Alias, "seq_id")).Append(" desc\n");
@@ -618,12 +640,21 @@ internal static class EventQueryBuilder
     }
 
     /// <summary>
-    /// How many dead letters there are. A plain count of Marten's own document table, which is the one
-    /// place the studio counts a document table by name rather than through a mapping.
+    /// How many dead letters there are: a count of Marten's own document table, the very rows the dead-letter
+    /// list reads.
     /// </summary>
-    /// <param name="schema">The event store's schema.</param>
+    /// <param name="table">
+    /// The dead-letter table, as <see cref="DeadLetterQueries.TableFor" /> resolved it and settled against the
+    /// catalog with <c>WithPhysicalColumns</c> - so its name is the mapping's and its soft delete is the table's.
+    /// </param>
     /// <param name="commandTimeout">A bound on how long the count may cost, when the caller sets one.</param>
     /// <remarks>
+    /// <para>
+    /// <b>The same rows as the list.</b> A soft-deleted dead letter - <c>Policies.AllDocumentsSoftDeleted()</c>
+    /// reaches <c>DeadLetterEvent</c> too - is counted out exactly as <see cref="DeadLetterQueries.BuildPage" />
+    /// leaves it out, through the one predicate both share; otherwise the badge kept counting every letter a
+    /// Discard had soft-deleted while the page it links to showed none of them.
+    /// </para>
     /// <para>
     /// <b>There is no tenant parameter, and there cannot be one.</b> Marten registers
     /// <c>DeadLetterEvent</c> into the event schema <c>SingleTenanted()</c> unconditionally
@@ -632,18 +663,21 @@ internal static class EventQueryBuilder
     /// or not. This builder used to take one and emit <c>where "tenant_id" = @tenant</c>, which could only
     /// ever raise <c>42703 undefined_column</c>; a parameter whose only reachable behaviour is to throw is
     /// not a feature. The dead-letter <em>list</em> narrows by the document's own <c>TenantId</c>
-    /// <em>property</em> instead, which is stored inside the JSON body and is queryable through Marten's
-    /// LINQ — see <c>EventDataService.ListDeadLettersAsync</c>.
+    /// <em>property</em> instead, which is stored inside the JSON body — see
+    /// <see cref="DeadLetterQueries.BuildPage" />.
     /// </para>
     /// </remarks>
-    public static NpgsqlCommand BuildDeadLetterCount(string schema, TimeSpan? commandTimeout = null)
+    public static NpgsqlCommand BuildDeadLetterCount(DocumentTableInfo table, TimeSpan? commandTimeout = null)
     {
+        ArgumentNullException.ThrowIfNull(table);
+
         var command = new NpgsqlCommand();
 
         try
         {
-            command.CommandText =
-                "select count(*) from " + SqlIdentifier.Qualify(schema, EventTableInfo.DeadLetterTable);
+            command.CommandText = DeadLetterQueries.LiveRows(table, alias: null) is { } live
+                ? "select count(*) from " + table.QualifiedName + " where " + live
+                : "select count(*) from " + table.QualifiedName;
             ApplyTimeout(command, commandTimeout);
 
             return command;

@@ -3,6 +3,7 @@ using JasperFx.Descriptors;
 using Marten;
 using Marten.Storage;
 
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -31,6 +32,7 @@ internal sealed class ConfigurationService : IConfigurationService
     private readonly IStoreInfoService storeInfo;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<ConfigurationService> logger;
+    private readonly IHostEnvironment? hostEnvironment;
 
     public ConfigurationService(
         IOptions<MartenStudioOptions> options,
@@ -38,7 +40,8 @@ internal sealed class ConfigurationService : IConfigurationService
         StudioAuthorization authorization,
         IStoreInfoService storeInfo,
         StudioLogThrottle throttle,
-        ILogger<ConfigurationService> logger)
+        ILogger<ConfigurationService> logger,
+        IHostEnvironment? hostEnvironment = null)
     {
         this.options = options;
         this.resolver = resolver;
@@ -46,7 +49,19 @@ internal sealed class ConfigurationService : IConfigurationService
         this.storeInfo = storeInfo;
         this.throttle = throttle;
         this.logger = logger;
+        this.hostEnvironment = hostEnvironment;
     }
+
+    /// <summary>
+    /// The environment as the Runtime card prints it - what K01 reads, in the words its status row would use for a
+    /// host that registers none or names none.
+    /// </summary>
+    internal static string DescribeEnvironment(IHostEnvironment? environment) => environment switch
+    {
+        null => "not registered (the host has no IHostEnvironment)",
+        { EnvironmentName: var name } when string.IsNullOrWhiteSpace(name) => "registered, with no name",
+        { EnvironmentName: var name } => name,
+    };
 
     /// <inheritdoc />
     public async Task<StudioConfiguration> DescribeAsync(
@@ -70,11 +85,22 @@ internal sealed class ConfigurationService : IConfigurationService
             databases,
             notice);
 
+        MartenRuntime runtime = MartenRuntime.Current;
+
         return new StudioConfiguration(
             store,
             ConfigurationDescriber.DescribeEvents(storeOptions.Events),
             ConfigurationDescriber.DescribeDocumentTypes(storeOptions, options.Value.IsDocumentTypeVisible),
-            postgresVersion);
+            postgresVersion)
+        {
+            Runtime = runtime.Components,
+            HostEnvironment = DescribeEnvironment(hostEnvironment),
+            Features =
+            [
+                .. RuntimeFeature.All.Select(feature => new RuntimeFeatureStatus(
+                    feature.Name, feature.Requirement, feature.IsAvailable(runtime), feature.Summary)),
+            ],
+        };
     }
 
     /// <summary>

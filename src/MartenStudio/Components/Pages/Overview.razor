@@ -1,7 +1,9 @@
 @page "/marten"
 @using System.Globalization
 @using MartenStudio.Services
+@using MartenStudio.Components.Pages.Health
 @using MartenStudio.Services.Events
+@using MartenStudio.Services.Health
 @using MartenStudio.Services.Live
 @using MartenStudio.Services.Projections
 @using Microsoft.Extensions.Options
@@ -9,6 +11,9 @@
 @inject IStoreInfoService StoreInfo
 @inject IEventDataService Events
 @inject IProjectionDataService ProjectionData
+@inject IHealthService HealthData
+@inject HealthMutes HealthMutes
+@inject IJSRuntime JsRuntime
 @inject StudioState State
 @inject StudioActionLog ActionLog
 @inject StudioAuthorization Authorization
@@ -52,10 +57,71 @@
                 <StatCard Title="Daemon" Value="@DaemonValue" Color="@DaemonColor" />
             </a>
 
-            <a class="ms-stat-link" href="@Link(EventLinks.DeadLettersRoute)">
-                <StatCard Title="Dead letters" Value="@DeadLetterValue" Color="@DeadLetterColor" />
+            @* Absent, not "unknown", for a host that hides DeadLetterEvent: a hidden type is absent (D27), and an amber
+               tile would call the host's own configuration a problem. *@
+            @if (DeadLettersShown)
+            {
+                <a class="ms-stat-link" href="@Link(EventLinks.DeadLettersRoute)">
+                    <StatCard Title="Dead letters" Value="@DeadLetterValue" Color="@DeadLetterColor" />
+                </a>
+            }
+
+            <a class="ms-stat-link ms-overview-health-tile" href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">
+                <StatCard Title="Health" Value="@HealthValue" Color="@HealthColor" />
             </a>
         </div>
+
+        @* ------------------------------------------------------------------------------------------
+           Health: the advisor's three worst unmuted findings. Read only once the page is interactive,
+           and at HealthInterval rather than at every tick - the sweep behind it is shared with the
+           Health page and everybody else watching this database.
+           ------------------------------------------------------------------------------------------ *@
+        <section class="ms-section ms-overview-region ms-overview-health">
+            <h2 class="ms-section-title">Health</h2>
+
+            @if (healthError is { Length: > 0 } healthProblem)
+            {
+                <ErrorAlert Message="@healthProblem" OnRetry="RefreshHealthAsync" />
+            }
+            else if (health is null)
+            {
+                <p class="ms-muted">@(healthRead ? "The health advisor has nothing to say about this database." : "Checking...")</p>
+            }
+            else if (health.Refusal != HealthRefusal.None)
+            {
+                <p class="ms-muted">@health.Reason</p>
+            }
+            else if (TopFindings.Count == 0)
+            {
+                @* Not "nothing to report" while the advisor has findings this visitor is not shown: that would be an
+                   all-clear the visitor has no way to know is false. *@
+                <p class="ms-muted ms-overview-health-empty">
+                    @(health.WithheldCount > 0 ? HealthPresentation.Withheld(health.WithheldCount, health.WithheldReason) : "Nothing to report.")
+                    <a href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">See what was checked</a>
+                </p>
+            }
+            else
+            {
+                <ul class="ms-overview-list ms-overview-health-list">
+                    @foreach (HealthReportFinding finding in TopFindings)
+                    {
+                        <li class="ms-overview-list-item" @key="finding.MuteKey">
+                            <span class="@HealthPresentation.ChipClass(finding.Severity)">@HealthPresentation.Label(finding.Severity)</span>
+                            <a class="ms-overview-list-name" href="@HealthLinks.ToFinding(Options.Value, State.ActiveScope, finding)">@finding.Finding.Title</a>
+                        </li>
+                    }
+                </ul>
+
+                @if (health.WithheldCount > 0)
+                {
+                    <p class="ms-muted ms-overview-health-withheld">@HealthPresentation.Withheld(health.WithheldCount, health.WithheldReason)</p>
+                }
+
+                <p class="ms-muted">
+                    <a href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">Open the Health page</a>
+                </p>
+            }
+        </section>
 
         @if (WorstShardName is { Length: > 0 } worst)
         {
@@ -176,9 +242,15 @@
                     {
                         <ErrorAlert Message="@eventsError" OnRetry="RefreshAsync" />
                     }
+                    else if (recentEvents.Error is { NeedsTenant: true } quiet)
+                    {
+                        @* The host's configuration, not a fault: a store that numbers events per tenant has no latest
+                           events across tenants (SEC1-fix3/4). *@
+                        <p class="ms-muted ms-overview-events-tenant">@quiet.Message</p>
+                    }
                     else if (recentEvents.Error is { } feedError)
                     {
-                        <ErrorAlert Message="@feedError.Display" OnRetry="RefreshAsync" />
+                        <ErrorAlert Message="@feedError.Display" OnRetry="@(feedError.CanRetry ? EventCallback.Factory.Create(this, RefreshAsync) : default)" />
                     }
                     else if (recentEvents.Rows.Count == 0)
                     {
@@ -189,7 +261,7 @@
                         <ul class="ms-overview-list">
                             @foreach (EventRow row in recentEvents.Rows)
                             {
-                                <li class="ms-overview-list-item" @key="row.Sequence">
+                                <li class="ms-overview-list-item" @key="(row.TenantId, row.Sequence)">
                                     <span class="ms-overview-list-seq ms-mono">#@row.Sequence.ToString(CultureInfo.InvariantCulture)</span>
                                     <a class="ms-overview-list-name" href="@TypeHref(row.EventType)">@row.EventType</a>
                                     <a class="ms-overview-list-stream ms-mono ms-truncate" href="@StreamHref(row.StreamId)" title="@row.StreamId">@row.StreamId</a>
@@ -361,7 +433,8 @@
                     @foreach (DatabaseOverview database in store.Databases)
                     {
                         <div class="ms-database-card" @key="database.Identity">
-                            <h3 class="ms-database-title ms-mono">@database.Identity</h3>
+                            @* A database the store could not list arrives with no identity; the card still has a heading. *@
+                            <h3 class="ms-database-title ms-mono">@(database.Identity is { Length: > 0 } identity ? identity : "Databases")</h3>
                             @if (database.Error is { Length: > 0 } error)
                             {
                                 <ErrorAlert Message="@error" OnRetry="LoadAsync" />
@@ -448,6 +521,69 @@
     private bool disposed;
     private string? loadError;
 
+    /// <summary>How many health findings the tile list shows before it points at the Health page.</summary>
+    private const int TopFindingCount = 3;
+
+    private HealthReport? health;
+    private string? healthError;
+    private bool healthRead;
+    private DateTimeOffset healthReadAt;
+
+    /// <summary>The three worst unmuted findings the visitor may see.</summary>
+    private List<HealthReportFinding> TopFindings =>
+        health is null || health.Refusal != HealthRefusal.None
+            ? []
+            : [.. health.Findings.Where(x => !HealthMutes.IsMuted(x.MuteKey)).Take(TopFindingCount)];
+
+    private string HealthValue
+    {
+        get
+        {
+            if (healthError is not null || health is null || health.Refusal != HealthRefusal.None)
+            {
+                return healthRead ? "unknown" : "checking";
+            }
+
+            List<HealthReportFinding> unmuted = [.. health.Findings.Where(x => !HealthMutes.IsMuted(x.MuteKey))];
+            int critical = unmuted.Count(static x => x.Severity == HealthSeverity.Critical);
+            int warning = unmuted.Count(static x => x.Severity == HealthSeverity.Warning);
+
+            if (critical > 0)
+            {
+                return HealthPresentation.Count(critical, "critical");
+            }
+
+            if (warning > 0)
+            {
+                return HealthPresentation.Count(warning, "warning");
+            }
+
+            // Findings this visitor is not shown are not "nothing to report": the tile says they exist, with the count
+            // the Health page's notice gives - never their severity, which is the gate's to withhold.
+            if (health.WithheldCount > 0)
+            {
+                return HealthPresentation.Count(health.WithheldCount, "finding") + " not shown";
+            }
+
+            return unmuted.Count > 0 ? HealthPresentation.Count(unmuted.Count, "suggestion") : "nothing to report";
+        }
+    }
+
+    /// <summary>The tile's colour: the worst finding the visitor may see, and never green while any is withheld.</summary>
+    private string HealthColor
+    {
+        get
+        {
+            if (healthError is not null || health is null || health.Refusal != HealthRefusal.None)
+            {
+                return "info";
+            }
+
+            HealthSeverity? worst = health.Findings.Where(x => !HealthMutes.IsMuted(x.MuteKey)).Select(static x => (HealthSeverity?) x.Severity).Min();
+            return worst is null && health.WithheldCount > 0 ? "info" : HealthPresentation.TileColor(worst);
+        }
+    }
+
     /// <summary>What the projection tiles show before anything has been read.</summary>
     private static ProjectionSummary EmptySummary { get; } = new(
         0, 0, 0, null, 0, 0,
@@ -533,6 +669,9 @@
         _ => deadLetters > 0 ? "danger" : "success",
     };
 
+    /// <summary>Whether the host lets the studio show DeadLetterEvent - the dead-letter screen's own rule, failing closed.</summary>
+    private bool DeadLettersShown => DeadLetterVisibility.IsVisible(Options.Value.IsDocumentTypeVisible, out _);
+
     private static string CountColor(EventStoreCount count) => count.Value is null ? "warning" : "info";
 
     private static string SeverityClass(LagSeverity severity) => severity switch
@@ -581,6 +720,12 @@
 
         started = true;
 
+        // The health region reads only once the page is interactive: a sweep is not something a prerender
+        // should start, and the circuit right behind it would only start it again.
+        HealthMutes.Changed += OnHealthMutesChangedAsync;
+        await HealthMutes.LoadAsync(JsRuntime, pageCancellation.Token);
+        await RefreshHealthAsync();
+
         live = LiveFactory.Create();
 
         // No Failed handler: every region already keeps its own failure as a value and renders it, so a
@@ -594,11 +739,18 @@
     /// </summary>
     /// <remarks>
     /// The loop's token is ignored on purpose - each region carries its own, linked to the page's, which
-    /// is what keeps one region's cancellation out of the other five.
+    /// is what keeps one region's cancellation out of the other five. The health region is re-read only
+    /// once <c>HealthInterval</c> has passed: the sweep behind it would not have changed any sooner.
     /// </remarks>
     private async Task TickAsync(CancellationToken _)
     {
         await LoadScopeRegionsAsync();
+
+        if (DateTimeOffset.UtcNow - healthReadAt >= Options.Value.EffectiveHealthInterval)
+        {
+            await LoadHealthAsync();
+        }
+
         await InvokeAsync(StateHasChanged);
     }
 
@@ -606,12 +758,70 @@
     {
         await LoadAsync();
         await LoadScopeRegionsAsync();
+
+        if (started)
+        {
+            await LoadHealthAsync();
+        }
     }
 
     private async Task OnScopeChangedAsync()
     {
         await LoadScopeRegionsAsync();
+
+        if (started)
+        {
+            health = null;
+            healthRead = false;
+            await LoadHealthAsync();
+        }
+
         await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnHealthMutesChangedAsync() => await InvokeAsync(StateHasChanged);
+
+    private async Task RefreshHealthAsync()
+    {
+        await LoadHealthAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// The health region: the visitor's report, stamped with the scope it was asked for like every other
+    /// region, and its failure kept as a value.
+    /// </summary>
+    private async Task LoadHealthAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || disposed)
+        {
+            return;
+        }
+
+        healthReadAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            HealthReport read = await HealthData.GetReportAsync(scope, HealthReportRequest.Regular, pageCancellation.Token);
+
+            if (!HasMovedOn(scope))
+            {
+                health = read;
+                healthError = null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            healthError = exception.Message;
+        }
+        finally
+        {
+            healthRead = true;
+        }
     }
 
     private async Task LoadAsync()
@@ -718,7 +928,10 @@
         projections = readProjections;
 
         long? readDeadLetters = deadLetters;
-        await deadLettersRegion.RunAsync(async token => readDeadLetters = await Events.CountDeadLettersAsync(scope, token));
+        if (DeadLettersShown)
+        {
+            await deadLettersRegion.RunAsync(async token => readDeadLetters = await Events.CountDeadLettersAsync(scope, token));
+        }
 
         if (HasMovedOn(scope))
         {
@@ -815,6 +1028,7 @@
         disposed = true;
 
         State.ScopeChanged -= OnScopeChangedAsync;
+        HealthMutes.Changed -= OnHealthMutesChangedAsync;
 
         try
         {

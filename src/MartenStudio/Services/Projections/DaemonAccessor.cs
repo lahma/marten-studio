@@ -18,9 +18,14 @@ namespace MartenStudio.Services.Projections;
 /// <param name="Daemon">The daemon, when there is one. Never touched when <paramref name="State" /> is not <c>Hosted</c>.</param>
 /// <param name="Explanation">Plain words, rendered on the card.</param>
 /// <param name="Databases">
-/// Every database of this store, by <c>DatabaseId.Identity</c> - the set a coordinator pause would
-/// reach. Enumerated on the way to the daemon rather than asked for a second time, because
-/// <c>IMartenStorage.AllDatabases()</c> is a query on a master-table tenancy.
+/// The databases of this store the tenancy holds, by <c>DatabaseId.Identity</c> - the set a coordinator
+/// pause would reach, which the confirm dialog names. Read through <c>HeldDatabases</c>, never
+/// <c>IMartenStorage.AllDatabases()</c>: that is a query on a master-table tenancy, an apply on its first call,
+/// and a <c>CREATE DATABASE</c> on a single-server one, and this list is read inside every health sweep. A
+/// coordinator's daemons are the databases it has itself enumerated, which the tenancy then holds; a tenancy of
+/// the host's own that cannot say without building gives an empty list, and the dialog names the current
+/// database. The pause itself is authorized over the store's whole set elsewhere
+/// (<c>DatabaseReachAuthorization.RequireEveryDatabaseOfTheStoreAsync</c>).
 /// </param>
 internal sealed record DaemonHosting(
     DaemonHostingState State,
@@ -319,7 +324,14 @@ internal sealed class DaemonAccessor
 
         try
         {
-            IReadOnlyList<IMartenDatabase> databases = await scope.Store.Storage.AllDatabases().ConfigureAwait(false);
+            // The databases the tenancy holds, for the dialog's names - never Storage.AllDatabases() of the studio's
+            // own (H8-fix F3), because this runs inside every health sweep, the opt-in export's included. The
+            // lookup below still enumerates, and that is Marten's: on Marten's coordinator AllDaemonsAsync() is
+            // Storage.AllDatabases(), as its leadership loop's every cycle is, so a sweep can be the first
+            // enumerator only before that loop's first cycle - or always under MartenDaemonModeIsSolo(), which has
+            // no loop. DaemonForDatabase would be worse: it is FindOrCreateDatabase. A sweep asks once
+            // (SweptDaemon).
+            IReadOnlyList<IMartenDatabase> databases = (await HeldDatabases.ListAsync(scope.Store).ConfigureAwait(false)).Databases;
             cancellationToken.ThrowIfCancellationRequested();
 
             IProjectionDaemon? daemon = await LookUpDaemonAsync(

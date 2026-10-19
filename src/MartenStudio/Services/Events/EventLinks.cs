@@ -95,6 +95,10 @@ internal static class EventLinks
     public static string ToFeedForType(MartenStudioOptions options, StudioScope? scope, string eventType) =>
         To(options, FeedRoute, scope, [new("types", eventType)]);
 
+    /// <summary>A link to the feed, filtered to one DCB tag: <c>?tag=type=value</c>.</summary>
+    public static string ToFeedForTag(MartenStudioOptions options, StudioScope? scope, string tagType, string value) =>
+        To(options, FeedRoute, scope, [new("tag", EventTagFilter.Format(tagType, value))]);
+
     /// <summary>A number as a query-string value, or null when it is the default the page would use anyway.</summary>
     public static string? Number(long? value) =>
         value?.ToString(CultureInfo.InvariantCulture);

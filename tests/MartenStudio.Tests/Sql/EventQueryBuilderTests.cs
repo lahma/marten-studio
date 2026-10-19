@@ -304,7 +304,8 @@ public class EventQueryBuilderTests
         using var active = EventQueryBuilder.BuildRecentlyActiveStreams(
             Full, 10, "acme", TimeSpan.FromSeconds(4));
         using var counts = EventQueryBuilder.BuildEventTypeCounts(Full, "acme", TimeSpan.FromSeconds(4));
-        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount("studio_sql", TimeSpan.FromSeconds(4));
+        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount(
+            DeadLetterQueries.MartensRegistration("studio_sql"), TimeSpan.FromSeconds(4));
 
         active.Parameters["tenant"].Value.Should().Be("acme");
         counts.Parameters["tenant"].Value.Should().Be("acme");
@@ -357,12 +358,12 @@ public class EventQueryBuilderTests
     /// and emit <c>where "tenant_id" = @tenant</c>, which could only ever raise <c>42703</c>: Marten
     /// registers <c>DeadLetterEvent</c> <c>SingleTenanted()</c> whatever the event store's tenancy is, so
     /// the column does not exist on any store. The tenant axis lives on the document's own
-    /// <c>TenantId</c> property, which the list filters through LINQ.
+    /// <c>TenantId</c> property, which the list filters on in the body (<c>DeadLetterQueries</c>).
     /// </summary>
     [Fact]
     public void The_dead_letter_count_is_a_plain_count_of_Martens_own_table()
     {
-        using var command = EventQueryBuilder.BuildDeadLetterCount("studio_sql");
+        using var command = EventQueryBuilder.BuildDeadLetterCount(DeadLetterQueries.MartensRegistration("studio_sql"));
 
         command.CommandText.Should().Be(
             "select count(*) from \"studio_sql\".\"mt_doc_deadletterevent\"");
@@ -429,7 +430,7 @@ public class EventQueryBuilderTests
             EventQueryBuilder.BuildRecentlyActiveStreams(Full, 5),
             EventQueryBuilder.BuildEventTypeCounts(Full),
             EventQueryBuilder.BuildHighestSequence(Full),
-            EventQueryBuilder.BuildDeadLetterCount("studio_sql"),
+            EventQueryBuilder.BuildDeadLetterCount(DeadLetterQueries.MartensRegistration("studio_sql")),
         ];
 
         try

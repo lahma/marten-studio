@@ -10,7 +10,10 @@ using Microsoft.Extensions.Options;
 namespace MartenStudio.Services;
 
 /// <summary>One database of a store, as the Overview page draws it.</summary>
-/// <param name="Identity">Marten's <c>DatabaseId.Identity</c> - the key everything else is scoped by.</param>
+/// <param name="Identity">
+/// Marten's <c>DatabaseId.Identity</c> - the key everything else is scoped by. Empty on the one card that
+/// says the store's databases could not be listed, which has no database to name.
+/// </param>
 /// <param name="Name">The database name.</param>
 /// <param name="Server">The server it lives on. Never a connection string.</param>
 /// <param name="SchemaNames">Every schema this store owns objects in.</param>
@@ -66,9 +69,13 @@ internal interface IStoreInfoService
 /// </summary>
 /// <remarks>
 /// <para>
-/// Everything goes through <see cref="StudioScopeResolver" />, so a store or database the visitor may not
-/// see is absent from the page rather than rendered with a refusal - the Overview is a listing, and a
-/// listing that named what it was hiding would be the leak the per-store policy exists to prevent.
+/// Every store and database is asked about exactly as <see cref="StudioScopeResolver" /> would ask - the
+/// store policy, for the store before anything is built, then for each database with no tenant - so one the
+/// visitor may not see is absent from the page rather than rendered with a refusal. The Overview is a
+/// listing, and a listing that named what it was hiding would be the leak the per-store policy exists to
+/// prevent. The questions go to <see cref="StudioAuthorization" /> directly rather than through the
+/// resolver, because every resolution is an enumeration of the store's databases of its own
+/// (<see cref="ListDatabasesAsync" />).
 /// </para>
 /// <para>
 /// The Postgres version is <c>IDiagnostics.GetPostgresVersion()</c>, which is synchronous and opens a
@@ -80,7 +87,8 @@ internal sealed class StoreInfoService : IStoreInfoService
 {
     private readonly IOptions<MartenStudioOptions> options;
     private readonly MartenStoreRegistry registry;
-    private readonly StudioScopeResolver resolver;
+    private readonly StudioAuthorization authorization;
+    private readonly IServiceProvider provider;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<StoreInfoService> logger;
     private readonly Dictionary<string, string?> postgresVersions = new(StringComparer.OrdinalIgnoreCase);
@@ -88,13 +96,15 @@ internal sealed class StoreInfoService : IStoreInfoService
     public StoreInfoService(
         IOptions<MartenStudioOptions> options,
         MartenStoreRegistry registry,
-        StudioScopeResolver resolver,
+        StudioAuthorization authorization,
+        IServiceProvider provider,
         StudioLogThrottle throttle,
         ILogger<StoreInfoService> logger)
     {
         this.options = options;
         this.registry = registry;
-        this.resolver = resolver;
+        this.authorization = authorization;
+        this.provider = provider;
         this.throttle = throttle;
         this.logger = logger;
     }
@@ -120,30 +130,27 @@ internal sealed class StoreInfoService : IStoreInfoService
         MartenStoreRegistration registration,
         CancellationToken cancellationToken)
     {
-        ResolvedScope resolved;
-        try
-        {
-            // An empty database identity asks for the store's default database, which is the only one a
-            // single-database store has and the right place to start for every other shape.
-            resolved = await resolver
-                .ResolveAsync(new StudioScope(registration.Key, string.Empty, null), null, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (StudioNotAuthorizedException)
+        string storeKey = registration.Key;
+
+        // 1. The store policy about the store as a whole, before anything is built: the question the resolver
+        //    asks first for an empty database identity, and the reason a store the visitor may not see is
+        //    absent rather than drawn with a refusal.
+        if (!await authorization
+                .IsAuthorizedAsync(new StudioScope(storeKey, string.Empty, null), capability: null, cancellationToken)
+                .ConfigureAwait(false))
         {
             return null;
         }
-        catch (KeyNotFoundException)
-        {
-            return null;
-        }
-        catch (StudioStoreUnavailableException unavailable)
+
+        // 2. The store itself, which may refuse to build: its own region, not a broken page (plan section 4.8).
+        StoreAvailability availability = registry.TryResolve(registration, provider, out IDocumentStore? store);
+        if (!availability.IsAvailable || store is null)
         {
             return new StoreOverview(
-                registration.Key,
+                storeKey,
                 registration.DisplayName,
                 IsAvailable: false,
-                unavailable.Reason,
+                availability.Message ?? "unknown reason",
                 DatabaseCardinality.Single,
                 DocumentTypeCount: 0,
                 PostgresVersion: null,
@@ -151,46 +158,25 @@ internal sealed class StoreInfoService : IStoreInfoService
                 Databases: []);
         }
 
-        IDocumentStore store = resolved.Store;
+        // 3. Its databases, from one enumeration.
+        IReadOnlyList<DatabaseOverview>? databases = await ListDatabasesAsync(storeKey, store, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (databases is null)
+        {
+            return null;
+        }
+
         IReadOnlyStoreOptions storeOptions = store.Options;
 
-        List<DatabaseOverview> databases = [];
-        try
-        {
-            IReadOnlyList<string> schemaNames = SchemaNames(storeOptions);
-            foreach (IMartenDatabase database in await store.Storage.AllDatabases().ConfigureAwait(false))
-            {
-                DatabaseOverview? described = await DescribeDatabaseAsync(registration.Key, database, schemaNames, cancellationToken)
-                    .ConfigureAwait(false);
-                if (described is not null)
-                {
-                    databases.Add(described);
-                }
-            }
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            // Every Overview load in every circuit, and the scope selector asks the same question: one
-            // Warning per store and kind of failure per window, Debug in between (event 9213).
-            string storeKey = registration.Key;
-            LogLevel level = throttle.WarningOrDebug("Store.Databases", storeKey, null, StudioLogThrottle.KindOf(exception));
-            logger.StoreDatabasesUnreadable(level, exception, storeKey);
-            databases.Add(new DatabaseOverview(
-                resolved.Database.Id.Identity,
-                resolved.Database.Id.Name,
-                resolved.Database.Id.Server,
-                [],
-                exception.Message));
-        }
-
         return new StoreOverview(
-            registration.Key,
+            storeKey,
             registration.DisplayName,
             IsAvailable: true,
             UnavailableMessage: null,
             storeOptions.Tenancy.Cardinality,
             CountVisibleDocumentTypes(storeOptions),
-            await PostgresVersionAsync(registration.Key, store, cancellationToken).ConfigureAwait(false),
+            await PostgresVersionAsync(storeKey, store, cancellationToken).ConfigureAwait(false),
             DescribeEvents(storeOptions),
             databases);
     }
@@ -236,30 +222,81 @@ internal sealed class StoreInfoService : IStoreInfoService
         }
     }
 
-    private async Task<DatabaseOverview?> DescribeDatabaseAsync(
+    /// <summary>
+    /// The databases of <paramref name="store" /> the visitor may see, from one <c>AllDatabases()</c> - or
+    /// <see langword="null" /> when the store has none, which the resolver always answered "not found" for an
+    /// empty identity, and which is therefore not drawn.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One enumeration per store per load.</b> This used to resolve the store's empty scope, enumerate, and
+    /// then resolve every database again for its authorization - and every resolution is an enumeration of its
+    /// own, so a load cost N + 2 of them per store. On a master-table or sharded tenancy each one is a read of
+    /// the lookup table (AGENTS.md D27), and the per-database resolution added nothing the policy does not
+    /// ask: the store was already built and the database already in hand. So the one list is filtered by the
+    /// question the resolver would have asked - the store policy, with this store, that database and no
+    /// tenant - through <see cref="StudioAuthorization.FilterAsync{T}" />, which fetches the visitor once for
+    /// the whole sweep.
+    /// </para>
+    /// <para>
+    /// <b>One card per identity.</b> Two databases with one <c>Id.Identity</c> - two master-table rows with the
+    /// same connection string are two <c>MartenDatabase</c> objects over one database - are one database to
+    /// the studio, which scopes by that identity and resolves it to the first match. The page keys its cards
+    /// by it, and two siblings under one Blazor <c>@key</c> end the circuit rather than the render (AGENTS.md
+    /// hard rule 10), so the first is drawn and its twin is not.
+    /// </para>
+    /// <para>
+    /// A store whose databases cannot be listed - a master database that is unreachable - breaks its own
+    /// region and nothing else: one card carrying the failure, with no identity, because none could be read.
+    /// It used to fail the whole page, since the resolver's enumeration came first and threw.
+    /// </para>
+    /// </remarks>
+    private async Task<IReadOnlyList<DatabaseOverview>?> ListDatabasesAsync(
         string storeKey,
-        IMartenDatabase database,
-        IReadOnlyList<string> schemaNames,
+        IDocumentStore store,
         CancellationToken cancellationToken)
     {
         try
         {
-            // Resolving again per database is the per-database authorization check, and it is the reason a
-            // visitor who may see one database of a store does not thereby see the others.
-            _ = await resolver
-                .ResolveAsync(new StudioScope(storeKey, database.Id.Identity, null), null, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (StudioNotAuthorizedException)
-        {
-            return null;
-        }
-        catch (KeyNotFoundException)
-        {
-            return null;
-        }
+            IReadOnlyList<IMartenDatabase> all = await store.Storage.AllDatabases().ConfigureAwait(false);
+            if (all.Count == 0)
+            {
+                return null;
+            }
 
-        return new DatabaseOverview(database.Id.Identity, database.Id.Name, database.Id.Server, schemaNames, null);
+            List<IMartenDatabase> distinct = [];
+            HashSet<string> identities = new(StringComparer.OrdinalIgnoreCase);
+            foreach (IMartenDatabase database in all)
+            {
+                if (identities.Add(database.Id.Identity))
+                {
+                    distinct.Add(database);
+                }
+            }
+
+            List<IMartenDatabase> visible = await authorization
+                .FilterAsync(distinct, x => new StudioScope(storeKey, x.Id.Identity, null), take: null, cancellationToken)
+                .ConfigureAwait(false);
+
+            IReadOnlyList<string> schemaNames = SchemaNames(store.Options);
+
+            List<DatabaseOverview> databases = new(visible.Count);
+            foreach (IMartenDatabase database in visible)
+            {
+                databases.Add(new DatabaseOverview(database.Id.Identity, database.Id.Name, database.Id.Server, schemaNames, null));
+            }
+
+            return databases;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Every Overview load in every circuit, and the scope selector asks the same question: one
+            // Warning per store and kind of failure per window, Debug in between (event 9213).
+            LogLevel level = throttle.WarningOrDebug("Store.Databases", storeKey, null, StudioLogThrottle.KindOf(exception));
+            logger.StoreDatabasesUnreadable(level, exception, storeKey);
+
+            return [new DatabaseOverview(string.Empty, string.Empty, string.Empty, [], exception.Message)];
+        }
     }
 
     private int CountVisibleDocumentTypes(IReadOnlyStoreOptions storeOptions)
@@ -297,9 +334,21 @@ internal sealed class StoreInfoService : IStoreInfoService
     /// The server version, read once per store per circuit.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>GetPostgresVersion()</c> is synchronous and opens a connection, so it is pushed onto the thread
     /// pool rather than run on the circuit's renderer. It answers for the store's default connection, so
     /// it is a fact about the store rather than about each of its databases.
+    /// </para>
+    /// <para>
+    /// <b>A store with no default database has no store-wide version, and that is a value</b>
+    /// (<see cref="HasDefaultDatabase" />). Marten's <c>GetPostgresVersion</c> opens
+    /// <c>Tenancy.Default.Database</c>, which a master-table or sharded tenancy refuses with
+    /// <see cref="NotSupportedException" /> - every operation there needs a tenant - and a static multi-tenancy with no
+    /// database marked <c>AsDefault()</c> does not have; its databases may sit on servers of different versions. So the
+    /// version is "unknown" without a read, at Debug: it used to be event 9214 at Warning, once a window for every such
+    /// host, for a state the host configured. A store that has a default database and cannot be read is still 9214,
+    /// throttled - that is an anomaly.
+    /// </para>
     /// </remarks>
     private async Task<string?> PostgresVersionAsync(string storeKey, IDocumentStore store, CancellationToken cancellationToken)
     {
@@ -308,20 +357,62 @@ internal sealed class StoreInfoService : IStoreInfoService
             return cached;
         }
 
-        string? version = await ReadPostgresVersionAsync(
-            store.Diagnostics.GetPostgresVersion,
-            options.Value.QueryTimeout,
-            cancellationToken).ConfigureAwait(false);
+        bool noDefaultDatabase = !HasDefaultDatabase(store.Options.Tenancy);
+
+        string? version = noDefaultDatabase
+            ? null
+            : await ReadPostgresVersionAsync(
+                store.Diagnostics.GetPostgresVersion,
+                options.Value.QueryTimeout,
+                cancellationToken).ConfigureAwait(false);
 
         if (version is null)
         {
-            // Once per circuit per store, and every circuit asks: event 9214, throttled across them.
-            LogLevel level = throttle.WarningOrDebug("Store.PostgresVersion", storeKey, null, kind: null);
+            // Once per circuit per store, and every circuit asks: event 9214, throttled across them - and Debug for a
+            // tenancy that has no default database to read, which is the host's configuration rather than a fault.
+            LogLevel level = noDefaultDatabase
+                ? LogLevel.Debug
+                : throttle.WarningOrDebug("Store.PostgresVersion", storeKey, null, kind: null);
             logger.PostgresVersionUnreadable(level, null, storeKey);
         }
 
         postgresVersions[storeKey] = version;
         return version;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="tenancy" /> has a default database for <c>GetPostgresVersion</c> to open - asked of the
+    /// tenancy's memory, never of a database.
+    /// </summary>
+    /// <remarks>
+    /// <c>Tenancy.Default</c> is a field or an in-memory lookup on every Marten tenancy (read at <c>V9.39.0</c> and
+    /// <c>V9.50.2</c>): <c>DefaultTenancy</c> and its tenant-partitioned subclass hold one; <c>StaticMultiTenancy</c> holds
+    /// the database marked <c>AsDefault()</c>, or none; <c>SingleServerMultiTenancy</c> takes the first tenant it has
+    /// built; <c>MasterTableTenancy</c> and <c>ShardedTenancy</c> throw <see cref="NotSupportedException" />. Nothing
+    /// here enumerates, builds or connects.
+    /// <para>
+    /// Anything else a host's own tenancy throws from <c>Default</c> is not an answer, so it is read as "has one": the
+    /// version read is attempted, fails the way it always did, and is event 9214 at the throttled Warning. It must never
+    /// leave here - this runs outside the version read's own guard, and a throw would take the Overview's stores region
+    /// with it.
+    /// </para>
+    /// </remarks>
+    internal static bool HasDefaultDatabase(ITenancy tenancy)
+    {
+        ArgumentNullException.ThrowIfNull(tenancy);
+
+        try
+        {
+            return tenancy.Default?.Database is not null;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return true;
+        }
     }
 
     /// <summary>

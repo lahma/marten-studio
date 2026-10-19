@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 namespace MartenStudio.Services;
 
 /// <summary>
-/// The capabilities - the mutating operations and the two reads beyond the store - as an enum, so a
+/// The capabilities - the mutating operations and the reads authorized like writes - as an enum, so a
 /// service method can name the one it is about and the guard can answer for it. Mirrors
 /// <see cref="MartenStudioCapabilities" /> property for property.
 /// </summary>
@@ -41,7 +41,16 @@ internal enum StudioCapability
     RunSql,
 
     /// <inheritdoc cref="MartenStudioCapabilities.BrowseDatabase" />
-    BrowseDatabase
+    BrowseDatabase,
+
+    /// <inheritdoc cref="MartenStudioCapabilities.ViewDatabaseActivity" />
+    ViewDatabaseActivity,
+
+    /// <inheritdoc cref="MartenStudioCapabilities.CompactStreams" />
+    CompactStreams,
+
+    /// <inheritdoc cref="MartenStudioCapabilities.RunLinqQueries" />
+    RunLinqQueries
 }
 
 /// <summary>Why a capability was refused.</summary>
@@ -108,18 +117,32 @@ internal sealed class StudioCapabilityGuard
     public static IReadOnlyList<StudioCapability> All { get; } = Enum.GetValues<StudioCapability>();
 
     /// <summary>
-    /// The capabilities that change nothing but read beyond the store's own documents and events - what
-    /// the capability chip lists under "Reads beyond the store" rather than under "Mutating operations".
+    /// The capabilities that change nothing and are still authorized like writes - what the capability
+    /// chip lists under "Reads authorized like writes" rather than under "Mutating operations".
     /// </summary>
     /// <remarks>
-    /// Both are reads treated as writes for authorization (D13): the service asks
+    /// <para>
+    /// Every one is a read treated as a write for authorization (D13): the service asks
     /// <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> with the capability named, and
     /// <see cref="MartenStudioOptions.ReadOnly" /> turns them off with everything else. A page that told a
     /// host "every mutating operation is off" when the console and the database browser were off too would
     /// be describing a narrower switch than the one they set.
+    /// </para>
+    /// <para>
+    /// Two of them read beyond the store's own documents and events (the console, the database browser),
+    /// one names other sessions and their statements (<c>ViewDatabaseActivity</c>), and one evaluates a typed
+    /// expression in this process (<c>RunLinqQueries</c>). What they share is the rule
+    /// <c>StudioActionLog.GetVisibleAsync</c> applies to an audit entry recorded under one of them: it names
+    /// what was read, so it is shown only to a visitor who may make the same read.
+    /// </para>
     /// </remarks>
     public static IReadOnlyList<StudioCapability> ReadsBeyondTheStore { get; } =
-        [StudioCapability.RunSql, StudioCapability.BrowseDatabase];
+    [
+        StudioCapability.RunSql,
+        StudioCapability.BrowseDatabase,
+        StudioCapability.ViewDatabaseActivity,
+        StudioCapability.RunLinqQueries,
+    ];
 
     /// <summary>
     /// Every capability that changes something - <see cref="All" /> without
@@ -205,6 +228,9 @@ internal sealed class StudioCapabilityGuard
             StudioCapability.ApplySchemaChanges => capabilities.ApplySchemaChanges,
             StudioCapability.RunSql => capabilities.RunSql,
             StudioCapability.BrowseDatabase => capabilities.BrowseDatabase,
+            StudioCapability.ViewDatabaseActivity => capabilities.ViewDatabaseActivity,
+            StudioCapability.CompactStreams => capabilities.CompactStreams,
+            StudioCapability.RunLinqQueries => capabilities.RunLinqQueries,
             _ => throw new ArgumentOutOfRangeException(
                 nameof(capability),
                 capability,

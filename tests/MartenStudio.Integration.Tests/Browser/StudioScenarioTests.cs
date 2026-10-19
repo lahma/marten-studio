@@ -42,7 +42,7 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     // ------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// Signing in as <c>admin</c> and opening <c>/marten</c> gives six tiles with numbers in them, over a
+    /// Signing in as <c>admin</c> and opening <c>/marten</c> gives seven tiles with numbers in them, over a
     /// circuit that is actually attached — proved by moving a control and watching the server re-render.
     /// </summary>
     [BrowserFact]
@@ -54,11 +54,11 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
 
             ILocator tiles = studio.Page.Locator(".ms-overview-tiles .ms-stat-card");
 
-            // The sixth, not the first: the tiles arrive as their regions do, so counting straight after
-            // the first one exists is counting a page that is still filling in.
-            await tiles.Nth(5).WaitForAsync();
+            // The last, not the first: the tiles arrive as their regions do, so counting straight after
+            // the first one exists is counting a page that is still filling in. The seventh is Health (0.4).
+            await tiles.Nth(6).WaitForAsync();
 
-            (await tiles.CountAsync()).Should().Be(6, "the Overview draws six tiles");
+            (await tiles.CountAsync()).Should().Be(7, "the Overview draws seven tiles");
 
             // The Overview's regions load independently of the first render - skeletons rather than
             // spinners, deliberately - so a tile can honestly read "unknown" for a moment before its own
@@ -264,9 +264,9 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
 
             ILocator tiles = studio.Page.Locator(".ms-overview-tiles .ms-stat-card");
 
-            // The sixth, for the reason the Overview scenario gives: the tiles arrive as their regions do.
-            await tiles.Nth(5).WaitForAsync();
-            (await tiles.CountAsync()).Should().Be(6);
+            // The last, for the reason the Overview scenario gives: the tiles arrive as their regions do.
+            await tiles.Nth(6).WaitForAsync();
+            (await tiles.CountAsync()).Should().Be(7);
 
             await studio.SetThemeAsync("dark");
 

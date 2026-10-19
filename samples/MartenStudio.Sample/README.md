@@ -17,7 +17,7 @@ Sign in at `/login` as `admin`, `ops` or `viewer` — the password is the user n
 | `--anonymous` | Maps the studio with `AllowAnonymous()` and draws a red banner. Never do this anywhere real. |
 | `--readonly` | Sets `MartenStudioOptions.ReadOnly`, which turns every mutating capability off. |
 | `--path /ops/marten` | Mounts the studio somewhere other than `/marten`, which exercises the sub-path re-rooting. |
-| `--allow-data-generation` | Maps the demo-data panel outside `Development`. See below. |
+| `--allow-data-generation` | Maps the demo-data panel and the "make it unhealthy" switches outside `Development`. See below. |
 
 ## Demo data
 
@@ -86,6 +86,49 @@ being in a sample is not a defence — samples are what people copy.
 | `POST /sample/generate/cancel` | Stops the running job after the batch it is in. |
 | `GET /sample/generate/status` | JSON: state, phase, counters, rows/s, elapsed, ETA, and the daemon's lag. |
 | `POST /sample/truncate` | Optional `confirmEventData=DELETE ALL EVENT DATA`. |
+
+## Make it unhealthy
+
+The sample starts with no configuration finding: its store turns on `Events.EnableExtendedProgressionTracking`
+(the studio's K02 would suggest it otherwise), and Marten 9 already has advanced async tracking on (K03); the
+throwaway server's own `synchronous_commit` Info (S02) still shows. Below the demo-data panel, under the same
+gates, four switches make the database unhealthy **on purpose**, so a demo or a screenshot can show the studio's
+Health page finding something real:
+
+| Switch | What it does | Look for |
+|---|---|---|
+| **Pinned gap** | A transaction draws the next number from the event sequence Marten uses (read from the store, never typed) and holds it open, while one marker event is committed above it. The daemon's high-water mark cannot pass the number. | D01 once the marker has waited a minute (it needs this host's daemon), C04 for the open transaction, and Projections › Explain. After it is off, Marten skips the abandoned number and D07 shows the skip as an Info for a day. |
+| **Idle in transaction** | A session begins a repeatable-read transaction, runs one statement and idles, holding its snapshot. | C04: a Warning after a minute, Critical at ten. |
+| **Bloated table** | Recreates the sample's own demo table `studio_sample.demo_bloat`, switches autovacuum off for that table alone, fills it with 30 000 rows and updates each once - half the table dead rows. | T07 at once (with autovacuum off there is nothing to wait for). |
+| **Pool hog** | Holds up to 90% of the store's own connection pool open and idle: at most `Maximum Pool Size` less two, at most what the server has room for less five, and it stops growing - rather than wait out the pool's `Timeout` - once no more than two other connections can still be had. Those are limits on what it takes, not a promise about the pool: the host's own work can still use up the connections it left. | C01 at once; C03 too on a server whose `max_connections` is close to the pool's size. |
+
+**Pinned gap and Pool hog run only on the throwaway database.** They reach beyond the demo's own rows - every async
+projection stalled, most of a server's connections taken - so on a database somebody configured
+(`ConnectionStrings:Marten`), which may be shared, they are refused unless the host was started with
+`--allow-data-generation`, which says outright that this database is the demo's to break. Development alone maps the
+panel but does not lift the refusal. The panel says which kind of database the host has, and why a switch is refused.
+
+Each switch is a background task of the sample's own on a connection of its own. It turns itself off after **10
+minutes**, and the panel says when; it can be turned off by hand; and the host turns every switch off when it
+stops. Whichever ends it, it cleans up: the transaction is rolled back, the connections are closed (the pool hog
+clears the pool, so they are not left idle in it), and the demo table's autovacuum is reset and the table vacuumed
+(or the table created again, if it was cancelled between being dropped and recreated). A clean-up that fails is not
+reported as off: the switch shows as Failed, with the reason, and the host logs a Warning. All four are off when the
+host starts - and a host that was killed with the bloated table on, which ran no clean-up, has autovacuum put back
+and the table vacuumed when it next starts. The panel shows, while a switch is on, what it is holding, when it turns
+itself off and which check codes to look for; the Health page checks once a minute while it is open.
+
+The demo table is declared to Marten as one of `StoreOptions.Storage.ExtendedSchemaObjects` (and created when the
+host starts), because the studio's table checks judge only the tables a store declares. It holds nothing but the
+switch's rows, it is not a document or an event table, and its name does not start with `mt_`. The pinned gap's marker
+is an event type of the sample's own, `UnhealthyDemoMarker`, registered with the store so that E05 never calls it
+unregistered; no projection reads it.
+
+| | |
+|---|---|
+| `POST /sample/unhealthy/{switch}/on` | `pinned-gap`, `idle-in-transaction`, `bloated-table` or `pool-hog`. Answers at once. |
+| `POST /sample/unhealthy/{switch}/off` | Waits, for a bounded time, until the switch has cleaned up. |
+| `GET /sample/unhealthy/status` | JSON: each switch's state, what it is doing, when it turns itself off, and its codes. |
 
 ## Responsiveness tests
 

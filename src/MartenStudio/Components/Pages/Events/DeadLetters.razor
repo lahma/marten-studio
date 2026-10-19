@@ -28,6 +28,16 @@
         stopped or still skipping: discarding the record forgets the failure, it does not fix it.
     </p>
 
+    @* Reached by its address while the host hides DeadLetterEvent (the nav entry is gone): the one sentence that
+       says why, and nothing that would read, filter or change a dead letter. *@
+    @if (Hidden)
+    {
+        <div class="ms-empty ms-dead-letters-hidden">
+            <p class="ms-empty-title">@DeadLetterVisibility.HiddenMessage</p>
+        </div>
+    }
+    else
+    {
     <div class="ms-event-filters">
         <div class="ms-event-filter">
             <label class="ms-event-filter-label" for="ms-dl-projection">Projection</label>
@@ -122,7 +132,7 @@
                             <td class="ms-table-cell"><TimeAgo Timestamp="row.Timestamp" /></td>
                             <td class="ms-table-cell ms-table-cell-mono">@row.TenantId</td>
                             <td class="ms-table-cell ms-table-cell-actions">
-                                <button type="button" class="ms-button ms-btn-sm" @onclick="() => ToggleAsync(row.Id, row.EventSequence)">
+                                <button type="button" class="ms-button ms-btn-sm" @onclick="() => ToggleAsync(row.Id, row.EventSequence, row.TenantId)">
                                     @(expanded == row.Id ? "Hide" : "Details")
                                 </button>
                             </td>
@@ -156,7 +166,7 @@
                                                            DotNetType="@offending.DotNetType"
                                                            Timestamp="offending.Timestamp"
                                                            StreamId="@offending.StreamId"
-                                                           StreamHref="@StreamHref(offending.StreamId)"
+                                                           StreamHref="@StreamHref(offending.StreamId, offending.TenantId)"
                                                            ShowStream="true"
                                                            IsArchived="offending.IsArchived"
                                                            IsSkipped="offending.IsSkipped"
@@ -192,7 +202,7 @@
 
                                                 <button type="button"
                                                         class="ms-button ms-dead-letter-skip"
-                                                        disabled="@(working || !SupportsSkipping || !mayManage)"
+                                                        disabled="@(working || !SupportsSkipping || !mayManage || PerTenantSequences)"
                                                         title="@SkipTitle"
                                                         @onclick="() => OpenSkipAsync(row.EventSequence)">
                                                     Skip event
@@ -248,6 +258,7 @@
                 <a class="ms-button" href="@PageHref(OffsetValue + PageSize)">Next</a>
             }
         </nav>
+    }
     }
 </div>
 
@@ -354,6 +365,13 @@
     private string? signature;
 
     /// <summary>
+    /// Whether the host hides <c>DeadLetterEvent</c>: asked of the options, failing closed
+    /// (<see cref="DeadLetterVisibility" />), or said by the service. The service refuses either way; this is what
+    /// keeps a page reached by its address from reading anything and from offering what it would refuse.
+    /// </summary>
+    private bool Hidden => !DeadLetterVisibility.IsVisible(Options.Value.IsDocumentTypeVisible, out _) || page?.IsHidden == true;
+
+    /// <summary>
     /// Whether <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> lets <em>this</em> visitor
     /// discard, skip or rewind in the scope on screen.
     /// </summary>
@@ -420,9 +438,18 @@
 
     private string SkipTitle => !mayManage
         ? ManageRefusal
-        : SupportsSkipping
-            ? "Marks the event skipped so the daemon steps over it"
-            : "This store has no mt_events.is_skipped column: the host did not enable event skipping";
+        : PerTenantSequences
+            ? StreamCompactionRules.SkipNeedsOneSequence
+            : SupportsSkipping
+                ? "Marks the event skipped so the daemon steps over it"
+                : "This store has no mt_events.is_skipped column: the host did not enable event skipping";
+
+    /// <summary>
+    /// Whether this store numbers events per tenant (<c>UseTenantPartitionedEvents</c>), where Marten's skip and rewind
+    /// reach every tenant's event of a number: both are refused by the service and disabled here with its sentence
+    /// (SEC1-fix4), and an event is looked up in its dead letter's own tenant.
+    /// </summary>
+    private bool PerTenantSequences => shape is { PerTenantSequences: true };
 
     /// <summary>
     /// Whether the daemon this process hosts could be asked to rewind <paramref name="projectionName" />.
@@ -436,6 +463,7 @@
     /// </remarks>
     private bool CanRewind(string projectionName) =>
         mayManage
+        && !PerTenantSequences
         && projections is { Daemon.IsHostedHere: true }
         && FindProjection(projectionName) is { IsAsync: true };
 
@@ -448,6 +476,11 @@
         if (!mayManage)
         {
             return ManageRefusal;
+        }
+
+        if (PerTenantSequences)
+        {
+            return StreamCompactionRules.RewindNeedsOneSequence;
         }
 
         if (projections is null)
@@ -616,6 +649,17 @@
             return;
         }
 
+        // A hidden type is read by nothing on this page - not the shape, not the list, not the projections.
+        if (!DeadLetterVisibility.IsVisible(Options.Value.IsDocumentTypeVisible, out _))
+        {
+            page = DeadLetterPage.Hidden;
+            shape = null;
+            projections = null;
+            mayManage = false;
+            loading = false;
+            return;
+        }
+
         loading = true;
         expanded = null;
         offending = null;
@@ -638,15 +682,15 @@
             // information_schema question, through the studio's own cached column catalog, with no Marten
             // call in it.
             //
-            // The list is a Marten session query over DeadLetterEvent, and every Marten query opens with
-            // EnsureStorageExistsAsync for the document type - which on a database that has never run the
-            // daemon creates mt_doc_deadletterevent and Marten's whole helper-function set under the
-            // database's own AutoCreate. Proven live by NavIndicatorNoDdlLiveTests: a studio that wrote
-            // twenty functions and a table because somebody opened a tab.
+            // The list used to be a Marten session query over DeadLetterEvent, and every Marten LINQ
+            // terminal opens with EnsureStorageExistsAsync for the document type - which on a database
+            // that has never run the daemon created mt_doc_deadletterevent and Marten's whole
+            // helper-function set under the database's own AutoCreate (NavIndicatorNoDdlLiveTests). It is
+            // the studio's own SQL now (DeadLetterQueries), and safe on its own; this branch is an
+            // optimisation, not the guard.
             //
             // Nothing is lost by not asking. A dead letter is recorded by the async daemon while it
-            // applies an event, so a database with no event tables has never had one - the list would
-            // have been empty, at the cost of a migration.
+            // applies an event, so a database with no event tables has never had one.
             if (shape.EventTablesExist)
             {
                 page = await Events.ListDeadLettersAsync(scope, new DeadLetterQuery
@@ -678,7 +722,7 @@
         }
     }
 
-    private async Task ToggleAsync(Guid id, long sequence)
+    private async Task ToggleAsync(Guid id, long sequence, string eventTenantId)
     {
         actionError = null;
 
@@ -702,7 +746,14 @@
 
         try
         {
-            offending = await Events.GetEventBySequenceAsync(scope, sequence, pageCancellation.Token);
+            // Under per-tenant sequences #N names one event in each tenant, so with "All tenants" the lookup is pinned to
+            // the dead letter's own tenant, as the daemon recorded it - not whichever tenant's #N comes back first
+            // (SEC1-fix4). Elsewhere a sequence is the store's and the scope as selected reads it.
+            StudioScope lookup = PerTenantSequences && scope.TenantId is null && !string.IsNullOrEmpty(eventTenantId)
+                ? scope with { TenantId = eventTenantId }
+                : scope;
+
+            offending = await Events.GetEventBySequenceAsync(lookup, sequence, pageCancellation.Token);
         }
         catch (OperationCanceledException)
         {
@@ -919,8 +970,18 @@
                 new("offset", offset > 0 ? offset.ToString(CultureInfo.InvariantCulture) : null),
             ]);
 
-    private string StreamHref(string streamId) =>
-        EventLinks.ToStream(Options.Value, State.ActiveScope, streamId);
+    /// <summary>
+    /// The offending event's stream, in the event's own tenant when the scope names none and the event store is
+    /// conjoined - so a stream id two tenants share opens that tenant's stream rather than the stream page's "choose a
+    /// tenant" answer (SEC1-fix5). Elsewhere the link keeps the scope as selected.
+    /// </summary>
+    private string StreamHref(string streamId, string? eventTenantId) =>
+        EventLinks.ToStream(
+            Options.Value,
+            State.ActiveScope is { TenantId: null } all && shape is { EventsConjoined: true } && !string.IsNullOrEmpty(eventTenantId)
+                ? all with { TenantId = eventTenantId }
+                : State.ActiveScope,
+            streamId);
 
     private string Signature() =>
         string.Join(

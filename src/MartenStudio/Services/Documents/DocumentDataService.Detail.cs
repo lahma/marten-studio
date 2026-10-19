@@ -1,11 +1,9 @@
 using System.Globalization;
 
-using JasperFx.Events;
 using JasperFx.MultiTenancy;
 
 using Marten;
 using Marten.Schema;
-using Marten.Services;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
@@ -211,25 +209,52 @@ internal sealed partial class DocumentDataService
 
         try
         {
-            // Streams are read through a Marten session rather than raw SQL: FetchStreamStateAsync already
-            // knows which identity style this store uses and which table that means.
+            // The studio's own SQL on the scope's own database, never session.Events.FetchStreamStateAsync: that
+            // opens with EnsureStorageExistsAsync(typeof(StreamAction)) - read at Marten V9.39.0 and V9.50.2 - which
+            // under the database's AutoCreate applies the whole event store's migration the first time the process
+            // asks, and on a store with a HiLo id creates mt_hilo on the way (hard rule 14). A document's detail
+            // page asks this on every load.
             //
-            // Pinned to the scope's database with SessionOptions.ForDatabase. QuerySession(tenant) routes
-            // through the store's own tenancy, which on a multi-database store picks the database that
-            // tenant maps to - not the one the visitor selected and the store policy authorized - and
-            // QuerySession() with no argument picks the default database outright.
-            await using IQuerySession session = resolved.Store.QuerySession(
-                resolved.TenantId is { } tenant
-                    ? SessionOptions.ForDatabase(tenant, resolved.Database)
-                    : SessionOptions.ForDatabase(resolved.Database));
+            // The tenant predicate is the stream list's, so the link is offered exactly when the stream page it
+            // opens will find the stream. Marten's call filtered a conjoined store on the session's tenant, which
+            // with no tenant in scope was *DEFAULT* - a link that never appeared for a stream the page shows.
+            string schema = resolved.Store.Options.Events.DatabaseSchemaName;
 
-            if (resolved.Store.Options.Events.StreamIdentity == StreamIdentity.AsGuid)
+            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            TableColumns streams = await columnCatalog
+                .GetAsync(connection, schema, EventTableInfo.StreamsTable, cancellationToken)
+                .ConfigureAwait(false);
+
+            var table = new EventTableInfo
             {
-                return Guid.TryParse(id, CultureInfo.InvariantCulture, out Guid streamId) &&
-                       await session.Events.FetchStreamStateAsync(streamId, cancellationToken).ConfigureAwait(false) is not null;
+                Schema = schema,
+                StreamIdentity = resolved.Store.Options.Events.StreamIdentity,
+                StreamColumns = [.. streams.Columns.Select(static x => x.Name)],
+            };
+
+            // No mt_streams is no stream, and nothing is created to find that out.
+            if (table.StreamColumns.Count == 0)
+            {
+                return false;
             }
 
-            return await session.Events.FetchStreamStateAsync(id, cancellationToken).ConfigureAwait(false) is not null;
+            IdParseResult parsed = table.ParseStreamId(id);
+            if (!parsed.Success)
+            {
+                return false;
+            }
+
+            await using NpgsqlCommand command = StreamReadQueries.BuildStreamExists(table, parsed.Value!, resolved.TenantId);
+            command.Connection = connection;
+            command.CommandTimeout = CommandTimeoutSeconds;
+
+            await using NpgsqlDataReader reader = await command
+                .ExecuteReaderAsync(System.Data.CommandBehavior.SingleResult, cancellationToken)
+                .ConfigureAwait(false);
+
+            return await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

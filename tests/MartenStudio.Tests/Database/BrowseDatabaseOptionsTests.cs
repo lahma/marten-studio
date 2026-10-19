@@ -103,11 +103,17 @@ public class BrowseDatabaseOptionsTests
     [Fact]
     public void The_reads_beyond_the_store_and_the_mutating_operations_partition_every_capability()
     {
-        StudioCapabilityGuard.ReadsBeyondTheStore.Should().Equal(StudioCapability.RunSql, StudioCapability.BrowseDatabase);
+        // 0.4: ViewDatabaseActivity and RunLinqQueries are reads authorized like writes too; CompactStreams is a write.
+        StudioCapabilityGuard.ReadsBeyondTheStore.Should().Equal(
+            StudioCapability.RunSql,
+            StudioCapability.BrowseDatabase,
+            StudioCapability.ViewDatabaseActivity,
+            StudioCapability.RunLinqQueries);
         StudioCapabilityGuard.Mutating.Should().NotContain(StudioCapabilityGuard.ReadsBeyondTheStore);
+        StudioCapabilityGuard.Mutating.Should().Contain(StudioCapability.CompactStreams);
         StudioCapabilityGuard.Mutating.Concat(StudioCapabilityGuard.ReadsBeyondTheStore)
             .Should().BeEquivalentTo(StudioCapabilityGuard.All);
-        StudioCapabilityGuard.All.Should().HaveCount(10);
+        StudioCapabilityGuard.All.Should().HaveCount(13);
     }
 
     [Fact]

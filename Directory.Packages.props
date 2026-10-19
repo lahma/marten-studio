@@ -7,21 +7,57 @@
 
   <!-- The complete package budget. Adding anything here requires a recorded decision in AGENTS.md. -->
 
+  <!--
+    The Marten version, defined once and tested at both ends.
+
+    MartenStudioMartenFloor is the version the shipped package depends on (`Marten >= floor` in its
+    nuspec) and the one every build, test and pack uses unless told otherwise. 9.39.0 is a SECURITY
+    floor, not an API one: it fixes GHSA-q4xm-rhx9-xjm4 (GroupBy HAVING operand, critical, affects
+    9.13.0 - 9.38.0) and GHSA-frqq-p5g3-8jq5 (full-text regConfig on the ranking path, critical,
+    affects 9.31.0 - 9.38.0). Neither was in the GitHub advisory database on 2026-10-15, and the day
+    one is, restore at any lower floor fails with NU1904 under TreatWarningsAsErrors - the same wall
+    as GHSA-rfx3-98h7-v3xp at <= 9.12.0. Nothing the studio calls is missing at 9.31.0; the floor
+    moved so that it cannot break CI from outside, and so that the package never asks a host to stay
+    on an injectable Marten. Full record in AGENTS.md, *Package budget changes*, 2026-10-15.
+
+    MartenStudioMartenLatest is the newest 9.x CI tests: the marten-latest workflow runs
+    `dotnet fallout Test` with MARTEN_VERSION=latest, the Fallout parameter `marten-version`. It is an
+    exact version, never a floating `9.*`: a red main caused by an upstream release would be nobody's
+    pull request's fault. To bump it, change the value here, run both suites at it (the Fallout
+    parameter set to `latest`, or `dotnet test` with -p:MartenStudioMartenVersion=<new>), and fix or
+    record every difference in the same pull request.
+
+    MartenStudioMartenVersion is what is actually restored. Leave it empty and it is the floor; set it
+    with -p:MartenStudioMartenVersion=9.50.2, or through the Fallout parameter, which resolves `floor`
+    and `latest` from the two properties above. Pack always packs at the floor and refuses anything
+    else - the build's Pack target and a guard in src/MartenStudio/MartenStudio.csproj both say so -
+    because a package packed at a newer Marten would silently raise every host's floor.
+
+    (No double hyphen anywhere in an XML comment: it is not well-formed XML, and MSBuild answers a
+    malformed Directory.Packages.props with NU1015 on every project rather than with a parse error.)
+  -->
+  <PropertyGroup Label="Marten version">
+    <MartenStudioMartenFloor>9.39.0</MartenStudioMartenFloor>
+    <MartenStudioMartenLatest>9.50.2</MartenStudioMartenLatest>
+    <MartenStudioMartenVersion Condition="'$(MartenStudioMartenVersion)' == ''">$(MartenStudioMartenFloor)</MartenStudioMartenVersion>
+  </PropertyGroup>
+
   <ItemGroup Label="Library (src/MartenStudio)">
     <!-- The only PackageReference the shipped RCL makes. Everything else it needs is in the
          Microsoft.AspNetCore.App shared framework (FrameworkReference), which is what keeps the
          package from pinning an ASP.NET Core patch on its host. Floor, not exact pin: a consumer
          on a newer Marten 9.x must not be forced down. Npgsql arrives transitively via Weasel.Postgresql.
 
-         9.31.0 is the LOWEST stable 9.x this repository restores, compiles and passes both suites on -
-         bisected over every published stable 9.x, 2026-09-19. 9.30.0 fails: Marten gated
+         The floor is 9.39.0 for the two advisories above. Below it, the 2026-09-19 bisection still
+         holds as the record of what the code itself needs: 9.31.0 is the lowest stable 9.x this
+         repository restores, compiles and passes both suites on. 9.30.0 fails: Marten gated
          EventProgressionTable's extended columns on Events.EnableExtendedProgressionTracking until
          9.31.0 (#5309), so ExtendedProgressionLiveTests cannot even write its row
          ("42703: column heartbeat of relation mt_event_progression does not exist"). Below that,
          9.22.4 is the first with ShardName.HighWaterMarkFor, 9.20.0 the first with
          JasperFx.Events.Daemon.ShardFailure, and everything <= 9.12.0 fails restore outright with
          NU1904 for GHSA-rfx3-98h7-v3xp. Full record in AGENTS.md, *Package budget changes*. -->
-    <PackageVersion Include="Marten" Version="9.31.0" />
+    <PackageVersion Include="Marten" Version="$(MartenStudioMartenVersion)" />
     <!--
       blazor.web.js. As of .NET 10 it is not in the shared framework and not embedded in any ASP.NET
       Core assembly: it lives in this pack, which the SDK resolves only for a project whose

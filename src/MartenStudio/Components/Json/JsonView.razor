@@ -106,6 +106,7 @@
                                  ChildCount="node.ChildCount"
                                  IsContainer="node.IsContainer"
                                  IsArray="node.Kind == JsonValueKind.Array"
+                                 NumberPreview="@_numberArrays.GetValueOrDefault(row.NodeId)"
                                  Expanded="_expanded.Contains(row.NodeId)"
                                  SetSize="row.SetSize"
                                  PosInSet="row.PosInSet"
@@ -151,8 +152,14 @@
 </div>
 
 @code {
+    /// <summary>How many numbers a collapsed number array shows before its "…".</summary>
+    private const int NumberArrayPreview = 3;
+
     private readonly HashSet<int> _expanded = [];
     private readonly HashSet<int> _expandedStrings = [];
+
+    /// <summary>The arrays drawn collapsed as numbers - an embedding - by node id, with the start of each (see <see cref="FindNumberArrays" />).</summary>
+    private readonly Dictionary<int, string> _numberArrays = [];
     private readonly Dictionary<int, int> _windows = [];
     private readonly List<JsonRow> _rows = [];
     private readonly string _menuElementId = "ms-json-menu-" + Guid.NewGuid().ToString("N")[..8];
@@ -271,6 +278,13 @@
     [Parameter]
     public int LongString { get; set; } = JsonModelOptions.Default.LongString;
 
+    /// <summary>
+    /// The fewest numbers an array of numbers, not all whole, needs to be drawn collapsed as an embedding
+    /// (<see cref="JsonModelOptions.CollapsedNumberArray" />).
+    /// </summary>
+    [Parameter]
+    public int CollapsedNumberArray { get; set; } = JsonModelOptions.Default.CollapsedNumberArray;
+
     /// <summary>The most rows the tree will put in the DOM at once.</summary>
     [Parameter]
     public int MaxVisibleRows { get; set; } = 2_000;
@@ -361,6 +375,7 @@
         ChildWindow = ChildWindow,
         LargeContainer = LargeContainer,
         LongString = LongString,
+        CollapsedNumberArray = CollapsedNumberArray,
     };
 
     /// <summary>Everything a search leaves behind: the term, the hits, the cursor and the badges.</summary>
@@ -389,7 +404,69 @@
         _rawMode = StartInRawView || !_model.HasNodes;
         _downloadHref = BuildDownloadHref();
 
+        FindNumberArrays(options.CollapsedNumberArray);
         ExpandToDepth(AutoExpandDepth, AutoExpandNodeBudget);
+    }
+
+    /// <summary>
+    /// Every array of at least <see cref="JsonModelOptions.CollapsedNumberArray" /> numbers and nothing else, at least
+    /// one of them with a fraction or an exponent, with the start of it - "[0.0123, -0.0441, 0.2, …]".
+    /// </summary>
+    /// <remarks>
+    /// That is the shape an embedding takes inside a Marten document: Marten.PgVector stores one as a <c>float[]</c>
+    /// member of the document's JSON and casts it to <c>vector(n)</c> at query time, so a document with a
+    /// 1536-dimension embedding is 1536 rows of numbers that mean nothing one at a time. Such an array is drawn
+    /// collapsed with its first components and its length, and auto-expansion and the depth control pass over it;
+    /// its toggle, Expand all and the copy menu still open and copy the whole of it. Found once per model, over the
+    /// children the model already holds contiguously.
+    /// </remarks>
+    private void FindNumberArrays(int minimum)
+    {
+        _numberArrays.Clear();
+
+        if (!_model.HasNodes || minimum < 1)
+        {
+            return;
+        }
+
+        foreach (var node in _model.Nodes)
+        {
+            if (node.Kind != JsonValueKind.Array || node.ChildCount < minimum || node.ChildStart < 0)
+            {
+                continue;
+            }
+
+            bool numbers = true;
+            bool fractional = false;
+            for (int i = node.ChildStart; i < node.ChildStart + node.ChildCount; i++)
+            {
+                if (_model.Nodes[i].Kind != JsonValueKind.Number)
+                {
+                    numbers = false;
+                    break;
+                }
+
+                fractional |= _model.Nodes[i].Raw.AsSpan().IndexOfAny('.', 'e', 'E') >= 0;
+            }
+
+            // Only numbers, and not only whole ones: an embedding is floats, and an array of ids or counts is
+            // read element by element as it always was.
+            if (!numbers || !fractional)
+            {
+                continue;
+            }
+
+            var preview = new System.Text.StringBuilder("[");
+            int shown = Math.Min(node.ChildCount, NumberArrayPreview);
+
+            for (int i = 0; i < shown; i++)
+            {
+                preview.Append(i == 0 ? string.Empty : ", ").Append(_model.Nodes[node.ChildStart + i].Display);
+            }
+
+            preview.Append(node.ChildCount > shown ? ", …]" : "]");
+            _numberArrays[node.Id] = preview.ToString();
+        }
     }
 
     private string? BuildDownloadHref()
@@ -419,7 +496,7 @@
             var added = new List<int>();
             foreach (var node in _model.Nodes)
             {
-                if (node.Depth == level && node.HasChildren && _expanded.Add(node.Id))
+                if (node.Depth == level && node.HasChildren && !_numberArrays.ContainsKey(node.Id) && _expanded.Add(node.Id))
                 {
                     added.Add(node.Id);
                 }

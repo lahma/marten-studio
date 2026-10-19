@@ -103,6 +103,13 @@ internal class StudioComponentContext : BunitContext
         // Every live page builds its own loop from this, so the circuit's container never tracks one.
         Services.AddScoped<StudioLiveUpdatesFactory>();
 
+        // H1: the Overview's Health region, the Health page and the sidebar's badge all read through this;
+        // the mutes and the toast memory are the real ones, because they are per circuit and cheap.
+        Health = new MartenStudio.Tests.Health.FakeHealthService();
+        Services.AddSingleton<MartenStudio.Services.Health.IHealthService>(Health);
+        Services.AddSingleton<MartenStudio.Services.Health.HealthMutes>();
+        Services.AddSingleton<MartenStudio.Services.Health.HealthAlerts>();
+
         Services.AddSingleton<IAuthorizationService>(AuthorizationService);
         Services.AddSingleton<AuthenticationStateProvider>(AuthenticationState);
         Services.AddSingleton<StudioAuthorization>();
@@ -163,6 +170,9 @@ internal class StudioComponentContext : BunitContext
     /// <summary>What the sidebar's badges are told.</summary>
     public FakeNavIndicatorService NavBadges { get; }
 
+    /// <summary>What the Health page, the Overview's Health region and the badge are told (H1).</summary>
+    public MartenStudio.Tests.Health.FakeHealthService Health { get; }
+
     /// <summary>What document detail's "referenced by" panel and the relationships screen are given.</summary>
     public FakeRelationshipDataService RelationshipData { get; }
 
@@ -196,6 +206,31 @@ internal class StudioComponentContext : BunitContext
 
     /// <summary>Where the browser is now.</summary>
     public string CurrentUri => Services.GetRequiredService<NavigationManager>().Uri;
+
+    /// <summary>
+    /// Disposes every component this context rendered and waits for their asynchronous disposal - bUnit's own
+    /// <see cref="BunitContext.DisposeComponentsAsync" />, run on the renderer's dispatcher, which is the only place
+    /// bUnit 2.11.3 runs it reliably.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// bUnit 2.11.3's <c>BunitRenderer.DisposeComponents</c> hands its work to <c>Dispatcher.InvokeAsync</c> and clears
+    /// its list of root components straight after. From an idle dispatcher the work runs inline, before the clear. From a
+    /// busy one it is queued, the list is empty by the time it runs, nothing is disposed, and the task completes
+    /// successfully all the same (bUnit-dev/bUnit#1939, fixed in bUnit 2.12.5 by 945163b). A studio page leaves its
+    /// dispatcher busy as a matter of course: <c>StudioLiveUpdates</c> posts its loop's first continuation to the
+    /// renderer's synchronization context during the first render, so the check a following <c>WaitForAssertion</c>
+    /// makes is queued behind it, and that check releases the test thread before its own work item has finished. That
+    /// was FLK2: the Sessions page still holding its pool lease after a "disposal" that had disposed nothing.
+    /// </para>
+    /// <para>
+    /// Called on the dispatcher, bUnit's <c>InvokeAsync</c> runs the work inline - before the clear - whatever else is
+    /// queued, and nothing else can run on the dispatcher while it does. The member hides rather than overrides because
+    /// the base one is not virtual; every test holds its context as this type or a derived one, so every caller gets
+    /// this one. Remove it once bUnit is past 2.11.3.
+    /// </para>
+    /// </remarks>
+    public new Task DisposeComponentsAsync() => Renderer.Dispatcher.InvokeAsync(base.DisposeComponentsAsync);
 
     /// <summary>
     /// Turns the per-store policy on and says which stores the visitor passes for. Every other store is

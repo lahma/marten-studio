@@ -7,6 +7,7 @@ using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Health;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
 using MartenStudio.Services.Relationships;
@@ -89,6 +90,7 @@ public class CapabilityGatingMatrixTests
         new(typeof(IEventDataService), nameof(IEventDataService.DiscardDeadLetterAsync), StudioCapability.ManageDeadLetters),
         new(typeof(IEventDataService), nameof(IEventDataService.SkipEventAsync), StudioCapability.ManageDeadLetters),
         new(typeof(IEventDataService), nameof(IEventDataService.RewindSubscriptionAsync), StudioCapability.ManageDeadLetters),
+        new(typeof(IEventDataService), nameof(IEventDataService.CompactStreamAsync), StudioCapability.CompactStreams),
 
         new(typeof(IProjectionDataService), nameof(IProjectionDataService.StartAgentAsync), StudioCapability.ControlDaemon),
         new(typeof(IProjectionDataService), nameof(IProjectionDataService.StopAgentAsync), StudioCapability.ControlDaemon),
@@ -103,6 +105,10 @@ public class CapabilityGatingMatrixTests
         new(typeof(ISchemaDataService), nameof(ISchemaDataService.ApplyAsync), StudioCapability.ApplySchemaChanges),
 
         new(typeof(IQueryService), nameof(IQueryService.RunSqlAsync), StudioCapability.RunSql),
+
+        // F7: a read gated like a write that refuses by throwing, exactly as the console does - so it sits
+        // here, beside RunSqlAsync, and gets the same three refusals.
+        new(typeof(ILinqQueryService), nameof(ILinqQueryService.RunAsync), StudioCapability.RunLinqQueries),
     ];
 
     /// <summary>
@@ -135,6 +141,10 @@ public class CapabilityGatingMatrixTests
         new(typeof(ITableRowService), nameof(ITableRowService.GetReferencesAsync), StudioCapability.BrowseDatabase),
         new(typeof(ITableRowService), nameof(ITableRowService.CountExactAsync), StudioCapability.BrowseDatabase),
         new(typeof(ITableRowService), nameof(ITableRowService.GetCellAsync), StudioCapability.BrowseDatabase),
+
+        // H3: Database > Sessions' details - process ids, roles, client addresses, application names and
+        // statements - refused as a value and audited; the summary beside it is a plain read.
+        new(typeof(ISessionActivityService), nameof(ISessionActivityService.GetDetailsAsync), StudioCapability.ViewDatabaseActivity),
     ];
 
     /// <summary>
@@ -160,10 +170,11 @@ public class CapabilityGatingMatrixTests
         ],
         [typeof(IEventDataService)] =
         [
-            "AggregateAtVersionAsync", "CountDeadLettersAsync", "DescribeAsync", "GetEventBySequenceAsync",
-            "GetEventStoreCountsAsync", "GetFeedAsync", "GetHighestSequenceAsync", "GetRecentStreamsAsync",
+            "AggregateAtVersionAsync", "CountDeadLettersAsync", "DescribeAsync", "DescribeCompactionAsync",
+            "FindStreamsByNaturalKeyAsync", "GetEventBySequenceAsync", "GetEventStoreCountsAsync",
+            "GetEventTagsAsync", "GetFeedAsync", "GetHighestSequenceAsync", "GetRecentStreamsAsync",
             "GetStreamAsync", "GetStreamEventsAsync", "ListAggregateCandidatesAsync", "ListDeadLettersAsync",
-            "ListEventTypesAsync", "ListStreamsAsync",
+            "ListEventTypesAsync", "ListStreamsAsync", "ListTagTypesAsync",
         ],
         [typeof(IProjectionDataService)] =
         [
@@ -171,6 +182,10 @@ public class CapabilityGatingMatrixTests
             // lookup of a running operation by its handle, which reads the tracker and touches nothing.
             "DescribeRebuildAsync", "FindOperation", "GetProjectionsAsync", "GetSummaryAsync",
             "RunningOperationsAsync", "SubscribeToLiveStateAsync",
+
+            // H2: D01's "Explain". ViewDatabaseActivity decides whether the sessions that could hold the mark are
+            // named, as the health report's evidence is - a redaction, never a refusal (see Reserved).
+            "ExplainHighWaterAsync",
         ],
         [typeof(ISchemaDataService)] =
         [
@@ -178,11 +193,48 @@ public class CapabilityGatingMatrixTests
             "PreviewAsync", "TablesAsync",
         ],
         [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync"],
+        [typeof(ILinqQueryService)] = ["DescribeAsync"],
         [typeof(IDatabaseObjectService)] =
         [
             "GetDefinitionAsync", "GetObjectAsync", "GetOverviewAsync", "GetSequenceValueAsync", "ListAsync",
         ],
         [typeof(ITableRowService)] = ["CountExactAsync", "GetCellAsync", "GetReferencesAsync", "GetRowAsync", "ListRowsAsync"],
+
+        // H1: the health advisor reads; ViewDatabaseActivity decides what of a report a visitor is shown, per
+        // finding and per piece of evidence, and refuses nothing - the read that refuses on it is the sessions one.
+        [typeof(IHealthService)] = ["CachedFindingsAsync", "GetReportAsync", "GlanceAsync"],
+
+        // H3: the summary is the store policy's for the database as a whole; the details are a gated read.
+        [typeof(ISessionActivityService)] = ["GetDetailsAsync", "GetSummaryAsync"],
+    };
+
+    /// <summary>
+    /// Capabilities that exist ahead of the service member that will be gated on them, and why.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 0.4 lands every public-surface addition in one packet (H1), so that later packets never contend for the
+    /// API baseline - which means capabilities exist before the reads and writes that need them do (three did;
+    /// EV's compaction has since moved <c>CompactStreams</c> into <see cref="Mutating" />).
+    /// "A capability no method requires is a capability nothing enforces" is still the rule; this list is
+    /// where the exception is written down, naming the packet that ends it.
+    /// <see cref="A_reserved_capability_is_required_by_nothing_yet" /> fails the moment a service starts to
+    /// <c>Require</c> one, so its packet has to move it into <see cref="Mutating" /> or <see cref="GatedReads" />
+    /// and give it the three refusals.
+    /// </para>
+    /// <para>
+    /// <c>ViewDatabaseActivity</c> left this list with H3: <c>ISessionActivityService.GetDetailsAsync</c> requires
+    /// it and is a gated read above. The health report still consumes it as a redaction rather than a refusal
+    /// (<c>HealthGateTests</c>, <c>ConnectionFindingGatesTests</c>).
+    /// </para>
+    /// <para>
+    /// <c>CompactStreams</c> left it with EV (<c>IEventDataService.CompactStreamAsync</c>, Mutating) and
+    /// <c>RunLinqQueries</c> with F7 (<c>ILinqQueryService.RunAsync</c>), so the list is empty in 0.4; it stays as the
+    /// place a capability added before its consumer is parked.
+    /// </para>
+    /// </remarks>
+    private static readonly Dictionary<StudioCapability, string> Reserved = new()
+    {
     };
 
     /// <summary>
@@ -196,7 +248,7 @@ public class CapabilityGatingMatrixTests
     /// </remarks>
     private static readonly string[] MutatingVerbs =
     [
-        "Advance", "Apply", "Archive", "BulkDelete", "Cancel", "Correct", "Delete", "Discard", "Pause",
+        "Advance", "Apply", "Archive", "BulkDelete", "Cancel", "Compact", "Correct", "Delete", "Discard", "Pause",
         "Rebuild", "Restart", "Resume", "Rewind", "RunSql", "Save", "Skip", "Start", "Stop", "Undelete",
     ];
 
@@ -270,10 +322,47 @@ public class CapabilityGatingMatrixTests
     [Fact]
     public void The_roster_covers_every_capability()
     {
-        Mutating.Concat(GatedReads).Select(static x => x.Capability).Distinct().Order().Should().Equal(
+        Mutating.Concat(GatedReads).Select(static x => x.Capability).Concat(Reserved.Keys).Distinct().Order().Should().Equal(
             Enum.GetValues<StudioCapability>().Order(),
             "a capability no method requires is a capability nothing enforces, and one this roster has "
             + "forgotten is a set of methods nothing here tests");
+    }
+
+    /// <summary>
+    /// A visitor the write policy refuses is told so in a sentence about that capability, not the catch-all -
+    /// the three 0.4 added included, before their screens exist.
+    /// </summary>
+    [Fact]
+    public void Every_capability_has_a_refusal_sentence_of_its_own()
+    {
+        string fallback = WritePolicyRefusal.For("NoSuchCapability");
+
+        foreach (StudioCapability capability in Enum.GetValues<StudioCapability>())
+        {
+            WritePolicyRefusal.For(capability).Should().NotBe(fallback, "{0} has a sentence of its own", capability);
+        }
+
+        Enum.GetValues<StudioCapability>().Select(static x => WritePolicyRefusal.For(x)).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public void A_reserved_capability_is_required_by_nothing_yet()
+    {
+        Mutating.Concat(GatedReads).Select(static x => x.Capability).Should().NotIntersectWith(
+            Reserved.Keys, "a capability something gates on is in the roster, not reserved");
+
+        foreach ((StudioCapability capability, string why) in Reserved)
+        {
+            why.Length.Should().BeGreaterThan(20, "a reason, naming the packet that ends it, for {0}", capability);
+
+            string required = "Require(StudioCapability." + capability + ")";
+
+            SourceScanner.ShippedSourceFiles()
+                .Where(file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains(required, StringComparison.Ordinal))
+                .Should().BeEmpty(
+                    "{0} is reserved; a service that requires it now gates on it, so move it to Mutating or GatedReads and assert its refusals",
+                    capability);
+        }
     }
 
     [Fact]
@@ -362,7 +451,7 @@ public class CapabilityGatingMatrixTests
 
         harness.Policies.Calls.Where(static x => x.Resource.Capability is not null)
             .Should().OnlyContain(static x => x.Resource.TenantId == null,
-                "BrowseDatabase is always asked of the database as a whole");
+                "BrowseDatabase and ViewDatabaseActivity are always asked of the database as a whole");
     }
 
     private static async Task AssertEveryGatedReadRefusedAsync(Harness harness, DatabaseRefusal expected)
@@ -558,6 +647,13 @@ public class CapabilityGatingMatrixTests
         if (type == typeof(SqlConsoleRequest))
         {
             return new SqlConsoleRequest("select 1");
+        }
+
+        // A request the screen would accept, so a gate that ran after the text was looked at would be caught
+        // looking rather than refusing for the text.
+        if (type == typeof(LinqQueryRequest))
+        {
+            return new LinqQueryRequest("customer", "Name == \"x\"", "Name");
         }
 
         // A schema that is not the store's own, which is what makes a database-browser call a

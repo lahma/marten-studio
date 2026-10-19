@@ -8,7 +8,8 @@
     Everything that identifies a row or ties it to another: the row key and where it came from, the
     constraints and indexes as Postgres prints them (pg_get_constraintdef, pg_get_indexdef, coloured by
     SqlText on the server), and the foreign keys both ways with their far ends linked - or said to be out of
-    view, never named - and what a delete or an update does to them.
+    view, never named - and what a delete or an update does to them. A pgvector HNSW or IVFFlat index also says
+    its operator classes and its build parameters, defaults included (VectorIndexSummary).
 *@
 
 @if (DetailModel is { } detail)
@@ -108,7 +109,13 @@
                                         }
                                     </span>
                                 </td>
-                                <td class="ms-db-cell-sql"><SqlText Sql="@index.Definition" Label="@($"Definition of {index.Name}")" Wrap="true" ShowLineNumbers="false" /></td>
+                                <td class="ms-db-cell-sql">
+                                    <SqlText Sql="@index.Definition" Label="@($"Definition of {index.Name}")" Wrap="true" ShowLineNumbers="false" />
+                                    @if (index.Vector is { } vector)
+                                    {
+                                        <VectorIndexSummary Model="vector" />
+                                    }
+                                </td>
                             </tr>
                         }
                     </tbody>

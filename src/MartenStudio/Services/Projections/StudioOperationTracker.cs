@@ -78,6 +78,16 @@ internal sealed record OperationStart(OperationHandle Handle, bool Started)
 {
     /// <summary>The handle's id, which is what a page polls by.</summary>
     public string Id => Handle.Id;
+
+    /// <summary>
+    /// Why nothing was started although nothing failed - the daemon here is already rebuilding the projection and Marten
+    /// Studio is not - or <see langword="null" />. With a refusal there is nothing to watch: <see cref="Id" /> is empty.
+    /// </summary>
+    public string? Refusal { get; init; }
+
+    /// <summary>Nothing was started, for this reason.</summary>
+    public static OperationStart Refused(string kind, string target, string reason) =>
+        new(new OperationHandle(string.Empty, kind, target), Started: false) { Refusal = reason };
 }
 
 /// <summary>

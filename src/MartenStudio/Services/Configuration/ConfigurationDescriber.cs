@@ -119,6 +119,11 @@ internal static class ConfigurationDescriber
             new("Tenant partitioned events", YesNo(events.UseTenantPartitionedEvents), "StoreOptions.Events.UseTenantPartitionedEvents"),
             new("Event skipping", YesNo(events.EnableEventSkippingInProjectionsOrSubscriptions), "StoreOptions.Events.EnableEventSkippingInProjectionsOrSubscriptions"),
             new("Optimized rebuilds", YesNo(events.UseOptimizedProjectionRebuilds), "StoreOptions.Events.UseOptimizedProjectionRebuilds"),
+
+            // The two switches health checks K02 and K03 are about: shown here so that a configuration finding,
+            // which every visitor of the scope may see, says nothing this page does not.
+            new("Extended progression tracking", YesNo(events.EnableExtendedProgressionTracking), "StoreOptions.Events.EnableExtendedProgressionTracking"),
+            new("Advanced async tracking", YesNo(events.EnableAdvancedAsyncTracking), "StoreOptions.Events.EnableAdvancedAsyncTracking"),
         ];
 
         Marten.Events.IReadonlyMetadataConfig metadata = events.MetadataConfig;
@@ -144,6 +149,9 @@ internal static class ConfigurationDescriber
             new("Stale sequence threshold", Duration(daemon.StaleSequenceThreshold), "StoreOptions.Events.Daemon.StaleSequenceThreshold"),
             new("High water staleness", Duration(daemon.HighWaterStalenessThreshold), "StoreOptions.Events.Daemon.HighWaterStalenessThreshold"),
             new("Stop and drain timeout", Duration(daemon.StopAndDrainTimeout), "StoreOptions.Events.Daemon.StopAndDrainTimeout"),
+
+            // What health check K04 prints beside the mode: a configuration finding says nothing this page does not.
+            new("Transaction-scoped leadership lock", YesNo(events.UseAdvisoryLockTransaction), "StoreOptions.Events.UseAdvisoryLockTransaction"),
         ];
 
         return new EventStoreConfiguration(

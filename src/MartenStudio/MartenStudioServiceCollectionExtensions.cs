@@ -7,6 +7,8 @@ using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Health;
+using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
@@ -88,6 +90,9 @@ public static partial class MartenStudioServiceCollectionExtensions
                 static options => options.RefreshInterval >= TimeSpan.FromSeconds(1) && options.RefreshInterval <= TimeSpan.FromMinutes(5),
                 "MartenStudioOptions.RefreshInterval must be between one second and five minutes")
             .Validate(
+                static options => options.HealthInterval >= TimeSpan.FromSeconds(15) && options.HealthInterval <= TimeSpan.FromHours(1),
+                "MartenStudioOptions.HealthInterval must be between fifteen seconds and one hour: several health checks scan the server's lock table and process array, and a page polls them no faster than this")
+            .Validate(
                 static options => options.RebuildShardTimeout >= TimeSpan.FromMinutes(1),
                 "MartenStudioOptions.RebuildShardTimeout must be at least one minute: it is the per-shard replay budget, and a rebuild that exceeds it stops with the projection's tables already emptied")
             .Validate(
@@ -159,6 +164,10 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<ISchemaDataService, SchemaDataService>();
         services.TryAddScoped<IConfigurationService, ConfigurationService>();
         services.TryAddScoped<IQueryService, QueryService>();
+
+        // F7: LINQ mode. Scoped like every data service: it keeps one circuit's audit ledger, so a page turn
+        // is not a second opening.
+        services.TryAddScoped<ILinqQueryService, LinqQueryService>();
         services.TryAddScoped<IRelationshipDataService, RelationshipDataService>();
 
         // Projections and the async daemon. The four singletons are process-wide on purpose: one
@@ -198,6 +207,32 @@ public static partial class MartenStudioServiceCollectionExtensions
         // DB-5: the Rows tab's per-circuit memory - "Run anyway" answers, keyset history and the page a row
         // was opened from. Scoped, like DocumentBrowserState, so it is one browser tab's and nobody else's.
         services.TryAddScoped<DatabaseBrowserState>();
+
+        // H1: the health advisor. The checks, their history and the one sweep per database per interval are
+        // process-wide singletons - a sweep's facts are about the database and the same for every circuit -
+        // and none of them runs anything on its own: no hosted service, no timer. A sweep happens when the
+        // Health page or the Overview asks. What a visitor is shown, what they muted and which Critical they
+        // have already been toasted about are that circuit's, so scoped.
+        services.TryAddSingleton<HealthCheckRegistry>();
+        services.TryAddSingleton<HealthHistory>();
+        services.TryAddSingleton<HealthSweeper>();
+        services.TryAddSingleton<HealthSweepCache>();
+
+        // H7: the statement checks' memory of the texts they have read, so a statement sweep whose statements are all
+        // known makes no text call - each one costs pg_stat_statements its whole query-text file.
+        services.TryAddSingleton<StatementTextCache>();
+        services.TryAddScoped<HealthMutes>();
+        services.TryAddScoped<HealthAlerts>();
+        services.TryAddScoped<IHealthService, HealthService>();
+
+        // H3: Database > Sessions and the connection checks. The pool observer is a singleton because a
+        // MeterListener is process-wide, and it listens only while a sweep or an open Sessions page holds a
+        // lease. The session snapshot is the database's, shared by every circuit for ten seconds; what a
+        // visitor is shown of it, and which first read this circuit has audited, are the circuit's.
+        services.TryAddSingleton<SessionPoolObserver>();
+        services.TryAddSingleton<ISessionActivityReader, SessionActivityReader>();
+        services.TryAddSingleton<SessionActivitySnapshots>();
+        services.TryAddScoped<ISessionActivityService, SessionActivityService>();
 
         return services;
     }

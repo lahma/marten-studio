@@ -126,15 +126,14 @@ public class NavIndicatorNoDdlLiveTests(PostgresFixture fixture)
     }
 
     /// <summary>
-    /// The dead-letter list is a Marten session query, and it creates nothing because it looks first.
+    /// The dead-letter list creates nothing on a database that has no dead-letter table.
     /// </summary>
     /// <remarks>
-    /// <b>Found by this class, on its first run.</b> <c>ListDeadLettersAsync</c> has to be a Marten query
-    /// (D6 - the tenant axis is a predicate over the document body), and every Marten query opens with
-    /// <c>EnsureStorageExistsAsync</c> for its document type: on a database that has never run the daemon
-    /// that made <c>mt_doc_deadletterevent</c>, that is a studio writing DDL because somebody opened a
-    /// tab. P5-fix-3 probes the table through the shared column catalog before the session is opened,
-    /// which is the same probe <c>CountDeadLettersAsync</c> already made.
+    /// <b>Found by this class, on its first run.</b> <c>ListDeadLettersAsync</c> was a Marten LINQ query then, and
+    /// every Marten LINQ terminal opens with <c>EnsureStorageExistsAsync</c> for its document type: on a database
+    /// that has never run the daemon that made <c>mt_doc_deadletterevent</c>, that was a studio writing DDL because
+    /// somebody opened a tab. P5-fix-3 probed the table first; DL replaced the query with the studio's own SQL, which
+    /// also covers a table that exists but that this process's store never ensured (<c>ReadPathNoDdlLiveTests</c>).
     /// </remarks>
     [PostgresFact]
     public async Task Listing_the_dead_letters_does_not_create_the_document_table()

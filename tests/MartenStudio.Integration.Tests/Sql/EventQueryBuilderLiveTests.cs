@@ -263,7 +263,7 @@ public class EventQueryBuilderLiveTests(PostgresFixture fixture) : PostgresTestB
         highest.Connection = connection;
         (await highest.ExecuteScalarAsync()).Should().Be(4L);
 
-        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount(Schema);
+        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount(DeadLetterQueries.MartensRegistration(Schema));
 
         deadLetters.Connection = connection;
         (await deadLetters.ExecuteScalarAsync()).Should().Be(1L);
@@ -297,7 +297,7 @@ public class EventQueryBuilderLiveTests(PostgresFixture fixture) : PostgresTestB
         // `where "tenant_id" = @tenant`, and the test that stood here proved only that doing so raises
         // 42703; a parameter whose sole reachable behaviour is to throw is not a feature, so it is gone
         // and what is asserted now is that the count works.
-        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount(Schema, budget);
+        using var deadLetters = EventQueryBuilder.BuildDeadLetterCount(DeadLetterQueries.MartensRegistration(Schema), budget);
 
         deadLetters.Connection = connection;
         deadLetters.CommandTimeout.Should().Be(10);

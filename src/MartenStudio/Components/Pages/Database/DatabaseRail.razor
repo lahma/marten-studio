@@ -148,6 +148,23 @@
                 }
             </section>
 
+            @* H3: the database's sessions, locks and prepared transactions - this database only, not a schema's. *@
+            <section class="ms-rail-group ms-db-rail-activity">
+                <h2 class="ms-rail-title">
+                    <span class="ms-rail-name">Activity</span>
+                </h2>
+
+                <ul class="ms-rail-list">
+                    <li class="ms-rail-item" @key="@("sessions")">
+                        <div class="ms-rail-entry">
+                            <a class="@LinkClass(false)" href="@SessionLinks.ToSessions(Options.Value, State.ActiveScope)">
+                                <span class="ms-db-rail-name">Sessions and locks</span>
+                            </a>
+                        </div>
+                    </li>
+                </ul>
+            </section>
+
             @if (ShowRelations)
             {
                 @if (Schema is { } current)

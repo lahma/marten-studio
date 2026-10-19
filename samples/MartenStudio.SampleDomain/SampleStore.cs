@@ -103,6 +103,13 @@ public static class SampleStore
         // cannot show what a real event store looks like. The seeder sets all three on every append.
         opts.Events.MetadataConfig.EnableAll();
 
+        // Off by default in Marten. On here, so the sample starts healthy - the studio's health advisor suggests it (K02)
+        // for any store with async projections - and so the projections screen has each shard's status, pause reason
+        // and failure to show, which is the only record of why a shard stopped that outlives the process that ran it.
+        // Since Marten 9.31 the columns exist either way; the switch only decides whether the daemon writes them.
+        // Advanced async tracking (K03) is Marten 9's default already, which is why it is not set here.
+        opts.Events.EnableExtendedProgressionTracking = true;
+
         // A projection that throws must produce a dead letter and let the shard carry on, rather than
         // pausing it. ShipmentTracker throws on one event on purpose; without this the demo would come
         // up with a stopped shard instead of the dead letter it is meant to demonstrate.

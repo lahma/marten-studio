@@ -88,15 +88,17 @@ internal sealed class StudioScopeResolver
         }
 
         // 4. The database, matched against what Marten already knows.
-        IMartenDatabase database = await FindDatabaseAsync(store, scope.DatabaseId).ConfigureAwait(false)
+        IReadOnlyList<IMartenDatabase> databases = await store.Storage.AllDatabases().ConfigureAwait(false);
+        IMartenDatabase database = MatchDatabase(databases, scope.DatabaseId)
             ?? throw new KeyNotFoundException(
                 $"Marten store '{registration.Key}' has no database with identity '{scope.DatabaseId}'.");
 
-        // 5. The tenant, which is only ever one the store could actually answer for.
-        if (scope.TenantId is not null)
+        // 5. The tenant, which is only ever one the store could actually answer for - asked with the list
+        //    just read, so that a database's same-identity twins answer for their tenants too.
+        if (scope.TenantId is { } tenantId)
         {
             TenantList tenants = await tenantDiscovery
-                .DiscoverAsync(registration.Key, store, database, cancellationToken)
+                .DiscoverAsync(registration.Key, store, database, databases, cancellationToken)
                 .ConfigureAwait(false);
 
             if (!TenantDiscovery.IsAcceptable(tenants, scope.TenantId))
@@ -104,15 +106,67 @@ internal sealed class StudioScopeResolver
                 throw new KeyNotFoundException(
                     $"'{scope.TenantId}' is not a tenant of database '{scope.DatabaseId}' in Marten store '{registration.Key}'.");
             }
+
+            // 6. And the instance that tenant was built from, when the database has twins.
+            database = InstanceFor(databases, database, tenantId);
         }
 
         return new ResolvedScope(scope, registration, store, database);
     }
 
-    private static async ValueTask<IMartenDatabase?> FindDatabaseAsync(IDocumentStore store, string databaseId)
+    /// <summary>
+    /// Of the instances that share <paramref name="database" />'s identity, the one whose own tenant list holds
+    /// <paramref name="tenantId" /> - or <paramref name="database" /> itself, the first of them, when it does or none
+    /// does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Twins.</b> Two master-table rows with one connection string are two <c>MartenDatabase</c> objects with one
+    /// <c>Id.Identity</c>, each listing its own row's tenant (<c>MasterTableTenancy.BuildDatabases</c>). The studio scopes by
+    /// identity, so the database matched above is the first of them, and tenant discovery answers for every twin's
+    /// tenants (<see cref="TenantDiscovery" />). A scope naming the second row's tenant then opened every session, and
+    /// every connection, on the <em>first</em> row's instance: its data source - that row's role, its
+    /// <c>Options=-c</c>, its pool - and not the one Marten itself would use for that tenant. For a host that gives
+    /// each tenant a role of its own, or row-level security keyed on one, that is the wrong tenant's connection under
+    /// the right tenant's header (SEC1 L1). The policies were asked the right question; only the instance was wrong.
+    /// </para>
+    /// <para>
+    /// A scope with no tenant keeps the first instance, which is what the picker lists. Matched ordinally, as
+    /// <see cref="TenantDiscovery.IsAcceptable" /> matched the tenant against the same lists, each copied before it is
+    /// read because a sharded tenancy reconciles them from whichever thread enumerates.
+    /// </para>
+    /// </remarks>
+    internal static IMartenDatabase InstanceFor(IReadOnlyList<IMartenDatabase> databases, IMartenDatabase database, string tenantId)
     {
-        IReadOnlyList<IMartenDatabase> databases = await store.Storage.AllDatabases().ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(databases);
+        ArgumentNullException.ThrowIfNull(database);
 
+        if (Lists(database, tenantId))
+        {
+            return database;
+        }
+
+        foreach (IMartenDatabase twin in databases)
+        {
+            if (!ReferenceEquals(twin, database)
+                && string.Equals(twin.Id.Identity, database.Id.Identity, StringComparison.OrdinalIgnoreCase)
+                && Lists(twin, tenantId))
+            {
+                return twin;
+            }
+        }
+
+        return database;
+
+        static bool Lists(IMartenDatabase instance, string tenantId)
+        {
+            string[] tenants = [.. instance.TenantIds];
+            return tenants.Contains(tenantId, StringComparer.Ordinal);
+        }
+    }
+
+    private static IMartenDatabase? MatchDatabase(IReadOnlyList<IMartenDatabase> databases, string databaseId)
+    {
         // An empty identity means "whatever this store's single database is", which is the shape every
         // single-tenant store has and the one a link without a ?db= carries.
         if (string.IsNullOrEmpty(databaseId))

@@ -53,10 +53,22 @@ namespace MartenStudio.Services.Events;
 /// registered and never builds a second daemon (hard rule 11).
 /// </para>
 /// </remarks>
-internal sealed class EventDataService : IEventDataService
+internal sealed partial class EventDataService : IEventDataService
 {
     /// <summary>The action names the audit ring records these operations under.</summary>
     internal const string ArchiveStreamAction = "Archive stream";
+
+    /// <summary>
+    /// What a write by stream id is told when the stream is not this scope's: the same sentence for a stream that
+    /// does not exist and for one that belongs to a tenant the scope does not name, so the refusal reveals neither.
+    /// </summary>
+    internal const string StreamNotInScopeMessage = "There is no such stream in this scope.";
+
+    /// <summary>What an archive on a conjoined event store is told when no tenant is selected.</summary>
+    internal const string ArchiveTenantRequiredMessage =
+        "This event store is tenanted per event, and Marten archives a stream as exactly one tenant. Pick the stream's "
+        + "tenant in the header and archive it there: with \"All tenants\" selected, Marten would archive the default "
+        + "tenant's stream of this id instead.";
 
     /// <summary>The action name for discarding a dead letter.</summary>
     internal const string DiscardDeadLetterAction = "Discard dead letter";
@@ -82,6 +94,7 @@ internal sealed class EventDataService : IEventDataService
     private readonly StudioAuthorization authorization;
     private readonly DaemonAccessor daemons;
     private readonly ColumnCatalog catalog;
+    private readonly IndexCatalog indexes;
     private readonly IOptions<MartenStudioOptions> options;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<EventDataService> logger;
@@ -94,6 +107,7 @@ internal sealed class EventDataService : IEventDataService
         StudioAuthorization authorization,
         DaemonAccessor daemons,
         ColumnCatalog catalog,
+        IndexCatalog indexes,
         IOptions<MartenStudioOptions> options,
         StudioLogThrottle throttle,
         ILogger<EventDataService> logger)
@@ -104,6 +118,7 @@ internal sealed class EventDataService : IEventDataService
         this.authorization = authorization;
         this.daemons = daemons;
         this.catalog = catalog;
+        this.indexes = indexes;
         this.options = options;
         this.throttle = throttle;
         this.logger = logger;
@@ -130,11 +145,15 @@ internal sealed class EventDataService : IEventDataService
                 Schema = table.Schema,
                 EventTablesExist = table.EventColumns.Count > 0 && table.StreamColumns.Count > 0,
                 HasTenantId = table.HasTenantId,
+                EventsConjoined = resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined,
+                PerTenantSequences = resolved.Store.Options.Events.UseTenantPartitionedEvents,
                 HasIsArchived = table.HasIsArchived,
                 HasIsSkipped = table.HasIsSkipped,
                 HasBinaryData = table.HasBinaryData,
                 OptionalColumns = MetadataColumns(table),
                 TenantId = scope.TenantId,
+                TagStorage = EventTagModel.From(resolved.Store.Options).Storage,
+                NaturalKeys = [.. NaturalKeyCatalog.From(resolved.Store.Options, options.Value.IsDocumentTypeVisible).Select(static x => x.Label)],
             };
         }
         catch (Exception exception) when (IsReadFailure(exception))
@@ -144,10 +163,27 @@ internal sealed class EventDataService : IEventDataService
     }
 
     /// <inheritdoc />
-    public async Task<StreamPage> ListStreamsAsync(
+    public Task<StreamPage> ListStreamsAsync(
         StudioScope scope,
         StreamListRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        ReadStreamsAsync(scope, request, ConnectionUsage.Read, cancellationToken);
+
+    /// <summary>The stream list, on a connection of the given usage.</summary>
+    /// <param name="scope">The store, database and tenant.</param>
+    /// <param name="request">What to list.</param>
+    /// <param name="usage">
+    /// <see cref="ConnectionUsage.Read" /> for every page, which follows the host's
+    /// <c>MultiHostSettings.ReadSessionPreference</c> and so may be a standby;
+    /// <see cref="ConnectionUsage.ReadWrite" /> only where a write depends on the answer
+    /// (<see cref="ReadStreamOnPrimaryAsync" />).
+    /// </param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    private async Task<StreamPage> ReadStreamsAsync(
+        StudioScope scope,
+        StreamListRequest request,
+        ConnectionUsage usage,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(request);
@@ -156,7 +192,7 @@ internal sealed class EventDataService : IEventDataService
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
-            await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+            await using NpgsqlConnection connection = await OpenAsync(resolved, usage, cancellationToken).ConfigureAwait(false);
             EventTableInfo table = await DescribeTablesAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
 
             if (table.StreamColumns.Count == 0)
@@ -240,10 +276,37 @@ internal sealed class EventDataService : IEventDataService
     }
 
     /// <inheritdoc />
-    public async Task<StreamState> GetStreamAsync(
+    public Task<StreamState> GetStreamAsync(
         StudioScope scope,
         string streamId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        ReadStreamAsync(scope, streamId, ConnectionUsage.Read, cancellationToken);
+
+    /// <summary>
+    /// One stream's row, read on the primary - for a write that decides on what it reads.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GetStreamAsync" /> opens <see cref="ConnectionUsage.Read" />, which Marten maps to
+    /// <c>MultiHostSettings.ReadSessionPreference</c>: on a multi-host data source set to
+    /// <c>PreferStandby</c> that is a standby, and an asynchronous standby answers with the row as it was. That
+    /// is fine for a page and wrong for a compaction, whose checks before the save and whose read-back after it
+    /// must see what the primary holds - a stale <c>compacted_version</c> after the save reads as "nothing was
+    /// compacted" while the events are already gone. <see cref="ConnectionUsage.ReadWrite" /> maps to
+    /// <c>WriteSessionPreference</c>, the host the write itself runs on, which is also what Marten's own write
+    /// session reads with (<c>AutoClosingLifetime</c> picks <c>ReadWrite</c> for any session that is not
+    /// read-only).
+    /// </remarks>
+    private Task<StreamState> ReadStreamOnPrimaryAsync(
+        StudioScope scope,
+        string streamId,
+        CancellationToken cancellationToken) =>
+        ReadStreamAsync(scope, streamId, ConnectionUsage.ReadWrite, cancellationToken);
+
+    private async Task<StreamState> ReadStreamAsync(
+        StudioScope scope,
+        string streamId,
+        ConnectionUsage usage,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -252,9 +315,10 @@ internal sealed class EventDataService : IEventDataService
             return StreamState.Missing(streamId ?? string.Empty);
         }
 
-        StreamPage page = await ListStreamsAsync(
+        StreamPage page = await ReadStreamsAsync(
             scope,
             new StreamListRequest { StreamId = streamId, IncludeArchived = true, PageSize = 1 },
+            usage,
             cancellationToken).ConfigureAwait(false);
 
         if (page.Error is { } error)
@@ -276,7 +340,10 @@ internal sealed class EventDataService : IEventDataService
             row.Created,
             row.LastEvent,
             row.IsArchived,
-            row.TenantId);
+            row.TenantId)
+        {
+            CompactedVersion = row.CompactedVersion,
+        };
     }
 
     /// <inheritdoc />
@@ -303,6 +370,27 @@ internal sealed class EventDataService : IEventDataService
 
             int pageSize = Math.Clamp(take, 1, options.Value.MaxPageSize);
 
+            // Per-tenant sequences and no tenant: one id's streams of two tenants would interleave by their own counters
+            // in one timeline, so such a stream asks for a tenant; an id only one tenant has reads as before (SEC1-fix3).
+            if (scope.TenantId is null
+                && resolved.Store.Options.Events.UseTenantPartitionedEvents
+                && table.HasStreamColumn("tenant_id")
+                && table.ParseStreamId(streamId ?? string.Empty) is { Success: true } id)
+            {
+                await using NpgsqlCommand count = StreamReadQueries.BuildStreamTenantCount(table, id.Value!);
+                count.Connection = connection;
+                count.CommandTimeout = CommandTimeoutSeconds;
+
+                if (Convert.ToInt64(await count.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture) > 1)
+                {
+                    return EventPage.Failed(new EventDataError(
+                        StreamCompactionRules.ReadNeedsTenant("this stream: more than one tenant has a stream with this id"), null, false)
+                    {
+                        NeedsTenant = true,
+                    });
+                }
+            }
+
             if (!EventQueryBuilder.TryBuildStreamEvents(
                     table, streamId ?? string.Empty, afterVersion, pageSize + 1, scope.TenantId,
                     out NpgsqlCommand? command, out string? error))
@@ -323,7 +411,10 @@ internal sealed class EventDataService : IEventDataService
                     rows.RemoveRange(pageSize, rows.Count - pageSize);
                 }
 
-                return new EventPage(rows, rows.Count > 0 ? rows[^1].Sequence : null, hasMore);
+                (List<EventRow> tagged, EventTagLoad tags) = await AttachTagsAsync(resolved, connection, table, rows, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return new EventPage(tagged, tagged.Count > 0 ? tagged[^1].Sequence : null, hasMore) { TagLoad = tags };
             }
         }
         catch (Exception exception) when (IsReadFailure(exception))
@@ -345,6 +436,15 @@ internal sealed class EventDataService : IEventDataService
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
+            // Per-tenant sequences and no tenant: the feed pages and follows on seq_id, which then orders each tenant's
+            // events and nothing across them - two tenants' pages interleave by their own counters, a page's cursor
+            // skips the other tenants' events with the same number, and follow mode never sees a tenant whose counter is
+            // behind (SEC1-fix3). Nothing correct to page through, so nothing is read, and the page says why.
+            if (resolved.TenantId is null && resolved.Store.Options.Events.UseTenantPartitionedEvents)
+            {
+                return EventPage.Failed(new EventDataError(StreamCompactionRules.ReadNeedsTenant("the feed"), null, false) { NeedsTenant = true });
+            }
+
             await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
             EventTableInfo table = await DescribeTablesAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
 
@@ -354,6 +454,20 @@ internal sealed class EventDataService : IEventDataService
             }
 
             int pageSize = Math.Clamp(request.PageSize, 1, options.Value.MaxPageSize);
+
+            // A tag type this store does not have, or a value its type cannot hold, is an answer rather than
+            // an empty page: "no event carries that tag" is a different fact.
+            EventTagPredicate? tag = null;
+            if (request.Tag is { } filter)
+            {
+                (tag, string? tagError) = await ResolveTagFilterAsync(resolved, connection, table, filter, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (tagError is not null)
+                {
+                    return EventPage.Failed(new EventDataError(tagError, null, false));
+                }
+            }
 
             await using NpgsqlCommand command = EventQueryBuilder.BuildFeed(table, new EventFeedQuery
             {
@@ -365,6 +479,7 @@ internal sealed class EventDataService : IEventDataService
                 To = request.To,
                 IncludeArchived = request.IncludeArchived,
                 IncludeSkipped = request.IncludeSkipped,
+                Tag = tag,
                 PageSize = pageSize + 1,
             });
 
@@ -379,7 +494,11 @@ internal sealed class EventDataService : IEventDataService
             if (request.SinceSequence is { } since)
             {
                 rows.RemoveAll(row => row.Sequence <= since);
-                return new EventPage(rows, rows.Count > 0 ? rows[^1].Sequence : null, HasMore: false);
+
+                (List<EventRow> delta, EventTagLoad deltaTags) = await AttachTagsAsync(resolved, connection, table, rows, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return new EventPage(delta, delta.Count > 0 ? delta[^1].Sequence : null, HasMore: false) { TagLoad = deltaTags };
             }
 
             bool hasMore = rows.Count > pageSize;
@@ -388,7 +507,10 @@ internal sealed class EventDataService : IEventDataService
                 rows.RemoveRange(pageSize, rows.Count - pageSize);
             }
 
-            return new EventPage(rows, rows.Count > 0 ? rows[^1].Sequence : null, hasMore);
+            (List<EventRow> tagged, EventTagLoad tags) = await AttachTagsAsync(resolved, connection, table, rows, cancellationToken)
+                .ConfigureAwait(false);
+
+            return new EventPage(tagged, tagged.Count > 0 ? tagged[^1].Sequence : null, hasMore) { TagLoad = tags };
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
@@ -644,7 +766,12 @@ internal sealed class EventDataService : IEventDataService
                 }
             }
 
-            return new EventTypeList(Order(merged.Values), CountsLoaded: true, IsTruncated: truncated);
+            // Under per-tenant sequences with no tenant selected, min(seq_id) and max(seq_id) are taken across counters that
+            // each tenant runs on its own, and name no event: the page labels them rather than show them (SEC1-fix4).
+            return new EventTypeList(Order(merged.Values), CountsLoaded: true, IsTruncated: truncated)
+            {
+                SequencesPerTenant = resolved.TenantId is null && resolved.Store.Options.Events.UseTenantPartitionedEvents,
+            };
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
@@ -663,7 +790,7 @@ internal sealed class EventDataService : IEventDataService
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
-            return AggregateStreamInvoker.Candidates(resolved.Store.Options);
+            return AggregateStreamInvoker.Candidates(resolved.Store.Options, options.Value.IsDocumentTypeVisible);
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {
@@ -689,7 +816,10 @@ internal sealed class EventDataService : IEventDataService
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
             AggregateTypeCandidate? candidate = null;
-            foreach (AggregateTypeCandidate known in AggregateStreamInvoker.Candidates(resolved.Store.Options))
+            // The same filtered list the picker offered: a hidden type's name typed into a request is refused
+            // as "not one of this store's aggregate types", the answer for a type the store does not have.
+            foreach (AggregateTypeCandidate known in AggregateStreamInvoker.Candidates(
+                         resolved.Store.Options, options.Value.IsDocumentTypeVisible))
             {
                 if (string.Equals(known.FullName, typeName, StringComparison.Ordinal))
                 {
@@ -715,10 +845,42 @@ internal sealed class EventDataService : IEventDataService
                     candidate.Name, version, new EventDataError(parsed.Error ?? "That stream id is not usable.", null, false));
             }
 
+            // Marten's EventStatement emits its stream predicate only for a non-empty id, so a replay of the
+            // empty GUID would fetch - and fold into one aggregate - every event of the tenant or the store:
+            // a wrong answer, and a read of the whole log on one click (StreamCompactionRules.IsWholeLogId).
+            if (StreamCompactionRules.IsWholeLogId(parsed.Value))
+            {
+                return AggregateSnapshot.Failed(
+                    candidate.Name,
+                    version,
+                    new EventDataError(
+                        "This stream's id is the empty GUID, which Marten's stream fetch reads as no stream filter at all, "
+                        + "so replaying it would fold every event in the log. The studio does not replay it.",
+                        null,
+                        false));
+            }
+
             await using IQuerySession session = OpenQuerySession(resolved);
 
+            // The events with the studio's own SQL and Marten's own selector, never session.Events: see
+            // ReadReplayEventsAsync. The session runs no statement of its own; the aggregator is handed it.
+            ReplayEvents replay = await ReadReplayEventsAsync(resolved, session, parsed.Value!, version, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (replay.Refusal is { } refusal)
+            {
+                return AggregateSnapshot.Failed(candidate.Name, version, refusal);
+            }
+
+            // Not a stream of this scope: the answer a stream that does not exist gets, word for word, so a guessed
+            // id of another tenant's stream learns nothing - and nothing of it was read.
+            if (replay.NotInScope)
+            {
+                return AggregateSnapshot.NotFound(candidate.Name, version, AggregateMissingReason.StreamMissing);
+            }
+
             object? aggregate = await AggregateStreamInvoker
-                .AggregateAtVersionAsync(session, candidate.Type, parsed.Value!, version, cancellationToken)
+                .AggregateAtVersionAsync(session, candidate.Type, parsed.Value!, replay.Events, version, cancellationToken)
                 .ConfigureAwait(false);
 
             if (aggregate is null)
@@ -798,6 +960,211 @@ internal sealed class EventDataService : IEventDataService
         return AggregateSnapshot.NotFound(typeName, version, AggregateMissingReason.NoAggregate, state.Version);
     }
 
+    /// <summary>
+    /// One stream's events for the replay, read the way <c>QueryEventStore.FetchStreamAsync</c> reads them - minus the
+    /// <c>EnsureStorageExistsAsync(typeof(IEvent))</c> it opens with.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why.</b> That ensure is Weasel's <c>ensureStorageExistsAsync</c> under the database's own <c>AutoCreate</c>
+    /// (read at Marten <c>V9.39.0</c> and <c>V9.50.2</c>, Weasel <c>9.33.0</c>): the event store's dependent features,
+    /// <c>AllObjects()</c> for post-processing - <c>mt_hilo</c> on a store with a HiLo id - and the event store's own
+    /// migration, which under <c>CreateOrUpdate</c> is not additive. The first replay in a process that had not touched
+    /// the event store ran all of it because somebody pressed a version step (AGENTS.md hard rule 14).
+    /// </para>
+    /// <para>
+    /// <b>What is still Marten's.</b> The select list and the reading of each row: <c>IMartenSession.EventStorage()</c>
+    /// is the very storage <c>FetchStreamAsync</c> resolves rows through - public, and it runs nothing - so upcasters,
+    /// binary payloads and every configured metadata column are read exactly as Marten reads them.
+    /// </para>
+    /// <para>
+    /// <b>The stream is proved to be this scope's before one event of it is read</b> (<see cref="StreamInScopeAsync" />),
+    /// and the events are narrowed to the scope's tenant exactly as the timeline narrows them
+    /// (<c>EventQueryBuilder.TryBuildStreamEvents</c>) - <em>whatever the tenancy style</em>. Marten writes the session's
+    /// tenant into <c>mt_streams.tenant_id</c> and <c>mt_events.tenant_id</c> on every append, on a single-tenanted event
+    /// store too (<c>EventGraph.Actions</c>, <c>StreamsTable</c>, the quick-append function; read at <c>V9.39.0</c> and
+    /// <c>V9.50.2</c>), so a store whose documents are conjoined and whose events are not still records whose stream each
+    /// one is; and Marten's own <c>EventStatement</c> narrows only a conjoined store. Replaying by id alone there handed
+    /// an <c>acme</c> visitor the aggregate of any <c>globex</c> stream whose id they could guess - read by the studio,
+    /// for a scope that may not see it. On a conjoined store the tenant is still the session's own, as
+    /// <c>EventStatement</c> binds it; with no tenant in scope that is Marten's <c>*DEFAULT*</c>, which is why such a
+    /// replay still reads nothing and the caller still says a tenant is needed. On any other store with a tenant column
+    /// it is the scope's, and with no tenant in scope nothing narrows, as nothing narrows the timeline. From any tenant's
+    /// scope but the stream's owner's the stream is out of scope and nothing is folded at all; from the owner's, a stream
+    /// some of whose events another tenant's session appended folds only the owner's events - which is what the timeline
+    /// beside the panel shows, rather than what Marten folds, the one difference from Marten's aggregate this read
+    /// allows, and the panel says so (SEC1-fix F2).
+    /// </para>
+    /// <para>
+    /// An event store that is not there is no events, read as a stream that does not exist - never created to find
+    /// out. A column the configuration reads and the table lacks is a pending migration Marten would have run here;
+    /// the replay says so instead, and names the screen that applies it.
+    /// </para>
+    /// </remarks>
+    private async Task<ReplayEvents> ReadReplayEventsAsync(
+        ResolvedScope resolved,
+        IQuerySession session,
+        object streamId,
+        long version,
+        CancellationToken cancellationToken)
+    {
+        await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+        EventTableInfo table = await DescribeTablesAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
+
+        if (table.EventColumns.Count == 0)
+        {
+            return ReplayEvents.None;
+        }
+
+        if (!await StreamInScopeAsync(resolved, connection, table, streamId, cancellationToken).ConfigureAwait(false))
+        {
+            return ReplayEvents.OutOfScope;
+        }
+
+        Marten.Events.IEventStorage storage = ((Marten.Internal.IMartenSession) session).EventStorage();
+
+        var query = new ReplayEventsQuery
+        {
+            SelectFields = storage.SelectFields(),
+            StreamId = streamId,
+            Version = version,
+            TenantId = resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined
+                ? session.TenantId
+                : table.HasTenantId ? resolved.TenantId : null,
+            IgnoreSkipped = resolved.Store.Options.Events.EnableEventSkippingInProjectionsOrSubscriptions,
+        };
+
+        IReadOnlyList<string> missing = StreamReadQueries.MissingColumns(table, query);
+        if (missing.Count > 0)
+        {
+            return new ReplayEvents([], new EventDataError(
+                $"{table.Schema}.{EventTableInfo.EventsTable} has no {(missing.Count == 1 ? "column" : "columns")} "
+                + $"{string.Join(", ", missing)}, which this store's configuration reads. Marten would add "
+                + $"{(missing.Count == 1 ? "it" : "them")} by migrating the event store on its first event read; the studio "
+                + "does not migrate a table to read it. Apply the pending change from the Schema screen, then replay again.",
+                null,
+                false));
+        }
+
+        await using NpgsqlCommand command = StreamReadQueries.BuildReplayEvents(table, query);
+        command.Connection = connection;
+        command.CommandTimeout = CommandTimeoutSeconds;
+
+        Weasel.Storage.ISelector<IEvent> selector = storage;
+        List<IEvent> events = [];
+
+        await using (NpgsqlDataReader reader = await command
+            .ExecuteReaderAsync(CommandBehavior.SingleResult, cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                events.Add(await selector.ResolveAsync(reader, cancellationToken).ConfigureAwait(false));
+            }
+        }
+
+        return new ReplayEvents(events, null);
+    }
+
+    /// <summary>
+    /// For a write by stream id from a tenant's scope on a store whose events are not conjoined: the database as a whole is
+    /// asked as well (<see cref="DatabaseReachAuthorization.RequireWholeDatabaseAsync" />, D27 "reach, not scope") whenever
+    /// an event of the stream was appended under another tenant - because Marten archives and compacts such a stream by id,
+    /// every event of it, and the tenant in scope narrows nothing it does (SEC1-fix F1).
+    /// </summary>
+    /// <remarks>
+    /// Run after the stream has been proved to be the scope's, on the primary as that read is. A refusal is a
+    /// <see cref="StudioNotAuthorizedException" /> against <c>(store, database, null)</c>, which <c>MutateAsync</c> audits
+    /// as the scope denial it is. A conjoined event store, a scope with no tenant and a table with no <c>tenant_id</c> ask
+    /// nothing more: there the write is either narrowed by Marten or already authorized for every tenant.
+    /// <para>
+    /// <b>A residual window, for Archive.</b> Archive is by stream id with no version bound, and on a store whose events
+    /// are not conjoined Marten's <c>mt_archive_stream</c> has no tenant predicate either. So an event another tenant's
+    /// session appends between this check and the archive's <c>SaveChangesAsync</c> is archived with the rest. Only
+    /// <c>EventAppendMode.Rich</c> can append one: the quick-append function refuses a session whose tenant does not
+    /// match the stream's row. The way to close it is to take the stream's <c>mt_streams</c> row <c>for update</c> on the
+    /// write session's own connection, run this check under that lock, and archive in the same transaction - not done
+    /// here. Compaction has no such window past its cutoff: Marten folds only through the version the dialog described.
+    /// </para>
+    /// </remarks>
+    private async Task RequireReachOverOtherTenantsEventsAsync(
+        ResolvedScope resolved,
+        object streamId,
+        StudioCapability capability,
+        CancellationToken cancellationToken)
+    {
+        if (resolved.TenantId is not { } tenant
+            || resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined)
+        {
+            return;
+        }
+
+        bool othersEvents;
+
+        await using (NpgsqlConnection connection = await OpenAsync(resolved, ConnectionUsage.ReadWrite, cancellationToken).ConfigureAwait(false))
+        {
+            EventTableInfo table = await DescribeTablesAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
+
+            if (!table.HasTenantId)
+            {
+                return;
+            }
+
+            await using NpgsqlCommand command = StreamReadQueries.BuildStreamHasOtherTenantsEvents(table, streamId, tenant);
+            command.Connection = connection;
+            command.CommandTimeout = CommandTimeoutSeconds;
+
+            othersEvents = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is true;
+        }
+
+        if (othersEvents)
+        {
+            await reach.RequireWholeDatabaseAsync(resolved, resolved.Database, capability, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="streamId" /> is a stream of this scope, archived or not: one row of <c>mt_streams</c>,
+    /// narrowed to the scope's tenant whenever the table carries <c>tenant_id</c>, whatever the tenancy style
+    /// (<see cref="StreamReadQueries.BuildStreamExists" />, the predicate the stream list and the document's stream
+    /// link use). The proof a read by id makes before it reads anything of the stream.
+    /// </summary>
+    /// <remarks>
+    /// No <c>mt_streams</c> to prove it against, beside an <c>mt_events</c> that is there, is a table somebody dropped
+    /// or never created - and it fails closed, as a stream that is not this scope's.
+    /// </remarks>
+    private async Task<bool> StreamInScopeAsync(
+        ResolvedScope resolved,
+        NpgsqlConnection connection,
+        EventTableInfo table,
+        object streamId,
+        CancellationToken cancellationToken)
+    {
+        if (table.StreamColumns.Count == 0)
+        {
+            return false;
+        }
+
+        await using NpgsqlCommand command = StreamReadQueries.BuildStreamExists(table, streamId, resolved.TenantId);
+        command.Connection = connection;
+        command.CommandTimeout = CommandTimeoutSeconds;
+
+        object? found = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return found is not null and not DBNull;
+    }
+
+    /// <summary>What the replay read: the events, or why it could not read them.</summary>
+    /// <param name="Events">The stream's events in sequence order.</param>
+    /// <param name="Refusal">Why nothing was read, when the table cannot be read the way Marten would read it.</param>
+    /// <param name="NotInScope">The stream is not one of this scope's, so nothing of it was read.</param>
+    private sealed record ReplayEvents(IReadOnlyList<IEvent> Events, EventDataError? Refusal, bool NotInScope = false)
+    {
+        /// <summary>No event store in this database, so no events.</summary>
+        public static ReplayEvents None { get; } = new([], null);
+
+        /// <summary>No stream of that id in this scope - missing, or another tenant's.</summary>
+        public static ReplayEvents OutOfScope { get; } = new([], null, NotInScope: true);
+    }
+
     /// <inheritdoc />
     public async Task<DeadLetterPage> ListDeadLettersAsync(
         StudioScope scope,
@@ -811,88 +1178,80 @@ internal sealed class EventDataService : IEventDataService
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
+            // A host that hides DeadLetterEvent hides this list, before anything is read (D27: a hidden document type is
+            // absent). The page says DeadLetterVisibility.HiddenMessage, which names no alias and no table.
+            if (!DeadLettersVisible(scope))
+            {
+                return DeadLetterPage.Hidden;
+            }
+
             int pageSize = Math.Clamp(query.PageSize, 1, MaxDeadLetterPageSize);
 
-            // Hard rule 14, asked of the table this read is actually about, and the one read in this
-            // service that cannot be re-expressed as the studio's own SQL: the tenant axis of a dead
-            // letter is a property *inside* the JSON body, so this has to be a Marten query (D6) - and
-            // every Marten query opens with EnsureStorageExistsAsync for its document type, which on a
-            // database that never ran the daemon creates mt_doc_deadletterevent and Marten's whole
-            // helper-function set under the database's own AutoCreate. Proven live: it is what
-            // NavIndicatorNoDdlLiveTests found on its first run.
-            //
-            // The screen above gates on EventStoreShape.EventTablesExist, which answers for mt_events and
-            // mt_streams - so a database with an event store but no dead-letter table would pass that gate
-            // and reach the session. That it normally has one is only because Marten happens to register
-            // DeadLetterEvent through DependentTypes(), which is not a guarantee this file may lean on. So
-            // the same catalog read CountDeadLettersAsync does settles it here too: one information_schema
-            // lookup through the shared, expiring ColumnCatalog, and no Marten call.
-            //
-            // What the probe cannot prevent is Marten applying a *pending change* to a table that does
-            // exist; that is true of any Marten session read and is the reason the studio reads documents
-            // with its own SQL everywhere it can.
-            await using (NpgsqlConnection probe = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false))
+            // The studio's own SQL, never session.Query<DeadLetterEvent>(): every Marten LINQ terminal opens with
+            // EnsureStorageExistsAsync for the document type (read at Marten V9.39.0 and V9.50.2), which under the
+            // database's own AutoCreate creates the table, runs AllObjects() - mt_hilo on a store with a HiLo id - and
+            // applies the table's migration, the first time the process asks (hard rule 14). The catalog probe this
+            // used to make first kept it from creating the table; it could not keep it from the rest. See
+            // DeadLetterQueries for what of the LINQ query is kept, and how.
+            await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+            DocumentTableInfo? table = await DescribeDeadLettersAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
+
+            if (table is null)
             {
-                if (!await DeadLetterTableExistsAsync(resolved, probe, cancellationToken).ConfigureAwait(false))
-                {
-                    // No table means the daemon never recorded one, which is an empty page rather than a
-                    // failure - and a store with no async projections never creates it at all.
-                    return DeadLetterPage.Empty;
-                }
+                // No table means the daemon never recorded one, which is an empty page rather than a failure - and a
+                // store with no async projections never creates it at all. The studio never does.
+                return DeadLetterPage.Empty;
             }
 
-            await using IQuerySession session = OpenQuerySession(resolved);
-
-            IQueryable<DeadLetterEvent> queryable = session.Query<DeadLetterEvent>();
-
-            // Marten registers DeadLetterEvent SingleTenanted() unconditionally, so the session's tenant
-            // applies no filter at all here and the table has no tenant_id column to filter on. What it
-            // does have is the document's own TenantId *property*, which the daemon fills in with the
-            // tenant the failing event belonged to - so the tenant axis is expressed as an ordinary
-            // predicate over the body, and a scope pinned to one tenant sees only its own failures.
-            if (resolved.TenantId is { } tenant)
+            // Marten registers DeadLetterEvent SingleTenanted() unconditionally, so the table has no tenant_id column
+            // to filter on. What it does have is the document's own TenantId *property*, which the daemon fills in with
+            // the tenant the failing event belonged to - so the tenant axis is a predicate over the body, and a scope
+            // pinned to one tenant sees only its own failures (hard rule 15).
+            var page = new DeadLetterPageQuery
             {
-                queryable = queryable.Where(x => x.TenantId == tenant);
-            }
+                TenantId = resolved.TenantId,
+                ProjectionName = string.IsNullOrWhiteSpace(query.ProjectionName) ? null : query.ProjectionName,
+                ShardName = string.IsNullOrWhiteSpace(query.ShardName) ? null : query.ShardName,
+                ExceptionType = string.IsNullOrWhiteSpace(query.ExceptionType) ? null : query.ExceptionType,
+                Offset = Math.Max(0, query.Offset),
 
-            if (!string.IsNullOrWhiteSpace(query.ProjectionName))
-            {
-                string projection = query.ProjectionName;
-                queryable = queryable.Where(x => x.ProjectionName == projection);
-            }
+                // One more than asked for, so "is there another page" is answered without a count.
+                Limit = pageSize + 1,
+            };
 
-            if (!string.IsNullOrWhiteSpace(query.ShardName))
-            {
-                string shard = query.ShardName;
-                queryable = queryable.Where(x => x.ShardName == shard);
-            }
+            DeadLetterJsonKeys keys = DeadLetterJsonKeys.For(
+                MartenStudio.Services.Documents.DocumentDataService.NamingPolicyFor(resolved.Store));
 
-            if (!string.IsNullOrWhiteSpace(query.ExceptionType))
-            {
-                string exceptionType = query.ExceptionType;
-                queryable = queryable.Where(x => x.ExceptionType.Contains(exceptionType));
-            }
+            await using NpgsqlCommand command = DeadLetterQueries.BuildPage(table, keys, page);
+            command.Connection = connection;
+            command.CommandTimeout = CommandTimeoutSeconds;
 
-            // Async terminals only - Marten 9 has no synchronous ones, they throw (AGENTS.md hard rule 10).
-            IReadOnlyList<DeadLetterEvent> found = await queryable
-                .OrderByDescending(x => x.Timestamp)
-                .Skip(Math.Max(0, query.Offset))
-                .Take(pageSize + 1)
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false);
-
+            // The store's own serializer, never a JsonSerializer of ours (hard rule 10): the body is read back with the
+            // settings Marten wrote it with. The id is the row's own column, which is what Discard deletes by.
+            ISerializer serializer = resolved.Store.Options.Serializer();
             List<DeadLetterRow> rows = [];
-            foreach (DeadLetterEvent letter in found)
+
+            await using (NpgsqlDataReader reader = await command
+                .ExecuteReaderAsync(CommandBehavior.SingleResult, cancellationToken).ConfigureAwait(false))
             {
-                rows.Add(new DeadLetterRow(
-                    letter.Id,
-                    letter.ProjectionName ?? string.Empty,
-                    letter.ShardName ?? string.Empty,
-                    letter.Timestamp,
-                    letter.ExceptionType ?? string.Empty,
-                    letter.ExceptionMessage ?? string.Empty,
-                    letter.EventSequence,
-                    letter.TenantId ?? string.Empty));
+                while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    Guid id = reader.GetGuid(0);
+                    DeadLetterEvent letter = await serializer
+                        .FromJsonAsync<DeadLetterEvent>(reader, 1, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    rows.Add(new DeadLetterRow(
+                        id,
+                        letter.ProjectionName ?? string.Empty,
+                        letter.ShardName ?? string.Empty,
+                        letter.Timestamp,
+                        letter.ExceptionType ?? string.Empty,
+                        letter.ExceptionMessage ?? string.Empty,
+                        letter.EventSequence,
+                        letter.TenantId ?? string.Empty));
+                }
             }
 
             bool hasMore = rows.Count > pageSize;
@@ -910,32 +1269,82 @@ internal sealed class EventDataService : IEventDataService
     }
 
     /// <summary>
-    /// Whether <c>mt_doc_deadletterevent</c> is actually in this database, asked of the catalog.
+    /// The dead-letter table as this database actually has it, asked of the catalog - or <see langword="null" /> when
+    /// it is not there.
     /// </summary>
     /// <remarks>
     /// One rule for both dead-letter reads. The table is created by Marten's own registration of
-    /// <c>DeadLetterEvent</c> and only when something applies it, so a database with an event store need
-    /// not have it — and a read that assumes otherwise is a read that hands Marten the chance to create
-    /// it (AGENTS.md hard rule 14). The lookup goes through <see cref="ColumnCatalog"/>, which is shared
-    /// and expiring, so the second caller inside the window pays nothing.
+    /// <c>DeadLetterEvent</c> and only when something applies it, so a database with an event store need not have
+    /// it — and a read that assumes otherwise is a read that hands Marten the chance to create it (AGENTS.md hard
+    /// rule 14). Its name comes from the mapping when Marten has one (<see cref="DeadLetterQueries.TableFor" />), and
+    /// the lookup goes through <see cref="ColumnCatalog"/>, which is shared and expiring, so the second caller inside
+    /// the window pays nothing.
     /// </remarks>
     /// <param name="resolved">The scope, already resolved — which is where the store policy was applied.</param>
     /// <param name="connection">An open connection to that scope's database.</param>
     /// <param name="cancellationToken">The usual.</param>
-    private async Task<bool> DeadLetterTableExistsAsync(
+    private async Task<DocumentTableInfo?> DescribeDeadLettersAsync(
         ResolvedScope resolved,
         NpgsqlConnection connection,
         CancellationToken cancellationToken)
     {
-        TableColumns table = await catalog
-            .GetAsync(
-                connection,
-                resolved.Store.Options.Events.DatabaseSchemaName,
-                EventTableInfo.DeadLetterTable,
-                cancellationToken)
+        DocumentTableInfo table = DeadLetterQueries.TableFor(resolved.Store.Options);
+
+        TableColumns physical = await catalog
+            .GetAsync(connection, table.Schema, table.Table, cancellationToken)
             .ConfigureAwait(false);
 
-        return table.Exists;
+        return physical.Exists ? table.WithPhysicalColumns(physical) : null;
+    }
+
+    /// <summary>
+    /// Whether the host lets the studio show <c>DeadLetterEvent</c> (<see cref="MartenStudioOptions.IsDocumentTypeVisible" />),
+    /// failing closed: a delegate that throws hides it, and says so in the log.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One gate for the dead-letter screen's four paths</b> - the list, the badge's count, Discard and Rewind - so a host
+    /// that hides the type, as D27 says a hidden type is hidden, hides it here as well: the list is
+    /// <see cref="DeadLetterPage.Hidden" />, the count is no number, and the two writes are refused with
+    /// <see cref="DeadLetterVisibility.HiddenMessage" />. The navigation entry, the Overview tile and the advisor's D06 ask
+    /// the same question (<see cref="DeadLetterVisibility" />).
+    /// </para>
+    /// <para>
+    /// A throwing delegate is the host's fault and is reported once a window per store and database as event 9217, Debug in
+    /// between, because the badge asks on every poll. Nothing here asks the database anything.
+    /// </para>
+    /// </remarks>
+    private bool DeadLettersVisible(StudioScope scope)
+    {
+        if (DeadLetterVisibility.IsVisible(options.Value.IsDocumentTypeVisible, out Exception? failure))
+        {
+            return true;
+        }
+
+        if (failure is not null)
+        {
+            LogReadFailure(scope, failure, DeadLetterVisibilityRead, sqlState: null);
+        }
+
+        return false;
+    }
+
+    /// <summary>What the log says could not be done when the visibility delegate throws for <c>DeadLetterEvent</c>.</summary>
+    internal const string DeadLetterVisibilityRead =
+        "ask MartenStudioOptions.IsDocumentTypeVisible about DeadLetterEvent, so the dead letters are treated as hidden,";
+
+    /// <summary>
+    /// Refuses a dead-letter write when the host hides <c>DeadLetterEvent</c>, with the page's own sentence
+    /// (<see cref="DeadLetterVisibility.HiddenMessage" />) - never the type's alias, which a host that re-aliased the type
+    /// it hides would not want printed.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The type is hidden; <c>MutateAsync</c> audits it as a refused action.</exception>
+    private void RequireDeadLettersVisible(ResolvedScope resolved)
+    {
+        if (!DeadLettersVisible(resolved.Scope))
+        {
+            throw new InvalidOperationException(DeadLetterVisibility.HiddenMessage);
+        }
     }
 
     /// <inheritdoc />
@@ -946,6 +1355,12 @@ internal sealed class EventDataService : IEventDataService
         try
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+            // A hidden DeadLetterEvent has no number on the badge, as a hidden collection has none on the rail.
+            if (!DeadLettersVisible(scope))
+            {
+                return null;
+            }
 
             // Marten registers DeadLetterEvent into the *event* store's schema, single-tenanted
             // (StoreOptions.ApplyConfiguration: Schema.For<DeadLetterEvent>().DatabaseSchemaName(
@@ -967,16 +1382,16 @@ internal sealed class EventDataService : IEventDataService
 
             await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
 
-            string schema = resolved.Store.Options.Events.DatabaseSchemaName;
-
-            if (!await DeadLetterTableExistsAsync(resolved, connection, cancellationToken).ConfigureAwait(false))
+            if (await DescribeDeadLettersAsync(resolved, connection, cancellationToken).ConfigureAwait(false) is not { } table)
             {
                 // No table means the daemon never recorded one, which is a real zero rather than a
                 // failure - and a store with no async projections never creates it at all.
                 return 0;
             }
 
-            await using NpgsqlCommand command = EventQueryBuilder.BuildDeadLetterCount(schema);
+            // The table the list reads, settled the same way and filtered by the same soft-delete predicate, so the badge
+            // counts exactly the rows the page it links to shows.
+            await using NpgsqlCommand command = EventQueryBuilder.BuildDeadLetterCount(table);
             command.Connection = connection;
             command.CommandTimeout = CommandTimeoutSeconds;
 
@@ -1055,6 +1470,40 @@ internal sealed class EventDataService : IEventDataService
                     throw new InvalidOperationException(parsed.Error ?? "That stream id is not usable.");
                 }
 
+                // One tenant or none, as compaction's NeedsTenant: a conjoined event store's session always runs as
+                // exactly one tenant, and with "All tenants" selected that is Marten's *DEFAULT* - so mt_archive_stream,
+                // which takes the session's tenant, archived *DEFAULT*'s stream of this id, or nothing, and the studio
+                // reported "archived" either way. Refused before anything is read, and audited as failed.
+                if (resolved.TenantId is null
+                    && resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined)
+                {
+                    throw new InvalidOperationException(ArchiveTenantRequiredMessage);
+                }
+
+                // The stream, proved to be this scope's before it is archived - read on the primary, as compaction's
+                // check is, because the write depends on the answer. Marten's mt_archive_stream narrows by tenant only
+                // on a conjoined event store (ArchiveStreamFunction, read at V9.39.0 and V9.50.2), while every append
+                // records its session's tenant in mt_streams on any store; so on a store with single-tenanted events
+                // and tenanted sessions, archiving by id alone reached any tenant's stream whose id was typed - since
+                // 0.3. This read is narrowed to the scope's tenant whenever mt_streams carries the column, and a stream
+                // it does not find is refused with the sentence a stream that does not exist gets, so the refusal says
+                // nothing about whether it exists elsewhere. Refused before the session, and audited as failed (hard
+                // rule 5): nothing was written.
+                StreamState stream = await ReadStreamOnPrimaryAsync(resolved.Scope, target, token).ConfigureAwait(false);
+
+                if (stream.Error is { } error)
+                {
+                    throw new InvalidOperationException(error.Display);
+                }
+
+                if (!stream.Exists)
+                {
+                    throw new InvalidOperationException(StreamNotInScopeMessage);
+                }
+
+                await RequireReachOverOtherTenantsEventsAsync(resolved, parsed.Value!, StudioCapability.ArchiveStreams, token)
+                    .ConfigureAwait(false);
+
                 await using IDocumentSession session = OpenWriteSession(resolved);
 
                 // Queued on the session, applied by SaveChangesAsync - which is why it takes no token
@@ -1090,6 +1539,9 @@ internal sealed class EventDataService : IEventDataService
             id.ToString(),
             async (resolved, token) =>
             {
+                // Before the session: a hidden type is refused, audited as refused, and nothing of it is read.
+                RequireDeadLettersVisible(resolved);
+
                 await using IDocumentSession session = OpenWriteSession(resolved);
 
                 IQueryable<DeadLetterEvent> queryable = session.Query<DeadLetterEvent>().Where(x => x.Id == id);
@@ -1108,11 +1560,13 @@ internal sealed class EventDataService : IEventDataService
 
                 if (letter is null)
                 {
-                    // Nothing in scope under that id, which is two different facts. Somebody else
-                    // discarding the same row first is routine and is not a refusal; asking for a row
-                    // that belongs to another tenant is. The unscoped re-read costs one query on the miss
-                    // path only, and it never tells the visitor which of the two it was - the refusal
-                    // message says nothing about what exists (D5).
+                    // Nothing in scope under that id, which is two different facts, and they are answered
+                    // differently on purpose. Somebody else discarding the same row first is routine and is
+                    // not a refusal: "already gone". Asking for a row that belongs to another tenant is, and is
+                    // refused and audited as a scope denial (9203). So the two can be told apart by whoever
+                    // asks - a visitor learns that a dead letter of that id exists in another tenant, though
+                    // never whose or what it holds: the refusal names no tenant and nothing of the row (D5).
+                    // The unscoped re-read costs one query on the miss path only.
                     if (resolved.TenantId is not null
                         && await session.Query<DeadLetterEvent>()
                             .AnyAsync(x => x.Id == id, token)
@@ -1149,6 +1603,16 @@ internal sealed class EventDataService : IEventDataService
             sequence.ToString(CultureInfo.InvariantCulture),
             async (resolved, token) =>
             {
+                // First, before anything is read: Marten's MarkEventsAsSkipped is `update mt_events set is_skipped = TRUE
+                // where seq_id = ANY(:sequences)` with no tenant predicate (MartenDatabase.EventStorage.cs, read at V9.39.0
+                // and V9.50.2), and under UseTenantPartitionedEvents every tenant numbers seq_id on its own - so skipping
+                // acme's #42 skipped every tenant's #42, whatever the proof below found (SEC1-fix4). Refused, and audited
+                // as failed; the page disables the button with the same sentence.
+                if (resolved.Store.Options.Events.UseTenantPartitionedEvents)
+                {
+                    throw new InvalidOperationException(StreamCompactionRules.SkipNeedsOneSequence);
+                }
+
                 await using (NpgsqlConnection connection = await OpenAsync(resolved, token).ConfigureAwait(false))
                 {
                     EventTableInfo table = await DescribeTablesAsync(resolved, connection, token).ConfigureAwait(false);
@@ -1209,7 +1673,26 @@ internal sealed class EventDataService : IEventDataService
             projectionName + " to #" + eventSequence.ToString(CultureInfo.InvariantCulture),
             async (resolved, token) =>
             {
-                // First, what the rewind reaches, which is not the tenant in the scope. Marten 9.31's
+                // Before anything else: Marten deletes the projection's dead letters on the way, so a rewind is a write to
+                // DeadLetterEvent, and a hidden type is refused - audited as refused - before any policy is asked of it.
+                RequireDeadLettersVisible(resolved);
+
+                // Then, before the whole-database question: under UseTenantPartitionedEvents a rewind has no floor that means one
+                // thing. The daemon's RewindSubscriptionAsync (JasperFxAsyncDaemon, read at JasperFx V2.74.0 and V2.87.1)
+                // stops every agent of the subscription - each tenant's, since the agents are distributed per tenant there
+                // (IEventStore.DistributesAgentsPerTenant) - has Marten write the floor into the store-global shards'
+                // progression rows only (RewindSubscriptionProgressAsync over Options.Projections.AllShards(), and deletes
+                // the projection's dead letters at or above the floor in every tenant, read at V9.39.0 and V9.50.2), then
+                // starts store-global agents, whose event loader has no tenant filter, from that floor: one tenant's event
+                // number applied to every tenant's events. The per-tenant overload IProjectionDaemon declares
+                // (jasperfx#407) throws for a tenant by default and the daemon does not override it at either version.
+                // Refused, and audited as failed; the page disables the button with the same sentence (SEC1-fix4).
+                if (resolved.Store.Options.Events.UseTenantPartitionedEvents)
+                {
+                    throw new InvalidOperationException(StreamCompactionRules.RewindNeedsOneSequence);
+                }
+
+                // Then, what the rewind reaches, which is not the tenant in the scope. Marten 9.31's
                 // RewindSubscriptionProgressAsync opens its session with AllowAnyTenant = true, rewrites
                 // every shard's progression row of the projection and deletes the projection's dead
                 // letters at or above the floor with no tenant predicate; the daemon then restarts every
@@ -1397,7 +1880,8 @@ internal sealed class EventDataService : IEventDataService
     /// The shape of every mutating call: capability, then scope with the write policy, then the
     /// operation, then the audit entry - written on failure as well as on success (hard rule 5).
     /// </summary>
-    private async Task MutateAsync(
+    /// <returns>The operation's outcome, as it was audited.</returns>
+    private async Task<string> MutateAsync(
         StudioScope scope,
         StudioCapability capability,
         string action,
@@ -1425,11 +1909,21 @@ internal sealed class EventDataService : IEventDataService
             audit.RecordScopeDenied(denied.Scope, options.Value.WriteAuthorizationPolicy ?? "(none)", action, target);
             throw;
         }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A scope the policies passed that names no store, database or tenant this process has
+            // (KeyNotFoundException), a store that will not build (StudioStoreUnavailableException), or an enumeration
+            // that failed on the way: the write was refused before it began, and an audit that skipped it would not
+            // say what somebody tried (hard rule 5). Still thrown - it fails closed, and the page says why.
+            audit.Record(action, target, succeeded: false, exception.Message, capability, scope);
+            throw;
+        }
 
         try
         {
             string outcome = await operation(resolved, cancellationToken).ConfigureAwait(false);
             audit.Record(action, target, succeeded: true, outcome, capability, scope);
+            return outcome;
         }
         catch (StudioNotAuthorizedException denied)
         {
@@ -1451,9 +1945,15 @@ internal sealed class EventDataService : IEventDataService
         }
     }
 
-    private static async Task<NpgsqlConnection> OpenAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    private static Task<NpgsqlConnection> OpenAsync(ResolvedScope resolved, CancellationToken cancellationToken) =>
+        OpenAsync(resolved, ConnectionUsage.Read, cancellationToken);
+
+    private static async Task<NpgsqlConnection> OpenAsync(
+        ResolvedScope resolved,
+        ConnectionUsage usage,
+        CancellationToken cancellationToken)
     {
-        NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+        NpgsqlConnection connection = resolved.Database.CreateConnection(usage);
 
         try
         {
@@ -1542,7 +2042,7 @@ internal sealed class EventDataService : IEventDataService
         List<string> present = [];
 
         foreach (string column in
-                 (string[]) ["tenant_id", "mt_dotnet_type", "correlation_id", "causation_id", "headers", "user_name", "tags"])
+                 (string[]) ["tenant_id", "mt_dotnet_type", "correlation_id", "causation_id", "headers", "user_name"])
         {
             if (table.HasEventColumn(column))
             {
@@ -1589,7 +2089,10 @@ internal sealed class EventDataService : IEventDataService
                 columns.Boolean(reader, "has_binary") ?? false,
                 columns.Int64(reader, "binary_length"),
                 columns.Text(reader, "data"),
-                metadata));
+                metadata)
+            {
+                Tags = columns.HStoreTags(reader),
+            });
         }
 
         return rows;
@@ -1603,7 +2106,10 @@ internal sealed class EventDataService : IEventDataService
             columns.Timestamp(reader, "created"),
             columns.Timestamp(reader, "timestamp"),
             columns.Boolean(reader, "is_archived") ?? false,
-            columns.Text(reader, "tenant_id"));
+            columns.Text(reader, "tenant_id"))
+        {
+            CompactedVersion = columns.Int64(reader, "compacted_version") ?? 0,
+        };
 
     private static StreamKeysetCursor? ToBuilderCursor(StreamCursor? cursor) =>
         cursor is null ? null : new StreamKeysetCursor(cursor.Timestamp, cursor.Id);
@@ -1673,7 +2179,7 @@ internal sealed class EventDataService : IEventDataService
     /// <para>
     /// <b>A missing table or schema (42P01, 3F000) is on this side too.</b> It is not how an event store
     /// that has not been created yet shows up: every read here asks the column catalog first
-    /// (<c>DescribeTablesAsync</c>), and the dead-letter reads <c>DeadLetterTableExistsAsync</c>, and
+    /// (<c>DescribeTablesAsync</c>), and the dead-letter reads <c>DescribeDeadLettersAsync</c>, and
     /// answers "empty" when the tables are not there - so the expected state never reaches Postgres at
     /// all. One of those SQLSTATEs therefore means the catalog said a table exists and the statement found
     /// none: a table dropped from under a running studio, a search path that changed, a schema a role
@@ -1698,7 +2204,8 @@ internal sealed class EventDataService : IEventDataService
     /// </summary>
     /// <remarks>
     /// Separate so the classification can be tested without a database. A connection that could not be
-    /// opened is never expected here, however Npgsql spells it: <see cref="OpenAsync" /> opens through
+    /// opened is never expected here, however Npgsql spells it:
+    /// <see cref="OpenAsync(ResolvedScope, ConnectionUsage, CancellationToken)" /> opens through
     /// <see cref="PostgresFailure.OpenAsync" />, which is what keeps a pool that ran dry off this list.
     /// </remarks>
     /// <param name="exception">What the read threw.</param>
@@ -1751,5 +2258,28 @@ internal sealed class EventDataService : IEventDataService
             ordinals.TryGetValue(column, out int index) && !reader.IsDBNull(index)
                 ? reader.GetFieldValue<DateTimeOffset>(index)
                 : null;
+
+        /// <summary>
+        /// A store's inline DCB tags: <c>mt_events.tags</c> in <c>DcbStorageMode.HStore</c>, keyed by the tag
+        /// type's suffix, which Npgsql reads as a dictionary. Empty on a store without the column, and for any
+        /// <c>tags</c> column that is not an hstore.
+        /// </summary>
+        public List<EventTag> HStoreTags(NpgsqlDataReader reader)
+        {
+            if (!ordinals.TryGetValue(EventTagModel.HStoreColumn, out int index)
+                || reader.IsDBNull(index)
+                || reader.GetValue(index) is not IDictionary<string, string?> tags)
+            {
+                return [];
+            }
+
+            List<EventTag> found = new(tags.Count);
+            foreach (KeyValuePair<string, string?> tag in tags.OrderBy(static x => x.Key, StringComparer.Ordinal))
+            {
+                found.Add(new EventTag(tag.Key, tag.Value ?? string.Empty));
+            }
+
+            return found;
+        }
     }
 }

@@ -191,7 +191,8 @@ public class OverviewTests
 
         List<string> hrefs = [.. page.FindAll(".ms-overview-tiles a").Select(x => x.GetAttribute("href") ?? string.Empty)];
 
-        hrefs.Should().HaveCount(6);
+        hrefs.Should().HaveCount(7);
+        hrefs.Should().Contain(x => x.StartsWith("health?", StringComparison.Ordinal), "the Health tile opens the Health page");
         hrefs.Should().Contain(x => x.StartsWith("events/streams?", StringComparison.Ordinal));
         hrefs.Should().Contain(x => x.StartsWith("events/feed?", StringComparison.Ordinal));
         hrefs.Should().Contain(x => x.StartsWith("events/dead-letters?", StringComparison.Ordinal));
@@ -284,6 +285,28 @@ public class OverviewTests
         page.StatCardClasses("Dead letters").Should().Contain("ms-stat-card-warning");
     }
 
+    /// <summary>
+    /// CL1 item 4: a host that hides <c>DeadLetterEvent</c> - or whose delegate throws for it - has no dead-letter tile at
+    /// all, rather than an amber "unknown" calling its own configuration a problem, and the count is not asked for.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_hidden_dead_letter_type_has_no_tile_and_is_not_counted(bool throws)
+    {
+        using StudioComponentContext context = await ScopedAsync();
+        context.EventData.DeadLetterCount = 3;
+        context.Options.IsDocumentTypeVisible = throws
+            ? static type => type == typeof(JasperFx.Events.Daemon.DeadLetterEvent) ? throw new InvalidOperationException("broken") : true
+            : static type => type != typeof(JasperFx.Events.Daemon.DeadLetterEvent);
+
+        var page = context.Render<Overview>();
+
+        page.WaitForAssertion(() => page.StatCardValue("Streams").Should().Be("~1,200"), TimeSpan.FromSeconds(5));
+        page.FindAll(".ms-stat-card-title").Select(static x => x.TextContent.Trim()).Should().NotContain("Dead letters");
+        context.EventData.DeadLetterCountReads.Should().Be(0, "a hidden type's count is not asked for");
+    }
+
     // -----------------------------------------------------------------------------------------------
     // Projection health
     // -----------------------------------------------------------------------------------------------
@@ -356,6 +379,44 @@ public class OverviewTests
 
         // Fifteen, the way the plan asks - and the request says so rather than the page trimming later.
         context.EventData.FeedRequests[^1].PageSize.Should().Be(15);
+    }
+
+    /// <summary>
+    /// SEC1-fix4: on a store that numbers events per tenant, "All tenants" has no latest events, which is the host's
+    /// configuration rather than a fault - a muted note, not a red alert with a Retry that would ask the same question.
+    /// Rows are keyed by tenant and sequence, as the feed's are.
+    /// </summary>
+    [Fact]
+    public async Task Latest_events_under_per_tenant_sequences_is_a_note_and_a_failure_that_cannot_be_retried_offers_no_retry()
+    {
+        using StudioComponentContext context = await ScopedAsync();
+        context.EventData.Feed = EventPage.Failed(new EventDataError(StreamCompactionRules.ReadNeedsTenant("the feed"), null, false) { NeedsTenant = true });
+
+        var page = context.Render<Overview>();
+
+        page.Find(".ms-overview-events .ms-overview-events-tenant").TextContent.Should().Be(StreamCompactionRules.ReadNeedsTenant("the feed"));
+        page.FindAll(".ms-overview-events .ms-error-alert").Should().BeEmpty();
+
+        context.EventData.Feed = EventPage.Failed(new EventDataError("permission denied for table mt_events", "42501", false));
+        var refused = context.Render<Overview>();
+
+        refused.Find(".ms-overview-events .ms-error-alert").TextContent.Should().Contain("permission denied");
+        refused.FindAll(".ms-overview-events .ms-error-alert button").Should().BeEmpty("a failure that is not retryable offers no Retry");
+    }
+
+    [Fact]
+    public async Task Two_tenants_latest_events_with_one_sequence_are_two_rows()
+    {
+        using StudioComponentContext context = await ScopedAsync();
+        context.EventData.Feed = new EventPage(
+            [FakeEventDataService.Event(5) with { TenantId = "acme" }, FakeEventDataService.Event(5) with { TenantId = "globex" }],
+            5,
+            false);
+
+        var page = context.Render<Overview>();
+
+        page.FindAll(".ms-overview-events .ms-overview-list-item").Should().HaveCount(2);
+        page.Invoking(static x => x.Render()).Should().NotThrow("a re-render diffs the keys, which is where a duplicate throws");
     }
 
     [Fact]

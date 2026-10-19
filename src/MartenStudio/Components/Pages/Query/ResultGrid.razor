@@ -60,7 +60,14 @@ else
                                thing first (RowGrid's CellClass). *@
                             <td class="ms-table-cell ms-query-cell ms-query-kind-@cell.Kind" @key="columnIndex">
                                 @* NULL, the JSON chip and plain text are SqlCellView's, shared with the database
-                                   browser's row grid so the two grids never spell a cell two ways. *@
+                                   browser's row grid so the two grids never spell a cell two ways.
+                                   A pgvector value is not collapsed here, unlike the row grid (PGV): the console reads
+                                   values through Npgsql's type mapping, which cannot read a vector at all unless the
+                                   host called UseVector() (the cell says "cannot read" and the type), and when it can,
+                                   the text is Pgvector's own ToString, not Postgres's; and nothing here knows the
+                                   column is pgvector's - the row grid's PgVectorColumn comes from pg_depend and the type
+                                   modifier, and a result set has only a type name. Casting to ::text in the statement
+                                   reads one as Postgres prints it. *@
                                 <SqlCellView Text="@cell.Text"
                                              Kind="@cell.Kind"
                                              OnOpen="() => OpenJsonAsync(rowIndex, columnIndex)" />

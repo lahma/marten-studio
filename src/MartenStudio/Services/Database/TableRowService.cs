@@ -1595,7 +1595,8 @@ internal sealed class TableRowService : ITableRowService
                 ],
                 level,
                 reason,
-                column.Comment));
+                column.Comment,
+                column.Vector));
         }
 
         return columns;

@@ -28,6 +28,13 @@ internal sealed record EventDataError(string Message, string? SqlState, bool Can
 
     /// <summary>The error as one line, with the SQLSTATE in front when there is one.</summary>
     public string Display => SqlState is null ? Message : $"[{SqlState}] {Message}";
+
+    /// <summary>
+    /// Whether this is not a failure at all but the answer for a read that needs a tenant selected - a store that numbers
+    /// events per tenant has no feed across tenants (<c>StreamCompactionRules.ReadNeedsTenant</c>). A page draws it as a
+    /// note, not an alert.
+    /// </summary>
+    public bool NeedsTenant { get; init; }
 }
 
 /// <summary>
@@ -62,6 +69,18 @@ internal sealed record EventStoreShape
     /// <summary>Whether events carry a tenant.</summary>
     public bool HasTenantId { get; init; }
 
+    /// <summary>
+    /// Whether the event store is conjoined (<c>Events.TenancyStyle</c>): Marten then narrows its own stream reads and
+    /// writes by the session's tenant, and runs one with no tenant as <c>*DEFAULT*</c>.
+    /// </summary>
+    public bool EventsConjoined { get; init; }
+
+    /// <summary>
+    /// Whether each tenant numbers its events from a sequence of its own (<c>Events.UseTenantPartitionedEvents</c>), so
+    /// that <c>seq_id</c> orders one tenant's events and nothing across tenants.
+    /// </summary>
+    public bool PerTenantSequences { get; init; }
+
     /// <summary>Whether events can be archived.</summary>
     public bool HasIsArchived { get; init; }
 
@@ -76,6 +95,12 @@ internal sealed record EventStoreShape
 
     /// <summary>The tenant the current scope is pinned to, or <see langword="null" /> for all of them.</summary>
     public string? TenantId { get; init; }
+
+    /// <summary>How the store keeps DCB tags, from its options; <see cref="EventTagStorage.None" /> without tag types.</summary>
+    public EventTagStorage TagStorage { get; init; }
+
+    /// <summary>The natural keys the Streams box can look a stream up by, as <c>Aggregate.Member</c>.</summary>
+    public IReadOnlyList<string> NaturalKeys { get; init; } = [];
 }
 
 /// <summary>One row of the stream list.</summary>
@@ -93,7 +118,14 @@ internal sealed record StreamRow(
     DateTimeOffset? Created,
     DateTimeOffset? LastEvent,
     bool IsArchived,
-    string? TenantId);
+    string? TenantId)
+{
+    /// <summary>
+    /// The version an earlier compaction folded the stream through (<c>mt_streams.compacted_version</c>,
+    /// Marten 9.x, 0 when never compacted or when the column is not there).
+    /// </summary>
+    public long CompactedVersion { get; init; }
+}
 
 /// <summary>Where the next keyset page of the stream list starts.</summary>
 /// <param name="Timestamp">The last row's timestamp.</param>
@@ -215,6 +247,9 @@ internal sealed record StreamState(
 
     /// <summary>A stream that is not there.</summary>
     public static StreamState Missing(string id) => new(id, false, null, 0, null, null, false, null);
+
+    /// <summary>The version an earlier compaction folded the stream through; 0 when never.</summary>
+    public long CompactedVersion { get; init; }
 }
 
 /// <summary>One event, as the timeline and the feed draw it.</summary>
@@ -246,7 +281,14 @@ internal sealed record EventRow(
     bool HasBinary,
     long? BinaryLength,
     string? Json,
-    IReadOnlyDictionary<string, string?> Metadata);
+    IReadOnlyDictionary<string, string?> Metadata)
+{
+    /// <summary>
+    /// The event's DCB tags, when they were read with it: inline in hstore mode, from the tag tables when
+    /// the page's <see cref="EventPage.TagLoad" /> says so.
+    /// </summary>
+    public IReadOnlyList<EventTag> Tags { get; init; } = [];
+}
 
 /// <summary>One page of events.</summary>
 /// <param name="Rows">The events: newest first in the feed, oldest first in a timeline.</param>
@@ -264,6 +306,9 @@ internal sealed record EventPage(
 
     /// <summary>An empty page that succeeded.</summary>
     public static EventPage Empty { get; } = new([], null, false);
+
+    /// <summary>Whether the rows carry their DCB tags, and why not when they do not.</summary>
+    public EventTagLoad TagLoad { get; init; } = EventTagLoad.NotApplicable;
 }
 
 /// <summary>What the global feed is asking for.</summary>
@@ -292,6 +337,9 @@ internal sealed record EventFeedRequest
 
     /// <summary>Whether events the daemon was told to skip are included.</summary>
     public bool IncludeSkipped { get; init; } = true;
+
+    /// <summary>Only events carrying this DCB tag - the feed's <c>tag:&lt;type&gt;=&lt;value&gt;</c> filter.</summary>
+    public EventTagFilter? Tag { get; init; }
 
     /// <summary>How many events to return.</summary>
     public int PageSize { get; init; } = 50;
@@ -340,6 +388,12 @@ internal sealed record EventTypeList(
 {
     /// <summary>An empty list that failed.</summary>
     public static EventTypeList Failed(EventDataError error) => new([], false, error);
+
+    /// <summary>
+    /// Whether the first and last sequences were taken across tenants that number their events on their own
+    /// (<c>UseTenantPartitionedEvents</c> with no tenant selected), so that neither names an event.
+    /// </summary>
+    public bool SequencesPerTenant { get; init; }
 }
 
 /// <summary>One dead letter.</summary>
@@ -375,6 +429,15 @@ internal sealed record DeadLetterPage(
 
     /// <summary>An empty page that succeeded.</summary>
     public static DeadLetterPage Empty { get; } = new([], false);
+
+    /// <summary>
+    /// The page of a host that hides <c>DeadLetterEvent</c>: nothing was read, and the screen says
+    /// <see cref="DeadLetterVisibility.HiddenMessage" />. Not a failure - it is the host's configuration.
+    /// </summary>
+    public static DeadLetterPage Hidden { get; } = new([], false) { IsHidden = true };
+
+    /// <summary>Whether the host hides <c>DeadLetterEvent</c>, so nothing was read (<see cref="Hidden" />).</summary>
+    public bool IsHidden { get; init; }
 }
 
 /// <summary>What the dead-letter list is asking for.</summary>
@@ -399,7 +462,7 @@ internal sealed record DeadLetterQuery
 /// <summary>
 /// An aggregate type the stream detail page can replay a stream into.
 /// </summary>
-/// <param name="Type">The CLR type the generic <c>AggregateStreamAsync</c> is closed over.</param>
+/// <param name="Type">The CLR type Marten's generic aggregator is closed over.</param>
 /// <param name="Name">Its short name, for the picker.</param>
 /// <param name="FullName">Its full name, for the tooltip.</param>
 /// <param name="Source">
@@ -425,9 +488,9 @@ internal enum AggregateCandidateSource
 /// Why a replay produced no aggregate. Four different facts that used to render as one sentence.
 /// </summary>
 /// <remarks>
-/// Marten's <c>AggregateStreamAsync&lt;T&gt;</c> answers <see langword="null" /> for all four (verified
-/// against 9.35's <c>QueryEventStore</c>): the stream's events are fetched through an
-/// <c>EventStatement</c> that always applies <c>IsNotArchivedFilter</c>, so an archived stream fetches
+/// The replay answers <see langword="null" /> for all four, as Marten's <c>AggregateStreamAsync&lt;T&gt;</c> - whose
+/// logic it follows - does (read at <c>V9.39.0</c> and <c>V9.50.2</c>, <c>QueryEventStore</c>): the stream's events are
+/// read with <c>EventStatement</c>'s filters, which always leave archived events out, so an archived stream reads
 /// empty; a version past the stream's last one is an explicit
 /// <c>if (version != 0 &amp;&amp; version &gt; events[^1].Version) return null</c>; and an aggregator that
 /// never creates — or that deletes — returns null of its own accord. Telling the visitor "produced

@@ -260,7 +260,12 @@ internal static class IndexAdvice
                 collection?.Alias,
                 SuggestionFor(row, isDeclared, onMartenTable, ignored, Relational(tableKey)),
                 onMartenTable,
-                ignored));
+                ignored)
+            {
+                AccessMethod = row.AccessMethod,
+                Vector = MartenStudio.Services.Database.PgVector.Index(
+                    row.AccessMethodIsPgVector, row.AccessMethod, row.KeyDefinitions, row.OperatorClasses, row.Options),
+            });
         }
 
         List<MissingIndex> missing = [];

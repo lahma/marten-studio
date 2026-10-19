@@ -9,6 +9,7 @@ using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Conventions;
 
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
 
 using QueryPage = MartenStudio.Components.Pages.Query.Query;
@@ -253,8 +254,13 @@ public class QueryPageTests
         return context;
     }
 
+    /// <summary>
+    /// The JSON chip is clicked after a run, so the click is awaited: the run's "Running… N ms" ticker re-renders the
+    /// page once after it ends, and a <c>Click()</c> that lands inside that render returns before its handler has run
+    /// (<see cref="The_stats_panel_has_a_tab_for_the_sql_the_plan_and_the_messages" />).
+    /// </summary>
     [Fact]
-    public void With_RunSql_granted_a_statement_runs_and_the_grid_keeps_NULL_apart_from_a_JSON_cell()
+    public async Task With_RunSql_granted_a_statement_runs_and_the_grid_keeps_NULL_apart_from_a_JSON_cell()
     {
         FakeQueryService service = WithPerson();
         service.SqlResult = FakeQueryService.OneRow();
@@ -272,7 +278,7 @@ public class QueryPageTests
         page.Find(".ms-query-null").TextContent.Should().Be("NULL");
         page.Find(".ms-query-json-chip").Should().NotBeNull();
 
-        page.Find(".ms-query-json-chip").Click();
+        await page.Find(".ms-query-json-chip").ClickAsync(new MouseEventArgs());
         page.Find(".ms-query-json-panel").TextContent.Should().Contain("Alice");
     }
 
@@ -403,8 +409,17 @@ public class QueryPageTests
     // Chrome: stats tabs, the key handler, cancellation
     // ------------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// The tab clicks are awaited, because they come after a run. bUnit's <c>Click()</c> discards the dispatch task,
+    /// and the dispatch runs inline only while the renderer's dispatcher is idle - so a click that lands while the
+    /// dispatcher is busy is queued, and <c>Click()</c> returns before its handler has run. A run makes it busy: it
+    /// starts the page's 200 ms "Running… N ms" <see cref="PeriodicTimer" />, whose one tick after the run has ended
+    /// re-renders the page on the dispatcher. On a loaded machine the tab click can land inside that render, and the
+    /// panel it opens is then drawn after the assertion that looks for it - the failure seen under load in full fast
+    /// runs. The run itself is the first click on the page, before any timer exists, so it runs inline.
+    /// </summary>
     [Fact]
-    public void The_stats_panel_has_a_tab_for_the_sql_the_plan_and_the_messages()
+    public async Task The_stats_panel_has_a_tab_for_the_sql_the_plan_and_the_messages()
     {
         FakeQueryService service = WithPerson();
         service.SqlResult = FakeQueryService.OneRow();
@@ -422,10 +437,10 @@ public class QueryPageTests
         page.Find(".ms-query-tab-count").TextContent.Trim().Should().Be("1", "one notice came back");
         page.Find(".ms-query-tab-panel").TextContent.Should().Contain("select 1");
 
-        page.Find("#ms-query-tab-messages").Click();
+        await page.Find("#ms-query-tab-messages").ClickAsync(new MouseEventArgs());
         page.Find(".ms-query-message").TextContent.Should().Contain("something happened");
 
-        page.Find("#ms-query-tab-plan").Click();
+        await page.Find("#ms-query-tab-plan").ClickAsync(new MouseEventArgs());
         page.Find(".ms-query-no-plan").TextContent.Should().Contain("EXPLAIN");
     }
 

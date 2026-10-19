@@ -21,7 +21,7 @@ namespace MartenStudio.Tests.Events;
 /// page asked for, so a test can assert that the feed's filters reached the service rather than only that
 /// the markup changed.
 /// </remarks>
-internal sealed class FakeEventDataService : IEventDataService
+internal sealed partial class FakeEventDataService : IEventDataService
 {
     /// <summary>What <see cref="DescribeAsync" /> answers.</summary>
     public EventStoreShape Shape { get; set; } = new()
@@ -158,13 +158,27 @@ internal sealed class FakeEventDataService : IEventDataService
         return Task.FromResult(Streams);
     }
 
-    public Task<StreamState> GetStreamAsync(
+    /// <summary>
+    /// Gates on the stream read, by id: a read of a gated id waits until the test completes the gate - which is how a
+    /// test holds a page between an id changing and the new stream's answer.
+    /// </summary>
+    public ConcurrentDictionary<string, TaskCompletionSource> StreamGates { get; } = new(StringComparer.Ordinal);
+
+    public async Task<StreamState> GetStreamAsync(
         StudioScope scope,
         string streamId,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(StreamStates.TryGetValue(streamId, out StreamState? state)
+        CancellationToken cancellationToken = default)
+    {
+        if (StreamGates.TryGetValue(streamId, out TaskCompletionSource? gate))
+        {
+            // With the token, as the counts gate: a gate nobody completes ends with the page that waited on it.
+            await gate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return StreamStates.TryGetValue(streamId, out StreamState? state)
             ? state
-            : StreamState.Missing(streamId));
+            : StreamState.Missing(streamId);
+    }
 
     public Task<EventPage> GetStreamEventsAsync(
         StudioScope scope,
@@ -237,13 +251,25 @@ internal sealed class FakeEventDataService : IEventDataService
         CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<AggregateTypeCandidate>>(Candidates);
 
-    public Task<AggregateSnapshot> AggregateAtVersionAsync(
+    /// <summary>A gate the next replay waits on, when set - how a test holds a replay while the page moves on.</summary>
+    public TaskCompletionSource? ReplayGate { get; set; }
+
+    public async Task<AggregateSnapshot> AggregateAtVersionAsync(
         StudioScope scope,
         string streamId,
         string aggregateTypeFullName,
         long version,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(Snapshot ?? AggregateSnapshot.NotFound(aggregateTypeFullName, version));
+        CancellationToken cancellationToken = default)
+    {
+        AggregateSnapshot answer = Snapshot ?? AggregateSnapshot.NotFound(aggregateTypeFullName, version);
+
+        if (ReplayGate is { } gate)
+        {
+            await gate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return answer;
+    }
 
     public Task<DeadLetterPage> ListDeadLettersAsync(
         StudioScope scope,
@@ -263,11 +289,17 @@ internal sealed class FakeEventDataService : IEventDataService
             : Task.FromException<long?>(CountFailure);
     }
 
+    /// <summary>The scope every event lookup by sequence was asked with, newest last.</summary>
+    public List<StudioScope> EventBySequenceScopes { get; } = [];
+
     public Task<EventRow?> GetEventBySequenceAsync(
         StudioScope scope,
         long sequence,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(EventBySequence);
+        CancellationToken cancellationToken = default)
+    {
+        EventBySequenceScopes.Add(scope);
+        return Task.FromResult(EventBySequence);
+    }
 
     public Task ArchiveStreamAsync(StudioScope scope, string streamId, CancellationToken cancellationToken = default)
     {

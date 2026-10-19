@@ -11,6 +11,12 @@
         {
             <span class="ms-muted ms-projection-note">the async daemon does not run this</span>
         }
+        @if (IsRebuilding)
+        {
+            @* A state, not an error: the rebuild is somebody's deliberate act, and the buttons beside it say what it
+               means for them. *@
+            <span class="ms-badge ms-projection-rebuilding" title="@("Being rebuilt " + (RebuildingBy ?? string.Empty))">rebuilding</span>
+        }
     </th>
     <td class="ms-table-cell ms-table-cell-mono ms-projection-type" title="@ImplementationType">@ImplementationType</td>
     @* @( ... ) and not a bare @: an '@' with a word character in front of it and one behind it is an
@@ -52,6 +58,17 @@
     /// <summary>How many shards it runs as.</summary>
     [Parameter]
     public int ShardCount { get; set; }
+
+    /// <summary>
+    /// Whether it is being rebuilt right now - by Marten Studio, or where the daemon here can say so (JasperFx 2.86+),
+    /// by anything.
+    /// </summary>
+    [Parameter]
+    public bool IsRebuilding { get; set; }
+
+    /// <summary>Who is rebuilding it, for the badge's hover text ("by Marten Studio").</summary>
+    [Parameter]
+    public string? RebuildingBy { get; set; }
 
     /// <summary>
     /// The buttons for this projection, rendered by the page.

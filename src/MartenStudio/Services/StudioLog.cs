@@ -128,7 +128,7 @@ internal static partial class StudioLog
     /// line. A timeout - 57014, or the <c>NpgsqlException</c> wrapping a <c>TimeoutException</c> that the
     /// same expiry produces when the backend is slow to answer the cancel - is the page's business and is
     /// Debug. A table or schema that is not there (42P01, 3F000) comes here: every read asks the column
-    /// catalog, or <c>DeadLetterTableExistsAsync</c>, before it touches a table, so an event store that
+    /// catalog, or <c>DescribeDeadLettersAsync</c>, before it touches a table, so an event store that
     /// has not been created yet is an empty answer and never this, and one of those SQLSTATEs means the
     /// catalog and the database disagree. So does a connection failure and any other SQLSTATE.
     /// </remarks>
@@ -161,6 +161,17 @@ internal static partial class StudioLog
     /// </remarks>
     [LoggerMessage(EventId = 9221, Message = "Marten Studio could not ask the store policy which tenants of store {StoreKey}, database {DatabaseId} to list")]
     public static partial void TenantPolicyFailed(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
+
+    /// <remarks>
+    /// A health check failed for a reason nobody chose: an unexpected SQLSTATE, a connection the database
+    /// refused, a bug in a check. The Health page and the Overview re-check at <c>HealthInterval</c> while
+    /// they are open, so the same failure comes round again; the throttle key is the check's code (or the
+    /// connection, which is one failure however many checks it stops), the store, the database and the kind
+    /// of failure. Expected states - a missing extension, a privilege the role lacks, a statement that ran out
+    /// of its timeout - are rows the page draws and Debug lines, and never come here.
+    /// </remarks>
+    [LoggerMessage(EventId = 9222, Message = "Marten Studio's health check {Code} could not check store {StoreKey}, database {DatabaseId}")]
+    public static partial void HealthCheckFailed(this ILogger logger, LogLevel level, Exception exception, string code, string storeKey, string databaseId);
 
     /// <remarks>
     /// <para>
