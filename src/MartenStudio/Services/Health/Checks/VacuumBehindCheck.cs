@@ -134,8 +134,11 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
             Subject = declared.Key,
             DocumentTypes = declared.DocumentTypes,
             GatedSchemas = declared.GatedSchemas,
-            Title = TableText.Percent(table.DeadShare ?? 0) + " of " + declared.Key + " is dead rows, and it was last vacuumed "
-                + (table.LastVacuumOfAnyKind is { } last ? TableText.Span(now - last) + " ago" : "never"),
+            // "it was last vacuumed never" is not a sentence: a table nothing has vacuumed gets a clause of its own.
+            Title = TableText.Percent(table.DeadShare ?? 0) + " of " + declared.Key + " is dead rows, and "
+                + (table.LastVacuumOfAnyKind is { } last
+                    ? "it was last vacuumed " + TableText.Span(now - last) + " ago"
+                    : "it has never been vacuumed"),
             WhyItMatters =
                 "A dead row is an old version an update or a delete left behind, and only vacuum makes its space reusable. Until "
                 + "it runs, every sequential scan reads the dead rows, every index still points at them, the table and its "

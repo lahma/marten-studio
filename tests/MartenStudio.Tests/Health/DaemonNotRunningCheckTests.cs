@@ -66,6 +66,37 @@ public class DaemonNotRunningCheckTests
 
         finding.Title.Should().Contain("500 events behind");
         finding.Evidence.Should().Contain(new HealthEvidence("Last write to mt_event_progression", "never"));
+        finding.WhyItMatters.Should().Contain("no session holds this store's leadership lock, nothing has ever written to mt_event_progression, and no daemon runs")
+            .And.NotContain("for ever", "\"written for ever\" reads as \"for a long time\", not as \"never\"");
+    }
+
+    [Fact]
+    public void A_silent_table_says_how_long_it_has_been_silent()
+    {
+        HealthFinding finding = Evaluate(Quiet(TimeSpan.FromMinutes(10))).Findings.Single();
+
+        finding.WhyItMatters.Should().Contain("no session holds this store's leadership lock, nothing has written to mt_event_progression for 10 min, and no daemon runs");
+    }
+
+    /// <summary>
+    /// The held-lock finding over a table nothing has ever written to: its title is a sentence, never "nothing has been
+    /// written for ever".
+    /// </summary>
+    [Theory]
+    [InlineData(10, "A session holds the daemon's leadership lock, but nothing has been written for 10 min",
+        "the session holding this store's leadership lock has written nothing to mt_event_progression for 10 min. A running daemon")]
+    [InlineData(null, "A session holds the daemon's leadership lock, but nothing has ever been written",
+        "nothing has ever written to mt_event_progression, although a session holds this store's leadership lock. A running daemon")]
+    public void A_held_lock_says_how_long_nothing_has_been_written_or_that_nothing_ever_was(int? quietMinutes, string title, string why)
+    {
+        DaemonLockHolder holder = new(4242, 4444, "app", "billing-api", "10.0.0.5", Now - TimeSpan.FromDays(1), "idle in transaction");
+        HighWaterReading reading = Quiet(quietMinutes is { } minutes ? TimeSpan.FromMinutes(minutes) : null);
+
+        HealthFinding finding = Evaluate(reading, holders: [holder]).Findings.Should().ContainSingle().Subject;
+
+        finding.Subject.Should().Be("lock-held-idle");
+        finding.Title.Should().Be(title);
+        finding.WhyItMatters.Should().Contain(why).And.NotContain("for ever");
     }
 
     /// <summary>2 x SlowPollingTime + 1 min: with the default 1 s, 62 s.</summary>

@@ -224,7 +224,8 @@ internal sealed class DaemonNotRunningCheck : HealthCheck<DaemonNotRunningFacts>
         }
 
         IReadOnlyList<DaemonLockHolder> holders = facts.Holders ?? [];
-        string quietFor = quiet is { } q ? DaemonCheckConfiguration.Format(q) : "ever";
+        // A table nothing has ever written to gets clauses of its own: "written for ever" reads as "for a long time".
+        string? quietFor = quiet is { } q ? DaemonCheckConfiguration.Format(q) : null;
         string hosting = facts.InProcess.Hosting switch
         {
             DaemonHostingState.Hosted => "hosted in this process, and stopped",
@@ -256,8 +257,11 @@ internal sealed class DaemonNotRunningCheck : HealthCheck<DaemonNotRunningFacts>
                 Title = "Async projections are " + DaemonCheckConfiguration.Number(lag) + " events behind and nothing appears to be running the daemon",
                 WhyItMatters =
                     "Every async projection and subscription in this database waits for a daemon, and the evidence says none is "
-                    + "running: no session holds this store's leadership lock, nothing has written to mt_event_progression for "
-                    + quietFor + ", and no daemon runs in this process. Events keep arriving and nothing projects them.",
+                    + "running: no session holds this store's leadership lock, "
+                    + (quietFor is null
+                        ? "nothing has ever written to mt_event_progression"
+                        : "nothing has written to mt_event_progression for " + quietFor)
+                    + ", and no daemon runs in this process. Events keep arriving and nothing projects them.",
                 Evidence = evidence,
                 Caveat =
                     "A Solo daemon in another process takes no lock, so for it only the progression table speaks - and it writes "
@@ -294,10 +298,14 @@ internal sealed class DaemonNotRunningCheck : HealthCheck<DaemonNotRunningFacts>
             Code = "D02",
             Severity = HealthSeverity.Warning,
             Subject = "lock-held-idle",
-            Title = "A session holds the daemon's leadership lock, but nothing has been written for " + quietFor,
+            Title = "A session holds the daemon's leadership lock, but nothing has "
+                + (quietFor is null ? "ever been written" : "been written for " + quietFor),
             WhyItMatters =
-                "Async projections here are " + DaemonCheckConfiguration.Number(lag) + " events behind, and the session holding this "
-                + "store's leadership lock has written nothing to mt_event_progression for " + quietFor + ". A running daemon writes on "
+                "Async projections here are " + DaemonCheckConfiguration.Number(lag) + " events behind, and "
+                + (quietFor is null
+                    ? "nothing has ever written to mt_event_progression, although a session holds this store's leadership lock"
+                    : "the session holding this store's leadership lock has written nothing to mt_event_progression for " + quietFor)
+                + ". A running daemon writes on "
                 + "every high-water poll while caught up and on every shard advance, so the process holding the lock is hung, or the "
                 + "lock outlived it - while it is held, no other node takes over.",
             Evidence = evidence,

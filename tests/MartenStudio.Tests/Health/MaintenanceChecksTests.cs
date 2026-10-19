@@ -175,6 +175,37 @@ public class MaintenanceChecksTests
         finding.Caveat.Should().Contain("Seen for 12 min");
     }
 
+    /// <summary>
+    /// The title is the headline of the README's Health screenshot. A table vacuumed by hand or by autovacuum says how
+    /// long ago; one nothing has vacuumed says so in a clause of its own, never "it was last vacuumed never".
+    /// </summary>
+    [Theory]
+    [InlineData(3, null, "it was last vacuumed 3 days ago")]
+    [InlineData(null, 2, "it was last vacuumed 2 days ago")]
+    [InlineData(null, null, "it has never been vacuumed")]
+    public void The_title_says_how_long_ago_the_table_was_last_vacuumed_or_that_it_never_was(
+        int? autovacuumedDaysAgo,
+        int? vacuumedDaysAgo,
+        string clause)
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+        TableFacts table = Table(orders, row => row with
+        {
+            LiveRows = 40_000,
+            DeadRows = 20_000,
+            LastVacuum = vacuumedDaysAgo is { } manual ? Now.AddDays(-manual) : null,
+            LastAutovacuum = autovacuumedDaysAgo is { } auto ? Now.AddDays(-auto) : null,
+            StorageOptions = ["autovacuum_enabled=false"],
+        });
+
+        HealthFinding finding = new VacuumBehindCheck()
+            .Evaluate(new VacuumFacts(Now, [table]), Evaluation())
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Title.Should().Be("33% of " + orders.Key + " is dead rows, and " + clause);
+        finding.Title.Should().NotContain("vacuumed never");
+    }
+
     [Fact]
     public void A_break_in_the_condition_restarts_the_clock()
     {

@@ -247,6 +247,9 @@ public class UnhealthySwitchesLiveTests(PostgresFixture postgres)
 
         HealthReportFinding finding = (await host.ReportAsync()).Findings.Should().ContainSingle(static x => x.Code == "T07").Subject;
         finding.Finding.Title.Should().StartWith("50% of ", "half the table is dead rows");
+        finding.Finding.Title.Should().EndWith(
+            " is dead rows, and it has never been vacuumed",
+            "the switch has just recreated the table with autovacuum off for it - and the title is a sentence, not \"last vacuumed never\"");
         finding.Evidence.Should().Contain(new HealthEvidence("Live rows", "30,000"));
         finding.Evidence.Should().Contain(new HealthEvidence("Dead rows", "30,000 (50%)"));
     }
