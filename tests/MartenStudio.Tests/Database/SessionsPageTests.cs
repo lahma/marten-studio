@@ -5,8 +5,10 @@ using MartenStudio.Services;
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Health;
 using MartenStudio.Tests.Components;
+using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace MartenStudio.Tests.Database;
 
@@ -29,12 +31,14 @@ public class SessionsPageTests
 
         public async ValueTask DisposeAsync()
         {
+            // A read a test held and the page never cancelled ends here, so a failing test leaves nothing waiting behind it.
+            Sessions.ReleaseHeld();
             await Context.DisposeAsync();
             Pools.Dispose();
         }
     }
 
-    private static async Task<Fixture> ReadyAsync(SessionDetailsAccess access)
+    private static async Task<Fixture> ReadyAsync(SessionDetailsAccess access, CapturingLoggerProvider? logs = null)
     {
         FakeSessionActivityService sessions = new() { Summary = FakeSessionActivityService.SummaryWith(access) };
         SessionPoolObserver pools = new("MartenStudio.Tests.SessionsPage." + Guid.NewGuid().ToString("N"));
@@ -43,6 +47,11 @@ public class SessionsPageTests
         {
             services.AddSingleton<ISessionActivityService>(sessions);
             services.AddSingleton(pools);
+
+            if (logs is not null)
+            {
+                services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
+            }
         });
 
         await context.ReadyAsync();
@@ -159,6 +168,85 @@ public class SessionsPageTests
         pools.IsListening.Should().BeFalse("the last lease takes the listener with it");
     }
 
+    /// <summary>
+    /// FLK2, made certain rather than left to the scheduler: the page is closed while the renderer's dispatcher still has
+    /// work running - which the page's own polling loop and bUnit's <c>WaitForAssertion</c> both leave behind them - and
+    /// the lease still goes back. bUnit 2.11.3's <c>DisposeComponentsAsync</c>, called from outside the dispatcher at
+    /// that moment, disposed nothing and completed successfully (bUnit-dev/bUnit#1939);
+    /// <see cref="StudioComponentContext.DisposeComponentsAsync" /> runs it on the dispatcher.
+    /// </summary>
+    [Fact]
+    public async Task The_lease_goes_back_even_when_the_renderer_is_busy_as_the_page_closes()
+    {
+        await using Fixture fixture = await ReadyAsync(Closed);
+        StudioComponentContext context = fixture.Context;
+        SessionPoolObserver pools = fixture.Pools;
+        CancellationToken cancel = Xunit.TestContext.Current.CancellationToken;
+
+        var page = context.Render<Sessions>();
+        page.WaitForAssertion(() => page.FindAll(".ms-sessions-stats").Should().ContainSingle());
+        pools.IsListening.Should().BeTrue();
+
+        using ManualResetEventSlim entered = new();
+        using ManualResetEventSlim release = new();
+        Task busy = Task.Run(
+            () => context.Renderer.Dispatcher.InvokeAsync(() =>
+            {
+                entered.Set();
+                release.Wait(cancel);
+            }),
+            cancel);
+
+        try
+        {
+            entered.Wait(TimeSpan.FromSeconds(10), cancel).Should().BeTrue("the renderer's dispatcher is held for the length of the call");
+
+            Task disposing = context.DisposeComponentsAsync();
+            release.Set();
+            await disposing.WaitAsync(TimeSpan.FromSeconds(10), cancel);
+        }
+        finally
+        {
+            release.Set();
+            await busy;
+        }
+
+        pools.IsListening.Should().BeFalse("the page was disposed, lease and all, though the renderer was busy when it was asked");
+    }
+
+    /// <summary>
+    /// A poll still reading when the page closes is cancelled with the loop, and the lease goes back without waiting for
+    /// it. The page disposes its loop - and waits for it - before it cancels its own token, so a poll that read under the
+    /// page's token alone held the lease, and the pool listener with it, until the read finished by itself; this read
+    /// never does. Closing the tab puts nothing in the log either.
+    /// </summary>
+    [Fact]
+    public async Task A_poll_still_reading_when_the_page_closes_is_cancelled_and_the_lease_goes_back_without_waiting_for_it()
+    {
+        CapturingLoggerProvider logs = new();
+        await using Fixture fixture = await ReadyAsync(Closed, logs);
+        StudioComponentContext context = fixture.Context;
+        SessionPoolObserver pools = fixture.Pools;
+        CancellationToken cancel = Xunit.TestContext.Current.CancellationToken;
+
+        context.Options.RefreshInterval = TimeSpan.FromMilliseconds(20);
+        context.Options.HealthInterval = TimeSpan.FromMilliseconds(20);
+
+        var page = context.Render<Sessions>();
+        page.WaitForAssertion(() => page.FindAll(".ms-sessions-stats").Should().ContainSingle());
+
+        CancellationToken read = await fixture.Sessions.HoldNextSummaryAsync().WaitAsync(TimeSpan.FromSeconds(10), cancel);
+        read.IsCancellationRequested.Should().BeFalse("the poll is still reading");
+        pools.IsListening.Should().BeTrue();
+
+        await context.DisposeComponentsAsync().WaitAsync(TimeSpan.FromSeconds(10), cancel);
+
+        read.IsCancellationRequested.Should().BeTrue("closing the page cancels the read its poll was waiting for");
+        pools.IsListening.Should().BeFalse("the lease goes back with the page, not when an abandoned read gets round to finishing");
+        logs.Entries.Where(static x => x.Level >= LogLevel.Warning).Should().BeEmpty("a poll the page's own closing cancelled is not a failure");
+        logs.Entries.Select(static x => x.Message).Should().NotContain(static x => x.Contains("live update failed", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task A_refusal_of_the_summary_is_said_in_its_own_words()
     {
@@ -192,11 +280,36 @@ internal sealed class FakeSessionActivityService : ISessionActivityService
     /// <summary>The details it answers.</summary>
     public SessionActivityDetails Details { get; set; } = DetailsFor();
 
+    private readonly TaskCompletionSource released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource<CancellationToken>? held;
+
+    /// <summary>
+    /// Makes the next summary read one that is still in flight: it waits until its token is cancelled, or until
+    /// <see cref="ReleaseHeld" />, and never answers by itself. The task completes, with the token that read was given,
+    /// once it has started.
+    /// </summary>
+    public Task<CancellationToken> HoldNextSummaryAsync()
+    {
+        TaskCompletionSource<CancellationToken> hold = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Volatile.Write(ref held, hold);
+        return hold.Task;
+    }
+
+    /// <summary>Lets a held read finish, for a test that is ending whatever the page did.</summary>
+    public void ReleaseHeld() => released.TrySetResult();
+
     /// <inheritdoc />
-    public Task<SessionActivitySummary> GetSummaryAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    public async Task<SessionActivitySummary> GetSummaryAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
         SummaryRequests.Add(scope);
-        return Task.FromResult(Summary);
+
+        if (Interlocked.Exchange(ref held, null) is { } hold)
+        {
+            hold.TrySetResult(cancellationToken);
+            await released.Task.WaitAsync(cancellationToken);
+        }
+
+        return Summary;
     }
 
     /// <inheritdoc />

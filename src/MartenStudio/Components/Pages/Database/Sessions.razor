@@ -408,7 +408,12 @@
         await live.StartAsync(Options.Value.EffectiveHealthInterval, TickAsync, lifetime.Token);
     }
 
-    private async Task TickAsync(CancellationToken _) => await LoadAsync();
+    /// <summary>
+    /// One poll, under the loop's token as well as the page's. The page disposes its loop - and waits for it - before it
+    /// cancels its own token, so a poll that ignored the loop's held the lease, and the pool listener with it, until its
+    /// read finished by itself.
+    /// </summary>
+    private async Task TickAsync(CancellationToken cancellationToken) => await LoadAsync(cancellationToken);
 
     private async Task RefreshAsync() => await LoadAsync();
 
@@ -424,7 +429,7 @@
         await LoadAsync();
     }
 
-    private async Task LoadAsync()
+    private async Task LoadAsync(CancellationToken poll = default)
     {
         if (disposed)
         {
@@ -434,8 +439,10 @@
         StudioScope? scope = State.ActiveScope;
 
         // Taken while the page is alive: a disposal under one of the awaits below cancels it rather than leaving a
-        // disposed source to be read.
-        CancellationToken token = lifetime.Token;
+        // disposed source to be read. A poll's own token is linked in, so stopping the loop cancels the read it waits on;
+        // the lifetime is disposed only once the loop has stopped, so a poll never links a disposed one.
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, poll);
+        CancellationToken token = linked.Token;
         busy = true;
         loading = true;
         await InvokeAsync(StateHasChanged);
