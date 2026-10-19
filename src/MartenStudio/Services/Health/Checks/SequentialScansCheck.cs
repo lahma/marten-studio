@@ -165,6 +165,7 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
             Severity = HealthSeverity.Warning,
             Subject = declared.Key,
             DocumentTypes = declared.DocumentTypes,
+            GatedSchemas = declared.GatedSchemas,
             Title = table.Row.IsPartitioned
                 ? "Partition-wide sequential scans of " + declared.Key + " read the table's worth " + times + " times in "
                   + TableText.Span(window)

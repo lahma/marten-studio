@@ -149,6 +149,7 @@ internal sealed class JitShareCheck : HealthCheck<JitFacts>
                 + "takes the same Options on its own NpgsqlDataSourceBuilder. To keep JIT for the occasional long query, a DBA can "
                 + "raise jit_above_cost for the store's role instead."),
             DocumentTypes = [.. over.SelectMany(static x => x.Statement.DocumentTypes).Distinct()],
+            GatedSchemas = [.. over.SelectMany(static x => x.Statement.GatedSchemas).Distinct(StringComparer.Ordinal)],
         });
     }
 

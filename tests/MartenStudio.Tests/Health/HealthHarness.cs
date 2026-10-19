@@ -67,6 +67,8 @@ internal sealed class HealthFindingBuilder(string code, HealthSeverity severity,
 
     public List<Type> DocumentTypes { get; } = [];
 
+    public List<string> GatedSchemas { get; } = [];
+
     public HealthRemedy? Remedy { get; set; }
 
     public HealthFinding Build() => new()
@@ -79,6 +81,7 @@ internal sealed class HealthFindingBuilder(string code, HealthSeverity severity,
         TenantId = TenantId,
         Evidence = [.. Evidence],
         DocumentTypes = [.. DocumentTypes],
+        GatedSchemas = [.. GatedSchemas],
         Remedy = Remedy,
     };
 }

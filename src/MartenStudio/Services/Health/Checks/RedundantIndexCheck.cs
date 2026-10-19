@@ -87,6 +87,7 @@ internal sealed class RedundantIndexCheck : HealthCheck<RedundantIndexFacts>
             Severity = HealthSeverity.Warning,
             Subject = index.Key,
             DocumentTypes = table.DocumentTypes,
+            GatedSchemas = table.GatedSchemas,
             Title = "Index " + index.Row.Name + " on " + table.Key + " is redundant: " + cover.Row.Name + " already answers every lookup it answers",
             WhyItMatters =
                 "The index is " + how + ", with the same predicate, operator classes, collations and order, so every query that "

@@ -10,9 +10,17 @@ statistics views (`pg_class`, `pg_index`, `pg_inherits`, `pg_depend`, `pg_stats`
 What every check here has in common:
 
 - **A "Marten table" is one the store's configuration declares**: a document type's table, the event store's
-  tables, a projection's or an `ExtendedSchemaObjects` table, and `mt_hilo`. The list comes from the
+  tables, a projection's or an `ExtendedSchemaObjects` table, and `mt_hilo` - each in the schema it is
+  declared in, an `ExtendedSchemaObjects` table in a schema of its own included. The list comes from the
   configuration alone, never from `AllObjects()` or `AllSchemaNames()` (which migrate), and a document type
-  `IsDocumentTypeVisible` hides is left out of it - its table is not even a parameter of a statement.
+  `IsDocumentTypeVisible` hides is left out of it - its table is not even a parameter of a statement. Such a
+  table's schema does not become one of the store's own for the database browser or the Schema screen's lists,
+  so a finding that names it needs the database browser's gate for that schema as well as the check's own:
+  `Capabilities.BrowseDatabase`, the write policy and a `BrowsableSchemas` entry (or `"*"`) that admits it,
+  as the browser asks before it shows that schema at all. Anybody else has the finding counted as not shown
+  to them, and the navigation badge, which cannot ask that gate, counts it as not shown for everybody. T12 and
+  T13, which are about the whole database, stay visible instead and name such a table only as "a
+  Marten-managed table outside the store's own schemas", as a check row's note does.
 - **One read, shared.** The regular checks share one read of the tables and one of their indexes per sweep,
   so the whole area costs a regular sweep eight statements on the sample store - those two, T10's `pg_stats`
   read, T11's two (whether `mt_hilo` exists, then its one row), and three for T12-T14: the wraparound read the

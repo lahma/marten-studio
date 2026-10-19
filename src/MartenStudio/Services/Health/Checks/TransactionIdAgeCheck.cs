@@ -179,10 +179,13 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
             Code = "T12",
             Severity = severity,
             DocumentTypes = [.. past.SelectMany(static x => x.Table.DocumentTypes).Distinct()],
+
+            // No GatedSchemas: a database-wide wraparound warning must not vanish because the oldest table is one in a
+            // schema the browser withholds, so such a table is named generically (MartenTable.NoteName) throughout.
             Title = forecastOnly
                 ? Capitalised(forecast!.AtTheRate) + ", Postgres would stop accepting writes in " + HorizonForecast.Span(toRefusal!.Value)
                   + ": " + Whose(origin, oldest) + " is past autovacuum_freeze_max_age and has not been frozen"
-                : (origin == Origin.StoreTable ? oldest!.Key : Capitalised(Whose(origin, oldest))) + " is " + Wraparound.Count(age)
+                : (origin == Origin.StoreTable && !oldest!.Table.OutsideStoreSchemas ? oldest.Key : Capitalised(Whose(origin, oldest))) + " is " + Wraparound.Count(age)
                   + " transactions from its last freeze; Postgres stops accepting writes at about 2.1 billion",
             WhyItMatters = WhyItMatters(origin, freezeMaxAge, database),
             Evidence = Evidence(oldest, tableAge, database, freezeMaxAge, warning, critical, past, forecast, toForced, toRefusal),
@@ -200,7 +203,7 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
 
     private static string Whose(Origin origin, TableFacts? oldest) => origin switch
     {
-        Origin.StoreTable => oldest!.Key,
+        Origin.StoreTable => oldest!.Table.NoteName,
         Origin.Database => "this database (a table that is not the store's)",
         _ => "another database on this server",
     };
@@ -255,7 +258,7 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
 
         if (oldest is not null)
         {
-            evidence.Add(new HealthEvidence("Oldest table", oldest.Table.Describe()));
+            evidence.Add(new HealthEvidence("Oldest table", oldest.Table.DescribeUngated()));
             evidence.Add(new HealthEvidence("Its age(relfrozenxid)", tableAge.ToString("N0", CultureInfo.InvariantCulture)));
         }
 
@@ -276,7 +279,7 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
 
         if (past.Count > 0)
         {
-            evidence.Add(new HealthEvidence("The oldest of them", string.Join(", ", past.Take(NamedTables).Select(static x => x.Key
+            evidence.Add(new HealthEvidence("The oldest of them", string.Join(", ", past.Take(NamedTables).Select(static x => x.Table.NoteName
                 + " (" + x.Row.OldestXidAge!.Value.ToString("N0", CultureInfo.InvariantCulture) + ")"))));
         }
 
@@ -350,7 +353,7 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
 
         if (oldest is not null)
         {
-            parts.Add("The oldest Marten table, " + oldest.Key + ", is " + tableAge.ToString("N0", CultureInfo.InvariantCulture)
+            parts.Add("The oldest Marten table, " + oldest.Table.NoteName + ", is " + tableAge.ToString("N0", CultureInfo.InvariantCulture)
                 + " transactions from its last freeze.");
         }
 

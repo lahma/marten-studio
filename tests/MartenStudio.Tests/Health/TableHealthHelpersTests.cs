@@ -151,7 +151,7 @@ public class TableHealthHelpersTests
     // IndexRedundancy
     // -----------------------------------------------------------------------------------------------
 
-    private static readonly MartenTable Orders = new("s", "t", MartenTableKind.Managed);
+    private static readonly MartenTable Orders = new("s", "t", MartenTableKind.Managed, OutsideStoreSchemas: false);
 
     [Theory]
     [InlineData("CREATE INDEX i ON s.t USING btree (a) WHERE (b = 1)", "(b = 1)")]
@@ -320,24 +320,63 @@ public class TableHealthHelpersTests
         HiloHeadroomCheck.IntSequences(context).Should().BeEmpty("the only int-id type is hidden");
     }
 
-    [Theory]
-    [InlineData("studio.mt_doc_x", "studio", "mt_doc_x")]
-    [InlineData("studio_events.mt_events", "studio_events", "mt_events")]
-    [InlineData("studio_events.a.b", "studio_events", "a.b")]
-    [InlineData("elsewhere.t", null, null)]
-    public void A_declarations_key_splits_by_the_longest_store_schema_it_starts_with(string key, string? schema, string? table)
+    /// <summary>
+    /// XSO: an <c>ExtendedSchemaObjects</c> table in a schema of its own is in the set, by the schema and name
+    /// its declaration carries. The set used to split each key back against <c>SchemaDeclarations.Schemas</c>,
+    /// which leaves that schema out on purpose (D27), so the table was skipped and every T-check ignored it.
+    /// One whose name holds a dot, beside a schema whose name is a prefix of another, is taken as declared too.
+    /// </summary>
+    [Fact]
+    public void An_extended_table_in_a_schema_of_its_own_is_in_the_set_by_the_pair_its_declaration_carries()
     {
-        (string Schema, string Table)? split = MartenTables.Split(key, ["studio", "studio_events"]);
+        using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
+        using DocumentStore store = DocumentStore.For(options =>
+        {
+            options.Connection(SqlTestStore.Unreachable);
+            options.DatabaseSchemaName = "studio_set";
+            options.Events.DatabaseSchemaName = "studio_set_events";
+            options.Schema.For<HealthOrderDoc>();
+            options.Storage.ExtendedSchemaObjects.Add(new Weasel.Postgresql.Tables.Table(
+                new Weasel.Postgresql.PostgresqlObjectName("xso_own", "xso_things", Weasel.Postgresql.SchemaUtils.IdentifierUsage.General)));
+            options.Storage.ExtendedSchemaObjects.Add(new Weasel.Postgresql.Tables.Table(
+                new Weasel.Postgresql.PostgresqlObjectName("studio_set_events.x", "y", Weasel.Postgresql.SchemaUtils.IdentifierUsage.General)));
+        });
 
-        if (schema is null)
-        {
-            split.Should().BeNull();
-        }
-        else
-        {
-            split.Should().Be((schema, table!));
-        }
+        MartenTableSet set = MartenTables.Read(Context(store, services));
+
+        MartenTable extended = set.Tables.Should().ContainSingle(static x => x.Table == "xso_things").Subject;
+        extended.Schema.Should().Be("xso_own");
+        extended.Kind.Should().Be(MartenTableKind.Managed);
+        extended.DocumentTypes.Should().BeEmpty("a finding about it names no document type");
+        extended.OutsideStoreSchemas.Should().BeTrue();
+        extended.GatedSchemas.Should().Equal(["xso_own"], "a finding about it is shown only past the database browser's gate for that schema (D27)");
+        extended.NoteName.Should().NotContain("xso", "a status row's note names neither the table nor its schema");
+        set.Tables.Where(static x => x.Table != "xso_things" && x.Table != "y").Should().OnlyContain(static x => !x.OutsideStoreSchemas && x.GatedSchemas.Count == 0,
+            "every other table is in the store's own schemas, and its findings read no gate they did not read before");
+        set.Targets.Should().Contain(new HealthTableTarget("xso_own", "xso_things"), "the statements bind its own schema, as a parameter");
+        set.Find("xso_own", "xso_things").Should().BeSameAs(extended, "a row the catalog returns for it is matched back to it");
+
+        set.Tables.Should().ContainSingle(static x => x.Schema == "studio_set_events.x" && x.Table == "y",
+            "split against the store's schemas, this key would have read as studio_set_events's table x.y");
+
+        set.Declarations.Schemas.Should().NotContain("xso_own").And.NotContain("studio_set_events.x",
+            "the set reads the pair; the store's own schemas are unchanged (D27)");
     }
+
+    private static HealthCheckContext Context(DocumentStore store, ServiceProvider services) =>
+        new(
+            new ResolvedScope(
+                new StudioScope("default", string.Empty, null),
+                new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
+                store,
+                store.Storage.Database),
+            new MartenStudioOptions(),
+            MartenRuntime.Current,
+            services,
+            new HealthSqlRunner(new HealthConnection(store.Storage.Database), new ReadOnlySqlOptions(), null),
+            Now,
+            new HealthSweepMemo(),
+            CancellationToken.None);
 
     /// <summary>The registry finds all eleven, and every one is well formed.</summary>
     [Fact]

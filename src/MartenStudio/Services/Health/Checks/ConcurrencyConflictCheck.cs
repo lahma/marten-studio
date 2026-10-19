@@ -240,6 +240,7 @@ internal sealed partial class ConcurrencyConflictCheck : HealthCheck<Concurrency
                     + "from events, FetchForExclusiveWriting so the second writer waits instead of failing, and a stream per period for a "
                     + "long-lived, busy one."),
             DocumentTypes = table.DocumentTypes,
+            GatedSchemas = table.GatedSchemas,
         };
     }
 

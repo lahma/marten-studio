@@ -163,7 +163,7 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
         }
 
         string whose = tableAge >= Math.Max(databaseAge, serverAge) && oldest is not null
-            ? oldest.Table.Key
+            ? oldest.Table.NoteName
             : databaseAge >= serverAge ? "this database (a table that is not the store's)" : "another database on this server";
 
         bool forecastOnly = age <= warning;
@@ -177,7 +177,7 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
 
         if (oldest is not null)
         {
-            evidence.Add(new HealthEvidence("Oldest table", oldest.Table.Describe()));
+            evidence.Add(new HealthEvidence("Oldest table", oldest.Table.DescribeUngated()));
             evidence.Add(new HealthEvidence("Its mxid_age(relminmxid)", Wraparound.Number(oldest.Age)));
         }
 
@@ -198,7 +198,7 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
         if (past.Count > 0)
         {
             evidence.Add(new HealthEvidence("The oldest of them", string.Join(", ", past.Take(NamedTables)
-                .Select(static x => x.Table.Key + " (" + Wraparound.Number(x.Age) + ")"))));
+                .Select(static x => x.Table.NoteName + " (" + Wraparound.Number(x.Age) + ")"))));
         }
 
         evidence.Add(new HealthEvidence("Other tables past autovacuum_multixact_freeze_max_age", Wraparound.Number(database.OtherPastForcedMultixact)
@@ -228,6 +228,9 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
             Code = "T13",
             Severity = severity,
             DocumentTypes = [.. past.SelectMany(static x => x.Table.DocumentTypes).Distinct()],
+
+            // No GatedSchemas: a database-wide wraparound warning must not vanish because the oldest table is one in a
+            // schema the browser withholds, so such a table is named generically (MartenTable.NoteName) throughout.
             Title = forecastOnly
                 ? Capitalised(forecast!.AtTheRate) + ", Postgres would stop creating multixacts in " + HorizonForecast.Span(toRefusal!.Value)
                   + ": " + whose + " is past autovacuum_multixact_freeze_max_age and has not been frozen"
@@ -268,7 +271,7 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
 
         if (oldest is not null)
         {
-            parts.Add("The oldest Marten table, " + oldest.Table.Key + ", is " + Wraparound.Number(oldest.Age) + " multixacts from its last freeze.");
+            parts.Add("The oldest Marten table, " + oldest.Table.NoteName + ", is " + Wraparound.Number(oldest.Age) + " multixacts from its last freeze.");
         }
 
         parts.Add("This database's mxid_age(datminmxid) is " + Wraparound.Number(database.DatabaseMultixactAge) + ".");

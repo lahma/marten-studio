@@ -155,6 +155,7 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
             Severity = HealthSeverity.Warning,
             Subject = declared.Key,
             DocumentTypes = declared.DocumentTypes,
+            GatedSchemas = declared.GatedSchemas,
             Title = never
                 ? declared.Key + " has " + TableText.Count(table.Row.LiveRows ?? 0) + " rows and has never been analysed"
                 : TableText.Count(table.Row.ModifiedSinceAnalyze ?? 0) + " rows of " + declared.Key

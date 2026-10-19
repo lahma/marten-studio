@@ -171,6 +171,7 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
         Severity = HealthSeverity.Warning,
         Subject = table.Key,
         DocumentTypes = table.Table.DocumentTypes,
+        GatedSchemas = table.Table.GatedSchemas,
         Title = "Only " + TableText.Percent(share) + " of the updates to " + table.Key + " were HOT updates",
         WhyItMatters =
             "No index on this table reads a column every upsert changes, so its updates could stay on their page and skip "
@@ -211,6 +212,7 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
             Severity = HealthSeverity.Info,
             Subject = table.Key,
             DocumentTypes = table.Table.DocumentTypes,
+            GatedSchemas = table.Table.GatedSchemas,
             Title = "Only " + TableText.Percent(share) + " of the updates to " + table.Key + " were HOT, and fillfactor cannot help",
             WhyItMatters =
                 "An update can be a HOT update only when no indexed column changes. Every Marten upsert rewrites data, stamps "

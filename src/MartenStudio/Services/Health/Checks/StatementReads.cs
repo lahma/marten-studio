@@ -35,6 +35,9 @@ internal sealed record ObservedStatement(
     public IReadOnlyList<Type> DocumentTypes =>
         [.. Tables.Where(static x => x.DocumentType is not null).Select(static x => x.DocumentType!.DocumentType).Distinct()];
 
+    /// <summary>The schemas outside the store's own of the tables it names (<see cref="HealthFinding.GatedSchemas" />).</summary>
+    public IReadOnlyList<string> GatedSchemas => [.. Tables.SelectMany(static x => x.GatedSchemas).Distinct(StringComparer.Ordinal)];
+
     /// <summary>
     /// Whether it is the application's workload rather than a utility statement: Marten's own migrations
     /// (<c>create table</c>, <c>do $$ … $$</c>), a transaction's <c>begin</c>, an <c>explain</c> - which

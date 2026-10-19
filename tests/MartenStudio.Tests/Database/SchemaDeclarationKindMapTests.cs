@@ -20,10 +20,10 @@ public class SchemaDeclarationKindMapTests
         declarations.ObjectsFailure.Should().BeNull();
 
         Kind(declarations, DocumentSchema, "mt_doc_dbcustomer").Should().Be(new MartenDeclaredObject(
-            MartenObjectKind.DocumentTable, "dbcustomer", Visible: true));
+            DocumentSchema, "mt_doc_dbcustomer", MartenObjectKind.DocumentTable, "dbcustomer", Visible: true));
 
         Kind(declarations, DocumentSchema, "mt_doc_dbsecret").Should().Be(new MartenDeclaredObject(
-            MartenObjectKind.DocumentTable, Alias: null, Visible: false),
+            DocumentSchema, "mt_doc_dbsecret", MartenObjectKind.DocumentTable, Alias: null, Visible: false),
             "a hidden type's alias is exactly what it must not show");
 
         Kind(declarations, EventSchema, "mt_events")!.Kind.Should().Be(MartenObjectKind.EventTable);
@@ -75,6 +75,33 @@ public class SchemaDeclarationKindMapTests
         declarations.Functions.Should().NotContain(ReportingSchema + ".ext_touch");
         declarations.Functions.Should().NotContain(EventSchema + ".mt_events_sequence");
         declarations.ManagedTables.Should().Contain(EventSchema + ".mt_events");
+    }
+
+    /// <summary>
+    /// XSO: every entry carries the schema and name its key was built from, so nothing has to split a key back
+    /// against <see cref="SchemaDeclarations.Schemas" /> - which an <c>ExtendedSchemaObjects</c> object in a
+    /// schema of its own is deliberately not in.
+    /// </summary>
+    [Fact]
+    public void Every_entry_carries_the_schema_and_name_its_key_was_built_from()
+    {
+        SchemaDeclarations declarations = SchemaDeclarationReader.Read(
+            DefaultStore(static options => options.Storage.ExtendedSchemaObjects.Add(
+                new Weasel.Postgresql.Tables.Table(Name("ext_own", "ext_vacuumed")))),
+            IsVisible);
+
+        declarations.Objects.Should().NotBeEmpty().And.OnlyContain(static x => x.Key == x.Value.Key && x.Value.Key == x.Value.Schema + "." + x.Value.Name);
+
+        declarations.Objects["ext_own.ext_vacuumed"].Should().Be(
+            new MartenDeclaredObject("ext_own", "ext_vacuumed", MartenObjectKind.ProjectionOrExtendedTable));
+        declarations.Objects[EventSchema + ".mt_events"].Should().Be(
+            new MartenDeclaredObject(EventSchema, "mt_events", MartenObjectKind.EventTable));
+
+        declarations.Schemas.Should().NotContain("ext_own",
+            "Schemas is the store's own schemas (D27): handing Marten a table to manage does not hand every visitor its schema");
+        declarations.Schemas.Should().Equal(SchemaDeclarationReader.Read(DefaultStore(), IsVisible).Schemas,
+            "an extended object in a schema of its own changes nothing about the list");
+        declarations.ManagedTables.Should().Contain("ext_own.ext_vacuumed", "an apply still migrates it");
     }
 
     [Fact]

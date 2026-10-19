@@ -152,6 +152,7 @@ internal sealed class LargeDocumentsCheck : HealthCheck<LargeDocumentsFacts>
             Severity = p95 >= VeryLargeBytes ? HealthSeverity.Warning : HealthSeverity.Info,
             Subject = table.Key,
             DocumentTypes = table.Table.DocumentTypes,
+            GatedSchemas = table.Table.GatedSchemas,
             Title = "One in twenty " + table.Table.TypeName + " documents is stored at " + TableText.Bytes((long) p95) + " or more",
             WhyItMatters =
                 "Marten reads and writes a document whole. Every load deserializes all of it, every upsert writes all of it again "

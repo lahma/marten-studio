@@ -56,11 +56,11 @@ internal static class TableCheckBuilders
     public static MartenTable Document<T>(Action<StoreOptions>? configure = null)
     {
         var documentType = SqlTestStore.DocumentType<T>(configure);
-        return new MartenTable(SqlTestStore.Schema, documentType.TableName.Name, MartenTableKind.Document, documentType);
+        return new MartenTable(SqlTestStore.Schema, documentType.TableName.Name, MartenTableKind.Document, OutsideStoreSchemas: false, documentType);
     }
 
     /// <summary>One of the event store's tables.</summary>
-    public static MartenTable EventTable(string table = "mt_events") => new("studio_sql_events", table, MartenTableKind.EventStore);
+    public static MartenTable EventTable(string table = "mt_events") => new("studio_sql_events", table, MartenTableKind.EventStore, OutsideStoreSchemas: false);
 
     /// <summary>A catalog row for <paramref name="table" />: analysed, empty, autovacuum on.</summary>
     public static HealthTableRow Row(MartenTable table) => new()

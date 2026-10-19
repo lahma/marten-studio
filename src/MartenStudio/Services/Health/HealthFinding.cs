@@ -180,6 +180,19 @@ internal sealed record HealthFinding
     /// </summary>
     public IReadOnlyList<Type> DocumentTypes { get; init; } = [];
 
+    /// <summary>
+    /// The schemas of the tables it names that are not one of the store's own schemas - an
+    /// <c>ExtendedSchemaObjects</c> table in a schema of its own (<see cref="Checks.MartenTable.OutsideStoreSchemas" />).
+    /// Empty for everything else, which is nearly everything.
+    /// </summary>
+    /// <remarks>
+    /// The database browser shows such a schema only past its own gate (<c>Capabilities.BrowseDatabase</c> and a
+    /// <c>BrowsableSchemas</c> entry), and masks its name everywhere else (D27), so a finding that names a table in
+    /// one is shown only to a visitor that gate does not withhold it from, and counted as withheld for anybody else.
+    /// A read that cannot ask the gate withholds it.
+    /// </remarks>
+    public IReadOnlyList<string> GatedSchemas { get; init; } = [];
+
     // ---- Stamped by the sweep from the check's metadata ------------------------------------------------
 
     /// <summary>The check's area.</summary>

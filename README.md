@@ -520,7 +520,13 @@ either is the number of tenants. *Functions* reads a body when you open its row:
 everybody, the application's own only with `Capabilities.BrowseDatabase` and a schema `BrowsableSchemas`
 admits. A name in a schema you may not see reads `‹withheld›`, as in the browser. If a registered store
 cannot be built, the tabs keep what the other stores declare and withhold, and say, what that store could
-own. The reads give up after three seconds behind a migration's lock rather than wait for it.
+own. The reads give up after three seconds behind a migration's lock rather than wait for it. A known
+limit: *Tables* and *Indexes* list the store's own schemas only, so a table handed to
+`StoreOptions.Storage.ExtendedSchemaObjects` in a schema of its own (one no document type, the event store
+or a projection also uses) is not on either tab. The database browser shows it once
+`Capabilities.BrowseDatabase` is on, the write policy passes and `BrowsableSchemas` admits that schema. The
+tables-and-indexes health checks cover it, and show their findings about it only to a visitor past that same
+gate.
 
 > **An apply runs under `AutoCreate.CreateOrUpdate`, and `CreateOrUpdate` is not additive.** Weasel's
 > update path emits `drop index` for every physical index your configuration does not declare,

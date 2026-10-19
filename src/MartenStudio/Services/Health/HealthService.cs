@@ -253,16 +253,19 @@ internal sealed class HealthService : IHealthService
         results.AddRange(deeper?.Results ?? []);
         results.AddRange(statements?.Results ?? []);
 
-        // A statement's text is masked for this visitor, with the database browser's own gate - read once per report,
-        // and only if a finding this visitor is shown carries one.
+        // The database browser's own gate, for this visitor and the database as a whole - read at most once per report, and
+        // only if something needs it: a statement's text to mask, a finding about a table outside the store's own schemas
+        // (D27), or Postgres' words in a check's failure.
+        Task<DatabaseGateRead?>? gateRead = null;
+        Task<DatabaseGateRead?> BrowserGate() => gateRead ??= BrowserGateAsync(whole, cancellationToken);
+
         Task<StatementScreen>? screenRead = null;
-        Task<StatementScreen> Screen() => screenRead ??= StatementScreenAsync(whole.Scope, whole, cancellationToken);
+        Task<StatementScreen> Screen() => screenRead ??= StatementScreenAsync(BrowserGate);
 
         (List<HealthReportFinding> findings, int withheld, IReadOnlyList<string> reasons) =
-            await ShowAsync(results, gate, storeKey, databaseId, audit: true, Screen).ConfigureAwait(false);
+            await ShowAsync(results, gate, storeKey, databaseId, audit: true, Screen, BrowserGate).ConfigureAwait(false);
 
-        IReadOnlyList<HealthCheckStatus> statuses = await StatusesAsync(results, findings, gate, whole.Scope, resolved, cancellationToken)
-            .ConfigureAwait(false);
+        IReadOnlyList<HealthCheckStatus> statuses = await StatusesAsync(results, findings, gate, BrowserGate).ConfigureAwait(false);
 
         // The studio's own footprint in this database is a database-wide number, so it is shown at that gate.
         bool database = await gate.PassesAsync(HealthGate.Database).ConfigureAwait(false);
@@ -383,9 +386,10 @@ internal sealed class HealthService : IHealthService
         VisitorGate gate = new(this, whole);
 
         // No screen: a cached read resolves no scope, so a statement's text cannot be masked for this visitor and is
-        // withheld (fail closed). The Health page itself goes through GetReportAsync, which masks it.
+        // withheld (fail closed). The Health page itself goes through GetReportAsync, which masks it. No browser gate
+        // either, for the same reason: a finding about a table outside the store's own schemas is counted as withheld.
         (List<HealthReportFinding> findings, int withheld, _) = await ShowAsync(
-                sweep.Results.Where(wanted), gate, sweep.StoreKey, sweep.DatabaseId, audit, screen: null)
+                sweep.Results.Where(wanted), gate, sweep.StoreKey, sweep.DatabaseId, audit, screen: null, browserGate: null)
             .ConfigureAwait(false);
 
         return (sweep, [.. findings.Where(x => !mutes.IsMuted(x.MuteKey))], withheld);
@@ -522,13 +526,19 @@ internal sealed class HealthService : IHealthService
     /// What this visitor's statements are checked against, read on first use; <see langword="null" /> withholds every
     /// statement's text (<see cref="HealthEvidence.Statement" />).
     /// </param>
+    /// <param name="browserGate">
+    /// The database browser's gate for this visitor, read on first use - only when a finding names a table outside the
+    /// store's own schemas (<see cref="HealthFinding.GatedSchemas" />). <see langword="null" />, or a read that answers
+    /// <see langword="null" />, withholds every such finding (fail closed).
+    /// </param>
     private async Task<(List<HealthReportFinding> Findings, int Withheld, IReadOnlyList<string> Reasons)> ShowAsync(
         IEnumerable<HealthCheckResult> results,
         VisitorGate gate,
         string storeKey,
         string databaseId,
         bool audit,
-        Func<Task<StatementScreen>>? screen)
+        Func<Task<StatementScreen>>? screen,
+        Func<Task<DatabaseGateRead?>>? browserGate)
     {
         List<HealthReportFinding> shown = [];
         int withheld = 0;
@@ -545,7 +555,9 @@ internal sealed class HealthService : IHealthService
                     ? gate.WhyNot(required)
                     : finding.TenantId is not null && !await gate.TenantAsync(finding.TenantId).ConfigureAwait(false)
                         ? "names a tenant the store policy does not show you"
-                        : null;
+                        : finding.GatedSchemas.Count > 0
+                            ? await SchemaRefusalAsync(finding.GatedSchemas, browserGate).ConfigureAwait(false)
+                            : null;
 
                 if (reason is not null)
                 {
@@ -642,6 +654,59 @@ internal sealed class HealthService : IHealthService
         return (shown, withheld, reasons);
     }
 
+    /// <summary>What withholds a finding naming a table in a schema outside the store's own from a visitor short of the browser's gate.</summary>
+    internal const string WithheldSchemaReason =
+        "names a table in a schema the database browser does not show you (it needs MartenStudioOptions.Capabilities.BrowseDatabase, "
+        + "the write policy and a BrowsableSchemas entry for that schema)";
+
+    /// <summary>What withholds such a finding when the browser's gate could not be read for this visitor.</summary>
+    internal const string UncheckedSchemaReason =
+        "names a table in a schema outside the store's own, which could not be checked against the database browser's gate for you";
+
+    /// <summary>
+    /// Why a finding naming tables in <paramref name="schemas" /> - each outside the store's own - is withheld from this
+    /// visitor, or <see langword="null" /> when the database browser shows them every one (AGENTS.md D27).
+    /// </summary>
+    /// <remarks>
+    /// Asked with <see cref="DatabaseGate.IsWithheld" />, not against <see cref="DatabaseGate.WithheldSchemas" />: a schema
+    /// created after the gate's schema list was read is in neither list, and the gate counts it as withheld.
+    /// </remarks>
+    private static async Task<string?> SchemaRefusalAsync(IReadOnlyList<string> schemas, Func<Task<DatabaseGateRead?>>? browserGate)
+    {
+        DatabaseGateRead? read = browserGate is null ? null : await browserGate().ConfigureAwait(false);
+
+        if (read is null || !read.Succeeded)
+        {
+            return UncheckedSchemaReason;
+        }
+
+        DatabaseGate gate = read.Gate;
+        return schemas.Any(gate.IsWithheld) ? WithheldSchemaReason : null;
+    }
+
+    /// <summary>
+    /// The database browser's gate for this visitor and the database as a whole - the one read a report shares between
+    /// statement masking, findings about tables outside the store's own schemas and Postgres' words - or
+    /// <see langword="null" /> when it cannot be read, which withholds all three.
+    /// </summary>
+    private async Task<DatabaseGateRead?> BrowserGateAsync(ResolvedScope whole, CancellationToken cancellationToken)
+    {
+        if (services.GetService<DatabaseAccess>() is not { } access)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await access.GateAsync(whole.Scope, whole, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogDebug(exception, "Marten Studio could not read the database browser's gate for a health report");
+            return null;
+        }
+    }
+
     /// <summary>
     /// One audit entry for Activity-gated evidence shown - process ids, roles, applications, client addresses, a
     /// prepared transaction's gid and owner - the first time a circuit is shown it for a store and database, and
@@ -690,13 +755,11 @@ internal sealed class HealthService : IHealthService
     /// shown or withheld (<see cref="ShowAsync" />), and a code is one check's.
     /// </para>
     /// </remarks>
-    private async Task<IReadOnlyList<HealthCheckStatus>> StatusesAsync(
+    private static async Task<IReadOnlyList<HealthCheckStatus>> StatusesAsync(
         IReadOnlyList<HealthCheckResult> results,
         IReadOnlyList<HealthReportFinding> shown,
         VisitorGate gate,
-        StudioScope scope,
-        ResolvedScope resolved,
-        CancellationToken cancellationToken)
+        Func<Task<DatabaseGateRead?>> browserGate)
     {
         IReadOnlySet<string>? withheld = null;
         bool withheldRead = false;
@@ -734,7 +797,11 @@ internal sealed class HealthService : IHealthService
                 if (!withheldRead)
                 {
                     withheldRead = true;
-                    withheld = await WithheldSchemasAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+
+                    // The schemas this visitor may not see, from the database browser's own gate - or none when it cannot
+                    // be read, which withholds Postgres' words outright.
+                    DatabaseGateRead? read = await browserGate().ConfigureAwait(false);
+                    withheld = read is not null && read.Succeeded ? read.Gate.WithheldSchemas : null;
                 }
 
                 problem = withheld is null
@@ -771,53 +838,16 @@ internal sealed class HealthService : IHealthService
     }
 
     /// <summary>
-    /// The schemas this visitor may not see, from the database browser's own gate - or <see langword="null" />
-    /// when it cannot be read, which withholds Postgres' words outright.
-    /// </summary>
-    private async Task<IReadOnlySet<string>?> WithheldSchemasAsync(StudioScope scope, ResolvedScope resolved, CancellationToken cancellationToken)
-    {
-        DatabaseAccess? access = services.GetService<DatabaseAccess>();
-        if (access is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            DatabaseGateRead read = await access.GateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
-            return read.Succeeded ? read.Gate.WithheldSchemas : null;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask a health check's error");
-            return null;
-        }
-    }
-
-    /// <summary>
     /// What this visitor's statements are checked against - the database browser's gate for the database as a whole,
     /// as Database › Sessions reads it - or <see cref="StatementScreen.Unchecked" /> when it cannot be read, which
     /// withholds every statement's text.
     /// </summary>
-    private async Task<StatementScreen> StatementScreenAsync(StudioScope whole, ResolvedScope resolved, CancellationToken cancellationToken)
+    private async Task<StatementScreen> StatementScreenAsync(Func<Task<DatabaseGateRead?>> browserGate)
     {
         bool hidesDocumentTypes = options.Value.IsDocumentTypeVisible is not null;
 
-        if (services.GetService<DatabaseAccess>() is not { } access)
-        {
-            return StatementScreen.Unchecked(hidesDocumentTypes);
-        }
-
-        try
-        {
-            DatabaseGateRead read = await access.GateAsync(whole, resolved, cancellationToken).ConfigureAwait(false);
-            return StatementScreen.Of(read, hidesDocumentTypes);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask a health finding's statement");
-            return StatementScreen.Unchecked(hidesDocumentTypes);
-        }
+        DatabaseGateRead? read = await browserGate().ConfigureAwait(false);
+        return read is null ? StatementScreen.Unchecked(hidesDocumentTypes) : StatementScreen.Of(read, hidesDocumentTypes);
     }
 
     /// <summary>

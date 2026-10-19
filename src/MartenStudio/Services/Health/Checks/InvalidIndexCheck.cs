@@ -97,7 +97,8 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 
             if (index.Row.BuildPhase is { } phase)
             {
-                building.Add(index.Row.Name + " (" + phase + ")");
+                // A status row's note is shown at the check's gate alone, so it names no table outside the store's own schemas.
+                building.Add((index.Table.OutsideStoreSchemas ? "an index on " + index.Table.NoteName : index.Row.Name) + " (" + phase + ")");
                 continue;
             }
 
@@ -110,7 +111,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             {
                 int count = table.Row.BuildingPartitionIndexes;
                 building.Add((count == 1 ? "an index" : count.ToString("N0", CultureInfo.InvariantCulture) + " indexes")
-                    + " on the partitions of " + table.Key + " (" + (table.Row.PartitionBuildPhase ?? "in progress") + ")");
+                    + " on the partitions of " + table.Table.NoteName + " (" + (table.Row.PartitionBuildPhase ?? "in progress") + ")");
             }
 
             if (table.Row.InvalidPartitionIndexes > 0)
@@ -194,6 +195,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             Severity = severity,
             Subject = index.Key,
             DocumentTypes = table.DocumentTypes,
+            GatedSchemas = table.GatedSchemas,
             Title = "Index " + index.Row.Name + " on " + table.Key + " is invalid: every write maintains it and no query uses it",
             WhyItMatters =
                 "Postgres has marked the index invalid, " + builds + " a CREATE INDEX CONCURRENTLY that failed half-way leaves "
@@ -233,6 +235,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             Severity = severity,
             Subject = table.Key + "#partitions",
             DocumentTypes = table.Table.DocumentTypes,
+            GatedSchemas = table.Table.GatedSchemas,
             Title = indexes + " on the partitions of " + table.Key + (count == 1 ? " is" : " are") + " invalid",
             WhyItMatters =
                 "Postgres has marked an index on one or more of this table's partitions invalid" + builds

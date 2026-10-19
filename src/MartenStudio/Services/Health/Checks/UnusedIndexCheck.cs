@@ -185,6 +185,7 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
             Severity = unproven is null ? HealthSeverity.Warning : HealthSeverity.Info,
             Subject = index.Key,
             DocumentTypes = index.Table.DocumentTypes,
+            GatedSchemas = index.Table.GatedSchemas,
             Title = "Index " + index.Row.Name + " on " + index.Table.Key + " has never been scanned, while the table took "
                 + TableText.Count(writes) + " writes",
             WhyItMatters =

@@ -60,11 +60,35 @@ internal enum IndexOrigin
 /// <param name="Schema">The schema.</param>
 /// <param name="Table">The table.</param>
 /// <param name="Kind">What it is.</param>
+/// <param name="OutsideStoreSchemas">
+/// Whether <paramref name="Schema" /> is not one of the store's own schemas (<c>SchemaDeclarations.Schemas</c>): an
+/// <c>ExtendedSchemaObjects</c> table in a schema of its own. The database browser withholds such a schema from a
+/// visitor short of its gate (D27), so a finding naming the table carries it in <see cref="HealthFinding.GatedSchemas" />.
+/// Required, and computed for every table <see cref="MartenTables.Read" /> lists: a default would be the fail-open answer.
+/// </param>
 /// <param name="DocumentType">The document type, for a document table; never a hidden one.</param>
-internal sealed record MartenTable(string Schema, string Table, MartenTableKind Kind, IDocumentType? DocumentType = null)
+internal sealed record MartenTable(
+    string Schema,
+    string Table,
+    MartenTableKind Kind,
+    bool OutsideStoreSchemas,
+    IDocumentType? DocumentType = null)
 {
     /// <summary>The key the history and the findings name it by.</summary>
     public string Key => SchemaKey.For(Schema, Table);
+
+    /// <summary>What a finding naming this table puts in <see cref="HealthFinding.GatedSchemas" />.</summary>
+    public IReadOnlyList<string> GatedSchemas => OutsideStoreSchemas ? [Schema] : [];
+
+    /// <summary>
+    /// The table's key for text shown at the check's gate with no per-visitor schema check - a status row's note, or a
+    /// database-wide finding such as T12's that must not vanish because one table in it is gated: the key itself, or -
+    /// for a table outside the store's own schemas - words that name neither it nor its schema.
+    /// </summary>
+    public string NoteName => OutsideStoreSchemas ? "a Marten-managed table outside the store's own schemas" : Key;
+
+    /// <summary><see cref="Describe" />, or <see cref="NoteName" /> for a table outside the store's own schemas.</summary>
+    public string DescribeUngated() => OutsideStoreSchemas ? NoteName : Describe();
 
     /// <summary>The .NET type a remedy's <c>Schema.For&lt;T&gt;()</c> names, for a document table.</summary>
     public string? TypeName => DocumentType is null ? null : SchemaTypeName.Of(DocumentType.DocumentType);
@@ -260,6 +284,10 @@ internal static class MartenTables
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
         HashSet<string> structural = new(StringComparer.OrdinalIgnoreCase);
 
+        // Ordinal, as the database browser's gate compares schema names: a near miss is gated, never waved through.
+        HashSet<string> storeSchemas = new(declarations.Schemas, StringComparer.Ordinal);
+        bool OutsideStore(string schema) => !storeSchemas.Contains(schema);
+
         foreach (IDocumentType documentType in options.AllKnownDocumentTypes())
         {
             string schema = string.IsNullOrWhiteSpace(documentType.TableName.Schema)
@@ -275,7 +303,7 @@ internal static class MartenTables
                 continue;
             }
 
-            tables.Add(new MartenTable(schema, table, MartenTableKind.Document, documentType));
+            tables.Add(new MartenTable(schema, table, MartenTableKind.Document, OutsideStore(schema), documentType));
 
             if (documentType is DocumentMapping mapping)
             {
@@ -296,13 +324,15 @@ internal static class MartenTables
                 _ => null,
             };
 
-            if (kind is null || seen.Contains(key) || Split(key, declarations.Schemas) is not { } name)
+            // The entry's own schema and name, never the key split back against SchemaDeclarations.Schemas: an
+            // ExtendedSchemaObjects table may sit in a schema of its own, which that list deliberately leaves out
+            // (D27), and a split that found no schema skipped the table without a word.
+            if (kind is null || !seen.Add(key))
             {
                 continue;
             }
 
-            seen.Add(key);
-            tables.Add(new MartenTable(name.Schema, name.Table, kind.Value));
+            tables.Add(new MartenTable(declared.Schema, declared.Name, kind.Value, OutsideStore(declared.Schema)));
         }
 
         tables.Sort(static (a, b) =>
@@ -431,27 +461,6 @@ internal static class MartenTables
             yield return new DocumentIndex(mapping, "tenant_id").Name;
         }
     }
-
-    /// <summary>
-    /// A declarations key split back into its schema and its name, by the longest of the store's schemas it
-    /// starts with - a key is <c>schema.name</c>, and a name may itself hold a dot.
-    /// </summary>
-    internal static (string Schema, string Table)? Split(string key, IReadOnlyList<string> schemas)
-    {
-        string? best = null;
-
-        foreach (string schema in schemas)
-        {
-            if (key.Length > schema.Length + 1
-                && key.StartsWith(schema + ".", StringComparison.OrdinalIgnoreCase)
-                && (best is null || schema.Length > best.Length))
-            {
-                best = schema;
-            }
-        }
-
-        return best is null ? null : (best, key[(best.Length + 1)..]);
-    }
 }
 
 /// <summary>How a cumulative counter changed over the history: from the last reset, to now.</summary>
@@ -574,8 +583,16 @@ internal static class Autovacuum
 
         if (table.AutovacuumOffForTable)
         {
-            return " Autovacuum is switched off for this table (autovacuum_enabled = false"
+            string off = " Autovacuum is switched off for this table (autovacuum_enabled = false"
                 + (table.Row.IsPartitioned ? " on every partition" : string.Empty) + ").";
+
+            // A document table's remedy is a Schema.For<T>() line (Remedy). Any other table's storage parameters are not
+            // something a StoreOptions line the studio can name sets, so the way back is said in words, never as DDL.
+            return table.Table.Kind == MartenTableKind.Document
+                ? off
+                : off + " Switching it back on is the host's to do: re-enable autovacuum on this table where its storage parameters "
+                  + "are set - the host's own DDL, or (Marten 9.47+) the table's declaration where the host hands it to Marten (a "
+                  + "projection's table, or StoreOptions.Storage.ExtendedSchemaObjects).";
         }
 
         string partly = table.Row.DifferingStorageOptions.Contains("autovacuum_enabled", StringComparer.OrdinalIgnoreCase)
@@ -583,11 +600,19 @@ internal static class Autovacuum
               + "of them (the Schema screen's Tables tab shows which parameters the partitions differ on)."
             : string.Empty;
 
+        // From Marten 9.47 a projection's or an ExtendedSchemaObjects table's Weasel declaration can carry storage
+        // parameters, and an apply then sets a declared one back; Marten's own event-store and bookkeeping tables still
+        // declare none a host can set.
+        string apply = table.Table.Kind == MartenTableKind.Managed
+            ? "no Marten apply resets it unless the apply rebuilds the table, as a changed partition scheme does - or, from "
+              + "Marten 9.47, unless the table's own declaration (a projection's table, or an ExtendedSchemaObjects table) "
+              + "declares " + parameter + ", which an apply then sets back to the declared value."
+            : "no Marten apply resets it unless the apply rebuilds the table, as a changed partition scheme does.";
+
         return table.Table.Kind == MartenTableKind.Document
             ? partly
-            : partly + " No StoreOptions line sets this table's autovacuum settings; a DBA's ALTER TABLE ... SET (" + parameter + " = "
-              + value + ") does, and no Marten apply resets it unless the apply rebuilds the table, as a changed partition "
-              + "scheme does.";
+            : partly + " No StoreOptions line the studio can suggest sets this table's autovacuum settings; a DBA's ALTER TABLE ... SET ("
+              + parameter + " = " + value + ") does, and " + apply;
     }
 }
 

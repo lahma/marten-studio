@@ -133,6 +133,7 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
             Severity = HealthSeverity.Warning,
             Subject = declared.Key,
             DocumentTypes = declared.DocumentTypes,
+            GatedSchemas = declared.GatedSchemas,
             Title = TableText.Percent(table.DeadShare ?? 0) + " of " + declared.Key + " is dead rows, and it was last vacuumed "
                 + (table.LastVacuumOfAnyKind is { } last ? TableText.Span(now - last) + " ago" : "never"),
             WhyItMatters =

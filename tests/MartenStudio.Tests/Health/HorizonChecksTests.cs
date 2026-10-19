@@ -186,6 +186,35 @@ public class HorizonChecksTests
         finding.Subject.Should().BeNull();
     }
 
+    /// <summary>
+    /// XSO-fix2: a database-wide wraparound finding whose oldest table is an <c>ExtendedSchemaObjects</c> table in a schema of
+    /// its own stays visible to every visitor of the check - a Critical "Postgres would stop accepting writes" must not
+    /// vanish behind the database browser's gate - and names that table generically, never by its schema or name.
+    /// </summary>
+    [Theory]
+    [InlineData("T12")]
+    [InlineData("T13")]
+    public void A_wraparound_finding_whose_oldest_table_is_outside_the_stores_schemas_stays_visible_and_names_it_generically(string code)
+    {
+        MartenTable gated = new("xso_own", "xso_things", MartenTableKind.Managed, OutsideStoreSchemas: true);
+
+        HealthVerdict verdict = code == "T12"
+            ? new TransactionIdAgeCheck().Evaluate(
+                new TransactionIdAgeFacts([Table(gated, static row => row with { OldestXidAge = 1_700_000_000 })], Wraparound()),
+                Evaluation())
+            : new MultixactAgeCheck().Evaluate(Multixacts(null, new TableMultixactAge(gated, 1_700_000_000)), Evaluation());
+
+        HealthFinding finding = verdict.Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Critical);
+        finding.GatedSchemas.Should().BeEmpty("the finding is the database's, and is shown at the check's own gate");
+        finding.Title.Should().StartWith("A Marten-managed table outside the store's own schemas is ");
+
+        string text = finding.Title + " " + finding.WhyItMatters + " " + finding.Subject + " " + finding.Caveat + " "
+            + string.Join(" ", finding.Evidence.Select(static x => x.Label + " " + x.Value));
+        text.Should().NotContain("xso_own").And.NotContain("xso_things");
+    }
+
     [Fact]
     public void Another_database_on_the_server_past_the_critical_line_is_a_critical_finding_here_too()
     {

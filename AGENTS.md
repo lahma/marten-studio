@@ -515,16 +515,21 @@ or an empty database id - so the gates, the audit, the mute keys and the high-wa
 the capability named, as Database › Sessions asks. A finding about one tenant names it, so it needs `Activity`
 and that tenant's store policy too. A withheld finding is counted and never described, and a row below its check's
 gate reads "findings not shown to you" whether or not there are any; the badge and the banners read only a scope
-the report would be shown to. The first exception is to D13 and D27, which call `SqlConsoleRole` the real
-boundary: T02, T22 and T23 read `pg_stat_statements`' counters and texts as the store's own role, because the
-extension shows any other role `<insufficient privilege>` for Marten's statements and a narrowed console role - the
-careful host's configuration - would see nothing of the store. The reads are fenced to `userid = current_user` and
-this database (`StatementChecksFenceTests`), so they show what that role could read anyway; a text still carrying a
-literal as written, or that is not a plain query or write, is withheld; plans run as `SqlConsoleRole`. Every other
-health read, and every console statement, stays under it. The second is the opt-in ASP.NET Core health check,
-which runs with no visitor at all - every store, up to 25 databases, no policy - and is acceptable only because it
-reports codes, outcomes, severities and counts, never a name, a tenant, a statement or anything Postgres said: the
-host's own endpoint is its only gate (`docs/health.md`, `docs/security.md`).
+the report would be shown to. A finding that names a table in a schema outside the store's own - an
+`ExtendedSchemaObjects` table in a schema of its own, `HealthFinding.GatedSchemas` - also needs the database
+browser's gate for that schema, which D27 withholds and masks otherwise; the badge, the banners and the Critical
+toast resolve no scope and cannot ask that gate, so they withhold such a finding from everybody, and T12 and T13,
+being the database's, name such a table generically rather than vanish. The first exception is to D13 and D27,
+which call `SqlConsoleRole` the real boundary: T02, T22 and T23 read `pg_stat_statements`' counters and texts as
+the store's own role, because the extension shows any other role `<insufficient privilege>` for Marten's
+statements and a narrowed console role - the careful host's configuration - would see nothing of the store. The
+reads are fenced to `userid = current_user` and this database (`StatementChecksFenceTests`), so they show what
+that role could read anyway; a text still carrying a literal as written, or that is not a plain query or write, is
+withheld; plans run as `SqlConsoleRole`. Every other health read, and every console statement, stays under it. The
+second is the opt-in ASP.NET Core health check, which runs with no visitor at all - every store, up to 25
+databases, no policy - and is acceptable only because it reports codes, outcomes, severities and counts, never a
+name, a tenant, a statement or anything Postgres said: the host's own endpoint is its only gate (`docs/health.md`,
+`docs/security.md`).
 
 ## Package budget
 

@@ -15,7 +15,14 @@ namespace MartenStudio.Services.Schema;
 /// Everything the Schema screen's read paths need to know about what <c>StoreOptions</c> declares,
 /// derived from the options alone.
 /// </summary>
-/// <param name="Schemas">The schemas this store owns in this database, in a stable order.</param>
+/// <param name="Schemas">
+/// The schemas this store owns in this database, in a stable order: the document and event schemas, every
+/// document type's, and every event-store feature object's (a projection's table included). Not the schema of
+/// an <c>ExtendedSchemaObjects</c> object, on purpose: this is D27's "store's own schemas", whose structure the
+/// database browser shows without <c>BrowseDatabase</c> and which the Schema screen lists, and handing an object
+/// to Marten to manage does not hand its schema to every visitor. Code that needs such an object's schema reads
+/// it from <see cref="MartenDeclaredObject.Schema" />, never by splitting a key against this list.
+/// </param>
 /// <param name="Indexes">Every index the configuration asks for, on a table it manages.</param>
 /// <param name="ManagedTables">
 /// The qualified names of the tables an apply from this store migrates: the document and event tables,
@@ -105,6 +112,13 @@ internal enum MartenObjectKind
 }
 
 /// <summary>One object a store's configuration declares, by what it is.</summary>
+/// <param name="Schema">
+/// The schema it is declared in. Carried rather than split back out of its key: an
+/// <c>ExtendedSchemaObjects</c> table may sit in a schema of its own that is deliberately <em>not</em> in
+/// <see cref="SchemaDeclarations.Schemas" /> (D27's "store's own schemas"), and a key is <c>schema.name</c>
+/// with a name that may itself hold a dot.
+/// </param>
+/// <param name="Name">The object's own name, unqualified.</param>
 /// <param name="Kind">What Marten means it to be.</param>
 /// <param name="Alias">
 /// The collection alias of a document table whose type is visible; <see langword="null" /> for everything
@@ -114,7 +128,11 @@ internal enum MartenObjectKind
 /// <see langword="false" /> only for a document table whose type
 /// <c>MartenStudioOptions.IsDocumentTypeVisible</c> hides.
 /// </param>
-internal sealed record MartenDeclaredObject(MartenObjectKind Kind, string? Alias = null, bool Visible = true);
+internal sealed record MartenDeclaredObject(string Schema, string Name, MartenObjectKind Kind, string? Alias = null, bool Visible = true)
+{
+    /// <summary>The key <see cref="SchemaDeclarations.Objects" /> holds it under.</summary>
+    public string Key => SchemaKey.For(Schema, Name);
+}
 
 /// <summary>
 /// What <see cref="SchemaDeclarationReader.ReadForClassification" /> answers: the declarations, or why
@@ -253,13 +271,13 @@ internal static class SchemaDeclarationReader
         foreach (string name in DocumentSchemaFunctions)
         {
             functions.Add(SchemaKey.For(documentSchema, name));
-            objects.TryAdd(SchemaKey.For(documentSchema, name), new MartenDeclaredObject(MartenObjectKind.Function));
+            Declare(objects, documentSchema, name, MartenObjectKind.Function);
         }
 
         // The HiLo table beside its function. The SequenceFactory that declares it is internal and is only
         // reachable through the migrating feature walk (hard rule 14), so it is named here - an entry for a
         // table that is not there yet classifies nothing and costs nothing.
-        objects.TryAdd(SchemaKey.For(documentSchema, HiloTable), new MartenDeclaredObject(MartenObjectKind.Infrastructure));
+        Declare(objects, documentSchema, HiloTable, MartenObjectKind.Infrastructure);
 
         foreach (IDocumentType documentType in storeOptions.AllKnownDocumentTypes())
         {
@@ -274,9 +292,7 @@ internal static class SchemaDeclarationReader
 
             bool visible = isDocumentTypeVisible is null || isDocumentTypeVisible(documentType.DocumentType);
 
-            objects.TryAdd(
-                SchemaKey.For(schema, table),
-                new MartenDeclaredObject(MartenObjectKind.DocumentTable, visible ? documentType.Alias : null, visible));
+            Declare(objects, schema, table, MartenObjectKind.DocumentTable, visible ? documentType.Alias : null, visible);
             string alias = visible ? documentType.Alias : table;
             string typeName = visible ? SchemaTypeName.Of(documentType.DocumentType) : table;
 
@@ -427,7 +443,11 @@ internal static class SchemaDeclarationReader
                     ? storeOptions.DatabaseSchemaName
                     : identifier.Schema;
 
-                objects.TryAdd(SchemaKey.For(schema, identifier.Name), new MartenDeclaredObject(kind));
+                // Its schema is deliberately not added to SchemaDeclarations.Schemas: that list is D27's "store's
+                // own schemas", which the database browser shows the structure of without BrowseDatabase and the
+                // Schema screen lists, and an extended object in a schema of its own must not widen either. The
+                // pair travels on the entry instead, for the health checks that read the table (MartenTables).
+                Declare(objects, schema, identifier.Name, kind);
 
                 // An apply migrates these like Marten's own tables - StorageFeatures yields itself as a
                 // feature whenever the list is not empty - so a table here is a managed table, its indexes
@@ -538,9 +558,7 @@ internal static class SchemaDeclarationReader
             if (schemaObject is Function)
             {
                 functions.Add(SchemaKey.For(schemaObject.Identifier.Schema, schemaObject.Identifier.Name));
-                objects.TryAdd(
-                    SchemaKey.For(schemaObject.Identifier.Schema, schemaObject.Identifier.Name),
-                    new MartenDeclaredObject(MartenObjectKind.Function));
+                Declare(objects, schemaObject.Identifier.Schema, schemaObject.Identifier.Name, MartenObjectKind.Function);
                 continue;
             }
 
@@ -549,9 +567,7 @@ internal static class SchemaDeclarationReader
                 // mt_events_sequence. Never on the Schema screen's lists, which is why nothing but the kind
                 // map records it. The per-tenant sequences (PerTenantEventSequences) are a wrapper with a
                 // placeholder identifier and are skipped: their real names carry tenant ids.
-                objects.TryAdd(
-                    SchemaKey.For(schemaObject.Identifier.Schema, schemaObject.Identifier.Name),
-                    new MartenDeclaredObject(MartenObjectKind.Sequence));
+                Declare(objects, schemaObject.Identifier.Schema, schemaObject.Identifier.Name, MartenObjectKind.Sequence);
                 continue;
             }
 
@@ -560,9 +576,7 @@ internal static class SchemaDeclarationReader
                 if (schemaObject is Weasel.Postgresql.Views.View)
                 {
                     // A projection that declares a view: relational, the host's data, Marten-managed.
-                    objects.TryAdd(
-                        SchemaKey.For(schemaObject.Identifier.Schema, schemaObject.Identifier.Name),
-                        new MartenDeclaredObject(MartenObjectKind.ProjectionOrExtendedTable));
+                    Declare(objects, schemaObject.Identifier.Schema, schemaObject.Identifier.Name, MartenObjectKind.ProjectionOrExtendedTable);
                 }
 
                 continue;
@@ -572,12 +586,13 @@ internal static class SchemaDeclarationReader
             string name = table.Identifier.Name;
             managedTables.Add(SchemaKey.For(schema, name));
 
-            objects.TryAdd(
-                SchemaKey.For(schema, name),
-                new MartenDeclaredObject(
-                    table.GetType().Assembly == typeof(StoreOptions).Assembly
-                        ? MartenObjectKind.EventTable
-                        : MartenObjectKind.ProjectionOrExtendedTable));
+            Declare(
+                objects,
+                schema,
+                name,
+                table.GetType().Assembly == typeof(StoreOptions).Assembly
+                    ? MartenObjectKind.EventTable
+                    : MartenObjectKind.ProjectionOrExtendedTable);
 
             foreach (string ignored in table.IgnoredIndexes)
             {
@@ -596,6 +611,19 @@ internal static class SchemaDeclarationReader
 
     /// <summary>What an <c>ExtendedSchemaObjects</c> table's indexes are attributed to (= <c>IndexAdvice.ManagedTableAlias</c>).</summary>
     internal const string ExtendedAlias = "Marten-managed";
+
+    /// <summary>
+    /// Adds one object to the kind map under its key, carrying the schema and name the key was built from - the
+    /// one place an entry is made, so that the two can never disagree. The first declaration of a name wins.
+    /// </summary>
+    private static void Declare(
+        Dictionary<string, MartenDeclaredObject> objects,
+        string schema,
+        string name,
+        MartenObjectKind kind,
+        string? alias = null,
+        bool visible = true) =>
+        objects.TryAdd(SchemaKey.For(schema, name), new MartenDeclaredObject(schema, name, kind, alias, visible));
 
     private static DeclaredIndex Describe(
         IndexDefinition index,

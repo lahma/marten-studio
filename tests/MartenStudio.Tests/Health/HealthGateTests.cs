@@ -340,6 +340,34 @@ public class HealthGateTests
         report.Findings.Select(static x => x.MuteKey).Should().OnlyHaveUniqueItems();
     }
 
+    /// <summary>
+    /// XSO-fix: a finding that names a table in a schema outside the store's own is shown only past the database
+    /// browser's gate for that schema (D27). This harness's store refuses every connection, so the gate cannot be read -
+    /// and the finding is withheld, counted and given its reason, on the report and on the badge alike, while a finding
+    /// that names no such schema is shown as before.
+    /// </summary>
+    [Fact]
+    public async Task A_finding_naming_a_table_outside_the_stores_schemas_is_withheld_when_the_browsers_gate_cannot_be_read()
+    {
+        await using HealthHarness harness = HealthHarness.Create(policies: true);
+        harness.Script.Finds("T90", HealthSeverity.Warning, "About an extended table", static x => x.GatedSchemas.Add("xso_own"));
+        harness.Script.Finds("K90", HealthSeverity.Warning, "About the configuration");
+
+        HealthReport report = await harness.Health.GetReportAsync(harness.Scope, HealthReportRequest.Regular, Token);
+
+        report.Findings.Select(static x => x.Code).Should().Equal("K90");
+        report.WithheldCount.Should().Be(1);
+        report.WithheldReason.Should().Be(HealthService.UncheckedSchemaReason);
+
+        HealthCheckStatus row = report.Checks.Single(static x => x.Code == "T90");
+        row.FindingCount.Should().Be(0);
+        row.FindingsWithheld.Should().BeTrue("a withheld finding is never a \"nothing found\"");
+
+        HealthGlance glance = (await harness.Health.GlanceAsync(harness.Scope, Token))!;
+        glance.Warning.Should().Be(1, "the badge resolves no scope, so it cannot ask the browser's gate and does not count the finding");
+        glance.Withheld.Should().Be(1);
+    }
+
     /// <summary>The badge's glance goes through the same gates, and is never a sweep.</summary>
     [Fact]
     public async Task The_glance_counts_what_this_visitor_may_see_and_has_not_muted()

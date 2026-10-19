@@ -488,6 +488,7 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
                     [new KeyValuePair<string, string?>("mode", "marten"), new KeyValuePair<string, string?>("type", alias)])
                 : null,
             DocumentTypes = statement.DocumentTypes,
+            GatedSchemas = statement.GatedSchemas,
         };
     }
 

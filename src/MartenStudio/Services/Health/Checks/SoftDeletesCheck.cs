@@ -118,6 +118,7 @@ internal sealed class SoftDeletesCheck : HealthCheck<SoftDeletesFacts>
             Severity = HealthSeverity.Info,
             Subject = table.Key,
             DocumentTypes = table.DocumentTypes,
+            GatedSchemas = table.GatedSchemas,
             Title = TableText.Percent(deleted) + " of the " + type + " documents are soft-deleted",
             WhyItMatters =
                 "A soft delete keeps the row and sets mt_deleted. Every query Marten runs on the collection adds "

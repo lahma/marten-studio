@@ -88,6 +88,14 @@ The sweep is about the database; what each visitor is shown of it is decided per
   `ReadOnly` - and the write policy, asked with `Capability = "ViewDatabaseActivity"` and `TenantId = null`.
   Without it a visitor still sees the counts and ages, never the names.
 - A document type `IsDocumentTypeVisible` hides never appears in a finding.
+- A table in a schema that is not one of the store's own - an `ExtendedSchemaObjects` table in a schema of
+  its own - is named in a finding only to a visitor the database browser shows that schema to:
+  `Capabilities.BrowseDatabase`, the write policy asked with `TenantId = null`, and a `BrowsableSchemas`
+  entry (or `"*"`) that admits it. Anybody else has the finding counted as not shown to them. The navigation
+  badge and the Critical toast cannot ask that gate, so they never count such a finding for anybody. T12 and
+  T13 are the exception: they are about the whole database, so a table like that is named only as "a
+  Marten-managed table outside the store's own schemas" and the finding stays visible. A check row's note
+  names it the same way.
 - A number one check measures can become another's evidence through the history, and only downwards: each
   number keeps the gate of the check that read it, and a check is handed only the numbers read at or below
   its own gate. A count of sessions by role never turns up in a finding every visitor sees.
