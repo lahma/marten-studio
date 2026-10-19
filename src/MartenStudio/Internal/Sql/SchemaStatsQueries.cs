@@ -89,7 +89,31 @@ internal sealed record IndexStatsRow(
     long? Scans,
     long? TuplesRead,
     bool IsPrimaryKey,
-    bool IsUnique);
+    bool IsUnique)
+{
+    /// <summary><c>pg_am.amname</c>: <c>btree</c>, <c>gin</c>, <c>hnsw</c>, <c>ivfflat</c>...</summary>
+    public string AccessMethod { get; init; } = "btree";
+
+    /// <summary>Whether the <c>vector</c> extension owns the access method.</summary>
+    public bool AccessMethodIsPgVector { get; init; }
+
+    /// <summary>For an <c>hnsw</c> or <c>ivfflat</c> index, each key column's operator class.</summary>
+    public IReadOnlyList<string?>? OperatorClasses { get; init; }
+
+    /// <summary>For the same, each key column as <c>pg_get_indexdef(oid, k, true)</c> prints it.</summary>
+    public IReadOnlyList<string?>? KeyDefinitions { get; init; }
+
+    /// <summary>For the same, the index's <c>reloptions</c>.</summary>
+    public IReadOnlyList<string>? Options { get; init; }
+}
+
+/// <summary>One pgvector column of a table in one of the store's schemas.</summary>
+/// <param name="Schema">The table's schema.</param>
+/// <param name="Table">The table.</param>
+/// <param name="Column">The column.</param>
+/// <param name="TypeName">Its type's - or its domain's base type's - <c>typname</c>: <c>vector</c>, <c>halfvec</c>, <c>sparsevec</c>.</param>
+/// <param name="TypeModifier">Its type modifier, which is pgvector's dimensions, or <c>-1</c>.</param>
+internal sealed record VectorColumnRow(string Schema, string Table, string Column, string TypeName, int TypeModifier);
 
 /// <summary>
 /// One routine in one of the store's schemas - a function, procedure, aggregate or window function - by
@@ -319,11 +343,17 @@ internal static class SchemaStatsQueries
                    c.relname as index_name,
                    c.relkind,
                    i.indisprimary,
-                   i.indisunique
+                   i.indisunique,
+                   i.indnkeyatts,
+                   i.indclass,
+                   c.reloptions,
+                   am.oid as am_oid,
+                   am.amname
             from pg_catalog.pg_index i
             join pg_catalog.pg_class c on c.oid = i.indexrelid
             join pg_catalog.pg_class t on t.oid = i.indrelid
             join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+            join pg_catalog.pg_am am on am.oid = c.relam
             where n.nspname = any(@schemas)
               and not t.relispartition
         ),
@@ -356,11 +386,71 @@ internal static class SchemaStatsQueries
                case when l.relkind = 'I' then r.scans::bigint else s.idx_scan end,
                case when l.relkind = 'I' then r.tuples::bigint else s.idx_tup_read end,
                l.indisprimary,
-               l.indisunique
+               l.indisunique,
+               l.amname::text,
+               exists (
+                   select 1
+                   from pg_catalog.pg_depend d
+                   join pg_catalog.pg_extension e on e.oid = d.refobjid
+                   where d.classid = 'pg_catalog.pg_am'::pg_catalog.regclass
+                     and d.objid = l.am_oid
+                     and d.refclassid = 'pg_catalog.pg_extension'::pg_catalog.regclass
+                     and d.deptype = 'e'
+                     and e.extname = 'vector'),
+               case when l.amname in ('hnsw', 'ivfflat') then
+                   (select pg_catalog.array_agg(oc.opcname::text order by u.ord)
+                      from pg_catalog.unnest(l.indclass::pg_catalog.oid[]) with ordinality as u(opclass, ord)
+                      join pg_catalog.pg_opclass oc on oc.oid = u.opclass
+                      where u.ord <= l.indnkeyatts)
+               end,
+               case when l.amname in ('hnsw', 'ivfflat') then
+                   (select pg_catalog.array_agg(pg_catalog.pg_get_indexdef(l.oid, k, true) order by k)
+                      from pg_catalog.generate_series(1, l.indnkeyatts::int) as k)
+               end,
+               case when l.amname in ('hnsw', 'ivfflat') then l.reloptions end
         from listed l
         left join rolled r on r.root = l.oid
         left join pg_catalog.pg_stat_user_indexes s on s.indexrelid = l.oid
         order by l.nspname, l.table_name, l.index_name
+        """;
+
+    /// <summary>
+    /// Every pgvector column - <c>vector</c>, <c>halfvec</c>, <c>sparsevec</c>, or a domain over one - of every
+    /// ordinary and partitioned table in the store's schemas, never a partition's, with its type modifier, which is
+    /// the dimensions the column declares.
+    /// </summary>
+    /// <remarks>
+    /// A type is pgvector's when the <c>vector</c> extension owns it (<c>pg_depend.deptype 'e'</c>), whatever schema
+    /// the extension was created in and whatever the type is called - so a host's own type named <c>vector</c> is not
+    /// one. Catalog columns only: no value is read to learn a dimension, and nothing here locks what it lists.
+    /// </remarks>
+    internal const string VectorColumnsSql =
+        """
+        select n.nspname::text,
+               c.relname::text,
+               a.attname::text,
+               bt.typname::text,
+               case when t.typtype = 'd' then t.typtypmod else a.atttypmod end
+        from pg_catalog.pg_attribute a
+        join pg_catalog.pg_class c on c.oid = a.attrelid
+        join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+        join pg_catalog.pg_type t on t.oid = a.atttypid
+        join pg_catalog.pg_type bt on bt.oid = case when t.typtype = 'd' then t.typbasetype else t.oid end
+        where n.nspname = any(@schemas)
+          and c.relkind in ('r', 'p')
+          and not c.relispartition
+          and a.attnum > 0
+          and not a.attisdropped
+          and exists (
+              select 1
+              from pg_catalog.pg_depend d
+              join pg_catalog.pg_extension e on e.oid = d.refobjid
+              where d.classid = 'pg_catalog.pg_type'::pg_catalog.regclass
+                and d.objid = bt.oid
+                and d.refclassid = 'pg_catalog.pg_extension'::pg_catalog.regclass
+                and d.deptype = 'e'
+                and e.extname = 'vector')
+        order by 1, 2, a.attnum
         """;
 
     /// <summary>
@@ -449,7 +539,7 @@ internal static class SchemaStatsQueries
 
     /// <summary>Every statement this class runs, for the tests that hold them to their rules.</summary>
     internal static IReadOnlyList<string> AllStatements { get; } =
-        [TableStatsSql, IndexStatsSql, FunctionsSql, FunctionBodiesSql, DatabaseSizeSql];
+        [TableStatsSql, IndexStatsSql, FunctionsSql, FunctionBodiesSql, DatabaseSizeSql, VectorColumnsSql];
 
     /// <summary>Reads table sizes and activity for the store's schemas.</summary>
     /// <param name="connection">An open connection to the database in scope.</param>
@@ -526,7 +616,45 @@ internal static class SchemaStatsQueries
                 NullableInt64(reader, 5),
                 NullableInt64(reader, 6),
                 reader.GetBoolean(7),
-                reader.GetBoolean(8)));
+                reader.GetBoolean(8))
+            {
+                AccessMethod = reader.IsDBNull(9) ? string.Empty : reader.GetString(9),
+                AccessMethodIsPgVector = !reader.IsDBNull(10) && reader.GetBoolean(10),
+                OperatorClasses = reader.IsDBNull(11) ? null : reader.GetFieldValue<string?[]>(11),
+                KeyDefinitions = reader.IsDBNull(12) ? null : reader.GetFieldValue<string?[]>(12),
+                Options = reader.IsDBNull(13) ? null : reader.GetFieldValue<string[]>(13),
+            });
+        }
+
+        return rows;
+    }
+
+    /// <summary>Reads every pgvector column of every table in the store's schemas (<see cref="VectorColumnsSql" />).</summary>
+    /// <param name="connection">An open connection to the database in scope.</param>
+    /// <param name="transaction">The read-only transaction to run in, or <see langword="null" /> for none.</param>
+    /// <param name="schemas">The schemas the store owns.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public static async Task<IReadOnlyList<VectorColumnRow>> ReadVectorColumnsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        IReadOnlyList<string> schemas,
+        int commandTimeoutSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        await using NpgsqlCommand command = CreateCommand(connection, transaction, VectorColumnsSql, schemas, commandTimeoutSeconds);
+
+        List<VectorColumnRow> rows = [];
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            rows.Add(new VectorColumnRow(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetString(3),
+                reader.IsDBNull(4) ? -1 : reader.GetInt32(4)));
         }
 
         return rows;

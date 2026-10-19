@@ -10640,3 +10640,129 @@ a.ms-schema-health-mark:focus-visible {
     font-size: var(--ms-font-size-xs);
     margin-right: auto;
 }
+
+/* ==========================================================================
+   PGV. pgvector awareness: vector columns, HNSW and IVFFlat indexes, and
+   vector values collapsed in the viewers (0.4, F6)
+
+   Appended at the end, after the 0.4 sections before it (D26). Every rule is
+   new and prefixed ms-vector- or ms-json-numbers; nothing earlier is
+   re-declared. A collapsed value is one line that may wrap anywhere, so a
+   long type or preview never widens the grid's column past its cut text.
+   ========================================================================== */
+
+.ms-vector-chip {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-vector-preview,
+.ms-vector-type {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    overflow-wrap: anywhere;
+}
+
+.ms-vector-preview {
+    color: var(--ms-color-text-secondary);
+    margin-left: var(--ms-space-xs);
+}
+
+.ms-vector-value {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-vector-value .ms-vector-preview {
+    margin-left: 0;
+}
+
+.ms-vector-actions {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-vector-whole {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    flex: 1 1 100%;
+}
+
+.ms-vector-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-vector-badge {
+    font-family: var(--ms-font-mono);
+    white-space: nowrap;
+}
+
+.ms-db-cell-type .ms-vector-badge {
+    margin-left: var(--ms-space-xs);
+}
+
+.ms-schema-vectors {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    margin-top: var(--ms-space-xs);
+}
+
+.ms-vector-index {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin-top: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+    min-width: 0;
+}
+
+.ms-vector-index-column,
+.ms-vector-index-parameters {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-vector-index-key,
+.ms-vector-index-opclass,
+.ms-vector-param {
+    font-family: var(--ms-font-mono);
+    overflow-wrap: anywhere;
+}
+
+.ms-vector-index-opclass {
+    font-weight: 600;
+}
+
+.ms-vector-index-distance {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-vector-param {
+    padding: 0 var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+}
+
+.ms-vector-param-default {
+    color: var(--ms-color-text-secondary);
+    border-style: dashed;
+}
+
+.ms-json-numbers-preview {
+    font-family: var(--ms-font-mono);
+    overflow-wrap: anywhere;
+}

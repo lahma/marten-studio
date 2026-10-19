@@ -18,6 +18,10 @@
     row figures of Marten's tenancy tables (mt_tenant_partitions, mt_tenant_databases), one row per tenant.
     The service decides both; this only draws them. A hidden document type's table is not here at all.
 
+    A table with pgvector columns names each under its own name with its type and dimensions -
+    "embedding vector(1536)" - from the catalog alone: the vector extension owns the type, and the dimensions are
+    its type modifier, so no value is read to learn them.
+
     Two states are not errors and are drawn as such. A registered store that cannot be read withholds the
     tables it could own, with a notice naming it, rather than blanking the tab (SchemaClassification). And a
     read that gave up behind somebody's lock after three seconds says so, with a retry (SchemaTables.Busy).
@@ -124,6 +128,15 @@ else
                             {
                                 <span class="ms-index-flag ms-schema-partitions"
                                       title="Its partitions' figures are added into this row; their names are never listed.">@PartitionLabel(table)</span>
+                            }
+                            @if (table.VectorColumns.Count > 0)
+                            {
+                                <span class="ms-schema-vectors">
+                                    @foreach (TableVectorColumn column in table.VectorColumns)
+                                    {
+                                        <span class="ms-index-flag ms-index-flag-info ms-vector-badge" title="@column.Type.Description" @key="column.Name">@column.Text</span>
+                                    }
+                                </span>
                             }
                         </td>
                         <td class="ms-table-cell">

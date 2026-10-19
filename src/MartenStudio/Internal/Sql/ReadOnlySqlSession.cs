@@ -385,7 +385,9 @@ internal sealed class ReadOnlySqlSession
         }
         catch (Exception exception) when (exception is InvalidCastException or NotSupportedException)
         {
-            // An extension type with no Npgsql mapping. The grid says so rather than failing the whole run.
+            // An extension type with no Npgsql mapping. The grid says so rather than failing the whole run. A pgvector
+            // column is one, unless the host called UseVector() on its data source - which is why the console's grid
+            // does not collapse vectors as the database browser's does (see ResultGrid).
             return new SqlCell($"(cannot read {postgresType})", SqlCellKind.Text, false, 0);
         }
     }

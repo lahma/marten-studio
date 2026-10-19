@@ -300,7 +300,8 @@ internal static class DatabaseObjectAssembler
             !string.IsNullOrEmpty(column.Generated),
             column.Sortable,
             gate.RedactText(column.Comment),
-            DatabaseCatalogQueries.IsQuotable(column.Name)))];
+            DatabaseCatalogQueries.IsQuotable(column.Name),
+            PgVector.Column(column.TypeExtension, column.BaseTypeName, column.TypeModifier)))];
 
         return new DatabaseObjectDetail(
             summary,
@@ -309,7 +310,20 @@ internal static class DatabaseObjectAssembler
             [.. detail.Constraints.Select(x => new DatabaseConstraintInfo(
                 x.Name, ConstraintKind(x.Kind), gate.Redact(x.Definition) ?? x.Definition))],
             [.. detail.Indexes.Select(x => new DatabaseIndexInfo(
-                x.Name, gate.Redact(x.Definition) ?? x.Definition, x.IsPrimary, x.IsUnique, x.IsValid, x.HasPredicate, x.KeyColumns))],
+                x.Name,
+                gate.Redact(x.Definition) ?? x.Definition,
+                x.IsPrimary,
+                x.IsUnique,
+                x.IsValid,
+                x.HasPredicate,
+                x.KeyColumns,
+                x.AccessMethod,
+                PgVector.Index(
+                    x.AccessMethodIsPgVector,
+                    x.AccessMethod,
+                    x.KeyDefinitions?.Select(definition => gate.Redact(definition)).ToList(),
+                    x.OperatorClasses,
+                    x.Options)))],
             [.. Triggers(gate, detail.Triggers)],
             outbound,
             inbound,

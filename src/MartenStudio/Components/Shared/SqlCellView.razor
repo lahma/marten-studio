@@ -1,3 +1,4 @@
+@using MartenStudio.Services.Database
 @inject StudioState State
 
 @*
@@ -19,7 +20,10 @@
         whole value), UTF-8 text (a chip that opens the text the same way), gzip or PNG - each with its size,
         and with a title saying why those two do not open - and hex for anything else;
       - a `DateHint` from the grid - "≈ 2026-09-29 14:03" under a bigint of ticks - is drawn under the number,
-        which stays.
+        which stays;
+      - a pgvector value (`Vector`, the column's type from the catalog) is collapsed to its type and its first
+        few components - "vector(1536) [0.0123, -0.0441, 0.2, …]" - from what the server already cut, and the
+        type is a chip that opens the whole value under the grid, where it can be read and copied.
 
     The parameters are strings rather than the studio's own cell type because a Razor component is a public
     class, and a public parameter cannot have an internal type (D12).
@@ -42,6 +46,15 @@ else if (IsKind(JsonKind))
 else if (Rich && IsKind(BinaryKind))
 {
     @RenderBinary()
+}
+else if (Rich && Vector is PgVectorColumn vector && PgVector.Preview(Text, IsTruncated) is { } preview)
+{
+    <button type="button"
+            class="ms-chip ms-vector-chip"
+            title="@(PgVector.Describe(vector, preview) + " Open the whole value under the grid, to read or copy it.")"
+            @onclick="OpenAsync"
+            @onkeydown:stopPropagation="true">@vector.Spelling</button>
+    <span class="ms-vector-preview" title="@PgVector.Describe(vector, preview)">@preview.Text</span>
 }
 else if (Rich && IsKind(TimestampKind) && SqlCellFormat.IsTimestampWithZone(Type) && SqlCellFormat.ParseInstant(Text) is { } instant)
 {
@@ -107,7 +120,15 @@ else
     [Parameter]
     public string? DateHintTitle { get; set; }
 
-    /// <summary>Opens the value: a JSON chip, or a <c>bytea</c> that holds JSON or UTF-8 text.</summary>
+    /// <summary>
+    /// For a pgvector column, its <c>PgVectorColumn</c> - the type and dimensions the catalog declares - which shows
+    /// the cell collapsed. Rich mode only. Typed <see cref="object" /> for the reason <c>DocumentComponentModel</c>
+    /// gives: a public component's parameter cannot have an internal type.
+    /// </summary>
+    [Parameter]
+    public object? Vector { get; set; }
+
+    /// <summary>Opens the value: a JSON chip, a <c>bytea</c> that holds JSON or UTF-8 text, or a pgvector value.</summary>
     [Parameter]
     public EventCallback OnOpen { get; set; }
 

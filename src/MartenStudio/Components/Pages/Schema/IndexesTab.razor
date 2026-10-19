@@ -37,6 +37,11 @@
     its last sweep, read through the cache-only CachedFindingsAsync: the tab never starts a sweep, and with
     nothing cached it draws no mark at all - an absent mark is never a claim that an index is fine. Each mark
     links to its finding on the Health page.
+
+    A pgvector HNSW or IVFFlat index - Marten.PgVector's VectorIndex<T>() makes one, over an expression on the
+    document table - says under its definition what pg_get_indexdef only implies: each column's operator class and
+    the distance it serves, and m, ef_construction or lists from reloptions, with pgvector's default where the index
+    sets none (VectorIndexSummary).
 *@
 
 @if (!loading && indexes.ClassificationNotice is { Length: > 0 } notice)
@@ -234,6 +239,10 @@ else
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.TuplesRead)</td>
                             <td class="ms-table-cell">
                                 <div class="ms-index-definition">@index.Definition</div>
+                                @if (index.Vector is { } vector)
+                                {
+                                    <VectorIndexSummary Model="vector" />
+                                }
                                 @if (index.Suggestion is { Length: > 0 } suggestion)
                                 {
                                     <p class="ms-suggestion">@suggestion</p>

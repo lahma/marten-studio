@@ -127,6 +127,17 @@ internal sealed record JsonModelOptions
 
     /// <summary>A string longer than this is marked <see cref="JsonSemanticKind.LongText"/> and rendered truncated.</summary>
     public int LongString { get; init; } = 120;
+
+    /// <summary>
+    /// An array of at least this many numbers and nothing else, not all of them whole - an embedding, as
+    /// Marten.PgVector stores one in a document - is drawn collapsed with its first few numbers and left out of
+    /// auto-expansion. An array of whole numbers (ids, counts) is not.
+    /// </summary>
+    /// <remarks>
+    /// 128, the smallest embedding size in common use, so a short list of measurements or prices in a document is
+    /// read element by element as it always was. Zero or less turns the collapse off.
+    /// </remarks>
+    public int CollapsedNumberArray { get; init; } = 128;
 }
 
 /// <summary>

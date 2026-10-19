@@ -6,7 +6,9 @@
 @*
     A relation's columns, in attnum order. The key column is marked where the key is, and a column that is
     part of a foreign key links to the table it points at - so the Columns tab answers "what is this column
-    and where does it go" without a trip to Keys.
+    and where does it go" without a trip to Keys. A pgvector column (vector, halfvec, sparsevec, or a domain over
+    one) carries a badge with its dimensions, from its type modifier - the type is the vector extension's by
+    pg_depend, so no value is read and a type of somebody else's called "vector" is not one.
 *@
 
 @if (DetailModel is { } detail)
@@ -52,7 +54,13 @@
                                 <span class="ms-db-badge" title="A stored generated column: computed from the others, never written">generated</span>
                             }
                         </td>
-                        <td class="ms-db-cell-type">@column.Type</td>
+                        <td class="ms-db-cell-type">
+                            @column.Type
+                            @if (column.Vector is { } vector)
+                            {
+                                <span class="ms-db-badge ms-vector-badge" title="@vector.Description">pgvector · @DimensionsText(vector)</span>
+                            }
+                        </td>
                         <td class="ms-db-cell-null">
                             @if (column.Nullable)
                             {
@@ -110,4 +118,10 @@
     public object? Detail { get; set; }
 
     private DatabaseObjectDetail? DetailModel => Detail as DatabaseObjectDetail;
+
+    /// <summary>"1,536 dimensions", or "any length" for a column declared without them.</summary>
+    private static string DimensionsText(MartenStudio.Services.Database.PgVectorColumn vector) =>
+        vector.Dimensions is { } dimensions
+            ? dimensions.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + (dimensions == 1 ? " dimension" : " dimensions")
+            : "any length";
 }

@@ -649,6 +649,10 @@ internal enum DatabaseIdentityKind
 /// <param name="Sortable">Whether its type has a default btree operator class - what lets it be sorted and compared.</param>
 /// <param name="Comment">Its comment.</param>
 /// <param name="Quotable">Whether its name can be quoted.</param>
+/// <param name="Vector">
+/// For a pgvector column, its type and declared dimensions, from the catalog - never from a value; otherwise
+/// <see langword="null" />.
+/// </param>
 internal sealed record DatabaseColumnInfo(
     string Name,
     int Position,
@@ -659,7 +663,8 @@ internal sealed record DatabaseColumnInfo(
     bool Generated,
     bool Sortable,
     string? Comment,
-    bool Quotable);
+    bool Quotable,
+    PgVectorColumn? Vector = null);
 
 /// <summary>Where a relation's row key came from.</summary>
 internal enum DatabaseRowKeySource
@@ -713,6 +718,8 @@ internal sealed record DatabaseConstraintInfo(string Name, DatabaseConstraintKin
 /// <param name="IsValid">Whether it is valid (a failed concurrent build is not).</param>
 /// <param name="IsPartial">Whether it has a predicate.</param>
 /// <param name="KeyColumns">Its key columns, <see langword="null" /> for an expression; never an <c>INCLUDE</c> column.</param>
+/// <param name="AccessMethod">Its access method: <c>btree</c>, <c>gin</c>, <c>hnsw</c>...</param>
+/// <param name="Vector">For a pgvector HNSW or IVFFlat index, its operator classes and build parameters; otherwise <see langword="null" />.</param>
 internal sealed record DatabaseIndexInfo(
     string Name,
     string Definition,
@@ -720,7 +727,9 @@ internal sealed record DatabaseIndexInfo(
     bool IsUnique,
     bool IsValid,
     bool IsPartial,
-    IReadOnlyList<string?> KeyColumns);
+    IReadOnlyList<string?> KeyColumns,
+    string AccessMethod = "btree",
+    PgVectorIndex? Vector = null);
 
 /// <summary>One foreign key, seen from one end.</summary>
 /// <param name="Name">The constraint name.</param>

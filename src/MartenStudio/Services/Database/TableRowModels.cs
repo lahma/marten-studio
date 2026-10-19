@@ -339,6 +339,10 @@ internal sealed record TableRowColumnReference(string ForeignKey, string? Schema
 /// <param name="Index">Whether a valid index leads with it.</param>
 /// <param name="IndexReason">The sentence behind <paramref name="Index" />.</param>
 /// <param name="Comment">The column comment.</param>
+/// <param name="Vector">
+/// For a pgvector column, its type and declared dimensions from the catalog - what lets its cells be shown
+/// collapsed - or <see langword="null" />.
+/// </param>
 internal sealed record TableRowColumn(
     string Name,
     int Position,
@@ -351,7 +355,8 @@ internal sealed record TableRowColumn(
     IReadOnlyList<TableRowColumnReference> References,
     IndexVerdictLevel Index,
     string IndexReason,
-    string? Comment);
+    string? Comment,
+    PgVectorColumn? Vector = null);
 
 /// <summary>One row of a page.</summary>
 /// <param name="Key">

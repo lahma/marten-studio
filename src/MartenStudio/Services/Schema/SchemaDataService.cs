@@ -443,7 +443,7 @@ internal sealed class SchemaDataService : ISchemaDataService
 
         try
         {
-            (IReadOnlyList<TableStatsRow> rows, long databaseBytes) = await InSessionAsync(
+            (IReadOnlyList<TableStatsRow> rows, IReadOnlyList<VectorColumnRow> vectors, long databaseBytes) = await InSessionAsync(
                     resolved,
                     async (connection, transaction, timeout, token) =>
                     {
@@ -451,11 +451,17 @@ internal sealed class SchemaDataService : ISchemaDataService
                             .ReadTablesAsync(connection, transaction, schemas, timeout, token)
                             .ConfigureAwait(false);
 
+                        // pgvector columns, by the catalog alone: a type the vector extension owns and its type
+                        // modifier, so no value is read to learn a dimension.
+                        IReadOnlyList<VectorColumnRow> vectorColumns = await SchemaStatsQueries
+                            .ReadVectorColumnsAsync(connection, transaction, schemas, timeout, token)
+                            .ConfigureAwait(false);
+
                         // Last, because a refusal aborts the transaction: under SqlConsoleRole, a role without
                         // CONNECT on the database may not size it.
                         long bytes = await DatabaseSizeAsync(connection, transaction, timeout, token).ConfigureAwait(false);
 
-                        return (read, bytes);
+                        return (read, vectorColumns, bytes);
                     },
                     cancellationToken)
                 .ConfigureAwait(false);
@@ -468,7 +474,7 @@ internal sealed class SchemaDataService : ISchemaDataService
                 partitionCountsShown: withheld is null,
                 declaredParameters);
 
-            return new SchemaTables(assembled.Tables, schemas, databaseBytes, null, withheld)
+            return new SchemaTables(WithVectorColumns(assembled.Tables, vectors), schemas, databaseBytes, null, withheld)
             {
                 ClassificationNotice = classification.Value.TablesNotice(assembled.Withheld),
             };
@@ -582,7 +588,11 @@ internal sealed class SchemaDataService : ISchemaDataService
                     }
                 }
 
-                shown.Add(row with { Definition = WithheldNames.Redact(row.Definition, withheldSchemas) ?? string.Empty });
+                shown.Add(row with
+                {
+                    Definition = WithheldNames.Redact(row.Definition, withheldSchemas) ?? string.Empty,
+                    KeyDefinitions = row.KeyDefinitions?.Select(definition => WithheldNames.Redact(definition, withheldSchemas)).ToList(),
+                });
             }
 
             excluded.UnionWith(withheldTables);
@@ -1315,6 +1325,41 @@ internal sealed class SchemaDataService : ISchemaDataService
         {
             return -1;
         }
+    }
+
+    /// <summary>
+    /// The tables with their pgvector columns attached - only the tables the assembler kept, so a hidden document
+    /// type's table, a partition and a withheld table bring none.
+    /// </summary>
+    internal static IReadOnlyList<TableStats> WithVectorColumns(IReadOnlyList<TableStats> tables, IReadOnlyList<VectorColumnRow> vectors)
+    {
+        if (vectors.Count == 0)
+        {
+            return tables;
+        }
+
+        Dictionary<string, List<TableVectorColumn>> byTable = new(StringComparer.Ordinal);
+
+        foreach (VectorColumnRow row in vectors)
+        {
+            if (PgVector.Column(PgVector.Extension, row.TypeName, row.TypeModifier) is not { } type)
+            {
+                continue;
+            }
+
+            string key = SchemaKey.For(row.Schema, row.Table);
+
+            if (!byTable.TryGetValue(key, out List<TableVectorColumn>? columns))
+            {
+                byTable[key] = columns = [];
+            }
+
+            columns.Add(new TableVectorColumn(row.Column, type));
+        }
+
+        return [.. tables.Select(table => byTable.TryGetValue(SchemaKey.For(table.Schema, table.Table), out List<TableVectorColumn>? columns)
+            ? table with { VectorColumns = columns }
+            : table)];
     }
 
     /// <summary>What a Schema tab says when its read gave up behind a lock.</summary>

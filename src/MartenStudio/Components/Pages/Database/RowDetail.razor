@@ -429,7 +429,8 @@
                                               Kind="@RowPresentation.KindToken(cell.Kind)"
                                               Text="@cell.Text"
                                               IsTruncated="cell.IsTruncated"
-                                              FullLength="cell.FullLength" />
+                                              FullLength="cell.FullLength"
+                                              Vector="column.Vector" />
                                 </div>
                                 @if (FilterHref(column, cell) is { } filter)
                                 {

@@ -73,6 +73,17 @@
             {
                 <span class="ms-json-brace" aria-hidden="true">@(IsArray ? "[" : "{")</span>
             }
+            else if (IsArray && NumberPreview is { Length: > 0 } numbers)
+            {
+                <span class="ms-json-summary ms-json-numbers" title="An array of numbers only - an embedding, perhaps - drawn collapsed. Expand it, or copy it from the key's menu.">
+                    <span class="ms-json-brace ms-json-numbers-preview">@numbers</span>
+                    <span class="ms-json-count">@ChildCount.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) numbers</span>
+                </span>
+                @if (MatchBadge > 0)
+                {
+                    <span class="ms-json-badge" title="@MatchBadge matching nodes are hidden here">@MatchBadge</span>
+                }
+            }
             else
             {
                 <span class="ms-json-summary">
@@ -184,6 +195,13 @@
     /// <summary>Whether the container is an array rather than an object.</summary>
     [Parameter]
     public bool IsArray { get; set; }
+
+    /// <summary>
+    /// For an array of numbers only that is long enough to be an embedding, its first few numbers - <c>[0.0123,
+    /// -0.0441, 0.2, …]</c> - which it shows while collapsed in place of <c>[…]</c>; otherwise <see langword="null" />.
+    /// </summary>
+    [Parameter]
+    public string? NumberPreview { get; set; }
 
     /// <summary>Whether the container is currently expanded.</summary>
     [Parameter]

@@ -106,6 +106,12 @@ internal sealed record TableStats(
     /// </summary>
     public bool DeclaredParametersKnown { get; init; }
 
+    /// <summary>
+    /// Its pgvector columns, in column order, each with its type and declared dimensions - from the catalog, never
+    /// from a value.
+    /// </summary>
+    public IReadOnlyList<TableVectorColumn> VectorColumns { get; init; } = [];
+
     /// <summary>The share of dead rows among live and dead, or <see langword="null" /> when the collector has nothing.</summary>
     public double? DeadShare => LiveRows is { } live && DeadRows is { } dead && live + dead > 0
         ? (double) dead / (live + dead)
@@ -115,6 +121,15 @@ internal sealed record TableStats(
     public double? HotShare => Updates is { } updates && updates > 0 && HotUpdates is { } hot
         ? (double) hot / updates
         : null;
+}
+
+/// <summary>One pgvector column of a table, as the Tables tab names it.</summary>
+/// <param name="Name">The column.</param>
+/// <param name="Type">Its pgvector type and declared dimensions.</param>
+internal sealed record TableVectorColumn(string Name, PgVectorColumn Type)
+{
+    /// <summary>The column and its type, as a person reads them: <c>embedding vector(1536)</c>.</summary>
+    public string Text => Name + " " + Type.Spelling;
 }
 
 /// <summary>The Tables tab's answer for one database.</summary>
