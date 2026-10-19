@@ -56,8 +56,9 @@ internal sealed partial class EventDataService
 
         // Capability, then the scope with the write policy asked about (store, database, tenant,
         // CompactStreams), then the operation, then the audit - on failure as well as on success (hard
-        // rule 5). The scope's own tenant is the right resource: compaction reaches one stream of one
-        // tenant, never the database as a whole, so DatabaseReach has nothing to widen here. On a conjoined
+        // rule 5). The scope's own tenant is the resource asked about first: compaction reaches one stream,
+        // never the database as a whole - but where that stream also holds an event another tenant's session
+        // appended, step 2b asks about the database as a whole as well. On a conjoined
         // event store Marten keeps it to that tenant itself - every statement on the session path carries the
         // session's tenant. On any other store it does not: Marten fetches the stream by id alone and deletes and
         // replaces the sequences that fetch returned with no tenant predicate (ConjoinedEventFilter, read at

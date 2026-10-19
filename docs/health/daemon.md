@@ -2,10 +2,11 @@
 
 These checks answer the question asked most often: **why aren't my projections moving?** They read
 `mt_event_progression` (a few dozen rows), the event sequence, one primary-key probe of `mt_events`, the
-dead-letter table, and - only when there is work and no healthy daemon in this process - `pg_locks`. Every
-read runs in the advisor's read-only transaction at the health cadence (`HealthInterval`, 60 s by default),
-never on a page's poll. Each finding is about the database as a whole, so it is shown to a visitor the store
-policy allows for the database with no tenant selected; a name of a session or a tenant sits behind
+dead-letter table, and - only when there is work and no healthy daemon in this process - `pg_locks`. Every read
+runs in the advisor's read-only transaction at the health cadence (`HealthInterval`, 60 s by default), never on
+a page's poll, and takes only the `AccessShareLock` a plain read takes on what it reads, and none on a table
+your documents are stored in. Each finding is about the database as a whole, so it is shown to a visitor the
+store policy allows for the database with no tenant selected; a name of a session or a tenant sits behind
 `ViewDatabaseActivity`. Back to the [index](../health.md).
 
 Every age of a row below is measured in the **database server's** time (`transaction_timestamp()`), against

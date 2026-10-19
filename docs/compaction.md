@@ -118,13 +118,18 @@ change how the host's own stream-state reads behave.
 
 ## Tenants
 
-Each of Marten's compaction reads and writes is narrowed to the session's tenant (#5234). On a conjoined
-store, the scope must name the stream's tenant, and only that tenant's stream with that id is touched. This
-holds from the 9.39.0 floor, and with `UseTenantPartitionedEvents`, where two tenants' events can share a
-`seq_id`. On a single-tenanted event store, the dialog and the audit entry name no tenant, because the
-stream has none. The studio does not use the store-level `IEventStore.CompactStreamAsync`
-overloads, including the tenant ones added in 9.41.0. They open `LightweightSession()` or
-`LightweightSession(tenantId)`, and neither pins the database the scope selector chose.
+Marten narrows its compaction reads and writes to the session's tenant only on a conjoined event store
+(#5234). There the scope must name the stream's tenant, and only that tenant's stream with that id is
+touched. This holds from the 9.39.0 floor, and with `UseTenantPartitionedEvents`, where two tenants' events
+can share a `seq_id`. On an event store that is not conjoined, Marten fetches the stream by id alone and
+deletes what it folded with no tenant predicate, although every append records its session's tenant in
+`mt_streams.tenant_id`. So from a tenant's scope the studio first checks that the stream is that tenant's -
+another tenant's stream gets the answer a missing one gets - and compacts a stream that also holds an event
+another tenant's session appended only for a visitor the write policy allows for the database as a whole
+(`TenantId = null`), because Marten folds and deletes every event of it. The studio does not use the
+store-level `IEventStore.CompactStreamAsync` overloads, including the tenant ones added in 9.41.0. They open
+`LightweightSession()` or `LightweightSession(tenantId)`, and neither pins the database the scope selector
+chose.
 
 ## Streams that cannot be compacted
 

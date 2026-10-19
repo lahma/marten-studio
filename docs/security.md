@@ -214,6 +214,16 @@ Every refusal, and the first run of each query in a circuit, is audited (events 
 predicate is in your logs from then on. **Grant `RunLinqQueries` to people you would trust with the store's
 data.**
 
+### The opt-in health check
+
+`services.AddHealthChecks().AddMartenStudio()` runs the advisor's configuration and catalog checks with no
+visitor at all - every registered store, up to 25 databases a run, no studio policy asked - so the host's
+own health endpoint is its only gate. That is acceptable only because of what it reports: check codes,
+outcomes, severities and counts, never a tenant, a stream, a session, a role, a table, a statement, a store
+key, a database name or anything Postgres said ([`health.md`](health.md#export)). With a response writer
+that prints the data, `databases + databasesSkipped` on a database-per-tenant tenancy is the number of
+tenant databases this process holds. `AddMartenStudio()` does not register it.
+
 ## The SQL console
 
 `RunSql` is off by default like every other capability. What makes the console safe when it *is* on is
@@ -426,6 +436,10 @@ should not have been typed is on the record either way.
   buttons that say on the button what they may create. An apply is gated on `ApplySchemaChanges`, runs
   under `AutoCreate.CreateOrUpdate` and never `AutoCreate.All`, lists its destructive statements, and
   requires a typed confirmation that travels to the service rather than being re-supplied by the page.
+  The one exception is Marten's, not the studio's: enumerating a master-table, sharded or single-server
+  tenancy's databases builds them, and the first time a store instance does so it applies the tenancy's
+  lookup table or creates a configured database that does not exist yet - and the studio's first
+  navigation can be that enumeration (AGENTS.md D27).
 - **Never writes document DML of its own.** There is no `mt_upsert_*` function to call — Marten 9.35
   installs none, and the upsert is inline SQL in its generated write path — and re-implementing that
   write path is how a UI corrupts a store. Writes go through a Marten session (`StoreObjects`,
@@ -465,7 +479,7 @@ A checklist for a deployment that is not a demo:
 8. **`RebuildShardTimeout`**, if `RebuildProjections` is on. A rebuild drops the projection's tables
    *before* the timeout starts applying to the replay, so a timeout that is too short leaves the tables
    empty and the operation failed.
-9. **Log retention for event ids 9200–9211.** The Activity page is a 500-entry in-memory ring that dies
+9. **Log retention for event ids 9200–9299.** The Activity page is a 500-entry in-memory ring that dies
    with the process; your own `ILogger` is the copy that survives a deployment.
 10. **Browser security headers** — CSP, HSTS, frame options — are your application's, as they are for
     every other page it serves. The studio sets none and would be wrong to.
@@ -490,6 +504,8 @@ a saved query matches. The README lists the operational ones, which say somethin
 | 9209 | `DaemonControlRequested` — the operation and its target | Information |
 | 9210 | `StoreUnavailable` — a registered store that would not build, and why | Warning |
 | 9211 | `DocumentWriteRoundTripDropped` — a save whose round trip dropped properties, counted and named | Warning |
+| 9235 | `TableRowsRead` — the first read of a relation's rows per signature: the relation, the filter as typed and the sort | Information |
+| 9236 | `TableRowOpened` — a row opened, a cell expanded or a key followed: the relation and the row's key | Information |
 | 9245 | `SessionDetailsRead` — the first read of other sessions' details per circuit, store and database | Information |
 | 9260 | `LinqQueryExecuted` — a LINQ mode query's first run in a circuit: type, scope, rows, the predicate and ordering | Information |
 | 9261 | `LinqQueryRefused` — a LINQ mode refusal, naming its stage | Information |

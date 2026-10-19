@@ -55,8 +55,8 @@ least three times over the window, with an average scan (allowing for `max_paral
 parallel scan counts once per worker) reading at least half of it.
 
 A sequential scan reads every page to find the rows a query wants. On a large table that is the query's whole
-cost, and it grows with the table. Which statement it was is T02's to say (a later check); until then the remedy
-is the index line, and the finding links to Query in Marten mode on the collection, whose index advice says
+cost, and it grows with the table. Which statement it was is T02's to say, behind **Run statement checks**; the
+remedy here is the index line, and the finding links to Query in Marten mode on the collection, whose index advice says
 whether an index serves a where clause and which member it needs:
 
 ```csharp

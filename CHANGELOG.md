@@ -140,8 +140,9 @@
   prepared transactions, C08 deadlock, rollback and temp-file rates, C09 async shards against the pool, and
   C10 (below). A lock is labelled by the table it belongs to, and only this store's own declared, visible
   objects are named. Sessions the studio's role cannot see into are counted, and said to be unreadable.
-  C04's remedy says that on Marten 9.39 and 9.40 a server-wide `idle_in_transaction_session_timeout` can
-  also end the HotCold daemon's leadership session. C04 recognises Marten's own HotCold leader by its
+  C04's remedy says that a server-wide `idle_in_transaction_session_timeout` can also end the HotCold
+  daemon's leadership session while its lock is transaction-scoped (`Events.UseAdvisoryLockTransaction`,
+  the default at Marten 9.39 and 9.40). C04 recognises Marten's own HotCold leader by its
   leadership lock, never by its name: a session holding one of the store's daemon lock ids, with the
   leader's shape (a snapshot, no transaction id, no relation lock), idle in its leadership transaction for
   under three minutes, is not raised - at Marten 9.50.2 with `Events.UseAdvisoryLockTransaction = true` it
@@ -253,7 +254,8 @@
   when the host stops, and cleans up after itself - a clean-up that fails shows as Failed - and a host
   killed with the table bloated puts autovacuum back when it next starts. The pinned gap and the pool hog
   run only on the sample's throwaway database unless the host is started with `--allow-data-generation`. The
-  sample now starts healthy, with `Events.EnableExtendedProgressionTracking` on (K02).
+  sample now starts with no configuration finding, with `Events.EnableExtendedProgressionTracking` on (K02);
+  S02's `synchronous_commit` Info, which is the throwaway server's own, still shows.
 - The Marten floor is 9.39.0 (it was 9.31.0). Marten 9.39.0 fixes two critical SQL injections in Marten's
   LINQ provider, GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5. The studio reaches neither, but it should not
   pin a host to an injectable Marten, and once the advisories are published NuGet's audit flags every lower

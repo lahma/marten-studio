@@ -304,8 +304,8 @@ mapped studio is a read-only browser of Marten's own data.
 |---|---|
 | `EditDocuments` | Edit a document's JSON and save it through the store's own serializer and session |
 | `DeleteDocuments` | Delete, soft-delete and undelete documents, one at a time or a selection |
-| `ArchiveStreams` | Archive an event stream |
-| `ManageDeadLetters` | Discard dead-letter records, mark events as skipped, and rewind a subscription to the event that failed (a rewind reaches every tenant in the database, so it is asked with `TenantId = null` unless the database holds only the selected tenant) |
+| `ArchiveStreams` | Archive an event stream. On an event store that is not conjoined, a stream that also holds another tenant's events needs the write policy for the database as a whole |
+| `ManageDeadLetters` | Discard dead-letter records, mark events as skipped, and rewind a subscription to the event that failed (a rewind reaches every tenant in the database, so it is asked with `TenantId = null` unless the database holds only the selected tenant). On a store with `Events.UseTenantPartitionedEvents`, Skip event and Rewind subscription are refused, because Marten skips and rewinds by a number every tenant counts on its own |
 | `ControlDaemon` | Pause and resume the async daemon hosted in this process, start and stop individual projection agents while it is paused, and restart the high-water agent |
 | `RebuildProjections` | Rebuild a projection |
 | `CorrectProgression` | Advance the high-water mark, or correct projection progression in the database |
@@ -313,7 +313,7 @@ mapped studio is a read-only browser of Marten's own data.
 | `RunSql` | Run read-only SQL from the Query page's console. Authorized like a write and always with `TenantId = null` — the console is not limited to a tenant — which also governs the Mode A `EXPLAIN` and the subquery lift |
 | `BrowseDatabase` | Browse the rows and definitions of non-Marten tables, views, functions, triggers, sequences and types in the schemas `BrowsableSchemas` names. A read, authorized like `RunSql` as a write, and always with `TenantId = null` |
 | `ViewDatabaseActivity` | See who and what is using the database: other sessions' process ids, roles, client addresses, application names and statements, on the Health page, on Database › Sessions and in the Projections screen's high-water Explain, and run the health advisor's statement checks over `pg_stat_statements`. Without it the counts, ages and states are still shown. A read, authorized like `RunSql` as a write, and always with `TenantId = null`. Off by default, in `All()` |
-| `CompactStreams` | Compact an event stream from Stream detail: Marten's own `CompactStreamAsync<T>` replaces its events up to a version with a snapshot of its aggregate, and the folded events are deleted. Authorized for the scope as selected, tenant included. Off by default, in `All()` — see [`docs/compaction.md`](docs/compaction.md) |
+| `CompactStreams` | Compact an event stream from Stream detail: Marten's own `CompactStreamAsync<T>` replaces its events up to a version with a snapshot of its aggregate, and the folded events are deleted. Authorized for the scope as selected, tenant included - and, on an event store that is not conjoined, for the database as a whole when the stream also holds an event another tenant's session appended. Off by default, in `All()` — see [`docs/compaction.md`](docs/compaction.md) |
 | `RunLinqQueries` | Run LINQ mode on the Query page (Marten 9.48+): a typed predicate parsed in this process and applied to Marten's own `Query<T>()`. A read, authorized like a write — with the tenant for a conjoined collection, with `TenantId = null` for one not divided by tenant and for the plan. Off by default, in `All()` — see [`docs/linq-mode.md`](docs/linq-mode.md) |
 
 ```csharp
@@ -431,7 +431,8 @@ read-only transaction as the SQL console as `SqlConsoleRole`, locks nothing it l
 read of every relation. It never reads the rows of Marten's own document or event tables (they are read in
 Documents and Events, where tenancy, soft delete and the serializer apply), never reads a foreign table,
 directly or through a view, never shows a hidden document type or anything built on it, and masks the name
-of a schema the visitor may not see as `‹withheld›` wherever Postgres prints it.
+of a schema the visitor may not see as `‹withheld›` wherever Postgres prints it. A `vector`, `halfvec` or
+`sparsevec` value is shown collapsed to its type and first components, with Expand and Copy.
 
 **Relationships** — the document types of the store as a graph: one node per registered type with its
 collection colour, its .NET type and a `reltuples` estimate, one arrow per foreign key. What
@@ -506,27 +507,30 @@ state on its row, Pause, Stop and Rebuild quote the store's `StopAndDrainTimeout
 Start warns that a rebuild started outside the studio cannot be seen.
 
 **Schema** — five tabs: *Drift* (what Marten would change), *Tables*, *Indexes*, *Functions* and *DDL*.
-Nothing here executes DDL on a read path: schema names, declared indexes, managed tables and installed
-functions come from `StoreOptions` and Marten's own feature schemas, and `Check`, `Preview` and `DDL` sit
-behind buttons that say on the button what they may create. What those three show spans the whole
-database — every tenant's partition by name, every document type's table — so they answer only a visitor
-the store policy allows for the database with no tenant selected, and, while `IsDocumentTypeVisible`
-hides a document type, one past the database browser's gate (`Capabilities.BrowseDatabase` and the write
-policy). An apply migrates the whole database, every tenant, whichever tenant is selected, so both
-policies are asked about the database as a whole. *Tables* says whose each table is by the database
-browser's rules, rolls partitions into their parent without listing them, leaves hidden document types
-out, and shows a partition count or a Marten tenancy table's row count only past that gate, because
-either is the number of tenants. *Functions* reads a body when you open its row: Marten's own for
-everybody, the application's own only with `Capabilities.BrowseDatabase` and a schema `BrowsableSchemas`
-admits. A name in a schema you may not see reads `‹withheld›`, as in the browser. If a registered store
-cannot be built, the tabs keep what the other stores declare and withhold, and say, what that store could
-own. The reads give up after three seconds behind a migration's lock rather than wait for it. A known
-limit: *Tables* and *Indexes* list the store's own schemas only, so a table handed to
-`StoreOptions.Storage.ExtendedSchemaObjects` in a schema of its own (one no document type, the event store
-or a projection also uses) is not on either tab. The database browser shows it once
-`Capabilities.BrowseDatabase` is on, the write policy passes and `BrowsableSchemas` admits that schema. The
-tables-and-indexes health checks cover it, and show their findings about it only to a visitor past that same
-gate.
+*Tables* shows each table's TOAST size, dead and HOT percentages, last autovacuum and storage parameters
+(with drift against the configuration on Marten 9.47+), and names each pgvector column with its
+dimensions; *Indexes* marks invalid, redundant and unused indexes from the health advisor's last check and
+says what an HNSW or IVFFlat index's operator class and parameters mean. Nothing here executes DDL on a
+read path: schema names, declared indexes, managed tables and installed functions come from `StoreOptions`
+and Marten's own feature schemas, and `Check`, `Preview` and `DDL` sit behind buttons that say on the
+button what they may create. What those three show spans the whole database — every tenant's partition by
+name, every document type's table — so they answer only a visitor the store policy allows for the database
+with no tenant selected, and, while `IsDocumentTypeVisible` hides a document type, one past the database
+browser's gate (`Capabilities.BrowseDatabase` and the write policy). An apply migrates the whole database,
+every tenant, whichever tenant is selected, so both policies are asked about the database as a whole.
+*Tables* says whose each table is by the database browser's rules, rolls partitions into their parent
+without listing them, leaves hidden document types out, and shows a partition count or a Marten tenancy
+table's row count only past that gate, because either is the number of tenants. *Functions* reads a body
+when you open its row: Marten's own for everybody, the application's own only with
+`Capabilities.BrowseDatabase` and a schema `BrowsableSchemas` admits. A name in a schema you may not see
+reads `‹withheld›`, as in the browser. If a registered store cannot be built, the tabs keep what the other
+stores declare and withhold, and say, what that store could own. The reads give up after three seconds
+behind a migration's lock rather than wait for it. A known limit: *Tables* and *Indexes* list the store's
+own schemas only, so a table handed to `StoreOptions.Storage.ExtendedSchemaObjects` in a schema of its own
+(one no document type, the event store or a projection also uses) is not on either tab. The database
+browser shows it once `Capabilities.BrowseDatabase` is on, the write policy passes and `BrowsableSchemas`
+admits that schema. The tables-and-indexes health checks cover it, and show their findings about it only
+to a visitor past that same gate.
 
 > **An apply runs under `AutoCreate.CreateOrUpdate`, and `CreateOrUpdate` is not additive.** Weasel's
 > update path emits `drop index` for every physical index your configuration does not declare,
@@ -549,7 +553,7 @@ the features newer Marten releases add this host has.
 
 **Activity** — the last 500 actions taken through the studio in this process, newest first, with user,
 scope, action, target, outcome, capability and message. It is in memory and goes away with the process.
-The durable record is your own `ILogger`, under event ids 9200–9211.
+The durable record is your own `ILogger`, under the reserved event ids 9200–9299.
 
 ## Multi-tenancy, multiple databases and multiple stores
 
@@ -666,6 +670,8 @@ daemon's lag, plus a truncate that removes exactly what was generated. Documents
 something to catch up on, with one poisoned stream per 10 000 so the dead-letter screen has real content.
 The studio's own services are measured against the Medium set in every integration run; the Large set
 runs under `MARTENSTUDIO_LARGE=1`. See [`samples/MartenStudio.Sample/README.md`](samples/MartenStudio.Sample/README.md).
+The same panel has **Make it unhealthy** switches - a pinned gap, a session idle in a transaction, a bloated
+table, a hogged pool - each turning itself off after ten minutes; see the sample's README.
 
 ## Security model and limits
 
@@ -714,12 +720,13 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   which `RunSql` lifts**. What `RunSql` lifts is reaching another relation: subquery, union, join,
   `lateral`, `returning`. The scanner errs towards refusing, and every refusal names what would lift it.
 - **Audit.** Every mutating operation and every refusal is written to a 500-entry in-memory ring (the
-  Activity page) *and* to your `ILogger` under event ids **9200–9211**, which is the copy that survives a
-  deployment. 9200 `ActionPerformed`, 9201 `ActionFailed`, 9202 `CapabilityDenied`, 9203
+  Activity page) *and* to your `ILogger` under the reserved event ids **9200–9299**, which is the copy
+  that survives a deployment. 9200 `ActionPerformed`, 9201 `ActionFailed`, 9202 `CapabilityDenied`, 9203
   `ScopeAuthorizationDenied`, 9204 `SqlExecuted`, 9205 `SqlRejected`, 9206 `SchemaChangeApplied`, 9207
   `ProjectionRebuildStarted`, 9208 `ProjectionRebuildFinished`, 9209 `DaemonControlRequested`, 9210
-  `StoreUnavailable`, 9211 `DocumentWriteRoundTripDropped`. A read of other sessions' details is 9245, and a
-  LINQ mode run, refusal and Postgres failure are 9260, 9261 and 9262. The range 9200–9299 is reserved.
+  `StoreUnavailable`, 9211 `DocumentWriteRoundTripDropped`. A database browser's first read of a
+  relation's rows is 9235 and an opened row 9236, a read of other sessions' details is 9245, and a LINQ
+  mode run, refusal and Postgres failure are 9260, 9261 and 9262. The range 9200–9299 is reserved.
 - **Log levels.** A state the host configured is not a warning. No async daemon in this process, a
   daemon run by an external system (`AsyncMode = ExternallyManaged`, which Wolverine's managed
   distribution sets), event tables that do not exist yet, a speculative count or a query of your own
@@ -747,9 +754,10 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   | 9246 | `SessionActivityReadFailed` | Database › Sessions could not read the sessions for a reason other than a privilege or a timeout |
   | 9270 | `HealthExportFailed` | The opt-in health check itself failed, so it reports `Degraded` |
 
-- **What the studio never does:** start a second projection daemon, execute DDL on a read or navigation
-  path, write document DML of its own, replace your `StoreOptions.Logger`, or show a connection string
-  or a credential anywhere.
+- **What the studio never does:** start a second projection daemon, execute DDL on a read or navigation path
+  of its own (the exception is Marten's: the first enumeration of a master-table, sharded or single-server
+  tenancy, under *Current limitations*), write document DML of its own, replace your `StoreOptions.Logger`,
+  or show a connection string or a credential anywhere.
 
 ## Current limitations
 
@@ -828,9 +836,10 @@ dotnet test tests\MartenStudio.Tests
 ```
 
 The integration suite needs Docker — run `docker info` first. It starts one `postgres:17-alpine` through
-Testcontainers and reuses it between runs locally. **Any run that might overlap another must opt out**,
-because schema names derive from test class names and two runs on one reused container drop each other's
-tables:
+Testcontainers and reuses it between runs locally; a few classes start a server of their own, never
+reused: a `postgres:17-alpine` with settings of its own, and `pgvector/pgvector:0.8.1-pg17` for the
+pgvector tests. **Any run that might overlap another must opt out**, because schema names derive from test
+class names and two runs on one reused container drop each other's tables:
 
 ```powershell
 $env:MARTENSTUDIO_PG_REUSE='false'

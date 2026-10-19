@@ -783,9 +783,10 @@ misses one that does. Keep it in step with the tree.
 build/                                   The Fallout orchestrator. `build/` is a resolver convention and
                                          .gitignore must never untrack it (hard rule 8)
   Build.cs                               CHANGELOG-driven version, Clean, test projects, release notes
-  Build.CI.GitHubActions.cs              The three [GitHubActions] attributes every workflow comes from
+  Build.CI.GitHubActions.cs              The four [GitHubActions] attributes every workflow comes from
   Build.Browsers.cs                      The Playwright install target, and Test's dependency on it (D19)
   Build.Publish.cs                       Pack + the in-build nuget.org OIDC token exchange (D15)
+  Build.Marten.cs                        --marten-version: the floor, the latest-tested Marten or an exact one (D3)
 build/Extensions/                        Vendored Cake helpers (StringExtensions) - do not edit
 src/                                     The shipped library, and nothing else
 src/MartenStudio/                        The Razor Class Library: public API, Internal/ (guard, SQL
@@ -869,7 +870,7 @@ src/MartenStudio/Services/Relationships/      The relationship graph service, it
 src/MartenStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
 tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, page and panel - no database
 tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both ways, visibility, bounded counts
-tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: ten scenarios, the D19 gate, the large-data passes
+tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: thirteen scenarios, the D19 gate, the large-data passes
 src/MartenStudio/Services/Database/       The database browser: the per-visitor gate, the schema matcher, the
                                          ownership classifier, the catalog cache and the object service
 src/MartenStudio/Components/Pages/Database/  The database browser's screens: the rail, the kind tabs and grids,
@@ -1014,7 +1015,13 @@ There are seven kinds of test, in two projects:
 7. **Integration and browser** (`tests/MartenStudio.Integration.Tests/`) — one `postgres:17-alpine` via an
    assembly fixture (reuse enabled locally unless `MARTENSTUDIO_PG_REUSE=false`; `PostgresFixtureTests`
    pins the variable's name), one Marten schema per collection, everything driven *through*
-   the studio's own services so the gating is exercised rather than bypassed. Waits are always
+   the studio's own services so the gating is exercised rather than bypassed. A class that needs a
+   server setting of its own (`pg_stat_statements` preloaded, a lowered `autovacuum_freeze_max_age`,
+   `max_connections`, `wal_level=logical`, data checksums) starts a `postgres:17-alpine` of its own,
+   never reused. `PgVectorLiveTests` starts `pgvector/pgvector:0.8.1-pg17`
+   (`PgVectorServerFixture.Image`), pinned by tag to the pgvector release whose defaults the studio
+   quotes; an image that cannot be pulled skips that class locally, with the `docker pull` command in
+   the reason, and fails the run on CI (D19's rule). Waits are always
    wait-on-condition, **never `Task.Delay`**. The Playwright scenarios live in `Browser/`: locally they
    skip with the install command in the reason when Chromium is missing; on CI a missing browser throws
    (D19).

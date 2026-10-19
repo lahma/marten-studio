@@ -17,8 +17,6 @@ heading is the anchor the page's "About" link opens:
 | Server | `S` | [`health/server.md`](health/server.md) |
 | Configuration | `K` | [`health/configuration.md`](health/configuration.md) |
 
-An area's file is written by the packet that adds its first check; until then its link has nothing behind it.
-
 ## What a finding is
 
 Every finding has a code, a severity, a title, the evidence behind it with the time it was measured, the SQL
@@ -60,11 +58,14 @@ watching that database until `MartenStudioOptions.HealthInterval` (a minute by d
 tabs cost one sweep per interval, not ten. There is no hosted service and no timer of the advisor's own - a
 studio nobody has open checks nothing. The navigation badge reads the last sweep and never starts one.
 
-Every statement runs in the studio's read-only transaction under `statement_timeout` and `lock_timeout`,
-reads the catalog and takes no lock beyond what a catalog read takes, and never runs DDL. A check that fails
-is a "could not check" row on the page; it never hides the other checks. A check that cannot run here for a
-reason that is the host's choice - no extension, no privilege, an old Postgres - says so and is logged at
-Debug, never as a warning.
+Every statement runs in the studio's read-only transaction under `statement_timeout` and `lock_timeout`, and
+never runs DDL. A sweep takes only the `AccessShareLock` a plain read takes, and only on the catalog, the
+statistics views and Marten's own bookkeeping: `mt_event_progression`, `mt_high_water_skips`, the dead-letter
+table, the newest rows of `mt_events` read through its primary key, and `mt_hilo`. It never reads a table your
+documents are stored in. **Run statement checks** also plans statements, which locks what a plain read of them
+would ([T02](health/tables.md#t02-expensive-statements)). A check that fails is a "could not check" row on the
+page; it never hides the other checks. A check that cannot run here for a reason that is the host's choice -
+no extension, no privilege, an old Postgres - says so and is logged at Debug, never as a warning.
 
 The page's **Studio cost** line is the database time the studio's own read-only sessions took in the
 selected database in the last five minutes: the health checks, the SQL console, the Query page's Marten mode,
@@ -92,7 +93,8 @@ The sweep is about the database; what each visitor is shown of it is decided per
   its own - is named in a finding only to a visitor the database browser shows that schema to:
   `Capabilities.BrowseDatabase`, the write policy asked with `TenantId = null`, and a `BrowsableSchemas`
   entry (or `"*"`) that admits it. Anybody else has the finding counted as not shown to them. The navigation
-  badge and the Critical toast cannot ask that gate, so they never count such a finding for anybody. T12 and
+  badge, the inline banners and the Critical toast cannot ask that gate, so they never count or show such a
+  finding for anybody. T12 and
   T13 are the exception: they are about the whole database, so a table like that is named only as "a
   Marten-managed table outside the store's own schemas" and the finding stays visible. A check row's note
   names it the same way.
