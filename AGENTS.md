@@ -398,7 +398,9 @@ Keep that when touching those selectors: a rule added *before* the section that 
 that does nothing, and `StylesheetTests` (plus its `.Shell` part) pins the ones that were measured.
 0.3.0 appended `DB-4`, `DB-6`, `DB-7`, `DB-5`, `UX-6` and `UX-7` in that order under the same rule; `UX-6`
 re-declares a few earlier selectors on purpose (the notices' contrast, the heading's focus ring) and
-`StylesheetTests.DatabasePolish` pins them, as `StylesheetTests.FinalPolish` pins `UX-7`.
+`StylesheetTests.DatabasePolish` pins them, as `StylesheetTests.FinalPolish` pins `UX-7`. 0.4.0 appended `HEALTH-1`,
+`HEALTH-2`, `HEALTH-4`, `HEALTH-3`, `EVENTS-4`, `QUERY-LINQ`, `PGV` and `UX-8` in that order, under the same rule;
+`StylesheetTests.QueryRefusal` pins `UX-8`.
 
 **D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
 0.3.0 lets the studio show what else lives in the store's Postgres database — a Quartz.NET job store, a
@@ -1014,17 +1016,16 @@ There are seven kinds of test, in two projects:
    decompiling. All three are read-only: never modify them.
 7. **Integration and browser** (`tests/MartenStudio.Integration.Tests/`) — one `postgres:17-alpine` via an
    assembly fixture (reuse enabled locally unless `MARTENSTUDIO_PG_REUSE=false`; `PostgresFixtureTests`
-   pins the variable's name), one Marten schema per collection, everything driven *through*
-   the studio's own services so the gating is exercised rather than bypassed. A class that needs a
-   server setting of its own (`pg_stat_statements` preloaded, a lowered `autovacuum_freeze_max_age`,
-   `max_connections`, `wal_level=logical`, data checksums) starts a `postgres:17-alpine` of its own,
-   never reused. `PgVectorLiveTests` starts `pgvector/pgvector:0.8.1-pg17`
-   (`PgVectorServerFixture.Image`), pinned by tag to the pgvector release whose defaults the studio
-   quotes; an image that cannot be pulled skips that class locally, with the `docker pull` command in
-   the reason, and fails the run on CI (D19's rule). Waits are always
-   wait-on-condition, **never `Task.Delay`**. The Playwright scenarios live in `Browser/`: locally they
-   skip with the install command in the reason when Chromium is missing; on CI a missing browser throws
-   (D19).
+   pins the variable's name), one Marten schema per collection, everything driven *through* the studio's
+   own services so the gating is exercised rather than bypassed. A class that needs a server setting of
+   its own (`pg_stat_statements` preloaded, a lowered `autovacuum_freeze_max_age`, `max_connections`,
+   `wal_level=logical`, data checksums) starts a `postgres:17-alpine` of its own, never reused.
+   `PgVectorLiveTests` starts `pgvector/pgvector:0.8.1-pg17` (`PgVectorServerFixture.Image`), pinned by
+   tag to the pgvector release whose defaults the studio quotes; an image that cannot be pulled skips that
+   class locally, with the `docker pull` command in the reason, and fails the run on CI (D19's rule).
+   Waits are always wait-on-condition, **never `Task.Delay`**. The Playwright scenarios live in `Browser/`
+   (and the Health page's first one in `Health/`): locally they skip with the install command in the
+   reason when Chromium is missing; on CI a missing browser throws (D19).
 
 Run `docker info` before the integration suite. If Docker is not running, say so — a skipped Docker suite
 reported as a pass is worse than a failure.

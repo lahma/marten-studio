@@ -89,10 +89,11 @@ being in a sample is not a defence — samples are what people copy.
 
 ## Make it unhealthy
 
-The sample starts healthy: its store turns on `Events.EnableExtendedProgressionTracking` (the studio's K02 would
-suggest it otherwise), and Marten 9 already has advanced async tracking on (K03). Below the demo-data panel, under
-the same gates, four switches make the database unhealthy **on purpose**, so a demo or a screenshot can show the
-studio's Health page finding something real:
+The sample starts with no configuration finding: its store turns on `Events.EnableExtendedProgressionTracking`
+(the studio's K02 would suggest it otherwise), and Marten 9 already has advanced async tracking on (K03); the
+throwaway server's own `synchronous_commit` Info (S02) still shows. Below the demo-data panel, under the same
+gates, four switches make the database unhealthy **on purpose**, so a demo or a screenshot can show the studio's
+Health page finding something real:
 
 | Switch | What it does | Look for |
 |---|---|---|

@@ -67,13 +67,15 @@ tabs cost one sweep per interval, not ten. There is no hosted service and no tim
 studio nobody has open checks nothing. The navigation badge reads the last sweep and never starts one.
 
 Every statement runs in the studio's read-only transaction under `statement_timeout` and `lock_timeout`, and
-never runs DDL. A sweep takes only the `AccessShareLock` a plain read takes, and only on the catalog, the
-statistics views and Marten's own bookkeeping: `mt_event_progression`, `mt_high_water_skips`, the dead-letter
-table, the newest rows of `mt_events` read through its primary key, and `mt_hilo`. It never reads a table your
-documents are stored in. **Run statement checks** also plans statements, which locks what a plain read of them
-would ([T02](health/tables.md#t02-expensive-statements)). A check that fails is a "could not check" row on the
-page; it never hides the other checks. A check that cannot run here for a reason that is the host's choice -
-no extension, no privilege, an old Postgres - says so and is logged at Debug, never as a warning.
+never runs DDL. A regular sweep takes only the `AccessShareLock` a plain read takes, and only on the catalog,
+the statistics views and Marten's own bookkeeping: `mt_event_progression`, `mt_high_water_skips`, the
+dead-letter table, the newest rows of `mt_events` read through its primary key, and `mt_hilo`. It never reads
+a table your documents are stored in. **Run deeper checks** does, under the same lock: a `TABLESAMPLE` of up
+to 20 document tables ([T09](health/tables.md#t09-large-documents)) and the newest 100,000 events. **Run
+statement checks** also plans statements, which locks what a plain read of them would
+([T02](health/tables.md#t02-expensive-statements)). A check that fails is a "could not check" row on the page;
+it never hides the other checks. A check that cannot run here for a reason that is the host's choice - no
+extension, no privilege, an old Postgres - says so and is logged at Debug, never as a warning.
 
 The page's **Studio cost** line is the database time the studio's own read-only sessions took in the
 selected database in the last five minutes: the health checks, the SQL console, the Query page's Marten mode,

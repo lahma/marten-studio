@@ -71,8 +71,9 @@ opts.Events.EnableExtendedProgressionTracking = true;
 
 **K02 fires on Marten's defaults, by design.** A new store with an async projection and nothing else configured
 gets this Info. It is an Info, not a Warning: nothing is wrong, and muting it in the browser is a reasonable
-answer. `samples/MartenStudio.Sample` turns the switch on, so that the sample starts healthy and its landing page's
-"Make it unhealthy" switches are what makes the advisor speak.
+answer. `samples/MartenStudio.Sample` turns the switch on, so that the sample starts healthy and its landing
+page's "Make it unhealthy" switches are what makes the advisor warn - the throwaway server's own
+[S02](server.md#s02-settings-that-blind-or-endanger-the-store) Info aside.
 
 ## K03 Advanced async tracking
 
