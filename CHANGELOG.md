@@ -4,10 +4,15 @@
   database and says what is wrong, how sure it is, and which `StoreOptions` line would change it: a remedy
   is never DDL, and one that needs a newer Marten says which ("Marten 9.47+") and what the host runs.
   Findings are grouped by area, each with its evidence and when it was measured, Show SQL, a caveat, a link
-  to its section of `docs/health.md`, and "mute in this browser", which is kept in the browser and never in
-  the database. The navigation entry carries a severity badge, the Overview a Health tile and the three
-  worst findings, a toast says when a Critical finding appears while somebody is watching, and a Studio
-  cost line shows the database time the studio's own read-only sessions took in the last five minutes.
+  to its section of `docs/health.md`, and "mute in this browser", which is kept in the browser as a SHA-256
+  of the finding's key (never the key itself, which can name a tenant or a stream) and never in the
+  database. The "What was checked" table never reads "nothing found" for findings it withholds: below a
+  check's gate a row says "findings not shown to you" whether or not there are any, a row that withheld some
+  says "N shown, others not shown to you", and the Overview's tile is never a green "nothing to report"
+  while any are withheld. The navigation entry carries a severity badge, the Overview a Health tile and the
+  three worst findings, a toast says when a Critical finding appears while somebody is watching, and a
+  Studio cost line shows the database time the studio's own read-only sessions took in the last five
+  minutes.
 - The advisor does no background work. A sweep runs only when the Health page, the Overview or the opt-in
   health check (below) asks, and one sweep of a database serves every tab watching it for
   `MartenStudioOptions.HealthInterval`; the navigation badge never starts one. Every statement runs in the
@@ -15,21 +20,28 @@
   statement checks excepted, below), takes no lock beyond what a read takes and runs no DDL, and the checks
   that read no database run first, so a slow catalog read never uses up a sweep's budget before them. **Run
   deeper checks**, the bounded reads of the data, cached for five minutes, starts only for a visitor the
-  store policy allows the database as a whole. A check that fails is a "could not check" row and event
-  9222, throttled; one the host's setup rules out (no extension, no privilege, an old Postgres) says so and
-  logs at Debug. A database-wide number needs the store policy for the database with `TenantId = null`,
-  anything that names a session, a role, an address, a statement or a tenant needs
+  store policy allows the database as a whole. A check that fails is a "could not check" row and event 9222,
+  throttled; one the host's setup rules out (no extension, no privilege, an old Postgres) says so and logs
+  at Debug. A database-wide number needs the store policy for the database with `TenantId = null`, asked
+  about the store by its registered key and the database by the identity the scope resolved to (an empty
+  `?db=` included). Anything that names a session, a role, an address, a statement or a tenant needs
   `Capabilities.ViewDatabaseActivity`, and a document type `IsDocumentTypeVisible` hides is in no finding.
+  The navigation badge and the inline banners show a sweep only to a scope the report would be shown to, its
+  tenant included.
 - Health, daemon and high water: D01 committed events held behind a gap in the event sequence (with Explain
   on the Projections screen, which names the sessions that could be holding it only with
   `ViewDatabaseActivity` and asks the database at most once a minute), D02 async projections behind with
   nothing running the daemon, D03 a shard alive but not moving, D04 a projection falling behind with an ETA
   (only when its lag has grown at two consecutive samples, never on a single burst of appends), D05 a shard
-  failed or paused, D06 dead letters accumulating, counted in the table the store maps `DeadLetterEvent` to
-  (an alias of the host's own included), D07 gaps the daemon skipped (from `mt_high_water_skips`), and D08
-  a shard rebuilt elsewhere or stopped half-way. No Marten writes `mt_event_progression.mode`, so D08
-  watches each shard's position, and the high-water mark's, and judges a replay finished only once the
-  shard is back past where it began. See `docs/health/daemon.md`.
+  failed or paused - or one that keeps failing and being restarted, which reads Running between the
+  coordinator's restart and its next failure (JasperFx keeps no failure across a restart, and Marten's start
+  clears the row's), so the advisor remembers where it saw the shard fail and reports it while it is
+  restarted there, until a check sees it past that point or none has seen it fail, or still standing there,
+  for ten minutes or three `HealthInterval`s, D06 dead letters accumulating, counted in the table the store
+  maps `DeadLetterEvent` to (an alias of the host's own included), D07 gaps the daemon skipped (from
+  `mt_high_water_skips`), and D08 a shard rebuilt elsewhere or stopped half-way. No Marten writes
+  `mt_event_progression.mode`, so D08 watches each shard's position, and the high-water mark's, and judges a
+  replay finished only once the shard is back past where it began. See `docs/health/daemon.md`.
 - Health, events: E02 tombstones, E03 hot stream (a Warning only for a stream written by at least ten
   transactions at one a second or more, counted by distinct transaction, so a bulk import in one save is an
   Info) and E04 large payloads, from one bounded read of the newest 100,000 events behind Run deeper
@@ -70,10 +82,15 @@
   transaction id, a prepared transaction's) also by the advisor's samples of the transaction-id counter,
   which reach back about an hour at the default `HealthInterval`, and a slot or a standby is judged by how
   far back it holds. A lazy `VACUUM` and an invalidated slot are never holders, and a lost slot that still
-  holds is named as one to drop. A snapshot pinned at another holder's id is behind that holder, so
-  Marten's HotCold leader is never named for another holder's transaction, and with Marten's defaults it is
-  never old enough to raise on its own. Who the holder is sits behind `ViewDatabaseActivity`; another
-  database's holders and logical slots are never named.
+  holds is named as one to drop. A snapshot pinned at another holder's id is behind that holder, so Marten's
+  HotCold leader is never named for another holder's transaction, and with Marten's defaults it is never old
+  enough to raise on its own. Who the holder is sits behind `ViewDatabaseActivity`; another database's
+  holders and logical slots are never named. With a transaction-scoped leadership lock and the lock monitor
+  on, the HotCold leader holds its snapshot about a minute at read committed, measured at Marten 9.39 and
+  9.50.2: at 9.50.2 (Weasel 9.45, Patched.DistributedLock.Postgres 1.3.3) there is no `pg_sleep(60)` - the
+  leader sits idle in its transaction until DistributedLock's keepalive, about once a minute - except where
+  the connection string sets Npgsql's `Keepalive` or `Multiplexing`, where it runs `pg_sleep(60)` as at
+  9.39; the remedy text says so.
 - Health, statement checks: T02 expensive statements, T22 optimistic-concurrency conflicts per document
   type and T23 JIT's share of execution (with the `ConfigureNpgsqlDataSourceBuilder` line that turns JIT
   off for the store's own connections), from `pg_stat_statements`, run only on **Run statement checks** and
@@ -102,14 +119,20 @@
   C10 (below). A lock is labelled by the table it belongs to, and only this store's own declared, visible
   objects are named. Sessions the studio's role cannot see into are counted, and said to be unreadable.
   C04's remedy says that on Marten 9.39 and 9.40 a server-wide `idle_in_transaction_session_timeout` can
-  also end the HotCold daemon's leadership session. See `docs/health/connections.md`.
+  also end the HotCold daemon's leadership session. C04 recognises Marten's own HotCold leader by its
+  leadership lock, never by its name: a session holding one of the store's daemon lock ids, with the
+  leader's shape (a snapshot, no transaction id, no relation lock), idle in its leadership transaction for
+  under three minutes, is not raised - at Marten 9.50.2 with `Events.UseAdvisoryLockTransaction = true` it
+  waits there between DistributedLock's keepalives, about a minute apart, by design, and T14 judges that
+  snapshot - and past three minutes it is raised as before. See `docs/health/connections.md`.
 - Database › Sessions (`/marten/database/sessions`): this database's sessions, locks and prepared
   transactions. Counts, ages, states, wait classes and lock modes are shown to a visitor the store policy
-  passes for the database as a whole; process ids, roles, addresses, applications and statements need
-  `ViewDatabaseActivity`. A statement is masked for the schemas the visitor may not see, and withheld when
-  it names a hidden document type. The first read of session details per circuit is audited (event 9245),
-  and so is the first Health report per circuit that shows such details. There are no cancel or terminate
-  buttons.
+  passes for the database as a whole (asked, like the details' write policy, about that database's own
+  identity, which is what the audit records); process ids, roles, addresses, applications and statements
+  need `ViewDatabaseActivity`. A statement is masked for the schemas the visitor may not see, and withheld
+  when it names a hidden document type. The first read of session details per circuit is audited (event
+  9245), and so is the first Health report per circuit that shows such details. There are no cancel or
+  terminate buttons.
 - Health, replication and server: R01 a replication slot holding WAL that nobody reads (a Warning at 1 GiB
   for 10 minutes, or by PostgreSQL 17's own `inactive_since`; Critical when it is unreserved, or at 80% of
   `max_slot_wal_keep_size` on two consecutive samples; Info once Postgres has invalidated it), where a slot
@@ -169,12 +192,13 @@
   and an ordering. It is parsed by JasperFx's Dynamic LINQ under its allow-list and the studio's own,
   applied to Marten's own `Query<T>()` on a session pinned to the tenant and database, so tenancy, soft
   deletes, hierarchies, enum storage and duplicated fields stay Marten's, and it shows the rows, Marten's
-  SQL, the plan (`EXPLAIN`, never `ANALYZE`) and index advice with the `StoreOptions` line. It never
-  creates a table: it builds Marten's statement without `ToCommand`, which runs `EnsureStorageExists`. A
-  date literal is the UTC date it names whatever the server's time zone, and an `in (…)` list binds as one
-  array parameter. Marten 9.48+ (on an older Marten the mode is absent and says which it needs), behind
+  SQL, the plan (`EXPLAIN`, never `ANALYZE`) and index advice with the `StoreOptions` line. It never creates
+  a table: it builds Marten's statement without `ToCommand`, which runs `EnsureStorageExists`. A date
+  literal is the UTC date it names whatever the server's time zone, and an `in (…)` list binds as one array
+  parameter. Marten 9.48+ (on an older Marten the mode is absent and says which it needs), behind
   `Capabilities.RunLinqQueries` (off by default); every refusal, and the first run of each query in a
-  circuit, is audited (events 9260-9262). See `docs/linq-mode.md`.
+  circuit, is audited (events 9260-9262). The predicate and the ordering are recorded capped at 200
+  characters each, and not at all for a refusal at the capability stage. See `docs/linq-mode.md`.
 - Projections: a Last progress column, a trend arrow with an estimated catch-up (withheld while a pause, a
   rebuild or a stopped shard explains the lag), the advisor's D01 and D02 as banners, a rebuild shown as a
   state on its row (one Marten Studio runs at every version, any other on this daemon from JasperFx 2.86),
@@ -245,6 +269,33 @@
   version from (master-table, sharded, or a static multi-tenancy without `AsDefault()`), which is the
   host's configuration. Its version shows as unknown and the event is logged at Debug; a host's own tenancy
   whose `Default` throws anything else is still read, and still logged at Warning.
+- Fix: on a store whose events are single-tenanted but whose sessions carry tenants (conjoined documents
+  beside Marten's default event tenancy), Stream detail's time travel replayed, and Archive archived, any
+  tenant's stream whose id was typed - Archive since 0.3. Marten records the appending session's tenant in
+  `mt_streams` on every store, but narrows its own stream fetch and its archive by tenant only on a
+  conjoined event store. Both now check the stream is the selected tenant's first, as the timeline and
+  compaction already did, and another tenant's stream gets the answer a stream that does not exist gets. A
+  stream that also holds an event another tenant's session appended is archived or compacted from a tenant's
+  scope only by a visitor the write policy allows for the database as a whole, because Marten writes every
+  event of the stream. Time travel from a tenant's scope folds only that tenant's events, as the timeline
+  shows them, and the panel says so. On a conjoined event store Archive waits for a tenant to be selected,
+  as Compact does. Stream detail now reloads when its `?id=` changes, and drops a replay or a page of events
+  that answers after it has moved on. A scope change closes an open Archive or Compact dialog. Every refusal
+  is audited.
+- Fix: with `Events.UseTenantPartitionedEvents`, where each tenant numbers its own events, Marten Studio did
+  several things that only make sense when one sequence numbers every event. With All tenants selected the
+  Feed paged and followed a number the tenants share, two tenants' events with the same number on one page
+  ended the circuit, the Overview listed them and Event types showed their range; the dead-letter screen
+  looked the failed event up by that number alone; Skip event marked every tenant's event of that number
+  skipped, because Marten skips by sequence alone; and Rewind subscription restarted every tenant's agents
+  as one store-wide agent from a floor taken from one tenant's numbering. The Feed, and a stream whose id
+  more than one tenant has, now ask for a tenant first, and the Overview says so in a note; Event types
+  shows the sequence range as per tenant; the dead letter's event is read, and its stream linked, in its own
+  tenant; and Skip event and Rewind subscription are refused on such a store, audited, with their buttons
+  saying why.
+- Fix: on a master-table tenancy with two tenant rows on one connection string, a scope naming the second
+  row's tenant opened its sessions and connections on the first row's instance, with that row's role and
+  connection options. It now opens them on the instance built from its own row.
 
 # 0.3.0
 
