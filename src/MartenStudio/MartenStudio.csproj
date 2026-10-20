@@ -34,36 +34,10 @@
     <!-- The JasperFx source generator Marten bundles is taken out of this compilation by the
          MartenStudioWithoutTheJasperFxSourceGenerator target at the end of this file. -->
     <PackageReference Include="Marten" />
+    <!-- The shared studio. Its Microsoft.AspNetCore.App.Internal.Assets reference - blazor.web.js for the
+         host, D22 - lives in PostgresStudio.csproj now and reaches the host through this reference: two
+         hops, measured by PS-0 on 2026-10-20 (200 for /_framework/blazor.web.js and under {Path}). -->
     <ProjectReference Include="../PostgresStudio/PostgresStudio.csproj" />
-    <!--
-      blazor.web.js, for the host.
-
-      As of .NET 10 that file is not in the shared framework and not embedded in any ASP.NET Core
-      assembly (checked: Microsoft.AspNetCore.Components.Server/Web/Endpoints carry no manifest
-      resources). It comes from this pack, which the SDK resolves only for a project whose
-      `RequiresAspNetWebAssets` is true - and the Web SDK defaults that to true only for a project that
-      has `.razor` Content items of its own (`ResolveRequiredWebAssets` in
-      Microsoft.NET.Sdk.Web.ProjectSystem.targets). A host that adds Marten Studio and writes no Blazor
-      components has none, so `GET /_framework/blazor.web.js` was a 404, the studio prerendered, never
-      became interactive, and nothing said a word.
-
-      The package cannot set the property on the consumer's behalf: it is a restore-time decision and
-      NuGet deliberately excludes package-provided .props/.targets from restore evaluation
-      (ExcludeRestorePackageImports) - measured, not assumed. A plain PackageReference is what does
-      reach the consumer: this pack's buildTransitive targets run in any Web SDK executable that
-      references the studio, directly or transitively, and define `_framework/blazor.web.js` as that
-      project's OWN static web asset. So the script is served by the host's own
-      MapStaticAssets()/UseStaticFiles(), the studio's mapped {Path}/_framework/blazor.web.js endpoint
-      forwards to it, and nothing here ships a copy of a Microsoft script that would go stale one patch
-      after the package was built. A floor rather than an exact pin, like Marten: a host whose own SDK
-      already resolves this pack (any project with .razor files of its own) keeps its version, because
-      NuGet takes the higher of the two.
-
-      No lib/, no ref/, no runtime assembly - three .js files and one MSBuild target - so this is not
-      an ASP.NET Core patch pinned onto the host (D3). Verified 2026-09-14 with an API-only host that
-      has no .razor file, does not set RequiresAspNetWebAssets and references only the MartenStudio
-      nupkg: /_framework/blazor.web.js 200, /marten/_framework/blazor.web.js 200, negotiate 200.
-    -->
   </ItemGroup>
 
   <ItemGroup>
