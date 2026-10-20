@@ -229,6 +229,57 @@ public class CoreFenceTests
         }
     }
 
+    /// <summary>
+    /// No type is declared on both sides of the move in one namespace - a partial class with a part on the manifest and a
+    /// part off it. A partial type cannot span two assemblies: after the move the part left behind compiles as a second
+    /// type of the same name, and every file that sees both namespaces is ambiguous. The stay-behind list cannot see it,
+    /// because a name both sides declare is left off that list on purpose (<see cref="CollectStayBehind" />).
+    /// </summary>
+    [Fact]
+    public void No_type_is_declared_on_both_sides_of_the_move()
+    {
+        HashSet<string> manifest = new(CoreManifest.Entries.Select(static x => x.RepositoryPath), StringComparer.OrdinalIgnoreCase);
+        List<(string File, string Code, bool Shared)> files =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(static x => x.EndsWith(".cs", StringComparison.Ordinal))
+                .Select(x => (SourceScanner.Relative(x), SourceScanner.StripCommentsAndStrings(File.ReadAllText(x)), manifest.Contains(SourceScanner.Relative(x)))),
+        ];
+
+        files.Should().Contain(static x => x.Shared).And.Contain(static x => !x.Shared);
+        SplitDeclarations(files).Should().BeEmpty("a partial type does not survive being split between two assemblies");
+    }
+
+    /// <summary>The split-declaration rule, on synthetic files: a partial split across the line is found; a namesake in another namespace is not.</summary>
+    [Theory]
+    [InlineData("namespace A;\ninternal sealed partial class Counter { }", "namespace A;\ninternal sealed partial class Counter { }", "A.Counter")]
+    [InlineData("namespace A;\ninternal sealed record ReferencedBy(int X);", "namespace B;\ninternal sealed class ReferencedBy { }", "")]
+    [InlineData("namespace A;\ninternal sealed class Counter { }", "namespace A;\ninternal static class CounterExtensions { }", "")]
+    public void A_type_split_across_the_move_is_found(string shared, string stays, string expected)
+    {
+        SplitDeclarations([("shared.cs", shared, true), ("stays.cs", stays, false)]).Should().Equal(
+            expected.Length == 0 ? Array.Empty<string>() : new[] { expected });
+    }
+
+    /// <summary>Every namespace-qualified type name declared both in a shared file and in one that stays.</summary>
+    private static List<string> SplitDeclarations(IEnumerable<(string File, string Code, bool Shared)> files)
+    {
+        HashSet<string> shared = new(StringComparer.Ordinal);
+        HashSet<string> stays = new(StringComparer.Ordinal);
+
+        foreach ((string _, string code, bool isShared) in files)
+        {
+            string ns = NamespaceDeclaration.Match(code) is { Success: true } m ? m.Groups["name"].Value : string.Empty;
+
+            foreach (string name in TopLevelTypes(code))
+            {
+                (isShared ? shared : stays).Add(ns + "." + name);
+            }
+        }
+
+        return [.. shared.Intersect(stays).Order(StringComparer.Ordinal)];
+    }
+
     private static readonly Regex NamespaceDeclaration = new(
         @"^\s*namespace\s+(?<name>[\w.]+)\s*[;{]",
         RegexOptions.Multiline | RegexOptions.CultureInvariant,

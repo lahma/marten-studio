@@ -132,8 +132,12 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
 /// by the table. That probe is what keeps a rail full of freshly bulk-loaded collections from being
 /// twenty-five sequential scans.
 /// </para>
+/// <para>
+/// Not partial: the count a Marten document list narrows by tenant and soft delete is MartenStudio's, written as
+/// extension members (<c>DocumentCountEstimator</c>) because a partial type cannot span the two assemblies.
+/// </para>
 /// </remarks>
-internal sealed partial class CountEstimator
+internal sealed class CountEstimator
 {
     /// <summary>
     /// The estimate query. <c>to_regclass</c> returns null rather than throwing for a table that is not
