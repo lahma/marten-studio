@@ -215,6 +215,34 @@ public class StudioSpineTests
         resolved.Should().Be(new ResolvedScope(resolved.Scope, resolved.Registration, resolved.Store, resolved.Database), "a wrapper of one instance is equal to another of it");
     }
 
+    /// <summary>
+    /// The shared view and Marten's cannot be split by a copy: the members the base record is built from, and the base
+    /// record's own, are get-only, so no <c>with</c> can replace one without the other; <c>with { Scope = … }</c> still works.
+    /// </summary>
+    [Fact]
+    public async Task A_copy_cannot_split_the_shared_view_from_Marten_s()
+    {
+        await using SourceHarness harness = SourceHarness.Create();
+        ResolvedScope resolved = await harness.Resolver.ResolveAsync(new StudioScope("default", string.Empty, null), null, Token);
+
+        foreach ((Type type, string property) in new[]
+                 {
+                     (typeof(ResolvedSource), nameof(ResolvedSource.Source)),
+                     (typeof(ResolvedSource), nameof(ResolvedSource.Target)),
+                     (typeof(ResolvedScope), nameof(ResolvedScope.Registration)),
+                     (typeof(ResolvedScope), nameof(ResolvedScope.Database)),
+                 })
+        {
+            type.GetProperty(property)!.SetMethod.Should().BeNull("{0}.{1} is get-only", type.Name, property);
+        }
+
+        ResolvedScope moved = resolved with { Scope = resolved.Scope with { TenantId = "acme" } };
+
+        moved.TenantId.Should().Be("acme");
+        moved.Target.Should().Be(resolved.Target);
+        moved.Database.Should().BeSameAs(resolved.Database);
+    }
+
     [Fact]
     public async Task A_tenant_of_a_store_without_tenancy_is_not_found()
     {

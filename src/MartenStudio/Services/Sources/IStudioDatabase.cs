@@ -42,17 +42,25 @@ internal enum StudioDatabaseCardinality
 /// caller, used only for the studio's own parameterised SQL, and never handed to anything that would cache it.
 /// </para>
 /// <para>
-/// <b>Identity is the one stable name.</b> It is what the URL carries in <c>?db=</c>, what a policy is shown as the
-/// resource's database, what every cache, the sweep history and the audit log key on, and it must therefore be the
-/// same string in every process and across restarts for the same database: <c>{Server}.{Name}</c>, the shape of
-/// JasperFx's <c>DatabaseId.Identity</c>, so that a Marten store and a plain data source on one database present one
-/// identity to a policy. It is never a connection string and never carries a credential. Two instances may share one
-/// identity (a Marten master-table tenancy's twins); the first is the one a scope without a tenant resolves to.
+/// <b>Identity is a source-defined stable identity.</b> It is what the URL carries in <c>?db=</c>, what a policy is
+/// shown as the resource's database, and what every cache, the sweep history and the audit log key on - so it must be
+/// the same string in every process and across restarts for the same database of the same source. Each source defines
+/// it, and no shape is normative:
+/// </para>
+/// <list type="bullet">
+/// <item><description>a Marten store: the database's <c>Id.Identity</c> (JasperFx's <c>DatabaseId</c>), unchanged from
+/// every earlier release;</description></item>
+/// <item><description>a DI-registered <see cref="NpgsqlDataSource" />: its registration name;</description></item>
+/// <item><description>a host-supplied provider (issue #8, G11): the name the host lists the database under.</description></item>
+/// </list>
+/// <para>
+/// It is compared ignoring case, it is never a connection string and it never carries a credential. Two instances may
+/// share one identity (a Marten master-table tenancy's twins); the first is the one a scope without a tenant resolves to.
 /// </para>
 /// </remarks>
 internal interface IStudioDatabase
 {
-    /// <summary>The database's stable identity: <c>{Server}.{Name}</c>. Compared ignoring case.</summary>
+    /// <summary>The database's source-defined stable identity (see the remarks). Compared ignoring case.</summary>
     string Identity { get; }
 
     /// <summary>The PostgreSQL database name.</summary>

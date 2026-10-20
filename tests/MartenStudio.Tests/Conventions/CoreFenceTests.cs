@@ -26,8 +26,14 @@ namespace MartenStudio.Tests.Conventions;
 /// <para>
 /// <b>What it cannot see.</b> A call that binds to a MartenStudio extension member reads like a call on the shared type
 /// (<c>StudioCapabilityGuard.OptionName(…)</c> resolves to <c>MartenServiceBridges</c>); the bridges list their
-/// remaining shared-bound callers, and PS-2's compile is the proof. Razor markup text is scanned as code, which is the
-/// safe direction: a prose word that collides with a MartenStudio type name fails loudly and is reworded.
+/// remaining shared-bound callers, and PS-2's compile is the proof. Comments and C# string literals are blanked, so prose
+/// and text never fail the fence - but a Razor file is read as code in two more places, because Razor puts code in them:
+/// its markup text (an <c>@Expression</c> sits in it, and a prose word that collides with a MartenStudio type name fails
+/// loudly and is reworded), and every tag's attribute values (<c>href="@Links.To(…)"</c>,
+/// <c>Capability="@nameof(…)"</c>, a component parameter's bare C#), which the string pass would have blanked. An import
+/// that brings a Marten namespace into every file at once - a <c>global using</c>, a csproj <c>&lt;Using&gt;</c>, an
+/// <c>_Imports.razor</c> line - is refused on its own (<see cref="No_import_brings_a_Marten_family_namespace_into_every_file" />),
+/// since no per-file scan would see it.
 /// </para>
 /// </remarks>
 public partial class CoreFenceTests
@@ -44,11 +50,26 @@ public partial class CoreFenceTests
 
     /// <summary>A qualified name: <c>Marten.Storage.IMartenDatabase</c>, <c>global::JasperFx.Descriptors</c>.</summary>
     private static readonly Regex MartenQualifiedName = new(
-        @"(?<![\w.])(?:Marten|JasperFx|Weasel)\.[A-Za-z_]",
+        @"(?<![\w.])(?:Marten|JasperFx|Weasel)\.[A-Za-z_][\w.]*",
         RegexOptions.CultureInvariant,
         RegexTimeout);
 
-    private static readonly Regex Identifier = new(@"(?<![\w@])[A-Za-z_][A-Za-z0-9_]*", RegexOptions.CultureInvariant, RegexTimeout);
+    /// <summary>An identifier - after <c>@</c> too, which is how Razor names one in markup (<c>@MartenStoreRegistry.X</c>).</summary>
+    private static readonly Regex Identifier = new(@"(?<!\w)[A-Za-z_][A-Za-z0-9_]*", RegexOptions.CultureInvariant, RegexTimeout);
+
+    /// <summary>
+    /// One markup tag, attributes and all, with quoted values paired so a <c>&gt;</c> inside one does not end the tag.
+    /// </summary>
+    private static readonly Regex Tag = new(
+        @"<[A-Za-z][\w.:-]*(?:[^<>""]|""[^""]*"")*/?>",
+        RegexOptions.CultureInvariant,
+        RegexTimeout);
+
+    /// <summary>A Razor comment, a C# block comment, or a whole line that is a C# line comment.</summary>
+    private static readonly Regex RazorProse = new(
+        @"@\*[\s\S]*?\*@|/\*[\s\S]*?\*/|^[ \t]*//[^\n]*",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant,
+        RegexTimeout);
 
     private static readonly Regex Cref = new(@"cref\s*=\s*""(?<value>[^""]*)""", RegexOptions.CultureInvariant, RegexTimeout);
 
@@ -138,6 +159,7 @@ public partial class CoreFenceTests
     [InlineData("class C { MartenStoreRegistry? registry; }", "identifier")]
     [InlineData("@inject IOptions<MartenStudioOptions> Options\n<p>x</p>", "identifier")]
     [InlineData("<p><code>MartenStudioOptions.ReadOnly</code></p>", "identifier")]
+    [InlineData("<p>@MartenStoreRegistry.DefaultStoreKey</p>", "identifier")]
     [InlineData("/// <see cref=\"MartenStudioOptions.Path\" />\nclass C { }", "cref")]
     // Found: a MartenStudio component, named as a component.
     [InlineData("<div><Overview /></div>", "component")]
@@ -172,6 +194,106 @@ public partial class CoreFenceTests
     }
 
     /// <summary>
+    /// The Razor half of the anti-vacuity theory: an attribute value is code, which the string pass alone would blank,
+    /// and a comment or plain attribute text still is not.
+    /// </summary>
+    [Theory]
+    [InlineData("<span title=\"@MartenStudioOptions.Title\">x</span>", "identifier")]
+    [InlineData("<CapabilityDisabled Capability=\"@nameof(MartenStoreRegistry)\" />", "identifier")]
+    [InlineData("<StatCard Value=\"MartenStoreRegistry.DefaultStoreKey\" />", "identifier")]
+    [InlineData("<a href=\"@Marten.Links.To(x)\">x</a>", "qualified")]
+    [InlineData("<a href=\"@($\"{JasperFx.Core.Paths.Root}/x\")\">x</a>", "qualified")]
+    [InlineData("<Overview Title=\"x\" />", "component")]
+    [InlineData("<p title=\"registered with Marten.\">x</p>", null)]
+    [InlineData("<button class=\"ms-btn\" title=\"Store unavailable: retry\">x</button>", null)]
+    [InlineData("@* <a href=\"@MartenStoreRegistry.X\">x</a> *@\n<p>x</p>", null)]
+    [InlineData("<p>x</p>\n@code {\n    // <a href=\"@MartenStoreRegistry.X\">\n}", null)]
+    public void The_scanner_reads_a_razor_attribute_value_as_code(string source, string? expected)
+    {
+        IReadOnlyList<string> found = Leans(source, StayBehindNames.OfTypes("MartenStoreRegistry", "MartenStudioOptions"), razor: true);
+
+        if (expected is null)
+        {
+            found.Should().BeEmpty();
+        }
+        else
+        {
+            found.Should().ContainSingle().Which.Should().StartWith(expected);
+        }
+    }
+
+    /// <summary>
+    /// An import that reaches every file at once is invisible to a per-file scan, so it is refused on its own: no
+    /// <c>global using</c> in <c>src/</c>, no <c>&lt;Using&gt;</c> item in a <c>src/</c> project or a
+    /// <c>Directory.Build.*</c> file, and no <c>_Imports.razor</c> line names a Marten, JasperFx or Weasel namespace.
+    /// </summary>
+    [Fact]
+    public void No_import_brings_a_Marten_family_namespace_into_every_file()
+    {
+        List<string> problems = [];
+
+        foreach (string file in SourceScanner.ShippedSourceFiles())
+        {
+            string code = SourceScanner.StripCommentsAndStrings(File.ReadAllText(file));
+            bool imports = Path.GetFileName(file).Equals("_Imports.razor", StringComparison.OrdinalIgnoreCase);
+
+            foreach (Match match in MartenUsing.Matches(code))
+            {
+                if (imports || match.Value.TrimStart().StartsWith("global", StringComparison.Ordinal))
+                {
+                    problems.Add(SourceScanner.Relative(file) + ": " + match.Value.Trim());
+                }
+            }
+        }
+
+        string[] projectFiles =
+        [
+            .. Directory.EnumerateFiles(RepositoryRoot.Combine("src"), "*.csproj", SearchOption.AllDirectories),
+            .. RepositoryProjectFiles
+                .Select(static x => RepositoryRoot.Combine(x))
+                .Where(File.Exists),
+        ];
+
+        projectFiles.Should().NotBeEmpty("scanning no project file would pass for the wrong reason");
+
+        foreach (string file in projectFiles)
+        {
+            foreach (Match match in ProjectUsing.Matches(File.ReadAllText(file)))
+            {
+                problems.Add(SourceScanner.Relative(file) + ": " + match.Value);
+            }
+        }
+
+        problems.Should().BeEmpty(
+            "an import that reaches every file would put a Marten namespace in every shared file without a line of it saying so: "
+            + string.Join(", ", problems));
+    }
+
+    /// <summary>The project-file and global-import half of the rule, on synthetic input.</summary>
+    [Theory]
+    [InlineData("<ItemGroup><Using Include=\"Marten\" /></ItemGroup>", true)]
+    [InlineData("<ItemGroup>\n  <Using Include=\"JasperFx.Events\" Static=\"true\" />\n</ItemGroup>", true)]
+    [InlineData("<ItemGroup><Using Include='Weasel.Postgresql' Alias='W' /></ItemGroup>", true)]
+    [InlineData("<ItemGroup><Using Include=\"MartenStudio.Services\" /></ItemGroup>", false)]
+    [InlineData("<ItemGroup><PackageReference Include=\"Marten\" /></ItemGroup>", false)]
+    [InlineData("<!-- <Using Include=\"Marten\" /> -->", true)]
+    public void A_project_using_of_a_Marten_family_namespace_is_found(string project, bool expected)
+    {
+        // A commented-out item is reported too: the rule is about the file's text, and a comment that would only need
+        // its markers removed to import Marten everywhere is worth a look either way.
+        ProjectUsing.IsMatch(project).Should().Be(expected);
+    }
+
+    /// <summary>The repository-wide MSBuild files every <c>src/</c> project imports.</summary>
+    private static readonly string[] RepositoryProjectFiles = ["Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props"];
+
+    /// <summary>A csproj or props <c>&lt;Using Include="…"&gt;</c> of a Marten-family namespace.</summary>
+    private static readonly Regex ProjectUsing = new(
+        @"<Using\s+Include\s*=\s*[""'](?:Marten|JasperFx|Weasel)(?:\.[\w.]*)?[""'][^>]*>",
+        RegexOptions.CultureInvariant,
+        RegexTimeout);
+
+    /// <summary>
     /// Scans every row <paramref name="packet" /> fences and fails with every lean it finds, by file.
     /// </summary>
     private static void AssertFenced(CoreManifest.Packet packet)
@@ -192,7 +314,8 @@ public partial class CoreFenceTests
                 problems.Add(row.RepositoryPath + ": the scanner could not follow the file to its end");
             }
 
-            foreach (string lean in Leans(source, stayBehind))
+            bool razor = row.Path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase);
+            foreach (string lean in Leans(source, stayBehind, razor))
             {
                 problems.Add(row.RepositoryPath + ": " + lean);
             }
@@ -203,11 +326,23 @@ public partial class CoreFenceTests
             + Environment.NewLine + string.Join(Environment.NewLine, problems));
     }
 
-    /// <summary>Every lean in <paramref name="source" />, each as "kind: what".</summary>
-    private static List<string> Leans(string source, StayBehindNames stayBehind)
+    /// <summary>Every lean in <paramref name="source" />, each as "kind: what", each once.</summary>
+    /// <param name="source">The file's text.</param>
+    /// <param name="stayBehind">The names only MartenStudio declares.</param>
+    /// <param name="razor">
+    /// Whether it is a Razor file, whose every tag - attribute values included, which the string pass blanks - is read as
+    /// code too: an attribute value is where Razor puts an expression.
+    /// </param>
+    private static List<string> Leans(string source, StayBehindNames stayBehind, bool razor = false)
     {
         List<string> found = [];
         string code = SourceScanner.StripCommentsAndStrings(source);
+
+        if (razor)
+        {
+            string markup = RazorProse.Replace(source, static x => new string(' ', x.Length));
+            code += "\n" + string.Join("\n", Tag.Matches(markup).Select(static x => x.Value));
+        }
 
         foreach (Match match in MartenUsing.Matches(code))
         {
@@ -218,7 +353,7 @@ public partial class CoreFenceTests
         string withoutUsings = MartenUsing.Replace(code, static x => new string(' ', x.Length));
         foreach (Match match in MartenQualifiedName.Matches(withoutUsings))
         {
-            found.Add("qualified: " + Line(withoutUsings, match.Index));
+            found.Add("qualified: " + match.Value.TrimEnd('.'));
         }
 
         foreach (string name in Identifiers(withoutUsings).Where(stayBehind.Types.Contains).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
@@ -247,7 +382,8 @@ public partial class CoreFenceTests
             }
         }
 
-        return found;
+        // A tag read twice - once in the markup, once with its attributes - is one finding.
+        return [.. found.Distinct(StringComparer.Ordinal)];
     }
 
     /// <summary>A component named as one: <c>&lt;Name</c>, <c>typeof(Name)</c>, <c>nameof(Name)</c>, <c>@inherits Name</c>.</summary>
@@ -258,13 +394,6 @@ public partial class CoreFenceTests
 
     private static IEnumerable<string> Identifiers(string code) =>
         Identifier.Matches(code).Select(static x => x.Value);
-
-    private static string Line(string text, int index)
-    {
-        int start = text.LastIndexOf('\n', Math.Max(index - 1, 0)) + 1;
-        int end = text.IndexOf('\n', index);
-        return text[start..(end < 0 ? text.Length : end)].Trim();
-    }
 
     /// <summary>
     /// Every top-level type and component declared in a <c>src/</c> file that is not on the manifest, less every name a

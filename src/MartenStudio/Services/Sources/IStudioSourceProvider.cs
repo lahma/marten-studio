@@ -141,7 +141,10 @@ internal sealed record StudioSweepTarget(
 /// <para>
 /// <b>Scoped.</b> A source's tenant discovery is cached per circuit, and a refresh button clears this circuit's view
 /// (<see cref="Invalidate" />); everything process-wide underneath - which sources exist, a failure cache - is the
-/// implementation's own singleton.
+/// implementation's own singleton. A caller with no circuit - the opt-in health export, a sweeper running with no
+/// visitor - creates an <c>AsyncServiceScope</c> per run (<c>IServiceScopeFactory.CreateAsyncScope()</c>), resolves the
+/// provider from it, and disposes the scope when the run ends; it never resolves the provider from the root container,
+/// which would keep one run's discovered tenants for the life of the process.
 /// </para>
 /// <para>
 /// <b>Never asks a policy, never discovers anything by connection string.</b> Sources are what the application
@@ -150,11 +153,17 @@ internal sealed record StudioSweepTarget(
 /// caller before it gets here: a source the visitor may not see and a source that does not exist must be one answer.
 /// </para>
 /// <para>
+/// <b>Identity is the source's.</b> Each source defines its databases' <see cref="IStudioDatabase.Identity" />: a Marten
+/// store the database's <c>Id.Identity</c>, unchanged; a DI-registered <c>NpgsqlDataSource</c> its registration name; a
+/// host-supplied provider the name the host lists the database under. Whatever it is, it is stable across processes and
+/// restarts, because URLs, policies, caches and the sweep history key on it.
+/// </para>
+/// <para>
 /// <b>Adapting a host's own source (issue #8, G11).</b> A later public interface for a host's database provider - a
 /// name, and an asynchronous enumeration of databases each with a stable name and a data source - adapts onto this as one
 /// <see cref="StudioSourceRegistration" /> of kind <see cref="StudioSourceKind.HostProvider" /> whose
-/// <see cref="IStudioSource.DatabasesAsync" /> materializes the enumeration and whose databases carry the host's stable
-/// name in <see cref="IStudioDatabase.Identity" />; <see cref="SweepTargetsAsync" /> streams the same enumeration so a
+/// <see cref="IStudioSource.DatabasesAsync" /> materializes the enumeration and whose databases carry the name the host
+/// lists in <see cref="IStudioDatabase.Identity" />; <see cref="SweepTargetsAsync" /> streams the same enumeration so a
 /// sweep never materializes a thousand tenants to cover twenty-five.
 /// </para>
 /// </remarks>
@@ -192,6 +201,7 @@ internal interface IStudioSourceProvider
     /// The budget is the caller's: it stops sweeping after its limit and goes on reading only to count what it skipped,
     /// so an implementation must enumerate lazily and cheaply - names, never connections. A database is yielded resolved
     /// with no tenant, and must be named by an identity the source can look up again, never one it would have to build.
+    /// The caller has no circuit, so it resolves this provider from an <c>AsyncServiceScope</c> of its own run.
     /// </remarks>
     /// <param name="cancellationToken">Cancels the enumeration.</param>
     IAsyncEnumerable<StudioSweepTarget> SweepTargetsAsync(CancellationToken cancellationToken);

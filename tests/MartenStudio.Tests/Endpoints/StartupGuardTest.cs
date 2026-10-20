@@ -1,3 +1,6 @@
+using MartenStudio.Services;
+using MartenStudio.Services.Settings;
+
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.TestHost;
@@ -61,6 +64,50 @@ public class StartupGuardTest
         failure.Message.Should().Contain("FallbackPolicy");
         failure.Message.Should().Contain("/marten", "the message names the routes nothing authorizes");
     }
+
+    /// <summary>
+    /// The route table is built when the studio is mapped, so a relative route two pages claim fails the mapping call
+    /// itself - at startup, never at the first request for the page.
+    /// </summary>
+    [Fact]
+    public async Task A_route_two_pages_claim_fails_the_mapping_call()
+    {
+        // This test assembly's pages (StudioRouteTableTests' fixtures) claim /elsewhere/things/{…} twice; rooted at the
+        // empty root, every template here is in range, so the duplicate is the only fault.
+        StudioDescriptor descriptor = Clone(
+            MartenStudioDescriptor.Instance,
+            [
+                .. MartenStudioDescriptor.Instance.PageAssemblies,
+                new StudioPageAssembly(typeof(StartupGuardTest).Assembly, string.Empty),
+            ]);
+
+        await using var app = CreateApp(configureBuilder: builder => builder.Services.AddSingleton(descriptor));
+
+        Action map = () => app.MapMartenStudio().AllowAnonymous();
+
+        map.Should().Throw<InvalidOperationException>().WithMessage("*both claim the route*");
+    }
+
+    private static StudioDescriptor Clone(
+        StudioDescriptor source,
+        IReadOnlyList<StudioPageAssembly> pageAssemblies) => new()
+    {
+        Key = source.Key,
+        ProductName = source.ProductName,
+        PageAssemblies = pageAssemblies,
+        HealthCheckAssemblies = source.HealthCheckAssemblies,
+        Navigation = source.Navigation,
+        OverviewComponent = source.OverviewComponent,
+        QueryComponent = source.QueryComponent,
+        SourceQueryParameter = source.SourceQueryParameter,
+        SourceNoun = source.SourceNoun,
+        SourceLabel = source.SourceLabel,
+        ExposedContent = source.ExposedContent,
+        CreateResource = source.CreateResource,
+        Surface = source.Surface,
+        Exposure = source.Exposure,
+        Remedies = source.Remedies,
+    };
 
     [Fact]
     public async Task RequireAuthorization_at_the_map_site_satisfies_the_guard()

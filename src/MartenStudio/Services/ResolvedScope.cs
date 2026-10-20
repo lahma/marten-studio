@@ -15,9 +15,10 @@ namespace MartenStudio.Services;
 /// <c>Target</c>, which are the same registration and the same database seen through the shared seam.
 /// </para>
 /// <para>
-/// <b>Never <c>with { Database = … }</c>.</b> <c>Target</c> is computed from <see cref="Database" /> when the record is
-/// built, so a copy that changed only <see cref="Database" /> would leave shared code reading the old instance. Build a
-/// new one instead; nothing in the studio copies one with another database.
+/// <b>One view, whatever is copied.</b> The base record's <c>Source</c> and <c>Target</c> are computed from
+/// <see cref="Registration" /> and <see cref="Database" /> when the record is built, so all four are get-only: a
+/// <c>with { Database = … }</c> that left shared code reading the old instance does not compile. <c>with { Scope = … }</c>
+/// and <c>with { Store = … }</c> still do - neither feeds the base record.
 /// </para>
 /// </remarks>
 /// <param name="Scope">The scope that was resolved.</param>
@@ -29,7 +30,14 @@ internal sealed record ResolvedScope(
     MartenStoreRegistration Registration,
     IDocumentStore Store,
     IMartenDatabase Database)
-    : ResolvedSource(Scope, Registration.AsSource(), MartenStudioDatabase.Of(Database));
+    : ResolvedSource(Scope, Registration.AsSource(), MartenStudioDatabase.Of(Database))
+{
+    /// <summary>The store's registration; get-only, because the base record's <c>Source</c> is built from it.</summary>
+    public MartenStoreRegistration Registration { get; } = Registration;
+
+    /// <summary>The database the scope resolved to; get-only, because the base record's <c>Target</c> is built from it.</summary>
+    public IMartenDatabase Database { get; } = Database;
+}
 
 /// <summary>The Marten spellings of the shared scope types.</summary>
 internal static class MartenScopeResources

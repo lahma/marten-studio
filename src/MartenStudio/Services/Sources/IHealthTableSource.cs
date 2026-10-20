@@ -150,6 +150,13 @@ internal interface IHealthTableSource
 /// when there is nothing honest to suggest - a library's table, a table whose owner cannot be told, a server setting no
 /// line changes - which the finding then says in words.
 /// </para>
+/// <para>
+/// <b>SQL text is built where all SQL is built (AGENTS.md hard rule 4).</b> A remedy that is SQL is composed in, or by a
+/// builder in, <c>Internal/Sql</c> - never by concatenation here or in a check - and every identifier in it (schema,
+/// table, index, column) is quoted through <c>SqlIdentifier</c>, never interpolated raw: the text is copied into a
+/// migration and run by a person with more rights than the studio, so a table name that is not quoted is an injection
+/// the studio handed them. A value it suggests is a literal the builder formats, never a visitor's input.
+/// </para>
 /// </remarks>
 internal interface IHealthRemedyProvider
 {

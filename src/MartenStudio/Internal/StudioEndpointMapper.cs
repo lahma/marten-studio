@@ -95,10 +95,16 @@ internal static class StudioEndpointMapper
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ServiceProvider.GetRequiredService<MartenStudioMappedEndpoints>().Track(builder);
-
         IStudioSettings settings = builder.ServiceProvider.GetRequiredService<IStudioSettings>();
         StudioDescriptor descriptor = builder.ServiceProvider.GetRequiredService<StudioDescriptor>();
+
+        // Built here, before anything is mapped, so that a page template outside its assembly's root or a relative
+        // route two pages claim makes Map*Studio() throw at startup - not the first request for a page, and not an
+        // AmbiguousMatchException between two endpoints on one pattern.
+        _ = descriptor.Routes;
+
+        builder.ServiceProvider.GetRequiredService<MartenStudioMappedEndpoints>().Track(builder);
+
         string studioPath = settings.TrimmedPath;
 
         // The pages already carry their compile-time root in their @page directives, so the components root is mapped
