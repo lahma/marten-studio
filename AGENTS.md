@@ -493,12 +493,13 @@ asked about the tenant as before. Below either, both stay refused (SEC1-fix4). A
 tenant it does not have (`DatabaseReach.FindTenantDatabaseAsync`). Enumerating a dynamic tenancy's
 databases is not read-only, at any Marten through 9.51.0: `AllDatabases()`, `Tenancy.DescribeDatabasesAsync()`
 and 9.50.1's `IEventStore.TryDescribeDatabasesAsync()` all run `Tenancy.BuildDatabases()`. Once per store
-instance, that applies a master-table or sharded tenancy's lookup table, gated by the tenancy's own
-`AutoCreate` when it sets one. Below 9.51 the apply runs under the store's `AutoCreateSchemaObjects`: that
-includes `All`, which drops and recreates a table it cannot alter, and `None` is promoted to
-`CreateOrUpdate` when the tenancy's own `AutoCreate` is set to anything but `None`. From 9.51 (#5692) it
-runs under the tenancy's own `AutoCreate` when that is set. 9.51's `ShardedTenancy.FindOrCreateDatabase`
-also builds a pooled database id on a cache miss (#5702). It also
+instance, that applies a master-table or sharded tenancy's lookup table - gated, and from 9.51 (#5692) run,
+under the tenancy's own `AutoCreate` when it sets one and the store's `AutoCreateSchemaObjects` otherwise;
+below 9.51 always run under the store's (`maybeApplyChanges` at `V9.50.2` and `v9.51.0`). So a tenancy that
+sets none applies under the store's mode at every version, `All` included, which drops and recreates a table
+it cannot alter; and below 9.51 a store's `None` is promoted to `CreateOrUpdate` when the tenancy's own
+`AutoCreate` is set to anything but `None`, where from 9.51 the tenancy's own mode runs instead. 9.51's
+`ShardedTenancy.FindOrCreateDatabase` also builds a pooled database id on a cache miss (#5702). It also
 upserts the tenancy's seed rows. On a single-server tenancy it creates every configured database that does
 not exist yet, under no `AutoCreate` at all. The studio enumerates on the first navigation, so in a process that runs no daemon of its own it can be
 that first caller; a host whose daemon runs in-process, or that applies on startup, has always enumerated
@@ -778,8 +779,9 @@ The gates were run at both ends:
 - `dotnet restore marten-studio.slnx -p:MartenStudioMartenVersion=9.51.0` with `TreatWarningsAsErrors`: zero NU
   warnings, so no `NU1901`–`NU1904` for anything in the graph.
 - `dotnet build marten-studio.slnx` at 9.39.0 and at 9.51.0: 0 warnings at both.
-- The fast suite at both: 5 978 tests; 5 863 passed with 114 opt-in skips at the floor, 5 976 passed with 1 skip at
-  9.51.0.
+- The fast suite at both: 5 986 tests; 5 872 passed with 114 version-gated skips at the floor (every one a LINQ-mode
+  test, which needs Marten 9.48), 5 985 passed with 1 skip at 9.51.0 (its mirror, the LINQ-mode test of a Marten older
+  than 9.48).
 - Every live class under `Events`, `Schema` and `Query`, with `DaemonHealthLiveTests`, `EventHealthSweepLiveTests` and
   `EnumerationAppliesLiveTests`, at both, with `MARTENSTUDIO_PG_REUSE=false`.
 - `PublicApiTest` passes at both against an untouched baseline, and so does `JasperFxSourceGeneratorTests`. At 9.51.0

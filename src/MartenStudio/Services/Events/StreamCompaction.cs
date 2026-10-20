@@ -382,6 +382,29 @@ internal static class StreamCompactionRules
         + "tenant's events: choose the dead letter's tenant to rewind its subscription.";
 
     /// <summary>
+    /// Why a per-tenant rewind is refused for a tenant whose agents' shard identity does not read back as that tenant's
+    /// - an id with a <c>:</c> in it. JasperFx hard-stops the tenant's agents and only then has Marten parse the identity,
+    /// which fails; so it is refused before the daemon is asked. The service's refusal and the page's title.
+    /// </summary>
+    /// <param name="tenant">The tenant.</param>
+    public static string RewindTenantNotAddressable(string tenant) =>
+        "Tenant " + tenant + "'s agents are named with its id, and with a ':' in it that name does not read back as this "
+        + "tenant's: the daemon would stop the tenant's agents and Marten would then refuse the rewind, leaving them "
+        + "stopped. Marten Studio does not rewind subscriptions for this tenant.";
+
+    /// <summary>
+    /// What a rewind Marten or JasperFx refused as an unknown subscription is reported as - in place of their own message,
+    /// which lists every subscription the store has (D5).
+    /// </summary>
+    /// <param name="projection">The projection the rewind was asked for.</param>
+    /// <param name="tenantId">The tenant, for a per-tenant rewind; <see langword="null" /> otherwise.</param>
+    public static string SubscriptionNotRecognised(string projection, string? tenantId) =>
+        "Marten did not recognise the subscription '" + projection + "'"
+        + (string.IsNullOrEmpty(tenantId) ? string.Empty : " for tenant " + tenantId)
+        + ", so nothing was rewound. The daemon stops the agents before it asks Marten, so check the Projections screen: "
+        + "they may need starting again.";
+
+    /// <summary>
     /// Why a per-tenant rewind is refused when the daemon in this process does not run that tenant's agent of the
     /// projection: JasperFx's per-tenant rewind starts the tenant's agents here whether or not this process ran them, so
     /// under HotCold or a distributed host it would run a second agent beside the one on the node that has it.

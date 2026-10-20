@@ -213,8 +213,10 @@ public class MigrationRiskTests
             """
             CREATE TABLE IF NOT EXISTS studio.mt_event_tag_customer (value varchar NOT NULL, seq_id bigint NOT NULL);
             CREATE INDEX idx_mt_event_tag_customer_seq_id ON studio.mt_event_tag_customer USING btree (seq_id);
-            create table studio."mt_doc_Order" (id uuid not null, data jsonb not null);
+            create table Studio.MT_DOC_ORDER (id uuid not null, data jsonb not null);
             CREATE UNIQUE INDEX mt_doc_order_idx_number ON studio.mt_doc_order USING btree ((data ->> 'Number'));
+            CREATE TABLE "Legacy"."Order Lines" (id int);
+            CREATE INDEX order_lines_idx ON "Legacy"."Order Lines" USING btree (id);
             --WEASEL_INDEX_CREATION_BEGIN
             CREATE INDEX CONCURRENTLY mt_doc_customer_idx_name ON studio.mt_doc_customer USING btree ((data ->> 'Name'));
             --WEASEL_INDEX_CREATION_END
@@ -222,7 +224,42 @@ public class MigrationRiskTests
             """;
 
         MigrationRisk.Notes(sql).Should().BeEmpty(
-            "nothing waits for an index on a table created in the same script, a concurrent build, or ON ONLY's metadata");
+            "nothing waits for an index on a table created in the same script - unquoted names fold to lower case, quoted ones "
+            + "match exactly - a concurrent build, or ON ONLY's metadata");
+    }
+
+    /// <summary>
+    /// A quoted identifier keeps its case and an unquoted one folds to lower case, as Postgres resolves them: a table
+    /// created as <c>"mt_doc_Order"</c> is not the <c>mt_doc_order</c> an index names, so that index builds on a table the
+    /// script did not create, and is a note.
+    /// </summary>
+    [Fact]
+    public void A_quoted_name_matches_only_its_own_case()
+    {
+        const string sql =
+            """
+            create table studio."mt_doc_Order" (id uuid not null, data jsonb not null);
+            CREATE INDEX quoted_idx ON studio."mt_doc_Order" USING btree (id);
+            CREATE INDEX folded_idx ON studio.mt_doc_order USING btree (id);
+            """;
+
+        IReadOnlyList<MigrationNote> notes = MigrationRisk.Notes(sql);
+
+        notes.Should().ContainSingle("the quoted index is on the created table; the unquoted one names another table")
+            .Which.Statement.Should().Contain("folded_idx");
+
+        // A quoted name with a space in it is one name, not a name cut at the space.
+        MigrationRisk.Notes(
+            """
+            CREATE TABLE "Legacy"."Order Lines" (id int);
+            CREATE INDEX lines_idx ON "Legacy"."Order Lines" USING btree (id);
+            CREATE INDEX other_idx ON "Legacy"."Order Totals" USING btree (id);
+            """).Should().ContainSingle().Which.Statement.Should().Contain("other_idx");
+
+        MigrationRisk.Normalize("Studio.\"mt_doc_Order\"").Should().Be(MigrationRisk.Normalize("studio.\"mt_doc_Order\""));
+        MigrationRisk.Normalize("studio.\"mt_doc_Order\"").Should().NotBe(MigrationRisk.Normalize("studio.mt_doc_order"));
+        MigrationRisk.Normalize("\"a.b\"").Should().NotBe(MigrationRisk.Normalize("a.b"), "a dot inside quotes is part of the name");
+        MigrationRisk.Normalize("\"say \"\"hi\"\"\"").Should().Be("say \"hi\"", "a doubled quote is one quote");
     }
 
     [Fact]

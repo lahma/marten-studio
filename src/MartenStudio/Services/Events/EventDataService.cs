@@ -1886,7 +1886,21 @@ internal sealed partial class EventDataService : IEventDataService
     /// distributes agents across nodes (Wolverine), it would run a second agent beside the one on the node that has it.
     /// So the daemon here has to hold an agent of that projection for that tenant (<c>CurrentAgents()</c>), and the call
     /// is made with that agent's own projection name and tenant id: JasperFx stops a tenant's agents by an ordinal
-    /// comparison of both, and a name in another case would leave the running agent going beside the new one.
+    /// comparison of both, and a name in another case would leave the running agent going beside the new one. That
+    /// agent's identity must also read back, through <c>ShardName.TryParse</c>, as the same projection, shard and tenant
+    /// (<see cref="TenantRewind.RoundTrips" />): Marten 9.51 resolves the tenant shard by parsing the identity the daemon
+    /// hands it, and a tenant id with a <c>:</c> in it does not parse - by then the daemon has hard-stopped the tenant's
+    /// agents, and Marten answers "Unknown subscription name", so such a tenant is refused before the daemon is asked.
+    /// </para>
+    /// <para>
+    /// <b>The window that remains.</b> The agent check is a snapshot of <c>CurrentAgents()</c>, and nothing awaits
+    /// between it and the call (the user is looked up before it). Under HotCold the node can still lose leadership in
+    /// that instant: its coordinator then stops every agent it runs, while the rewind - already past its own stop - starts
+    /// the tenant's agents again here, beside the agents the new leader starts. JasperFx's rewind takes no leadership
+    /// lock, so the studio cannot close the window, only keep it to the call itself; it is a known limit
+    /// (<c>docs/security.md</c>). The extra agents last until this node's next leadership poll, which stops every agent
+    /// a node without the lock is running (<c>ProjectionCoordinatorBase</c>, read at JasperFx <c>v2.91.0</c>) - at most
+    /// one <c>LeadershipPollingTime</c>.
     /// </para>
     /// </remarks>
     private async Task<string> RewindTenantAsync(
@@ -1903,6 +1917,14 @@ internal sealed partial class EventDataService : IEventDataService
         if (resolved.TenantId is not { } tenantId)
         {
             throw new InvalidOperationException(StreamCompactionRules.RewindNeedsTenant);
+        }
+
+        // A tenant id whose agent identity does not read back as that tenant's - one with a ':' in it - cannot be
+        // rewound: JasperFx hard-stops the tenant's agents first and Marten then fails to parse the identity it is
+        // handed ("Unknown subscription name"), leaving them stopped. Refused before anything is asked of the daemon.
+        if (!TenantRewind.IsAddressable(tenantId))
+        {
+            throw new InvalidOperationException(StreamCompactionRules.RewindTenantNotAddressable(tenantId));
         }
 
         if (!HasAsyncProjection(resolved.Store.Options.Events.Projections(), projectionName))
@@ -1946,12 +1968,15 @@ internal sealed partial class EventDataService : IEventDataService
                 + "with a tenant), so Marten Studio does not rewind subscriptions on this store.");
         }
 
+        // The user first, so that nothing awaits between the agent check and the call: the check is a snapshot of the
+        // daemon, and the window in which it can go stale (the remarks' HotCold case) is as short as this code makes it.
+        string user = await authorization.UserNameAsync().ConfigureAwait(false);
+
         if (TenantAgentOf(daemon, projectionName, tenantId) is not { } agent)
         {
             throw new InvalidOperationException(StreamCompactionRules.RewindNeedsTenantAgentHere(projectionName, tenantId));
         }
 
-        string user = await authorization.UserNameAsync().ConfigureAwait(false);
         logger.DaemonControlRequested(
             user,
             RewindSubscriptionAction,
@@ -1974,7 +1999,8 @@ internal sealed partial class EventDataService : IEventDataService
     /// <summary>
     /// The shard name of the agent <paramref name="daemon" /> runs for <paramref name="projectionName" /> in
     /// <paramref name="tenantId" />, or <see langword="null" /> when it runs none - the projection name compared as
-    /// Marten compares it (ignoring case), the tenant ordinally.
+    /// Marten compares it (ignoring case), the tenant ordinally - and only one whose identity reads back as itself
+    /// (<see cref="TenantRewind.RoundTrips" />), because that identity is what Marten parses to find the tenant's shard.
     /// </summary>
     internal static ShardName? TenantAgentOf(IProjectionDaemon daemon, string projectionName, string tenantId)
     {
@@ -1984,7 +2010,8 @@ internal sealed partial class EventDataService : IEventDataService
         {
             if (agent.Name is { TenantId: { } tenant } name
                 && string.Equals(tenant, tenantId, StringComparison.Ordinal)
-                && string.Equals(name.Name, projectionName, StringComparison.OrdinalIgnoreCase))
+                && string.Equals(name.Name, projectionName, StringComparison.OrdinalIgnoreCase)
+                && TenantRewind.RoundTrips(name))
             {
                 return name;
             }
@@ -2040,7 +2067,7 @@ internal sealed partial class EventDataService : IEventDataService
     /// <c>IProjectionDaemon</c> since at least JasperFx 2.74.0, implemented from 2.91.0). A floor of zero is Marten's
     /// "delete the progression row".
     /// </remarks>
-    internal static Task RewindTenantToFloorAsync(
+    internal static async Task RewindTenantToFloorAsync(
         IProjectionDaemon daemon,
         string projectionName,
         string tenantId,
@@ -2048,7 +2075,39 @@ internal sealed partial class EventDataService : IEventDataService
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(daemon);
-        return daemon.RewindSubscriptionAsync(projectionName, tenantId, cancellationToken, sequenceFloor);
+
+        try
+        {
+            await daemon.RewindSubscriptionAsync(projectionName, tenantId, cancellationToken, sequenceFloor).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (ListsSubscriptions(exception))
+        {
+            throw new InvalidOperationException(StreamCompactionRules.SubscriptionNotRecognised(projectionName, tenantId));
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="exception" />, or one it wraps, is Marten's or JasperFx's "Unknown subscription name 'x'.
+    /// Available options are A, B, C" - every shard the store has, joined into the message.
+    /// </summary>
+    /// <remarks>
+    /// That message would reach the audit ring and the page through the failure's own text, and tell whoever asked the
+    /// store's whole projection set (D5). The studio refuses an unknown name before either is asked, so this is the belt to
+    /// that: the two rewinds replace it with a sentence naming only what the caller supplied, and keep none of it - not
+    /// even as an inner exception.
+    /// </remarks>
+    internal static bool ListsSubscriptions(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current.Message.Contains("Available options", StringComparison.OrdinalIgnoreCase)
+                || current.Message.Contains("Unknown subscription name", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -2141,14 +2200,22 @@ internal sealed partial class EventDataService : IEventDataService
     /// and the dialog says so. Under per-tenant partitioning the tenant overload is the only rewind
     /// (<see cref="RewindTenantToFloorAsync" />).
     /// </remarks>
-    internal static Task RewindToFloorAsync(
+    internal static async Task RewindToFloorAsync(
         IProjectionDaemon daemon,
         string projectionName,
         long sequenceFloor,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(daemon);
-        return daemon.RewindSubscriptionAsync(projectionName, cancellationToken, sequenceFloor);
+
+        try
+        {
+            await daemon.RewindSubscriptionAsync(projectionName, cancellationToken, sequenceFloor).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (ListsSubscriptions(exception))
+        {
+            throw new InvalidOperationException(StreamCompactionRules.SubscriptionNotRecognised(projectionName, tenantId: null));
+        }
     }
 
     /// <summary>

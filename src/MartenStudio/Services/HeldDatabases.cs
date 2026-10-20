@@ -57,8 +57,8 @@ internal sealed record HeldDatabaseList(TenancyShape Shape, IReadOnlyList<IMarte
 /// <list type="bullet">
 /// <item><description>
 /// <c>MasterTableTenancy</c> and <c>ShardedTenancy</c> apply their lookup tables' schema on the first call in a
-/// process (<c>maybeApplyChanges</c>) - gated by the tenancy's own <c>AutoCreate</c> when it sets one, and run under the
-/// host's <c>AutoCreateSchemaObjects</c> below 9.51 or, from 9.51 (#5692), under the tenancy's own - upsert their configured seed
+/// process (<c>maybeApplyChanges</c>) - gated, and from 9.51 (#5692) run, under the tenancy's own <c>AutoCreate</c> when it
+/// sets one and the host's <c>AutoCreateSchemaObjects</c> otherwise, and below 9.51 always run under the host's - upsert their configured seed
 /// rows, and read the whole master table - building a data source for every tenant it names - on every call,
 /// outside the studio's read-only session. A master-table tenancy that has so far only resolved tenants one at
 /// a time (<c>GetTenantAsync</c>, which applies and seeds nothing) holds databases and has never been built.

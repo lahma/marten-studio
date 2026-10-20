@@ -192,11 +192,28 @@ internal static partial class MigrationRisk
         return at < 0 ? null : line[(at + words.Length)..].Trim();
     }
 
-    /// <summary>The first token: up to whitespace or an opening parenthesis.</summary>
+    /// <summary>The first token: up to whitespace or an opening parenthesis outside double quotes.</summary>
     private static string? FirstToken(string text)
     {
-        int end = text.IndexOfAny([' ', '\t', '(']);
-        string token = (end < 0 ? text : text[..end]).TrimEnd(';');
+        bool quoted = false;
+        int end = text.Length;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+
+            if (c == '"')
+            {
+                quoted = !quoted;
+            }
+            else if (!quoted && (c is ' ' or '\t' or '('))
+            {
+                end = i;
+                break;
+            }
+        }
+
+        string token = text[..end].TrimEnd(';');
 
         return token.Length == 0 ? null : token;
     }
@@ -204,6 +221,54 @@ internal static partial class MigrationRisk
     /// <summary>A statement's operand without its terminating semicolon.</summary>
     private static string Statement(string text) => text.TrimEnd().TrimEnd(';').TrimEnd();
 
-    /// <summary>An identifier as compared: no quotes, lower case.</summary>
-    private static string Normalize(string identifier) => identifier.Replace("\"", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+    /// <summary>
+    /// A possibly schema-qualified identifier as Postgres resolves it: each unquoted part folded to lower case, each
+    /// quoted part kept exactly (its quotes removed and a doubled quote read as one), and the parts joined by a separator
+    /// no identifier spells - so <c>studio."Order"</c> and <c>studio.order</c> are two tables, as they are to Postgres,
+    /// and <c>"a.b"</c> is never <c>a.b</c>.
+    /// </summary>
+    internal static string Normalize(string identifier)
+    {
+        ArgumentNullException.ThrowIfNull(identifier);
+
+        System.Text.StringBuilder result = new(identifier.Length);
+
+        for (int i = 0; i < identifier.Length; i++)
+        {
+            char c = identifier[i];
+
+            if (c == '"')
+            {
+                for (i++; i < identifier.Length; i++)
+                {
+                    if (identifier[i] != '"')
+                    {
+                        result.Append(identifier[i]);
+                    }
+                    else if (i + 1 < identifier.Length && identifier[i + 1] == '"')
+                    {
+                        result.Append('"');
+                        i++;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+            }
+            else if (c == '.')
+            {
+                result.Append(PartSeparator);
+            }
+            else
+            {
+                result.Append(char.ToLowerInvariant(c));
+            }
+        }
+
+        return result.ToString();
+    }
+
+    /// <summary>What joins a qualified name's parts once normalized: a control character no identifier Weasel writes holds.</summary>
+    private const char PartSeparator = '\u001F';
 }

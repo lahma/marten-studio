@@ -117,6 +117,70 @@ public class RewindFloorTests
     }
 
     /// <summary>
+    /// A tenant id with a <c>:</c> in it makes an agent identity - <c>OrderSummary:All:a:b</c> - that does not read back as
+    /// that tenant's. Marten 9.51 parses the identity the daemon hands it only after the daemon has hard-stopped the
+    /// tenant's agents, so such an agent is never the one the rewind is made for, and such a tenant is not addressable.
+    /// </summary>
+    [Fact]
+    public void An_agent_whose_identity_does_not_read_back_is_never_rewound()
+    {
+        var colon = new JasperFx.Events.Projections.ShardName("OrderSummary", JasperFx.Events.Projections.ShardName.All, 1, "a:b");
+
+        colon.Identity.Should().Be("OrderSummary:All:a:b");
+        TenantRewind.RoundTrips(colon).Should().BeFalse("ShardName.TryParse cannot read a tenant with a ':' back");
+
+        using var daemon = new FakeProjectionDaemon();
+        daemon.Agents.Add(NamedAgent.For(colon));
+
+        EventDataService.TenantAgentOf(daemon, "OrderSummary", "a:b").Should().BeNull(
+            "the daemon runs it, but Marten could not find its shard after the daemon had stopped it");
+
+        TenantRewind.IsAddressable("a:b").Should().BeFalse();
+        TenantRewind.IsAddressable("acme").Should().BeTrue();
+        TenantRewind.IsAddressable("acme_corp-2").Should().BeTrue();
+        TenantRewind.IsAddressable(null).Should().BeFalse();
+        TenantRewind.RoundTrips(new JasperFx.Events.Projections.ShardName("OrderSummary", "All", 2, "acme")).Should().BeTrue(
+            "a versioned shard's identity reads back too");
+    }
+
+    /// <summary>
+    /// Marten's and JasperFx's "Unknown subscription name 'x'. Available options are ..." lists every subscription the
+    /// store has; neither rewind lets it through - not as the message, and not as an inner exception - so it cannot reach
+    /// the audit ring or the page (D5).
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task An_unknown_subscription_refusal_never_carries_the_stores_subscription_list(bool perTenant)
+    {
+        using var daemon = new FakeProjectionDaemon
+        {
+            RewindFailure = new ArgumentOutOfRangeException(
+                "Unknown subscription name 'OrderSummary:All:acme'. Available options are OrderSummary, SecretLedger, PayrollAudit",
+                innerException: null),
+        };
+
+        Func<Task> rewinding = perTenant
+            ? () => EventDataService.RewindTenantToFloorAsync(daemon, "OrderSummary", "acme", 41, Token)
+            : () => EventDataService.RewindToFloorAsync(daemon, "OrderSummary", 41, Token);
+
+        InvalidOperationException refused = (await rewinding.Should().ThrowAsync<InvalidOperationException>()).Which;
+
+        refused.Message.Should().Be(StreamCompactionRules.SubscriptionNotRecognised("OrderSummary", perTenant ? "acme" : null));
+        refused.Message.Should().NotContain("SecretLedger").And.NotContain("PayrollAudit").And.NotContain("Available options");
+        refused.InnerException.Should().BeNull("an inner exception's message is one ToString() away from a page");
+    }
+
+    [Fact]
+    public async Task Any_other_rewind_failure_keeps_its_own_words()
+    {
+        using var daemon = new FakeProjectionDaemon { RewindFailure = new TimeoutException("the shard did not stop in time") };
+
+        await ((Func<Task>) (() => EventDataService.RewindTenantToFloorAsync(daemon, "OrderSummary", "acme", 41, Token)))
+            .Should().ThrowAsync<TimeoutException>().WithMessage("the shard did not stop in time");
+    }
+
+    /// <summary>
     /// Whether a daemon implements the per-tenant rewind rather than inheriting <c>IProjectionDaemon</c>'s throwing
     /// default: Marten's own <c>ProjectionDaemon</c> does exactly from JasperFx 2.91 - which is what the light-up probe's
     /// first half says - and a daemon that overrides it does at every version.
@@ -146,11 +210,18 @@ public class NamedAgent : System.Reflection.DispatchProxy
 
     internal static JasperFx.Events.Daemon.ISubscriptionAgent For(string identity)
     {
+        JasperFx.Events.Projections.ShardName.TryParse(identity, out JasperFx.Events.Projections.ShardName? parsed).Should().BeTrue();
+
+        return For(parsed!);
+    }
+
+    /// <summary>An agent named exactly <paramref name="name" /> - one whose identity need not parse back.</summary>
+    internal static JasperFx.Events.Daemon.ISubscriptionAgent For(JasperFx.Events.Projections.ShardName name)
+    {
         JasperFx.Events.Daemon.ISubscriptionAgent agent =
             Create<JasperFx.Events.Daemon.ISubscriptionAgent, NamedAgent>();
 
-        JasperFx.Events.Projections.ShardName.TryParse(identity, out JasperFx.Events.Projections.ShardName? parsed).Should().BeTrue();
-        ((NamedAgent) (object) agent).name = parsed;
+        ((NamedAgent) (object) agent).name = name;
 
         return agent;
     }

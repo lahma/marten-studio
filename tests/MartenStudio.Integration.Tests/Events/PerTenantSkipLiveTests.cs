@@ -4,13 +4,17 @@ using JasperFx.MultiTenancy;
 
 using Marten;
 
+using MartenStudio.Integration.Tests.Documents;
+using MartenStudio.Integration.Tests.Logging;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Events;
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
@@ -41,6 +45,12 @@ public sealed class PerTenantSkipFixture(PostgresFixture postgres) : IAsyncLifet
 
     /// <summary>The audit ring.</summary>
     internal StudioActionLogService Audit { get; private set; } = null!;
+
+    /// <summary>The store and write policies' answers - everything allowed unless a test says otherwise.</summary>
+    internal FakeStoreAuthorizationService Policy { get; } = new();
+
+    /// <summary>What the studio logged.</summary>
+    internal LogCapture Logs { get; } = new();
 
     /// <inheritdoc />
     public async ValueTask InitializeAsync()
@@ -73,13 +83,18 @@ public sealed class PerTenantSkipFixture(PostgresFixture postgres) : IAsyncLifet
         await Store.Advanced.AddMartenManagedTenantsAsync(CancellationToken.None, Acme, Globex);
 
         var services = new ServiceCollection();
-        services.AddLogging();
+        services.AddLogging(builder => builder.AddProvider(Logs));
         services.AddAuthorization();
         services.AddSingleton<AuthenticationStateProvider, StubAuthenticationStateProvider>();
         services.AddSingleton<IDocumentStore>(Store);
+
+        // Both policies set and asked of a fake that allows everything until a reach test narrows it, and resets it.
+        services.AddSingleton<IAuthorizationService>(Policy);
         services.AddMartenStudio(static options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
+            options.StoreAuthorizationPolicy = "studio-store";
+            options.WriteAuthorizationPolicy = "studio-write";
             options.DiscoverTenantIds = false;
             options.KnownTenantIds.Add(Acme);
             options.KnownTenantIds.Add(Globex);
@@ -241,6 +256,83 @@ public class PerTenantSkipLiveTests(PerTenantSkipFixture fixture) : IClassFixtur
 
         refused.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(
             TenantSkipping ? StreamCompactionRules.SkipNeedsTenant : StreamCompactionRules.SkipNeedsOneSequence);
+    }
+
+    /// <summary>
+    /// Reach, with policies: a visitor the store and write policies allow only <c>(db, acme)</c> skips acme's #N - from
+    /// 9.51 it goes through without the whole database ever being asked about, below it the numbering's refusal stands -
+    /// and globex's #N never moves.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_visitor_allowed_only_acme_skips_acmes_event_and_never_globexs()
+    {
+        (long acme, long globex) = await fixture.AppendOneEachWithOneNumberAsync();
+        fixture.Policy.Allow(static resource => resource.TenantId == PerTenantSkipFixture.Acme);
+
+        try
+        {
+            var acmeScope = new StudioScope(MartenStoreRegistry.DefaultStoreKey, string.Empty, PerTenantSkipFixture.Acme);
+            int asked = fixture.Policy.Calls.Count;
+
+            Exception? outcome = await Record.ExceptionAsync(() => fixture.Events.SkipEventAsync(acmeScope, acme, Token));
+
+            fixture.Policy.Calls.Skip(asked).Should().NotContain(
+                static x => x.Resource.TenantId == null && x.Resource.Capability == nameof(StudioCapability.ManageDeadLetters),
+                "a skip reaches one tenant's event, so the database as a whole is never asked about");
+
+            (await fixture.IsSkippedAsync(PerTenantSkipFixture.Globex, globex)).Should().BeFalse();
+
+            if (TenantSkipping)
+            {
+                outcome.Should().BeNull();
+                (await fixture.IsSkippedAsync(PerTenantSkipFixture.Acme, acme)).Should().BeTrue();
+            }
+            else
+            {
+                outcome.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(StreamCompactionRules.SkipNeedsOneSequence);
+                (await fixture.IsSkippedAsync(PerTenantSkipFixture.Acme, acme)).Should().BeFalse();
+            }
+        }
+        finally
+        {
+            fixture.Policy.AllowEverything();
+        }
+    }
+
+    /// <summary>
+    /// The same visitor's globex-scoped skip is refused as a scope denial at every version - the resolver refuses
+    /// (db, globex) before the operation runs - audited as one (event 9203), and globex's #N does not move.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_same_visitors_globex_skip_is_refused_as_a_scope_denial_and_globex_does_not_move()
+    {
+        (_, long globex) = await fixture.AppendOneEachWithOneNumberAsync();
+        fixture.Policy.Allow(static resource => resource.TenantId == PerTenantSkipFixture.Acme);
+
+        try
+        {
+            var globexScope = new StudioScope(MartenStoreRegistry.DefaultStoreKey, string.Empty, PerTenantSkipFixture.Globex);
+            string target = globex.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            Func<Task> skipping = () => fixture.Events.SkipEventAsync(globexScope, globex, Token);
+
+            (await skipping.Should().ThrowAsync<StudioNotAuthorizedException>()).Which.Scope.TenantId.Should().Be(PerTenantSkipFixture.Globex);
+
+            (await fixture.IsSkippedAsync(PerTenantSkipFixture.Globex, globex)).Should().BeFalse();
+
+            StudioActionLogEntry entry = fixture.Audit.GetLatest()
+                .First(x => x.Action == EventDataService.SkipEventAction && x.Target == target);
+            entry.Succeeded.Should().BeFalse();
+            entry.Message.Should().Be("Not authorized for this store, database or tenant.");
+            entry.TenantId.Should().Be(PerTenantSkipFixture.Globex);
+
+            fixture.Logs.Lines.Should().Contain(static x => x.EventId.Id == 9203 && x.Message.Contains(PerTenantSkipFixture.Globex, StringComparison.Ordinal),
+                "a scope denial is logged as one");
+        }
+        finally
+        {
+            fixture.Policy.AllowEverything();
+        }
     }
 
     /// <summary>

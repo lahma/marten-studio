@@ -720,6 +720,23 @@ public class DeadLettersTests
         rewind.GetAttribute("title").Should().Be(StreamCompactionRules.RewindNeedsTenantAgentHere("OrderSummary", "acme"));
     }
 
+    /// <summary>
+    /// A tenant id with a <c>:</c> in it: its agents' identity does not read back as its own, so the per-tenant rewind would
+    /// stop them and then fail. Disabled, with the service's sentence - not "the daemon does not run it".
+    /// </summary>
+    [Fact]
+    public async Task A_tenant_whose_agents_cannot_be_addressed_is_not_offered_a_rewind_and_says_why()
+    {
+        using StudioComponentContext context = await PerTenantRewindableAsync(agents: ["OrderSummary:All:acme"]);
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId) with { TenantId = "a:b" }], false);
+
+        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
+
+        AngleSharp.Dom.IElement rewind = RewindButton(page);
+        rewind.HasAttribute("disabled").Should().BeTrue();
+        rewind.GetAttribute("title").Should().Be(StreamCompactionRules.RewindTenantNotAddressable("a:b"));
+    }
+
     [Theory]
     [InlineData("OrderSummary:All:acme", "OrderSummary", "acme", true)]
     [InlineData("ordersummary:All:acme", "OrderSummary", "acme", true)]

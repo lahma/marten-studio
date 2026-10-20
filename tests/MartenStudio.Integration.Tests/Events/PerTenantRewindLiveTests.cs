@@ -8,11 +8,14 @@ using JasperFx.MultiTenancy;
 
 using Marten;
 
+using MartenStudio.Integration.Tests.Documents;
+using MartenStudio.Integration.Tests.Logging;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Events;
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -54,6 +57,9 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
     private static readonly string Projection = typeof(PoisonProjection).FullName!;
 
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(60);
+
+    private readonly FakeStoreAuthorizationService policy = new();
+    private readonly LogCapture logs = new();
 
     private IHost? host;
     private IDocumentStore? store;
@@ -100,11 +106,17 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
             .UseLightweightSessions()
             .AddAsyncDaemon(DaemonMode.Solo);
 
+        builder.Logging.AddProvider(logs);
+
+        // Both policies set and asked of a fake that allows everything until a test narrows it - the reach tests' visitor.
         builder.Services.AddAuthorization();
         builder.Services.AddSingleton<AuthenticationStateProvider, StubAuthenticationStateProvider>();
+        builder.Services.AddSingleton<IAuthorizationService>(policy);
         builder.Services.AddMartenStudio(options =>
         {
             options.Capabilities = MartenStudioCapabilities.All();
+            options.StoreAuthorizationPolicy = "studio-store";
+            options.WriteAuthorizationPolicy = "studio-write";
             options.DiscoverTenantIds = false;
             options.KnownTenantIds.Add(Acme);
             options.KnownTenantIds.Add(Globex);
@@ -221,6 +233,7 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
         using IServiceScope scope = host!.Services.CreateScope();
         IEventDataService events = scope.ServiceProvider.GetRequiredService<IEventDataService>();
 
+        IReadOnlyList<DeadLetterEvent> acmeBefore = await LettersAsync(Acme);
         IReadOnlyList<DeadLetterEvent> globexBefore = await LettersAsync(Globex);
         long sequence = PoisonSequence(globexBefore);
 
@@ -231,9 +244,91 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
         (await rewinding.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Be(
             TenantRewind ? StreamCompactionRules.RewindNeedsTenant : StreamCompactionRules.RewindNeedsOneSequence);
 
-        // Every one of globex's dead letters is still there (none at all at the floor, where the daemon records none).
-        Guid[] globexAfter = [.. (await LettersAsync(Globex)).Select(static x => x.Id)];
-        globexBefore.Should().OnlyContain(x => globexAfter.Contains(x.Id));
+        // The fixture waited for a dead letter in each tenant at both ends, and the refusal came before anything was asked
+        // of the daemon: both tenants' dead letters are exactly the ones there were.
+        (await LettersAsync(Acme)).Select(static x => x.Id).Should().BeEquivalentTo(acmeBefore.Select(static x => x.Id));
+        (await LettersAsync(Globex)).Select(static x => x.Id).Should().BeEquivalentTo(globexBefore.Select(static x => x.Id));
+    }
+
+    /// <summary>
+    /// Reach, with policies: a visitor the store and write policies allow only <c>(db, acme)</c>. From 9.51 the rewind of
+    /// acme goes through - the whole-database question is never asked, because nothing beyond acme is reached - and
+    /// globex's dead letter and progression row do not move. Below 9.51 the numbering's refusal stands.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_visitor_allowed_only_acme_rewinds_acme_and_globex_does_not_move()
+    {
+        policy.Allow(static resource => resource.TenantId == Acme);
+
+        using IServiceScope scope = host!.Services.CreateScope();
+        IEventDataService events = scope.ServiceProvider.GetRequiredService<IEventDataService>();
+
+        IReadOnlyList<DeadLetterEvent> acmeBefore = await LettersAsync(Acme);
+        IReadOnlyList<DeadLetterEvent> globexBefore = await LettersAsync(Globex);
+        long? globexProgress = await ProgressAsync($"{Projection}:All:{Globex}");
+        long sequence = PoisonSequence(acmeBefore);
+
+        StudioScope acmeScope = new(MartenStoreRegistry.DefaultStoreKey, databaseId, Acme);
+
+        Exception? outcome = await Record.ExceptionAsync(
+            () => events.RewindSubscriptionAsync(acmeScope, Projection, sequence, Token));
+
+        policy.Calls.Should().NotContain(
+            static x => x.Resource.TenantId == null && x.Resource.Capability == nameof(StudioCapability.ManageDeadLetters),
+            "the per-tenant rewind reaches acme alone, so the database as a whole is never asked about");
+
+        if (!TenantRewind)
+        {
+            outcome.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(StreamCompactionRules.RewindNeedsOneSequence);
+        }
+        else
+        {
+            outcome.Should().BeNull("the policy allows acme, and acme is all the rewind reaches");
+
+            DeadLetterEvent letter = acmeBefore.Single(x => x.EventSequence == sequence);
+            await WaitForAsync(
+                async () => (await LettersAsync(Acme)).Any(x => x.EventSequence == letter.EventSequence && x.Id != letter.Id),
+                "acme's agent to re-apply its poison event and record a new dead letter");
+        }
+
+        (await LettersAsync(Globex)).Select(static x => x.Id).Should().BeEquivalentTo(globexBefore.Select(static x => x.Id));
+        (await ProgressAsync($"{Projection}:All:{Globex}")).Should().Be(globexProgress);
+    }
+
+    /// <summary>
+    /// The same visitor's globex-scoped rewind is refused as a scope denial at every version - the resolver refuses
+    /// (db, globex) before the operation runs - audited as one (event 9203), and globex's dead letter and progression row
+    /// do not move.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_same_visitors_globex_rewind_is_refused_as_a_scope_denial_and_globex_does_not_move()
+    {
+        policy.Allow(static resource => resource.TenantId == Acme);
+
+        using IServiceScope scope = host!.Services.CreateScope();
+        IEventDataService events = scope.ServiceProvider.GetRequiredService<IEventDataService>();
+
+        IReadOnlyList<DeadLetterEvent> globexBefore = await LettersAsync(Globex);
+        long? globexProgress = await ProgressAsync($"{Projection}:All:{Globex}");
+        long sequence = PoisonSequence(globexBefore);
+
+        StudioScope globexScope = new(MartenStoreRegistry.DefaultStoreKey, databaseId, Globex);
+
+        Func<Task> rewinding = () => events.RewindSubscriptionAsync(globexScope, Projection, sequence, Token);
+
+        (await rewinding.Should().ThrowAsync<StudioNotAuthorizedException>()).Which.Scope.TenantId.Should().Be(Globex);
+
+        StudioActionLogEntry entry = host.Services.GetRequiredService<StudioActionLogService>().GetLatest()
+            .First(static x => x.Action == EventDataService.RewindSubscriptionAction);
+        entry.Succeeded.Should().BeFalse();
+        entry.Message.Should().Be("Not authorized for this store, database or tenant.");
+        entry.TenantId.Should().Be(Globex);
+
+        logs.Lines.Should().Contain(static x => x.EventId.Id == 9203 && x.Message.Contains(Globex, StringComparison.Ordinal),
+            "a scope denial is logged as one");
+
+        (await LettersAsync(Globex)).Select(static x => x.Id).Should().BeEquivalentTo(globexBefore.Select(static x => x.Id));
+        (await ProgressAsync($"{Projection}:All:{Globex}")).Should().Be(globexProgress);
     }
 
     public async ValueTask DisposeAsync()

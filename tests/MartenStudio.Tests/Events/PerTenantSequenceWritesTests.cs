@@ -129,6 +129,29 @@ public class PerTenantSequenceWritesTests
         entry.Capability.Should().Be(nameof(StudioCapability.ManageDeadLetters));
     }
 
+    /// <summary>
+    /// A tenant id with a <c>:</c> in it is refused, audited, before the daemon is asked: its agents' identity does not read
+    /// back as its own, and from 9.51 the daemon would hard-stop them before Marten failed to parse it. Below 9.51 the
+    /// numbering's refusal comes first, as for every tenant.
+    /// </summary>
+    [Fact]
+    public async Task A_tenant_whose_agents_cannot_be_addressed_is_refused_before_the_daemon_is_asked()
+    {
+        await using Harness harness = await Harness.CreateAsync(perTenantSequences: true);
+
+        string expected = TenantRewind
+            ? StreamCompactionRules.RewindTenantNotAddressable("a:b")
+            : StreamCompactionRules.RewindNeedsOneSequence;
+
+        Func<Task> rewind = () => harness.Events.RewindSubscriptionAsync(harness.Scope with { TenantId = "a:b" }, "Poison", 5, Token);
+
+        (await rewind.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Be(expected);
+
+        StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Subject;
+        entry.Succeeded.Should().BeFalse();
+        entry.Message.Should().Be(expected);
+    }
+
     /// <summary>The control: on a conjoined store with one sequence neither write is refused for its numbering.</summary>
     [Fact]
     public async Task On_a_store_with_one_sequence_neither_is_refused_for_its_numbering()
@@ -190,6 +213,7 @@ public class PerTenantSequenceWritesTests
                 options.Capabilities = MartenStudioCapabilities.All();
                 options.DiscoverTenantIds = false;
                 options.KnownTenantIds.Add("acme");
+                options.KnownTenantIds.Add("a:b");
                 options.QueryTimeout = TimeSpan.FromSeconds(5);
             });
             services.AddScoped<AuthenticationStateProvider>(_ => users);

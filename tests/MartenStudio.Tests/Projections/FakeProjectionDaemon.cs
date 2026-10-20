@@ -127,11 +127,14 @@ internal sealed class FakeProjectionDaemon : IProjectionDaemon
         Rewinds.Add(subscriptionName + "/" + (sequenceFloor?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"));
         LastSequenceFloor = sequenceFloor;
         LastTimestamp = timestamp;
-        return Task.CompletedTask;
+        return RewindFailure is null ? Task.CompletedTask : Task.FromException(RewindFailure);
     }
 
     /// <summary>Every per-tenant rewind, as "subscription/tenant/floor".</summary>
     public List<string> TenantRewinds { get; } = [];
+
+    /// <summary>Thrown by both rewinds, when set - what Marten or JasperFx refused with.</summary>
+    public Exception? RewindFailure { get; set; }
 
     /// <summary>
     /// Records the per-tenant rewind - <c>IProjectionDaemon</c>'s five-argument overload, a throwing default at every
@@ -149,7 +152,7 @@ internal sealed class FakeProjectionDaemon : IProjectionDaemon
             + (sequenceFloor?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"));
         LastSequenceFloor = sequenceFloor;
         LastTimestamp = timestamp;
-        return Task.CompletedTask;
+        return RewindFailure is null ? Task.CompletedTask : Task.FromException(RewindFailure);
     }
 
     public void Dispose() => ((IDisposable) Tracker).Dispose();

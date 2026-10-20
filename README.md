@@ -816,10 +816,11 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
 - **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.51.0.
   `AllDatabases()` and `DescribeDatabasesAsync()` build the tenancy's databases, and the first time a
   store instance does, a master-table or sharded tenancy applies its lookup table and upserts its seed rows,
-  and a single-server tenancy creates every configured database that does not exist yet. The tenancy's own
-  `AutoCreate`, when it sets one, decides whether the lookup table is applied; below Marten 9.51 the apply
-  then runs under the store's `AutoCreateSchemaObjects` (`All` included, and `None` becomes
-  `CreateOrUpdate`), and from 9.51 under the tenancy's own `AutoCreate`. The studio enumerates on the first navigation, so in a process that runs no
+  and a single-server tenancy creates every configured database that does not exist yet. The lookup table's
+  apply is gated, and from Marten 9.51 run, under the tenancy's own `AutoCreate` when it sets one and the
+  store's `AutoCreateSchemaObjects` otherwise; below 9.51 it always runs under the store's (`All`
+  included, and a store's `None` becomes `CreateOrUpdate` when the tenancy's own says anything else). A
+  tenancy that sets none applies under the store's mode at every version. The studio enumerates on the first navigation, so in a process that runs no
   daemon of its own it can be that first caller; a host whose daemon runs in-process, or that applies on
   startup, has always enumerated before it. The opt-in health check's own listing never enumerates one
   (AGENTS.md D27); a hosted projection coordinator it asks for its daemons enumerates the store, as its own

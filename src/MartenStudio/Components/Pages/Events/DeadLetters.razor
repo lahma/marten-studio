@@ -513,6 +513,7 @@
 
     private bool RunsTenantAgent(DeadLetterRow row) =>
         projections is { Daemon.IsHostedHere: true } view
+        && TenantRewind.IsAddressable(row.TenantId)
         && TenantRewind.RunsAgent(view.Daemon.Agents.Select(static x => x.ShardName), row.ProjectionName, row.TenantId);
 
     private ProjectionInfo? FindProjection(string projectionName) =>
@@ -560,6 +561,11 @@
 
         if (PerTenantSequences)
         {
+            if (!TenantRewind.IsAddressable(row.TenantId))
+            {
+                return StreamCompactionRules.RewindTenantNotAddressable(row.TenantId);
+            }
+
             return RunsTenantAgent(row)
                 ? $"Rewinds tenant {row.TenantId}'s agents of the subscription so the daemon re-applies this event and everything after it in that tenant"
                 : StreamCompactionRules.RewindNeedsTenantAgentHere(projectionName, row.TenantId);

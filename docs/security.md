@@ -65,7 +65,14 @@ tenant only when the database holds that tenant alone). One rewind is the except
 `Events.UseTenantPartitionedEvents`, from Marten 9.51 with JasperFx 2.91, the dead-letter rewind is the daemon's
 per-tenant one - it stops, rewinds and restarts only that tenant's agents and deletes only that tenant's dead
 letters - so it is asked about the dead letter's tenant, and it is offered only where the daemon in this process
-runs that tenant's agent. On such a store the database-wide rewind is never offered.
+runs that tenant's agent. On such a store the database-wide rewind is never offered. One window remains, and
+the studio can only keep it short: the agent check is a snapshot of the daemon, taken immediately before the call
+(nothing awaits between them), and under HotCold the node can lose leadership in that instant. Its coordinator
+then stops every agent it runs while the rewind starts the tenant's agents again here, beside the ones the new
+leader starts. JasperFx's rewind takes no leadership lock, so this cannot be closed from the studio; the extra
+agents last until the node's next leadership poll stops them (at most one `LeadershipPollingTime`). A tenant id
+with a `:` in it is never rewound: its agents' identity does not read back as its own, and the daemon would stop
+them before Marten refused the rewind.
 
 `BrowsableSchemas` limits what the database browser's screens show, not what can be read: the SQL console
 reads whatever the connection's role can, in any schema. `SqlConsoleRole` is the real boundary for both,

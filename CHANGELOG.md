@@ -9,7 +9,10 @@
   dead letter's tenant's agents alone and deletes only that tenant's dead letters, so it is authorized for that tenant
   rather than for the database as a whole, and it is offered only where the async daemon in this process runs that
   tenant's agent of the projection (on HotCold's cold node or a distributed host it would otherwise start a second
-  one). The database-wide rewind is never offered on such a store; below 9.51 the rewind stays refused.
+  one). The database-wide rewind is never offered on such a store; below 9.51 the rewind stays refused. A tenant id
+  with a `:` in it is not rewound, because its agents' name does not read back as that tenant's and Marten would
+  refuse only after the daemon had stopped them; and neither rewind lets Marten's "Unknown subscription name ...
+  Available options are ..." - every subscription the store has - reach the page or the audit log.
 - Compacting a stream whose folded events carry DCB tags works from Marten 9.51, which deletes their tag rows with
   them; the snapshot keeps the last event's tags. Below 9.51 Postgres still refuses and nothing changes, and the
   dialog says which this host's Marten does.
