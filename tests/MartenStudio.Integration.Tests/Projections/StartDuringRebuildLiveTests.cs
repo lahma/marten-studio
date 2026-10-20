@@ -1,13 +1,13 @@
 using Marten.Exceptions;
 
 using MartenStudio.Integration.Tests.Health;
-using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Projections;
 

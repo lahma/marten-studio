@@ -1,6 +1,5 @@
 using Marten;
 
-using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Support;
@@ -8,6 +7,7 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Query;
 

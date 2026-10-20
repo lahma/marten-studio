@@ -1,8 +1,9 @@
 using MartenStudio.Services;
-using MartenStudio.Services.Relationships;
 using MartenStudio.Tests.Support;
 
-using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph;
+using GraphModel = PostgresStudio.Services.Relationships.RelationshipGraph;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Relationships;
 
@@ -170,7 +171,7 @@ public class RelationshipViewTests
     public void The_default_view_is_left_out_of_the_url()
     {
         RelationshipViews.Token(RelationshipViewMode.Both).Should().BeNull();
-        MartenStudio.Services.Database.DatabaseLinks.ToRelationships(
+        PostgresStudio.Services.Database.DatabaseLinks.ToRelationships(
                 MartenStudioSettings.Of(new MartenStudioOptions()), MartenStudioDescriptor.Instance, new StudioScope("default", "db1", null), RelationshipViewMode.Tables, "quartz")
             .Should().Be("relationships?store=default&db=db1&view=tables&schema=quartz");
     }

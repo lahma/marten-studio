@@ -2,11 +2,10 @@ using JasperFx.Events.Daemon;
 
 using Marten;
 
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Checks;
-
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Integration.Tests.Health;
 

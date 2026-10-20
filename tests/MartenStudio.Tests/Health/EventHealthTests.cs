@@ -7,8 +7,8 @@ using Marten;
 using Marten.Events;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

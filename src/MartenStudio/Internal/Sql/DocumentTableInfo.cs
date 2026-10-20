@@ -3,6 +3,7 @@ using JasperFx.MultiTenancy;
 using Marten.Schema;
 
 using NpgsqlTypes;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Internal.Sql;
 

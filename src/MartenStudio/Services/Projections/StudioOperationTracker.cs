@@ -3,6 +3,7 @@ using System.Diagnostics;
 
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Services.Projections;
 

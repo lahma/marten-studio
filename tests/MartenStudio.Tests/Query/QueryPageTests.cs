@@ -2,8 +2,6 @@ using System.Reflection;
 
 using Bunit;
 
-using MartenStudio.Components.Pages.Query;
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
@@ -13,6 +11,10 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
 
 using QueryPage = MartenStudio.Components.Pages.Query.Query;
+using PostgresStudio.Components.Pages.Query;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Query;
 
@@ -48,7 +50,7 @@ public class QueryPageTests
     private sealed class QueryServices(FakeQueryService instance) : IServiceProvider
     {
         public object? GetService(Type requested) =>
-            requested == typeof(IQueryService) || requested == typeof(MartenStudio.Services.Sources.ISqlConsoleService)
+            requested == typeof(IQueryService) || requested == typeof(PostgresStudio.Services.Sources.ISqlConsoleService)
                 ? instance
                 : null;
     }
@@ -820,11 +822,18 @@ public class QueryPageTests
     [Fact]
     public void QueryComponentsUseTheSharedInteropPredicate()
     {
-        var directory = RepositoryRoot.Combine("src", "MartenStudio", "Components", "Pages", "Query");
-
-        string[] files = [.. Directory.EnumerateFiles(directory, "*.razor", SearchOption.AllDirectories)];
+        // Both studios' Components/Pages/Query: the shared editor, grid and console panel moved to PostgresStudio, and
+        // Query.razor and LinqQueryPanel.razor stayed in MartenStudio.
+        string[] files = StudioProjects.Files("*.razor", SearchOption.AllDirectories, "Components", "Pages", "Query");
 
         files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
+
+        foreach (string project in StudioProjects.Names)
+        {
+            files.Should().Contain(
+                x => StudioProjects.ProjectOf(SourceScanner.Relative(x)) == project,
+                "{0} has Query components, so a scan that read none of them reads one studio", project);
+        }
 
         List<string> offenders = [];
         var callers = 0;

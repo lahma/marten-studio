@@ -1,5 +1,5 @@
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Query;
+using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Database;
 

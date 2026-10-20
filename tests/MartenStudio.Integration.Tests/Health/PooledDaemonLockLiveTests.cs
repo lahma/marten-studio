@@ -6,11 +6,10 @@ using DotNet.Testcontainers.Networks;
 
 using JasperFx.Events.Daemon;
 
-using MartenStudio.Services.Health;
-
 using Npgsql;
 
 using Testcontainers.PostgreSql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

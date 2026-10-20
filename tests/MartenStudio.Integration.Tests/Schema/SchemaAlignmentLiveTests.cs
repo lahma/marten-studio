@@ -8,8 +8,7 @@ using Marten.Events.Projections.Flattened;
 using Marten.Schema;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 
 using Microsoft.AspNetCore.Components.Authorization;
@@ -20,6 +19,7 @@ using Npgsql;
 
 using Weasel.Postgresql;
 using Weasel.Postgresql.Tables;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Schema;
 

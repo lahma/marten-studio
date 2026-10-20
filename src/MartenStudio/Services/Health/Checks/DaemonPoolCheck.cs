@@ -3,10 +3,12 @@ using System.Globalization;
 using JasperFx;
 using JasperFx.Events.Daemon;
 
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Services.Health.Checks;
 

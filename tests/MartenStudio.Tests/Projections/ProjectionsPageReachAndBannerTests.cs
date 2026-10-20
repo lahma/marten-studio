@@ -9,6 +9,7 @@ using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Components;
 
 using Page = MartenStudio.Components.Pages.Projections.Projections;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Projections;
 

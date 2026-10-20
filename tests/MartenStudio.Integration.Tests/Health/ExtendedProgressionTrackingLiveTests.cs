@@ -1,5 +1,5 @@
 using MartenStudio.SampleDomain;
-using MartenStudio.Services.Health;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

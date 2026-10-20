@@ -5,14 +5,14 @@ using Marten.Storage;
 
 using MartenStudio.Integration.Tests.Browser;
 using MartenStudio.Integration.Tests.Logging;
-using MartenStudio.Services;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Database;
 

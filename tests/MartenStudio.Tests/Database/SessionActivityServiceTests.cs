@@ -1,9 +1,7 @@
 using Marten;
 
-using MartenStudio.Services;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Sources;
 using MartenStudio.Tests.Health;
 using MartenStudio.Tests.Support;
 
@@ -12,6 +10,8 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Database;
 

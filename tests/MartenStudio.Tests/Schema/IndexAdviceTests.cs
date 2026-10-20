@@ -1,5 +1,6 @@
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Schema;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Tests.Schema;
 

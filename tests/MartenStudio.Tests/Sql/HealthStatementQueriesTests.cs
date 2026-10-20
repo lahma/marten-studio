@@ -1,9 +1,10 @@
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Health.Checks;
 
 using Npgsql;
 
 using NpgsqlTypes;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Tests.Sql;
 

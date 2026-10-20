@@ -11,6 +11,7 @@ using MartenStudio.Services.Documents;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests;
 

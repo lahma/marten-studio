@@ -6,6 +6,7 @@ using Marten;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Services;
 

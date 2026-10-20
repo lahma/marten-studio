@@ -2,8 +2,8 @@ using Bunit;
 
 using MartenStudio.Components.Pages.Events;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Events;
 

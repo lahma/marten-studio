@@ -1,0 +1,165 @@
+@using PostgresStudio.Components.Json
+@using PostgresStudio.Components.Shared
+@*
+    The SQL console's results.
+
+    Everything it is given is already formatted and capped on the server by SqlValueFormatter: a select *
+    over a table with a 40 MB bytea column must never push 40 MB down a SignalR circuit to be rendered as
+    mojibake. So the grid's job is only to say what each cell *is* - NULL drawn as its own thing rather
+    than as an empty string, binary as \x…, a Postgres type on every column header - and to let a JSON
+    cell open in the viewer.
+
+    The parameters are strings and tuples of strings rather than the studio's own result types because a
+    Razor component's class is public: a public [Parameter] cannot have an internal type, and every data
+    type in this project is internal on purpose (D12). Passing the rendering, not the model, is also what
+    makes this grid reusable by any page that has a table to draw.
+*@
+
+@if (Columns.Count == 0)
+{
+    <div class="ms-empty ms-query-empty">
+        <p class="ms-empty-title">@EmptyTitle</p>
+        <p class="ms-empty-description">@EmptyText</p>
+    </div>
+}
+else
+{
+    @* Already a scroll container of its own, so it is not wrapped in a <TableScroll> - that would be two
+       nested scrollers, and the outer one would never scroll. It takes the shared class instead, which
+       is what carries the edge cue, the focus ring and the keyboard reachability every other data table
+       on the studio now has. *@
+    <div class="ms-query-grid-scroll ms-table-scroll" role="region" aria-label="Query results table" tabindex="0">
+        <table class="ms-table ms-query-grid">
+            <thead>
+                <tr>
+                    <th class="ms-query-grid-ordinal" scope="col">#</th>
+                    @for (int column = 0; column < Columns.Count; column++)
+                    {
+                        (string Name, string Type) header = Columns[column];
+                        <th scope="col" @key="column">
+                            <span class="ms-query-grid-name">@header.Name</span>
+                            <span class="ms-query-grid-type">@header.Type</span>
+                        </th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @for (int row = 0; row < Rows.Count; row++)
+                {
+                    int rowIndex = row;
+                    IReadOnlyList<(string Text, string Kind)> cells = Rows[row];
+                    <tr class="ms-table-row" @key="rowIndex">
+                        <td class="ms-table-cell ms-query-grid-ordinal">@(rowIndex + 1)</td>
+                        @for (int column = 0; column < Columns.Count; column++)
+                        {
+                            int columnIndex = column;
+                            (string Text, string Kind) cell = columnIndex < cells.Count
+                                ? cells[columnIndex]
+                                : (string.Empty, NullKind);
+                            @* ms-query-kind-, never ms-query-cell- + kind: for a text cell that spells
+                               ms-query-cell-text, the class of the span inside a cell - an inline-block - and a
+                               cell that is an inline-block is not a table cell. The row grid learnt the same
+                               thing first (RowGrid's CellClass). *@
+                            <td class="ms-table-cell ms-query-cell ms-query-kind-@cell.Kind" @key="columnIndex">
+                                @* NULL, the JSON chip and plain text are SqlCellView's, shared with the database
+                                   browser's row grid so the two grids never spell a cell two ways.
+                                   A pgvector value is not collapsed here, unlike the row grid (PGV): the console reads
+                                   values through Npgsql's type mapping, which cannot read a vector at all unless the
+                                   host called UseVector() (the cell says "cannot read" and the type), and when it can,
+                                   the text is Pgvector's own ToString, not Postgres's; and nothing here knows the
+                                   column is pgvector's - the row grid's PgVectorColumn comes from pg_depend and the type
+                                   modifier, and a result set has only a type name. Casting to ::text in the statement
+                                   reads one as Postgres prints it. *@
+                                <SqlCellView Text="@cell.Text"
+                                             Kind="@cell.Kind"
+                                             OnOpen="() => OpenJsonAsync(rowIndex, columnIndex)" />
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <p class="ms-query-grid-footer ms-muted">
+        @Rows.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) row@(Rows.Count == 1 ? "" : "s")
+        @if (Truncated)
+        {
+            <span class="ms-chip ms-chip-warning ms-query-truncated">
+                stopped at @RowLimit.ToString(System.Globalization.CultureInfo.InvariantCulture) rows
+            </span>
+            <span>
+                - the reader was stopped rather than a <code>limit</code> appended, so the statement is
+                still exactly what you typed.
+            </span>
+        }
+    </p>
+
+    @if (openJson is not null)
+    {
+        <div class="ms-query-json-panel">
+            <div class="ms-query-json-panel-header">
+                <span class="ms-query-json-panel-title">@openTitle</span>
+                <button type="button" class="ms-btn ms-btn-sm" @onclick="CloseJson">Close</button>
+            </div>
+            <JsonView Json="@openJson"
+                      Label="@openTitle"
+                      AutoExpandDepth="1"
+                      ShowSearch="false"
+                      DownloadFileName="cell.json" />
+        </div>
+    }
+}
+
+@code {
+    /// <summary>The cell kind <c>SqlCellKind.Null</c> is passed as.</summary>
+    public const string NullKind = SqlCellView.NullKind;
+
+    /// <summary>The cell kind <c>SqlCellKind.Json</c> is passed as.</summary>
+    public const string JsonKind = SqlCellView.JsonKind;
+
+    private string? openJson;
+    private string openTitle = string.Empty;
+
+    /// <summary>The columns, as name and Postgres type.</summary>
+    [Parameter]
+    public IReadOnlyList<(string Name, string Type)> Columns { get; set; } = [];
+
+    /// <summary>The rows, as already-formatted text and the kind of each cell, lower-cased.</summary>
+    [Parameter]
+    public IReadOnlyList<IReadOnlyList<(string Text, string Kind)>> Rows { get; set; } = [];
+
+    /// <summary>Whether the reader was stopped at the row cap.</summary>
+    [Parameter]
+    public bool Truncated { get; set; }
+
+    /// <summary>The row cap that was in force.</summary>
+    [Parameter]
+    public int RowLimit { get; set; }
+
+    /// <summary>The heading shown when there are no columns at all.</summary>
+    [Parameter]
+    public string EmptyTitle { get; set; } = "Nothing to show";
+
+    /// <summary>What to say when there are no columns at all.</summary>
+    [Parameter]
+    public string EmptyText { get; set; } = "This statement returned no result set.";
+
+    private Task OpenJsonAsync(int row, int column)
+    {
+        if (row < Rows.Count && column < Rows[row].Count)
+        {
+            openJson = Rows[row][column].Text;
+            openTitle = (column < Columns.Count ? Columns[column].Name : "value") +
+                " (row " + (row + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + ")";
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void CloseJson()
+    {
+        openJson = null;
+        openTitle = string.Empty;
+    }
+}

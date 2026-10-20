@@ -7,8 +7,7 @@ using Marten.Schema;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Health;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Live;
 
 using Microsoft.Extensions.Logging;
@@ -17,6 +16,10 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Services.Projections;
 

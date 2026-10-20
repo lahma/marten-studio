@@ -1,6 +1,4 @@
 using MartenStudio.Services;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Live;
 using MartenStudio.Tests.Events;
 using MartenStudio.Tests.Projections;
 using MartenStudio.Tests.Support;
@@ -8,6 +6,9 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Tests.Health;
 

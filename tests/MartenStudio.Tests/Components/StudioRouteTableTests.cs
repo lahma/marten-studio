@@ -1,9 +1,11 @@
 using MartenStudio.Components;
 using MartenStudio.Components.Pages;
-using MartenStudio.Services.Settings;
+using PostgresStudio.Services.Settings;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
+using PostgresStudio.Components;
+using PostgresStudio.Components.Pages;
 
 namespace MartenStudio.Tests.Components;
 
@@ -37,27 +39,41 @@ public class StudioRouteTableTests
     // Built from the descriptor's (assembly, root) pairs
     // -------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// MartenStudio's pages are rooted at <c>/marten</c> and the shared studio's at <c>/postgres</c>, each re-rooted at the
+    /// mount path from its own root (design §2.5) - two assemblies since the move.
+    /// </summary>
     [Fact]
-    public void The_descriptor_names_the_studio_assembly_rooted_at_marten()
+    public void The_descriptor_names_both_studio_assemblies_each_at_its_own_root()
     {
-        MartenSpine.Descriptor.PageAssemblies.Should().ContainSingle()
-            .Which.Should().Be(new StudioPageAssembly(typeof(MartenStudioApp).Assembly, "/marten"));
+        MartenSpine.Descriptor.PageAssemblies.Should().Equal(
+            new StudioPageAssembly(typeof(MartenStudioApp).Assembly, "/marten"),
+            new StudioPageAssembly(typeof(StudioHome).Assembly, "/postgres"));
+
+        typeof(StudioHome).Assembly.Should().NotBeSameAs(typeof(MartenStudioApp).Assembly, "the shared pages are an assembly of their own");
     }
 
     [Fact]
     public void Each_assembly_s_pages_are_matched_below_its_own_root()
     {
-        StudioRouteTable table = new([(typeof(Activity), "/marten"), (typeof(ElsewherePage), "/elsewhere")]);
+        StudioRouteTable table = new(
+        [
+            (typeof(Activity), "/postgres"),
+            (typeof(MartenStudio.Components.Pages.Projections.Projections), "/marten"),
+            (typeof(ElsewherePage), "/elsewhere"),
+        ]);
 
         table.Match("activity")!.PageType.Should().Be<Activity>();
+        table.Match("projections")!.PageType.Should().Be<MartenStudio.Components.Pages.Projections.Projections>();
         table.Match("other")!.PageType.Should().Be<ElsewherePage>();
         table.Match("elsewhere/other").Should().BeNull("a template is stored relative to its own root");
+        table.Match("postgres/activity").Should().BeNull("the shared studio's root is stripped like any other");
     }
 
     [Fact]
     public void A_route_two_pages_claim_is_refused_when_the_table_is_built()
     {
-        Action build = () => _ = new StudioRouteTable([(typeof(Activity), "/marten"), (typeof(DuplicateActivityPage), "/elsewhere")]);
+        Action build = () => _ = new StudioRouteTable([(typeof(Activity), "/postgres"), (typeof(DuplicateActivityPage), "/elsewhere")]);
 
         build.Should().Throw<InvalidOperationException>()
             .WithMessage("*Activity*DuplicateActivityPage*both claim the route '/activity'*");

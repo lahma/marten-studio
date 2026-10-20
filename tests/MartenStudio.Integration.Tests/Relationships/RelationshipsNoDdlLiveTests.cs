@@ -3,14 +3,13 @@ using System.Security.Claims;
 using Marten;
 using Marten.Schema;
 
-using MartenStudio.Services;
-using MartenStudio.Services.Relationships;
-
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Integration.Tests.Relationships;
 

@@ -280,7 +280,7 @@ public sealed class MartenStudioOptions
     /// </summary>
     internal string EscapedPath => PathCache.Escaped;
 
-    private Services.Settings.StudioPath? pathCache;
+    private PostgresStudio.Services.Settings.StudioPath? pathCache;
 
     /// <summary>
     /// Values derived from <see cref="Path"/>, computed once and reused — they are read
@@ -289,11 +289,11 @@ public sealed class MartenStudioOptions
     /// observes a fully-populated instance (reference reads/writes are atomic) even if the option
     /// is mutated mid-render.
     /// </summary>
-    private Services.Settings.StudioPath PathCache
+    private PostgresStudio.Services.Settings.StudioPath PathCache
     {
         get
         {
-            Services.Settings.StudioPath cache = Services.Settings.StudioPath.Of(Path, DefaultPath, pathCache);
+            PostgresStudio.Services.Settings.StudioPath cache = PostgresStudio.Services.Settings.StudioPath.Of(Path, DefaultPath, pathCache);
             pathCache = cache;
             return cache;
         }

@@ -1,6 +1,6 @@
 using Bunit;
 
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
@@ -26,19 +26,19 @@ internal static class DatabasePageData
     }
 
     /// <summary>Renders the browser at <paramref name="query" />, the way the address bar would deliver it.</summary>
-    public static IRenderedComponent<MartenStudio.Components.Pages.Database.DatabaseObjects> RenderBrowser(
+    public static IRenderedComponent<PostgresStudio.Components.Pages.Database.DatabaseObjects> RenderBrowser(
         StudioComponentContext context,
         string query = "")
     {
         context.Navigate("marten/database" + (query.Length == 0 ? string.Empty : "?" + query));
 
-        var page = context.Render<MartenStudio.Components.Pages.Database.DatabaseObjects>();
+        var page = context.Render<PostgresStudio.Components.Pages.Database.DatabaseObjects>();
         page.WaitForAssertion(() => page.FindAll(".ms-loading-spinner").Should().BeEmpty());
         return page;
     }
 
     /// <summary>Renders object detail for one relation, on one tab or the page's default.</summary>
-    public static IRenderedComponent<MartenStudio.Components.Pages.Database.ObjectDetail> RenderObject(
+    public static IRenderedComponent<PostgresStudio.Components.Pages.Database.ObjectDetail> RenderObject(
         StudioComponentContext context,
         string schema,
         string name,
@@ -48,7 +48,7 @@ internal static class DatabasePageData
             "marten/database/object?schema=" + Uri.EscapeDataString(schema) + "&name=" + Uri.EscapeDataString(name)
             + (tab is null ? string.Empty : "&tab=" + tab));
 
-        var page = context.Render<MartenStudio.Components.Pages.Database.ObjectDetail>();
+        var page = context.Render<PostgresStudio.Components.Pages.Database.ObjectDetail>();
         page.WaitForAssertion(() => page.FindAll(".ms-db-object-header, .ms-empty, .ms-error-alert").Should().NotBeEmpty());
         return page;
     }

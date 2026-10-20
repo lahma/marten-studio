@@ -1,4 +1,6 @@
 using MartenStudio.Internal.Sql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Services.Documents;
 

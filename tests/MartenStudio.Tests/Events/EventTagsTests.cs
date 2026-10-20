@@ -6,6 +6,7 @@ using Marten.Events;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Sql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Events;
 

@@ -1,8 +1,7 @@
-using MartenStudio.Internal.Sql;
-
 using Microsoft.Playwright;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests.Browser;
 

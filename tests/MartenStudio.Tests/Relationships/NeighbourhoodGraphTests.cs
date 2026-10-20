@@ -1,13 +1,13 @@
 using Bunit;
 
-using MartenStudio.Components.Pages.Relationships;
-using MartenStudio.Services.Relationships;
+using PostgresStudio.Components.Pages.Relationships;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph;
+using GraphModel = PostgresStudio.Services.Relationships.RelationshipGraph;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Relationships;
 

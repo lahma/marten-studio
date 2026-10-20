@@ -1,7 +1,7 @@
-using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Services;
 
@@ -92,7 +92,7 @@ public class PostgresFailureTests
 
         // A name that does not resolve surfaces as the resolver's own SocketException; a server that does
         // not answer, as Npgsql's. Either way it is what the connection threw, not a wrapper of the studio's.
-        thrown.GetType().Namespace.Should().NotStartWith("MartenStudio");
+        thrown.GetType().Namespace.Should().NotStartWith("MartenStudio").And.NotStartWith("PostgresStudio");
         PostgresFailure.IsConnectionFailure(thrown).Should().BeTrue();
         PostgresFailure.IsTimeout(thrown).Should().BeFalse();
     }

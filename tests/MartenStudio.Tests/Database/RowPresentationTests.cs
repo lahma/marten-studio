@@ -1,11 +1,11 @@
 using System.Text.Json;
 
-using MartenStudio.Components.Pages.Database;
-using MartenStudio.Components.Shared;
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Query;
+using PostgresStudio.Components.Pages.Database;
+using PostgresStudio.Components.Shared;
+using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Support;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Database;
 

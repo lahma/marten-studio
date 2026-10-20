@@ -1,10 +1,10 @@
 using Marten;
 
 using MartenStudio.Services.Documents;
-using MartenStudio.Services.Query;
 using MartenStudio.Services.Schema;
 
 using Npgsql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Integration.Tests.Documents;
 
@@ -13,7 +13,7 @@ namespace MartenStudio.Integration.Tests.Documents;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>P2-perf deliverable 4.</b> <see cref="MartenStudio.Internal.Sql.ColumnCatalog" /> and
+/// <b>P2-perf deliverable 4.</b> <see cref="PostgresStudio.Internal.Sql.ColumnCatalog" /> and
 /// <see cref="MartenStudio.Internal.Sql.IndexCatalog" /> are DI singletons that cache for sixty seconds,
 /// which is right for migrations the studio did not make — a deployment, a DBA — and wrong for the one it
 /// did. Without a <c>Clear()</c>, somebody pressing Apply on the Schema screen watched the documents

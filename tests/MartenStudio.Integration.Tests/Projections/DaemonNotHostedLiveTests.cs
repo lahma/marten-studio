@@ -1,5 +1,5 @@
-using MartenStudio.Services;
 using MartenStudio.Services.Projections;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Projections;
 

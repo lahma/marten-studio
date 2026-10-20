@@ -1,9 +1,10 @@
 using JasperFx.Events.Daemon;
 
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 
 using Npgsql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Integration.Tests.Health;
 

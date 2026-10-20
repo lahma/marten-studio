@@ -9,6 +9,8 @@ using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
 using ListPage = MartenStudio.Components.Pages.Documents.Documents;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Documents;
 

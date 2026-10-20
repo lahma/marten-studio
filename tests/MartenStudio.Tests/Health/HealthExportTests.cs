@@ -1,8 +1,7 @@
 using System.Text.Json;
 
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
-using MartenStudio.Services.Health.Export;
+using PostgresStudio.Services.Health.Export;
 using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Projections;
 
@@ -19,6 +18,7 @@ using AspNetCoreHealthCheckContext = Microsoft.Extensions.Diagnostics.HealthChec
 using AspNetCoreHealthCheckResult = Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult;
 using AspNetCoreHealthReport = Microsoft.Extensions.Diagnostics.HealthChecks.HealthReport;
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 
@@ -91,7 +91,7 @@ public class HealthExportTests
         registration.Name.Should().Be("marten");
         registration.FailureStatus.Should().Be(HealthStatus.Degraded);
         registration.Tags.Should().BeEquivalentTo(["marten", "ready"]);
-        registration.Factory(provider).Should().BeOfType<MartenStudioHealthCheck>();
+        registration.Factory(provider).Should().BeOfType<StudioHealthCheck>();
     }
 
     [Fact]
@@ -132,9 +132,9 @@ public class HealthExportTests
     public void The_advisors_registry_does_not_take_the_export_for_one_of_its_checks()
     {
         MartenStudio.Services.MartenStudioDescriptor.Instance.HealthCheckAssemblies.Select(static x => x.Assembly).Distinct()
-            .SelectMany(HealthCheckRegistry.Discover).Should().NotContain(typeof(MartenStudioHealthCheck));
-        typeof(MartenStudioHealthCheck).Should().Implement<AspNetCoreHealthCheck>()
-            .And.NotImplement<MartenStudio.Services.Health.IHealthCheck>();
+            .SelectMany(HealthCheckRegistry.Discover).Should().NotContain(typeof(StudioHealthCheck));
+        typeof(StudioHealthCheck).Should().Implement<AspNetCoreHealthCheck>()
+            .And.NotImplement<PostgresStudio.Services.Health.IHealthCheck>();
     }
 
     // ---- Acceptance 2: the mapping, through HealthCheckService --------------------------------------
@@ -167,7 +167,7 @@ public class HealthExportTests
     {
         await using HealthExportHarness harness = HealthExportHarness.Create(validateScopes: true);
 
-        Action fromRoot = () => harness.Services.GetService<MartenStudio.Services.Sources.IStudioSourceProvider>();
+        Action fromRoot = () => harness.Services.GetService<PostgresStudio.Services.Sources.IStudioSourceProvider>();
         fromRoot.Should().Throw<InvalidOperationException>("the container validates scopes, so this test can tell a root resolution");
 
         HealthReportEntry entry = await harness.ProbeAsync();
@@ -644,7 +644,7 @@ public class HealthExportTests
     {
         await using HealthExportHarness harness = HealthExportHarness.Create(checks: [typeof(ScriptedConfigurationCheck)]);
         (TaskCompletionSource entered, TaskCompletionSource release) = Block(harness);
-        MartenStudioHealthCheck check = new(harness.Runner);
+        StudioHealthCheck check = new(harness.Runner);
 
         using CancellationTokenSource gaveUp = CancellationTokenSource.CreateLinkedTokenSource(Token);
         Task<AspNetCoreHealthCheckResult> impatient = check.CheckHealthAsync(Context(check), gaveUp.Token);
@@ -797,7 +797,7 @@ public class HealthExportTests
         return (entered, release);
     }
 
-    private static AspNetCoreHealthCheckContext Context(MartenStudioHealthCheck check) => new()
+    private static AspNetCoreHealthCheckContext Context(StudioHealthCheck check) => new()
     {
         Registration = new HealthCheckRegistration(HealthExportHarness.DefaultName, check, failureStatus: null, tags: null),
     };

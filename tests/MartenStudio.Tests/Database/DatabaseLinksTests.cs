@@ -1,7 +1,8 @@
-using MartenStudio.Components;
 using MartenStudio.Services;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Settings;
+using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
+using PostgresStudio.Components;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Database;
 
@@ -238,9 +239,9 @@ public class DatabaseLinksTests
     [Fact]
     public void A_name_that_cannot_be_quoted_gets_no_statement_at_all()
     {
-        MartenStudio.Internal.Sql.SqlLiteralText.SelectStatement("legacy", "bad\"name").Should().BeNull();
+        PostgresStudio.Internal.Sql.SqlLiteralText.SelectStatement("legacy", "bad\"name").Should().BeNull();
         DatabaseLinks.ToQueryConsole(Settings, Descriptor, Scope, "legacy", "bad\"name").Should().BeNull();
-        MartenStudio.Internal.Sql.SqlLiteralText.SelectStatement("my schema", "Mixed Case").Should().Be("select * from \"my schema\".\"Mixed Case\" limit 100");
+        PostgresStudio.Internal.Sql.SqlLiteralText.SelectStatement("my schema", "Mixed Case").Should().Be("select * from \"my schema\".\"Mixed Case\" limit 100");
     }
 
     /// <summary>A key as a list of pairs, which compares in order - a dictionary assertion would not.</summary>

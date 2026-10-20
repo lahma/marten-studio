@@ -3,7 +3,6 @@ using AngleSharp.Dom;
 using Bunit;
 
 using MartenStudio.Services;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Components;
@@ -12,6 +11,8 @@ using MartenStudio.Tests.Health;
 using Microsoft.Extensions.DependencyInjection;
 
 using Page = MartenStudio.Components.Pages.Projections.Projections;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Projections;
 

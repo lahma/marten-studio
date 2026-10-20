@@ -1,0 +1,19 @@
+@page "/postgres"
+@using PostgresStudio.Services.Settings
+@inject StudioDescriptor Descriptor
+
+@*
+    The studio's root page. One route, one endpoint, whatever studio is mapped: the body is the descriptor's
+    OverviewComponent - MartenStudio's store overview, another studio's own - and this page names no studio's
+    component itself (design PS5, §2.5).
+
+    A body slot rather than two routed components, because two components claiming the root would be two
+    endpoints on one pattern: an AmbiguousMatchException at request time, and a relative route the route table
+    refuses. The body keeps everything a page has - its <PageTitle>, its [SupplyParameterFromQuery] properties,
+    its scope subscription - because nothing about any of those depends on being the routed component.
+
+    The compile-time root is this assembly's (StudioPageAssembly); the endpoint mapping re-roots it under the
+    configured mount path like every other page.
+*@
+
+<DynamicComponent Type="@Descriptor.OverviewComponent" />

@@ -4,6 +4,7 @@ using System.Reflection;
 using Marten.Schema;
 
 using MartenStudio.Services.Configuration;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Services.Schema;
 

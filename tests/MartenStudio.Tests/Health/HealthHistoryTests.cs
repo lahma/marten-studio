@@ -1,6 +1,6 @@
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Health;
 using MartenStudio.Tests.Support;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

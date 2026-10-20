@@ -2,13 +2,13 @@ using System.Collections.Concurrent;
 
 using JasperFx.Events;
 
-using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
 // JasperFx.Events has a StreamState of its own - Marten's FetchStreamStateAsync result. The studio's is
 // the page's record and carries the tenant as well; wherever both namespaces are in scope the alias says
 // which one is meant rather than leaving it to the reader.
 using StreamState = MartenStudio.Services.Events.StreamState;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Events;
 

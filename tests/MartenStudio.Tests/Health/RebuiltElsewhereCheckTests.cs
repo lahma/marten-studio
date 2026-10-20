@@ -1,8 +1,8 @@
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Projections;
 
 using static MartenStudio.Tests.Health.EventHealthFacts;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

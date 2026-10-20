@@ -2,7 +2,7 @@ using JasperFx;
 
 using Marten;
 
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 
 using Microsoft.Extensions.DependencyInjection;
 

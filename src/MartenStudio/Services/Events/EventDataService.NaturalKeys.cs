@@ -5,6 +5,8 @@ using MartenStudio.Internal.Sql;
 using Npgsql;
 
 using NpgsqlTypes;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Services.Events;
 

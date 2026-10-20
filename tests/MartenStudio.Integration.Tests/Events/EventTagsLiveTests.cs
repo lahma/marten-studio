@@ -8,9 +8,7 @@ using Marten;
 using Marten.Events;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Query;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +19,9 @@ using NpgsqlTypes;
 
 // JasperFx.Events has an EventTag of its own (what Marten appends); the studio's is what a read returns.
 using EventTag = MartenStudio.Services.Events.EventTag;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Integration.Tests.Events;
 

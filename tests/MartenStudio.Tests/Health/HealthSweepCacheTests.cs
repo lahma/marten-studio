@@ -1,8 +1,7 @@
-using MartenStudio.Services;
-using MartenStudio.Services.Health;
-
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 
@@ -113,8 +112,21 @@ public class HealthSweepCacheTests
             .Should().NotContain(static x => x.Contains("Health", StringComparison.Ordinal),
                 "the advisor runs only when a page asks (plan §3.2)");
 
-        typeof(HealthSweepCache).Assembly.GetTypes()
-            .Where(static x => x.Namespace?.StartsWith("MartenStudio.Services.Health", StringComparison.Ordinal) == true)
+        // Both studios' advisor types: the framework and the shared checks are PostgresStudio's since the move, and the
+        // Marten-only checks MartenStudio's.
+        Type[] advisor =
+        [
+            .. new[] { typeof(HealthSweepCache).Assembly, typeof(MartenStudioOptions).Assembly }
+                .Distinct()
+                .SelectMany(static x => x.GetTypes())
+                .Where(static x => x.Namespace?.StartsWith("MartenStudio.Services.Health", StringComparison.Ordinal) == true
+                    || x.Namespace?.StartsWith("PostgresStudio.Services.Health", StringComparison.Ordinal) == true),
+        ];
+
+        advisor.Should().Contain(typeof(HealthSweepCache), "the scan has to see the advisor it is about")
+            .And.Contain(static x => x.Namespace!.StartsWith("MartenStudio.", StringComparison.Ordinal), "and MartenStudio's own checks with it");
+
+        advisor
             .SelectMany(static x => x.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public))
             .Select(static x => x.FieldType)
             .Should().NotContain([typeof(PeriodicTimer), typeof(Timer), typeof(System.Timers.Timer)],

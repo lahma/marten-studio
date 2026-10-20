@@ -5,12 +5,12 @@ using Marten;
 using Marten.Storage;
 
 using MartenStudio.SampleDomain.Events;
-using MartenStudio.Services;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Projections;
 
@@ -121,7 +121,7 @@ public class HighWaterMarkLiveTests(PostgresFixture fixture)
         // The schema name is this class's own constant plus the test's name, never input; it is quoted
         // regardless, like every identifier this suite writes.
         await using var command = new NpgsqlCommand(
-            $"select last_value, is_called from {MartenStudio.Internal.Sql.SqlIdentifier.Qualify(host.EventSchema, "mt_events_sequence")}",
+            $"select last_value, is_called from {PostgresStudio.Internal.Sql.SqlIdentifier.Qualify(host.EventSchema, "mt_events_sequence")}",
             connection);
 
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(Token);

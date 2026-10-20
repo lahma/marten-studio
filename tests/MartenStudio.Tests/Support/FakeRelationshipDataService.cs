@@ -1,8 +1,7 @@
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
-using MartenStudio.Services.Relationships;
-
-using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph;
+using GraphModel = PostgresStudio.Services.Relationships.RelationshipGraph;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Support;
 
@@ -180,7 +179,7 @@ internal sealed class FakeRelationshipDataService : IRelationshipDataService
             name,
             RelationshipTableNode.SchemaHue(schema),
             DocumentCount.Estimate(42),
-            MartenStudio.Services.Database.DatabaseObjectOwner.Other,
+            PostgresStudio.Services.Database.DatabaseObjectOwner.Other,
             recognisedAs,
             InStoreSchema: false);
 

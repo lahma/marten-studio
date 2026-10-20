@@ -1,10 +1,10 @@
 using System.Reflection;
 
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
 using MartenStudio.Tests.Conventions;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 
@@ -60,7 +60,7 @@ public class HealthCheckConventionTests
         typeof(HealthCheckRegistry).GetConstructors().Should().ContainSingle(
             "a second public constructor is one the container may prefer")
             .Which.GetParameters().Select(static x => x.ParameterType).Should().Equal(
-                [typeof(MartenStudio.Services.Settings.StudioDescriptor), typeof(IStudioRuntime)],
+                [typeof(PostgresStudio.Services.Settings.StudioDescriptor), typeof(IStudioRuntime)],
                 "the descriptor is resolvable only where a studio registered one, and then it is the list to use");
     }
 

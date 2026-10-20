@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 
 using MartenStudio.Internal.Sql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Services.Query;
 

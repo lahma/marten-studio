@@ -3,11 +3,11 @@ using System.Reflection;
 
 using JasperFx.Events.Daemon;
 
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Projections;
 
 using static MartenStudio.Tests.Health.HighWaterPinnedCheckTests;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

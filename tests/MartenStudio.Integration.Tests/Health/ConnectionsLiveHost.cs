@@ -3,11 +3,9 @@ using System.Security.Claims;
 using Marten;
 
 using MartenStudio.Integration.Tests.Logging;
-using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +17,9 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 
 using Testcontainers.PostgreSql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

@@ -16,6 +16,9 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 
 using Weasel.Core;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Services.Documents;
 

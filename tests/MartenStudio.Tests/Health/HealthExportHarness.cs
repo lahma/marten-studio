@@ -1,7 +1,6 @@
 using Marten;
 
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Export;
+using PostgresStudio.Services.Health.Export;
 using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -10,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 using AspNetCoreHealthReport = Microsoft.Extensions.Diagnostics.HealthChecks.HealthReport;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

@@ -1,6 +1,6 @@
 using MartenStudio.Integration.Tests.Browser;
 using MartenStudio.SampleDomain.Relational;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 
 using Npgsql;
 

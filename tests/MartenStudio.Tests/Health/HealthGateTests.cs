@@ -1,8 +1,7 @@
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
-using MartenStudio.Services.Health;
-
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

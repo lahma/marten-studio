@@ -3,12 +3,13 @@ using Bunit;
 using MartenStudio.Components.Pages.Documents;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Documents;
-using MartenStudio.Services.Query;
 using MartenStudio.Tests.Support;
 
 using DetailPage = MartenStudio.Components.Pages.Documents.DocumentDetail;
 using DetailModel = MartenStudio.Services.Documents.DocumentDetail;
 using ListPage = MartenStudio.Components.Pages.Documents.Documents;
+using PostgresStudio.Components.Shared;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Documents;
 

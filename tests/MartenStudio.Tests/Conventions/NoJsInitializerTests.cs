@@ -21,23 +21,38 @@ namespace MartenStudio.Tests.Conventions;
 /// replaced it with. Neither half is visible in any rendered markup, and the failure is silent - the
 /// studio works perfectly while the host's console fills up.
 /// </para>
+/// <para>
+/// <b>Two packages since 0.5.</b> The static web assets moved with the shell into the shared studio
+/// (<c>src/PostgresStudio/wwwroot</c>, served as <c>_content/PostgresStudio/</c>), and MartenStudio ships no
+/// <c>wwwroot</c> of its own. Both are Razor Class Libraries a host references - MartenStudio directly,
+/// PostgresStudio through it - so the filename rule and the project-file rule hold for both: a
+/// <c>wwwroot</c> MartenStudio grew back would be loaded into the host's app just the same.
+/// </para>
 /// </remarks>
 public class NoJsInitializerTests
 {
-    private static readonly string WebRoot = RepositoryRoot.Combine("src", "MartenStudio", "wwwroot");
+    /// <summary>The shared studio's web root, where the shell's assets live.</summary>
+    private static readonly string WebRoot = RepositoryRoot.Combine("src", StudioProjects.Shared, "wwwroot");
 
     /// <summary>The script the shell loads instead, as an asset path and as a file.</summary>
-    private const string HelperScript = "_content/MartenStudio/js/marten-studio.js";
+    private const string HelperScript = "_content/PostgresStudio/js/studio.js";
 
     [Fact]
     public void No_static_web_asset_is_named_like_a_Blazor_JS_initializer()
     {
         Directory.Exists(WebRoot).Should().BeTrue("a vacuous pass here would let the initializer back in");
+        Directory.GetFiles(WebRoot, "*.js", SearchOption.AllDirectories).Should().NotBeEmpty(
+            "the shared studio's web root holds the shell's script, so a scan that sees no script is scanning nothing");
 
-        string[] initializers = Directory
-            .GetFiles(WebRoot, "*.lib.module.js", SearchOption.AllDirectories)
-            .Select(x => Path.GetRelativePath(WebRoot, x).Replace('\\', '/'))
-            .ToArray();
+        // Every project's web root, the one that exists today and any a project grows later.
+        string[] initializers =
+        [
+            .. StudioProjects.Names
+                .Select(static name => RepositoryRoot.Combine("src", name, "wwwroot"))
+                .Where(Directory.Exists)
+                .SelectMany(static root => Directory.GetFiles(root, "*.lib.module.js", SearchOption.AllDirectories))
+                .Select(SourceScanner.Relative),
+        ];
 
         initializers.Should().BeEmpty(
             "Blazor loads an RCL's JS initializers into every Blazor app in the host process, so a file " +
@@ -65,22 +80,23 @@ public class NoJsInitializerTests
     [Fact]
     public void Nothing_else_in_the_package_is_loaded_into_the_hosts_own_app_by_convention()
     {
-        string projectRoot = RepositoryRoot.Combine("src", "MartenStudio");
+        // Both packages: a host references MartenStudio, and PostgresStudio through it.
+        StudioProjects.Files("*.razor", SearchOption.AllDirectories).Select(SourceScanner.Relative)
+            .Should().Contain(static x => StudioProjects.ProjectOf(x) == StudioProjects.Shared)
+            .And.Contain(static x => StudioProjects.ProjectOf(x) == StudioProjects.Marten, "both projects have components to scan beside");
 
-        string[] scopedStylesheets = Directory
-            .GetFiles(projectRoot, "*.razor.css", SearchOption.AllDirectories)
-            .Where(x => !x.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-            .Where(x => !x.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-            .Select(x => Path.GetRelativePath(projectRoot, x).Replace('\\', '/'))
-            .ToArray();
+        string[] scopedStylesheets = StudioProjects.Files("*.razor.css", SearchOption.AllDirectories).Select(SourceScanner.Relative).ToArray();
 
         scopedStylesheets.Should().BeEmpty(
             "a scoped stylesheet is bundled into the host's own {HostAssembly}.styles.css, which is a " +
             "global style sheet on every page the host serves; found: " + string.Join(", ", scopedStylesheets));
 
-        File.ReadAllText(Path.Combine(projectRoot, "MartenStudio.csproj"))
-            .Should().NotContain("<JSModule",
-                "a JSModule item registers a JS initializer without a wwwroot filename to catch it");
+        foreach (string name in StudioProjects.Names)
+        {
+            File.ReadAllText(RepositoryRoot.Combine("src", name, name + ".csproj"))
+                .Should().NotContain("<JSModule",
+                    "a JSModule item registers a JS initializer without a wwwroot filename to catch it ({0})", name);
+        }
     }
 
     /// <summary>
@@ -89,11 +105,11 @@ public class NoJsInitializerTests
     [Fact]
     public void The_shell_loads_the_helpers_itself_from_a_studio_rooted_path()
     {
-        File.Exists(Path.Combine(WebRoot, "js", "marten-studio.js")).Should().BeTrue();
+        File.Exists(Path.Combine(WebRoot, "js", "studio.js")).Should().BeTrue("the asset the shell asks for is the file the package ships");
 
         // The shared document every studio's root component renders (0.5, PS-1a): MartenStudioApp is its root only.
         string shell = File.ReadAllText(
-            RepositoryRoot.Combine("src", "MartenStudio", "Components", "StudioDocument.razor"));
+            RepositoryRoot.Combine("src", "PostgresStudio", "Components", "StudioDocument.razor"));
 
         shell.Should().Contain($"<script src=\"{HelperScript}\">",
             "the shell is what loads the helpers now that no convention does it");

@@ -2,11 +2,11 @@ using Bunit;
 
 using MartenStudio.Components.Pages.Events;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Live;
 using MartenStudio.Tests.Components;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Tests.Events;
 

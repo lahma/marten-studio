@@ -2,11 +2,10 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text.RegularExpressions;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Checks;
-
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Tests.Conventions;
 
@@ -41,11 +40,11 @@ namespace MartenStudio.Tests.Conventions;
 /// </remarks>
 public class StatementChecksFenceTests
 {
-    private const string Runner = "src/MartenStudio/Services/Health/HealthCheckContext.cs";
+    private const string Runner = "src/PostgresStudio/Services/Health/HealthCheckContext.cs";
 
-    private const string Reads = "src/MartenStudio/Services/Health/Checks/StatementReads.cs";
+    private const string Reads = "src/PostgresStudio/Services/Health/Checks/StatementReads.cs";
 
-    private const string Planner = "src/MartenStudio/Services/Health/Checks/ExpensiveStatementsCheck.cs";
+    private const string Planner = "src/PostgresStudio/Services/Health/Checks/ExpensiveStatementsCheck.cs";
 
     private static readonly Regex Name = new(@"\bQueryAsApplicationRoleAsync\b", RegexOptions.None, TimeSpan.FromSeconds(5));
 
@@ -148,7 +147,7 @@ public class StatementChecksFenceTests
     // The plan is the planner's.
     [InlineData(Planner, "var query = HealthStatementQueries.Explain(statement.QueryId, statement.Text!, statement.TextTruncated);", false)]
     [InlineData(Reads, "var query = HealthStatementQueries.Explain(id, text, false);", true)]
-    [InlineData("src/MartenStudio/Services/Health/Checks/JitShareCheck.cs", "var plan = HealthStatementQueries .Explain(id, text, false);", true)]
+    [InlineData("src/PostgresStudio/Services/Health/Checks/JitShareCheck.cs", "var plan = HealthStatementQueries .Explain(id, text, false);", true)]
     // The one statement outside a transaction is T02's deallocate, and the runner only declares it.
     [InlineData(Planner, "await context.Sql.ExecuteOutsideTransactionAsync(HealthStatementQueries.Deallocate(), again.Token);", false)]
     [InlineData(Planner, "await context.Sql.ExecuteOutsideTransactionAsync(HealthStatementQueries.Extension(), token);", true)]
@@ -165,10 +164,45 @@ public class StatementChecksFenceTests
     // IL
     // ------------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// Both studio assemblies: the runner, the builders and the statement checks are the shared studio's, and
+    /// MartenStudio's own checks call the runner from the other side of an assembly boundary - where a caller of one of
+    /// the three doors would be as much a caller as one beside them.
+    /// </summary>
+    private static Assembly[] StudioAssemblies => [typeof(HealthQuery).Assembly, StudioProjects.MartenAssembly];
+
+    /// <summary>Every site in either studio assembly whose body reaches <paramref name="target" />.</summary>
+    private static List<MethodBase> StudioSites(MethodBase target) => [.. StudioAssemblies.SelectMany(x => IlScan.Sites(x, target))];
+
+    /// <summary>
+    /// The IL fences read both assemblies, and resolve a call across the boundary: MartenStudio's daemon and event checks
+    /// call the shared runner's <c>QueryAsync</c>, so the scan of <c>MartenStudio.dll</c> finds them. A token it could not
+    /// resolve would be dropped silently, and every fence below would pass over that assembly for the wrong reason.
+    /// </summary>
+    [Fact]
+    public void The_compiled_fences_read_both_studio_assemblies_and_resolve_calls_across_them()
+    {
+        StudioAssemblies.Should().OnlyHaveUniqueItems("the shared studio and MartenStudio are two assemblies since the move");
+
+        MethodInfo query = typeof(HealthSqlRunner).GetMethod(nameof(HealthSqlRunner.QueryAsync))!;
+
+        foreach (Assembly assembly in StudioAssemblies)
+        {
+            IlScan.Sites(assembly, query).Should().NotBeEmpty(
+                "{0}'s checks run their statements through the runner, so a scan of it that saw no call is reading nothing",
+                assembly.GetName().Name);
+        }
+
+        IlScan.Sites(StudioProjects.MartenAssembly, query)
+            .Should().OnlyContain(static x => x.DeclaringType!.Assembly == StudioProjects.MartenAssembly)
+            .And.Contain(static x => x.DeclaringType!.Namespace!.StartsWith("MartenStudio.Services.Health", StringComparison.Ordinal),
+                "MartenStudio's own checks are the callers on that side");
+    }
+
     [Fact]
     public void In_the_compiled_assembly_only_the_statement_reads_call_the_application_role_read_and_each_builds_what_it_hands_it()
     {
-        List<MethodBase> sites = IlScan.Sites(typeof(HealthQuery).Assembly, ApplicationRoleRead);
+        List<MethodBase> sites = StudioSites(ApplicationRoleRead);
 
         sites.Should().NotBeEmpty("StatementReads calls it, so a scan that finds nothing is reading nothing");
 
@@ -191,7 +225,7 @@ public class StatementChecksFenceTests
     {
         List<string> sites =
         [
-            .. IlScan.Sites(typeof(HealthQuery).Assembly, ShownConstructor).Select(static x => x.DeclaringType!.FullName + "." + x.Name),
+            .. StudioSites(ShownConstructor).Select(static x => x.DeclaringType!.FullName + "." + x.Name),
         ];
 
         sites.Should().BeEquivalentTo(
@@ -208,7 +242,7 @@ public class StatementChecksFenceTests
     public void In_the_compiled_assembly_only_the_expensive_statements_check_plans_a_recorded_statement()
     {
         MethodInfo explain = typeof(HealthStatementQueries).GetMethod(nameof(HealthStatementQueries.Explain))!;
-        List<MethodBase> sites = IlScan.Sites(typeof(HealthQuery).Assembly, explain);
+        List<MethodBase> sites = StudioSites(explain);
 
         sites.Should().NotBeEmpty().And.OnlyContain(
             static x => IlScan.Outermost(x.DeclaringType!) == typeof(ExpensiveStatementsCheck),
@@ -261,7 +295,7 @@ public class StatementChecksFenceTests
         FieldInfo? session = typeof(HealthSqlRunner).GetField("applicationRoleSession", BindingFlags.Instance | BindingFlags.NonPublic);
         session.Should().NotBeNull("the runner's store-role session is the field this fence is about; a rename must move the fence with it");
 
-        IlScan.Readers(typeof(HealthQuery).Assembly, session!)
+        StudioAssemblies.SelectMany(x => IlScan.Readers(x, session!))
             .Select(static x => x.DeclaringType!.FullName + "." + x.Name)
             .Should().Equal(
                 [typeof(HealthSqlRunner).FullName + "." + nameof(HealthSqlRunner.QueryAsApplicationRoleAsync)],
@@ -297,7 +331,7 @@ public class StatementChecksFenceTests
     public void In_the_compiled_assembly_only_T02_runs_a_statement_outside_a_transaction_and_only_its_deallocate()
     {
         OutsideTransaction.Should().NotBeNull();
-        List<MethodBase> sites = IlScan.Sites(typeof(HealthQuery).Assembly, OutsideTransaction);
+        List<MethodBase> sites = StudioSites(OutsideTransaction);
 
         sites.Should().NotBeEmpty("ForgetAsync calls it, so a scan that finds nothing is reading nothing");
         sites.Should().OnlyContain(

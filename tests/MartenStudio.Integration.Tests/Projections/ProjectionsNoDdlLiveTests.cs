@@ -5,7 +5,6 @@ using Marten;
 using Marten.Storage;
 
 using MartenStudio.Services;
-using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 
 using MartenStudio.SampleDomain.Events;
@@ -13,6 +12,8 @@ using MartenStudio.SampleDomain.Events;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Integration.Tests.Projections;
 

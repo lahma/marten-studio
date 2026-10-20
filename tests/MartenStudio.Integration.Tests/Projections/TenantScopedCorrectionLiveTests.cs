@@ -8,7 +8,6 @@ using Marten;
 
 using MartenStudio.Integration.Tests.Documents;
 using MartenStudio.Integration.Tests.Logging;
-using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain.Events;
 using MartenStudio.Services;
 using MartenStudio.Services.Projections;
@@ -19,6 +18,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Projections;
 

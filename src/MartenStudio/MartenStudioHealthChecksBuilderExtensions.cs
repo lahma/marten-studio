@@ -1,4 +1,4 @@
-using MartenStudio.Services.Health.Export;
+using PostgresStudio.Services.Health.Export;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -87,7 +87,7 @@ public static class MartenStudioHealthChecksBuilderExtensions
 
         return builder.Add(new HealthCheckRegistration(
             name,
-            static services => new MartenStudioHealthCheck(services.GetRequiredService<HealthExportRunner>()),
+            static services => new StudioHealthCheck(services.GetRequiredService<HealthExportRunner>()),
             failureStatus,
             tags,
             timeout));

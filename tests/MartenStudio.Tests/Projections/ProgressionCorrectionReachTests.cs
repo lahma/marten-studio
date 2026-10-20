@@ -8,6 +8,7 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Projections;
 

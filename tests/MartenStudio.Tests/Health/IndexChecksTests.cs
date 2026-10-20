@@ -1,7 +1,6 @@
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Checks;
-
 using static MartenStudio.Tests.Health.TableCheckBuilders;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Tests.Health;
 

@@ -5,6 +5,7 @@ using Marten;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Health.Checks;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Tests.Sql;
 

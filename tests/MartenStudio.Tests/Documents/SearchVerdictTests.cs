@@ -2,6 +2,7 @@ using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Sql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Documents;
 

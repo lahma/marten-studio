@@ -4,6 +4,7 @@ using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
 using StreamState = MartenStudio.Services.Events.StreamState;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Events;
 

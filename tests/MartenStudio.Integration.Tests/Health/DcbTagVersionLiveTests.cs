@@ -1,8 +1,8 @@
 using Marten.Events;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

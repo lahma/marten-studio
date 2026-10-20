@@ -3,7 +3,7 @@ using Bunit;
 using Marten;
 using Marten.Storage;
 
-using MartenStudio.Components.Layout;
+using PostgresStudio.Components.Layout;
 using MartenStudio.Services;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Services;
 

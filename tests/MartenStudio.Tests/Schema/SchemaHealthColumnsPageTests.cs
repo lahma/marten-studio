@@ -2,8 +2,7 @@ using Bunit;
 
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Health;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Health;
@@ -11,6 +10,9 @@ using MartenStudio.Tests.Health;
 using Microsoft.Extensions.DependencyInjection;
 
 using SchemaPage = MartenStudio.Components.Pages.Schema.Schema;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Tests.Schema;
 

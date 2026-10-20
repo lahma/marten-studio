@@ -1,7 +1,6 @@
 using Bunit;
 
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Health;
@@ -11,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 using ConfigurationPage = MartenStudio.Components.Pages.Configuration.Configuration;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Configuration;
 

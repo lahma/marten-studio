@@ -2,11 +2,10 @@ using System.Net;
 
 using Marten;
 
-using MartenStudio.Services.Health;
-
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

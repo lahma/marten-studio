@@ -4,12 +4,12 @@ using JasperFx.Events.Projections;
 using Marten;
 
 using MartenStudio.SampleDomain.Events;
-using MartenStudio.Services;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Projections;
 

@@ -1,6 +1,7 @@
 using JasperFx.Descriptors;
 
 using MartenStudio.Services;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Support;
 

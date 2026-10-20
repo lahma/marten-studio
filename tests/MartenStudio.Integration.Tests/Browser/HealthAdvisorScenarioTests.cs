@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Sample.Generation;
 using MartenStudio.SampleDomain;
 
@@ -10,6 +9,7 @@ using Microsoft.Playwright;
 using Npgsql;
 
 using static MartenStudio.Integration.Tests.Browser.HealthBrowser;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests.Browser;
 

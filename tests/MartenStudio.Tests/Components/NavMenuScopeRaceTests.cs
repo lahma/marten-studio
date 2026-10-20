@@ -4,10 +4,10 @@ using Bunit;
 
 using JasperFx.Descriptors;
 
-using MartenStudio.Components.Layout;
-using MartenStudio.Services;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Live;
+using PostgresStudio.Components.Layout;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Tests.Components;
 

@@ -1,15 +1,16 @@
 using Bunit;
 
 using MartenStudio.Components.Pages;
-using MartenStudio.Components.Pages.Query;
 using MartenStudio.Services.Query;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Sources;
 using MartenStudio.Tests.Components;
 
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 
 using MartenQueryBody = MartenStudio.Components.Pages.Query.Query;
+using PostgresStudio.Components.Pages;
+using PostgresStudio.Components.Pages.Query;
 
 namespace MartenStudio.Tests.Query;
 

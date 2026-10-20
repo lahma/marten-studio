@@ -1,13 +1,13 @@
 using Marten;
 
 using MartenStudio.SampleDomain.Documents;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Health;
+using PostgresStudio.Services.Database;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 using Npgsql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

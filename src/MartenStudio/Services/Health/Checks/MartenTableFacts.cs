@@ -1,4 +1,4 @@
-global using MartenTable = MartenStudio.Services.Sources.StudioTable;
+global using MartenTable = PostgresStudio.Services.Sources.StudioTable;
 
 using System.Runtime.CompilerServices;
 
@@ -8,9 +8,12 @@ using JasperFx.MultiTenancy;
 using Marten;
 using Marten.Schema;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Schema;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Sources;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Services.Health.Checks;
 

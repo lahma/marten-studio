@@ -1,10 +1,10 @@
 using System.Text.RegularExpressions;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Health.Checks;
 using MartenStudio.Tests.Conventions;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Tests.Sql;
 

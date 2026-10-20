@@ -1,15 +1,17 @@
 using Bunit;
 
-using MartenStudio.Components.Pages.Database;
+using PostgresStudio.Components.Pages.Database;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Query;
-using MartenStudio.Services.Relationships;
-using MartenStudio.Services.Settings;
+using PostgresStudio.Services.Settings;
 using MartenStudio.Tests.Components;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Database;
 

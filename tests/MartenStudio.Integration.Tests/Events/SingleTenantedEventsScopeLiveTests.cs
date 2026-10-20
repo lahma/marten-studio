@@ -4,7 +4,6 @@ using JasperFx.MultiTenancy;
 
 using Marten;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
@@ -14,6 +13,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 using StreamState = MartenStudio.Services.Events.StreamState;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Events;
 

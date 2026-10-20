@@ -19,8 +19,11 @@ internal sealed record StudioLogLine(string Category, LogLevel Level, EventId Ev
 /// <para>
 /// Added to the host's own logging builder, so it sees exactly what an application's provider would -
 /// the same categories, the same filters, the same levels - rather than a logger a test handed to one
-/// service. Only categories under <c>MartenStudio</c> are kept: Marten, Npgsql and the generic host log
-/// a great deal at Debug, and what they say is not what these tests are about.
+/// service. Only the studio's own categories are kept - under <c>MartenStudio</c>, and under
+/// <c>PostgresStudio</c>, where every shared service logs since the 0.5 move (the action log, the
+/// browser's row reads, the health sweeper, the SQL console): Marten, Npgsql and the generic host log
+/// a great deal at Debug, and what they say is not what these tests are about. Keeping only the first
+/// prefix would make every "no Warning" assertion over a shared service pass over nothing.
 /// </para>
 /// <para>
 /// Hand-written rather than taken from a package: the budget is complete (AGENTS.md hard rule 1).
@@ -47,9 +50,14 @@ internal sealed class LogCapture : ILoggerProvider
     public IReadOnlyList<StudioLogLine> WarningsOrWorse => [.. Lines.Where(static x => x.Level >= LogLevel.Warning)];
 
     public ILogger CreateLogger(string categoryName) =>
-        categoryName.StartsWith("MartenStudio", StringComparison.Ordinal)
+        IsStudioCategory(categoryName)
             ? new Capturing(this, categoryName)
             : Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+
+    /// <summary>Whether a logger category is one of the studio's: MartenStudio's own, or the shared studio's.</summary>
+    internal static bool IsStudioCategory(string categoryName) =>
+        categoryName.StartsWith("MartenStudio", StringComparison.Ordinal)
+        || categoryName.StartsWith("PostgresStudio", StringComparison.Ordinal);
 
     public void Dispose()
     {

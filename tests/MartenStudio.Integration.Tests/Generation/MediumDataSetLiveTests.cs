@@ -8,8 +8,8 @@ using MartenStudio.SampleDomain.Generation;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Projections;
-using MartenStudio.Services.Query;
 using MartenStudio.Services.Schema;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Integration.Tests.Generation;
 

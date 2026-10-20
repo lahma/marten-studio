@@ -132,4 +132,8 @@
     <PackageVersion Include="Microsoft.Playwright" Version="1.62.0" />
   </ItemGroup>
 
+  <ItemGroup Label="PostgresStudio-only projects (they set PostgresStudioPinsNpgsql)">
+    <PackageVersion Include="Npgsql" Version="9.0.4" Condition="'$(PostgresStudioPinsNpgsql)' == 'true'" />
+  </ItemGroup>
+
 </Project>

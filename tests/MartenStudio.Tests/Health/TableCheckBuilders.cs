@@ -1,12 +1,14 @@
-global using MartenTable = MartenStudio.Services.Sources.StudioTable;
+global using MartenTable = PostgresStudio.Services.Sources.StudioTable;
 
 using Marten;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Tests.Sql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Tests.Health;
 

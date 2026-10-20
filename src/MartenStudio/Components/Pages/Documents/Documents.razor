@@ -4,6 +4,9 @@
 @using Microsoft.Extensions.Options
 @using MartenStudio.Services.Documents
 @using MartenStudio.Services.Query
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Query
 @implements IAsyncDisposable
 @inject IDocumentDataService Data
 @inject IDocumentWriteService Writes
@@ -872,7 +875,7 @@
 
         try
         {
-            Internal.Sql.DocumentCount exact = await Data.CountExactAsync(scope, alias, cts?.Token ?? CancellationToken.None);
+            PostgresStudio.Internal.Sql.DocumentCount exact = await Data.CountExactAsync(scope, alias, cts?.Token ?? CancellationToken.None);
             rail = ReplaceCount(rail, alias, exact);
             StateHasChanged();
         }
@@ -886,7 +889,7 @@
         }
     }
 
-    private static CollectionRail ReplaceCount(CollectionRail rail, string alias, Internal.Sql.DocumentCount count)
+    private static CollectionRail ReplaceCount(CollectionRail rail, string alias, PostgresStudio.Internal.Sql.DocumentCount count)
     {
         List<CollectionGroup> groups = [];
 

@@ -1,5 +1,5 @@
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Tests.Database;
 

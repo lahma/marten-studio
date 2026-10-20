@@ -582,7 +582,7 @@ internal sealed record AggregateSnapshot(
 /// <c>EnsureStorageExistsAsync(typeof(IEvent), token)</c> - it applies the event store's migration under
 /// the database's own <c>AutoCreate</c> before it counts anything, so an Overview tile would be a studio
 /// writing DDL because somebody opened the front page. The numbers here come from
-/// <c>pg_class.reltuples</c> through the studio's own <see cref="MartenStudio.Internal.Sql.CountEstimator" />
+/// <c>pg_class.reltuples</c> through the studio's own <see cref="PostgresStudio.Internal.Sql.CountEstimator" />
 /// instead, which is also what D8 asks for: an exact <c>count(*)</c> over <c>mt_events</c> on a busy
 /// store is a sequential scan per refresh per visitor.
 /// </para>

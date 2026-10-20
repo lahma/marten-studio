@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Text;
 
-using MartenStudio.Services.Schema;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Tests.Schema;
 

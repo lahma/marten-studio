@@ -2,7 +2,6 @@ using System.Security.Claims;
 
 using Marten;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.Services;
 using MartenStudio.Services.Documents;
@@ -16,6 +15,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Documents;
 
@@ -120,7 +121,7 @@ public abstract class DocumentWriteFixture(PostgresFixture postgres) : IAsyncLif
         var sources = new MartenStudioSourceProvider(
             wrapped, stores, tenants, RequireProvider(), NullLogger<MartenStudioSourceProvider>.Instance);
         var resolver = new StudioScopeResolver(
-            new MartenStudio.Services.Sources.StudioSourceResolver(sources, authorization, MartenStudioDescriptor.Instance));
+            new PostgresStudio.Services.Sources.StudioSourceResolver(sources, authorization, MartenStudioDescriptor.Instance));
 
         var catalog = new StudioScopeCatalog(sources, authorization, NullLogger<StudioScopeCatalog>.Instance);
 

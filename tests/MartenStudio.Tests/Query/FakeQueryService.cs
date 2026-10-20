@@ -1,7 +1,9 @@
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
 using MartenStudio.Services.Query;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Sources;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Query;
 

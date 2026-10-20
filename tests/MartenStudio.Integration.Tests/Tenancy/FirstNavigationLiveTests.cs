@@ -4,8 +4,8 @@ using JasperFx.MultiTenancy;
 using Marten;
 using Marten.Storage;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Tenancy;
 

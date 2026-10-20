@@ -10,7 +10,7 @@ public class SessionsStylesheetTests
 {
     private const string Header = "HEALTH-3. Database > Sessions";
 
-    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "MartenStudio", "wwwroot", "css", "marten-studio.css"));
+    private static string Css => File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "wwwroot", "css", "studio.css"));
 
     /// <summary>The section's own text: from its header to the next section's, or to the end.</summary>
     private static string Section()

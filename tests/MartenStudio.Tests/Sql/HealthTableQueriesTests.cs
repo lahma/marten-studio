@@ -5,6 +5,7 @@ using MartenStudio.Internal.Sql;
 using Npgsql;
 
 using NpgsqlTypes;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Tests.Sql;
 

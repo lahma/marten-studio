@@ -1,4 +1,4 @@
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 
 namespace MartenStudio.Tests.Support;
 

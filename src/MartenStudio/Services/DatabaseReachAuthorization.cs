@@ -1,6 +1,7 @@
 using Marten.Storage;
 
 using Microsoft.Extensions.Logging;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Services;
 

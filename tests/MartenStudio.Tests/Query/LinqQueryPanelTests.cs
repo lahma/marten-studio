@@ -8,6 +8,8 @@ using MartenStudio.Tests.Components;
 using Microsoft.AspNetCore.Components.Web;
 
 using QueryPage = MartenStudio.Components.Pages.Query.Query;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Query;
 

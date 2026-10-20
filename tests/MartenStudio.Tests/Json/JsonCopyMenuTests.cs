@@ -1,5 +1,5 @@
 using Bunit;
-using MartenStudio.Components.Json;
+using PostgresStudio.Components.Json;
 using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Components;
 

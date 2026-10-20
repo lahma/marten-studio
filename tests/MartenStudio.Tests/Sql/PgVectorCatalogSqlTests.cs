@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 
 using MartenStudio.Internal.Sql;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Tests.Sql;
 

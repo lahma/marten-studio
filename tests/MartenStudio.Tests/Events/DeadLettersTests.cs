@@ -6,6 +6,7 @@ using MartenStudio.Components.Pages.Events;
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
 using MartenStudio.Tests.Components;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Events;
 
@@ -66,7 +67,7 @@ public class DeadLettersTests
         using StudioComponentContext context = await NewContextAsync();
         context.Options.IsDocumentTypeVisible = Hiding(throws);
 
-        var nav = context.Render<MartenStudio.Components.Layout.NavMenu>();
+        var nav = context.Render<PostgresStudio.Components.Layout.NavMenu>();
 
         List<string?> links = [.. nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href"))];
         links.Should().NotContain("events/dead-letters", "a hidden document type is absent (D27)");
@@ -80,7 +81,7 @@ public class DeadLettersTests
         using StudioComponentContext context = await NewContextAsync();
         context.Options.IsDocumentTypeVisible = static type => type != typeof(Uri);
 
-        var nav = context.Render<MartenStudio.Components.Layout.NavMenu>();
+        var nav = context.Render<PostgresStudio.Components.Layout.NavMenu>();
 
         nav.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Should().Contain("events/dead-letters");
     }

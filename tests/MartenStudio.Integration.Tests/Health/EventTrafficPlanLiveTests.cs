@@ -3,6 +3,7 @@ using System.Text.Json;
 using MartenStudio.Internal.Sql;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests.Health;
 

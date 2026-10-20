@@ -2,14 +2,14 @@ using AngleSharp.Dom;
 
 using Bunit;
 
-using MartenStudio.Components.Layout;
+using PostgresStudio.Components.Layout;
 using MartenStudio.Components.Pages;
-using MartenStudio.Components.Pages.Health;
-using MartenStudio.Internal.Sql;
+using PostgresStudio.Components.Pages.Health;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Database;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 
@@ -368,7 +368,7 @@ public class HealthPageTests
 
         // Stamped with the scope they are read for, as the real health service stamps a glance: the toast ignores one
         // read for any other scope.
-        MartenStudio.Services.StudioScope scope = context.State.ActiveScope!;
+        PostgresStudio.Services.StudioScope scope = context.State.ActiveScope!;
 
         // The first look at a database only takes note of what is there: a warning, and no Critical.
         context.NavBadges.Health = new HealthGlance(DateTimeOffset.UtcNow, 0, 1, []) { Scope = scope };

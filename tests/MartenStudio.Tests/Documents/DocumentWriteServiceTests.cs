@@ -18,6 +18,8 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 
 using NpgsqlTypes;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Documents;
 

@@ -4,7 +4,7 @@ using Marten;
 using Marten.Storage;
 
 using MartenStudio.Services;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 using MartenStudio.Tests.Sql;
 using MartenStudio.Tests.Support;
@@ -12,6 +12,7 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Schema;
 

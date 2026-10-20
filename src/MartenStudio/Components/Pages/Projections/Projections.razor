@@ -7,6 +7,10 @@
 @using MartenStudio.Services.Projections
 @using Microsoft.Extensions.DependencyInjection
 @using Microsoft.Extensions.Options
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Live
 @implements IAsyncDisposable
 @inject IProjectionDataService ProjectionData
 @inject StudioState State
@@ -1048,7 +1052,7 @@
         healthBanners.Any(x => string.Equals(x.Code, code, StringComparison.Ordinal));
 
     private static string HealthBannerChip(HealthReportFinding finding) =>
-        MartenStudio.Components.Pages.Health.HealthPresentation.ChipClass(finding.Severity);
+        PostgresStudio.Components.Pages.Health.HealthPresentation.ChipClass(finding.Severity);
 
     /// <summary>
     /// A shard's trend, as the service judged it - read behind the database gate, recent, and withheld where a pause, a
@@ -1470,8 +1474,8 @@
                     + "that database as a whole, or it holds this tenant and no other.";
             }
 
-            bool several = State.Cardinality is MartenStudio.Services.Sources.StudioDatabaseCardinality.StaticMultiple
-                or MartenStudio.Services.Sources.StudioDatabaseCardinality.DynamicMultiple;
+            bool several = State.Cardinality is PostgresStudio.Services.Sources.StudioDatabaseCardinality.StaticMultiple
+                or PostgresStudio.Services.Sources.StudioDatabaseCardinality.DynamicMultiple;
 
             if (!several)
             {

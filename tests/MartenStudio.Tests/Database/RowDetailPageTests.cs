@@ -2,15 +2,15 @@ using AngleSharp.Dom;
 
 using Bunit;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Primitives;
 
-using DetailPage = MartenStudio.Components.Pages.Database.RowDetail;
+using DetailPage = PostgresStudio.Components.Pages.Database.RowDetail;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Tests.Database;
 

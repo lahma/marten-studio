@@ -1,8 +1,11 @@
 @using Microsoft.Extensions.Options
-@using MartenStudio.Components.Pages.Relationships
-@using MartenStudio.Services.Database
+@using PostgresStudio.Components.Pages.Relationships
+@using PostgresStudio.Services.Database
 @using MartenStudio.Services.Relationships
-@using ReferencedByModel = MartenStudio.Services.Relationships.ReferencedBy
+@using ReferencedByModel = PostgresStudio.Services.Relationships.ReferencedBy
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Relationships
 @inject StudioState State
 @inject IOptions<MartenStudioOptions> Options
 

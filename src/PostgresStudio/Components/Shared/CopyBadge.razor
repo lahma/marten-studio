@@ -1,0 +1,57 @@
+@using PostgresStudio.Services.Live
+@inject Microsoft.JSInterop.IJSRuntime JsRuntime
+
+<span class="ms-copy-badge" title="@FullKey">
+    <span class="ms-copy-badge-value">@FullKey</span>
+    <button type="button"
+            class="ms-copy-badge-copy"
+            aria-label="Copy key"
+            @onclick="CopyAsync"
+            @onclick:stopPropagation="true"
+            @onclick:preventDefault="true">
+        @(_copied ? "Copied" : "Copy")
+    </button>
+</span>
+
+@code {
+    private bool _copied;
+
+    [Parameter]
+    public string GroupName { get; set; } = string.Empty;
+
+    [Parameter]
+    public string ItemName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The exact text to show and copy, for the badges that are not a group-and-name pair.
+    /// </summary>
+    /// <remarks>
+    /// A stream id, a document id or an event id is one value, not two, and pushing it through
+    /// <see cref="DisplayValueHelper.FormatKey" /> would put a <c>DEFAULT.</c> in front of it and copy
+    /// that too. When this is set the pair is ignored.
+    /// </remarks>
+    [Parameter]
+    public string? Value { get; set; }
+
+    private string FullKey => string.IsNullOrEmpty(Value)
+        ? DisplayValueHelper.FormatKey(GroupName, ItemName)
+        : Value;
+
+    protected override void OnParametersSet()
+    {
+        _copied = false;
+    }
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { FullKey });
+            _copied = copied;
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            _copied = false;
+        }
+    }
+}

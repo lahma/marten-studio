@@ -1,8 +1,7 @@
-using MartenStudio.Internal.Sql;
-
 using Npgsql;
 
 using Testcontainers.PostgreSql;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests;
 

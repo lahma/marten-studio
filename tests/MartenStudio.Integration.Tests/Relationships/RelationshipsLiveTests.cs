@@ -5,13 +5,13 @@ using Marten.Schema;
 using MartenStudio.SampleDomain;
 using MartenStudio.SampleDomain.Documents;
 using MartenStudio.Services;
-using MartenStudio.Services.Live;
-using MartenStudio.Services.Relationships;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Services.Live;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Integration.Tests.Relationships;
 
@@ -211,7 +211,7 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
 
         graph.Nodes.Single(x => x.Alias == "vehicle").SubclassAliases.Should().NotBeEmpty();
         graph.Nodes.Single(x => x.Alias == "customer").Count.Should()
-            .NotBe(MartenStudio.Internal.Sql.DocumentCount.Unavailable,
+            .NotBe(PostgresStudio.Internal.Sql.DocumentCount.Unavailable,
                 "the diagram reads every node's reltuples in one grouped query - a freshly seeded table " +
                 "may well be 'never analysed', but it is never 'could not be read'");
     }

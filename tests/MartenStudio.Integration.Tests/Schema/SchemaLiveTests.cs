@@ -1,8 +1,9 @@
-using MartenStudio.Services;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Integration.Tests.Schema;
 

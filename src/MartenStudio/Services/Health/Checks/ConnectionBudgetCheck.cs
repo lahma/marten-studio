@@ -2,7 +2,9 @@ using System.Globalization;
 
 using Marten.Storage;
 
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Services.Health.Checks;
 

@@ -7,8 +7,7 @@ using Marten;
 using Marten.Schema;
 
 using MartenStudio.Integration.Tests.Database;
-using MartenStudio.Services;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 
 using Microsoft.AspNetCore.Authorization;
@@ -17,6 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Schema;
 

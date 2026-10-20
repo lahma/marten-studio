@@ -1,13 +1,14 @@
 using Marten;
 
 using MartenStudio.Services;
-using MartenStudio.Services.Settings;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Settings;
+using PostgresStudio.Services.Sources;
 using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Services;
 
@@ -166,11 +167,11 @@ public class StudioSpineTests
         scoped.GetRequiredService<IStudioSourceProvider>().Should().BeOfType<MartenStudioSourceProvider>();
         scoped.GetRequiredService<ISessionLockLabeler>().Should().BeOfType<MartenSessionLockLabeler>();
         scoped.GetRequiredService<IHealthTableSource>().Should().BeOfType<MartenHealthTableSource>();
-        scoped.GetRequiredService<MartenStudio.Services.Health.Checks.IHealthTableRemedies>().Should().BeSameAs(MartenHealthRemedyProvider.Instance);
+        scoped.GetRequiredService<PostgresStudio.Services.Health.Checks.IHealthTableRemedies>().Should().BeSameAs(MartenHealthRemedyProvider.Instance);
         services.Where(static x => x.ServiceType == typeof(INavIndicatorContributor))
             .Should().ContainSingle().Which.ImplementationType.Should().Be<MartenNavIndicatorContributor>();
-        services.Should().Contain(static x => x.ServiceType == typeof(MartenStudio.Services.Query.SqlConsoleService)
-            && x.ImplementationType == typeof(MartenStudio.Services.Query.SqlConsoleService));
+        services.Should().Contain(static x => x.ServiceType == typeof(PostgresStudio.Services.Query.SqlConsoleService)
+            && x.ImplementationType == typeof(PostgresStudio.Services.Query.SqlConsoleService));
         services.Should().ContainSingle(static x => x.ServiceType == typeof(ISqlConsoleService))
             .Which.ImplementationFactory.Should().NotBeNull("the interface forwards to the one scoped console the Query service also uses");
         services.Should().Contain(static x => x.ServiceType == typeof(IRelationshipNodeSource) && x.ImplementationType == typeof(MartenRelationshipNodeSource));

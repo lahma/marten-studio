@@ -1,8 +1,7 @@
 using System.Text.RegularExpressions;
 
-using MartenStudio.Internal.Sql;
-
 using NpgsqlTypes;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Tests.Sql;
 

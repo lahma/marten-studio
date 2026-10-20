@@ -1,10 +1,9 @@
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Documents;
-using MartenStudio.Services.Query;
+using PostgresStudio.Services.Database;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Database;
 
@@ -279,7 +278,7 @@ public class TableRowServiceTests
         TableRowService.IsExpected(string.Empty, statement).Should().BeTrue();
 
         var exhausted = new NpgsqlException("The connection pool has been exhausted", new TimeoutException());
-        MartenStudio.Services.PostgresFailure.MarkAsConnectionFailure(exhausted);
+        PostgresStudio.Services.PostgresFailure.MarkAsConnectionFailure(exhausted);
 
         TableRowService.Describe(exhausted, TableRowTestData.Relation(), MartenStudioSettings.Of(new MartenStudioOptions()))
             .Sentence.Should().Be("The database could not be reached.");

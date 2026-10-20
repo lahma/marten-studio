@@ -1,10 +1,10 @@
 using Bunit;
 
-using MartenStudio.Services.Relationships;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
 using ReferencedByPanel = MartenStudio.Components.Pages.Documents.ReferencedBy;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Relationships;
 

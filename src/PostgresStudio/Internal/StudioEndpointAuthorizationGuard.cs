@@ -1,0 +1,205 @@
+#region License
+
+/*
+ * All content copyright Marko Lahma, unless otherwise indicated. All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy
+ * of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
+ *
+ */
+
+#endregion
+
+using System.Text;
+
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+
+namespace PostgresStudio.Internal;
+
+/// <summary>
+/// Refuses to start an application whose Marten Studio endpoints nothing authorizes.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Marten Studio's pages are fully mutating and add no authentication of their own: they can read and
+/// edit every document in every Marten store in this process, archive event streams, control the
+/// projection daemon, apply schema changes and run SQL. An open one is therefore a serious exposure
+/// rather than an information leak, and the mistake that opens it is a mapping call that says nothing.
+/// So a mapping that says nothing is the thing that fails, at startup, where it is cheap.
+/// </para>
+/// <para>
+/// The check runs in <see cref="IHostedLifecycleService.StartingAsync" />, which every hosted service
+/// completes before any of them is started — so before the web host binds its listeners and before a
+/// single request can arrive. An endpoint passes if it carries <see cref="IAuthorizeData" /> (someone
+/// called <c>RequireAuthorization</c>, whether on the returned builder or on a group above it) or
+/// <see cref="IAllowAnonymous" /> (someone said so on purpose); the whole check passes if the host has a
+/// non-null <see cref="AuthorizationOptions.FallbackPolicy" />, which covers every endpoint that states
+/// nothing.
+/// </para>
+/// <para>
+/// Registered by <c>AddMartenStudio</c>. Adding it without mapping it leaves nothing marked and nothing
+/// to refuse, which is right: an application that registered the services and never mapped the endpoints
+/// serves nothing.
+/// </para>
+/// <para>
+/// A <c>MapMartenStudio()</c> made after the host has started — from a hosted service, from a lazily
+/// built <see cref="EndpointDataSource" />, from anything that runs once requests are already being
+/// served — is out of scope and always will be. Both of this guard's passes have run by then, so such a
+/// mapping is never checked and never refused. There is no hook that would catch it without inspecting
+/// every endpoint on every request, which is a cost the whole application would pay for a mistake nobody
+/// has made; the rule is simply that the studio is mapped while the application is being built.
+/// </para>
+/// </remarks>
+internal sealed class StudioEndpointAuthorizationGuard : IHostedLifecycleService
+{
+    private readonly StudioMappedEndpoints mappedEndpoints;
+    private readonly IOptions<AuthorizationOptions>? authorizationOptions;
+    private readonly EndpointDataSource? containerEndpoints;
+
+    public StudioEndpointAuthorizationGuard(
+        StudioMappedEndpoints mappedEndpoints,
+        IOptions<AuthorizationOptions>? authorizationOptions = null,
+        EndpointDataSource? containerEndpoints = null)
+    {
+        this.mappedEndpoints = mappedEndpoints;
+        this.authorizationOptions = authorizationOptions;
+        this.containerEndpoints = containerEndpoints;
+    }
+
+    public Task StartingAsync(CancellationToken cancellationToken)
+    {
+        Verify(mappedEndpoints.Endpoints());
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The same check once the pipeline exists, for the hosting shapes that map their endpoints from
+    /// inside it.
+    /// </summary>
+    /// <remarks>
+    /// Two of them. A <c>Startup.Configure</c> class, or anything else that maps inside
+    /// <c>UseEndpoints</c>, builds its routes while the web host is starting — after
+    /// <see cref="StartingAsync" /> has already run and found nothing. A map onto a <c>MapGroup</c> is
+    /// the other: its endpoints only carry the group's prefix and the group's conventions once the
+    /// group has been asked to finish them, which is what the container's
+    /// <see cref="EndpointDataSource" /> holds by now. Both are caught here instead: later than is
+    /// ideal, since the listener is bound by then, but the host stops on the exception and the
+    /// alternative is passing them in silence.
+    /// </remarks>
+    public Task StartedAsync(CancellationToken cancellationToken)
+    {
+        List<Endpoint> endpoints = mappedEndpoints.Endpoints();
+        if (containerEndpoints is not null)
+        {
+            // Endpoint does not override Equals, so the default comparer is reference equality - which is
+            // what is wanted: the same endpoint instance reached through two data sources is one endpoint.
+            HashSet<Endpoint> seen = new(endpoints);
+            foreach (Endpoint endpoint in containerEndpoints.Endpoints)
+            {
+                if (seen.Add(endpoint))
+                {
+                    endpoints.Add(endpoint);
+                }
+            }
+        }
+
+        Verify(endpoints);
+        return Task.CompletedTask;
+    }
+
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    private void Verify(List<Endpoint> endpoints)
+    {
+        // Read before the fallback-policy shortcut below: "the studio is served to anyone" is a fact about
+        // the mapping that the banner needs whether or not this guard has anything to refuse.
+        mappedEndpoints.ObserveAnonymousPages(endpoints);
+
+        if (authorizationOptions?.Value.FallbackPolicy is not null)
+        {
+            // A fallback policy is evaluated for every endpoint that states nothing itself, so the
+            // application has already answered the question this guard asks.
+            return;
+        }
+
+        Dictionary<string, (StudioEndpointMarker Marker, List<string> Routes)> unguarded = new(StringComparer.Ordinal);
+        foreach (Endpoint endpoint in endpoints)
+        {
+            StudioEndpointMarker? marker = endpoint.Metadata.GetMetadata<StudioEndpointMarker>();
+            if (marker is null || marker.AuthorizedByOptions)
+            {
+                continue;
+            }
+
+            if (endpoint.Metadata.GetMetadata<IAuthorizeData>() is not null
+                || endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null)
+            {
+                continue;
+            }
+
+            if (!unguarded.TryGetValue(marker.Surface, out var surface))
+            {
+                surface = (marker, []);
+                unguarded[marker.Surface] = surface;
+            }
+
+            surface.Routes.Add(Describe(endpoint));
+        }
+
+        if (unguarded.Count == 0)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(BuildMessage(unguarded));
+    }
+
+    private static string Describe(Endpoint endpoint)
+    {
+        return endpoint is RouteEndpoint routeEndpoint && !string.IsNullOrEmpty(routeEndpoint.RoutePattern.RawText)
+            ? routeEndpoint.RoutePattern.RawText
+            : endpoint.DisplayName ?? "(unnamed endpoint)";
+    }
+
+    private static string BuildMessage(Dictionary<string, (StudioEndpointMarker Marker, List<string> Routes)> unguarded)
+    {
+        StringBuilder message = new();
+        foreach ((StudioEndpointMarker marker, List<string> routes) in unguarded.Values)
+        {
+            if (message.Length > 0)
+            {
+                message.AppendLine().AppendLine();
+            }
+
+            routes.Sort(StringComparer.Ordinal);
+            message.AppendLine(marker.Exposure ?? marker.Surface + " is mapped with no authorization, so it refuses to start rather than serve its pages to anyone by accident. Say which you meant:")
+                .AppendLine(marker.Remedies)
+                .Append("A non-null AuthorizationOptions.FallbackPolicy satisfies this too, since it covers every endpoint that states nothing. Unauthorized: ")
+                .Append(string.Join(", ", routes.Take(MaxRoutesNamed)))
+                .Append(routes.Count > MaxRoutesNamed ? $", and {routes.Count - MaxRoutesNamed} more." : ".");
+        }
+
+        return message.ToString();
+    }
+
+    private const int MaxRoutesNamed = 5;
+}

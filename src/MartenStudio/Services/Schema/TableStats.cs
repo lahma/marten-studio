@@ -1,4 +1,5 @@
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Services.Schema;
 

@@ -2,6 +2,7 @@ using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Query;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests.Sql;
 

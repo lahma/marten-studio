@@ -82,10 +82,10 @@ public class TenancyEnumerationCallTests
         new("src/MartenStudio/Services/MartenStudioSourceProvider.cs", "AllDatabases", 1,
             "the implementation of IStudioSource.DatabasesAsync for a Marten store, and nothing else: every caller of "
             + "the seam is counted at its own call below"),
-        new("src/MartenStudio/Services/Sources/StudioSourceResolver.cs", "DatabasesAsync", 1,
+        new("src/PostgresStudio/Services/Sources/StudioSourceResolver.cs", "DatabasesAsync", 1,
             "the instance: every resolution matches the URL's database by identity against what the source lists, "
             + "never FindOrCreateDatabase, which would create the database a URL named"),
-        new("src/MartenStudio/Services/StudioScopeCatalog.cs", "DatabasesAsync", 2,
+        new("src/PostgresStudio/Services/StudioScopeCatalog.cs", "DatabasesAsync", 2,
             "names, for the database picker; and the instance tenant discovery reads, for the header"),
         new("src/MartenStudio/Services/StoreInfoService.cs", "AllDatabases", 1,
             "names, for the Overview's cards - one enumeration per store per load (F8-D3 C3)"),

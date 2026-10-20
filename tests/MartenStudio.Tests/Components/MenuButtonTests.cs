@@ -2,7 +2,7 @@ using AngleSharp.Dom;
 
 using Bunit;
 
-using MartenStudio.Components.Shared;
+using PostgresStudio.Components.Shared;
 
 using Microsoft.AspNetCore.Components.Web;
 

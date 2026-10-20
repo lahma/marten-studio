@@ -6,6 +6,8 @@ using MartenStudio.Services.Documents;
 using MartenStudio.Services.Query;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Integration.Tests.Documents;
 

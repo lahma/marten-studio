@@ -1,11 +1,12 @@
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Query;
 
 using MartenStudio.Tests.Sql;
 
 using Npgsql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Documents;
 

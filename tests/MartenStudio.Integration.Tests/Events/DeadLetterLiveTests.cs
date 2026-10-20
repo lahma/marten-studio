@@ -1,7 +1,7 @@
-using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Events;
 
@@ -230,7 +230,7 @@ public class DeadLetterLiveTests(PoisonStoreFixture fixture) : IClassFixture<Poi
     {
         await using Npgsql.NpgsqlConnection connection = await Events.OpenAsync(token);
         await using Npgsql.NpgsqlCommand command = new(
-            "select count(*) from " + MartenStudio.Internal.Sql.SqlIdentifier.Qualify(Events.Schema, "mt_doc_deadletterevent"), connection);
+            "select count(*) from " + PostgresStudio.Internal.Sql.SqlIdentifier.Qualify(Events.Schema, "mt_doc_deadletterevent"), connection);
 
         return (long) (await command.ExecuteScalarAsync(token))!;
     }

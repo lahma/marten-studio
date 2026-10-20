@@ -6,6 +6,7 @@ using MartenStudio.Services;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Tenancy;
 

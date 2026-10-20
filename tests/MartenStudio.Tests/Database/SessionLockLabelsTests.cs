@@ -3,7 +3,7 @@ using JasperFx.Events.Projections;
 
 using Marten;
 
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Sql;
 
 namespace MartenStudio.Tests.Database;

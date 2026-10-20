@@ -3,12 +3,8 @@ using JasperFx.Events.Daemon;
 using Marten;
 
 using MartenStudio.Integration.Tests.Health;
-using MartenStudio.Internal.Sql;
 using MartenStudio.Sample.Generation;
 using MartenStudio.SampleDomain;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Checks;
-using MartenStudio.Services.Schema;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -17,6 +13,10 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 
 using static MartenStudio.Integration.Tests.Health.DaemonSweeps;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Integration.Tests.Generation;
 

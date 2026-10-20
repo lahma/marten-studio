@@ -4,20 +4,22 @@ using Marten;
 
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
-using MartenStudio.Services.Relationships;
 using MartenStudio.Services.Schema;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Sources;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Query;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Conventions;
 

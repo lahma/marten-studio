@@ -8,6 +8,7 @@ using Weasel.Core;
 using Weasel.Core.Migrations;
 using Weasel.Postgresql.Functions;
 using Weasel.Postgresql.Tables;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Services.Schema;
 

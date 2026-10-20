@@ -1,13 +1,12 @@
 using System.Diagnostics;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Health;
-
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 
 using Testcontainers.PostgreSql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

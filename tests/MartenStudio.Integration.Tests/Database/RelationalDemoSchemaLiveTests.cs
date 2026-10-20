@@ -5,7 +5,6 @@ using System.Text.RegularExpressions;
 using Marten;
 
 using MartenStudio.Integration.Tests.Browser;
-using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.SampleDomain.Documents;
 using MartenStudio.SampleDomain.Generation;
@@ -14,6 +13,7 @@ using MartenStudio.SampleDomain.Relational;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests.Database;
 

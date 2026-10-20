@@ -8,6 +8,7 @@ using Marten;
 using Marten.Events;
 
 using MartenStudio.Services.Events;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
 

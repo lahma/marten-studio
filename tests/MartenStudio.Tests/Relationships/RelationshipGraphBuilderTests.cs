@@ -1,7 +1,8 @@
 using Marten;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Relationships;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Relationships;
 

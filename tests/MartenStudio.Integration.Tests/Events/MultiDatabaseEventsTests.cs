@@ -5,13 +5,13 @@ using Marten;
 using Marten.Services;
 using Marten.Storage;
 
-using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Events;
 
@@ -203,7 +203,7 @@ internal sealed class MultiDatabaseEventsFixture : IAsyncDisposable
         {
             await admin.OpenAsync();
 
-            string quoted = MartenStudio.Internal.Sql.SqlIdentifier.Quote(name);
+            string quoted = PostgresStudio.Internal.Sql.SqlIdentifier.Quote(name);
 
             await using (var drop = new NpgsqlCommand(
                 $"drop database if exists {quoted} with (force)", admin))

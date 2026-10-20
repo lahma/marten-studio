@@ -6,8 +6,6 @@ using MartenStudio.Integration.Tests.Projections;
 using MartenStudio.Services;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -16,6 +14,9 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Integration.Tests.Logging;
 

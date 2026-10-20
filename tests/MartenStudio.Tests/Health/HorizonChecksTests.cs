@@ -1,9 +1,10 @@
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Health;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Health.Checks;
 
 using static MartenStudio.Tests.Health.TableCheckBuilders;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Tests.Health;
 
@@ -43,11 +44,11 @@ public class HorizonChecksTests
     /// A history of a counter: <paramref name="perMinute" /> a minute over <paramref name="minutes" /> (two samples), with the
     /// series that say the age stayed past its forced line in both - so a forecast alone has persisted.
     /// </summary>
-    private static HealthHistoryView XidRate(double perMinute, int minutes = 40, string series = MartenStudio.Services.Health.Checks.Wraparound.XidCounterSeries)
+    private static HealthHistoryView XidRate(double perMinute, int minutes = 40, string series = PostgresStudio.Services.Health.Checks.Wraparound.XidCounterSeries)
     {
-        bool xid = series == MartenStudio.Services.Health.Checks.Wraparound.XidCounterSeries;
-        string swept = xid ? MartenStudio.Services.Health.Checks.Wraparound.XidSweptSeries : MartenStudio.Services.Health.Checks.Wraparound.MultixactSweptSeries;
-        string forced = xid ? MartenStudio.Services.Health.Checks.Wraparound.XidPastForcedSeries : MartenStudio.Services.Health.Checks.Wraparound.MultixactPastForcedSeries;
+        bool xid = series == PostgresStudio.Services.Health.Checks.Wraparound.XidCounterSeries;
+        string swept = xid ? PostgresStudio.Services.Health.Checks.Wraparound.XidSweptSeries : PostgresStudio.Services.Health.Checks.Wraparound.MultixactSweptSeries;
+        string forced = xid ? PostgresStudio.Services.Health.Checks.Wraparound.XidPastForcedSeries : PostgresStudio.Services.Health.Checks.Wraparound.MultixactPastForcedSeries;
 
         return History(
             (TimeSpan.FromMinutes(minutes), [(series, 1_000_000), (swept, 1), (forced, 1)]),
@@ -77,7 +78,7 @@ public class HorizonChecksTests
                 ? latest - burstPerMinute * Math.Min(ago.TotalMinutes, recent.TotalMinutes) - perMinute * Math.Max(0, ago.TotalMinutes - recent.TotalMinutes)
                 : latest - perMinute * ago.TotalMinutes;
 
-            samples.Add((ago, [(MartenStudio.Services.Health.Checks.Wraparound.XidCounterSeries, value)]));
+            samples.Add((ago, [(PostgresStudio.Services.Health.Checks.Wraparound.XidCounterSeries, value)]));
         }
 
         samples.Count.Should().BeLessThanOrEqualTo(HealthHistory.Capacity, "the history holds no more samples than that");
@@ -91,17 +92,17 @@ public class HorizonChecksTests
     [Fact]
     public void The_refusal_line_is_three_million_short_of_wraparound_from_14_and_one_million_on_13()
     {
-        MartenStudio.Services.Health.Checks.Wraparound.RefusalAge(170_000).Should().Be(2_147_483_647 - 3_000_000);
-        MartenStudio.Services.Health.Checks.Wraparound.RefusalAge(140_000).Should().Be(2_147_483_647 - 3_000_000);
-        MartenStudio.Services.Health.Checks.Wraparound.RefusalAge(130_012).Should().Be(2_147_483_647 - 1_000_000);
+        PostgresStudio.Services.Health.Checks.Wraparound.RefusalAge(170_000).Should().Be(2_147_483_647 - 3_000_000);
+        PostgresStudio.Services.Health.Checks.Wraparound.RefusalAge(140_000).Should().Be(2_147_483_647 - 3_000_000);
+        PostgresStudio.Services.Health.Checks.Wraparound.RefusalAge(130_012).Should().Be(2_147_483_647 - 1_000_000);
     }
 
     [Fact]
     public void A_failsafe_below_105_percent_of_the_forced_line_is_raised_to_it_as_vacuum_does()
     {
-        MartenStudio.Services.Health.Checks.Wraparound.EffectiveFailsafe(1_600_000_000, 400_000_000).Should().Be(1_600_000_000);
-        MartenStudio.Services.Health.Checks.Wraparound.EffectiveFailsafe(100_000_000, 400_000_000).Should().Be(420_000_000);
-        MartenStudio.Services.Health.Checks.Wraparound.EffectiveFailsafe(null, 400_000_000).Should().BeNull("PostgreSQL 13 has no failsafe");
+        PostgresStudio.Services.Health.Checks.Wraparound.EffectiveFailsafe(1_600_000_000, 400_000_000).Should().Be(1_600_000_000);
+        PostgresStudio.Services.Health.Checks.Wraparound.EffectiveFailsafe(100_000_000, 400_000_000).Should().Be(420_000_000);
+        PostgresStudio.Services.Health.Checks.Wraparound.EffectiveFailsafe(null, 400_000_000).Should().BeNull("PostgreSQL 13 has no failsafe");
     }
 
     [Fact]
@@ -257,9 +258,9 @@ public class HorizonChecksTests
     [Fact]
     public void A_forecast_alone_waits_for_the_age_to_stay_past_the_forced_line()
     {
-        const string Counter = MartenStudio.Services.Health.Checks.Wraparound.XidCounterSeries;
-        const string Swept = MartenStudio.Services.Health.Checks.Wraparound.XidSweptSeries;
-        const string Forced = MartenStudio.Services.Health.Checks.Wraparound.XidPastForcedSeries;
+        const string Counter = PostgresStudio.Services.Health.Checks.Wraparound.XidCounterSeries;
+        const string Swept = PostgresStudio.Services.Health.Checks.Wraparound.XidSweptSeries;
+        const string Forced = PostgresStudio.Services.Health.Checks.Wraparound.XidPastForcedSeries;
 
         // template0 past the forced line at this sample, this database young: the server's oldest decides the age.
         TransactionIdAgeFacts facts = new([], Wraparound(static x => x with { DatabaseXidAge = 30_000_000, ServerXidAge = 210_000_000 }));
@@ -304,18 +305,18 @@ public class HorizonChecksTests
     [InlineData(120, 1_800, "30 min")]
     public void A_forecast_alone_waits_half_what_the_history_holds_and_at_most_thirty_minutes(int intervalSeconds, double seconds, string text)
     {
-        TimeSpan persist = MartenStudio.Services.Health.Checks.Wraparound.ForecastPersistFor(TimeSpan.FromSeconds(intervalSeconds));
+        TimeSpan persist = PostgresStudio.Services.Health.Checks.Wraparound.ForecastPersistFor(TimeSpan.FromSeconds(intervalSeconds));
 
         persist.Should().Be(TimeSpan.FromSeconds(seconds));
-        MartenStudio.Services.Health.Checks.Wraparound.PersistText(persist).Should().Be(text);
+        PostgresStudio.Services.Health.Checks.Wraparound.PersistText(persist).Should().Be(text);
     }
 
     [Fact]
     public void At_a_short_interval_a_forecast_alone_speaks_once_it_has_held_for_half_the_ring()
     {
-        const string Counter = MartenStudio.Services.Health.Checks.Wraparound.XidCounterSeries;
-        const string Swept = MartenStudio.Services.Health.Checks.Wraparound.XidSweptSeries;
-        const string Forced = MartenStudio.Services.Health.Checks.Wraparound.XidPastForcedSeries;
+        const string Counter = PostgresStudio.Services.Health.Checks.Wraparound.XidCounterSeries;
+        const string Swept = PostgresStudio.Services.Health.Checks.Wraparound.XidSweptSeries;
+        const string Forced = PostgresStudio.Services.Health.Checks.Wraparound.XidPastForcedSeries;
 
         // Past the forced line for twenty minutes, at 20,000 a minute: about 67 days to the refusal line.
         HealthHistoryView twentyMinutes = History(
@@ -335,9 +336,9 @@ public class HorizonChecksTests
             .Which.Title.Should().StartWith("At the rate of the last 20 minutes, Postgres would stop accepting writes in");
 
         // T13 the same, at 15 seconds.
-        const string Multixacts = MartenStudio.Services.Health.Checks.Wraparound.MultixactCounterSeries;
-        const string MultixactSwept = MartenStudio.Services.Health.Checks.Wraparound.MultixactSweptSeries;
-        const string MultixactForced = MartenStudio.Services.Health.Checks.Wraparound.MultixactPastForcedSeries;
+        const string Multixacts = PostgresStudio.Services.Health.Checks.Wraparound.MultixactCounterSeries;
+        const string MultixactSwept = PostgresStudio.Services.Health.Checks.Wraparound.MultixactSweptSeries;
+        const string MultixactForced = PostgresStudio.Services.Health.Checks.Wraparound.MultixactPastForcedSeries;
 
         HealthHistoryView tenMinutes = History(
             (TimeSpan.FromMinutes(10), [(Multixacts, 1_000_000), (MultixactSwept, 1), (MultixactForced, 1)]),
@@ -457,9 +458,9 @@ public class HorizonChecksTests
     [Fact]
     public void A_multixact_forecast_alone_waits_for_the_age_to_stay_past_the_forced_line()
     {
-        const string Counter = MartenStudio.Services.Health.Checks.Wraparound.MultixactCounterSeries;
-        const string Swept = MartenStudio.Services.Health.Checks.Wraparound.MultixactSweptSeries;
-        const string Forced = MartenStudio.Services.Health.Checks.Wraparound.MultixactPastForcedSeries;
+        const string Counter = PostgresStudio.Services.Health.Checks.Wraparound.MultixactCounterSeries;
+        const string Swept = PostgresStudio.Services.Health.Checks.Wraparound.MultixactSweptSeries;
+        const string Forced = PostgresStudio.Services.Health.Checks.Wraparound.MultixactPastForcedSeries;
 
         MultixactAgeFacts facts = Multixacts(static x => x with { DatabaseMultixactAge = 450_000_000, ServerMultixactAge = 450_000_000 });
 
@@ -479,7 +480,7 @@ public class HorizonChecksTests
         MultixactAgeFacts facts = Multixacts(static x => x with { DatabaseMultixactAge = 450_000_000, ServerMultixactAge = 450_000_000 });
 
         HealthFinding finding = new MultixactAgeCheck()
-            .Evaluate(facts, Evaluation(XidRate(40_000, series: MartenStudio.Services.Health.Checks.Wraparound.MultixactCounterSeries)))
+            .Evaluate(facts, Evaluation(XidRate(40_000, series: PostgresStudio.Services.Health.Checks.Wraparound.MultixactCounterSeries)))
             .Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Warning);
@@ -493,7 +494,7 @@ public class HorizonChecksTests
     {
         HealthVerdict verdict = new MultixactAgeCheck().Evaluate(
             Multixacts(),
-            Evaluation(XidRate(600, series: MartenStudio.Services.Health.Checks.Wraparound.MultixactCounterSeries)));
+            Evaluation(XidRate(600, series: PostgresStudio.Services.Health.Checks.Wraparound.MultixactCounterSeries)));
 
         verdict.Findings.Should().BeEmpty();
         verdict.Note.Should().Contain("About 36,000 multixacts an hour, at the rate of the last 40 minutes");
@@ -652,7 +653,7 @@ public class HorizonChecksTests
         new HorizonHeldCheck().Evaluate(facts, Evaluation(burst)).Findings.Should().BeEmpty(
             "the first sample past the id it holds is the latest, so the samples bound its hold at none - and the lower bound is forty seconds");
 
-        (TimeSpan? age, HorizonTimeKind kind) = HorizonHeldCheck.AgeOf(leader, facts, Evaluation(burst), burst.Trend(MartenStudio.Services.Health.Checks.Wraparound.XidCounterSeries));
+        (TimeSpan? age, HorizonTimeKind kind) = HorizonHeldCheck.AgeOf(leader, facts, Evaluation(burst), burst.Trend(PostgresStudio.Services.Health.Checks.Wraparound.XidCounterSeries));
         age.Should().Be(TimeSpan.FromSeconds(40));
         kind.Should().Be(HorizonTimeKind.AtLeast);
     }
@@ -666,7 +667,7 @@ public class HorizonChecksTests
         new HorizonHeldCheck().Evaluate(Horizon([loop]), Evaluation()).Findings.Should().BeEmpty(
             "a three-hour statement whose transaction is a second old holds the horizon back by a second");
 
-        HorizonHeldCheck.AgeOf(loop, Horizon([loop]), Evaluation(), HealthHistoryView.Empty.Trend(MartenStudio.Services.Health.Checks.Wraparound.XidCounterSeries))
+        HorizonHeldCheck.AgeOf(loop, Horizon([loop]), Evaluation(), HealthHistoryView.Empty.Trend(PostgresStudio.Services.Health.Checks.Wraparound.XidCounterSeries))
             .Age.Should().Be(TimeSpan.FromSeconds(1));
     }
 
@@ -675,7 +676,7 @@ public class HorizonChecksTests
     {
         HorizonHolder session = Session(TimeSpan.FromSeconds(10), xids: 600_000, open: TimeSpan.FromMinutes(20), wrote: true) with { State = "active", Bound = "statement" };
         HealthHistoryView counter = Counter(5_000_000, 600, TimeSpan.FromHours(3), TimeSpan.FromMinutes(10));
-        HealthTrend trend = counter.Trend(MartenStudio.Services.Health.Checks.Wraparound.XidCounterSeries);
+        HealthTrend trend = counter.Trend(PostgresStudio.Services.Health.Checks.Wraparound.XidCounterSeries);
 
         (TimeSpan? age, HorizonTimeKind kind) = HorizonHeldCheck.AgeOf(
             session, Horizon([session], database: static x => x with { XidCounter = 5_000_000 }), Evaluation(counter), trend);
@@ -696,7 +697,7 @@ public class HorizonChecksTests
         HealthHistoryView counter = Counter(5_000_000, 600, TimeSpan.FromHours(3), TimeSpan.FromMinutes(10));
         HorizonFacts facts = Horizon([snapshot], database: static x => x with { XidCounter = 5_000_000 });
 
-        HorizonHeldCheck.AgeOf(snapshot, facts, Evaluation(counter), counter.Trend(MartenStudio.Services.Health.Checks.Wraparound.XidCounterSeries))
+        HorizonHeldCheck.AgeOf(snapshot, facts, Evaluation(counter), counter.Trend(PostgresStudio.Services.Health.Checks.Wraparound.XidCounterSeries))
             .Should().Be(((TimeSpan?) TimeSpan.FromSeconds(10), HorizonTimeKind.AtLeast));
 
         new HorizonHeldCheck().Evaluate(facts, Evaluation(counter)).Findings.Should().BeEmpty("its statement is ten seconds old");
@@ -993,7 +994,7 @@ public class HorizonChecksTests
         finding.WhyItMatters.Should().Contain("it is the one to end").And.NotContain("HotCold daemon leader. With");
         finding.Remedy.Should().BeNull("the leader's remedy would send the host to the wrong setting");
 
-        HorizonHeldCheck.AgeOf(leader, facts, Evaluation(FourHours()), FourHours().Trend(MartenStudio.Services.Health.Checks.Wraparound.XidCounterSeries))
+        HorizonHeldCheck.AgeOf(leader, facts, Evaluation(FourHours()), FourHours().Trend(PostgresStudio.Services.Health.Checks.Wraparound.XidCounterSeries))
             .Should().Be(((TimeSpan?) TimeSpan.FromSeconds(40), HorizonTimeKind.AtLeast), "a snapshot is dated by Postgres' timestamps alone");
 
         new HorizonHeldCheck().Evaluate(Horizon([leader], database: static x => x with { XidCounter = 5_000_000 }), Evaluation(FourHours()))

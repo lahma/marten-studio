@@ -128,23 +128,23 @@ public class LogLevelsTests
     private static readonly Dictionary<string, (Verdict Verdict, string Why)> Roster = new(StringComparer.Ordinal)
     {
         // ---- StudioLog: the audit events kept at Warning ----------------------------------------------
-        ["src/MartenStudio/Services/StudioLog.cs : 9202 CapabilityDenied"] = (Verdict.Refusal,
+        ["src/PostgresStudio/Services/StudioLog.cs : 9202 CapabilityDenied"] = (Verdict.Refusal,
             "A capability refusal reaches the service only when a client drives a control the page disabled or hid."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9203 ScopeAuthorizationDenied"] = (Verdict.Refusal,
+        ["src/PostgresStudio/Services/StudioLog.cs : 9203 ScopeAuthorizationDenied"] = (Verdict.Refusal,
             "A policy refusal on a write, a query run or a database-browser read (by name, of a store the store policy refuses), including an offered pause or correction that reaches a database the visitor may not; listings are filtered (FilterAsync logs nothing)."),
         ["src/MartenStudio/Services/MartenLog.cs : 9211 DocumentWriteRoundTripDropped"] = (Verdict.DataLoss,
             "A save the visitor confirmed dropped properties the CLR type does not have; the only durable record of the loss."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9230 DatabaseBrowserOpenToEverySchemaWithoutRole"] = (Verdict.Configuration,
+        ["src/PostgresStudio/Services/StudioLog.cs : 9230 DatabaseBrowserOpenToEverySchemaWithoutRole"] = (Verdict.Configuration,
             "BrowsableSchemas contains \"*\" and SqlConsoleRole is unset: every table the store's role can read is browsable. Once per host start."),
 
         // ---- StudioLog: the throttled anomalies (level is a parameter) --------------------------------
-        ["src/MartenStudio/Services/StudioLog.cs : 9210 StoreUnavailable"] = (Verdict.Throttled,
+        ["src/PostgresStudio/Services/StudioLog.cs : 9210 StoreUnavailable"] = (Verdict.Throttled,
             "A registered store will not build; the registry's ten-second cache expires under every polling page."),
         ["src/MartenStudio/Services/MartenLog.cs : 9212 DaemonUnreachable"] = (Verdict.Throttled,
             "A registered coordinator answered with neither a daemon nor NotSupported, or would not build other than by Wolverine's unknown-store shape; polled."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9213 StoreDatabasesUnreadable"] = (Verdict.Throttled,
+        ["src/PostgresStudio/Services/StudioLog.cs : 9213 StoreDatabasesUnreadable"] = (Verdict.Throttled,
             "A store's databases could not be listed; asked by every Overview load and every scope listing in every circuit."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9214 PostgresVersionUnreadable"] = (Verdict.Throttled,
+        ["src/PostgresStudio/Services/StudioLog.cs : 9214 PostgresVersionUnreadable"] = (Verdict.Throttled,
             "The server version of a store with a default database could not be read; asked once per circuit per store, and every circuit asks. A tenancy with no default database (master-table, sharded, static without AsDefault) is Debug."),
         ["src/MartenStudio/Services/MartenLog.cs : 9215 ShardTrackerUnobservable"] = (Verdict.Throttled,
             "The in-process tracker refused an observer; asked again by every visit to the projections page."),
@@ -154,19 +154,19 @@ public class LogLevelsTests
             "An event-store read failed other than by a statement timeout (a missing table is here: every read asks the catalog first); polled."),
         ["src/MartenStudio/Services/MartenLog.cs : 9218 StreamTimestampMissing"] = (Verdict.Throttled,
             "A hand-migrated mt_streams no Marten schema can have; once is enough, not once per page of streams."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9219 TenantDiscoveryFailed"] = (Verdict.Throttled,
+        ["src/PostgresStudio/Services/StudioLog.cs : 9219 TenantDiscoveryFailed"] = (Verdict.Throttled,
             "Tenant discovery failed; the header asks on every scope change in every circuit."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9220 LiveUpdateHandlerFailed"] = (Verdict.Throttled,
+        ["src/PostgresStudio/Services/StudioLog.cs : 9220 LiveUpdateHandlerFailed"] = (Verdict.Throttled,
             "A page's own refresh-failure handler threw: a studio bug, on a loop that runs every RefreshInterval."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9221 TenantPolicyFailed"] = (Verdict.Throttled,
+        ["src/PostgresStudio/Services/StudioLog.cs : 9221 TenantPolicyFailed"] = (Verdict.Throttled,
             "The host's store policy threw while the header asked which discovered tenants to list; asked on every scope change in every circuit."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9222 HealthCheckFailed"] = (Verdict.Throttled,
+        ["src/PostgresStudio/Services/StudioLog.cs : 9222 HealthCheckFailed"] = (Verdict.Throttled,
             "A health check failed other than by an expected state (privilege, timeout, missing extension); the Health page and Overview re-check at HealthInterval."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9237 TableRowReadFailed"] = (Verdict.Throttled,
+        ["src/PostgresStudio/Services/StudioLog.cs : 9237 TableRowReadFailed"] = (Verdict.Throttled,
             "A row read failed by connection or an unexpected SQLSTATE; a timeout, privilege, RLS or unrefreshed view is Debug, and page turns repeat it."),
-        ["src/MartenStudio/Services/StudioLog.Sessions.cs : 9246 SessionActivityReadFailed"] = (Verdict.Throttled,
+        ["src/PostgresStudio/Services/StudioLog.Sessions.cs : 9246 SessionActivityReadFailed"] = (Verdict.Throttled,
             "A read of a database's sessions failed by connection or an unexpected SQLSTATE; privilege and timeouts are Debug, and the Sessions page re-reads every HealthInterval."),
-        ["src/MartenStudio/Services/StudioLog.Export.cs : 9270 HealthExportFailed"] = (Verdict.Throttled,
+        ["src/PostgresStudio/Services/StudioLog.Export.cs : 9270 HealthExportFailed"] = (Verdict.Throttled,
             "The opt-in health export failed in the studio itself and reports Degraded; an orchestrator probes the health endpoint every few seconds, and the run repeats every HealthInterval."),
 
         // ---- Visitor-started reads and writes, one line per action ------------------------------------
@@ -176,7 +176,7 @@ public class LogLevelsTests
             "The configuration screen's own load; not polled, and the page shows the failure."),
         ["src/MartenStudio/Services/DatabaseReachAuthorization.cs : Marten Studio could not enumerate the databases of store {StoreKey} before {Action}, so it refused it"] = (Verdict.VisitorAction,
             "A pause, resume or store-wide correction the visitor pressed is refused because the store's databases cannot be enumerated."),
-        ["src/MartenStudio/Services/Relationships/RelationshipDataService.cs : Marten Studio could not read the relationships of {StoreKey}"] = (Verdict.VisitorAction,
+        ["src/PostgresStudio/Services/Relationships/RelationshipDataService.cs : Marten Studio could not read the relationships of {StoreKey}"] = (Verdict.VisitorAction,
             "The relationships screen's load failed on a catalog read; not polled."),
         ["src/MartenStudio/Services/MartenRelationshipNodeSource.cs : Marten Studio could not read what references '{Id}' of '{Alias}'"] = (Verdict.VisitorAction,
             "A document detail's referenced-by panel failed as a whole; the per-edge counts inside it are Debug."),
@@ -216,7 +216,7 @@ public class LogLevelsTests
             "The find-by-id probe the visitor ran failed; per-collection probe failures inside it are Debug."),
 
         // ---- Faults ---------------------------------------------------------------------------------
-        ["src/MartenStudio/Services/StudioState.cs : A Marten Studio page failed to handle a scope change"] = (Verdict.Fault,
+        ["src/PostgresStudio/Services/StudioState.cs : A Marten Studio page failed to handle a scope change"] = (Verdict.Fault,
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),
         ["src/MartenStudio/Services/Projections/StudioOperationTracker.cs : Marten Studio operation {Kind} on {Target} failed"] = (Verdict.Fault,
             "A rebuild the visitor started failed after tearing the projection's tables down; they stay empty until rebuilt."),
@@ -486,7 +486,7 @@ public class LogLevelsTests
     /// </summary>
     private static readonly string[] EventFiles =
     [
-        "src/MartenStudio/Services/StudioLog.cs",
+        "src/PostgresStudio/Services/StudioLog.cs",
         "src/MartenStudio/Services/MartenLog.cs",
     ];
 

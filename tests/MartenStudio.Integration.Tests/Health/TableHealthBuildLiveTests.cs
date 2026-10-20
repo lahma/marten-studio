@@ -2,10 +2,8 @@ using System.Globalization;
 
 using Marten;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -13,6 +11,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 using static MartenStudio.Integration.Tests.Health.TableHealthLive;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Integration.Tests.Health;
 

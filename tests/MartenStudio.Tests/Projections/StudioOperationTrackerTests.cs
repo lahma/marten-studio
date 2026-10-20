@@ -1,10 +1,10 @@
-using MartenStudio.Services;
 using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Projections;
 

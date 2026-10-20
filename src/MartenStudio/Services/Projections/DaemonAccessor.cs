@@ -8,6 +8,7 @@ using Marten.Storage;
 using Microsoft.Extensions.Logging;
 
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Services.Projections;
 

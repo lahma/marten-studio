@@ -1,8 +1,5 @@
 using System.Globalization;
 
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Checks;
-
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
@@ -10,6 +7,8 @@ using Microsoft.Extensions.Hosting;
 using Npgsql;
 
 using Testcontainers.PostgreSql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Integration.Tests.Health;
 

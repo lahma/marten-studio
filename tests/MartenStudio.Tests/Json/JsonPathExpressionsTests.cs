@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using MartenStudio.Services.Json;
+using PostgresStudio.Services.Json;
 
 namespace MartenStudio.Tests.Json;
 

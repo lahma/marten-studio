@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <AssemblyName>PostgresStudio</AssemblyName>
+    <RootNamespace>PostgresStudio</RootNamespace>
+    <PackageId>PostgresStudio</PackageId>
+    <IsPackable>true</IsPackable>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>postgresql;npgsql;database;admin;dashboard;ui;blazor;aspnetcore</PackageTags>
+    <Description>An embeddable Blazor Server admin UI for the PostgreSQL databases an ASP.NET Core application already registers as NpgsqlDataSource.</Description>
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <!-- Selects the conditional Npgsql PackageVersion row in Directory.Packages.props (AGENTS.md D30). -->
+    <PostgresStudioPinsNpgsql>true</PostgresStudioPinsNpgsql>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <IsTrimmable>false</IsTrimmable>
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Microsoft.AspNetCore.App.Internal.Assets" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MartenStudio" />
+    <InternalsVisibleTo Include="MartenStudio.Tests" />
+    <InternalsVisibleTo Include="MartenStudio.Integration.Tests" />
+    <InternalsVisibleTo Include="PostgresStudio.Tests" />
+    <InternalsVisibleTo Include="PostgresStudio.Integration.Tests" />
+  </ItemGroup>
+
+</Project>

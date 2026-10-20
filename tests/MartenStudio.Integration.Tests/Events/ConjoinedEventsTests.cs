@@ -5,13 +5,13 @@ using JasperFx.MultiTenancy;
 
 using Marten;
 
-using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Events;
 
@@ -142,7 +142,7 @@ internal sealed class ConjoinedEventsFixture : IAsyncDisposable
         await connection.OpenAsync(cancellationToken);
 
         await using var command = new NpgsqlCommand(
-            $"select is_skipped from {MartenStudio.Internal.Sql.SqlIdentifier.Qualify(Schema, "mt_events")} where seq_id = @seq",
+            $"select is_skipped from {PostgresStudio.Internal.Sql.SqlIdentifier.Qualify(Schema, "mt_events")} where seq_id = @seq",
             connection);
 
         command.Parameters.AddWithValue("seq", sequence);
@@ -167,7 +167,7 @@ internal sealed class ConjoinedEventsFixture : IAsyncDisposable
         await connection.OpenAsync(cancellationToken);
 
         await using var command = new NpgsqlCommand(
-            $"update {MartenStudio.Internal.Sql.SqlIdentifier.Qualify(Schema, "mt_events")} set is_skipped = FALSE where seq_id = @seq",
+            $"update {PostgresStudio.Internal.Sql.SqlIdentifier.Qualify(Schema, "mt_events")} set is_skipped = FALSE where seq_id = @seq",
             connection);
 
         command.Parameters.AddWithValue("seq", sequence);

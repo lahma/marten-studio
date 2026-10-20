@@ -4,10 +4,10 @@ using JasperFx;
 
 using Marten;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Configuration;
 
 using IJasperFxEventStore = JasperFx.Events.IEventStore;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests.Tenancy;
 

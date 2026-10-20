@@ -3,14 +3,15 @@ using JasperFx.Events.Projections;
 using Marten;
 using Marten.Events.Projections.Flattened;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 using MartenStudio.Tests.Sql;
 
 using Weasel.Postgresql;
 using Weasel.Postgresql.Functions;
 using Weasel.Postgresql.Tables;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Tests.Database;
 
