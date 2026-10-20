@@ -106,10 +106,20 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
     /// The anti-vacuity theory: the danger the two tests above measure is real on this Marten.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Without it, a Marten release that stopped applying migrations from <c>DocumentTables()</c> would
     /// turn both tests into assertions that nothing happens when nothing could have happened. This calls
-    /// the two methods the documents browser refuses to call and asserts that they really do create
-    /// Marten's HiLo objects on a schema that did not have them.
+    /// the two methods the documents browser refuses to call and asserts that, below Marten 9.50.3, they really
+    /// do create Marten's HiLo objects on a schema that did not have them.
+    /// </para>
+    /// <para>
+    /// <b>Version-aware (L5).</b> One release did stop: from 9.50.3 (#5665) <c>AllObjects()</c> describes the HiLo
+    /// feature and applies nothing, so <c>DocumentTables()</c> and <c>Functions()</c> create nothing - asserted, so the
+    /// change is recorded rather than silent, and the second test above proves its point at the floor, which still has
+    /// the hazard. From 9.50.3 the proof that the first test is not vacuous moves to the read the documents list and
+    /// detail replaced: Marten's own <c>LoadAsync</c>, on the same empty schemas, still ensures - and so creates - the
+    /// document's storage at every version.
+    /// </para>
     /// </remarks>
     [PostgresFact]
     public async Task Martens_own_DocumentTables_and_Functions_really_do_create_the_HiLo_objects()
@@ -127,10 +137,27 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
 
         SchemaObjects after = await host.ReadObjectsAsync();
 
-        after.Tables.Should().Contain("mt_hilo",
-            "this is the DDL a read path used to run - if Marten has stopped doing it, the two tests " +
-            "above no longer prove anything and this one is where that is noticed");
-        after.Routines.Should().Contain("mt_get_next_hi");
+        if (MartenStudio.Services.Configuration.RuntimeFeature.OfflineSchemaEnumeration.Probe() != true)
+        {
+            after.Tables.Should().Contain("mt_hilo",
+                "this is the DDL a read path used to run - if Marten has stopped doing it, the two tests " +
+                "above no longer prove anything and this one is where that is noticed");
+            after.Routines.Should().Contain("mt_get_next_hi");
+            return;
+        }
+
+        after.Should().Be(SchemaObjects.Empty,
+            "from Marten 9.50.3 DocumentTables() and Functions() describe the HiLo feature and apply nothing");
+
+        // The read the documents list and detail replaced: Marten's own load ensures the document's storage first, which
+        // on these empty schemas creates it - at every version, and so from 9.50.3 too.
+        await using (IQuerySession session = store.QuerySession())
+        {
+            (await session.LoadAsync<NumberedThing>(1L)).Should().BeNull();
+        }
+
+        (await host.ReadObjectsAsync()).Tables.Should().Contain("mt_doc_numbered",
+            "Marten's own read still writes DDL on this setup - if it no longer does, the first test above proves nothing");
     }
 
     private async Task<Host> StartAsync(string name)
