@@ -2,7 +2,6 @@ using MartenStudio.Services;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Settings;
 using MartenStudio.Services.Sources;
-using MartenStudio.Tests.Conventions;
 
 namespace MartenStudio.Tests.Health;
 
@@ -69,35 +68,31 @@ public class HealthSourceKindTests
     }
 
     /// <summary>
-    /// MartenStudio's own registry: every check runs against a Marten store, and none declared in one of MartenStudio's own
-    /// files - every check file not on the move manifest - runs against anything else. While the shared engine and
-    /// MartenStudio are one assembly the shared checks are held to Marten stores too, which is every source MartenStudio
-    /// has; from the move on, they run against every kind.
+    /// MartenStudio's own registry: every check runs against a Marten store, and every check in MartenStudio's own
+    /// assembly runs against nothing else. While the shared engine and MartenStudio are one assembly (before PS-2) that is
+    /// all 49, the shared checks included - every source MartenStudio has is a Marten store; from the move on, the 23 in
+    /// the shared assembly run against every kind and MartenStudio's 26 against Marten stores alone.
     /// </summary>
     [Fact]
     public void MartenStudios_own_checks_run_against_Marten_stores_only()
     {
         HealthCheckRegistry registry = StudioHealthChecks.Registry;
-        HashSet<string> sharedTypes =
-        [
-            .. CoreManifest.Entries
-                .Where(static x => x.Path.EndsWith(".cs", StringComparison.Ordinal))
-                .SelectMany(static x => CoreFenceTests.TopLevelTypes(
-                    SourceScanner.StripCommentsAndStrings(File.ReadAllText(RepositoryRoot.Combine(x.RepositoryPath.Split('/')))))),
-        ];
+        HealthCheckDescriptor[] marten = [.. registry.All.Where(static x => x.Info.CheckType.Assembly == typeof(MartenStudioDescriptor).Assembly)];
+        HealthCheckDescriptor[] restricted = [.. registry.All.Where(static x => x.SourceKinds is not null)];
 
-        HealthCheckDescriptor[] marten = [.. registry.All.Where(x => !sharedTypes.Contains(x.Info.CheckType.Name))];
-        HealthCheckDescriptor[] shared = [.. registry.All.Where(x => sharedTypes.Contains(x.Info.CheckType.Name))];
-
-        marten.Should().HaveCount(26, "MartenStudio keeps 26 of the 49 checks (design Appendix B)");
-        shared.Should().HaveCount(23, "the shared engine has 23");
-
+        registry.All.Should().HaveCount(49);
         registry.All.Should().OnlyContain(static x => x.RunsAgainst(StudioSourceKind.MartenStore));
-        marten.Should().OnlyContain(static x => !x.RunsAgainst(StudioSourceKind.DataSource) && !x.RunsAgainst(StudioSourceKind.HostProvider));
+        marten.Should().NotBeEmpty().And.OnlyContain(
+            static x => !x.RunsAgainst(StudioSourceKind.DataSource) && !x.RunsAgainst(StudioSourceKind.HostProvider));
 
-        if (typeof(HealthCheckRegistry).Assembly != typeof(MartenStudioDescriptor).Assembly)
+        if (typeof(HealthCheckRegistry).Assembly == typeof(MartenStudioDescriptor).Assembly)
         {
-            shared.Should().OnlyContain(static x => x.SourceKinds == null, "after the move, the shared checks run against every kind of source");
+            restricted.Should().HaveCount(49, "one assembly: a check found by both entries runs against what both admit");
+        }
+        else
+        {
+            marten.Should().HaveCount(26, "MartenStudio keeps 26 of the 49 checks (design Appendix B)");
+            restricted.Should().BeEquivalentTo(marten, "the shared engine's 23 run against every kind of source");
         }
     }
 }

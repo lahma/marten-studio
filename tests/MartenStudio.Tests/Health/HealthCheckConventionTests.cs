@@ -79,9 +79,10 @@ public class HealthCheckConventionTests
     [Fact]
     public void Every_check_lives_in_the_checks_folder()
     {
+        // Each assembly's own Services/Health/Checks: the shared engine's and MartenStudio's are one folder until the move.
         Discovered.Should().OnlyContain(
-            static x => x.Namespace == "MartenStudio.Services.Health.Checks",
-            "a check is added by adding its file to Services/Health/Checks, and nowhere else");
+            static x => x.Namespace == x.Assembly.GetName().Name + ".Services.Health.Checks",
+            "a check is added by adding its file to its assembly's Services/Health/Checks, and nowhere else");
     }
 
     /// <summary>The anti-vacuity half: each rule has to be able to fail.</summary>
