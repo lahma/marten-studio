@@ -32,13 +32,13 @@ public class RowLinksTests
     [Fact]
     public void The_rows_link_opens_the_rows_tab_with_the_filter_and_the_scope()
     {
-        string url = DatabaseLinks.ToRows(Settings,Descriptor, Scope, "quartz", "qrtz_triggers", "trigger_state = WAITING");
+        string url = DatabaseLinks.ToRows(Settings, Descriptor, Scope, "quartz", "qrtz_triggers", "trigger_state = WAITING");
 
         url.Should().StartWith("database/object?schema=quartz&name=qrtz_triggers&tab=rows&q=");
         Query(url, "q").Should().Be("trigger_state = WAITING");
         Query(url, "store").Should().Be("default");
 
-        DatabaseLinks.ToRows(Settings,Descriptor, Scope, "quartz", "qrtz_triggers").Should().NotContain("q=", "no filter is every row");
+        DatabaseLinks.ToRows(Settings, Descriptor, Scope, "quartz", "qrtz_triggers").Should().NotContain("q=", "no filter is every row");
     }
 
     [Theory]

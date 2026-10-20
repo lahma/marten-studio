@@ -3,6 +3,7 @@ using Marten.Schema;
 
 using MartenStudio.Services;
 using MartenStudio.Services.Database;
+using MartenStudio.Services.Sources;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authorization;
@@ -251,6 +252,53 @@ public class DatabaseAccessTests
         after.Should().NotBeSameAs(before);
         after.Classifier!.IsHiddenTable(schema, table).Should().BeTrue();
         after.Classifier.ClassifyRelation(schema, table).Should().BeNull("a hidden type's table is absent from every list");
+    }
+
+    /// <summary>
+    /// PS-1b-fix: the routing reads the declarations of the source before any database of it is resolved, the gate those
+    /// of the resolved scope - and the two must agree, or a schema the gate treats as a BrowseDatabase read could be routed
+    /// as the store's own structure and skip RequireBrowseAsync's audited refusal (<see cref="IDatabaseDeclarationsSource" />).
+    /// </summary>
+    [Fact]
+    public async Task The_routing_and_the_gate_read_the_same_own_schemas_and_the_same_classification()
+    {
+        await using Harness harness = Harness.Create(
+            static options => options.IsDocumentTypeVisible = static type => type != typeof(DbSecret),
+            static services => services.AddMartenStore<IElsewhereStore>(options =>
+            {
+                options.Connection(DummyConnectionString);
+                options.DatabaseSchemaName = "elsewhere";
+                options.Schema.For<DbSecret>();
+            }));
+
+        ResolvedScope resolved = await harness.Resolve<StudioScopeResolver>()
+            .ResolveAsync(new StudioScope("default", string.Empty, null), null, Token);
+
+        // Each from a circuit of its own, so that neither answer is the other's remembered read.
+        DatabaseDeclarations routed;
+        using (IServiceScope routing = harness.NewScope())
+        {
+            IStudioSourceProvider sources = routing.ServiceProvider.GetRequiredService<IStudioSourceProvider>();
+            StudioSourceRegistration registration = sources.Find("default")!;
+            sources.TryResolve(registration, out IStudioSource? source).IsAvailable.Should().BeTrue();
+
+            routed = routing.ServiceProvider.GetRequiredService<IDatabaseDeclarationsSource>().Read(source!);
+        }
+
+        DatabaseDeclarations gated;
+        using (IServiceScope gate = harness.NewScope())
+        {
+            gated = gate.ServiceProvider.GetRequiredService<IDatabaseDeclarationsSource>().Read(resolved);
+        }
+
+        routed.Succeeded.Should().BeTrue(routed.Failure);
+        gated.Succeeded.Should().BeTrue(gated.Failure);
+
+        routed.StoreSchemas.Should().NotBeEmpty().And.Equal(gated.StoreSchemas, "own schemas come from configuration alone");
+        routed.Classifier!.Stores.Select(static x => x.StoreKey).Should().Equal(gated.Classifier!.Stores.Select(static x => x.StoreKey));
+        routed.Classifier.HiddenTables.Should().BeEquivalentTo(gated.Classifier.HiddenTables);
+        routed.Classifier.HiddenTables.Should().NotBeEmpty("the premise: a hidden type is declared");
+        routed.Classifier.MayHideDocumentTypes.Should().Be(gated.Classifier.MayHideDocumentTypes);
     }
 
     [Fact]
@@ -686,6 +734,9 @@ public class DatabaseAccessTests
         public DatabaseAccess Access => Resolve<DatabaseAccess>();
 
         public T Resolve<T>() where T : notnull => scope.ServiceProvider.GetRequiredService<T>();
+
+        /// <summary>Another circuit over the same container.</summary>
+        public IServiceScope NewScope() => provider.CreateScope();
 
         public static Harness Create(Action<MartenStudioOptions> configure, Action<IServiceCollection>? extra = null)
         {

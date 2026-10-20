@@ -111,7 +111,15 @@ else
 
             case RowReferenceState.MartenDocument when reference is { DocumentAlias: { } alias, DocumentId: { } id }:
                 <CollectionChip Alias="@alias" Hue="@CollectionColorizer.HueFor(alias)" Small="true" />
-                <a class="ms-row-ref-key ms-doc-id" href="@DocumentHref(reference, alias, id)" title="Open this document in Documents, where tenancy and soft delete apply">@id</a>
+                @* Plain text where the studio has no Documents screen (IStudioLinks answers null): never a link to nowhere. *@
+                @if (DocumentHref(reference, alias, id) is { } documentHref)
+                {
+                    <a class="ms-row-ref-key ms-doc-id" href="@documentHref" title="Open this document in Documents, where tenancy and soft delete apply">@id</a>
+                }
+                else
+                {
+                    <span class="ms-row-ref-key ms-doc-id">@id</span>
+                }
                 break;
 
             case RowReferenceState.NoReference:
@@ -188,9 +196,18 @@ else
                 break;
 
             case RowInboundState.MartenDocument when reference.DocumentAlias is { } alias:
-                <a class="ms-row-ref-link" href="@Links.ToCollection(State.ActiveScope, alias)" title="A Marten document table: its rows are counted and browsed in Documents">
-                    <CollectionChip Alias="@alias" Hue="@CollectionColorizer.HueFor(alias)" Small="true" />
-                </a>
+                @if (Links.ToCollection(State.ActiveScope, alias) is { } collectionHref)
+                {
+                    <a class="ms-row-ref-link" href="@collectionHref" title="A Marten document table: its rows are counted and browsed in Documents">
+                        <CollectionChip Alias="@alias" Hue="@CollectionColorizer.HueFor(alias)" Small="true" />
+                    </a>
+                }
+                else
+                {
+                    <span class="ms-row-ref-link" title="A Marten document table: its rows are not read here">
+                        <CollectionChip Alias="@alias" Hue="@CollectionColorizer.HueFor(alias)" Small="true" />
+                    </span>
+                }
                 break;
 
             case RowInboundState.NoReference:

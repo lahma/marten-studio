@@ -34,7 +34,7 @@ public class DatabaseLinksTests
     [Fact]
     public void The_browser_link_carries_the_schema_kind_owner_filter_and_scope()
     {
-        string url = DatabaseLinks.ToBrowser(Settings,Descriptor, Scope, "quartz", DatabaseObjectCategory.Views, DatabaseOwnerFilter.Other, "trig");
+        string url = DatabaseLinks.ToBrowser(Settings, Descriptor, Scope, "quartz", DatabaseObjectCategory.Views, DatabaseOwnerFilter.Other, "trig");
 
         url.Should().StartWith("database?");
         url.Should().Contain("schema=quartz").And.Contain("kind=views").And.Contain("owner=other").And.Contain("q=trig");
@@ -44,9 +44,9 @@ public class DatabaseLinksTests
     [Fact]
     public void The_browser_link_leaves_out_what_is_the_default_or_blank()
     {
-        DatabaseLinks.ToBrowser(Settings,Descriptor, null).Should().Be("database");
+        DatabaseLinks.ToBrowser(Settings, Descriptor, null).Should().Be("database");
 
-        string url = DatabaseLinks.ToBrowser(Settings,Descriptor, null, schema: null, kind: DatabaseObjectCategory.Tables, owner: DatabaseOwnerFilter.All, nameFilter: "  ");
+        string url = DatabaseLinks.ToBrowser(Settings, Descriptor, null, schema: null, kind: DatabaseObjectCategory.Tables, owner: DatabaseOwnerFilter.All, nameFilter: "  ");
 
         url.Should().Be("database?kind=tables", "owner=all is the default and a blank filter is no filter");
     }
@@ -55,7 +55,7 @@ public class DatabaseLinksTests
     [MemberData(nameof(OddNames))]
     public void An_object_link_round_trips_any_name(string schema, string name)
     {
-        string url = DatabaseLinks.ToObject(Settings,Descriptor, Scope, schema, name, DatabaseObjectTab.Keys);
+        string url = DatabaseLinks.ToObject(Settings, Descriptor, Scope, schema, name, DatabaseObjectTab.Keys);
 
         url.Should().StartWith("database/object?", "the name travels in the query string, never as a segment");
 
@@ -79,7 +79,7 @@ public class DatabaseLinksTests
             new("naïve \"col\"", "v=1&w=2 + 3 % # ?"),
         ];
 
-        string url = DatabaseLinks.ToRow(Settings,Descriptor, Scope, schema, name, key);
+        string url = DatabaseLinks.ToRow(Settings, Descriptor, Scope, schema, name, key);
 
         url.Should().StartWith("database/row?");
 
@@ -108,7 +108,7 @@ public class DatabaseLinksTests
     [Fact]
     public void The_key_prefix_is_stripped_exactly_once()
     {
-        string url = DatabaseLinks.ToRow(Settings,Descriptor, null, "s", "t", [new("key.x", "1")]);
+        string url = DatabaseLinks.ToRow(Settings, Descriptor, null, "s", "t", [new("key.x", "1")]);
 
         url.Should().Contain("key.key.x=1");
         Pairs(DatabaseLinks.ReadKey(url)).Should().Equal(("key.x", "1"));
@@ -228,7 +228,7 @@ public class DatabaseLinksTests
     [Fact]
     public void The_console_link_fills_the_editor_with_a_quoted_select()
     {
-        string? href = DatabaseLinks.ToQueryConsole(Settings,Descriptor, Scope, "quartz", "qrtz_triggers");
+        string? href = DatabaseLinks.ToQueryConsole(Settings, Descriptor, Scope, "quartz", "qrtz_triggers");
 
         href.Should().StartWith("query?mode=sql&sql=");
         Parameter(href!, "sql").Should().Be("select * from \"quartz\".\"qrtz_triggers\" limit 100");
@@ -239,7 +239,7 @@ public class DatabaseLinksTests
     public void A_name_that_cannot_be_quoted_gets_no_statement_at_all()
     {
         MartenStudio.Internal.Sql.SqlLiteralText.SelectStatement("legacy", "bad\"name").Should().BeNull();
-        DatabaseLinks.ToQueryConsole(Settings,Descriptor, Scope, "legacy", "bad\"name").Should().BeNull();
+        DatabaseLinks.ToQueryConsole(Settings, Descriptor, Scope, "legacy", "bad\"name").Should().BeNull();
         MartenStudio.Internal.Sql.SqlLiteralText.SelectStatement("my schema", "Mixed Case").Should().Be("select * from \"my schema\".\"Mixed Case\" limit 100");
     }
 

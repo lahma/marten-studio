@@ -41,6 +41,21 @@ internal interface IDatabaseDeclarationsSource
     /// structure or a <c>BrowseDatabase</c> read, and must do so before the capability is asked and so before any
     /// database or tenant of the source is enumerated or discovered (AGENTS.md hard rule 14, D27).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Must agree with <see cref="Read(ResolvedSource)" />.</b> For one source, both answer the same
+    /// <see cref="DatabaseDeclarations.StoreSchemas" /> and the same classification, whichever of its databases the
+    /// second was resolved to. The routing reads this one to decide that a schema is the source's own and its structure
+    /// needs no capability; the gate reads the other to show it. Were they to disagree, a schema the gate treats as a
+    /// <c>BrowseDatabase</c> read could be routed as the source's own structure and skip
+    /// <c>DatabaseAccess.RequireBrowseAsync</c> - and with it the audited refusal.
+    /// </para>
+    /// <para>
+    /// <b>So own schemas come from configuration alone</b> - the source's options, never a resolved database, its
+    /// catalog or a tenant. A source whose own schemas depended on which database a scope resolved to could not answer
+    /// here at all, and would answer the two members differently.
+    /// </para>
+    /// </remarks>
     /// <param name="source">The source the visitor's scope names, found and built but not resolved to a database.</param>
     DatabaseDeclarations Read(IStudioSource source);
 

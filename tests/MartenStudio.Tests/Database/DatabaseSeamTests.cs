@@ -1,8 +1,10 @@
 using Bunit;
 
 using MartenStudio.Components.Pages.Database;
+using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Database;
+using MartenStudio.Services.Query;
 using MartenStudio.Services.Relationships;
 using MartenStudio.Services.Settings;
 using MartenStudio.Tests.Components;
@@ -101,6 +103,56 @@ public class DatabaseSeamTests
         badge.FindAll("a").Should().BeEmpty("there is nowhere to open it");
         badge.Find(selector).GetAttribute("title").Should().NotBeNullOrEmpty("the badge still says whose it is");
     }
+
+    [Fact]
+    public void The_references_panel_links_a_document_in_MartenStudio()
+    {
+        using var context = new StudioComponentContext();
+
+        IRenderedComponent<RowReferencesPanel> panel = context.Render<RowReferencesPanel>(parameters => parameters
+            .Add(x => x.References, DocumentReferences()));
+
+        panel.Find("section[aria-label=References] a.ms-row-ref-key.ms-doc-id").GetAttribute("href")
+            .Should().StartWith("documents/customer/doc?");
+        panel.Find("section[aria-label='Referenced by'] a.ms-row-ref-link").GetAttribute("href")
+            .Should().StartWith("documents/invoice");
+    }
+
+    [Fact]
+    public void The_references_panel_is_plain_text_where_the_studio_has_no_documents_screen()
+    {
+        using var context = new StudioComponentContext(static services => services.AddSingleton<IStudioLinks>(new NoLinks()));
+
+        IRenderedComponent<RowReferencesPanel> panel = context.Render<RowReferencesPanel>(parameters => parameters
+            .Add(x => x.References, DocumentReferences()));
+
+        panel.FindAll("a").Should().BeEmpty("never a link with nowhere to go");
+        panel.Find("section[aria-label=References] span.ms-row-ref-key.ms-doc-id").TextContent.Should().Be("42");
+        panel.Find("section[aria-label='Referenced by'] span.ms-row-ref-link").TextContent.Should().Contain("invoice");
+    }
+
+    [Fact]
+    public void The_row_reads_page_no_further_and_no_larger_than_the_documents_list()
+    {
+        TableRowQueryBuilder.MaxOffset.Should().Be(DocumentQueryBuilder.MaxOffset);
+        TableRowQueryBuilder.MaxPageSize.Should().Be(DocumentListQuery.MaxPageSize);
+    }
+
+    /// <summary>A row that points at a Marten document and is pointed at from a Marten document table.</summary>
+    private static TableRowReferences DocumentReferences() => new()
+    {
+        Found = true,
+        Outbound =
+        [
+            new RowOutboundReference("fk_customer", ["customer_id"], ["42"], null, null, [], true,
+                RowReferenceState.MartenDocument, false, null, null, "customer", "42", "default", null),
+        ],
+        Inbound =
+        [
+            new RowInboundReference("fk_invoice", "public", "mt_doc_invoice", ["customer_id"], ["id"], ["42"],
+                RowInboundState.MartenDocument, null, false, null, "invoice", "no action", null),
+        ],
+    };
 
     /// <summary>MartenStudio's descriptor, with another source parameter - a studio whose sources are not stores.</summary>
     private static StudioDescriptor WithSourceParameter(string parameter)
