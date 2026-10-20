@@ -1,0 +1,8 @@
+{
+  "solution": {
+    "path": "marten-studio.slnx",
+    "projects": [
+      "src\\PostgresStudio\\PostgresStudio.csproj"
+    ]
+  }
+}

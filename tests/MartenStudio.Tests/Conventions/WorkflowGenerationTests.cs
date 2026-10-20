@@ -15,8 +15,9 @@ namespace MartenStudio.Tests.Conventions;
 /// The assertions are deliberately about <em>capability</em>, not formatting: that the key-minting job
 /// has <c>id-token: write</c> and only <c>contents: read</c>, that the release job has the repository
 /// write it needs and the token to use it, that the two CI jobs cache the Playwright browsers and can
-/// write nothing, and that the latest-Marten leg really asks for the latest Marten. A reformat of the
-/// generator's YAML must not fail this test; a change to who can do what must.
+/// write nothing, that the latest leg really asks for the latest Marten and the latest Npgsql, and that the
+/// floor leg and the publish leg ask for neither. A reformat of the generator's YAML must not fail this
+/// test; a change to who can do what must.
 /// </para>
 /// </remarks>
 public class WorkflowGenerationTests
@@ -271,6 +272,39 @@ public class WorkflowGenerationTests
             .Where(x => x.StartsWith("run: dotnet fallout", StringComparison.Ordinal))
             .Should().ContainSingle()
             .Which.Should().Be("run: dotnet fallout Test");
+    }
+
+    /// <summary>
+    /// The latest leg also runs PostgresStudio's projects at the latest-tested Npgsql. Without the env line the
+    /// second pass over <c>postgres-studio.slnf</c> never runs, and nothing would say so: PostgresStudio would be
+    /// tested only at its floor while a host without Marten is on Npgsql 10.
+    /// </summary>
+    [Fact]
+    public void The_marten_latest_workflow_also_runs_PostgresStudio_at_the_latest_tested_npgsql()
+    {
+        var latest = ReadWorkflow("marten-latest.yml");
+
+        latest.Should().Contain("NPGSQL_VERSION: latest",
+            "Fallout binds NPGSQL_VERSION to the NpgsqlVersion parameter, and 'latest' resolves to " +
+            "PostgresStudioNpgsqlLatest in Directory.Packages.props and adds the pass over postgres-studio.slnf " +
+            "(build/Build.Npgsql.cs)");
+        latest.Should().Contain("MARTEN_VERSION: latest", "one workflow runs both latest legs");
+    }
+
+    /// <summary>
+    /// The floor workflows ask for no other version. <c>build.yml</c> is the floor leg - a <c>MARTEN_VERSION</c> or
+    /// <c>NPGSQL_VERSION</c> there would leave the floors the packages ship with untested - and <c>publish.yml</c>
+    /// packs, which refuses anything but the floors.
+    /// </summary>
+    [Theory]
+    [InlineData("build.yml")]
+    [InlineData("publish.yml")]
+    public void The_floor_workflows_ask_for_neither_the_latest_marten_nor_the_latest_npgsql(string fileName)
+    {
+        var workflow = ReadWorkflow(fileName);
+
+        workflow.Should().NotContain("MARTEN_VERSION", "this workflow runs at the Marten floor");
+        workflow.Should().NotContain("NPGSQL_VERSION", "this workflow runs at the Npgsql floor");
     }
 
     /// <summary>

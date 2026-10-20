@@ -21,11 +21,13 @@ using Project = Fallout.Solutions.Project;
 /// The Fallout orchestrator for marten-studio.
 /// </summary>
 /// <remarks>
-/// Restore / Compile / Test come from the Fallout.Components interfaces. Only four things are
+/// Restore / Compile / Test come from the Fallout.Components interfaces. Only five things are
 /// hand-written: the CHANGELOG-driven version (<see cref="OnBuildInitialized"/>), the NuGet leg in
-/// <c>Build.Publish.cs</c>, the Playwright browser install in <c>Build.Browsers.cs</c>, and the choice of
-/// Marten - the floor, or the latest-tested 9.x - in <c>Build.Marten.cs</c>. There is no publish or
-/// archive target: MartenStudio ships as one NuGet package and nothing else.
+/// <c>Build.Publish.cs</c>, the Playwright browser install in <c>Build.Browsers.cs</c>, the choice of
+/// Marten - the floor, or the latest-tested 9.x - in <c>Build.Marten.cs</c>, and the choice of Npgsql for
+/// the PostgresStudio-only projects, with its second pass over <c>postgres-studio.slnf</c>, in
+/// <c>Build.Npgsql.cs</c>. There is no publish or archive target: the studio ships as two NuGet packages,
+/// PostgresStudio and MartenStudio, released together, and nothing else.
 /// </remarks>
 [ShutdownDotNetAfterServerBuild]
 partial class Build : FalloutBuild,
@@ -53,6 +55,7 @@ partial class Build : FalloutBuild,
     // Spelled out rather than looked up through the solution: on Linux the path is case-sensitive, and
     // a typo here should fail as a missing file rather than as a null reference three targets later.
     AbsolutePath StudioProject => SourceDirectory / "MartenStudio" / "MartenStudio.csproj";
+    AbsolutePath PostgresStudioProject => SourceDirectory / "PostgresStudio" / "PostgresStudio.csproj";
     AbsolutePath SampleProject => SamplesDirectory / "MartenStudio.Sample" / "MartenStudio.Sample.csproj";
 
     AbsolutePath ChangelogPath => RootDirectory / "CHANGELOG.md";
@@ -113,6 +116,10 @@ partial class Build : FalloutBuild,
         // Build.Marten.cs: the floor, or the latest-tested Marten when --marten-version / MARTEN_VERSION
         // asks for it. Settled here so a bad value fails before anything is restored.
         ResolveMartenVersion();
+
+        // Build.Npgsql.cs: the same for the PostgresStudio-only projects' Npgsql, whose non-floor values get a
+        // pass of their own after Test.
+        ResolveNpgsqlVersion();
     }
 
     Target Clean => _ => _
@@ -131,17 +138,22 @@ partial class Build : FalloutBuild,
 
     IEnumerable<Project> ITest.TestProjects => Solution.GetAllProjects("*.Tests");
 
-    // The Marten version goes to all three, the floor included (Build.Marten.cs says why).
+    // The Marten version goes to all three, the floor included (Build.Marten.cs says why). The Npgsql version of
+    // this whole-solution pass is always the floor - never the requested one, which would reach MartenStudio through
+    // its PostgresStudio reference - and is said explicitly for the same reason (Build.Npgsql.cs).
     Configure<DotNetRestoreSettings> IRestore.RestoreSettings => _ => _
-        .SetProperty(MartenVersionProperty, ResolvedMartenVersion);
+        .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
+        .SetProperty(NpgsqlVersionProperty, NpgsqlFloor);
 
     Configure<DotNetBuildSettings> ICompile.CompileSettings => _ => _
         .SetProperty("Version", Version)
-        .SetProperty(MartenVersionProperty, ResolvedMartenVersion);
+        .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
+        .SetProperty(NpgsqlVersionProperty, NpgsqlFloor);
 
     Configure<DotNetTestSettings> ITest.TestSettings => _ => _
         .SetProperty("Version", Version)
-        .SetProperty(MartenVersionProperty, ResolvedMartenVersion);
+        .SetProperty(MartenVersionProperty, ResolvedMartenVersion)
+        .SetProperty(NpgsqlVersionProperty, NpgsqlFloor);
 
     string ICreateGitHubRelease.Name => $"v{Version}";
 

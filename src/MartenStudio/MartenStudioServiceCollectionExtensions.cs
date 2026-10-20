@@ -1,5 +1,7 @@
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 
+using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
@@ -51,12 +53,32 @@ public static partial class MartenStudioServiceCollectionExtensions
     /// <param name="configure">Configures the studio, including the path it is served under.</param>
     /// <returns>The same collection, so calls can be chained.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services" /> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The application was deployed without the PostgresStudio package this one was released with, or with
+    /// another version of it.
+    /// </exception>
     public static IServiceCollection AddMartenStudio(
         this IServiceCollection services,
         Action<MartenStudioOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        // Before anything that names a PostgresStudio type: this body names none, so the JIT can compile it and the
+        // guard can say what is wrong even when NuGet left PostgresStudio out of the deployment, where the first
+        // PostgresStudio type would otherwise be a FileNotFoundException with no word about why. Everything else is in
+        // AddMartenStudioServices, which is NoInlining so that it is compiled only once the guard has passed.
+        // PostgresStudioVersionGuardTests scans this method's IL to keep it that way.
+        PostgresStudioVersionGuard.Ensure();
+
+        return AddMartenStudioServices(services, configure);
+    }
+
+    /// <summary>The body of <see cref="AddMartenStudio" />, once the shared studio is known to be the right one.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static IServiceCollection AddMartenStudioServices(
+        IServiceCollection services,
+        Action<MartenStudioOptions>? configure)
+    {
         // First, so that a second studio in this container is refused before anything of this one is registered.
         // Everything the shared studio needs - the shell, the scope and audit services, the database browser,
         // Sessions, the health advisor - is registered there; what follows is Marten Studio's own.
