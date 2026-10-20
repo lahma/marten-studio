@@ -166,7 +166,7 @@ public class StudioSpineTests
         scoped.GetRequiredService<IStudioSourceProvider>().Should().BeOfType<MartenStudioSourceProvider>();
         scoped.GetRequiredService<ISessionLockLabeler>().Should().BeOfType<MartenSessionLockLabeler>();
         scoped.GetRequiredService<IHealthTableSource>().Should().BeOfType<MartenHealthTableSource>();
-        scoped.GetRequiredService<IHealthRemedyProvider>().Should().BeOfType<MartenHealthRemedyProvider>();
+        scoped.GetRequiredService<MartenStudio.Services.Health.Checks.IHealthTableRemedies>().Should().BeSameAs(MartenHealthRemedyProvider.Instance);
         services.Where(static x => x.ServiceType == typeof(INavIndicatorContributor))
             .Should().ContainSingle().Which.ImplementationType.Should().Be<MartenNavIndicatorContributor>();
         services.Should().Contain(static x => x.ServiceType == typeof(MartenStudio.Services.Query.SqlConsoleService)
@@ -333,13 +333,16 @@ public class StudioSpineTests
     [Fact]
     public void A_storage_parameter_remedy_is_a_StoreOptions_line_for_a_document_table_and_nothing_otherwise()
     {
-        MartenHealthRemedyProvider remedies = new();
         StudioTable document = new("public", "mt_doc_order", StudioTableKind.DocumentTable, StudioTableOwnership.Owned) { TypeName = "Order" };
         StudioTable events = new("public", "mt_events", StudioTableKind.EventTable, StudioTableOwnership.Library) { Library = "Marten" };
 
-        remedies.StorageParameter(document, "fillfactor", "90", "Leaves room for HOT updates.")!.Code
+        MartenHealthRemedyProvider.StorageParameter(document, "fillfactor", "90", "Leaves room for HOT updates.")!.Code
             .Should().Be("opts.Schema.For<Order>().StorageParameter(\"fillfactor\", 90);");
-        remedies.StorageParameter(events, "fillfactor", "90", "x").Should().BeNull();
+        MartenHealthRemedyProvider.StorageParameter(events, "fillfactor", "90", "x").Should().BeNull();
+        MartenHealthRemedyProvider.Instance.AutovacuumSetting(document, "autovacuum_vacuum_scale_factor", "0.05", "Vacuums sooner.")!.Code
+            .Should().Be("opts.Schema.For<Order>().StorageParameter(\"autovacuum_vacuum_scale_factor\", 0.05);",
+                "the one table-remedy seam words a storage parameter the way the folded IHealthRemedyProvider did");
+        MartenHealthRemedyProvider.Instance.AutovacuumSetting(events, "autovacuum_vacuum_scale_factor", "0.05", "x").Should().BeNull();
         events.ExemptFromIndexDesign.Should().BeTrue("a library's table is exempt from the index-design rules only");
         document.ExemptFromIndexDesign.Should().BeFalse();
     }

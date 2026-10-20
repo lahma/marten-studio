@@ -235,7 +235,8 @@ internal sealed class HealthService : IHealthService
         // bounded slice of the data in every table it checks, whoever asked - a database-wide act - so only a visitor
         // through the database-wide gate starts one. Anybody else is shown a recent run if there is one, through the
         // same per-finding gates as the regular sweep, and never one they caused.
-        bool deeperExist = registry.HasTier(HealthCostTier.BoundedData);
+        StudioSourceKind sourceKind = resolved.Source.Kind;
+        bool deeperExist = registry.HasTier(HealthCostTier.BoundedData, sourceKind);
         bool deeperAllowed = deeperExist && await gate.PassesAsync(HealthGate.Database).ConfigureAwait(false);
 
         HealthSweep? deeper = deeperExist
@@ -244,7 +245,8 @@ internal sealed class HealthService : IHealthService
             : null;
 
         // Tier 3 reads other people's statements: nothing of it is run or shown short of the activity gate.
-        bool statementsAllowed = registry.HasTier(HealthCostTier.Statements) && await gate.PassesAsync(HealthGate.Activity).ConfigureAwait(false);
+        bool statementsExist = registry.HasTier(HealthCostTier.Statements, sourceKind);
+        bool statementsAllowed = statementsExist && await gate.PassesAsync(HealthGate.Activity).ConfigureAwait(false);
 
         HealthSweep? statements = statementsAllowed
             ? await SweepOfAsync(whole, HealthSweepKind.Statements, request.Statements == HealthDeeperChecks.Run, scope, cancellationToken)
@@ -290,9 +292,9 @@ internal sealed class HealthService : IHealthService
             DeeperChecksExist = deeperExist,
             DeeperChecksAllowed = deeperAllowed,
             DeeperChecksRefused = deeperExist && !deeperAllowed ? gate.WhyNot(HealthGate.Database) : null,
-            StatementChecksExist = registry.HasTier(HealthCostTier.Statements),
+            StatementChecksExist = statementsExist,
             StatementChecksAllowed = statementsAllowed,
-            StatementChecksRefused = registry.HasTier(HealthCostTier.Statements) && !statementsAllowed ? gate.WhyNot(HealthGate.Activity) : null,
+            StatementChecksRefused = statementsExist && !statementsAllowed ? gate.WhyNot(HealthGate.Activity) : null,
         };
     }
 

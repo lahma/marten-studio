@@ -64,7 +64,7 @@ public class DatabaseLinksTests
         read.Name.Should().Be(name);
 
         Parameter(url, "tab").Should().Be("keys");
-        StudioScopeQuery.Read(url).Should().Be(("default", "localhost.marten", "acme"));
+        StudioScopeQuery.Read(url, MartenStudioDescriptor.SourceQueryParameter).Should().Be(("default", "localhost.marten", "acme"));
     }
 
     [Theory]
@@ -88,7 +88,7 @@ public class DatabaseLinksTests
         read.Name.Should().Be(name);
         Pairs(read.Key).Should().Equal(Pairs(key), "every key column comes back, in order, with its value exactly - an empty one included");
 
-        StudioScopeQuery.Read(url).Should().Be(("default", "localhost.marten", "acme"));
+        StudioScopeQuery.Read(url, MartenStudioDescriptor.SourceQueryParameter).Should().Be(("default", "localhost.marten", "acme"));
     }
 
     [Fact]
@@ -232,7 +232,7 @@ public class DatabaseLinksTests
 
         href.Should().StartWith("query?mode=sql&sql=");
         Parameter(href!, "sql").Should().Be("select * from \"quartz\".\"qrtz_triggers\" limit 100");
-        StudioScopeQuery.Read(href!).Should().Be(("default", "localhost.marten", "acme"));
+        StudioScopeQuery.Read(href!, MartenStudioDescriptor.SourceQueryParameter).Should().Be(("default", "localhost.marten", "acme"));
     }
 
     [Fact]

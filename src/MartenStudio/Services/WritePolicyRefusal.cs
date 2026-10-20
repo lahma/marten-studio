@@ -1,7 +1,7 @@
 namespace MartenStudio.Services;
 
 /// <summary>
-/// What a visitor <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> refuses is told, per
+/// What a visitor the studio's write policy (<see cref="Settings.IStudioSettings.WritePolicy" />) refuses is told, per
 /// capability.
 /// </summary>
 /// <remarks>

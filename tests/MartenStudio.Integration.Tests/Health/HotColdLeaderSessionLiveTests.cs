@@ -2,7 +2,6 @@ using JasperFx.Events.Daemon;
 
 using Marten;
 
-using MartenStudio.Services.Database;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 
@@ -222,7 +221,7 @@ public class HotColdLeaderSessionLiveTests(PostgresFixture postgres)
     }
 
     private static long[] DaemonLockIds(IHost host) =>
-        [.. SessionLockLabels.For(host.Services.GetRequiredService<IDocumentStore>(), "default", null).DaemonLockIds];
+        [.. MartenStudio.Services.MartenSessionLockLabeler.For(host.Services.GetRequiredService<IDocumentStore>(), "default", null).DaemonLockIds];
 
     private static async Task<int[]> LeaderPidsAsync(string database, long[] ids) =>
         await LiveWait.ScalarAsync<int[]>(database, "select array_agg(a.pid) from " + ConnectionDaemonLiveTests.LeaderSessions, ("ids", ids))

@@ -4,29 +4,32 @@ namespace MartenStudio.Tests.Conventions;
 
 /// <summary>
 /// The fence between the shared studio and MartenStudio, before the move: a file bound for the shared assembly names
-/// no Marten, JasperFx or Weasel type and no type MartenStudio keeps.
+/// no Marten, JasperFx or Weasel type and no type MartenStudio keeps - one fence, over every source file on
+/// <see cref="CoreManifest" />.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Why a text scanner, and what it reads.</b> Until PS-2 moves the files, both halves compile into one assembly, so
 /// the compiler cannot tell a shared file that leans on MartenStudio from one that does not - and every such lean is a
-/// compile error the move would discover all at once. So each fenced file (<see cref="CoreManifest" />, by packet) is
-/// read twice: as code, with comments and strings blanked by <see cref="SourceScanner" />, for a <c>using</c> of a
-/// Marten-family namespace, a <c>Marten.</c>/<c>JasperFx.</c>/<c>Weasel.</c> qualified name and any identifier from
-/// the stay-behind list; and as documentation, for every <c>cref</c> - a cref to a type the shared assembly cannot see
-/// is CS1574, an error under <c>TreatWarningsAsErrors</c>.
+/// compile error the move would discover all at once. So each fenced file is read twice: as code, with comments and
+/// strings blanked by <see cref="SourceScanner" />, for a <c>using</c> of a Marten-family namespace, a
+/// <c>Marten.</c>/<c>JasperFx.</c>/<c>Weasel.</c> qualified name and any identifier from the stay-behind list; and as
+/// documentation, for every <c>cref</c> - a cref to a type the shared assembly cannot see is CS1574, an error under
+/// <c>TreatWarningsAsErrors</c>. PS-1a to PS-1d each fenced their own rows; PS-1e merged the four into this one, over the
+/// whole manifest, its own rows (the JSON toolkit and the shared building blocks) included.
 /// </para>
 /// <para>
 /// <b>The stay-behind list</b> is every top-level type and Razor component declared in a <c>src/</c> file that is not on
-/// the manifest, less any name a manifest file declares too (<see cref="StayBehindNames" />). It is derived, not
-/// curated: a file a packet splits off as MartenStudio's adds its types the moment it exists, and a type on a manifest
-/// row is never on it. A type is matched wherever its name appears; a component only where it is named as one - a tag,
-/// <c>typeof</c>, <c>nameof</c>, <c>@inherits</c> - because <c>Schema</c> is as good a property name as a page name.
+/// the manifest, and every <c>global using</c> alias such a file declares (<c>MartenTable</c>), less any name a manifest
+/// file declares too (<see cref="StayBehindNames" />). It is derived, not curated: a file a packet splits off as
+/// MartenStudio's adds its types the moment it exists, and a type on a manifest row is never on it. A type or an alias is
+/// matched wherever its name appears; a component only where it is named as one - a tag, <c>typeof</c>, <c>nameof</c>,
+/// <c>@inherits</c> - because <c>Schema</c> is as good a property name as a page name.
 /// </para>
 /// <para>
 /// <b>What it cannot see.</b> A call that binds to a MartenStudio extension member reads like a call on the shared type
-/// (<c>StudioCapabilityGuard.OptionName(…)</c> resolves to <c>MartenServiceBridges</c>); the bridges list their
-/// remaining shared-bound callers, and PS-2's compile is the proof. Comments and C# string literals are blanked, so prose
+/// (<c>StudioCapabilityGuard.OptionName(…)</c> resolves to <c>MartenServiceBridges</c>); the bridges list their callers,
+/// every one MartenStudio's own since PS-1e, and PS-2's compile is the proof. Comments and C# string literals are blanked, so prose
 /// and text never fail the fence - but a Razor file is read as code in two more places, because Razor puts code in them:
 /// its markup text (an <c>@Expression</c> sits in it, and a prose word that collides with a MartenStudio type name fails
 /// loudly and is reworded), and every tag's attribute values (<c>href="@Links.To(…)"</c>,
@@ -36,7 +39,7 @@ namespace MartenStudio.Tests.Conventions;
 /// since no per-file scan would see it.
 /// </para>
 /// </remarks>
-public partial class CoreFenceTests
+public class CoreFenceTests
 {
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(5);
 
@@ -98,12 +101,54 @@ public partial class CoreFenceTests
             new(types.ToHashSet(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal) { "Overview", "Schema" });
     }
 
-    /// <summary>Every row names a file that exists, and no file is on the manifest twice.</summary>
+    /// <summary>
+    /// The one fence: every C# and Razor file on the manifest names no Marten-family type and no type MartenStudio keeps.
+    /// </summary>
     [Fact]
-    public void Every_manifest_row_is_a_file_that_exists()
+    public void Every_file_bound_for_the_shared_assembly_names_nothing_MartenStudio_keeps()
+    {
+        CoreManifest.Entry[] rows = [.. CoreManifest.Entries.Where(static x => x.IsSource)];
+        rows.Should().HaveCountGreaterThan(250, "a fence over a fraction of the manifest passes for the wrong reason");
+
+        foreach (CoreManifest.Packet packet in Enum.GetValues<CoreManifest.Packet>())
+        {
+            rows.Should().Contain(x => x.Owner == packet, "every packet's rows are fenced, " + packet + "'s included");
+        }
+
+        StayBehindNames stayBehind = StayBehind.Value;
+        List<string> problems = [];
+
+        foreach (CoreManifest.Entry row in rows)
+        {
+            string source = File.ReadAllText(RepositoryRoot.Combine(row.RepositoryPath.Split('/')));
+
+            SourceScanner.StripCommentsAndStrings(source, out bool unterminated);
+            if (unterminated)
+            {
+                problems.Add(row.RepositoryPath + ": the scanner could not follow the file to its end");
+            }
+
+            bool razor = row.Path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase);
+            foreach (string lean in Leans(source, stayBehind, razor))
+            {
+                problems.Add(row.RepositoryPath + " (" + row.Owner + "): " + lean);
+            }
+        }
+
+        problems.Should().BeEmpty(
+            "a file bound for the shared assembly names no Marten, JasperFx or Weasel type and no type MartenStudio keeps:"
+            + Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    /// <summary>
+    /// Every row names a file that exists, no file is on the manifest twice, and no two rows land on one path.
+    /// </summary>
+    [Fact]
+    public void Every_manifest_row_is_a_file_that_exists_and_lands_on_a_path_of_its_own()
     {
         CoreManifest.Entries.Should().NotBeEmpty();
         CoreManifest.Entries.Select(static x => x.Path).Should().OnlyHaveUniqueItems(static x => x.ToLowerInvariant());
+        CoreManifest.Entries.Select(static x => x.TargetPath).Should().OnlyHaveUniqueItems(static x => x.ToLowerInvariant());
 
         string[] missing =
         [
@@ -113,7 +158,83 @@ public partial class CoreFenceTests
         ];
 
         missing.Should().BeEmpty("a manifest row for a file that is gone is a fence that scans nothing: " + string.Join(", ", missing));
+
+        CoreManifest.Entries.Where(static x => x.NewPath is not null)
+            .Should().OnlyContain(static x => x.NewPath != x.Path, "a new path that is the old one is no move")
+            .And.OnlyContain(static x => Path.GetExtension(x.NewPath) == Path.GetExtension(x.Path), "a move keeps the file's kind");
     }
+
+    /// <summary>
+    /// What makes PS-2's rename a table: every C# file on the manifest declares, file-scoped, exactly the namespace its
+    /// folder gives under <c>MartenStudio</c>, and no Razor file on it overrides its folder's with <c>@namespace</c> - so
+    /// each one's namespace after the move is its new folder's under <c>PostgresStudio</c>.
+    /// </summary>
+    [Fact]
+    public void Every_file_bound_for_the_shared_assembly_declares_the_namespace_its_folder_gives()
+    {
+        List<string> problems = [];
+
+        foreach (CoreManifest.Entry row in CoreManifest.Entries.Where(static x => x.IsSource))
+        {
+            string code = SourceScanner.StripCommentsAndStrings(File.ReadAllText(RepositoryRoot.Combine(row.RepositoryPath.Split('/'))));
+            string[] declared = [.. NamespaceDeclaration.Matches(code).Select(static x => x.Groups["name"].Value)];
+
+            if (row.Path.EndsWith(".razor", StringComparison.Ordinal))
+            {
+                if (RazorNamespace.IsMatch(code))
+                {
+                    problems.Add(row.RepositoryPath + ": @namespace overrides the folder's namespace");
+                }
+            }
+            else if (declared is not [{ } only] || only != row.OldNamespace)
+            {
+                problems.Add(row.RepositoryPath + ": declares [" + string.Join(", ", declared) + "], not " + row.OldNamespace);
+            }
+        }
+
+        problems.Should().BeEmpty(string.Join(Environment.NewLine, problems));
+
+        CoreManifest.Entries.Single(static x => x.Path == "Services/Documents/SearchChip.cs").NewNamespace
+            .Should().Be("PostgresStudio.Services.Query", "the namespace after the move is the new folder's");
+        CoreManifest.Entries.Single(static x => x.Path == "MartenStudioConventionBuilder.cs").NewNamespace.Should().Be("PostgresStudio");
+        CoreManifest.Entries.Single(static x => x.Path == "wwwroot/css/marten-studio.css").NewNamespace.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Each type the move renames (<see cref="CoreManifest.TypeRenames" />) is declared in exactly one manifest file, whose
+    /// new name is the type's new name, and the new name is declared nowhere in <c>src/</c> yet.
+    /// </summary>
+    [Fact]
+    public void Every_renamed_type_moves_with_its_file_and_takes_a_name_nobody_has()
+    {
+        Dictionary<string, List<string>> declaredIn = new(StringComparer.Ordinal);
+
+        foreach (string file in SourceScanner.ShippedSourceFiles().Where(static x => x.EndsWith(".cs", StringComparison.Ordinal)))
+        {
+            foreach (string name in TopLevelTypes(SourceScanner.StripCommentsAndStrings(File.ReadAllText(file))))
+            {
+                (declaredIn.TryGetValue(name, out List<string>? files) ? files : declaredIn[name] = []).Add(SourceScanner.Relative(file));
+            }
+        }
+
+        foreach ((string oldName, string newName) in CoreManifest.TypeRenames)
+        {
+            declaredIn.Should().ContainKey(oldName);
+            string file = declaredIn[oldName].Should().ContainSingle().Subject;
+
+            CoreManifest.Entry row = CoreManifest.Entries.Single(x => x.RepositoryPath == file);
+            Path.GetFileNameWithoutExtension(row.TargetPath).Should().Be(newName, "the file is renamed with its type");
+
+            declaredIn.Should().NotContainKey(newName, newName + " is free to take");
+        }
+    }
+
+    private static readonly Regex NamespaceDeclaration = new(
+        @"^\s*namespace\s+(?<name>[\w.]+)\s*[;{]",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant,
+        RegexTimeout);
+
+    private static readonly Regex RazorNamespace = new(@"^\s*@namespace\s", RegexOptions.Multiline | RegexOptions.CultureInvariant, RegexTimeout);
 
     /// <summary>
     /// The collector's own anti-vacuity check: the types MartenStudio keeps are on the list, and the shared ones are not.
@@ -126,8 +247,8 @@ public partial class CoreFenceTests
         stayBehind.Types.Should().Contain(
             ["MartenStudioOptions", "MartenStoreResource", "MartenStoreRegistry", "MartenStoreRegistration", "ResolvedScope",
              "StudioScopeResolver", "TenantDiscovery", "MartenStudioSettings", "MartenStudioDescriptor", "MartenLog",
-             "MartenServiceBridges", "MartenComponentBridges", "DocumentComponentModel"],
-            "each is declared in a .cs file the manifest leaves to MartenStudio");
+             "MartenServiceBridges", "MartenComponentBridges", "DocumentComponentModel", "MartenTable"],
+            "each is declared in a .cs file the manifest leaves to MartenStudio - MartenTable as a global alias");
 
         stayBehind.Components.Should().Contain(
             ["MartenStudioApp", "Projections", "Overview", "Schema"],
@@ -155,8 +276,9 @@ public partial class CoreFenceTests
     [InlineData("class C { bool b = x is global::JasperFx.Descriptors.DatabaseCardinality.Single; }", "qualified")]
     [InlineData("/// <see cref=\"Marten.Storage.IMartenDatabase\" />\nclass C { }", "cref")]
     [InlineData("/// <inheritdoc cref=\"T:Weasel.Core.IDatabase\" />\nclass C { }", "cref")]
-    // Found: a stay-behind type, in code, in markup and in a cref.
+    // Found: a stay-behind type, in code, in markup and in a cref - and a stay-behind global alias, which is matched as one.
     [InlineData("class C { MartenStoreRegistry? registry; }", "identifier")]
+    [InlineData("class C { MartenTable? table; }", "identifier")]
     [InlineData("@inject IOptions<MartenStudioOptions> Options\n<p>x</p>", "identifier")]
     [InlineData("<p><code>MartenStudioOptions.ReadOnly</code></p>", "identifier")]
     [InlineData("<p>@MartenStoreRegistry.DefaultStoreKey</p>", "identifier")]
@@ -179,7 +301,7 @@ public partial class CoreFenceTests
     [InlineData("/// <see cref=\"StudioScope\" />\nclass C { }", null)]
     public void The_scanner_finds_each_kind_of_lean_and_ignores_prose(string source, string? expected)
     {
-        StayBehindNames stayBehind = StayBehindNames.OfTypes("MartenStoreRegistry", "MartenStudioOptions");
+        StayBehindNames stayBehind = StayBehindNames.OfTypes("MartenStoreRegistry", "MartenStudioOptions", "MartenTable");
 
         IReadOnlyList<string> found = Leans(source, stayBehind);
 
@@ -293,39 +415,6 @@ public partial class CoreFenceTests
         RegexOptions.CultureInvariant,
         RegexTimeout);
 
-    /// <summary>
-    /// Scans every row <paramref name="packet" /> fences and fails with every lean it finds, by file.
-    /// </summary>
-    private static void AssertFenced(CoreManifest.Packet packet)
-    {
-        IReadOnlyList<CoreManifest.Entry> rows = CoreManifest.Of(packet);
-        rows.Should().NotBeEmpty("a fence over nothing passes for the wrong reason");
-
-        StayBehindNames stayBehind = StayBehind.Value;
-        List<string> problems = [];
-
-        foreach (CoreManifest.Entry row in rows)
-        {
-            string source = File.ReadAllText(RepositoryRoot.Combine(row.RepositoryPath.Split('/')));
-
-            SourceScanner.StripCommentsAndStrings(source, out bool unterminated);
-            if (unterminated)
-            {
-                problems.Add(row.RepositoryPath + ": the scanner could not follow the file to its end");
-            }
-
-            bool razor = row.Path.EndsWith(".razor", StringComparison.OrdinalIgnoreCase);
-            foreach (string lean in Leans(source, stayBehind, razor))
-            {
-                problems.Add(row.RepositoryPath + ": " + lean);
-            }
-        }
-
-        problems.Should().BeEmpty(
-            "a file bound for the shared assembly names no Marten, JasperFx or Weasel type and no type MartenStudio keeps:"
-            + Environment.NewLine + string.Join(Environment.NewLine, problems));
-    }
-
     /// <summary>Every lean in <paramref name="source" />, each as "kind: what", each once.</summary>
     /// <param name="source">The file's text.</param>
     /// <param name="stayBehind">The names only MartenStudio declares.</param>
@@ -422,7 +511,11 @@ public partial class CoreFenceTests
                 continue;
             }
 
-            foreach (string name in TopLevelTypes(SourceScanner.StripCommentsAndStrings(File.ReadAllText(file))))
+            string code = SourceScanner.StripCommentsAndStrings(File.ReadAllText(file));
+
+            // A global alias reaches every file of the assembly, as a type does: MartenTableFacts.cs's MartenTable names a
+            // shared type, but under a name the shared assembly will not have.
+            foreach (string name in TopLevelTypes(code).Concat(GlobalAliases(code)))
             {
                 (onManifest ? shared : types).Add(name);
             }
@@ -431,6 +524,28 @@ public partial class CoreFenceTests
         types.ExceptWith(shared);
         components.ExceptWith(shared);
         return new StayBehindNames(types, components);
+    }
+
+    /// <summary>The names <paramref name="code" /> declares with <c>global using Name = …;</c>.</summary>
+    internal static IEnumerable<string> GlobalAliases(string code) =>
+        GlobalAlias.Matches(code).Select(static x => x.Groups["name"].Value);
+
+    private static readonly Regex GlobalAlias = new(
+        @"^\s*global\s+using\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant,
+        RegexTimeout);
+
+    /// <summary>The alias collector, on synthetic files: a global alias is found; a local alias and a plain using are not.</summary>
+    [Theory]
+    [InlineData("global using MartenTable = MartenStudio.Services.Sources.StudioTable;\nnamespace N;", "MartenTable")]
+    [InlineData("  global using Db = Marten.Storage.IMartenDatabase;\nglobal using Other=System.String;", "Db,Other")]
+    [InlineData("using Local = System.String;\nnamespace N;", "")]
+    [InlineData("global using System.Text;\nglobal using static System.Math;", "")]
+    public void The_collector_takes_global_aliases_too(string source, string expected)
+    {
+        string[] names = expected.Length == 0 ? Array.Empty<string>() : expected.Split(',');
+
+        GlobalAliases(SourceScanner.StripCommentsAndStrings(source)).Should().Equal(names);
     }
 
     /// <summary>

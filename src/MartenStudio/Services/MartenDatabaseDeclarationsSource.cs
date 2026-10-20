@@ -9,6 +9,7 @@ using MartenStudio.Services.Database;
 using MartenStudio.Services.Schema;
 using MartenStudio.Services.Sources;
 
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace MartenStudio.Services;
@@ -50,7 +51,14 @@ internal sealed class MartenDatabaseDeclarationsSource : IDatabaseDeclarationsSo
     private readonly MartenStoreRegistry registry;
     private readonly IServiceProvider provider;
     private readonly IOptions<MartenStudioOptions> options;
-    private readonly StudioAuthorization authorization;
+
+    /// <summary>
+    /// Resolved on the first policy question, never by the constructor: the health sweep resolves this source in a scope
+    /// that has no circuit only to call <see cref="ReadUncached" />, which asks no policy, and the authorization graph
+    /// (the authentication state, the authorization service) is not this read's to build - C06 labels its locks with what
+    /// this answers, and a graph that would not build must leave it unlabelled, not unchecked.
+    /// </summary>
+    private StudioAuthorization? authorization;
 
     /// <summary>
     /// Successful declaration reads, per store key, for the life of the circuit - each with the fingerprint
@@ -66,14 +74,15 @@ internal sealed class MartenDatabaseDeclarationsSource : IDatabaseDeclarationsSo
     public MartenDatabaseDeclarationsSource(
         MartenStoreRegistry registry,
         IServiceProvider provider,
-        IOptions<MartenStudioOptions> options,
-        StudioAuthorization authorization)
+        IOptions<MartenStudioOptions> options)
     {
         this.registry = registry;
         this.provider = provider;
         this.options = options;
-        this.authorization = authorization;
     }
+
+    /// <summary>The circuit's authorization, resolved from this source's own scope on first use.</summary>
+    private StudioAuthorization Authorization => authorization ??= provider.GetRequiredService<StudioAuthorization>();
 
     /// <inheritdoc />
     public DatabaseDeclarations Read(ResolvedSource resolved)
@@ -327,6 +336,7 @@ internal sealed class MartenDatabaseDeclarationsSource : IDatabaseDeclarationsSo
 
         // The same two questions the loop asks, and the policies that would answer them: the store policy for
         // B's identity, and - only while the capability is on - the write policy for B's rows.
+        StudioAuthorization authorization = Authorization;
         bool anyPolicyAsked = !string.IsNullOrWhiteSpace(authorization.PolicyFor(null))
             || (capabilityEnabled && !string.IsNullOrWhiteSpace(authorization.PolicyFor(nameof(StudioCapability.BrowseDatabase))));
 

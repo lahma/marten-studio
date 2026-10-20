@@ -2,13 +2,26 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 
 using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 namespace MartenStudio.Services.Health;
 
-/// <summary>One check, ready to run: its metadata and its single, stateless instance.</summary>
+/// <summary>One check, ready to run: its metadata, its single, stateless instance, and the sources it runs against.</summary>
 /// <param name="Info">What its attribute says.</param>
 /// <param name="Check">The instance every sweep uses.</param>
-internal sealed record HealthCheckDescriptor(HealthCheckInfo Info, IHealthCheck Check);
+/// <param name="SourceKinds">
+/// The kinds of source it runs against, or <see langword="null" /> for every kind - from the descriptor's
+/// <see cref="StudioDescriptor.HealthCheckAssemblies" /> entry that found it.
+/// </param>
+internal sealed record HealthCheckDescriptor(HealthCheckInfo Info, IHealthCheck Check, IReadOnlySet<StudioSourceKind>? SourceKinds = null)
+{
+    /// <summary>
+    /// Whether it runs against a source of <paramref name="kind" />. A check that does not is not run and has no row - it
+    /// reads a kind of source this one is not, and a sweep of it would only ever be a "could not check".
+    /// </summary>
+    /// <param name="kind">The swept source's kind.</param>
+    public bool RunsAgainst(StudioSourceKind kind) => SourceKinds is null || SourceKinds.Contains(kind);
+}
 
 /// <summary>
 /// Every health check in the studio, found by reflection: adding a check is adding its class.
@@ -34,34 +47,37 @@ internal sealed record HealthCheckDescriptor(HealthCheckInfo Info, IHealthCheck 
 /// studio's own assembly reads its sources through that studio's extension members, so the studio offers it only its own.
 /// </para>
 /// <para>
-/// <b>One parameterless public constructor, and one the container can satisfy only with a studio registered.</b> A test
-/// that wants exactly its own checks uses <see cref="ForTypes(IEnumerable{Type}, IStudioRuntime?)" />. A public constructor
-/// taking <c>IEnumerable&lt;Type&gt;</c> was a trap: the container treats any <c>IEnumerable&lt;T&gt;</c> as resolvable
-/// - to an empty list - and picks the greediest constructor it can satisfy, so every real host got a registry with no
-/// checks in it. The descriptor is resolvable only where a studio registered one, and then it is the list to use.
+/// <b>Which sources a check runs against is the descriptor's too.</b> Each entry of
+/// <see cref="StudioDescriptor.HealthCheckAssemblies" /> names the source kinds its checks are offered
+/// (<see cref="HealthCheckDescriptor.SourceKinds" />), and the sweep runs a check only against a source of one of them: a
+/// studio's own check, which reads the source through that studio's types, never meets another studio's source - no row,
+/// rather than a "could not check" one. A check found by several entries - while the shared engine and a studio share an
+/// assembly - runs only against a kind every one of them admits.
+/// </para>
+/// <para>
+/// <b>One public constructor, which the container can satisfy only with a studio registered.</b> A test that wants
+/// exactly its own checks uses <see cref="ForTypes(IEnumerable{Type}, IStudioRuntime?)" />. A public constructor taking
+/// <c>IEnumerable&lt;Type&gt;</c> was a trap: the container treats any <c>IEnumerable&lt;T&gt;</c> as resolvable - to an
+/// empty list - and picks the greediest constructor it can satisfy, so every real host got a registry with no checks in
+/// it. The descriptor is resolvable only where a studio registered one, and then it is the list to use. (A parameterless
+/// constructor over the engine's own assembly existed until PS-1e: it resolved features against no runtime, so it would
+/// have thrown the day a check required one, and after the move it would have found the shared checks alone. Nothing but
+/// tests used it, and they now build the studio's own registry.)
 /// </para>
 /// </remarks>
 internal sealed partial class HealthCheckRegistry
 {
-    /// <summary>
-    /// Every check in the shared engine's own assembly, with no studio runtime: a check that requires a feature is refused,
-    /// because nothing here can say whether a host has it.
-    /// </summary>
-    public HealthCheckRegistry() : this([.. Discover(typeof(HealthCheckRegistry).Assembly)], NoStudioRuntime.Instance)
-    {
-    }
-
     /// <summary>Every check in the assemblies <paramref name="descriptor" /> names, resolved against the studio's runtime.</summary>
     /// <param name="descriptor">The studio's descriptor.</param>
     /// <param name="runtime">The studio's runtime, or <see langword="null" /> for a studio that registers none.</param>
     public HealthCheckRegistry(StudioDescriptor descriptor, IStudioRuntime? runtime = null)
-        : this(DiscoverAll(descriptor), runtime ?? NoStudioRuntime.Instance)
+        : this(DiscoverAll((descriptor ?? throw new ArgumentNullException(nameof(descriptor))).HealthCheckAssemblies), runtime ?? NoStudioRuntime.Instance)
     {
     }
 
-    private HealthCheckRegistry(Type[] types, IStudioRuntime runtime)
+    private HealthCheckRegistry(IReadOnlyList<(Type Type, IReadOnlySet<StudioSourceKind>? SourceKinds)> checks, IStudioRuntime runtime)
     {
-        IReadOnlyList<string> problems = Problems(types, runtime);
+        IReadOnlyList<string> problems = Problems([.. checks.Select(static x => x.Type)], runtime);
 
         if (problems.Count > 0)
         {
@@ -71,8 +87,9 @@ internal sealed partial class HealthCheckRegistry
 
         All =
         [
-            .. types
-                .Select(type => new HealthCheckDescriptor(Describe(type, runtime), (IHealthCheck) Activator.CreateInstance(type)!))
+            .. checks
+                .Select(check => new HealthCheckDescriptor(
+                    Describe(check.Type, runtime), (IHealthCheck) Activator.CreateInstance(check.Type)!, check.SourceKinds))
                 .OrderBy(static x => x.Info.Area)
                 .ThenBy(static x => x.Info.Code, StringComparer.Ordinal),
         ];
@@ -81,7 +98,7 @@ internal sealed partial class HealthCheckRegistry
     /// <summary>Every check, by area and then code.</summary>
     public IReadOnlyList<HealthCheckDescriptor> All { get; }
 
-    /// <summary>Exactly these checks, for a test that sweeps something it made up.</summary>
+    /// <summary>Exactly these checks, each run against every kind of source, for a test that sweeps something it made up.</summary>
     /// <param name="checkTypes">The check classes.</param>
     /// <param name="runtime">
     /// The runtime their <c>RequiresFeature</c> is resolved against, or <see langword="null" /> for none - which refuses a
@@ -91,22 +108,64 @@ internal sealed partial class HealthCheckRegistry
     internal static HealthCheckRegistry ForTypes(IEnumerable<Type> checkTypes, IStudioRuntime? runtime = null)
     {
         ArgumentNullException.ThrowIfNull(checkTypes);
-        return new HealthCheckRegistry([.. checkTypes], runtime ?? NoStudioRuntime.Instance);
+        return new HealthCheckRegistry([.. checkTypes.Select(static x => (x, (IReadOnlySet<StudioSourceKind>?) null))], runtime ?? NoStudioRuntime.Instance);
     }
 
-    /// <summary>Every concrete check class in the descriptor's assemblies, each assembly once.</summary>
-    private static Type[] DiscoverAll(StudioDescriptor descriptor)
+    /// <summary>Exactly these checks, each run against the kinds of source it names, for a test of the source filter.</summary>
+    /// <param name="checks">The check classes, each with its source kinds (<see langword="null" /> for every kind).</param>
+    /// <param name="runtime">The runtime, as <see cref="ForTypes(IEnumerable{Type}, IStudioRuntime?)" />.</param>
+    internal static HealthCheckRegistry ForTypes(
+        IEnumerable<(Type CheckType, IReadOnlySet<StudioSourceKind>? SourceKinds)> checks,
+        IStudioRuntime? runtime = null)
     {
-        ArgumentNullException.ThrowIfNull(descriptor);
-        return [.. descriptor.HealthCheckAssemblies.Distinct().SelectMany(Discover)];
+        ArgumentNullException.ThrowIfNull(checks);
+        return new HealthCheckRegistry([.. checks], runtime ?? NoStudioRuntime.Instance);
+    }
+
+    /// <summary>
+    /// Every concrete check class in <paramref name="entries" />' assemblies, each once, with the source kinds every entry
+    /// that found it admits (<see langword="null" /> when every one admits every kind).
+    /// </summary>
+    /// <param name="entries">A descriptor's <see cref="StudioDescriptor.HealthCheckAssemblies" />.</param>
+    internal static IReadOnlyList<(Type Type, IReadOnlySet<StudioSourceKind>? SourceKinds)> DiscoverAll(
+        IEnumerable<StudioHealthCheckAssembly> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        Dictionary<Type, IReadOnlySet<StudioSourceKind>?> found = [];
+        List<Type> order = [];
+
+        foreach (StudioHealthCheckAssembly entry in entries)
+        {
+            foreach (Type type in Discover(entry.Assembly))
+            {
+                if (!found.TryGetValue(type, out IReadOnlySet<StudioSourceKind>? kinds))
+                {
+                    order.Add(type);
+                    found[type] = entry.SourceKinds;
+                }
+                else if (entry.SourceKinds is { } narrower)
+                {
+                    found[type] = kinds is null ? narrower : kinds.Where(narrower.Contains).ToHashSet();
+                }
+            }
+        }
+
+        return [.. order.Select(type => (type, found[type]))];
     }
 
     /// <summary>The check with <paramref name="code" />, or <see langword="null" />.</summary>
     public HealthCheckDescriptor? Find(string code) =>
         All.FirstOrDefault(x => string.Equals(x.Info.Code, code, StringComparison.Ordinal));
 
-    /// <summary>Whether any check of <paramref name="tier" /> exists - what decides whether a button is offered.</summary>
-    public bool HasTier(HealthCostTier tier) => All.Any(x => x.Info.Tier == tier);
+    /// <summary>
+    /// Whether any check of <paramref name="tier" /> runs against a source of <paramref name="sourceKind" /> - what decides
+    /// whether a button is offered.
+    /// </summary>
+    /// <param name="tier">The tier.</param>
+    /// <param name="sourceKind">The kind of source the page is about.</param>
+    public bool HasTier(HealthCostTier tier, StudioSourceKind sourceKind) =>
+        All.Any(x => x.Info.Tier == tier && x.RunsAgainst(sourceKind));
 
     /// <summary>Every concrete check class in <paramref name="assembly" />.</summary>
     internal static IReadOnlyList<Type> Discover(Assembly assembly)

@@ -1,6 +1,7 @@
 using System.Reflection;
 
 using MartenStudio.Components;
+using MartenStudio.Services.Sources;
 
 namespace MartenStudio.Services.Settings;
 
@@ -11,6 +12,17 @@ namespace MartenStudio.Services.Settings;
 /// endpoint mapping re-roots under the configured mount path.
 /// </param>
 internal sealed record StudioPageAssembly(Assembly Assembly, string CompileTimeRoot);
+
+/// <summary>
+/// One assembly whose health checks a studio runs, and the kinds of source they may run against.
+/// </summary>
+/// <param name="Assembly">The assembly the registry discovers checks in.</param>
+/// <param name="SourceKinds">
+/// The kinds of source its checks are offered, or <see langword="null" /> for every kind. A check that reads a source
+/// through a studio's own types - MartenStudio's checks read the store, its options and its daemon - names that studio's
+/// kind here, and is then never run against any other: no row, not a "could not check" one.
+/// </param>
+internal sealed record StudioHealthCheckAssembly(Assembly Assembly, IReadOnlySet<StudioSourceKind>? SourceKinds = null);
 
 /// <summary>
 /// What makes one studio this studio: its name, its pages, its navigation, how it names a source, and how it builds the
@@ -52,8 +64,12 @@ internal sealed class StudioDescriptor
     /// </summary>
     public required IReadOnlyList<StudioPageAssembly> PageAssemblies { get; init; }
 
-    /// <summary>The assemblies the health registry discovers checks in (read by the health engine, PS-1c).</summary>
-    public required IReadOnlyList<Assembly> HealthCheckAssemblies { get; init; }
+    /// <summary>
+    /// The assemblies the health registry discovers checks in, each with the kinds of source its checks may run against.
+    /// A check found in more than one entry runs only against a kind every one of them admits - which is what keeps a
+    /// studio's own checks off another studio's sources while both are compiled into one assembly.
+    /// </summary>
+    public required IReadOnlyList<StudioHealthCheckAssembly> HealthCheckAssemblies { get; init; }
 
     /// <summary>The sidebar, section by section.</summary>
     public required IReadOnlyList<StudioNavSection> Navigation { get; init; }

@@ -235,7 +235,7 @@ public class ConnectionDaemonLiveTests(PostgresFixture postgres)
 
         try
         {
-            SessionLockLabels labels = SessionLockLabels.For(host.Services.GetRequiredService<IDocumentStore>(), "default", null);
+            SessionLockLabels labels = MartenSessionLockLabeler.For(host.Services.GetRequiredService<IDocumentStore>(), "default", null);
             long[] ids = [.. labels.DaemonLockIds];
 
             await LiveWait.UntilAsync(

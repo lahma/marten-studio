@@ -37,6 +37,9 @@ namespace MartenStudio.Integration.Tests.Health;
 /// </remarks>
 public class ExtendedTableHealthLiveTests(PostgresFixture postgres)
 {
+    /// <summary>The reason a report gives for a finding withheld for its schema, in MartenStudio's words.</summary>
+    private static string WithheldSchemaReason => HealthService.WithheldSchemaReasonFor(MartenStudioSettings.Of(new MartenStudioOptions()));
+
     /// <summary>The extended table's name, in whichever schema a test gives it.</summary>
     private const string ThingsTable = "xso_things";
 
@@ -122,7 +125,7 @@ public class ExtendedTableHealthLiveTests(PostgresFixture postgres)
             // (T02, T22 and T23 are behind the activity gate, whose rows read "not shown to you" short of it, so they are left out.)
             report.Checks.Where(static x => TableCodes.Contains(x.Code)).Should().OnlyContain(static x => !x.FindingsWithheld,
                 "a table check's silence is not a finding kept back: {0}", report.WithheldReason);
-            (report.WithheldReason ?? string.Empty).Should().NotContain(HealthService.WithheldSchemaReason)
+            (report.WithheldReason ?? string.Empty).Should().NotContain(WithheldSchemaReason)
                 .And.NotContain(HealthService.UncheckedSchemaReason);
         }
 
@@ -232,7 +235,7 @@ public class ExtendedTableHealthLiveTests(PostgresFixture postgres)
         row.FindingCount.Should().Be(0);
         row.FindingsWithheld.Should().BeTrue("a withheld finding is never a \"nothing found\"");
         report.WithheldCount.Should().BeGreaterThan(0);
-        report.WithheldReason.Should().Contain(HealthService.WithheldSchemaReason);
+        report.WithheldReason.Should().Contain(WithheldSchemaReason);
 
         foreach (HealthReportFinding finding in report.Findings)
         {

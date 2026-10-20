@@ -11,7 +11,6 @@ using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
-using MartenStudio.Services.Relationships;
 using MartenStudio.Services.Schema;
 using MartenStudio.Services.Settings;
 using MartenStudio.Services.Sources;
@@ -132,7 +131,6 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddSingleton<ISessionLockLabeler, MartenSessionLockLabeler>();
         services.TryAddScoped<IDatabaseDeclarationsSource, MartenDatabaseDeclarationsSource>();
         services.TryAddSingleton<IHealthTableSource, MartenHealthTableSource>();
-        services.TryAddSingleton<IHealthRemedyProvider>(MartenHealthRemedyProvider.Instance);
 
         // PS-1c: the rest of the health engine's seams, in Marten's terms - the remedy lines the table checks offer, what a
         // plan of a document table filters on, the daemon's part in T14, and the Marten this host runs (a test may register
@@ -142,8 +140,6 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddSingleton<IHorizonContributor, MartenHorizonContributor>();
         services.TryAddSingleton<IStudioRuntime>(static provider =>
             new MartenStudioRuntime(provider.GetService<MartenRuntime>() ?? MartenRuntime.Current));
-        services.TryAddScoped<SqlConsoleService>();
-        services.TryAddScoped<ISqlConsoleService>(static provider => provider.GetRequiredService<SqlConsoleService>());
         services.TryAddScoped<IRelationshipNodeSource, MartenRelationshipNodeSource>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<INavIndicatorContributor, MartenNavIndicatorContributor>());
 
@@ -166,8 +162,6 @@ public static partial class MartenStudioServiceCollectionExtensions
         // F7: LINQ mode. Scoped like every data service: it keeps one circuit's audit ledger, so a page turn
         // is not a second opening.
         services.TryAddScoped<ILinqQueryService, LinqQueryService>();
-        services.TryAddScoped<RelationshipReads>();
-        services.TryAddScoped<IRelationshipDataService, RelationshipDataService>();
 
         // Projections and the async daemon. The three singletons are process-wide on purpose: one tracker
         // subscription per database however many pages are open, a rebuild that outlives the circuit that

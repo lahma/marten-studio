@@ -6,9 +6,16 @@ namespace MartenStudio.Services.Health.Checks;
 /// <summary>
 /// How a studio words each table remedy the tables-and-indexes checks offer - one member per remedy shape (issue #8,
 /// G12): MartenStudio's are <c>StoreOptions</c> lines, and a studio over plain data sources words the statement a DBA
-/// would hand to whoever owns the schema.
+/// would hand to whoever owns the schema. The one table-remedy seam: PS-1a's generic <c>IHealthRemedyProvider</c>
+/// (storage parameter, add index, remove index) was folded into it in PS-1e, each of its shapes being one of these.
 /// </summary>
 /// <remarks>
+/// <para>
+/// MartenStudio answers a <c>StoreOptions</c> line for a document table (<c>opts.Schema.For&lt;T&gt;()…</c>), because the
+/// next <c>CreateOrUpdate</c> resets whatever the configuration does not declare. A plain source answers the statement a
+/// DBA would run - <c>ALTER TABLE … SET (autovacuum_…)</c>, <c>CREATE INDEX CONCURRENTLY …</c> - as text to hand to
+/// whoever owns the schema, rendered under "For your own migrations - the studio never runs this".
+/// </para>
 /// <para>
 /// <b>Why a member per shape.</b> The check knows what to suggest - remove this redundant index, leave room for HOT
 /// updates - and the studio knows how its configuration says it. Two remedies that both remove an index say different
@@ -18,9 +25,16 @@ namespace MartenStudio.Services.Health.Checks;
 /// <para>
 /// <b>Every member is pure text.</b> It never runs what it words and never connects. It answers
 /// <see langword="null" /> when there is nothing honest to suggest for the table - another source's, a library's, one
-/// whose owner cannot be told - and the finding then says what to do in words or not at all. A remedy that is SQL text
-/// quotes every identifier through <c>SqlIdentifier</c> (AGENTS.md hard rule 4), and is rendered as text the studio never
-/// runs; one that is a configuration line is refused DDL by <see cref="HealthRemedy" /> itself.
+/// whose owner cannot be told, a server setting no line changes - and the finding then says what to do in words or not
+/// at all. One that is a configuration line is refused DDL by <see cref="HealthRemedy" /> itself.
+/// </para>
+/// <para>
+/// <b>SQL text is built where all SQL is built (AGENTS.md hard rule 4).</b> A remedy that is SQL is composed in, or by a
+/// builder in, <c>Internal/Sql</c> - never by concatenation in an implementation of this or in a check - and every
+/// identifier in it (schema, table, index, column) is quoted through <c>SqlIdentifier</c>, never interpolated raw: the
+/// text is copied into a migration and run by a person with more rights than the studio, so a table name that is not
+/// quoted is an injection the studio handed them. A value it suggests is a literal the builder formats, never a
+/// visitor's input.
 /// </para>
 /// <para>
 /// Handed to an evaluator in <see cref="HealthEvaluation.TableRemedies" />, read by the sweep from its own scope; a studio

@@ -79,15 +79,17 @@ internal static class MartenHealthContext
 /// <summary>
 /// MartenStudio's spellings of shared health members whose shared form takes the studio's seams - C# 14 static extension
 /// members, so that Marten-only code compiles unchanged. The rule is <see cref="MartenServiceBridges" />'s: Marten-only code
-/// may call these; a shared-bound file must not, and each member lists the shared-bound callers left.
+/// may call these; a shared-bound file must not, and each member lists its callers - every one MartenStudio's own since
+/// PS-1e, which moved the last test caller of <c>HealthService.WithheldSchemaReason</c> onto
+/// <see cref="HealthService.WithheldSchemaReasonFor" /> and deleted that member.
 /// </summary>
 internal static class MartenHealthBridges
 {
     extension(DataSourceEndpoints)
     {
         /// <summary>
-        /// <see cref="DataSourceEndpoints.Of(IStudioDatabase)" /> for a Marten database. Called by C10
-        /// (<c>PooledDaemonLockCheck</c>), which is MartenStudio's own.
+        /// <see cref="DataSourceEndpoints.Of(IStudioDatabase)" /> for a Marten database. Caller: C10
+        /// (<c>PooledDaemonLockCheck</c>).
         /// </summary>
         /// <param name="database">The database.</param>
         internal static DataSourceEndpoints? Of(IMartenDatabase database) => DataSourceEndpoints.Of(MartenStudioDatabase.Of(database));
@@ -97,7 +99,7 @@ internal static class MartenHealthBridges
     {
         /// <summary>
         /// <see cref="HealthLinks.ToPage(IStudioSettings, string, StudioScope?)" /> with MartenStudio's options and source
-        /// parameter. Shared-bound caller left: <c>Overview.razor</c> (PS-1d).
+        /// parameter. Caller: <c>Overview.razor</c>, MartenStudio's overview body.
         /// </summary>
         /// <param name="options">MartenStudio's options.</param>
         /// <param name="scope">The scope to carry.</param>
@@ -106,20 +108,13 @@ internal static class MartenHealthBridges
 
         /// <summary>
         /// <see cref="HealthLinks.ToFinding(IStudioSettings, string, StudioScope?, HealthReportFinding)" /> with
-        /// MartenStudio's options and source parameter. Shared-bound caller left: <c>Overview.razor</c> (PS-1d).
+        /// MartenStudio's options and source parameter. Callers: <c>Overview.razor</c>, <c>EventTypes.razor</c>,
+        /// <c>Projections.razor</c> and <c>IndexesTab.razor</c>.
         /// </summary>
         /// <param name="options">MartenStudio's options.</param>
         /// <param name="scope">The scope to carry.</param>
         /// <param name="finding">The finding.</param>
         internal static string ToFinding(MartenStudioOptions options, StudioScope? scope, HealthReportFinding finding) =>
             HealthLinks.ToFinding(MartenStudioSettings.Of(options), MartenStudioDescriptor.SourceQueryParameter, scope, finding);
-    }
-
-    extension(HealthService)
-    {
-        /// <summary>
-        /// <see cref="HealthService.WithheldSchemaReasonFor" /> in MartenStudio's words, for a test that looks for it.
-        /// </summary>
-        internal static string WithheldSchemaReason => HealthService.WithheldSchemaReasonFor(MartenStudioSettings.Of(new MartenStudioOptions()));
     }
 }

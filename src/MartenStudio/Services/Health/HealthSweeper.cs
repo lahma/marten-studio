@@ -303,8 +303,10 @@ internal sealed class HealthSweeper
         // Phase 1: every gatherer. All of the sweep's I/O happens here. Tier by tier - the in-process checks first, then
         // the catalog's - so that a slow catalog read can only ever cost the checks after it, and a configuration check,
         // which costs nothing, is never the one the sweep's budget runs out on. The results keep the registry's area and
-        // code order, which is the order the page draws them in.
-        HealthCheckDescriptor[] run = [.. registry.All.Where(x => tiers.Contains(x.Info.Tier))];
+        // code order, which is the order the page draws them in. A check that reads another kind of source than this one -
+        // a studio's own check, over a source it is not that studio's - is not run at all: it has no row in this sweep.
+        StudioSourceKind sourceKind = resolved.Source.Kind;
+        HealthCheckDescriptor[] run = [.. registry.All.Where(x => tiers.Contains(x.Info.Tier) && x.RunsAgainst(sourceKind))];
         Gathered[] gathered = new Gathered[run.Length];
         Dictionary<string, double> sample = new(StringComparer.Ordinal);
         Dictionary<string, HealthGate> sampleGates = new(StringComparer.Ordinal);

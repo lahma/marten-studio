@@ -116,8 +116,8 @@ internal interface IStudioTableSet
 /// <para>
 /// <b>Whole-database scope is the contract (issue #8, G1).</b> A source answers every table of the database it can
 /// classify, each marked <see cref="StudioTableOwnership" />: the source's own, a recognised library's, or somebody
-/// else's. MartenStudio's pass-through implementation still answers only the tables its store declares, which is
-/// today's behaviour; widening it is the health packet's.
+/// else's. MartenStudio's implementation still answers only the tables its store declares, which is 0.4's behaviour;
+/// widening it to the whole database, with the store's declarations laid over the catalog, is a later packet's (G1-M).
 /// </para>
 /// <para>
 /// <b>What it must not do.</b> Read the set without a statement where it can (a store's configuration, the database
@@ -132,53 +132,6 @@ internal interface IHealthTableSource
     /// <summary>The tables the sweep in <paramref name="context" /> judges, built once per sweep.</summary>
     /// <param name="context">The sweep's context: the resolved source, its settings and its statement runner.</param>
     Task<IStudioTableSet> TablesAsync(HealthCheckContext context);
-}
-
-/// <summary>
-/// The words a finding offers as its remedy, per table - a source's configuration line for a table it owns, SQL text for
-/// a table the host's migrations own (issue #8, G12).
-/// </summary>
-/// <remarks>
-/// <para>
-/// MartenStudio answers a <c>StoreOptions</c> line for a document table (<c>opts.Schema.For&lt;T&gt;()…</c>), because the
-/// next <c>CreateOrUpdate</c> resets whatever the configuration does not declare. A plain source answers the statement
-/// a DBA would run - <c>ALTER TABLE … SET (autovacuum_…)</c>, <c>CREATE INDEX CONCURRENTLY …</c> - as text to hand to
-/// whoever owns the schema, rendered under "For your own migrations - the studio never runs this".
-/// </para>
-/// <para>
-/// <b>Every member is pure text.</b> It never runs what it words, never connects, and answers <see langword="null" />
-/// when there is nothing honest to suggest - a library's table, a table whose owner cannot be told, a server setting no
-/// line changes - which the finding then says in words.
-/// </para>
-/// <para>
-/// <b>SQL text is built where all SQL is built (AGENTS.md hard rule 4).</b> A remedy that is SQL is composed in, or by a
-/// builder in, <c>Internal/Sql</c> - never by concatenation here or in a check - and every identifier in it (schema,
-/// table, index, column) is quoted through <c>SqlIdentifier</c>, never interpolated raw: the text is copied into a
-/// migration and run by a person with more rights than the studio, so a table name that is not quoted is an injection
-/// the studio handed them. A value it suggests is a literal the builder formats, never a visitor's input.
-/// </para>
-/// </remarks>
-internal interface IHealthRemedyProvider
-{
-    /// <summary>A remedy that sets one storage parameter of <paramref name="table" /> (<c>fillfactor</c>, <c>autovacuum_*</c>).</summary>
-    /// <param name="table">The table.</param>
-    /// <param name="parameter">The storage parameter.</param>
-    /// <param name="value">Its suggested value, as SQL spells it.</param>
-    /// <param name="explanation">What it changes and what it costs.</param>
-    HealthRemedy? StorageParameter(StudioTable table, string parameter, string value, string explanation);
-
-    /// <summary>A remedy that adds an index on <paramref name="columns" /> of <paramref name="table" />.</summary>
-    /// <param name="table">The table.</param>
-    /// <param name="columns">The columns, in order, as the catalog names them.</param>
-    /// <param name="explanation">What it changes and what it costs.</param>
-    HealthRemedy? AddIndex(StudioTable table, IReadOnlyList<string> columns, string explanation);
-
-    /// <summary>A remedy that removes <paramref name="index" /> from <paramref name="table" />.</summary>
-    /// <param name="table">The table.</param>
-    /// <param name="index">The index, as the catalog read it.</param>
-    /// <param name="origin">Where it came from.</param>
-    /// <param name="explanation">What it changes and what it costs.</param>
-    HealthRemedy? RemoveIndex(StudioTable table, HealthIndexRow index, IndexOrigin origin, string explanation);
 }
 
 /// <summary>The recognised libraries' tables (issue #8, G1), by name.</summary>

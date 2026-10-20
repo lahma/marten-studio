@@ -26,12 +26,17 @@ namespace MartenStudio.Tests.Health;
 /// </remarks>
 public class HealthCheckConventionTests
 {
-    private static IReadOnlyList<Type> Discovered => HealthCheckRegistry.Discover(typeof(HealthCheckRegistry).Assembly);
+    /// <summary>Every check class in the studio's check assemblies - the shared engine's and MartenStudio's own.</summary>
+    private static IReadOnlyList<Type> Discovered =>
+    [
+        .. MartenStudio.Services.MartenStudioDescriptor.Instance.HealthCheckAssemblies
+            .Select(static x => x.Assembly).Distinct().SelectMany(HealthCheckRegistry.Discover),
+    ];
 
     [Fact]
     public void The_studio_ships_K01_K02_and_K03_and_finds_them_by_reflection()
     {
-        new HealthCheckRegistry().All.Select(static x => x.Info.Code).Should().Contain(["K01", "K02", "K03"]);
+        StudioHealthChecks.Registry.All.Select(static x => x.Info.Code).Should().Contain(["K01", "K02", "K03"]);
         Discovered.Should().NotBeEmpty("a discovery that finds nothing would pass every rule below for the wrong reason");
     }
 
@@ -53,7 +58,10 @@ public class HealthCheckConventionTests
         registry.All.Select(static x => x.Info.Code).Should().Contain(["K01", "K02", "K03"]);
         registry.All.Should().HaveCount(Discovered.Count);
         typeof(HealthCheckRegistry).GetConstructors().Should().ContainSingle(
-            static x => x.GetParameters().Length == 0, "a second public constructor is one the container may prefer");
+            "a second public constructor is one the container may prefer")
+            .Which.GetParameters().Select(static x => x.ParameterType).Should().Equal(
+                [typeof(MartenStudio.Services.Settings.StudioDescriptor), typeof(IStudioRuntime)],
+                "the descriptor is resolvable only where a studio registered one, and then it is the list to use");
     }
 
     [Fact]
@@ -89,7 +97,7 @@ public class HealthCheckConventionTests
     [InlineData(typeof(ConstructedCheck), "no parameterless constructor")]
     public void The_rules_catch_a_check_that_breaks_them(Type offender, string problem)
     {
-        Type k01 = new HealthCheckRegistry().Find("K01")!.Info.CheckType;
+        Type k01 = StudioHealthChecks.Registry.Find("K01")!.Info.CheckType;
 
         HealthCheckRegistry.Problems([k01, offender]).Should().Contain(x => x.Contains(problem, StringComparison.Ordinal));
 
@@ -112,7 +120,7 @@ public class HealthCheckConventionTests
     {
         List<string> problems = [];
 
-        foreach (HealthCheckDescriptor check in new HealthCheckRegistry().All)
+        foreach (HealthCheckDescriptor check in StudioHealthChecks.Registry.All)
         {
             string path = RepositoryRoot.Combine(check.Info.DocsFile.Split('/'));
 
@@ -206,7 +214,7 @@ public class HealthCheckConventionTests
     [Fact]
     public void Every_feature_a_check_requires_is_in_the_probe_table()
     {
-        foreach (HealthCheckDescriptor check in new HealthCheckRegistry().All)
+        foreach (HealthCheckDescriptor check in StudioHealthChecks.Registry.All)
         {
             HealthCheckAttribute attribute = check.Info.CheckType.GetCustomAttribute<HealthCheckAttribute>()!;
 

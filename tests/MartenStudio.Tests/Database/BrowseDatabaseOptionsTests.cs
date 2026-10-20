@@ -85,18 +85,18 @@ public class BrowseDatabaseOptionsTests
             System.Reflection.PropertyInfo property = typeof(MartenStudioCapabilities).GetProperty(capability.ToString())
                 ?? throw new InvalidOperationException(capability + " has no MartenStudioCapabilities property.");
 
-            StudioCapabilityGuard.IsConfigured(configured, capability).Should().BeFalse();
+            MartenStudioSettings.IsConfigured(configured, capability).Should().BeFalse();
 
             property.SetValue(configured, true);
 
-            StudioCapabilityGuard.IsConfigured(configured, capability).Should().BeTrue(
+            MartenStudioSettings.IsConfigured(configured, capability).Should().BeTrue(
                 capability + " must read " + property.Name);
 
             StudioCapabilityGuard.All.Where(x => x != capability)
-                .Should().OnlyContain(x => !StudioCapabilityGuard.IsConfigured(configured, x));
+                .Should().OnlyContain(x => !MartenStudioSettings.IsConfigured(configured, x));
         }
 
-        Action unknown = () => StudioCapabilityGuard.IsConfigured(new MartenStudioCapabilities(), (StudioCapability) 999);
+        Action unknown = () => MartenStudioSettings.IsConfigured(new MartenStudioCapabilities(), (StudioCapability) 999);
         unknown.Should().Throw<ArgumentOutOfRangeException>("a capability with no property must not quietly read as off");
     }
 

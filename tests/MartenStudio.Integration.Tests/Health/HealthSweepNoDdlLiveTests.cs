@@ -135,7 +135,7 @@ public class HealthSweepNoDdlLiveTests(PostgresFixture postgres)
     }
 
     private static HealthCheckRegistry Registry(Type extra) =>
-        HealthCheckRegistry.ForTypes([.. new HealthCheckRegistry().All.Select(static x => x.Info.CheckType), extra]);
+        HealthCheckRegistry.ForTypes([.. StudioHealthChecks.Registry.All.Select(static x => x.Info.CheckType), extra]);
 }
 
 /// <summary>A document type with a numeric id, so Marten's lazy HiLo feature is active.</summary>

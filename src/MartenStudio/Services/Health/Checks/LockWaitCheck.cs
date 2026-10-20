@@ -245,18 +245,30 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
     /// <summary>
     /// The classifier over every registered source's declarations - the one the database browser uses, read afresh
     /// for the sweep, which has no circuit (<see cref="IDatabaseDeclarationsSource.ReadUncached" />) - or
-    /// <see langword="null" /> when they cannot all be read, or the studio registers no declarations, which names no
-    /// relation at all (fail closed).
+    /// <see langword="null" /> when they cannot all be read, the studio registers no declarations, or the declarations
+    /// source cannot even be built in the sweep's scope: a classifier names relations, and none at all is the closed
+    /// failure. The check itself never fails for want of one; it labels the locks it reads with what the catalog says.
     /// </summary>
-    private static DatabaseObjectClassifier? Classifier(HealthCheckContext context)
+    internal static DatabaseObjectClassifier? Classifier(HealthCheckContext context)
     {
-        if (context.Services.GetService<IDatabaseDeclarationsSource>() is not { } declarations)
+        ArgumentNullException.ThrowIfNull(context);
+
+        try
         {
+            if (context.Services.GetService<IDatabaseDeclarationsSource>() is not { } declarations)
+            {
+                return null;
+            }
+
+            DatabaseDeclarations declared = declarations.ReadUncached(context.Source);
+            return declared.Succeeded ? declared.Classifier : null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Fail closed, as 0.4's read of the store registry did: a source that will not resolve or read in a scope with
+            // no circuit costs C06 its relation names, not its row.
             return null;
         }
-
-        DatabaseDeclarations declared = declarations.ReadUncached(context.Source);
-        return declared.Succeeded ? declared.Classifier : null;
     }
 
     private static (SessionVisibility Visibility, LockWaiter? Waiter, long Total) MapWaiter(NpgsqlDataReader reader, SessionLockLabels labels)

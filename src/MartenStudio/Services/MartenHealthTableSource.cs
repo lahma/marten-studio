@@ -29,12 +29,12 @@ internal sealed class MartenHealthTableSource : IHealthTableSource
 }
 
 /// <summary>
-/// MartenStudio's remedy wording (<see cref="IHealthRemedyProvider" />, <see cref="IHealthTableRemedies" />): a
-/// <c>StoreOptions</c> line for a table the store's configuration declares, worded exactly as the checks have always
-/// worded it, and nothing for a table no Marten line changes - never DDL (D29), because the next <c>CreateOrUpdate</c>
-/// reconciles whatever the configuration does not declare.
+/// MartenStudio's remedy wording (<see cref="IHealthTableRemedies" />): a <c>StoreOptions</c> line for a table the store's
+/// configuration declares, worded exactly as the checks have always worded it, and nothing for a table no Marten line
+/// changes - never DDL (D29), because the next <c>CreateOrUpdate</c> reconciles whatever the configuration does not
+/// declare.
 /// </summary>
-internal sealed class MartenHealthRemedyProvider : IHealthRemedyProvider, IHealthTableRemedies
+internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
 {
     /// <summary>What T03's re-apply remedy says, for an invalid index on an ordinary table.</summary>
     internal const string ReapplyCode =
@@ -53,10 +53,16 @@ internal sealed class MartenHealthRemedyProvider : IHealthRemedyProvider, IHealt
     /// <summary>The one instance the sweep and the tests use: it holds nothing.</summary>
     public static MartenHealthRemedyProvider Instance { get; } = new();
 
-    // ---- IHealthRemedyProvider ------------------------------------------------------------------------------------
-
-    /// <inheritdoc />
-    public HealthRemedy? StorageParameter(StudioTable table, string parameter, string value, string explanation)
+    /// <summary>
+    /// A <c>StoreOptions</c> line that sets one storage parameter of a document table (<c>fillfactor</c>,
+    /// <c>autovacuum_*</c>), or <see langword="null" /> for any other table - the shape <see cref="AutovacuumSetting" /> is
+    /// worded in.
+    /// </summary>
+    /// <param name="table">The table.</param>
+    /// <param name="parameter">The storage parameter.</param>
+    /// <param name="value">Its suggested value, as C# spells it in the line.</param>
+    /// <param name="explanation">What it changes and what it costs.</param>
+    internal static HealthRemedy? StorageParameter(StudioTable table, string parameter, string value, string explanation)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentException.ThrowIfNullOrWhiteSpace(parameter);
@@ -69,16 +75,6 @@ internal sealed class MartenHealthRemedyProvider : IHealthRemedyProvider, IHealt
                 RuntimeFeature.DocumentStorageParameter)
             : null;
     }
-
-    /// <inheritdoc />
-    /// <remarks>None: the checks that suggest an index say what they need through <see cref="IHealthTableRemedies" />.</remarks>
-    public HealthRemedy? AddIndex(StudioTable table, IReadOnlyList<string> columns, string explanation) => null;
-
-    /// <inheritdoc />
-    /// <remarks>None: the checks that remove an index say why through <see cref="IHealthTableRemedies" />.</remarks>
-    public HealthRemedy? RemoveIndex(StudioTable table, HealthIndexRow index, IndexOrigin origin, string explanation) => null;
-
-    // ---- IHealthTableRemedies -------------------------------------------------------------------------------------
 
     /// <inheritdoc />
     public HealthRemedy? IndexTheFilteredMember(StudioTable table)

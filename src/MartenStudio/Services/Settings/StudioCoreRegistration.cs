@@ -4,6 +4,8 @@ using MartenStudio.Services.Database;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Live;
+using MartenStudio.Services.Query;
+using MartenStudio.Services.Relationships;
 using MartenStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -14,16 +16,20 @@ namespace MartenStudio.Services.Settings;
 
 /// <summary>
 /// Registers everything the shared studio renders with - the shell's services, the scope, authorization, capability
-/// and audit services, the database browser, Sessions and the health advisor - for whichever studio's
-/// <c>Add*Studio()</c> calls it.
+/// and audit services, the database browser, Sessions, the health advisor, the SQL console and Relationships - for
+/// whichever studio's <c>Add*Studio()</c> calls it.
 /// </summary>
 /// <remarks>
 /// <para>
 /// A studio supplies what makes it itself: its <see cref="StudioRegistrationMarker" />, its <see cref="StudioDescriptor" />,
-/// its <see cref="IStudioSettings" />, and - registered by its own <c>Add*Studio()</c> - its implementations of the seams
-/// (<see cref="IStudioSourceProvider" />, <see cref="IStudioLinks" />, <see cref="ISessionLockLabeler" />,
-/// <see cref="IDatabaseDeclarationsSource" />, <see cref="IHealthTableSource" />, <see cref="IHealthRemedyProvider" />,
-/// <see cref="ISqlConsoleService" />, <see cref="IRelationshipNodeSource" /> and any <see cref="INavIndicatorContributor" />).
+/// its <see cref="IStudioSettings" />, and - registered by its own <c>Add*Studio()</c> - its implementations of the seams.
+/// Four are required, because shared services and components take them as dependencies: <see cref="IStudioSourceProvider" />,
+/// <see cref="IStudioLinks" />, <see cref="ISessionLockLabeler" /> and <see cref="IDatabaseDeclarationsSource" />. The
+/// rest are optional, and a studio that registers none gets what the seam's own documentation says of its absence: the
+/// health advisor's <see cref="IHealthTableSource" />, <see cref="IHealthTableRemedies" />, <see cref="IHealthPlanAdvisor" />
+/// and <see cref="IHorizonContributor" />, the <see cref="IStudioRuntime" /> a check's required feature is resolved against,
+/// the <see cref="IRelationshipNodeSource" />, and any number of <see cref="INavIndicatorContributor" />. The SQL console
+/// (<see cref="ISqlConsoleService" />) and the Relationships services are shared, and registered here.
 /// </para>
 /// <para>
 /// <b>Nothing here changes how the host behaves.</b> No global JSON or SignalR option is touched, no middleware ordering
@@ -147,5 +153,15 @@ internal static class StudioCoreRegistration
         services.TryAddSingleton<ISessionActivityReader, SessionActivityReader>();
         services.TryAddSingleton<SessionActivitySnapshots>();
         services.TryAddScoped<ISessionActivityService, SessionActivityService>();
+
+        // The SQL console. Scoped like every data service, and registered once under both names: the interface forwards to
+        // the one console of the circuit, which a studio's own query service may also use.
+        services.TryAddScoped<SqlConsoleService>();
+        services.TryAddScoped<ISqlConsoleService>(static provider => provider.GetRequiredService<SqlConsoleService>());
+
+        // Relationships: the foreign-key graph and its reads. A studio adds what it knows beside the catalog through its
+        // IRelationshipNodeSource, which the data service takes as optional - a studio with none draws plain tables.
+        services.TryAddScoped<RelationshipReads>();
+        services.TryAddScoped<IRelationshipDataService, RelationshipDataService>();
     }
 }

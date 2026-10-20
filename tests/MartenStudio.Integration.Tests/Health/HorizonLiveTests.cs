@@ -8,7 +8,6 @@ using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.SampleDomain.Events;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Database;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 
@@ -184,7 +183,7 @@ internal static class HorizonLive
         await store.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
         await daemon.StartAsync(Token);
 
-        long[] ids = [.. SessionLockLabels.For(store, "default", null).DaemonLockIds];
+        long[] ids = [.. MartenStudio.Services.MartenSessionLockLabeler.For(store, "default", null).DaemonLockIds];
 
         // Held to this database: pg_locks is the server's, and every store built from the sample's configuration computes
         // the same lock ids, so on the shared server another class's HotCold leader would otherwise answer for this one.

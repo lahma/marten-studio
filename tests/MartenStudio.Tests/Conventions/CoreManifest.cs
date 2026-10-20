@@ -2,27 +2,32 @@ namespace MartenStudio.Tests.Conventions;
 
 /// <summary>
 /// The move manifest: every file under <c>src/MartenStudio/</c> that moves to the shared assembly (PostgresStudio) in
-/// 0.5, with the packet that makes it free of Marten - one table, which PS-1b to PS-1e extend.
+/// 0.5, where it goes and the namespace it then declares - final as of PS-1e, and the table PS-2's move script is written
+/// from.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What a row means.</b> The file, relative to <c>src/MartenStudio/</c>, is bound for the shared assembly - a core
-/// row of the design's Appendix A, or the core half of a mixed one as the packet that split it left it. Its packet is
-/// the one that makes it Marten-free and whose fence (<c>CoreFenceTests.&lt;Area&gt;</c>) scans it; until that packet
-/// lands, its row is on the manifest only so that the types it declares are not counted as Marten's.
+/// <b>What a row means.</b> The file, relative to <c>src/MartenStudio/</c>, moves to <c>src/PostgresStudio/</c> - at the
+/// same relative path unless the row names another (<see cref="Entry.NewPath" />: a folder change, or a type renamed with
+/// its file, <see cref="TypeRenames" />). It is a core row of the design's Appendix A, or the core half of a mixed one as
+/// the packet that split it left it. Its packet is the one that made it Marten-free; <see cref="CoreFenceTests" /> fences
+/// every row's source file alike.
 /// </para>
 /// <para>
-/// <b>What is not on it is MartenStudio's.</b> <see cref="CoreFenceTests" /> collects every type declared in a
-/// <c>src/</c> file that is not on this list, and a fenced file may name none of them. So a packet that splits a mixed
-/// file leaves the core half here and its Marten half off - a new file, whose types the fence then refuses - and a
-/// packet that adds a shared file adds its row. Rows are grouped by packet so that the three parallel packets
-/// (PS-1b, PS-1c, PS-1d) edit disjoint lines; PS-1e merges the fences into one over the whole table and emits the
-/// final manifest (path, new path, new namespace) for PS-2.
+/// <b>Namespaces follow folders, on both sides.</b> Every C# file on the manifest declares the namespace its folder gives
+/// under <c>MartenStudio</c> (<see cref="Entry.OldNamespace" />), and every Razor file takes it from its folder, so the
+/// namespace it declares after the move is its new folder's under <c>PostgresStudio</c> (<see cref="Entry.NewNamespace" />)
+/// - which is what makes the rename a table rather than a judgement. <see cref="CoreFenceTests" /> holds both halves.
+/// </para>
+/// <para>
+/// <b>What is not on it is MartenStudio's</b>, and stays in <c>src/MartenStudio/</c> under its own namespace.
+/// <see cref="CoreFenceTests" /> collects every type and global alias declared in a <c>src/</c> file that is not on this
+/// list, and a manifest file may name none of them.
 /// </para>
 /// </remarks>
 internal static class CoreManifest
 {
-    /// <summary>The packet that makes a row Marten-free.</summary>
+    /// <summary>The packet that made a row Marten-free.</summary>
     public enum Packet
     {
         /// <summary>The spine: settings, descriptor, sources, scope, authorization, audit, shell, routes, layout.</summary>
@@ -37,23 +42,61 @@ internal static class CoreManifest
         /// <summary>The SQL console, Relationships, Overview and Query shells, live badges.</summary>
         PS1d,
 
-        /// <summary>Core files no 1b-1d packet owns, which PS-1e fences with the rest.</summary>
+        /// <summary>Core files no 1b-1d packet owned - the JSON toolkit, the shared building blocks, the assets - fenced by PS-1e.</summary>
         PS1e,
     }
 
     /// <summary>One file bound for the shared assembly.</summary>
     /// <param name="Path">Relative to <c>src/MartenStudio/</c>, with forward slashes.</param>
-    /// <param name="Owner">The packet that makes it Marten-free.</param>
-    public sealed record Entry(string Path, Packet Owner)
+    /// <param name="Owner">The packet that made it Marten-free.</param>
+    /// <param name="NewPath">
+    /// Its path relative to <c>src/PostgresStudio/</c> when that is not <paramref name="Path" />: a folder change, a type
+    /// renamed with its file, or an asset renamed.
+    /// </param>
+    public sealed record Entry(string Path, Packet Owner, string? NewPath = null)
     {
         /// <summary>The path relative to the repository root, as the scanners report it.</summary>
         public string RepositoryPath => "src/MartenStudio/" + Path;
+
+        /// <summary>Where it goes, relative to <c>src/PostgresStudio/</c>.</summary>
+        public string TargetPath => NewPath ?? Path;
+
+        /// <summary>Where it goes, relative to the repository root.</summary>
+        public string NewRepositoryPath => "src/PostgresStudio/" + TargetPath;
+
+        /// <summary>Whether it is C# or Razor: code the fence reads and a namespace moves with.</summary>
+        public bool IsSource => Path.EndsWith(".cs", StringComparison.Ordinal) || Path.EndsWith(".razor", StringComparison.Ordinal);
+
+        /// <summary>The namespace it declares today, or <see langword="null" /> for an asset.</summary>
+        public string? OldNamespace => IsSource ? NamespaceOf("MartenStudio", Path) : null;
+
+        /// <summary>The namespace it declares after the move, or <see langword="null" /> for an asset.</summary>
+        public string? NewNamespace => IsSource ? NamespaceOf("PostgresStudio", TargetPath) : null;
+
+        private static string NamespaceOf(string root, string path)
+        {
+            int slash = path.LastIndexOf('/');
+            return slash < 0 ? root : root + "." + path[..slash].Replace('/', '.');
+        }
     }
+
+    /// <summary>
+    /// The types renamed with the move (design Appendix D): a shared type named <c>MartenStudio*</c> takes the neutral
+    /// <c>Studio*</c> name, and its file is renamed with it (<see cref="Entry.NewPath" />).
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> TypeRenames { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["MartenStudioEndpointAuthorizationGuard"] = "StudioEndpointAuthorizationGuard",
+        ["MartenStudioEndpointMarker"] = "StudioEndpointMarker",
+        ["MartenStudioMappedEndpoints"] = "StudioMappedEndpoints",
+        ["MartenStudioConventionBuilder"] = "StudioConventionBuilder",
+        ["MartenStudioHealthCheck"] = "StudioHealthCheck",
+    };
 
     /// <summary>Every row, grouped by packet.</summary>
     public static IReadOnlyList<Entry> Entries { get; } =
     [
-        // ---- PS1a ------------------------------------------------------------
+        // ---- PS1a --------------------------------------------------------
         new("Components/Layout/CapabilityBanner.razor", Packet.PS1a),
         new("Components/Layout/NavMenu.razor", Packet.PS1a),
         new("Components/Layout/PreferencesMenu.razor", Packet.PS1a),
@@ -68,11 +111,11 @@ internal static class CoreManifest
         new("Components/StudioRoutes.razor", Packet.PS1a),
         new("Components/StudioRouteTable.cs", Packet.PS1a),
         new("Components/StudioScopeQuery.cs", Packet.PS1a),
-        new("Internal/MartenStudioEndpointAuthorizationGuard.cs", Packet.PS1a),
-        new("Internal/MartenStudioEndpointMarker.cs", Packet.PS1a),
-        new("Internal/MartenStudioMappedEndpoints.cs", Packet.PS1a),
+        new("Internal/MartenStudioEndpointAuthorizationGuard.cs", Packet.PS1a, "Internal/StudioEndpointAuthorizationGuard.cs"),
+        new("Internal/MartenStudioEndpointMarker.cs", Packet.PS1a, "Internal/StudioEndpointMarker.cs"),
+        new("Internal/MartenStudioMappedEndpoints.cs", Packet.PS1a, "Internal/StudioMappedEndpoints.cs"),
         new("Internal/StudioEndpointMapper.cs", Packet.PS1a),
-        new("MartenStudioConventionBuilder.cs", Packet.PS1a),
+        new("MartenStudioConventionBuilder.cs", Packet.PS1a, "StudioConventionBuilder.cs"),
         new("Services/Settings/IStudioLinks.cs", Packet.PS1a),
         new("Services/Settings/IStudioSettings.cs", Packet.PS1a),
         new("Services/Settings/StudioCoreRegistration.cs", Packet.PS1a),
@@ -81,8 +124,6 @@ internal static class CoreManifest
         new("Services/Settings/StudioRegistrationMarker.cs", Packet.PS1a),
         new("Services/Sources/IDatabaseDeclarationsSource.cs", Packet.PS1a),
         new("Services/Sources/IHealthTableSource.cs", Packet.PS1a),
-        new("Services/Sources/INavIndicatorContributor.cs", Packet.PS1a),
-        new("Services/Sources/IRelationshipNodeSource.cs", Packet.PS1a),
         new("Services/Sources/ISessionLockLabeler.cs", Packet.PS1a),
         new("Services/Sources/ISqlConsoleService.cs", Packet.PS1a),
         new("Services/Sources/IStudioDatabase.cs", Packet.PS1a),
@@ -104,7 +145,7 @@ internal static class CoreManifest
         new("Services/StudioScopeModels.cs", Packet.PS1a),
         new("Services/StudioState.cs", Packet.PS1a),
 
-        // ---- PS1b ------------------------------------------------------------
+        // ---- PS1b --------------------------------------------------------
         new("Components/Pages/Database/DatabaseAccessNotice.razor", Packet.PS1b),
         new("Components/Pages/Database/DatabaseDefinitionBody.razor", Packet.PS1b),
         new("Components/Pages/Database/DatabaseDefinitionLoader.cs", Packet.PS1b),
@@ -136,10 +177,10 @@ internal static class CoreManifest
         new("Components/Pages/Database/RowValue.razor", Packet.PS1b),
         new("Components/Pages/Database/Sessions.razor", Packet.PS1b),
         new("Components/Pages/Database/TableRowsTab.razor", Packet.PS1b),
-        new("Components/Pages/Documents/CollectionChip.razor", Packet.PS1b),
-        new("Components/Pages/Documents/SafeReturnLink.cs", Packet.PS1b),
-        new("Components/Pages/Schema/SqlActions.razor", Packet.PS1b),
-        new("Components/Pages/Schema/SqlText.razor", Packet.PS1b),
+        new("Components/Pages/Documents/CollectionChip.razor", Packet.PS1b, "Components/Shared/CollectionChip.razor"),
+        new("Components/Pages/Documents/SafeReturnLink.cs", Packet.PS1b, "Components/Shared/SafeReturnLink.cs"),
+        new("Components/Pages/Schema/SqlActions.razor", Packet.PS1b, "Components/Shared/SqlActions.razor"),
+        new("Components/Pages/Schema/SqlText.razor", Packet.PS1b, "Components/Shared/SqlText.razor"),
         new("Internal/Sql/ColumnCatalog.cs", Packet.PS1b),
         new("Internal/Sql/CountEstimator.cs", Packet.PS1b),
         new("Internal/Sql/DatabaseCatalogQueries.cs", Packet.PS1b),
@@ -179,7 +220,7 @@ internal static class CoreManifest
         new("Services/Database/TableRowModels.cs", Packet.PS1b),
         new("Services/Database/TableRowService.cs", Packet.PS1b),
         new("Services/Database/WithheldNames.cs", Packet.PS1b),
-        new("Services/Documents/SearchChip.cs", Packet.PS1b),
+        new("Services/Documents/SearchChip.cs", Packet.PS1b, "Services/Query/SearchChip.cs"),
         new("Services/Query/IndexVerdict.cs", Packet.PS1b),
         new("Services/Query/SearchGrammarError.cs", Packet.PS1b),
         new("Services/Query/SortDirection.cs", Packet.PS1b),
@@ -187,7 +228,7 @@ internal static class CoreManifest
         new("Services/Schema/SchemaFormat.cs", Packet.PS1b),
         new("Services/Schema/SqlTokenizer.cs", Packet.PS1b),
 
-        // ---- PS1c ------------------------------------------------------------
+        // ---- PS1c --------------------------------------------------------
         new("Components/Pages/Health/HealthPage.razor", Packet.PS1c),
         new("Components/Pages/Health/HealthPresentation.cs", Packet.PS1c),
         new("Internal/Sql/HealthConnectionQueries.cs", Packet.PS1c),
@@ -228,7 +269,7 @@ internal static class CoreManifest
         new("Services/Health/Checks/VacuumBehindCheck.cs", Packet.PS1c),
         new("Services/Health/Export/HealthExportRunner.cs", Packet.PS1c),
         new("Services/Health/Export/HealthExportSummary.cs", Packet.PS1c),
-        new("Services/Health/Export/MartenStudioHealthCheck.cs", Packet.PS1c),
+        new("Services/Health/Export/MartenStudioHealthCheck.cs", Packet.PS1c, "Services/Health/Export/StudioHealthCheck.cs"),
         new("Services/Health/HealthCheck.cs", Packet.PS1c),
         new("Services/Health/HealthCheckContext.cs", Packet.PS1c),
         new("Services/Health/HealthCheckRegistry.cs", Packet.PS1c),
@@ -247,7 +288,7 @@ internal static class CoreManifest
         new("Services/Schema/IndexRedundancy.cs", Packet.PS1c),
         new("Services/Schema/StorageParameters.cs", Packet.PS1c),
 
-        // ---- PS1d ------------------------------------------------------------
+        // ---- PS1d --------------------------------------------------------
         new("Components/Pages/Activity.razor", Packet.PS1d),
         new("Components/Pages/Query/ExamplesPanel.razor", Packet.PS1d),
         new("Components/Pages/Query/QueryEditor.razor", Packet.PS1d),
@@ -283,8 +324,10 @@ internal static class CoreManifest
         new("Services/Relationships/RelationshipModels.cs", Packet.PS1d),
         new("Services/Relationships/RelationshipReads.cs", Packet.PS1d),
         new("Services/Relationships/RelationshipView.cs", Packet.PS1d),
+        new("Services/Sources/INavIndicatorContributor.cs", Packet.PS1d),
+        new("Services/Sources/IRelationshipNodeSource.cs", Packet.PS1d),
 
-        // ---- PS1e ------------------------------------------------------------
+        // ---- PS1e --------------------------------------------------------
         new("Components/Json/JsonCopyMenu.razor", Packet.PS1e),
         new("Components/Json/JsonDiff.razor", Packet.PS1e),
         new("Components/Json/JsonEditor.razor", Packet.PS1e),
@@ -325,9 +368,7 @@ internal static class CoreManifest
         new("Services/PostgresFailure.cs", Packet.PS1e),
         new("Services/ToastService.cs", Packet.PS1e),
         new("Services/WritePolicyRefusal.cs", Packet.PS1e),
-
+        new("wwwroot/css/marten-studio.css", Packet.PS1e, "wwwroot/css/studio.css"),
+        new("wwwroot/js/marten-studio.js", Packet.PS1e, "wwwroot/js/studio.js"),
     ];
-
-    /// <summary>The rows <paramref name="packet" /> fences.</summary>
-    public static IReadOnlyList<Entry> Of(Packet packet) => [.. Entries.Where(x => x.Owner == packet)];
 }

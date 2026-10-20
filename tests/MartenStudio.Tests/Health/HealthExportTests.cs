@@ -131,7 +131,8 @@ public class HealthExportTests
     [Fact]
     public void The_advisors_registry_does_not_take_the_export_for_one_of_its_checks()
     {
-        HealthCheckRegistry.Discover(typeof(HealthCheckRegistry).Assembly).Should().NotContain(typeof(MartenStudioHealthCheck));
+        MartenStudio.Services.MartenStudioDescriptor.Instance.HealthCheckAssemblies.Select(static x => x.Assembly).Distinct()
+            .SelectMany(HealthCheckRegistry.Discover).Should().NotContain(typeof(MartenStudioHealthCheck));
         typeof(MartenStudioHealthCheck).Should().Implement<AspNetCoreHealthCheck>()
             .And.NotImplement<MartenStudio.Services.Health.IHealthCheck>();
     }

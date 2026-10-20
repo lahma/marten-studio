@@ -1,6 +1,10 @@
+using System.Collections.Frozen;
+
 using MartenStudio.Components;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Health;
 using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 namespace MartenStudio.Services;
 
@@ -26,6 +30,10 @@ internal static class MartenStudioDescriptor
     /// <summary>The projections entry's badge key.</summary>
     public const string ProjectionsBadge = "projections";
 
+    /// <summary>The source kinds MartenStudio's own health checks run against: a Marten store, and nothing else.</summary>
+    internal static IReadOnlySet<StudioSourceKind> MartenStoreOnly { get; } =
+        FrozenSet.Create(StudioSourceKind.MartenStore);
+
     /// <summary>The descriptor every MartenStudio service and component reads.</summary>
     public static StudioDescriptor Instance { get; } = Create();
 
@@ -37,7 +45,14 @@ internal static class MartenStudioDescriptor
         Key = Key,
         ProductName = "Marten Studio",
         PageAssemblies = [new StudioPageAssembly(typeof(MartenStudioApp).Assembly, MartenStudioOptions.DefaultPath)],
-        HealthCheckAssemblies = [typeof(MartenStudioApp).Assembly],
+        // The shared checks run against any source; MartenStudio's own read the store and only ever run against one. Until
+        // the shared assembly is split out (PS-2) both entries name this assembly, and a check runs against a kind both
+        // admit - a Marten store, which is every source MartenStudio has.
+        HealthCheckAssemblies =
+        [
+            new StudioHealthCheckAssembly(typeof(HealthCheckRegistry).Assembly),
+            new StudioHealthCheckAssembly(typeof(MartenStudioApp).Assembly, MartenStoreOnly),
+        ],
         Navigation = Navigation(),
         OverviewComponent = typeof(Components.Pages.Overview),
         QueryComponent = typeof(Components.Pages.Query.Query),
