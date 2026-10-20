@@ -305,7 +305,7 @@ mapped studio is a read-only browser of Marten's own data.
 | `EditDocuments` | Edit a document's JSON and save it through the store's own serializer and session |
 | `DeleteDocuments` | Delete, soft-delete and undelete documents, one at a time or a selection |
 | `ArchiveStreams` | Archive an event stream. On an event store that is not conjoined, a stream that also holds another tenant's events needs the write policy for the database as a whole |
-| `ManageDeadLetters` | Discard dead-letter records, mark events as skipped, and rewind a subscription to the event that failed (a rewind reaches every tenant in the database, so it is asked with `TenantId = null` unless the database holds only the selected tenant). On a store with `Events.UseTenantPartitionedEvents`, Skip event and Rewind subscription are refused, because Marten skips and rewinds by a number every tenant counts on its own |
+| `ManageDeadLetters` | Discard dead-letter records, mark events as skipped, and rewind a subscription to the event that failed (a rewind reaches every tenant in the database, so it is asked with `TenantId = null` unless the database holds only the selected tenant). On a store with `Events.UseTenantPartitionedEvents`, below Marten 9.51 Skip event and Rewind subscription are refused, because Marten skips and rewinds by a number every tenant counts on its own; from 9.51 each acts on the dead letter's tenant alone and is asked for that tenant, and a rewind is offered only where the daemon in this process runs that tenant's agent |
 | `ControlDaemon` | Pause and resume the async daemon hosted in this process, start and stop individual projection agents while it is paused, and restart the high-water agent |
 | `RebuildProjections` | Rebuild a projection |
 | `CorrectProgression` | Advance the high-water mark, or correct projection progression in the database |
@@ -806,13 +806,20 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   `DcbTagVersionFillFactor` need 9.47+. D03 reads the high-water agent's own liveness stamp from 9.43; below
   it, an old stamp says nothing and D03 says it cannot tell. Telling that a projection is being rebuilt by
   something other than Marten Studio needs 9.50 (JasperFx 2.86): below it, Start cannot see such a rebuild and
-  warns that it cannot, and a start during one runs a second agent beside the replay.
-- **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.50.2.
+  warns that it cannot, and a start during one runs a second agent beside the replay. On a store that numbers
+  events per tenant (`UseTenantPartitionedEvents`), Skip event and Rewind subscription on the dead-letter page
+  need 9.51: from it each acts on one tenant, and a rewind is offered only for a tenant whose agent the daemon
+  in this process runs; below it both are refused, because Marten skips and rewinds by a number every tenant
+  has. Compacting a stream whose folded events carry DCB tags needs 9.51 too; below it Postgres refuses the
+  delete and nothing changes. The Schema screen's Check, Preview and Generate script buttons create
+  Marten's HiLo objects (`mt_hilo`, `mt_get_next_hi`) below 9.50.3 and nothing from it, and each says which.
+- **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.51.0.
   `AllDatabases()` and `DescribeDatabasesAsync()` build the tenancy's databases, and the first time a
-  store instance does, a master-table or sharded tenancy applies its lookup table under the store's
-  `AutoCreateSchemaObjects` (and `None` becomes `CreateOrUpdate` when the tenancy's own `AutoCreate` says
-  anything else) and upserts its seed rows, and a single-server tenancy creates every configured database
-  that does not exist yet. The studio enumerates on the first navigation, so in a process that runs no
+  store instance does, a master-table or sharded tenancy applies its lookup table and upserts its seed rows,
+  and a single-server tenancy creates every configured database that does not exist yet. The tenancy's own
+  `AutoCreate`, when it sets one, decides whether the lookup table is applied; below Marten 9.51 the apply
+  then runs under the store's `AutoCreateSchemaObjects` (`All` included, and `None` becomes
+  `CreateOrUpdate`), and from 9.51 under the tenancy's own `AutoCreate`. The studio enumerates on the first navigation, so in a process that runs no
   daemon of its own it can be that first caller; a host whose daemon runs in-process, or that applies on
   startup, has always enumerated before it. The opt-in health check's own listing never enumerates one
   (AGENTS.md D27); a hosted projection coordinator it asks for its daemons enumerates the store, as its own

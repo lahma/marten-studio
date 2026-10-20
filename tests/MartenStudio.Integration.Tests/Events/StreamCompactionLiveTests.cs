@@ -7,6 +7,7 @@ using Marten;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
+using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Events;
 
 using Microsoft.AspNetCore.Components.Authorization;
@@ -280,6 +281,31 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
         await session.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// The sequences the plain store's one tag table holds a row for among <paramref name="sequences" /> - read straight
+    /// from <c>mt_event_tag_compaction_customer</c>.
+    /// </summary>
+    public async Task<IReadOnlyList<long>> TaggedSequencesAsync(IEnumerable<long> sequences)
+    {
+        await using var connection = new NpgsqlConnection(ConnectionString);
+        await connection.OpenAsync();
+
+        await using var command = new NpgsqlCommand(
+            "select seq_id from " + SqlIdentifier.Qualify(PlainSchema, "mt_event_tag_compaction_customer")
+            + " where seq_id = any(@sequences) order by seq_id",
+            connection);
+        command.Parameters.AddWithValue("sequences", sequences.ToArray());
+
+        List<long> found = [];
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            found.Add(reader.GetInt64(0));
+        }
+
+        return found;
+    }
+
     /// <summary>How many rows <c>mt_events</c> holds in a schema - the whole log.</summary>
     public async Task<long> CountEventsAsync(string schema)
     {
@@ -383,8 +409,9 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
 
 /// <summary>
 /// F3 against a real Postgres, at whichever Marten the run resolves: the floor (9.39.0) and, with
-/// <c>-p:MartenStudioMartenVersion=9.50.2</c>, the latest - the same assertions at both, because the
-/// session-level compaction is the same code at both.
+/// <c>-p:MartenStudioMartenVersion=9.51.0</c>, the latest - the same assertions at both, because the
+/// session-level compaction is the same code at both, but for a tagged stream: 9.51 deletes the folded events'
+/// tag rows with them (#5694), and that one test asserts each end's behaviour.
 /// </summary>
 public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClassFixture<StreamCompactionFixture>
 {
@@ -404,7 +431,11 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
         CompactionPlan plan = await PlanAsync(events,Everyone, id.ToString(), Token);
         plan.IsOffered.Should().BeTrue(plan.Explanation);
         plan.EventsToFold.Should().Be(3);
-        plan.TagTablesMayRefuse.Should().BeTrue("this store keeps one tag type in a tag table");
+        // This store keeps one tag type in a tag table: below Marten 9.51 a tagged stream's delete may be refused, from
+        // 9.51 the folded events' tag rows go with them (L3) - one or the other, as this run's Marten does it.
+        bool martenDeletesTagRows = RuntimeFeature.TaggedStreamCompaction.Probe() == true;
+        plan.TagTablesMayRefuse.Should().Be(!martenDeletesTagRows);
+        plan.TagRowsFoldWithEvents.Should().Be(martenDeletesTagRows);
 
         plan.StreamTenantId.Should().BeNull("this store is single-tenanted, and its *DEFAULT* narrows nothing");
         string.Join(" ", StreamCompactionRules.WhatHappens(plan)).Should().NotContain("Only tenant").And.NotContain("*DEFAULT*");
@@ -780,28 +811,67 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
     }
 
     /// <summary>
-    /// The dialog's warning, proven: a tag row references its event by a foreign key with no cascade, so the
-    /// delete of a tagged event fails and Marten's one transaction rolls back everything.
+    /// A stream whose folded events carry DCB tags, at both ends (L3). Below Marten 9.51 the dialog's warning, proven: a tag
+    /// row references its event by a foreign key with no cascade, so the delete of a tagged event fails and Marten's one
+    /// transaction rolls back everything. From 9.51 (#5694) the folded events' tag rows are deleted with them in the same
+    /// statement, the stream compacts, and the snapshot keeps the last event's tag row.
     /// </summary>
+    /// <remarks>
+    /// The last event carries a tag too, so the 9.51 half proves both things the dialog says - the folded tags go, the
+    /// snapshot's stays - and the floor half is refused by the second event's tag, as before.
+    /// </remarks>
     [PostgresFact]
-    public async Task A_stream_whose_folded_events_carry_tags_is_refused_by_postgres_and_nothing_changes()
+    public async Task A_stream_whose_folded_events_carry_tags_is_refused_below_9_51_and_compacts_with_its_tags_from_it()
     {
         IServiceProvider studio = fixture.Studio(fixture.Plain, capabilities: true);
         IEventDataService events = studio.GetRequiredService<IEventDataService>();
 
         Guid id = await StreamCompactionFixture.StartAsync(
             fixture.Plain, tenantId: null, id: null,
-            new OrderPlaced("customer"), new CompactionTagged("acme"), new ItemAdded("sku-1", 10));
+            new OrderPlaced("customer"), new CompactionTagged("acme"), new ItemAdded("sku-1", 10), new CompactionTagged("globex"));
 
-        Func<Task> compact = () => events.CompactStreamAsync(Everyone, id.ToString(), id.ToString(), 3, Token);
+        IReadOnlyList<(long Sequence, long Version, string Type)> before = await fixture.EventsAsync(fixture.PlainSchema, id);
+        long[] sequences = [.. before.Select(static x => x.Sequence)];
+        (await fixture.TaggedSequencesAsync(sequences)).Should().Equal([sequences[1], sequences[3]], "the premise: two tagged events");
 
-        await compact.Should().ThrowAsync<InvalidOperationException>().WithMessage("*mt_event_tag_compaction_customer*");
-        (await fixture.EventsAsync(fixture.PlainSchema, id)).Should().HaveCount(3, "the whole SaveChanges rolled back");
-        (await fixture.CompactedVersionAsync(fixture.PlainSchema, id)).Should().Be(0);
+        CompactionPlan plan = await PlanAsync(events, Everyone, id.ToString(), Token);
+        plan.IsOffered.Should().BeTrue(plan.Explanation);
 
-        StudioActionLogEntry entry = Latest(studio);
-        entry.Succeeded.Should().BeFalse();
-        entry.Message.Should().Contain("Nothing was changed");
+        Func<Task> compact = () => events.CompactStreamAsync(Everyone, id.ToString(), id.ToString(), plan.Version, Token);
+        StudioActionLogEntry entry;
+
+        if (RuntimeFeature.TaggedStreamCompaction.Probe() != true)
+        {
+            plan.TagTablesMayRefuse.Should().BeTrue();
+            plan.TagRowsFoldWithEvents.Should().BeFalse();
+
+            await compact.Should().ThrowAsync<InvalidOperationException>().WithMessage("*mt_event_tag_compaction_customer*");
+            (await fixture.EventsAsync(fixture.PlainSchema, id)).Should().HaveCount(4, "the whole SaveChanges rolled back");
+            (await fixture.CompactedVersionAsync(fixture.PlainSchema, id)).Should().Be(0);
+            (await fixture.TaggedSequencesAsync(sequences)).Should().Equal([sequences[1], sequences[3]], "and the tag rows with it");
+
+            entry = Latest(studio);
+            entry.Succeeded.Should().BeFalse();
+            entry.Message.Should().Contain("Nothing was changed");
+            return;
+        }
+
+        plan.TagTablesMayRefuse.Should().BeFalse("Marten 9.51 deletes the folded events' tag rows with them");
+        plan.TagRowsFoldWithEvents.Should().BeTrue();
+        string.Join(" ", StreamCompactionRules.WhatHappens(plan)).Should().Contain("keeps the last event's tags");
+
+        await compact.Should().NotThrowAsync();
+
+        IReadOnlyList<(long Sequence, long Version, string Type)> after = await fixture.EventsAsync(fixture.PlainSchema, id);
+        after.Should().ContainSingle().Which.Sequence.Should().Be(sequences[3], "the snapshot is written in place of the last event");
+        (await fixture.CompactedVersionAsync(fixture.PlainSchema, id)).Should().Be(4);
+
+        (await fixture.TaggedSequencesAsync(sequences)).Should().Equal([sequences[3]],
+            "the folded event's tag row is deleted with it, and the snapshot keeps the last event's");
+
+        entry = Latest(studio);
+        entry.Succeeded.Should().BeTrue();
+        entry.Message.Should().StartWith("compacted through version 4");
     }
 
     [PostgresFact]

@@ -202,9 +202,9 @@
 
                                                 <button type="button"
                                                         class="ms-button ms-dead-letter-skip"
-                                                        disabled="@(working || !SupportsSkipping || !mayManage || PerTenantSequences)"
-                                                        title="@SkipTitle"
-                                                        @onclick="() => OpenSkipAsync(row.EventSequence)">
+                                                        disabled="@(working || !SupportsSkipping || !mayManage || SkipRefusedForNumbering)"
+                                                        title="@SkipTitle(row)"
+                                                        @onclick="() => OpenSkipAsync(row)">
                                                     Skip event
                                                 </button>
                                             }
@@ -216,9 +216,9 @@
                                             @if (Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
                                             {
                                                 <button type="button"
-                                                        class="ms-button ms-dead-letter-rewind @(CanRewind(row.ProjectionName) ? string.Empty : "ms-btn-disabled")"
-                                                        disabled="@(working || !CanRewind(row.ProjectionName))"
-                                                        title="@RewindTitle(row.ProjectionName)"
+                                                        class="ms-button ms-dead-letter-rewind @(CanRewind(row) ? string.Empty : "ms-btn-disabled")"
+                                                        disabled="@(working || !CanRewind(row))"
+                                                        title="@RewindTitle(row)"
                                                         @onclick="() => OpenRewindAsync(row)">
                                                     Rewind subscription to this event
                                                 </button>
@@ -298,7 +298,7 @@
                     <span class="ms-kv-value ms-mono">
                         @(rewindScope is { ShardNames.Count: > 0 }
                             ? string.Join(", ", rewindScope.ShardNames)
-                            : "unknown")
+                            : "unknown")@(RewindsOneTenant ? $" - tenant {pendingRewind?.TenantId}'s agents only" : string.Empty)
                     </span>
                 </div>
                 <div class="ms-kv-row">
@@ -311,14 +311,29 @@
                 </div>
             </div>
 
-            <p class="ms-muted">
-                Marten deletes this projection's dead letters at or above that sequence as part of the
-                rewind - every tenant's, not only the ones listed here - so the record you are looking at
-                goes away whether or not the replay succeeds. The rows are rewritten in place rather than
-                dropped: this is a rewind, not a rebuild.
-            </p>
+            @if (RewindsOneTenant)
+            {
+                <p class="ms-muted ms-rewind-one-tenant">
+                    This store numbers events per tenant, so this rewinds tenant
+                    <code>@pendingRewind?.TenantId</code> alone: the daemon stops that tenant's agents of this
+                    projection, moves that tenant's progression back and starts them again, and Marten deletes
+                    this projection's dead letters for that tenant at or above that sequence - so the record you
+                    are looking at goes away whether or not the replay succeeds. Every other tenant's agents,
+                    progression and dead letters are left as they are. The rows are rewritten in place rather
+                    than dropped: this is a rewind, not a rebuild.
+                </p>
+            }
+            else
+            {
+                <p class="ms-muted">
+                    Marten deletes this projection's dead letters at or above that sequence as part of the
+                    rewind - every tenant's, not only the ones listed here - so the record you are looking at
+                    goes away whether or not the replay succeeds. The rows are rewritten in place rather than
+                    dropped: this is a rewind, not a rebuild.
+                </p>
+            }
 
-            @if (State.ActiveScope?.TenantId is { Length: > 0 } tenant)
+            @if (!RewindsOneTenant && State.ActiveScope?.TenantId is { Length: > 0 } tenant)
             {
                 <p class="ms-alert ms-alert-warning ms-rewind-tenant-reach" role="alert">
                     Selecting <code>@tenant</code> does not narrow this rewind. Projection progression is
@@ -354,6 +369,7 @@
     private Guid? expanded;
     private Guid pendingDiscard;
     private long pendingSkip;
+    private string? pendingSkipTenant;
     private DeadLetterRow? pendingRewind;
     private RebuildScope? rewindScope;
     private string? rewindScopeError;
@@ -436,49 +452,83 @@
         ? "Deletes the dead letter record; the event itself stays where it is"
         : ManageRefusal;
 
-    private string SkipTitle => !mayManage
+    private string SkipTitle(DeadLetterRow row) => !mayManage
         ? ManageRefusal
-        : PerTenantSequences
+        : SkipRefusedForNumbering
             ? StreamCompactionRules.SkipNeedsOneSequence
-            : SupportsSkipping
-                ? "Marks the event skipped so the daemon steps over it"
-                : "This store has no mt_events.is_skipped column: the host did not enable event skipping";
+            : !SupportsSkipping
+                ? "This store has no mt_events.is_skipped column: the host did not enable event skipping"
+                : PerTenantSequences
+                    ? $"Marks tenant {row.TenantId}'s event skipped so the daemon steps over it; no other tenant's event of that number moves"
+                    : "Marks the event skipped so the daemon steps over it";
 
     /// <summary>
-    /// Whether this store numbers events per tenant (<c>UseTenantPartitionedEvents</c>), where Marten's skip and rewind
-    /// reach every tenant's event of a number: both are refused by the service and disabled here with its sentence
-    /// (SEC1-fix4), and an event is looked up in its dead letter's own tenant.
+    /// Whether this store numbers events per tenant (<c>UseTenantPartitionedEvents</c>), where below Marten 9.51 the skip
+    /// and the rewind reach every tenant's event of a number: there both are refused by the service and disabled here
+    /// with its sentence (SEC1-fix4), and an event is looked up in its dead letter's own tenant. From 9.51 each is one
+    /// tenant's (<see cref="EventStoreShape.TenantSkipping" />, <see cref="EventStoreShape.TenantRewind" />), asked in the
+    /// dead letter's own tenant.
     /// </summary>
     private bool PerTenantSequences => shape is { PerTenantSequences: true };
 
+    /// <summary>Whether Skip is refused for the store's numbering: per-tenant sequences and a Marten that skips by number alone.</summary>
+    private bool SkipRefusedForNumbering => PerTenantSequences && shape is not { TenantSkipping: true };
+
+    /// <summary>Whether a rewind from this page is one tenant's: per-tenant sequences and a Marten that rewinds one tenant.</summary>
+    private bool RewindsOneTenant => PerTenantSequences && shape is { TenantRewind: true };
+
     /// <summary>
-    /// Whether the daemon this process hosts could be asked to rewind <paramref name="projectionName" />.
+    /// The scope a write about <paramref name="rowTenantId" />'s dead letter is asked in: under per-tenant sequences, with
+    /// "All tenants" selected, the dead letter's own tenant - #N is one event in each tenant, and the service skips or
+    /// rewinds one tenant's - and otherwise the scope as selected, which the service holds the event to.
+    /// </summary>
+    private StudioScope WriteScope(StudioScope scope, string? rowTenantId) =>
+        PerTenantSequences && scope.TenantId is null && !string.IsNullOrEmpty(rowTenantId)
+            ? scope with { TenantId = rowTenantId }
+            : scope;
+
+    /// <summary>
+    /// Whether the daemon this process hosts could be asked to rewind <paramref name="row" />'s projection.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Three things have to be true, and the service checks the first one again regardless of what was
     /// rendered (hard rule 5): a daemon is hosted here, this store still registers a projection by that
     /// name, and that projection is async. A dead letter can outlive the projection that wrote it - the
     /// record is a document and the registration is code - and rewinding a projection this store no
     /// longer has would be asking the daemon for a shard it cannot build.
+    /// </para>
+    /// <para>
+    /// Under per-tenant sequences two more: a Marten that rewinds one tenant (9.51+), and an agent of that projection
+    /// for the dead letter's tenant in the daemon here - the per-tenant rewind starts that tenant's agents in the daemon
+    /// it is asked of, so asking one that does not run them would run a second agent beside the node that does. The
+    /// service refuses both regardless.
+    /// </para>
     /// </remarks>
-    private bool CanRewind(string projectionName) =>
+    private bool CanRewind(DeadLetterRow row) =>
         mayManage
-        && !PerTenantSequences
+        && (!PerTenantSequences || (RewindsOneTenant && RunsTenantAgent(row)))
         && projections is { Daemon.IsHostedHere: true }
-        && FindProjection(projectionName) is { IsAsync: true };
+        && FindProjection(row.ProjectionName) is { IsAsync: true };
+
+    private bool RunsTenantAgent(DeadLetterRow row) =>
+        projections is { Daemon.IsHostedHere: true } view
+        && TenantRewind.RunsAgent(view.Daemon.Agents.Select(static x => x.ShardName), row.ProjectionName, row.TenantId);
 
     private ProjectionInfo? FindProjection(string projectionName) =>
         projections?.Projections.FirstOrDefault(
             x => string.Equals(x.Name, projectionName, StringComparison.OrdinalIgnoreCase));
 
-    private string RewindTitle(string projectionName)
+    private string RewindTitle(DeadLetterRow row)
     {
+        string projectionName = row.ProjectionName;
+
         if (!mayManage)
         {
             return ManageRefusal;
         }
 
-        if (PerTenantSequences)
+        if (PerTenantSequences && !RewindsOneTenant)
         {
             return StreamCompactionRules.RewindNeedsOneSequence;
         }
@@ -502,10 +552,20 @@
                 + "document and outlives the code that wrote it.";
         }
 
-        return projection.IsAsync
-            ? "Rewinds the subscription so the daemon re-applies this event and everything after it"
-            : $"'{projectionName}' runs {projection.Lifecycle}, not Async, so the daemon does not run it and "
+        if (!projection.IsAsync)
+        {
+            return $"'{projectionName}' runs {projection.Lifecycle}, not Async, so the daemon does not run it and "
                 + "there is no progression to rewind.";
+        }
+
+        if (PerTenantSequences)
+        {
+            return RunsTenantAgent(row)
+                ? $"Rewinds tenant {row.TenantId}'s agents of the subscription so the daemon re-applies this event and everything after it in that tenant"
+                : StreamCompactionRules.RewindNeedsTenantAgentHere(projectionName, row.TenantId);
+        }
+
+        return "Rewinds the subscription so the daemon re-applies this event and everything after it";
     }
 
     /// <summary>The floor the rewind would write: one below the dead letter's own sequence.</summary>
@@ -533,6 +593,13 @@
 
             string from = "#" + row.EventSequence.ToString("N0", CultureInfo.InvariantCulture);
 
+            // Under per-tenant sequences the high-water mark the rebuild description reads is the store's, not the
+            // tenant's, so it says nothing about how far this tenant's events run.
+            if (RewindsOneTenant)
+            {
+                return $"every event of tenant {row.TenantId} from {from} onwards";
+            }
+
             if (rewindScope is not { } scope || scope.EventsToReplay < row.EventSequence)
             {
                 return $"every event from {from} onwards";
@@ -558,10 +625,20 @@
         DialogKind.Discard =>
             "The record of the failure is deleted. The projection is not restarted and the event is not " +
             "reapplied - if the shard is still failing on it, a new dead letter will appear.",
+        DialogKind.Skip when PerTenantSequences =>
+            $"Tenant {pendingSkipTenant}'s event #{pendingSkip.ToString(CultureInfo.InvariantCulture)} is marked skipped, " +
+            "so the daemon steps over it on the next attempt. Every tenant numbers its own events, and no other " +
+            "tenant's event of that number is touched. The event stays in the store, and every projection that " +
+            "reads it from now on will not see it.",
         DialogKind.Skip =>
             $"Event #{pendingSkip.ToString(CultureInfo.InvariantCulture)} is marked skipped, so the daemon " +
             "steps over it on the next attempt. The event stays in the store, and every projection that " +
             "reads it from now on will not see it.",
+        DialogKind.Rewind when RewindsOneTenant =>
+            $"The daemon stops tenant {pendingRewind?.TenantId}'s agents of '{pendingRewind?.ProjectionName}', moves "
+            + "that tenant's progression of every one of its shards back and starts them again from there, so the event "
+            + "it failed on is re-applied along with everything after it in that tenant - and in no other. If the "
+            + "projection still throws, the same failure comes back as a new dead letter.",
         DialogKind.Rewind =>
             $"The daemon stops every agent of '{pendingRewind?.ProjectionName}' in this database, moves the "
             + "progression of every one of its shards back and starts them again from there, so the event it "
@@ -776,10 +853,11 @@
         return Task.CompletedTask;
     }
 
-    private Task OpenSkipAsync(long sequence)
+    private Task OpenSkipAsync(DeadLetterRow row)
     {
         actionError = null;
-        pendingSkip = sequence;
+        pendingSkip = row.EventSequence;
+        pendingSkipTenant = row.TenantId;
         dialog = DialogKind.Skip;
         return Task.CompletedTask;
     }
@@ -899,18 +977,20 @@
             }
             else if (kind == DialogKind.Skip)
             {
-                await Events.SkipEventAsync(scope, pendingSkip, pageCancellation.Token);
+                await Events.SkipEventAsync(WriteScope(scope, pendingSkipTenant), pendingSkip, pageCancellation.Token);
                 await Toasts.Success(
-                    $"Event #{pendingSkip.ToString(CultureInfo.InvariantCulture)} is marked as skipped.");
+                    $"Event #{pendingSkip.ToString(CultureInfo.InvariantCulture)} is marked as skipped"
+                    + (PerTenantSequences ? $" in tenant {pendingSkipTenant}." : "."));
             }
             else if (pendingRewind is { } rewind)
             {
                 await Events.RewindSubscriptionAsync(
-                    scope, rewind.ProjectionName, rewind.EventSequence, pageCancellation.Token);
+                    WriteScope(scope, rewind.TenantId), rewind.ProjectionName, rewind.EventSequence, pageCancellation.Token);
 
                 await Toasts.Success(
                     $"'{rewind.ProjectionName}' is rewound to #"
                     + RewindFloor.ToString(CultureInfo.InvariantCulture)
+                    + (RewindsOneTenant ? $" in tenant {rewind.TenantId}" : string.Empty)
                     + $", so event #{rewind.EventSequence.ToString(CultureInfo.InvariantCulture)} is re-applied.");
             }
 

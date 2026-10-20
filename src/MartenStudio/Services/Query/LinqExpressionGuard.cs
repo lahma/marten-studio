@@ -13,10 +13,11 @@ namespace MartenStudio.Services.Query;
 /// expression that does not reference the document: <c>SimpleExpression</c> sends any operand with no parameter at
 /// its start to <c>LinqInternalExtensions.ReduceToConstant</c>, which reads static fields and properties by
 /// reflection and otherwise compiles the subtree with FastExpressionCompiler and invokes it (read at Marten
-/// <c>V9.39.0</c> and <c>V9.50.2</c>). So <c>Status == System.IO.File.ReadAllText("c:/x")</c>, were it ever to
-/// parse, would be run by the server - the shape of CVE-2023-32571 against System.Linq.Dynamic.Core. JasperFx's
-/// <c>DynamicQuery</c> already walks every clause against an allow-list of its own (JasperFx 2.84.0 to 2.89.0,
-/// unchanged); this is a second, independent one, so that no single library's allow-list is the only thing in the
+/// <c>V9.39.0</c> and <c>V9.50.2</c>; from <c>v9.51.0</c>, #5712, a parameter-free array initialiser goes the same
+/// way). So <c>Status == System.IO.File.ReadAllText("c:/x")</c>, were it ever to parse, would be run by the server -
+/// the shape of CVE-2023-32571 against System.Linq.Dynamic.Core. JasperFx's <c>DynamicQuery</c> already walks every
+/// clause against an allow-list of its own (JasperFx 2.84.0 to 2.91.0, unchanged - 2.91.0 moved only its date
+/// handling); this is a second, independent one, so that no single library's allow-list is the only thing in the
 /// way.
 /// </para>
 /// <para>

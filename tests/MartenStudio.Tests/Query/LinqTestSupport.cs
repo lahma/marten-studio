@@ -190,7 +190,7 @@ public static class DynamicLinqAvailability
 {
     public const string SkipReason =
         "JasperFx's DynamicQuery arrives with Marten 9.48 (JasperFx 2.84) and this run resolved an older Marten - the " +
-        "floor. Run the suite at the latest with -p:MartenStudioMartenVersion=9.50.2 (or dotnet fallout Test --marten-version latest).";
+        "floor. Run the suite at the latest with -p:MartenStudioMartenVersion=9.51.0 (or dotnet fallout Test --marten-version latest).";
 
     public static bool IsAvailable => DynamicLinqAdapter.Current is not null && MartenLinqCommand.IsAvailable;
 }

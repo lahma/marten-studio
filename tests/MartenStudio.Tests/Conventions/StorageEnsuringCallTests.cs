@@ -163,7 +163,8 @@ public class StorageEnsuringCallTests
             "DiscardDeadLetterAsync: whether a missed id belongs to another tenant, so the refusal is a refusal"),
         new("src/MartenStudio/Services/Events/EventDataService.cs", "MarkEventsAsSkipped",
             ["SkipEventAsync"],
-            "SkipEventAsync (ManageDeadLetters), audited; NoSchemaBuildingCallTests allows it too"),
+            "SkipEventAsync (ManageDeadLetters), audited; NoSchemaBuildingCallTests allows it too. Its 9.51 tenant overload "
+            + "is reached by reflection from the same write (see the shapes neither layer sees)"),
         new("src/MartenStudio/Services/Events/StreamCompactionInvoker.cs", "CompactStreamAsync",
             ["CompactAndSaveAsync", "CompactAndSaveAsync"],
             "the compaction (CompactStreams), Guid and string ids, audited by EventDataService.CompactStreamAsync"),
@@ -407,7 +408,11 @@ public class StorageEnsuringCallTests
     /// <list type="bullet">
     /// <item><description>A call made through <b>reflection</b> names the member as a string - <c>DocumentWriteService</c>
     /// builds its typed <c>Delete</c> and <c>UndoDeleteWhere</c> calls that way, and they queue operations that only its
-    /// <c>SaveChangesAsync</c> (on the list) runs.</description></item>
+    /// <c>SaveChangesAsync</c> (on the list) runs. So does <c>EventDataService.MarkTenantEventAsSkippedAsync</c>: Marten
+    /// 9.51's tenant overload of <c>MarkEventsAsSkipped</c>, which ensures the event storage like the tenant-less one on
+    /// the list, and is reached by reflection because the floor has no such member to compile against. It is made only
+    /// from <c>SkipEventAsync</c> - the same capability-gated, audited write as the listed site - and its declaration is
+    /// looked up by name in <c>RuntimeFeature.TenantSkipMethod</c>, a string this scanner blanks.</description></item>
     /// <item><description>A call inside an <b>interpolation hole</b> is blanked with its string by the source layer; the
     /// compiled layer still sees it.</description></item>
     /// <item><description>A member named in an <b>expression tree</b> is an <c>ldtoken</c>, not a call, and is not counted:

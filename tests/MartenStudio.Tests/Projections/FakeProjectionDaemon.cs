@@ -89,7 +89,10 @@ internal sealed class FakeProjectionDaemon : IProjectionDaemon
 
     public AgentStatus StatusFor(string shardName) => throw NotUsed();
 
-    public IReadOnlyList<ISubscriptionAgent> CurrentAgents() => throw NotUsed();
+    /// <summary>The agents <see cref="CurrentAgents" /> answers with - none unless a test adds some.</summary>
+    public List<ISubscriptionAgent> Agents { get; } = [];
+
+    public IReadOnlyList<ISubscriptionAgent> CurrentAgents() => Agents;
 
     public bool HasAnyPaused() => throw NotUsed();
 
@@ -122,6 +125,28 @@ internal sealed class FakeProjectionDaemon : IProjectionDaemon
         DateTimeOffset? timestamp = null)
     {
         Rewinds.Add(subscriptionName + "/" + (sequenceFloor?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"));
+        LastSequenceFloor = sequenceFloor;
+        LastTimestamp = timestamp;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Every per-tenant rewind, as "subscription/tenant/floor".</summary>
+    public List<string> TenantRewinds { get; } = [];
+
+    /// <summary>
+    /// Records the per-tenant rewind - <c>IProjectionDaemon</c>'s five-argument overload, a throwing default at every
+    /// JasperFx this suite runs below 2.91 - so a test can prove the tenant is second, the token third and the floor
+    /// fourth. Implementing it here is what makes this fake a daemon that "implements the per-tenant rewind".
+    /// </summary>
+    public Task RewindSubscriptionAsync(
+        string subscriptionName,
+        string? tenantId,
+        CancellationToken token,
+        long? sequenceFloor = 0,
+        DateTimeOffset? timestamp = null)
+    {
+        TenantRewinds.Add(subscriptionName + "/" + (tenantId ?? "(none)") + "/"
+            + (sequenceFloor?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"));
         LastSequenceFloor = sequenceFloor;
         LastTimestamp = timestamp;
         return Task.CompletedTask;

@@ -14,11 +14,13 @@ namespace MartenStudio.Services.Schema;
 /// <para>
 /// <b>Three of these are actions, not reads.</b> <see cref="CheckAsync" />, <see cref="PreviewAsync" />
 /// and <see cref="DdlAsync" /> reach Weasel's <c>CreateMigrationAsync()</c> / <c>ToDatabaseScript()</c>,
-/// which walk <c>IMartenDatabase.AllObjects()</c> - and that builds Marten's feature schemas, including
-/// the lazy HiLo <c>Sequences</c> feature, whose initialiser applies a migration under the database's own
-/// <c>AutoCreate</c>. They can therefore create Marten's own bookkeeping objects (<c>mt_hilo</c>,
-/// <c>mt_get_next_hi</c>) on a schema that did not have them. Every one of them is behind a button that
-/// says so, and none of them may be called on navigation.
+/// which walk <c>IMartenDatabase.AllObjects()</c> - and below Marten 9.50.3 that builds Marten's feature
+/// schemas through the lazy HiLo <c>Sequences</c> feature, whose initialiser applies a migration under the
+/// database's own <c>AutoCreate</c>. There they can create Marten's own bookkeeping objects (<c>mt_hilo</c>,
+/// <c>mt_get_next_hi</c>) on a schema that did not have them; from 9.50.3 (#5665) the enumeration describes
+/// them without applying anything (<c>RuntimeFeature.OfflineSchemaEnumeration</c>). Every one of them is
+/// still connection-hungry, is behind a button that says what it may do on this host's Marten, and may not
+/// be called on navigation.
 /// </para>
 /// <para>
 /// <b>And what they show spans the whole database</b> - every tenant's partitions by name, every document
@@ -42,8 +44,8 @@ internal interface ISchemaDataService
     /// </summary>
     /// <remarks>
     /// An action, not a read: it opens connections, reads the whole catalog and builds every feature
-    /// schema, which can create Marten's own HiLo objects. Never called on navigation - the Drift tab
-    /// runs it from a button that says what it may do.
+    /// schema, which below Marten 9.50.3 can create Marten's own HiLo objects. Never called on navigation -
+    /// the Drift tab runs it from a button that says what it may do.
     /// </remarks>
     Task<SchemaCheck> CheckAsync(StudioScope scope, CancellationToken cancellationToken = default);
 

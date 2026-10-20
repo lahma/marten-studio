@@ -25,8 +25,16 @@ internal sealed record DestructiveStatement(string Kind, string Statement);
 /// that the same screen is showing: it is an alarm, not a parser, and nothing is authorized or refused by
 /// what it finds. The refusal is still the capability, the write policy and the typed confirmation.
 /// </para>
+/// <para>
+/// <b>One <c>drop index</c> is not a drop.</b> From Weasel 9.46 (Marten 9.51, weasel#718) a concurrent index on a
+/// partitioned table is built per partition as <c>DROP INDEX CONCURRENTLY IF EXISTS s.child;</c>, then
+/// <c>CREATE INDEX CONCURRENTLY child ON s.partition ...</c>, then <c>ALTER INDEX s.parent ATTACH PARTITION s.child;</c>
+/// - the drop removes only what an earlier, stopped build of the same index left unattached, and is a no-op otherwise.
+/// That exact triple, with one child name throughout, is a note (<see cref="Notes" />) rather than "drops an index";
+/// any other <c>drop index</c>, including a lone <c>DROP INDEX CONCURRENTLY IF EXISTS</c>, is still a drop.
+/// </para>
 /// </remarks>
-internal static class MigrationRisk
+internal static partial class MigrationRisk
 {
     /// <summary>What the red block says above the list.</summary>
     internal const string Warning =
@@ -44,11 +52,13 @@ internal static class MigrationRisk
         }
 
         List<DestructiveStatement> found = [];
+        List<string> lines = StatementLines(sql);
 
-        foreach (ReadOnlySpan<char> rawLine in sql.AsSpan().EnumerateLines())
+        for (int i = 0; i < lines.Count; i++)
         {
-            ReadOnlySpan<char> line = rawLine.Trim();
-            if (line.IsEmpty || line.StartsWith("--", StringComparison.Ordinal))
+            ReadOnlySpan<char> line = lines[i];
+
+            if (IsPartitionIndexResume(lines, i))
             {
                 continue;
             }
@@ -59,10 +69,27 @@ internal static class MigrationRisk
                 continue;
             }
 
-            found.Add(new DestructiveStatement(kind, Clamp(line.ToString())));
+            found.Add(new DestructiveStatement(kind, Clamp(lines[i])));
         }
 
         return found;
+    }
+
+    /// <summary>The script's lines, trimmed, without blank lines and <c>--</c> comments (Weasel's markers among them).</summary>
+    private static List<string> StatementLines(string sql)
+    {
+        List<string> lines = [];
+
+        foreach (ReadOnlySpan<char> rawLine in sql.AsSpan().EnumerateLines())
+        {
+            ReadOnlySpan<char> line = rawLine.Trim();
+            if (!line.IsEmpty && !line.StartsWith("--", StringComparison.Ordinal))
+            {
+                lines.Add(line.ToString());
+            }
+        }
+
+        return lines;
     }
 
     /// <summary>Whether <paramref name="sql" /> contains anything that removes or rewrites an object.</summary>
@@ -86,6 +113,8 @@ internal static class MigrationRisk
 
     private static string? KindOf(ReadOnlySpan<char> line)
     {
+        // "drop index" covers "DROP INDEX CONCURRENTLY IF EXISTS" too: only the exact Weasel triple is told apart, by
+        // IsPartitionIndexResume, before this is asked.
         if (StartsWithWords(line, "drop index"))
         {
             return "drops an index";

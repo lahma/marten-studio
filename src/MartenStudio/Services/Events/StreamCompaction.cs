@@ -5,6 +5,8 @@ using JasperFx.Events;
 using Marten;
 using Marten.Events;
 
+using MartenStudio.Services.Configuration;
+
 namespace MartenStudio.Services.Events;
 
 /// <summary>Why a stream is not offered for compaction.</summary>
@@ -36,15 +38,22 @@ internal enum CompactionUnavailableReason
 
     /// <summary>
     /// The stream's id is <see cref="Guid.Empty" />, or an empty string key - the one id Marten's stream fetch
-    /// reads as "no stream filter at all".
+    /// read as "no stream filter at all" below 9.51, and that Marten's compaction refuses from 9.51.
     /// </summary>
     /// <remarks>
-    /// <c>EventStatement.filters()</c> (9.39.0 and 9.50.2) emits <c>d.stream_id = ?</c> only when
-    /// <c>StreamId != Guid.Empty</c>, and the key predicate only when <c>StreamKey.IsNotEmpty()</c>. So
-    /// <c>FetchStreamAsync(Guid.Empty)</c> returns every event of the tenant - of the store, when it is
-    /// single-tenanted - and a compaction would fold them all, rewrite the newest event of the log as this
-    /// stream's snapshot and delete every other event. Such a stream exists: DCB's <c>EventBoundary</c>, the
-    /// bulk appender, legacy data and hand-written SQL can all leave one.
+    /// <para>
+    /// Below Marten 9.51 (read at 9.39.0, 9.50.2 and 9.50.3) <c>EventStatement.filters()</c> emits
+    /// <c>d.stream_id = ?</c> only when <c>StreamId != Guid.Empty</c>, and the key predicate only when
+    /// <c>StreamKey.IsNotEmpty()</c>. So <c>FetchStreamAsync(Guid.Empty)</c> returns every event of the tenant - of
+    /// the store, when it is single-tenanted - and a compaction would fold them all, rewrite the newest event of the
+    /// log as this stream's snapshot and delete every other event. Such a stream exists: DCB's
+    /// <c>EventBoundary</c>, the bulk appender, legacy data and hand-written SQL can all leave one.
+    /// </para>
+    /// <para>
+    /// From 9.51 (#5695) the fetch reads only that stream and <c>CompactStreamAsync</c> throws
+    /// <c>ArgumentOutOfRangeException</c> for an empty key or <see cref="Guid.Empty" />. The studio's refusal stays at
+    /// every version - it is the floor's guard, and at 9.51 it says first what Marten would say second.
+    /// </para>
     /// </remarks>
     EmptyStreamId,
 
@@ -250,8 +259,17 @@ internal sealed record CompactionPlan
     /// </summary>
     public bool NeedsTenant { get; init; }
 
-    /// <summary>Whether the store keeps DCB tags in tag tables, whose foreign keys refuse a tagged stream's delete.</summary>
+    /// <summary>
+    /// Whether the store keeps DCB tags in tag tables whose foreign keys refuse a tagged stream's delete - which they do
+    /// below Marten 9.51, whose compaction deletes the events alone.
+    /// </summary>
     public bool TagTablesMayRefuse { get; init; }
+
+    /// <summary>
+    /// Whether the store keeps DCB tags in tag tables and this Marten deletes the folded events' tag rows with them
+    /// (9.51+, <c>RuntimeFeature.TaggedStreamCompaction</c>), so a tagged stream compacts instead of being refused.
+    /// </summary>
+    public bool TagRowsFoldWithEvents { get; init; }
 
     /// <summary>Whether the store records skipped events, which Marten's fetch leaves out and compaction leaves in.</summary>
     public bool SkippedEventsStay { get; init; }
@@ -287,7 +305,10 @@ internal sealed record CompactionPlan
 /// <remarks>
 /// <para>
 /// <b>What Marten does</b>, read from <c>EventStore.StreamCompacting.cs</c> at 9.39.0 and 9.50.2, which are
-/// byte for byte the same file: <c>FetchStreamAsync</c> reads the stream's events - never archived ones, and
+/// byte for byte the same file, and at 9.51.0, which adds two things and changes nothing else: an empty key or
+/// <see cref="Guid.Empty" /> is refused with <c>ArgumentOutOfRangeException</c> before anything is read (#5695), and
+/// the delete of the folded events deletes their DCB tag rows first, in the same statement (#5694, see
+/// <see cref="CompactionPlan.TagRowsFoldWithEvents" />). <c>FetchStreamAsync</c> reads the stream's events - never archived ones, and
 /// never skipped ones on a store that records them; returns having done nothing for no events, or for a
 /// stream that is already exactly one <c>Compacted&lt;T&gt;</c>; folds the events with
 /// <c>Projections.AggregatorFor&lt;T&gt;()</c> (the registered projection first); calls an
@@ -325,22 +346,52 @@ internal static class StreamCompactionRules
         "This store numbers events per tenant (UseTenantPartitionedEvents): choose a tenant to read " + read + ".";
 
     /// <summary>
-    /// Why Skip event is refused on a store whose events are numbered per tenant (<c>UseTenantPartitionedEvents</c>):
-    /// Marten skips by sequence alone (SEC1-fix4). The service's refusal and the disabled button's title, word for word.
-    /// </summary>
-    public const string SkipNeedsOneSequence =
-        "Marten marks events skipped by sequence alone, and this store numbers events per tenant "
-        + "(UseTenantPartitionedEvents): skipping this event would skip every tenant's event with the same number, "
-        + "so Marten Studio does not skip events on this store.";
-
-    /// <summary>
-    /// Why Rewind subscription is refused on such a store: the daemon rewinds to one sequence for every tenant
+    /// Why Skip event is refused on a store whose events are numbered per tenant (<c>UseTenantPartitionedEvents</c>)
+    /// by a Marten without the tenant overload of <c>MarkEventsAsSkipped</c> - below 9.51 Marten skips by sequence alone
     /// (SEC1-fix4). The service's refusal and the disabled button's title, word for word.
     /// </summary>
-    public const string RewindNeedsOneSequence =
-        "Marten rewinds a subscription to one sequence for every tenant, and this store numbers events per tenant "
-        + "(UseTenantPartitionedEvents): the floor would name a different event in each tenant, so Marten Studio does "
-        + "not rewind subscriptions on this store.";
+    public static readonly string SkipNeedsOneSequence =
+        "This host's Marten marks events skipped by sequence alone, and this store numbers events per tenant "
+        + "(UseTenantPartitionedEvents): skipping this event would skip every tenant's event with the same number, "
+        + "so Marten Studio does not skip events on this store. Skipping one tenant's event needs "
+        + RuntimeFeature.TenantEventSkipping.Requirement + ".";
+
+    /// <summary>
+    /// Why Rewind subscription is refused on such a store by a Marten without the per-tenant rewind - below 9.51 the
+    /// daemon rewinds to one sequence for every tenant (SEC1-fix4). The service's refusal and the disabled button's
+    /// title, word for word.
+    /// </summary>
+    public static readonly string RewindNeedsOneSequence =
+        "This host's Marten rewinds a subscription to one sequence for every tenant, and this store numbers events per "
+        + "tenant (UseTenantPartitionedEvents): the floor would name a different event in each tenant, so Marten Studio "
+        + "does not rewind subscriptions on this store. Rewinding one tenant's agents needs "
+        + RuntimeFeature.TenantSubscriptionRewind.Requirement + ".";
+
+    /// <summary>
+    /// Why Skip event is refused on such a store when the scope names no tenant: from Marten 9.51 the skip is one
+    /// tenant's, and a sequence alone names an event in every tenant. The page pins the dead letter's own tenant, so
+    /// only a caller that did not is told this.
+    /// </summary>
+    public const string SkipNeedsTenant =
+        "This store numbers events per tenant (UseTenantPartitionedEvents), so a sequence names an event in every "
+        + "tenant: choose the dead letter's tenant to skip its event.";
+
+    /// <summary>The same for Rewind subscription, which from Marten 9.51 rewinds one tenant's agents.</summary>
+    public const string RewindNeedsTenant =
+        "This store numbers events per tenant (UseTenantPartitionedEvents), so a rewind's floor names a position in one "
+        + "tenant's events: choose the dead letter's tenant to rewind its subscription.";
+
+    /// <summary>
+    /// Why a per-tenant rewind is refused when the daemon in this process does not run that tenant's agent of the
+    /// projection: JasperFx's per-tenant rewind starts the tenant's agents here whether or not this process ran them, so
+    /// under HotCold or a distributed host it would run a second agent beside the one on the node that has it.
+    /// </summary>
+    /// <param name="projection">The projection.</param>
+    /// <param name="tenant">The tenant.</param>
+    public static string RewindNeedsTenantAgentHere(string projection, string tenant) =>
+        "The async daemon in this process does not run '" + projection + "' for tenant " + tenant + ". A per-tenant "
+        + "rewind starts that tenant's agents in the daemon it is asked of, so asking this one would run a second agent "
+        + "beside the one wherever it runs now. Rewind it from the process that runs it.";
 
     /// <summary>
     /// The one sentence Stream detail draws beside a write that a conjoined event store runs as exactly one tenant, when
@@ -358,9 +409,10 @@ internal static class StreamCompactionRules
     /// </summary>
     /// <remarks>
     /// Marten's <c>EventTagTable</c> declares <c>seq_id</c> a foreign key to <c>mt_events(seq_id)</c> with
-    /// Weasel's default <c>NO ACTION</c> on delete (9.39.0 and 9.50.2), and compaction's delete does not
-    /// remove the tag rows first - so the delete of a tagged event fails with <c>23503</c> and the whole
-    /// <c>SaveChangesAsync</c> rolls back.
+    /// Weasel's default <c>NO ACTION</c> on delete (still so at 9.51.0), and below Marten 9.51 compaction's delete
+    /// does not remove the tag rows first - so the delete of a tagged event fails with <c>23503</c> and the whole
+    /// <c>SaveChangesAsync</c> rolls back. From 9.51 the delete removes them first and this is not reached; it stays
+    /// for the Marten that still refuses.
     /// </remarks>
     /// <param name="table">The tag table Postgres named, when it named one.</param>
     public static string TaggedStreamRefused(string? table) =>
@@ -416,6 +468,10 @@ internal static class StreamCompactionRules
     /// <param name="scopeTenantId">The scope's tenant.</param>
     /// <param name="tags">How the store keeps DCB tags.</param>
     /// <param name="skipping">Whether the store records skipped events.</param>
+    /// <param name="martenDeletesTagRows">
+    /// Whether this Marten's compaction deletes the folded events' tag rows with them
+    /// (<c>RuntimeFeature.TaggedStreamCompaction</c>, 9.51+); below it a tag table refuses a tagged stream's delete.
+    /// </param>
     public static CompactionPlan Plan(
         StreamState stream,
         StreamIdentity identity,
@@ -424,7 +480,8 @@ internal static class StreamCompactionRules
         bool isConjoined,
         string? scopeTenantId,
         EventTagStorage tags,
-        bool skipping)
+        bool skipping,
+        bool martenDeletesTagRows = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
@@ -485,7 +542,8 @@ internal static class StreamCompactionRules
             // (EventDataService.CompactStreamAsync, step 1), and a stream of another tenant is never planned.
             StreamTenantId = isConjoined ? stream.TenantId : null,
             NeedsTenant = isConjoined && scopeTenantId is null,
-            TagTablesMayRefuse = tags == EventTagStorage.TagTables,
+            TagTablesMayRefuse = tags == EventTagStorage.TagTables && !martenDeletesTagRows,
+            TagRowsFoldWithEvents = tags == EventTagStorage.TagTables && martenDeletesTagRows,
             SkippedEventsStay = skipping,
         };
     }
@@ -648,8 +706,9 @@ internal static class StreamCompactionRules
         CompactionUnavailableReason.NothingToFold =>
             "This stream holds a single event - or a snapshot and nothing after it - so there is nothing to fold.",
         CompactionUnavailableReason.EmptyStreamId =>
-            "This stream's id is the empty GUID (or an empty key), which Marten's stream fetch reads as no stream filter at all: "
-            + "compacting it would fold and delete every event in the log, so it is not offered.",
+            "This stream's id is the empty GUID (or an empty key). Below Marten 9.51 the stream fetch reads that as no stream "
+            + "filter at all, so compacting it would fold and delete every event in the log; from 9.51 Marten refuses to compact "
+            + "it. Either way it is not offered.",
         CompactionUnavailableReason.AggregateHidden =>
             "This stream's aggregate type is one this studio is configured not to show, so it will not write that aggregate's state into an event.",
         _ => "This stream can be compacted.",
@@ -703,7 +762,14 @@ internal static class StreamCompactionRules
         if (plan.TagTablesMayRefuse)
         {
             lines.Add("This store keeps DCB tags in tag tables, and each tag row references its event by a foreign key with no cascade: "
-                + "if any event before the last carries a tag, Postgres refuses the delete and nothing changes.");
+                + "if any event before the last carries a tag, Postgres refuses the delete and nothing changes. (From Marten 9.51 the "
+                + "folded events' tag rows are deleted with them.)");
+        }
+
+        if (plan.TagRowsFoldWithEvents)
+        {
+            lines.Add("This store keeps DCB tags in tag tables: the folded events' tag rows are deleted with them, in the same statement, "
+                + $"so a tag query no longer finds those events. The {compacted} event keeps the last event's tags.");
         }
 
         if (plan.SkippedEventsStay)

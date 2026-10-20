@@ -131,8 +131,9 @@ public class EnumerationAppliesLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>
-    /// The tenancy's own <c>AutoCreate</c> gates the apply, the store's picks its mode, and Weasel promotes
-    /// <c>None</c> to <c>CreateOrUpdate</c> - so a store that says <c>None</c> still gets the table.
+    /// The tenancy's own <c>AutoCreate</c> gates the apply. Below Marten 9.51 the store's picks its mode, and Weasel
+    /// promotes <c>None</c> to <c>CreateOrUpdate</c>; from 9.51 (#5692) the tenancy's own is the mode too - so at either
+    /// end a store that says <c>None</c> still gets the table.
     /// </summary>
     [PostgresFact]
     public async Task Under_a_store_AutoCreate_of_None_the_tenancys_own_AutoCreate_still_applies_it()
@@ -150,7 +151,8 @@ public class EnumerationAppliesLiveTests(PostgresFixture postgres)
         }
 
         (await TenancyDatabases.RelationExistsAsync(postgres, table, Token)).Should().BeTrue(
-            "the store's AutoCreate of None is the mode the apply runs under, and None is applied as CreateOrUpdate");
+            "the tenancy's CreateOrUpdate gates the apply - and below 9.51 the store's None is its mode, applied as "
+            + "CreateOrUpdate, while from 9.51 the tenancy's own CreateOrUpdate is");
     }
 
     [PostgresFact]

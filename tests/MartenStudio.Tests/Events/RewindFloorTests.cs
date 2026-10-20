@@ -68,4 +68,95 @@ public class RewindFloorTests
 
         await rewinding.Should().ThrowAsync<ArgumentNullException>();
     }
+
+    // ------------------------------------------------------------------------------------------------
+    // L2: the per-tenant rewind (Marten 9.51 with JasperFx 2.91)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>RewindSubscriptionAsync(name, tenantId, token, floor, timestamp)</c> takes the tenant second and the token
+    /// third, so a call that put the floor where the tenant goes would not compile - but one that swapped the tenant and
+    /// the projection would, and rewind a projection named after a tenant.
+    /// </summary>
+    [Fact]
+    public async Task The_tenant_rewind_is_given_the_tenant_second_and_the_floor_fourth_and_no_timestamp()
+    {
+        using var daemon = new FakeProjectionDaemon();
+
+        await EventDataService.RewindTenantToFloorAsync(daemon, "OrderSummary", "acme", 41, Token);
+
+        daemon.TenantRewinds.Should().ContainSingle().Which.Should().Be("OrderSummary/acme/41");
+        daemon.Rewinds.Should().BeEmpty("the store-global overload is never the one asked for a tenant");
+        daemon.LastTimestamp.Should().BeNull();
+    }
+
+    /// <summary>
+    /// The agent the gate finds is the projection's for that tenant, compared as the daemon itself stops agents: the
+    /// projection name ignoring case (Marten's comparison), the tenant ordinally - and it is that agent's own names the
+    /// call is made with, so JasperFx's ordinal stop finds the agent that is running.
+    /// </summary>
+    [Fact]
+    public void The_tenant_agent_is_the_projections_agent_for_exactly_that_tenant()
+    {
+        using var daemon = new FakeProjectionDaemon();
+        daemon.Agents.Add(NamedAgent.For("OrderSummary:All:globex"));
+        daemon.Agents.Add(NamedAgent.For("OrderSummary:All"));
+        daemon.Agents.Add(NamedAgent.For("Other:All:acme"));
+
+        EventDataService.TenantAgentOf(daemon, "OrderSummary", "acme").Should().BeNull(
+            "the daemon here runs globex's agent, the store-global one and another projection's acme agent - not acme's");
+
+        daemon.Agents.Add(NamedAgent.For("OrderSummary:All:Acme"));
+        EventDataService.TenantAgentOf(daemon, "OrderSummary", "acme").Should().BeNull("a tenant id is compared ordinally");
+
+        daemon.Agents.Add(NamedAgent.For("OrderSummary:All:acme"));
+        JasperFx.Events.Projections.ShardName found = EventDataService.TenantAgentOf(daemon, "ordersummary", "acme")!;
+
+        found.Name.Should().Be("OrderSummary", "the agent's own spelling is what the daemon is handed");
+        found.TenantId.Should().Be("acme");
+    }
+
+    /// <summary>
+    /// Whether a daemon implements the per-tenant rewind rather than inheriting <c>IProjectionDaemon</c>'s throwing
+    /// default: Marten's own <c>ProjectionDaemon</c> does exactly from JasperFx 2.91 - which is what the light-up probe's
+    /// first half says - and a daemon that overrides it does at every version.
+    /// </summary>
+    [Fact]
+    public void Martens_daemon_implements_the_tenant_rewind_exactly_where_the_probe_says_JasperFx_does()
+    {
+        bool jasperFxImplementsIt = typeof(global::Marten.Events.Daemon.ProjectionDaemon).GetMethod(
+            "RewindSubscriptionAsync",
+            [typeof(string), typeof(string), typeof(CancellationToken), typeof(long?), typeof(DateTimeOffset?)]) is not null;
+
+        EventDataService.ImplementsTenantRewind(typeof(global::Marten.Events.Daemon.ProjectionDaemon)).Should().Be(jasperFxImplementsIt);
+        jasperFxImplementsIt.Should().Be(
+            MartenStudio.Services.Configuration.MartenRuntime.Current.VersionOf(MartenStudio.Services.Configuration.RuntimePackage.JasperFxEvents)
+                >= new Version(2, 91, 0),
+            "jasperfx#1025 implemented it in 2.91.0");
+
+        using var daemon = new FakeProjectionDaemon();
+        EventDataService.ImplementsTenantRewind(daemon).Should().BeTrue("the fake implements the overload itself");
+    }
+}
+
+/// <summary>An agent that answers its name and nothing else - which is all the per-tenant rewind's gate reads.</summary>
+public class NamedAgent : System.Reflection.DispatchProxy
+{
+    private JasperFx.Events.Projections.ShardName? name;
+
+    internal static JasperFx.Events.Daemon.ISubscriptionAgent For(string identity)
+    {
+        JasperFx.Events.Daemon.ISubscriptionAgent agent =
+            Create<JasperFx.Events.Daemon.ISubscriptionAgent, NamedAgent>();
+
+        JasperFx.Events.Projections.ShardName.TryParse(identity, out JasperFx.Events.Projections.ShardName? parsed).Should().BeTrue();
+        ((NamedAgent) (object) agent).name = parsed;
+
+        return agent;
+    }
+
+    protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args) =>
+        targetMethod?.Name == "get_Name"
+            ? name
+            : throw new NotSupportedException($"NamedAgent does not implement {targetMethod?.Name}.");
 }

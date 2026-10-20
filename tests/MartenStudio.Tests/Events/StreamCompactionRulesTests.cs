@@ -255,6 +255,44 @@ public class StreamCompactionRulesTests
         said.Should().Contain("If the event at version 4 is one of them").And.Contain("compacted through that version instead");
     }
 
+    /// <summary>
+    /// L3: from Marten 9.51 compaction deletes the folded events' tag rows with them, so the dialog stops warning that a
+    /// tag table refuses the delete and says what happens to the tags instead - the two never both, and neither on a store
+    /// without tag tables. The plan is told which Marten it is about; the service asks the probe.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void The_tag_line_follows_whether_Marten_deletes_the_folded_events_tag_rows(bool martenDeletesTagRows)
+    {
+        CompactionPlan tagged = StreamCompactionRules.Plan(
+            Stream(version: 4), StreamIdentity.AsGuid, Order, CompactionUnavailableReason.None,
+            isConjoined: false, scopeTenantId: null, EventTagStorage.TagTables, skipping: false, martenDeletesTagRows);
+
+        tagged.TagTablesMayRefuse.Should().Be(!martenDeletesTagRows);
+        tagged.TagRowsFoldWithEvents.Should().Be(martenDeletesTagRows);
+
+        string said = string.Join(" ", StreamCompactionRules.WhatHappens(tagged));
+
+        if (martenDeletesTagRows)
+        {
+            said.Should().Contain("the folded events' tag rows are deleted with them")
+                .And.Contain("The Compacted<TimeTravelOrder> event keeps the last event's tags")
+                .And.NotContain("Postgres refuses the delete");
+        }
+        else
+        {
+            said.Should().Contain("Postgres refuses the delete").And.NotContain("keeps the last event's tags");
+        }
+
+        CompactionPlan untagged = StreamCompactionRules.Plan(
+            Stream(version: 4), StreamIdentity.AsGuid, Order, CompactionUnavailableReason.None,
+            isConjoined: false, scopeTenantId: null, EventTagStorage.HStore, skipping: false, martenDeletesTagRows);
+
+        untagged.TagTablesMayRefuse.Should().BeFalse("hstore keeps tags on mt_events, with no foreign key");
+        untagged.TagRowsFoldWithEvents.Should().BeFalse();
+    }
+
     [Fact]
     public void A_second_compaction_says_the_earlier_snapshot_is_folded_in()
     {
@@ -279,6 +317,8 @@ public class StreamCompactionRulesTests
         plan.IsOffered.Should().BeFalse();
         plan.Reason.Should().Be(CompactionUnavailableReason.EmptyStreamId);
         plan.Explanation.Should().Contain("every event in the log");
+        plan.Explanation.Should().Contain("Below Marten 9.51").And.Contain("from 9.51 Marten refuses to compact it",
+            "the reason is worded for both ends: the floor's hazard, and the latest's own refusal");
     }
 
     [Fact]

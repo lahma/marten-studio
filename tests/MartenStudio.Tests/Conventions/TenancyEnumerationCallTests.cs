@@ -8,7 +8,7 @@ namespace MartenStudio.Tests.Conventions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// None of these is read-only on a dynamic tenancy, at any Marten through 9.50.2 (AGENTS.md D27).
+/// None of these is read-only on a dynamic tenancy, at any Marten through 9.51.0 (AGENTS.md D27).
 /// <c>AllDatabases()</c>, <c>DescribeDatabasesAsync()</c> and 9.50.1's <c>TryDescribeDatabasesAsync()</c> all
 /// run <c>Tenancy.BuildDatabases()</c>: a read of a master-table or sharded tenancy's lookup table every
 /// time, and the first time per store instance that table's apply under the store's

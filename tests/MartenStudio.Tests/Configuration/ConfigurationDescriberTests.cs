@@ -89,6 +89,41 @@ public class ConfigurationDescriberTests
         advanced.Value.Should().Be(Options.Events.EnableAdvancedAsyncTracking ? "yes" : "no");
     }
 
+    /// <summary>
+    /// L8: the high-water progress stall threshold (JasperFx.Events 2.91, Marten 9.51) is a row beside "High water
+    /// staleness" exactly where this JasperFx has the setting - JasperFx's two-minute default here - and no row below it,
+    /// where the watchdog it configures does not exist.
+    /// </summary>
+    [Fact]
+    public void The_daemon_card_shows_the_high_water_progress_stall_exactly_where_JasperFx_has_it()
+    {
+        EventStoreConfiguration events = ConfigurationDescriber.DescribeEvents(Options.Events);
+
+        bool present = RuntimeFeature.HighWaterProgressStall.Probe() == true;
+        ConfigurationValue[] rows = [.. events.Daemon.Where(static x => x.Name == "High water progress stall")];
+
+        if (!present)
+        {
+            rows.Should().BeEmpty("below JasperFx.Events 2.91 there is no such setting to show");
+            return;
+        }
+
+        ConfigurationValue row = rows.Should().ContainSingle().Subject;
+        row.Member.Should().Be("StoreOptions.Events.Daemon.HighWaterProgressStallThreshold");
+        row.Value.Should().Be(TimeSpan.FromMinutes(2).ToString("g", System.Globalization.CultureInfo.InvariantCulture));
+
+        string[] names = [.. events.Daemon.Select(static x => x.Name)];
+        Array.IndexOf(names, "High water progress stall").Should().Be(Array.IndexOf(names, "High water staleness") + 1,
+            "it sits beside the threshold it is told apart from");
+
+        // A host that turned the watchdog off - null, as JasperFx reads "off" - is told it is off. Set by reflection,
+        // because the floor this suite compiles against has no such property.
+        var settings = new JasperFx.Events.Daemon.DaemonSettings();
+        typeof(JasperFx.Events.Daemon.DaemonSettings).GetProperty("HighWaterProgressStallThreshold")!.SetValue(settings, null);
+
+        ConfigurationDescriber.HighWaterProgressStall(settings).Should().ContainSingle().Which.Value.Should().Be("off");
+    }
+
     [Fact]
     public void A_document_type_reports_its_identity_concurrency_tenancy_and_delete_style()
     {

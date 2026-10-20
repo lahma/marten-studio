@@ -620,14 +620,18 @@ public class DeadLettersTests
     }
 
     /// <summary>
-    /// SEC1-fix4: on a store that numbers events per tenant, Skip and Rewind reach every tenant's event of a number, so
-    /// both are disabled with the service's own sentences.
+    /// SEC1-fix4: on a store that numbers events per tenant, below Marten 9.51 Skip and Rewind reach every tenant's event
+    /// of a number, so both are disabled with the service's own sentences - the shape saying the Marten has neither
+    /// per-tenant form, whatever Marten this test runs at.
     /// </summary>
     [Fact]
     public async Task Under_per_tenant_sequences_skip_and_rewind_are_disabled_with_the_services_sentences()
     {
         using StudioComponentContext context = await RewindableAsync();
-        context.EventData.Shape = context.EventData.Shape with { HasIsSkipped = true, PerTenantSequences = true, EventsConjoined = true };
+        context.EventData.Shape = context.EventData.Shape with
+        {
+            HasIsSkipped = true, PerTenantSequences = true, EventsConjoined = true, TenantSkipping = false, TenantRewind = false,
+        };
 
         IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
 
@@ -638,6 +642,112 @@ public class DeadLettersTests
         AngleSharp.Dom.IElement rewind = RewindButton(page);
         rewind.HasAttribute("disabled").Should().BeTrue();
         rewind.GetAttribute("title").Should().Be(StreamCompactionRules.RewindNeedsOneSequence);
+    }
+
+    /// <summary>
+    /// L1, from Marten 9.51: the skip is one tenant's, so it is offered, says so, and is asked in the dead letter's own
+    /// tenant when "All tenants" is selected - the service skips that tenant's #N and no other.
+    /// </summary>
+    [Fact]
+    public async Task Where_Marten_skips_one_tenants_event_skip_is_offered_and_asked_in_the_dead_letters_tenant()
+    {
+        using StudioComponentContext context = await RewindableAsync();
+        context.EventData.Shape = context.EventData.Shape with
+        {
+            HasIsSkipped = true, PerTenantSequences = true, EventsConjoined = true, HasTenantId = true, TenantSkipping = true,
+        };
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId, sequence: 77) with { TenantId = "acme" }], false);
+
+        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
+
+        AngleSharp.Dom.IElement skip = SkipButton(page);
+        skip.HasAttribute("disabled").Should().BeFalse();
+        skip.GetAttribute("title").Should().Contain("tenant acme's event").And.Contain("no other tenant's event");
+
+        await skip.ClickAsync(new());
+        page.Find(".ms-confirm-dialog").TextContent.Should().Contain("Tenant acme's event #77").And.Contain("no other tenant's event");
+        await page.Find(".ms-confirm-actions button.ms-button-danger").ClickAsync(new());
+
+        context.EventData.Skipped.Should().Equal(77L);
+        context.EventData.SkipScopes.Should().ContainSingle().Which.TenantId.Should().Be("acme",
+            "with All tenants selected, the write is asked in the dead letter's own tenant");
+    }
+
+    /// <summary>
+    /// L2, from Marten 9.51 with JasperFx 2.91: a rewind is one tenant's, offered for a tenant whose agent the daemon here
+    /// runs, described as that tenant's alone, and asked in that tenant.
+    /// </summary>
+    [Fact]
+    public async Task Where_the_daemon_here_runs_the_tenants_agent_rewind_is_offered_for_that_tenant_alone()
+    {
+        using StudioComponentContext context = await PerTenantRewindableAsync(agents: ["OrderSummary:All:acme", "OrderSummary:All:globex"]);
+
+        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
+
+        AngleSharp.Dom.IElement rewind = RewindButton(page);
+        rewind.HasAttribute("disabled").Should().BeFalse();
+        rewind.GetAttribute("title").Should().Contain("tenant acme's agents");
+
+        await rewind.ClickAsync(new());
+
+        string dialog = page.Find(".ms-confirm-dialog").TextContent;
+        dialog.Should().Contain("tenant acme's agents of 'OrderSummary'").And.Contain("in no other");
+        page.FindAll(".ms-rewind-one-tenant").Should().ContainSingle();
+        page.FindAll(".ms-rewind-tenant-reach").Should().BeEmpty("the per-tenant rewind does not reach the database as a whole");
+        dialog.Should().Contain("every event of tenant acme from #42 onwards");
+
+        await page.Find(".ms-confirm-input").InputAsync(new() { Value = "OrderSummary" });
+        await page.Find(".ms-confirm-actions button.ms-button-danger").ClickAsync(new());
+
+        context.EventData.Rewinds.Should().Equal("OrderSummary/42");
+        context.EventData.RewindScopes.Should().ContainSingle().Which.TenantId.Should().Be("acme");
+    }
+
+    /// <summary>
+    /// The condition the research named: the per-tenant rewind starts the tenant's agents in the daemon it is asked of, so
+    /// where the daemon here runs no agent of that projection for that tenant - HotCold's cold node, a distributed host - it
+    /// is not offered, and says why.
+    /// </summary>
+    [Fact]
+    public async Task Where_the_daemon_here_does_not_run_the_tenants_agent_rewind_is_disabled_and_says_why()
+    {
+        using StudioComponentContext context = await PerTenantRewindableAsync(agents: ["OrderSummary:All:globex", "Other:All:acme"]);
+
+        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
+
+        AngleSharp.Dom.IElement rewind = RewindButton(page);
+        rewind.HasAttribute("disabled").Should().BeTrue();
+        rewind.GetAttribute("title").Should().Be(StreamCompactionRules.RewindNeedsTenantAgentHere("OrderSummary", "acme"));
+    }
+
+    [Theory]
+    [InlineData("OrderSummary:All:acme", "OrderSummary", "acme", true)]
+    [InlineData("ordersummary:All:acme", "OrderSummary", "acme", true)]
+    [InlineData("OrderSummary:V2:All:acme", "OrderSummary", "acme", true)]
+    [InlineData("OrderSummary:All:Acme", "OrderSummary", "acme", false)]
+    [InlineData("OrderSummary:All", "OrderSummary", "acme", false)]
+    [InlineData("OrderSummary:V2:All", "OrderSummary", "All", false)]
+    [InlineData("OrderSummary:acme", "OrderSummary", "acme", false)]
+    [InlineData("OrderSummary:All:acme", "OrderSummary", null, false)]
+    public void A_tenant_agent_is_read_from_the_shard_identitys_grammar(string identity, string projection, string? tenant, bool runs)
+    {
+        TenantRewind.RunsAgent([identity], projection, tenant).Should().Be(runs);
+    }
+
+    private static async Task<StudioComponentContext> PerTenantRewindableAsync(string[] agents)
+    {
+        StudioComponentContext context = await RewindableAsync();
+        context.EventData.Shape = context.EventData.Shape with
+        {
+            PerTenantSequences = true, EventsConjoined = true, HasTenantId = true, TenantRewind = true,
+        };
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId) with { TenantId = "acme" }], false);
+        context.ProjectionData.Daemon = context.ProjectionData.Daemon with
+        {
+            Agents = [.. agents.Select(static x => new MartenStudio.Services.Projections.DaemonAgentInfo(x, "Running", 10, 10))],
+        };
+
+        return context;
     }
 
     private static async Task<StudioComponentContext> RewindableAsync()

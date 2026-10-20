@@ -178,7 +178,9 @@ internal sealed record SchemaDeclarationRead
 /// <c>Lazy&lt;SequenceFactory&gt;</c> whose factory calls <c>generateOrUpdateFeature(...)</c> and blocks
 /// on it, so it runs <c>Migrator.ApplyAllAsync</c> under the database's own <c>AutoCreate</c> — the
 /// default being <c>CreateOrUpdate</c>. A single <c>AllSchemaNames()</c> call on an empty schema creates
-/// <c>mt_hilo</c> and <c>mt_get_next_hi</c>. Proven live by the P7 review, 2026-09-14.
+/// <c>mt_hilo</c> and <c>mt_get_next_hi</c>. Proven live by the P7 review, 2026-09-14, and still so at the
+/// floor; from Marten 9.50.3 (#5665) <c>AllActiveFeatures</c> yields <c>database.SequenceFeature</c>, which is
+/// described and never applied, and <c>SchemaNoDdlLiveTests</c> pins both ends.
 /// </para>
 /// <para>
 /// So a read path never calls <c>AllSchemaNames()</c>, <c>AllObjects()</c>, <c>ToDatabaseScript()</c> or

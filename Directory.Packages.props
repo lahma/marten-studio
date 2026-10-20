@@ -38,7 +38,7 @@
   -->
   <PropertyGroup Label="Marten version">
     <MartenStudioMartenFloor>9.39.0</MartenStudioMartenFloor>
-    <MartenStudioMartenLatest>9.50.2</MartenStudioMartenLatest>
+    <MartenStudioMartenLatest>9.51.0</MartenStudioMartenLatest>
     <MartenStudioMartenVersion Condition="'$(MartenStudioMartenVersion)' == ''">$(MartenStudioMartenFloor)</MartenStudioMartenVersion>
   </PropertyGroup>
 

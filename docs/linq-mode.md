@@ -56,11 +56,13 @@ builder.Services.AddMartenStudio(options =>
 - Member names match without case, against the C# type rather than the JSON.
 - An enum member compares with its name as a string (`Status == "Shipped"`).
 - A date literal is read as UTC unless it carries an offset (`"2024-01-01T09:00:00+02:00"`), whatever time zone the
-  server is in. JasperFx 2.84 to 2.89 means the same but reads a date with no offset in the server's zone when it is
-  compared with a `DateTime` member (its `DateTimeIsParsedAsUTC` setting hands Dynamic LINQ's own converter the job
-  before JasperFx's UTC converter is asked), so the studio measures that once and puts each such date back to the
-  one the text names. A predicate holding two dates the server's zone reads as one moment but that name different
-  ones (`"2024-01-01"` beside `"2023-12-31T22:00:00Z"` on a server two hours east) is refused rather than guessed.
+  server is in. JasperFx 2.84 to 2.90.2 means the same but reads a date with no offset in the server's zone when it
+  is compared with a `DateTime` member (its `DateTimeIsParsedAsUTC` setting hands Dynamic LINQ's own converter the
+  job before JasperFx's UTC converter is asked), so the studio measures that once and puts each such date back to
+  the one the text names. A predicate holding two dates the server's zone reads as one moment but that name
+  different ones (`"2024-01-01"` beside `"2023-12-31T22:00:00Z"` on a server two hours east) is refused rather than
+  guessed. JasperFx 2.91.0 (Marten 9.51.0, jasperfx#1024) reads them as UTC itself; the measurement then finds
+  nothing to correct, and neither the correction nor that refusal happens.
 - Values are literals: `"text"`, `'c'`, `42`, `3.5m`, `-1`, `true`, `null`.
 
 There is no arithmetic (other than `%`), no lambda arrow, no method of your own, no type name, no conditional and no
@@ -173,7 +175,8 @@ A visitor the policies refuse the plan still gets the rows. The panel says why t
    - that reads static fields and properties by reflection;
    - otherwise it compiles the subtree with FastExpressionCompiler and invokes it.
 
-   This was read at Marten `V9.39.0` and `V9.50.2`, and a test runs it (see the tests below). If a parsed predicate
+   This was read at Marten `V9.39.0`, `V9.50.2` and `v9.51.0`, and a test runs it (see the tests below). From
+   9.51.0 (#5712) a parameter-free array initialiser is sent the same way. If a parsed predicate
    could contain `Status == System.IO.File.ReadAllText("c:/x")`, your server would run it. That is the shape of
    CVE-2023-32571 in System.Linq.Dynamic.Core: code execution through reflection, fixed in 1.3.0. CVE-2024-51417
    (fixed in 1.6.0) let a parsed expression reach members of reflection types and static members.
@@ -280,7 +283,7 @@ wall in front of the parse itself: every rule after it walks a tree Dynamic LINQ
   - collection `Any` / `All` / `Contains` / `Count`, each of which must touch the document;
   - no static members, no conditionals, and no construction beyond dates, times and Guids.
 
-  It is identical at JasperFx 2.84.0, 2.87.1 and 2.89.0.
+  It is identical at JasperFx 2.84.0, 2.87.1, 2.89.0 and 2.91.0 (2.91.0 changed only how dates are read).
 - The parser itself runs with no custom types, no `new`, no type lookup by simple name and no casting to a type
   named in a string. `object` was removed from its predefined types for CVE-2024-51417, so `GetType()` cannot be
   called.
@@ -326,9 +329,12 @@ This is a closed list. Every other node is refused.
   is allowed only as their argument, and its parameter is the element.
 - **An in-list**, `Status in ("Open", "Shipped")`: Dynamic LINQ writes it as `Enumerable.Contains` over an array
   initialiser of the literals, with the member as the value looked for. Every element must be a literal of the
-  member's own type and the member must read the document. Marten cannot translate an array initialiser, so the
-  composer builds the array itself, setting each literal's value into it (nothing is compiled), and Marten binds it as
-  one parameter (`= ANY(:p0)`). The guard walks the result again and accepts the array value in that one position.
+  member's own type and the member must read the document. Below Marten 9.51 Marten cannot translate an array
+  initialiser; from 9.51 (#5712) it reduces a parameter-free one by compiling it (`ReduceToConstant`, through
+  FastExpressionCompiler), which is the evaluation the studio's walk exists to keep out of Marten. So at every version
+  the composer builds the array itself, setting each literal's value into it (nothing is compiled), and Marten binds
+  it as one parameter (`= ANY(:p0)`). The guard walks the result again and accepts the array value in that one
+  position.
 - **The composed expression** may be nothing but `Queryable.Where`, `OrderBy`, `OrderByDescending`, `ThenBy` and
   `ThenByDescending` over quoted lambdas of the document type.
 
@@ -382,11 +388,13 @@ instead, because the refusal is shown to whoever typed the text.
   the root.
 - **An in-list's array is the one closed subtree accepted.** The composer builds it from the literals' values,
   without compiling anything, so Marten binds a value rather than evaluating an initialiser.
-- **Dates are put right after the parse, not during it.** JasperFx 2.84 to 2.89 reads a date with no offset in the
+- **Dates are put right after the parse, not during it.** JasperFx 2.84 to 2.90.2 reads a date with no offset in the
   server's time zone (see [The dialect](#the-dialect)). The studio measures that once per process, with two probe
   dates, and corrects each such constant from the literal the screen saw. A predicate holding two literals the
   server's zone reads as one moment but that name different ones is refused, because the two cannot be told apart
-  once parsed. Marten's own diagnostics read (9.48+) has the same reading and no correction.
+  once parsed. Marten's own diagnostics read (9.48 to 9.50.x) has the same reading and no correction. From JasperFx
+  2.91.0 (Marten 9.51.0) the measurement finds nothing to correct and the step does nothing - a test pins that, so a
+  JasperFx that read server time again, or a probe that stopped reading at all, fails rather than double-corrects.
 - **Marten's internal LINQ builder is reached by reflection.** A Marten that changes it makes the mode absent; it
   never falls back to `ToCommand`. The members are pinned by a test at the floor and at the latest.
 - **System.Linq.Dynamic.Core is only as safe as its version.** The mode refuses to run below 1.7.4, which is what

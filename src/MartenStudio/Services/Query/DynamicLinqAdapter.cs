@@ -29,7 +29,9 @@ internal sealed record DynamicLinqApplied<T>(IQueryable<T>? Query, LinqRefusal? 
 /// this adapter then resolves every member it needs by name and signature, once. A member that is missing or has
 /// changed shape makes the whole adapter absent - the mode says it does not recognise this JasperFx - rather than
 /// a call that fails half-way. Read at JasperFx <c>V2.84.0</c> and <c>V2.87.1</c> (identical in
-/// <c>src/JasperFx/Linq</c>, and still so at <c>V2.89.0</c>):
+/// <c>src/JasperFx/Linq</c>, and still so at <c>V2.89.0</c>), and again at <c>v2.91.0</c>, where only
+/// <c>DynamicQuery.cs</c>'s date handling moved (jasperfx#1024, <see cref="ReadsDatesInServerTime" />) and every
+/// member below is unchanged:
 /// </para>
 /// <list type="bullet">
 /// <item><description><c>static IQueryable&lt;T&gt; DynamicQuery.Apply&lt;T&gt;(IQueryable&lt;T&gt;, DynamicQueryText, DynamicQueryPolicy?)</c></description></item>
@@ -122,7 +124,13 @@ internal sealed class DynamicLinqAdapter
     /// configured converters - and that converter is a <c>DateTimeOffsetConverter</c>, which reads text with no offset
     /// in the server's zone before converting it to UTC. So <c>"2024-01-01"</c> becomes 2023-12-31T22:00Z on a host
     /// two hours east of Greenwich (measured at JasperFx 2.87.1, Marten 9.50.2), which is the very trap JasperFx's
-    /// comment says the converter closes.
+    /// comment says the converter closes. That is JasperFx 2.84.0 through 2.90.2.
+    /// </para>
+    /// <para>
+    /// JasperFx 2.91.0 (jasperfx#1024, Marten 9.51.0) turns <c>DateTimeIsParsedAsUTC</c> off, so its own UTC converter
+    /// answers for <see cref="DateTime" /> too, and this answers <see langword="false" /> there whatever the server's
+    /// zone - the correction goes idle by itself, with no version check of the studio's own
+    /// (<c>DynamicLinqAdapterTests</c> pins that at 2.91.0 and later).
     /// </para>
     /// <para>
     /// Two dates are probed, one in each half of the year, because a zone such as Europe/London is UTC in January

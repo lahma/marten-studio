@@ -414,10 +414,11 @@ public class LinqHostileInputTests
     }
 
     /// <summary>
-    /// A date with no offset is the UTC date it names, on whatever time zone this server is in. JasperFx 2.84-2.89
+    /// A date with no offset is the UTC date it names, on whatever time zone this server is in. JasperFx 2.84 to 2.90.2
     /// read it in the server's zone (see <see cref="DynamicLinqAdapter.ReadsDatesInServerTime" />); on a host east or
     /// west of Greenwich - this is the test that fails there without the correction - the bound value moved by the
-    /// zone's offset. On a UTC host it passes either way.
+    /// zone's offset. JasperFx 2.91.0 reads it as UTC itself, and there this is the test that fails if the studio
+    /// corrected it a second time. On a UTC host it passes either way.
     /// </summary>
     [DynamicLinqTheory]
     [InlineData("PlacedAt > \"2024-01-01\"", "2024-01-01T00:00:00")]

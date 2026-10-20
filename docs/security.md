@@ -61,7 +61,11 @@ visitor has selected: `BrowseDatabase` is always authorized against `TenantId = 
 confines people to their own tenant therefore refuses them the database browser — which is the point.
 `RunSql`, the dead-letter rewind, the progression corrections, rebuilds and a schema apply are asked the
 same way, because each of them reaches every tenant in the database (the operations are narrowed to the
-tenant only when the database holds that tenant alone).
+tenant only when the database holds that tenant alone). One rewind is the exception: on a store with
+`Events.UseTenantPartitionedEvents`, from Marten 9.51 with JasperFx 2.91, the dead-letter rewind is the daemon's
+per-tenant one - it stops, rewinds and restarts only that tenant's agents and deletes only that tenant's dead
+letters - so it is asked about the dead letter's tenant, and it is offered only where the daemon in this process
+runs that tenant's agent. On such a store the database-wide rewind is never offered.
 
 `BrowsableSchemas` limits what the database browser's screens show, not what can be read: the SQL console
 reads whatever the connection's role can, in any schema. `SqlConsoleRole` is the real boundary for both,
@@ -428,9 +432,10 @@ should not have been typed is on the record either way.
   would start a daemon alongside the host's own and the two would fight over the same advisory locks
   until one hung. The only supported way to reach a running daemon is the DI-registered coordinator, and
   its absence is a *value* — "not hosted in this process" — rather than an error.
-- **Never executes DDL on a read or navigation path.** `IMartenDatabase.AllSchemaNames()` and
-  `AllObjects()` *apply migrations* — a single `AllSchemaNames()` call on an empty schema creates
-  `mt_hilo` and `mt_get_next_hi`, proven live — so the studio calls neither. Schema names, declared
+- **Never executes DDL on a read or navigation path.** Below Marten 9.50.3 `IMartenDatabase.AllSchemaNames()`
+  and `AllObjects()` *apply migrations* — a single `AllSchemaNames()` call on an empty schema creates
+  `mt_hilo` and `mt_get_next_hi`, proven live at the floor — so the studio calls neither, at any version
+  (9.50.3 made them describe the HiLo feature without applying it, and the floor is older). Schema names, declared
   indexes, managed tables and installed functions come from `IReadOnlyStoreOptions`, `IDocumentType` and
   the event store's own feature schema, and touch no connection. `Check`, `Preview` and `DDL` are behind
   buttons that say on the button what they may create. An apply is gated on `ApplySchemaChanges`, runs
