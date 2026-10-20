@@ -16,37 +16,6 @@ using Npgsql;
 
 namespace MartenStudio.Services;
 
-/// <summary>Where a tenant listing came from, which is what the selector says under it.</summary>
-internal enum TenantListSource
-{
-    /// <summary>The host named them in <see cref="MartenStudioOptions.KnownTenantIds" />.</summary>
-    Configured,
-
-    /// <summary>Marten's own database descriptors carried them.</summary>
-    Descriptor,
-
-    /// <summary>They were read out of the tenant columns of the store's own tables, bounded.</summary>
-    Queried,
-
-    /// <summary>Nothing could answer. Not the same as "there are none".</summary>
-    Unavailable
-}
-
-/// <summary>
-/// The tenants the tenant selector offers, and how much of the truth they are.
-/// </summary>
-/// <param name="Ids">The tenant ids, in order.</param>
-/// <param name="IsTruncated">
-/// Whether there are more than this. A truncated list turns the selector into a free-text box, because a
-/// picker that silently omits tenants is worse than no picker.
-/// </param>
-/// <param name="Source">Where the ids came from.</param>
-internal sealed record TenantList(IReadOnlyList<string> Ids, bool IsTruncated, TenantListSource Source)
-{
-    /// <summary>Nothing could answer - drawn differently from an empty list.</summary>
-    public static TenantList Unavailable { get; } = new([], false, TenantListSource.Unavailable);
-}
-
 /// <summary>
 /// Finds the tenant ids of one store and database, in three tiers, cheapest first.
 /// </summary>
@@ -79,8 +48,8 @@ internal sealed record TenantList(IReadOnlyList<string> Ids, bool IsTruncated, T
 /// </remarks>
 internal sealed class TenantDiscovery
 {
-    /// <summary>How many tenants the selector will list before it becomes a free-text box.</summary>
-    public const int MaxListedTenants = 200;
+    /// <inheritdoc cref="TenantList.MaxListedTenants" />
+    public const int MaxListedTenants = TenantList.MaxListedTenants;
 
     private static readonly TimeSpan CacheWindow = TimeSpan.FromSeconds(60);
 
@@ -502,28 +471,6 @@ internal sealed class TenantDiscovery
         return new TenantList(ids, truncated, TenantListSource.Queried);
     }
 
-    /// <summary>
-    /// Whether <paramref name="tenantId" /> is one the studio will accept for
-    /// <paramref name="tenants" />: one of the listed ones, or - when the listing is truncated - any
-    /// plausible id, because the whole point of the free-text box is that the list is incomplete.
-    /// </summary>
-    public static bool IsAcceptable(TenantList tenants, string? tenantId)
-    {
-        ArgumentNullException.ThrowIfNull(tenants);
-
-        if (string.IsNullOrWhiteSpace(tenantId))
-        {
-            return true;
-        }
-
-        foreach (string id in tenants.Ids)
-        {
-            if (string.Equals(id, tenantId, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return tenants.IsTruncated && tenantId.Trim().Length == tenantId.Length && tenantId.Length <= 200;
-    }
+    /// <inheritdoc cref="TenantList.IsAcceptable" />
+    public static bool IsAcceptable(TenantList tenants, string? tenantId) => TenantList.IsAcceptable(tenants, tenantId);
 }

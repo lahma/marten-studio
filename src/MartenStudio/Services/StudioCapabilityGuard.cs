@@ -1,11 +1,11 @@
-using Microsoft.Extensions.Options;
+using MartenStudio.Services.Settings;
 
 namespace MartenStudio.Services;
 
 /// <summary>
 /// The capabilities - the mutating operations and the reads authorized like writes - as an enum, so a
-/// service method can name the one it is about and the guard can answer for it. Mirrors
-/// <see cref="MartenStudioCapabilities" /> property for property.
+/// service method can name the one it is about and the guard can answer for it. Every studio's options
+/// map the members it offers onto a public flag of the same name (<see cref="IStudioSettings.IsConfigured" />).
 /// </summary>
 /// <remarks>
 /// New members go at the end: the numeric values are not persisted anywhere, but the declaration order is
@@ -13,50 +13,50 @@ namespace MartenStudio.Services;
 /// </remarks>
 internal enum StudioCapability
 {
-    /// <inheritdoc cref="MartenStudioCapabilities.EditDocuments" />
+    /// <summary>Edit a document's JSON and save it through the store's serializer and session.</summary>
     EditDocuments,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.DeleteDocuments" />
+    /// <summary>Delete, soft-delete or undelete documents.</summary>
     DeleteDocuments,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.ArchiveStreams" />
+    /// <summary>Archive event streams.</summary>
     ArchiveStreams,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.ManageDeadLetters" />
+    /// <summary>Discard dead-letter events, mark events as skipped, or rewind a subscription to a sequence.</summary>
     ManageDeadLetters,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.ControlDaemon" />
+    /// <summary>Start and stop projection agents and the async daemon hosted in this process.</summary>
     ControlDaemon,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.RebuildProjections" />
+    /// <summary>Rebuild projections.</summary>
     RebuildProjections,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.CorrectProgression" />
+    /// <summary>Advance the high-water mark or correct projection progression in the database.</summary>
     CorrectProgression,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.ApplySchemaChanges" />
+    /// <summary>Apply pending schema migrations to the database.</summary>
     ApplySchemaChanges,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.RunSql" />
+    /// <summary>Run read-only SQL from the query page, inside a read-only transaction under a statement timeout.</summary>
     RunSql,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.BrowseDatabase" />
+    /// <summary>Read the rows and the definitions of the database objects beyond a source's own (D27).</summary>
     BrowseDatabase,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.ViewDatabaseActivity" />
+    /// <summary>See other sessions' process ids, roles, client addresses and statements (D29's Activity gate).</summary>
     ViewDatabaseActivity,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.CompactStreams" />
+    /// <summary>Compact event streams.</summary>
     CompactStreams,
 
-    /// <inheritdoc cref="MartenStudioCapabilities.RunLinqQueries" />
+    /// <summary>Run LINQ queries from the Query page (D28).</summary>
     RunLinqQueries
 }
 
 /// <summary>Why a capability was refused.</summary>
 internal enum CapabilityDenialReason
 {
-    /// <summary><see cref="MartenStudioOptions.ReadOnly" /> is on, so every capability is off.</summary>
+    /// <summary>The studio's master switch (<see cref="IStudioSettings.ReadOnly" />) is on, so every capability is off.</summary>
     ReadOnly,
 
     /// <summary>The individual capability is off.</summary>
@@ -74,11 +74,33 @@ internal enum CapabilityDenialReason
 /// </remarks>
 internal sealed class StudioCapabilityDeniedException : InvalidOperationException
 {
-    public StudioCapabilityDeniedException(StudioCapability capability, CapabilityDenialReason reason)
-        : base(BuildMessage(capability, reason))
+    /// <summary>A refusal worded from the studio's own settings - its product name and its options' spelling.</summary>
+    /// <param name="capability">The capability that was refused.</param>
+    /// <param name="reason">Whether the master switch or the individual capability refused it.</param>
+    /// <param name="settings">The studio's settings, for the names the message says.</param>
+    public StudioCapabilityDeniedException(StudioCapability capability, CapabilityDenialReason reason, IStudioSettings settings)
+        : this(
+            capability,
+            reason,
+            Require(settings).ProductName,
+            settings.ReadOnlyOption(),
+            settings.CapabilityOption(capability))
+    {
+    }
+
+    private StudioCapabilityDeniedException(
+        StudioCapability capability,
+        CapabilityDenialReason reason,
+        string productName,
+        string readOnlyOption,
+        string capabilityOption)
+        : base(reason == CapabilityDenialReason.ReadOnly
+            ? $"{productName} refused '{capability}' because {readOnlyOption} is true, which turns every capability off."
+            : $"{productName} refused '{capability}' because {capabilityOption} is false.")
     {
         Capability = capability;
         Reason = reason;
+        CapabilityOption = capabilityOption;
     }
 
     /// <summary>The capability that was refused.</summary>
@@ -87,11 +109,16 @@ internal sealed class StudioCapabilityDeniedException : InvalidOperationExceptio
     /// <summary>Whether the master switch or the individual capability refused it.</summary>
     public CapabilityDenialReason Reason { get; }
 
-    private static string BuildMessage(StudioCapability capability, CapabilityDenialReason reason)
+    /// <summary>
+    /// The capability's own option - <c>MartenStudioOptions.Capabilities.EditDocuments</c> - which would have to be set
+    /// whichever switch refused it: what event 9202 names.
+    /// </summary>
+    public string CapabilityOption { get; }
+
+    private static IStudioSettings Require(IStudioSettings settings)
     {
-        return reason == CapabilityDenialReason.ReadOnly
-            ? $"Marten Studio refused '{capability}' because MartenStudioOptions.ReadOnly is true, which turns every capability off."
-            : $"Marten Studio refused '{capability}' because {StudioCapabilityGuard.OptionName(capability)} is false.";
+        ArgumentNullException.ThrowIfNull(settings);
+        return settings;
     }
 }
 
@@ -99,21 +126,21 @@ internal sealed class StudioCapabilityDeniedException : InvalidOperationExceptio
 /// Answers whether one mutating operation is enabled at all in this process.
 /// </summary>
 /// <remarks>
-/// Singleton, and deliberately the simplest thing in the codebase: <c>!ReadOnly &amp;&amp; Capabilities.X</c>.
-/// It is process-wide and knows nothing about the visitor - who may do what is
-/// <see cref="StudioAuthorization" />'s question, and the two are asked one after the other so that
+/// Singleton, and deliberately the simplest thing in the codebase: <c>!ReadOnly &amp;&amp; Capabilities.X</c>,
+/// read live from <see cref="IStudioSettings" />. It is process-wide and knows nothing about the visitor - who may
+/// do what is <see cref="StudioAuthorization" />'s question, and the two are asked one after the other so that
 /// neither can be mistaken for the other.
 /// </remarks>
 internal sealed class StudioCapabilityGuard
 {
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
 
-    public StudioCapabilityGuard(IOptions<MartenStudioOptions> options)
+    public StudioCapabilityGuard(IStudioSettings settings)
     {
-        this.options = options;
+        this.settings = settings;
     }
 
-    /// <summary>Every capability, in declaration order - what the capability chip counts and lists.</summary>
+    /// <summary>Every capability member, in declaration order, whichever studio offers it.</summary>
     public static IReadOnlyList<StudioCapability> All { get; } = Enum.GetValues<StudioCapability>();
 
     /// <summary>
@@ -122,11 +149,10 @@ internal sealed class StudioCapabilityGuard
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Every one is a read treated as a write for authorization (D13): the service asks
-    /// <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> with the capability named, and
-    /// <see cref="MartenStudioOptions.ReadOnly" /> turns them off with everything else. A page that told a
-    /// host "every mutating operation is off" when the console and the database browser were off too would
-    /// be describing a narrower switch than the one they set.
+    /// Every one is a read treated as a write for authorization (D13): the service asks the write policy with the
+    /// capability named, and the master switch turns them off with everything else. A page that told a host "every
+    /// mutating operation is off" when the console and the database browser were off too would be describing a
+    /// narrower switch than the one they set.
     /// </para>
     /// <para>
     /// Two of them read beyond the store's own documents and events (the console, the database browser),
@@ -151,16 +177,27 @@ internal sealed class StudioCapabilityGuard
     public static IReadOnlyList<StudioCapability> Mutating { get; } =
         [.. All.Where(static x => !ReadsBeyondTheStore.Contains(x))];
 
-    /// <summary>Whether the master switch is on, which turns every capability off.</summary>
-    public bool ReadOnly => options.Value.ReadOnly;
+    /// <summary>The capabilities this studio offers, in the order the chip lists them (<see cref="IStudioSettings.Capabilities" />).</summary>
+    public IReadOnlyList<StudioCapability> Offered => settings.Capabilities;
 
-    /// <summary>How many capabilities are effectively enabled.</summary>
+    /// <summary>The offered reads authorized like writes, in <see cref="ReadsBeyondTheStore" /> order.</summary>
+    public IReadOnlyList<StudioCapability> OfferedReads =>
+        [.. ReadsBeyondTheStore.Where(x => settings.Capabilities.Contains(x))];
+
+    /// <summary>The offered mutating capabilities, in <see cref="Mutating" /> order.</summary>
+    public IReadOnlyList<StudioCapability> OfferedMutating =>
+        [.. Mutating.Where(x => settings.Capabilities.Contains(x))];
+
+    /// <summary>Whether the master switch is on, which turns every capability off.</summary>
+    public bool ReadOnly => settings.ReadOnly;
+
+    /// <summary>How many of the offered capabilities are effectively enabled.</summary>
     public int EnabledCount
     {
         get
         {
             int count = 0;
-            foreach (StudioCapability capability in All)
+            foreach (StudioCapability capability in settings.Capabilities)
             {
                 if (IsEnabled(capability))
                 {
@@ -173,11 +210,8 @@ internal sealed class StudioCapabilityGuard
     }
 
     /// <summary>Whether <paramref name="capability" /> is enabled, master switch included.</summary>
-    public bool IsEnabled(StudioCapability capability)
-    {
-        MartenStudioOptions value = options.Value;
-        return !value.ReadOnly && IsConfigured(value.Capabilities, capability);
-    }
+    public bool IsEnabled(StudioCapability capability) =>
+        !settings.ReadOnly && settings.IsConfigured(capability);
 
     /// <summary>
     /// Throws unless <paramref name="capability" /> is enabled. The first line of every mutating service
@@ -186,15 +220,14 @@ internal sealed class StudioCapabilityGuard
     /// <exception cref="StudioCapabilityDeniedException">The capability is not enabled.</exception>
     public void Require(StudioCapability capability)
     {
-        MartenStudioOptions value = options.Value;
-        if (value.ReadOnly)
+        if (settings.ReadOnly)
         {
-            throw new StudioCapabilityDeniedException(capability, CapabilityDenialReason.ReadOnly);
+            throw new StudioCapabilityDeniedException(capability, CapabilityDenialReason.ReadOnly, settings);
         }
 
-        if (!IsConfigured(value.Capabilities, capability))
+        if (!settings.IsConfigured(capability))
         {
-            throw new StudioCapabilityDeniedException(capability, CapabilityDenialReason.Disabled);
+            throw new StudioCapabilityDeniedException(capability, CapabilityDenialReason.Disabled, settings);
         }
     }
 
@@ -202,38 +235,5 @@ internal sealed class StudioCapabilityGuard
     /// The property a host would set to enable <paramref name="capability" />, spelled the way it is
     /// written in the host's own registration - which is what a disabled control says out loud.
     /// </summary>
-    public static string OptionName(StudioCapability capability) =>
-        "MartenStudioOptions.Capabilities." + capability;
-
-    /// <summary>
-    /// The property behind <paramref name="capability" />.
-    /// </summary>
-    /// <remarks>
-    /// The default arm throws rather than answering <see langword="false" />. A <c>_ =&gt; false</c> arm is
-    /// how a capability added to the enum and forgotten here becomes a switch a host sets to
-    /// <see langword="true" /> and the studio silently goes on refusing: the page names the option, the
-    /// host sets it, and nothing changes. <c>StudioCapabilityGuardTests</c> walks <see cref="All" /> so the
-    /// omission fails a test rather than a support ticket.
-    /// </remarks>
-    internal static bool IsConfigured(MartenStudioCapabilities capabilities, StudioCapability capability) =>
-        capability switch
-        {
-            StudioCapability.EditDocuments => capabilities.EditDocuments,
-            StudioCapability.DeleteDocuments => capabilities.DeleteDocuments,
-            StudioCapability.ArchiveStreams => capabilities.ArchiveStreams,
-            StudioCapability.ManageDeadLetters => capabilities.ManageDeadLetters,
-            StudioCapability.ControlDaemon => capabilities.ControlDaemon,
-            StudioCapability.RebuildProjections => capabilities.RebuildProjections,
-            StudioCapability.CorrectProgression => capabilities.CorrectProgression,
-            StudioCapability.ApplySchemaChanges => capabilities.ApplySchemaChanges,
-            StudioCapability.RunSql => capabilities.RunSql,
-            StudioCapability.BrowseDatabase => capabilities.BrowseDatabase,
-            StudioCapability.ViewDatabaseActivity => capabilities.ViewDatabaseActivity,
-            StudioCapability.CompactStreams => capabilities.CompactStreams,
-            StudioCapability.RunLinqQueries => capabilities.RunLinqQueries,
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(capability),
-                capability,
-                "No MartenStudioCapabilities property is mapped to this capability."),
-        };
+    public string OptionFor(StudioCapability capability) => settings.CapabilityOption(capability);
 }

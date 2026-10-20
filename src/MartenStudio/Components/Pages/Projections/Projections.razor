@@ -1470,8 +1470,8 @@
                     + "that database as a whole, or it holds this tenant and no other.";
             }
 
-            bool several = State.Cardinality is JasperFx.Descriptors.DatabaseCardinality.StaticMultiple
-                or JasperFx.Descriptors.DatabaseCardinality.DynamicMultiple;
+            bool several = State.Cardinality is MartenStudio.Services.Sources.StudioDatabaseCardinality.StaticMultiple
+                or MartenStudio.Services.Sources.StudioDatabaseCardinality.DynamicMultiple;
 
             if (!several)
             {

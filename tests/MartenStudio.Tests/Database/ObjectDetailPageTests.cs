@@ -2,7 +2,6 @@ using AngleSharp.Dom;
 
 using Bunit;
 
-using MartenStudio.Components;
 using MartenStudio.Services.Database;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
@@ -25,7 +24,7 @@ public class ObjectDetailPageTests
     [Fact]
     public void The_studios_router_reaches_the_page()
     {
-        StudioRouteTable.Match("database/object")!.PageType.Should().Be<DetailPage>();
+        MartenSpine.Routes.Match("database/object")!.PageType.Should().Be<DetailPage>();
     }
 
     [Fact]

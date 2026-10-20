@@ -300,7 +300,7 @@ public class NavIndicatorServiceTests
 
             Service = new NavIndicatorService(
                 State,
-                new StudioAuthorization(Options.Create(options), Authorization, AuthenticationState),
+                MartenSpine.Authorization(Options.Create(options), Authorization, AuthenticationState),
                 Events,
                 Projections,
                 Cache,

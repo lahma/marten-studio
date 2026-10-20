@@ -3,11 +3,26 @@ using Microsoft.Extensions.Logging;
 namespace MartenStudio.Services;
 
 /// <summary>
-/// Every event Marten Studio logs, as source-generated methods with a pinned event id.
+/// Every event the shared studio logs, as source-generated methods with a pinned event id.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Event ids <c>9200-9299</c> belong to Marten Studio. The first twelve (9200-9211) are the audit events
+/// <b>The split (0.5, PS-1a).</b> Event ids <c>9200-9299</c> belong to the studio, and one id space is shared by the
+/// events every studio logs - here, in <c>StudioLog</c> and its partial files - and the events only MartenStudio logs,
+/// in MartenStudio's <c>MartenLog</c>: the schema apply (9206), projection rebuilds and daemon control (9207-9209), the
+/// document round trip (9211), the daemon, tracker, projection and event-store anomalies (9212, 9215-9218) and LINQ
+/// mode (9260-9264). No id moved and no message changed; what changed is only which class declares an event, which no
+/// host can see. Every event a later packet needs is already declared on one side or the other, so no packet after
+/// this one adds a method here: a shared event is here, and a Marten one is in <c>MartenLog</c>.
+/// </para>
+/// <para>
+/// Here: 9200-9205 (audit, the SQL console), 9210 (a source that will not build), 9213, 9214, 9219-9222 (listing,
+/// version, tenant discovery and policy, live-update and health-check anomalies), 9230 (the database browser's
+/// configuration notice), 9235-9237 (row reads), 9245-9246 (Sessions), 9270 (the health export), 9280-9281 (the
+/// statement checks) and 9290 (platform detection).
+/// </para>
+/// <para>
+/// The first twelve ids (9200-9211) are the audit events
 /// and were declared together from the first packet that logs any of them, so the numbers are reserved
 /// rather than assigned in the order features happened to land - an operator's log query is written
 /// against the number, and renumbering one later would silently change what a saved query matches.
@@ -58,18 +73,6 @@ internal static partial class StudioLog
     [LoggerMessage(EventId = 9205, Level = LogLevel.Information, Message = "Marten Studio refused SQL from user {User} against store {StoreKey}, database {DatabaseId}: {Reason}. Statement: {Sql}")]
     public static partial void SqlRejected(this ILogger logger, string user, string storeKey, string databaseId, string reason, string sql);
 
-    [LoggerMessage(EventId = 9206, Level = LogLevel.Information, Message = "Marten Studio user {User} applied schema changes to store {StoreKey}, database {DatabaseId}: {Summary}")]
-    public static partial void SchemaChangeApplied(this ILogger logger, string user, string storeKey, string databaseId, string summary);
-
-    [LoggerMessage(EventId = 9207, Level = LogLevel.Information, Message = "Marten Studio user {User} started a rebuild of projection {Projection} in store {StoreKey}, database {DatabaseId}")]
-    public static partial void ProjectionRebuildStarted(this ILogger logger, string user, string projection, string storeKey, string databaseId);
-
-    [LoggerMessage(EventId = 9208, Level = LogLevel.Information, Message = "Rebuild of projection {Projection} in store {StoreKey}, database {DatabaseId} finished after {ElapsedMilliseconds} ms: {Outcome}")]
-    public static partial void ProjectionRebuildFinished(this ILogger logger, string projection, string storeKey, string databaseId, long elapsedMilliseconds, string outcome);
-
-    [LoggerMessage(EventId = 9209, Level = LogLevel.Information, Message = "Marten Studio user {User} requested daemon control {Operation} on {Target} in store {StoreKey}, database {DatabaseId}")]
-    public static partial void DaemonControlRequested(this ILogger logger, string user, string operation, string target, string storeKey, string databaseId);
-
     /// <remarks>
     /// Warning rather than Error: a store that will not build is the application's own configuration
     /// answering, and the studio goes on serving every other store. It is logged because the studio
@@ -81,28 +84,9 @@ internal static partial class StudioLog
     [LoggerMessage(EventId = 9210, Message = "Marten Studio could not resolve store {StoreKey} ({ServiceType}): {Reason}")]
     public static partial void StoreUnavailable(this ILogger logger, LogLevel level, string storeKey, string serviceType, string reason);
 
-    /// <remarks>
-    /// Warning, and it counts the properties: Marten has no untyped write path, so saving an edited
-    /// document round-trips through the CLR type and anything the type does not have is gone. The dialog
-    /// shows the loss before the save; this is the record that it happened anyway.
-    /// </remarks>
-    [LoggerMessage(EventId = 9211, Level = LogLevel.Warning, Message = "Marten Studio user {User} saved {DocumentType} {Id} and the round trip dropped {DroppedCount} properties: {Dropped}")]
-    public static partial void DocumentWriteRoundTripDropped(this ILogger logger, string user, string documentType, string id, int droppedCount, string dropped);
-
     // --------------------------------------------------------------------------------------------------
     // 9212-9229: operational anomalies, each at the level StudioLogThrottle chose (see the remarks above)
     // --------------------------------------------------------------------------------------------------
-
-    /// <remarks>
-    /// A coordinator <em>is</em> registered and answered with something other than the two expected
-    /// shapes, or could not be constructed for a reason other than the expected one. Wolverine's managed
-    /// distribution throws <c>NotSupportedException</c> from the per-database lookup by design, and its
-    /// constructor throws <c>ArgumentOutOfRangeException</c> for a store its agent family does not know;
-    /// neither comes here. Two throttle sites share this event - the lookup and the construction - so
-    /// one does not silence the other.
-    /// </remarks>
-    [LoggerMessage(EventId = 9212, Message = "Marten Studio could not reach the async daemon of store {StoreKey}, database {DatabaseId}")]
-    public static partial void DaemonUnreachable(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
 
     /// <remarks>Logged by the Overview's store cards and by the scope selector's database listing.</remarks>
     [LoggerMessage(EventId = 9213, Message = "Marten Studio could not list the databases of store {StoreKey}")]
@@ -111,36 +95,6 @@ internal static partial class StudioLog
     /// <remarks>Logged by the Overview's store cards and by the configuration screen.</remarks>
     [LoggerMessage(EventId = 9214, Message = "Marten Studio could not read the Postgres version of store {StoreKey}")]
     public static partial void PostgresVersionUnreadable(this ILogger logger, LogLevel level, Exception? exception, string storeKey);
-
-    /// <remarks>
-    /// The page falls back to the database rows it was reading anyway, so nothing on screen is wrong -
-    /// only less fresh between polls.
-    /// </remarks>
-    [LoggerMessage(EventId = 9215, Message = "Marten Studio could not observe the shard state tracker of store {StoreKey}, database {DatabaseId}")]
-    public static partial void ShardTrackerUnobservable(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
-
-    /// <remarks>Polled by the Overview's projection tiles and by the navigation badges.</remarks>
-    [LoggerMessage(EventId = 9216, Message = "Marten Studio could not summarise the projections of store {StoreKey}, database {DatabaseId}")]
-    public static partial void ProjectionSummaryUnreadable(this ILogger logger, LogLevel level, Exception exception, string storeKey, string databaseId);
-
-    /// <remarks>
-    /// Every event-store read renders its failure as a value through one describer, and this is its log
-    /// line. A timeout - 57014, or the <c>NpgsqlException</c> wrapping a <c>TimeoutException</c> that the
-    /// same expiry produces when the backend is slow to answer the cancel - is the page's business and is
-    /// Debug. A table or schema that is not there (42P01, 3F000) comes here: every read asks the column
-    /// catalog, or <c>DescribeDeadLettersAsync</c>, before it touches a table, so an event store that
-    /// has not been created yet is an empty answer and never this, and one of those SQLSTATEs means the
-    /// catalog and the database disagree. So does a connection failure and any other SQLSTATE.
-    /// </remarks>
-    [LoggerMessage(EventId = 9217, Message = "Marten Studio could not {What} in store {StoreKey}, database {DatabaseId}: {SqlState}")]
-    public static partial void EventReadFailed(this ILogger logger, LogLevel level, Exception exception, string what, string storeKey, string databaseId, string? sqlState);
-
-    /// <remarks>
-    /// <c>mt_streams."timestamp"</c> is <c>NOT NULL</c> in every schema Marten creates, so this is a table
-    /// somebody migrated by hand - worth one line, and not one per page of the stream list.
-    /// </remarks>
-    [LoggerMessage(EventId = 9218, Message = "Marten Studio stopped paging the stream list: {Schema}.mt_streams has a row with a null timestamp, which no Marten-created schema has and which a keyset cannot page past")]
-    public static partial void StreamTimestampMissing(this ILogger logger, LogLevel level, string schema);
 
     /// <remarks>Asked whenever the header describes a scope, which is every scope change in every circuit.</remarks>
     [LoggerMessage(EventId = 9219, Message = "Marten Studio could not discover the tenants of store {StoreKey}")]

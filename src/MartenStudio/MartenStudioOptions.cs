@@ -280,7 +280,7 @@ public sealed class MartenStudioOptions
     /// </summary>
     internal string EscapedPath => PathCache.Escaped;
 
-    private DerivedPath? pathCache;
+    private Services.Settings.StudioPath? pathCache;
 
     /// <summary>
     /// Values derived from <see cref="Path"/>, computed once and reused — they are read
@@ -289,33 +289,13 @@ public sealed class MartenStudioOptions
     /// observes a fully-populated instance (reference reads/writes are atomic) even if the option
     /// is mutated mid-render.
     /// </summary>
-    private DerivedPath PathCache
+    private Services.Settings.StudioPath PathCache
     {
         get
         {
-            string source = Path;
-            DerivedPath? cache = pathCache;
-            if (cache is null || !string.Equals(cache.Source, source, StringComparison.Ordinal))
-            {
-                string trimmed = DefaultPath;
-                if (!string.IsNullOrWhiteSpace(source))
-                {
-                    string candidate = source.Trim().Trim('/');
-                    if (candidate.Length > 0)
-                    {
-                        trimmed = "/" + candidate;
-                    }
-                }
-
-                string escaped = new Uri("http://localhost" + trimmed).AbsolutePath;
-                bool hasCustom = !string.Equals(trimmed, DefaultPath, StringComparison.OrdinalIgnoreCase);
-                cache = new DerivedPath(source, trimmed, escaped, hasCustom);
-                pathCache = cache;
-            }
-
+            Services.Settings.StudioPath cache = Services.Settings.StudioPath.Of(Path, DefaultPath, pathCache);
+            pathCache = cache;
             return cache;
         }
     }
-
-    private sealed record DerivedPath(string Source, string Trimmed, string Escaped, bool HasCustom);
 }

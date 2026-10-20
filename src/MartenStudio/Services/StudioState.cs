@@ -1,6 +1,6 @@
 using System.Globalization;
 
-using JasperFx.Descriptors;
+using MartenStudio.Services.Sources;
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -95,7 +95,7 @@ internal sealed class StudioState
     /// How many databases the active store has, which decides whether a database picker is shown at all
     /// and whether it needs a refresh button.
     /// </summary>
-    public DatabaseCardinality Cardinality { get; private set; } = DatabaseCardinality.Single;
+    public StudioDatabaseCardinality Cardinality { get; private set; } = StudioDatabaseCardinality.Single;
 
     /// <summary>
     /// Whether anything in the active store is tenanted per row. A tenant picker over a store with no
@@ -176,7 +176,7 @@ internal sealed class StudioState
         string databaseId = PickDatabase(previous?.DatabaseId);
         ApplyFacts(await catalog.DescribeAsync(store.Key, databaseId, cancellationToken).ConfigureAwait(false));
 
-        string? tenantId = TenantDiscovery.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
+        string? tenantId = TenantList.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
 
         await SetActiveScopeAsync(new StudioScope(store.Key, databaseId, tenantId), previous).ConfigureAwait(false);
     }
@@ -218,7 +218,7 @@ internal sealed class StudioState
             ApplyFacts(await catalog.DescribeAsync(store.Key, resolvedDatabaseId, cancellationToken).ConfigureAwait(false));
         }
 
-        string? resolvedTenantId = TenantDiscovery.IsAcceptable(AvailableTenants, tenantId)
+        string? resolvedTenantId = TenantList.IsAcceptable(AvailableTenants, tenantId)
             ? NullIfBlank(tenantId)
             : NullIfBlank(previous?.TenantId);
 

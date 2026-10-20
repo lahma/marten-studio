@@ -141,7 +141,7 @@ public class ActivityViewsOffThePollPathTests
         users.Should().Contain("src/MartenStudio/Components/Pages/Database/Sessions.razor");
         users.Should().OnlyContain(
             static x => x == "src/MartenStudio/Components/Pages/Database/Sessions.razor"
-                || x == "src/MartenStudio/MartenStudioServiceCollectionExtensions.cs"
+                || x == "src/MartenStudio/Services/Settings/StudioCoreRegistration.cs"
                 || x.StartsWith("src/MartenStudio/Services/Database/", StringComparison.Ordinal),
             "the sidebar, the Overview and every other page poll every RefreshInterval");
     }

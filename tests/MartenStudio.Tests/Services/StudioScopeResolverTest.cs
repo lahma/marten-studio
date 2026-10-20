@@ -52,7 +52,7 @@ public class StudioScopeResolverTest
         var authorizationService = new TestStoreAuthorizationService();
         var provider = services.BuildServiceProvider();
 
-        var authorization = new StudioAuthorization(
+        var authorization = MartenSpine.Authorization(
             Options.Create(options),
             authorizationService,
             new TestAuthenticationStateProvider());
@@ -60,7 +60,7 @@ public class StudioScopeResolverTest
         var tenants = new TenantDiscovery(Options.Create(options), NullLogger<TenantDiscovery>.Instance);
 
         return new Harness(
-            new StudioScopeResolver(Options.Create(options), registry, authorization, tenants, provider),
+            MartenSpine.Scope(Options.Create(options), registry, authorization, tenants, provider).Resolver,
             authorizationService,
             options,
             provider);
@@ -156,12 +156,12 @@ public class StudioScopeResolverTest
         var registry = new MartenStoreRegistry(services);
         using var provider = services.BuildServiceProvider();
 
-        var resolver = new StudioScopeResolver(
+        var resolver = MartenSpine.Scope(
             Options.Create(options),
             registry,
-            new StudioAuthorization(Options.Create(options), new TestStoreAuthorizationService(), new TestAuthenticationStateProvider()),
+            MartenSpine.Authorization(Options.Create(options), new TestStoreAuthorizationService(), new TestAuthenticationStateProvider()),
             new TenantDiscovery(Options.Create(options), NullLogger<TenantDiscovery>.Instance),
-            provider);
+            provider).Resolver;
 
         var failure = await resolver
             .Invoking(x => x.ResolveAsync(new StudioScope(nameof(MartenStoreRegistryTest.IBrokenStore), string.Empty, null), null, Token).AsTask())

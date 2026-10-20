@@ -539,7 +539,7 @@ internal sealed class DatabaseAccess
         if (!availability.IsAvailable || store is null)
         {
             return new DatabaseStoreLookup(
-                null, null, null, new StudioStoreUnavailableException(registration.Key, availability.Message ?? "unknown reason").Message);
+                null, null, null, new StudioStoreUnavailableException(registration.Key, availability.Message ?? "unknown reason", "Marten store").Message);
         }
 
         return new DatabaseStoreLookup(registration, store, ReadDeclarations(registration, store), null);
@@ -670,7 +670,7 @@ internal sealed class DatabaseAccess
     /// (<see cref="OtherStoreDatabaseIdAsync" />).
     /// </para>
     /// </remarks>
-    private async Task<IReadOnlyDictionary<string, DatabaseStoreAccess>> OtherStoresAsync(
+    internal async Task<IReadOnlyDictionary<string, DatabaseStoreAccess>> OtherStoresAsync(
         ResolvedScope resolved,
         DatabaseObjectClassifier classifier,
         bool capabilityEnabled,

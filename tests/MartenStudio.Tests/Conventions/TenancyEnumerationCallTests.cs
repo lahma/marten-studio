@@ -74,11 +74,12 @@ public class TenancyEnumerationCallTests
     /// </remarks>
     private static readonly AllowedSite[] AllowedSites =
     [
-        new("src/MartenStudio/Services/StudioScopeResolver.cs", "AllDatabases", 1,
-            "the instance: every resolution matches the URL's database by identity against what the store lists, "
-            + "never FindOrCreateDatabase, which would create the database a URL named"),
-        new("src/MartenStudio/Services/StudioScopeCatalog.cs", "AllDatabases", 2,
-            "names, for the database picker; and the instance tenant discovery reads, for the header"),
+        // PS-1a: the resolver's and the scope catalog's three enumerations are one call now, the Marten source's
+        // DatabasesAsync, which the shared resolver and catalog ask exactly where they used to ask the store.
+        new("src/MartenStudio/Services/MartenStudioSourceProvider.cs", "AllDatabases", 1,
+            "the instance and names: every resolution matches the URL's database by identity against what the store "
+            + "lists, never FindOrCreateDatabase, which would create the database a URL named; the database picker's "
+            + "names; and the instance tenant discovery reads, for the header"),
         new("src/MartenStudio/Services/StoreInfoService.cs", "AllDatabases", 1,
             "names, for the Overview's cards - one enumeration per store per load (F8-D3 C3)"),
         new("src/MartenStudio/Services/TenantDiscovery.cs", "DescribeDatabasesAsync", 1,

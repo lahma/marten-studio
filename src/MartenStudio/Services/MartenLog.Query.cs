@@ -16,7 +16,7 @@ namespace MartenStudio.Services;
 /// it; a page turn is not a new run.
 /// </para>
 /// </remarks>
-internal static partial class StudioLog
+internal static partial class MartenLog
 {
     [LoggerMessage(EventId = 9260, Level = LogLevel.Information, Message = "Marten Studio user {User} ran a LINQ query on {Alias} in store {StoreKey}, database {DatabaseId}, tenant {TenantId} in {ElapsedMilliseconds} ms returning {RowCount} rows: where {Where} order by {OrderBy}")]
     public static partial void LinqQueryExecuted(this ILogger logger, string user, string alias, string storeKey, string databaseId, string tenantId, long elapsedMilliseconds, int rowCount, string where, string orderBy);

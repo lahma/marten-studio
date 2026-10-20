@@ -119,7 +119,7 @@ public class BrowseDatabaseOptionsTests
     [Fact]
     public void ReadOnly_turns_BrowseDatabase_off_naming_the_master_switch()
     {
-        var guard = new StudioCapabilityGuard(Options.Create(new MartenStudioOptions
+        var guard = MartenSpine.Guard(Options.Create(new MartenStudioOptions
         {
             Capabilities = MartenStudioCapabilities.All(),
             ReadOnly = true,

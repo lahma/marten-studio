@@ -1,5 +1,7 @@
 using MartenStudio.Components;
 using MartenStudio.Components.Pages;
+using MartenStudio.Services.Settings;
+using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
 
@@ -18,7 +20,7 @@ namespace MartenStudio.Tests.Components;
 /// </remarks>
 public class StudioRouteTableTests
 {
-    private static MartenStudioOptions Options(string? path = null)
+    private static MartenStudio.Services.MartenStudioSettings Options(string? path = null)
     {
         MartenStudioOptions options = new();
         if (path is not null)
@@ -26,8 +28,74 @@ public class StudioRouteTableTests
             options.Path = path;
         }
 
-        return options;
+        return MartenSpine.Settings(options);
     }
+
+    private static StudioRouteTable Routes => MartenSpine.Routes;
+
+    // -------------------------------------------------------------------------------------------
+    // Built from the descriptor's (assembly, root) pairs
+    // -------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_descriptor_names_the_studio_assembly_rooted_at_marten()
+    {
+        MartenSpine.Descriptor.PageAssemblies.Should().ContainSingle()
+            .Which.Should().Be(new StudioPageAssembly(typeof(MartenStudioApp).Assembly, "/marten"));
+    }
+
+    [Fact]
+    public void Each_assembly_s_pages_are_matched_below_its_own_root()
+    {
+        StudioRouteTable table = new([(typeof(Activity), "/marten"), (typeof(ElsewherePage), "/elsewhere")]);
+
+        table.Match("activity")!.PageType.Should().Be<Activity>();
+        table.Match("other")!.PageType.Should().Be<ElsewherePage>();
+        table.Match("elsewhere/other").Should().BeNull("a template is stored relative to its own root");
+    }
+
+    [Fact]
+    public void A_route_two_pages_claim_is_refused_when_the_table_is_built()
+    {
+        Action build = () => _ = new StudioRouteTable([(typeof(Activity), "/marten"), (typeof(DuplicateActivityPage), "/elsewhere")]);
+
+        build.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Activity*DuplicateActivityPage*both claim the route '/activity'*");
+    }
+
+    [Fact]
+    public void A_route_claimed_twice_with_differently_named_parameters_is_one_route()
+    {
+        Action build = () => _ = new StudioRouteTable([(typeof(KeyedPage), "/elsewhere"), (typeof(OtherKeyedPage), "/elsewhere")]);
+
+        build.Should().Throw<InvalidOperationException>().WithMessage("*both claim the route*");
+    }
+
+    [Fact]
+    public void A_template_outside_its_assembly_s_root_is_refused()
+    {
+        Action build = () => _ = new StudioRouteTable([(typeof(ElsewherePage), "/marten")]);
+
+        build.Should().Throw<InvalidOperationException>().WithMessage("*'/elsewhere/other'*not rooted at '/marten'*");
+    }
+
+    [Fact]
+    public void Marten_studio_s_own_pages_build_one_table_with_no_duplicate()
+    {
+        new StudioRouteTable(MartenSpine.Descriptor.PageAssemblies).Match("database/object").Should().NotBeNull();
+    }
+
+    [Route("/elsewhere/other")]
+    private sealed class ElsewherePage : ComponentBase;
+
+    [Route("/elsewhere/activity")]
+    private sealed class DuplicateActivityPage : ComponentBase;
+
+    [Route("/elsewhere/things/{id}")]
+    private sealed class KeyedPage : ComponentBase;
+
+    [Route("/elsewhere/Things/{key}")]
+    private sealed class OtherKeyedPage : ComponentBase;
 
     [Theory]
     [InlineData(null, "")]
@@ -87,7 +155,7 @@ public class StudioRouteTableTests
     [InlineData("/ops/marten")]
     public void The_studio_root_matches_the_overview(string? path)
     {
-        StudioRouteTable.Match("", Options(path))!.PageType.Should().Be<Overview>();
+        Routes.Match("", Options(path))!.PageType.Should().Be<Overview>();
     }
 
     [Theory]
@@ -95,7 +163,7 @@ public class StudioRouteTableTests
     [InlineData("/ops/marten")]
     public void A_leaf_matches_its_page(string? path)
     {
-        StudioRouteTable.Match("activity", Options(path))!.PageType.Should().Be<Activity>();
+        Routes.Match("activity", Options(path))!.PageType.Should().Be<Activity>();
     }
 
     /// <summary>
@@ -108,22 +176,22 @@ public class StudioRouteTableTests
     [InlineData("/ops/marten", "ops/marten/activity")]
     public void A_still_prefixed_path_is_resolved_on_the_retry(string? path, string relative)
     {
-        MartenStudioOptions options = Options(path);
+        IStudioSettings options = Options(path);
 
-        StudioRouteTable.ResolveLeaf(relative, options).Should().Be("activity");
-        StudioRouteTable.Match(relative, options)!.PageType.Should().Be<Activity>();
+        Routes.ResolveLeaf(relative, options).Should().Be("activity");
+        Routes.Match(relative, options)!.PageType.Should().Be<Activity>();
     }
 
     [Fact]
     public void A_path_that_maps_to_nothing_matches_nothing()
     {
-        StudioRouteTable.Match("no-such-page", Options()).Should().BeNull();
+        Routes.Match("no-such-page", Options()).Should().BeNull();
     }
 
     [Fact]
     public void The_matched_route_carries_no_values_for_a_literal_page()
     {
-        RouteData routeData = StudioRouteTable.Match("activity", Options())!;
+        RouteData routeData = Routes.Match("activity", Options())!;
 
         routeData.RouteValues.Should().BeEmpty();
     }

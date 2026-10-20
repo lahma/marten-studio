@@ -4,7 +4,6 @@ using Bunit;
 
 using Marten;
 
-using MartenStudio.Components;
 using MartenStudio.Components.Pages.Database;
 using MartenStudio.Services;
 using MartenStudio.Services.Database;
@@ -31,7 +30,7 @@ public class DatabaseObjectsPageTests
     [Fact]
     public void The_studios_router_reaches_the_page()
     {
-        StudioRouteTable.Match("database")!.PageType.Should().Be<BrowserPage>();
+        MartenSpine.Routes.Match("database")!.PageType.Should().Be<BrowserPage>();
     }
 
     // ------------------------------------------------------------------------------------------------

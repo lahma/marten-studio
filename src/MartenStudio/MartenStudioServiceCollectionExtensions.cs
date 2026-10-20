@@ -1,23 +1,21 @@
 using System.Text.RegularExpressions;
 
-using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
 using MartenStudio.Services.Relationships;
 using MartenStudio.Services.Schema;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace MartenStudio;
@@ -57,13 +55,22 @@ public static partial class MartenStudioServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        // First, so that a second studio in this container is refused before anything of this one is registered.
+        // Everything the shared studio needs - the shell, the scope and audit services, the database browser,
+        // Sessions, the health advisor - is registered there; what follows is Marten Studio's own.
+        StudioCoreRegistration.Add(
+            services,
+            MartenStudioDescriptor.Marker,
+            MartenStudioDescriptor.Instance,
+            static provider => new MartenStudioSettings(provider.GetRequiredService<IOptions<MartenStudioOptions>>()));
+
         OptionsBuilder<MartenStudioOptions> optionsBuilder = services
             .AddOptions<MartenStudioOptions>()
             .Validate(
                 static options => !string.IsNullOrWhiteSpace(options.Path) && options.Path.StartsWith('/'),
                 "MartenStudioOptions.Path must start with '/'")
             .Validate(
-                static options => IsRoutableDashboardPath(options.Path),
+                static options => StudioPath.IsRoutable(options.Path),
                 "MartenStudioOptions.Path must be a simple URL path: it cannot contain '{', '}', '?', '#', '.' or '..' segments, or empty segments ('//')")
             .Validate(
                 static options => options.DefaultPageSize >= 1 && options.DefaultPageSize <= options.MaxPageSize,
@@ -112,50 +119,29 @@ public static partial class MartenStudioServiceCollectionExtensions
             optionsBuilder.Configure(configure);
         }
 
-        // Refuses to start an application whose mapped studio nothing authorizes. Registered here rather
-        // than at the map site, because a hosted service added to a built application is too late.
-        services.TryAddSingleton<MartenStudioMappedEndpoints>();
-        services.TryAddEnumerable(
-            ServiceDescriptor.Singleton<IHostedService, MartenStudioEndpointAuthorizationGuard>());
-
-        services.AddRazorComponents()
-            .AddInteractiveServerComponents();
-
-        // Deliberately no AddSignalR().AddJsonProtocol(...) and no JsonStringEnumConverter: those options
-        // belong to the whole application's SignalR and its own hubs must keep their own format
-        // (there is no studio hub in v1 - plan D10).
-        services.AddHttpContextAccessor();
-
         // The registry captures this collection and scans it lazily, on first use: AddMartenStudio() is
         // routinely called before AddMarten(), and a scan now would find no stores at all.
         services.TryAddSingleton(new MartenStoreRegistry(services));
 
-        services.TryAddSingleton<StudioCapabilityGuard>();
-        services.TryAddSingleton<StudioActionLogService>();
+        // The shared seams, answered in Marten's terms. The source provider is scoped like the tenant
+        // discovery it holds: a circuit's discovered tenants and its refresh button are its own.
+        services.TryAddScoped<IStudioSourceProvider, MartenStudioSourceProvider>();
+        services.TryAddSingleton<IStudioLinks, MartenStudioLinks>();
+        services.TryAddSingleton<ISessionLockLabeler, MartenSessionLockLabeler>();
+        services.TryAddScoped<IDatabaseDeclarationsSource, MartenDatabaseDeclarationsSource>();
+        services.TryAddSingleton<IHealthTableSource, MartenHealthTableSource>();
+        services.TryAddSingleton<IHealthRemedyProvider, MartenHealthRemedyProvider>();
+        services.TryAddScoped<ISqlConsoleService, MartenSqlConsoleService>();
+        services.TryAddScoped<IRelationshipNodeSource, MartenRelationshipNodeSource>();
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<INavIndicatorContributor, MartenNavIndicatorContributor>());
 
-        // DB-0: log hygiene
-        // One process-wide memory of which anomalies have already been reported, so a failure on a path
-        // every open page polls is a Warning once per store, database and exception type per ten minutes
-        // and Debug in between. The host's TimeProvider when it registered one, the system clock when not.
-        services.TryAddSingleton(static provider =>
-            new StudioLogThrottle(provider.GetService<TimeProvider>() ?? TimeProvider.System));
-
-        // Both read the database's catalog and cache what it said, keyed by database identity.
-        // Singletons because what they cache - a table's physical columns, a table's indexes - changes
-        // only with a schema migration and is the same answer for every circuit; a per-circuit cache
-        // would ask information_schema once per visitor per page.
-        services.TryAddSingleton<ColumnCatalog>();
+        // Reads a table's indexes for the Mode A index verdict and caches what it said, keyed by database
+        // identity, for the same reason as the shared column catalog.
         services.TryAddSingleton<IndexCatalog>();
 
-        // Scoped, because all five are about one circuit: what it is pointed at, who is driving it, and
-        // what it has been told.
-        services.TryAddScoped<StudioState>();
-        services.TryAddScoped<IStudioScopeCatalog, StudioScopeCatalog>();
-        services.TryAddScoped<StudioAuthorization>();
+        // Scoped, because each is about one circuit.
         services.TryAddScoped<StudioScopeResolver>();
         services.TryAddScoped<TenantDiscovery>();
-        services.TryAddScoped<StudioActionLog>();
-        services.TryAddScoped<ToastService>();
         services.TryAddScoped<IStoreInfoService, StoreInfoService>();
         services.TryAddScoped<IDocumentDataService, DocumentDataService>();
         services.TryAddScoped<DocumentBrowserState>();
@@ -170,74 +156,18 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<ILinqQueryService, LinqQueryService>();
         services.TryAddScoped<IRelationshipDataService, RelationshipDataService>();
 
-        // Projections and the async daemon. The four singletons are process-wide on purpose: one
-        // snapshot per interval however many circuits are watching, one tracker subscription per
-        // database however many pages are open, a rebuild that outlives the circuit that started it, and
-        // one record of which coordinators this process has paused - a pause is a fact about the process,
-        // and the circuit that reads it back is rarely the one that issued it.
-        services.TryAddSingleton<StudioSnapshotCache>();
+        // Projections and the async daemon. The three singletons are process-wide on purpose: one tracker
+        // subscription per database however many pages are open, a rebuild that outlives the circuit that
+        // started it, and one record of which coordinators this process has paused - a pause is a fact about
+        // the process, and the circuit that reads it back is rarely the one that issued it.
         services.TryAddSingleton<StudioLiveState>();
         services.TryAddSingleton<StudioOperationTracker>();
         services.TryAddSingleton<DaemonControlState>();
         services.TryAddScoped<DaemonAccessor>();
         services.TryAddScoped<IProjectionDataService, ProjectionDataService>();
 
-        // A factory rather than the loop itself: StudioLiveUpdates is IAsyncDisposable, and a transient
-        // registration would leave the circuit's container tracking one instance per page visit for the
-        // life of the circuit. The page owns the loop it creates.
-        services.TryAddScoped<StudioLiveUpdatesFactory>();
-
-        // The sidebar's badges. Scoped like the pages they point at, and reading through the same
-        // services, so a badge is subject to the same store, database and tenant policies as the screen.
-        services.TryAddScoped<INavIndicatorService, NavIndicatorService>();
-
-        // DB-1: database browser. The catalog is a singleton for the same reason ColumnCatalog is: what it
-        // caches is a fact about the database, the same for every circuit, and the per-visitor gate is
-        // applied after the cache. The gate and the service are about one circuit's visitor, so scoped.
-        // The notice logs event 9230 once at host start and changes nothing else about startup.
-        services.TryAddSingleton<DatabaseCatalog>();
-        services.TryAddScoped<DatabaseAccess>();
-        services.TryAddScoped<IDatabaseObjectService, DatabaseObjectService>();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, DatabaseBrowserConfigurationNotice>());
-
-        // DB-3: table rows. Scoped, like the gate it stands behind: it remembers, for this circuit only,
-        // which first page of a relation it has already audited, so a refresh is not a second opening.
-        services.TryAddScoped<ITableRowService, TableRowService>();
-
-        // DB-5: the Rows tab's per-circuit memory - "Run anyway" answers, keyset history and the page a row
-        // was opened from. Scoped, like DocumentBrowserState, so it is one browser tab's and nobody else's.
-        services.TryAddScoped<DatabaseBrowserState>();
-
-        // H1: the health advisor. The checks, their history and the one sweep per database per interval are
-        // process-wide singletons - a sweep's facts are about the database and the same for every circuit -
-        // and none of them runs anything on its own: no hosted service, no timer. A sweep happens when the
-        // Health page or the Overview asks. What a visitor is shown, what they muted and which Critical they
-        // have already been toasted about are that circuit's, so scoped.
-        services.TryAddSingleton<HealthCheckRegistry>();
-        services.TryAddSingleton<HealthHistory>();
-        services.TryAddSingleton<HealthSweeper>();
-        services.TryAddSingleton<HealthSweepCache>();
-
-        // H7: the statement checks' memory of the texts they have read, so a statement sweep whose statements are all
-        // known makes no text call - each one costs pg_stat_statements its whole query-text file.
-        services.TryAddSingleton<StatementTextCache>();
-        services.TryAddScoped<HealthMutes>();
-        services.TryAddScoped<HealthAlerts>();
-        services.TryAddScoped<IHealthService, HealthService>();
-
-        // H3: Database > Sessions and the connection checks. The pool observer is a singleton because a
-        // MeterListener is process-wide, and it listens only while a sweep or an open Sessions page holds a
-        // lease. The session snapshot is the database's, shared by every circuit for ten seconds; what a
-        // visitor is shown of it, and which first read this circuit has audited, are the circuit's.
-        services.TryAddSingleton<SessionPoolObserver>();
-        services.TryAddSingleton<ISessionActivityReader, SessionActivityReader>();
-        services.TryAddSingleton<SessionActivitySnapshots>();
-        services.TryAddScoped<ISessionActivityService, SessionActivityService>();
-
         return services;
     }
-
-    private static readonly char[] InvalidDashboardPathChars = ['{', '}', '?', '#'];
 
     /// <summary>
     /// A Postgres role name as <c>SET LOCAL ROLE</c> will accept it. The console's role cannot be a
@@ -246,39 +176,4 @@ public static partial class MartenStudioServiceCollectionExtensions
     /// </summary>
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_$]{0,62}$", RegexOptions.CultureInvariant)]
     private static partial Regex PostgresRoleName();
-
-    /// <summary>
-    /// Validates that <see cref="MartenStudioOptions.Path"/> is a plain URL path: the value is
-    /// concatenated into route templates (where <c>{</c>/<c>}</c> would be parsed as route parameters)
-    /// and percent-encoded for client-side comparisons (where <c>?</c>/<c>#</c> and <c>.</c>/<c>..</c>
-    /// segments would be truncated or collapsed, diverging from the server route).
-    /// </summary>
-    internal static bool IsRoutableDashboardPath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            // the empty/whitespace case is reported by the "must start with '/'" validation
-            return true;
-        }
-
-        string trimmed = path.Trim().Trim('/');
-        if (trimmed.Length == 0)
-        {
-            // normalizes to the default "/marten"
-            return true;
-        }
-
-        foreach (string segment in trimmed.Split('/'))
-        {
-            if (segment.Length == 0
-                || segment == "."
-                || segment == ".."
-                || segment.IndexOfAny(InvalidDashboardPathChars) >= 0)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
 }

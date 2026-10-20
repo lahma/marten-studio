@@ -191,7 +191,7 @@ internal sealed class MartenStudioEndpointAuthorizationGuard : IHostedLifecycleS
             }
 
             routes.Sort(StringComparer.Ordinal);
-            message.AppendLine("Marten Studio is mapped with no authorization. Its pages can read and edit every document in every Marten store in this process, archive event streams, control the projection daemon, apply schema changes and run SQL, so Marten Studio refuses to start rather than serve that by accident. Say which you meant:")
+            message.AppendLine(marker.Exposure ?? marker.Surface + " is mapped with no authorization, so it refuses to start rather than serve its pages to anyone by accident. Say which you meant:")
                 .AppendLine(marker.Remedies)
                 .Append("A non-null AuthorizationOptions.FallbackPolicy satisfies this too, since it covers every endpoint that states nothing. Unauthorized: ")
                 .Append(string.Join(", ", routes.Take(MaxRoutesNamed)))

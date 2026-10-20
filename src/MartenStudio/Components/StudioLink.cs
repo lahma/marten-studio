@@ -17,11 +17,13 @@
  */
 #endregion
 
+using MartenStudio.Services.Settings;
+
 namespace MartenStudio.Components;
 
 /// <summary>
 /// Builds dashboard link URLs relative to the application base URI so they honor the configured
-/// <see cref="MartenStudioOptions.Path"/> and any path base set by the host or a
+/// mount path (<see cref="IStudioSettings.TrimmedPath"/>) and any path base set by the host or a
 /// reverse proxy (relative URLs resolve against the rendered &lt;base href&gt;).
 /// </summary>
 internal static class StudioLink
@@ -29,18 +31,18 @@ internal static class StudioLink
     /// <summary>
     /// The href for a page below the studio root.
     /// </summary>
-    /// <param name="options">
-    /// The studio's options. Not read: <see cref="MartenStudioApp" /> renders a studio-rooted
+    /// <param name="settings">
+    /// The studio's settings. Not read: <see cref="StudioDocument" /> renders a studio-rooted
     /// <c>&lt;base href&gt;</c> for every mount now, so the answer no longer depends on the configured
     /// path. The parameter stays because it is what every call site passes and because a future shape
-    /// that does depend on the options must not be a signature change across all of them.
+    /// that does depend on the settings must not be a signature change across all of them.
     /// </param>
     /// <param name="subPath">The path below the studio root, with no leading slash.</param>
-    internal static string To(MartenStudioOptions options, string subPath)
+    internal static string To(IStudioSettings settings, string subPath)
     {
         // Relative to the studio-rooted document base; an empty href resolves to the base URI
         // (RFC 3986 §5.4), which is the studio's own front page.
-        _ = options;
+        _ = settings;
         return subPath;
     }
 
@@ -52,7 +54,7 @@ internal static class StudioLink
     /// prefix, while on the interactive circuit the base URI is the studio root itself (the rendered
     /// &lt;base href&gt;).
     /// </summary>
-    internal static string? ToDashboardRelativePath(string uri, string baseUri, MartenStudioOptions options)
+    internal static string? ToDashboardRelativePath(string uri, string baseUri, IStudioSettings settings)
     {
         string? relative = ToBaseRelative(uri, baseUri);
         if (relative is null)
@@ -69,7 +71,7 @@ internal static class StudioLink
         // the base URI's PATH (not the whole absolute URI, whose host name could otherwise spuriously
         // match the studio path) in its percent-encoded form (browsers emit encoded URIs); the leading
         // slash keeps the EndsWith segment-aligned.
-        if (GetAbsolutePath(baseUri).TrimEnd('/').EndsWith(options.EscapedPath, StringComparison.OrdinalIgnoreCase))
+        if (GetAbsolutePath(baseUri).TrimEnd('/').EndsWith(settings.EscapedPath, StringComparison.OrdinalIgnoreCase))
         {
             return relative;
         }
@@ -78,7 +80,7 @@ internal static class StudioLink
         // the only shape used in default-path mode) and the base-relative path carries the studio
         // path prefix; strip it. A path-base-rooted URI without the prefix (e.g. the application
         // root itself) is not a dashboard location.
-        return TryStripDashboardPrefix(relative, options, out string stripped) ? stripped : null;
+        return TryStripDashboardPrefix(relative, settings, out string stripped) ? stripped : null;
     }
 
     /// <summary>
@@ -87,9 +89,9 @@ internal static class StudioLink
     /// studio root) when the path is under the studio root, otherwise <see langword="false"/>.
     /// The comparison uses the percent-encoded dashboard path, matching browser-emitted URIs.
     /// </summary>
-    internal static bool TryStripDashboardPrefix(string normalizedPath, MartenStudioOptions options, out string stripped)
+    internal static bool TryStripDashboardPrefix(string normalizedPath, IStudioSettings settings, out string stripped)
     {
-        string dashboardRoot = options.EscapedPath.TrimStart('/');
+        string dashboardRoot = settings.EscapedPath.TrimStart('/');
         if (normalizedPath.Equals(dashboardRoot, StringComparison.OrdinalIgnoreCase))
         {
             stripped = string.Empty;

@@ -286,7 +286,7 @@ public class DocumentWritePolicyTests
         TestAuthenticationStateProvider visitor = new();
         visitor.SignIn("tester");
 
-        return new StudioAuthorization(Options.Create(options), policies, visitor);
+        return MartenSpine.Authorization(Options.Create(options), policies, visitor);
     }
 
     private static IRenderedComponent<DetailPage> RenderDetail(DocumentsComponentContext context)

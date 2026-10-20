@@ -59,7 +59,7 @@ public class MartenStudioOptionsTest
         options.Capabilities.RunLinqQueries.Should().BeFalse();
         foreach (var capability in StudioCapabilityGuard.All)
         {
-            new StudioCapabilityGuard(Options.Create(options)).IsEnabled(capability).Should().BeFalse();
+            Support.MartenSpine.Guard(Options.Create(options)).IsEnabled(capability).Should().BeFalse();
         }
     }
 
@@ -304,7 +304,7 @@ public class MartenStudioOptionsTest
     [Fact]
     public void Every_capability_is_off_by_default()
     {
-        var guard = new StudioCapabilityGuard(Options.Create(new MartenStudioOptions()));
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenStudioOptions()));
 
         guard.EnabledCount.Should().Be(0);
         guard.ReadOnly.Should().BeFalse();
@@ -313,7 +313,7 @@ public class MartenStudioOptionsTest
     [Fact]
     public void All_turns_on_every_capability()
     {
-        var guard = new StudioCapabilityGuard(Options.Create(new MartenStudioOptions
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenStudioOptions
         {
             Capabilities = MartenStudioCapabilities.All()
         }));
@@ -328,7 +328,7 @@ public class MartenStudioOptionsTest
     [Fact]
     public void ReadOnly_overrides_every_capability_however_they_were_configured()
     {
-        var guard = new StudioCapabilityGuard(Options.Create(new MartenStudioOptions
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenStudioOptions
         {
             Capabilities = MartenStudioCapabilities.All(),
             ReadOnly = true
@@ -362,7 +362,7 @@ public class MartenStudioOptionsTest
         var capabilities = new MartenStudioCapabilities();
         typeof(MartenStudioCapabilities).GetProperty(capabilityName)!.SetValue(capabilities, true);
 
-        var guard = new StudioCapabilityGuard(Options.Create(new MartenStudioOptions { Capabilities = capabilities }));
+        var guard = Support.MartenSpine.Guard(Options.Create(new MartenStudioOptions { Capabilities = capabilities }));
 
         guard.EnabledCount.Should().Be(1);
         guard.IsEnabled(enabled).Should().BeTrue();

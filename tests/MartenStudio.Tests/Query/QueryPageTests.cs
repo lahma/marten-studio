@@ -373,7 +373,7 @@ public class QueryPageTests
     public void A_capability_refusal_from_the_service_is_shown_rather_than_killing_the_circuit()
     {
         FakeQueryService service = WithPerson();
-        service.SqlFailure = new StudioCapabilityDeniedException(
+        service.SqlFailure = Support.MartenSpine.Denied(
             StudioCapability.RunSql, CapabilityDenialReason.Disabled);
 
         using StudioComponentContext context = CreateContext(service, runSql: true);

@@ -77,17 +77,9 @@ public class DocumentWriteServiceTests
 
         var users = new TestAuthenticationStateProvider();
         var authorizationService = new TestStoreAuthorizationService();
-        var authorization = new StudioAuthorization(wrapped, authorizationService, users);
+        var authorization = MartenSpine.Authorization(wrapped, authorizationService, users);
         var tenants = new TenantDiscovery(wrapped, NullLogger<TenantDiscovery>.Instance);
-        var resolver = new StudioScopeResolver(wrapped, registry, authorization, tenants, provider);
-
-        var catalog = new StudioScopeCatalog(
-            wrapped,
-            registry,
-            authorization,
-            tenants,
-            provider,
-            NullLogger<StudioScopeCatalog>.Instance);
+        var (_, catalog, resolver) = MartenSpine.Scope(wrapped, registry, authorization, tenants, provider);
         var state = new StudioState(catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
 
         var ring = new StudioActionLogService();
@@ -96,7 +88,7 @@ public class DocumentWriteServiceTests
         var audit = new StudioActionLog(ring, factory.CreateLogger<StudioActionLog>(), users, state);
 
         var service = new DocumentWriteService(
-            new StudioCapabilityGuard(wrapped),
+            MartenSpine.Guard(wrapped),
             resolver,
             audit,
             new ColumnCatalog(),

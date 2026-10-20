@@ -5,6 +5,7 @@ using MartenStudio.Services;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
+using MartenStudio.Services.Settings;
 using MartenStudio.Tests.Events;
 using MartenStudio.Tests.Projections;
 using MartenStudio.Tests.Support;
@@ -78,6 +79,14 @@ internal class StudioComponentContext : BunitContext
 
         Services.AddLogging(static builder => builder.SetMinimumLevel(LogLevel.Warning));
         Services.AddSingleton<IOptions<MartenStudioOptions>>(Microsoft.Extensions.Options.Options.Create(Options));
+
+        // What the shared shell reads in place of the options: the live settings adapter over the same options
+        // instance - so WithPolicy, WithReadOnly and every test that sets an option after construction are seen - the
+        // descriptor, and the links into MartenStudio's own screens.
+        Services.AddSingleton<IStudioSettings>(static provider =>
+            new MartenStudioSettings(provider.GetRequiredService<IOptions<MartenStudioOptions>>()));
+        Services.AddSingleton(MartenStudioDescriptor.Instance);
+        Services.AddSingleton<IStudioLinks, MartenStudioLinks>();
         Services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
         Services.AddSingleton<IStudioScopeCatalog>(Catalog);
         Services.AddSingleton<IStoreInfoService>(StoreInfo);

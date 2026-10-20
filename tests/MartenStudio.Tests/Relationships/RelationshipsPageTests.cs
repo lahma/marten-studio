@@ -33,7 +33,7 @@ public class RelationshipsPageTests
     [Fact]
     public void The_studios_router_reaches_the_page()
     {
-        MartenStudio.Components.StudioRouteTable.Match("relationships")
+        MartenSpine.Routes.Match("relationships")
             .Should().NotBeNull()
             .And.Subject.As<Microsoft.AspNetCore.Components.RouteData>()
             .PageType.Should().Be<RelationshipsPage>();

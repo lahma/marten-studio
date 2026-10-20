@@ -10,7 +10,6 @@ using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -289,18 +288,16 @@ public class StudioScopeCatalogTenantFilterTests
             users.SignIn("tester");
 
             var policies = new TestStoreAuthorizationService();
-            var authorization = new StudioAuthorization(Options.Create(options), policies, users);
+            var authorization = MartenSpine.Authorization(Options.Create(options), policies, users);
 
-            var catalog = new StudioScopeCatalog(
+            var (_, catalog, _) = MartenSpine.Scope(
                 Options.Create(options),
                 new MartenStoreRegistry(services),
                 authorization,
                 new TenantDiscovery(Options.Create(options), NullLogger<TenantDiscovery>.Instance),
                 provider,
-                logs is null
-                    ? NullLogger<StudioScopeCatalog>.Instance
-                    : logs.CreateFactory().CreateLogger<StudioScopeCatalog>(),
-                new StudioLogThrottle(new FakeTimeProvider(new DateTimeOffset(2026, 9, 29, 12, 0, 0, TimeSpan.Zero))));
+                new StudioLogThrottle(new FakeTimeProvider(new DateTimeOffset(2026, 9, 29, 12, 0, 0, TimeSpan.Zero))),
+                logs?.CreateFactory());
 
             IReadOnlyList<IMartenDatabase> databases = await provider.GetRequiredService<IDocumentStore>().Storage.AllDatabases();
 

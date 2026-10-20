@@ -91,8 +91,9 @@ public class NoJsInitializerTests
     {
         File.Exists(Path.Combine(WebRoot, "js", "marten-studio.js")).Should().BeTrue();
 
+        // The shared document every studio's root component renders (0.5, PS-1a): MartenStudioApp is its root only.
         string shell = File.ReadAllText(
-            RepositoryRoot.Combine("src", "MartenStudio", "Components", "MartenStudioApp.razor"));
+            RepositoryRoot.Combine("src", "MartenStudio", "Components", "StudioDocument.razor"));
 
         shell.Should().Contain($"<script src=\"{HelperScript}\">",
             "the shell is what loads the helpers now that no convention does it");

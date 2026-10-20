@@ -49,6 +49,13 @@ internal sealed record NavIndicators(
 
     /// <summary>Whether the Health entry carries a count.</summary>
     public bool ShowHealthBadge => Health?.Worst is not null;
+
+    /// <summary>
+    /// The badges beyond the health glance, keyed as the descriptor's sidebar entries name them - what the shared
+    /// sidebar draws (PS-1a). PS-1d fills these from the registered <c>INavIndicatorContributor</c>s instead.
+    /// </summary>
+    public IReadOnlyDictionary<string, MartenStudio.Services.Settings.StudioNavBadge> Badges =>
+        MartenNavBadges.From(DeadLetters, ProjectionsNeedAttention, ProjectionsExplanation);
 }
 
 /// <summary>
@@ -235,7 +242,7 @@ internal sealed class NavIndicatorService : INavIndicatorService
             Explain(summary));
     }
 
-    private static string? Explain(ProjectionSummary summary)
+    internal static string? Explain(ProjectionSummary summary)
     {
         if (summary.Error is not null || !summary.NeedsAttention)
         {

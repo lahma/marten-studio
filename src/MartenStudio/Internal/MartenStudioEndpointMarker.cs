@@ -22,14 +22,14 @@
 namespace MartenStudio.Internal;
 
 /// <summary>
-/// Endpoint metadata saying "Marten Studio mapped this", so <see cref="MartenStudioEndpointAuthorizationGuard" /> can
-/// tell the endpoints Marten Studio added from the application's own.
+/// Endpoint metadata saying "the studio mapped this", so <see cref="MartenStudioEndpointAuthorizationGuard" /> can
+/// tell the endpoints a studio added from the application's own.
 /// </summary>
 /// <remarks>
 /// A marker rather than a route-pattern comparison: both surfaces can be served under a path the
 /// application chose, the studio's pages come out of a Razor components data source it does not own
-/// outright, and an application is free to map its own routes under the same prefix. What Marten Studio
-/// put there is the only thing Marten Studio has any business refusing to start over.
+/// outright, and an application is free to map its own routes under the same prefix. What the studio
+/// put there is the only thing the studio has any business refusing to start over.
 /// </remarks>
 internal sealed class MartenStudioEndpointMarker
 {
@@ -41,7 +41,7 @@ internal sealed class MartenStudioEndpointMarker
     /// which is a statement about what a person can open in a browser.
     /// </param>
     /// <param name="authorizedByOptions">
-    /// Whether a Marten Studio option has already stated an authorization rule for this endpoint that is
+    /// Whether a studio option has already stated an authorization rule for this endpoint that is
     /// enforced elsewhere rather than by <c>IAuthorizeData</c> metadata, so it is invisible to the
     /// metadata check and has to be said here.
     /// </param>
@@ -69,7 +69,13 @@ internal sealed class MartenStudioEndpointMarker
     public string Remedies { get; }
 
     /// <summary>
-    /// Whether Marten Studio's own options already authorize this endpoint.
+    /// The startup failure's lead sentence: what this surface would serve unauthorized, and that it refuses to start
+    /// (<c>StudioDescriptor.Exposure</c>). <see langword="null" /> words it from <see cref="Surface" /> alone.
+    /// </summary>
+    public string? Exposure { get; init; }
+
+    /// <summary>
+    /// Whether the studio's own options already authorize this endpoint.
     /// </summary>
     public bool AuthorizedByOptions { get; }
 }
