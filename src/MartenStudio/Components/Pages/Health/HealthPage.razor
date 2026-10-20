@@ -1,14 +1,14 @@
 @page "/marten/health"
-@using MartenStudio.Services.Events
 @using MartenStudio.Services.Health
 @using MartenStudio.Services.Live
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @implements IAsyncDisposable
 @inject IHealthService HealthData
 @inject HealthMutes Mutes
 @inject StudioState State
 @inject StudioLiveUpdatesFactory LiveFactory
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 @inject IJSRuntime JsRuntime
 
 <PageTitle>Health</PageTitle>
@@ -296,7 +296,7 @@
         }
 
         live = LiveFactory.Create();
-        await live.StartAsync(Options.Value.EffectiveHealthInterval, TickAsync, token);
+        await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, token);
     }
 
     private async Task TickAsync(CancellationToken _)
@@ -439,7 +439,7 @@
                         @if (remedy.Requires is { } feature)
                         {
                             <span class="@(finding.RemedyAvailable ? "ms-health-requirement" : "ms-health-requirement ms-health-requirement-missing")">
-                                @RequirementText(finding, feature.Requirement)
+                                @RequirementText(finding, feature.Needs)
                             </span>
                         }
                         <CopyButton Value="@remedy.Code" Label="@("Copy the remedy for " + finding.Code)" />
@@ -455,7 +455,7 @@
             @if (finding.Finding.Link is { } link)
             {
                 <p class="ms-health-link">
-                    <a href="@EventLinks.To(Options.Value, link.Route, State.ActiveScope, link.Query)">@link.Label</a>
+                    <a href="@HealthLinks.To(Settings, Descriptor.SourceQueryParameter, link.Route, State.ActiveScope, link.Query)">@link.Label</a>
                 </p>
             }
 

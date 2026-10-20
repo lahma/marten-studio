@@ -295,8 +295,11 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
         await using HealthLiveHost host = await HealthLiveHost.CreateAsync(postgres, "health_t12_fires");
         await ApplyAsync(host.Store);
 
-        await using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
-        await using HealthConnection connection = new(host.Store.Storage.Database);
+        // The shared table checks read the store's tables through the studio's table source, as a sweep's scope has it.
+        await using ServiceProvider services = new ServiceCollection()
+            .AddSingleton<MartenStudio.Services.Sources.IHealthTableSource, MartenHealthTableSource>()
+            .BuildServiceProvider();
+        await using HealthConnection connection = new(MartenStudioDatabase.Of(host.Store.Storage.Database));
 
         HealthCheckContext context = new(
             new ResolvedScope(
@@ -304,8 +307,8 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
                 new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
                 host.Store,
                 host.Store.Storage.Database),
-            new MartenStudioOptions(),
-            MartenRuntime.Current,
+            MartenStudioSettings.Of(new MartenStudioOptions()),
+            MartenStudioRuntime.Current,
             services,
             new HealthSqlRunner(connection, new ReadOnlySqlOptions(), null),
             DateTimeOffset.UtcNow,

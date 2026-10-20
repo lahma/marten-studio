@@ -1,10 +1,10 @@
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Database;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace MartenStudio.Services.Health;
 
@@ -123,9 +123,9 @@ internal sealed class HealthService : IHealthService
 
     /// <summary>
     /// How long this circuit trusts its answer to "is this tenant one of this database's": tenant discovery's own
-    /// window (<see cref="TenantDiscovery" />). The answer is read through discovery's own minute-long list, so it can be
-    /// up to two minutes behind a tenant that moved; the scope selector's refresh, which clears discovery's list,
-    /// clears this as well (<see cref="TenantDiscovery.Generation" />).
+    /// window. The answer is read through the source's own minute-long list, so it can be up to two minutes behind a
+    /// tenant that moved; the scope selector's refresh, which clears that list, clears this as well
+    /// (<see cref="IStudioSourceProvider.Generation" />).
     /// </summary>
     internal static readonly TimeSpan TenantPlacementTimeToLive = TimeSpan.FromSeconds(60);
 
@@ -137,8 +137,8 @@ internal sealed class HealthService : IHealthService
     private readonly Lock placementGate = new();
     private int tenantPlacements;
 
-    private readonly IOptions<MartenStudioOptions> options;
-    private readonly StudioScopeResolver resolver;
+    private readonly IStudioSettings settings;
+    private readonly StudioSourceResolver resolver;
     private readonly StudioAuthorization authorization;
     private readonly StudioCapabilityGuard capabilities;
     private readonly HealthSweepCache cache;
@@ -147,14 +147,14 @@ internal sealed class HealthService : IHealthService
     private readonly HealthMutes mutes;
     private readonly IServiceProvider services;
     private readonly ILogger<HealthService> logger;
-    private readonly MartenRuntime runtime;
+    private readonly IStudioRuntime runtime;
     private readonly StudioDatabaseTime meter;
-    private readonly TenantDiscovery tenantDiscovery;
+    private readonly IStudioSourceProvider sources;
 
     public HealthService(
-        IOptions<MartenStudioOptions> options,
-        StudioScopeResolver resolver,
-        TenantDiscovery tenantDiscovery,
+        IStudioSettings settings,
+        StudioSourceResolver resolver,
+        IStudioSourceProvider sources,
         StudioAuthorization authorization,
         StudioCapabilityGuard capabilities,
         HealthSweepCache cache,
@@ -163,12 +163,12 @@ internal sealed class HealthService : IHealthService
         HealthMutes mutes,
         IServiceProvider services,
         ILogger<HealthService> logger,
-        MartenRuntime? runtime = null,
+        IStudioRuntime? runtime = null,
         StudioDatabaseTime? meter = null)
     {
-        this.options = options;
+        this.settings = settings;
         this.resolver = resolver;
-        this.tenantDiscovery = tenantDiscovery;
+        this.sources = sources;
         this.authorization = authorization;
         this.capabilities = capabilities;
         this.cache = cache;
@@ -177,7 +177,7 @@ internal sealed class HealthService : IHealthService
         this.mutes = mutes;
         this.services = services;
         this.logger = logger;
-        this.runtime = runtime ?? MartenRuntime.Current;
+        this.runtime = runtime ?? NoStudioRuntime.Instance;
         this.meter = meter ?? StudioDatabaseTime.Shared;
     }
 
@@ -189,7 +189,7 @@ internal sealed class HealthService : IHealthService
     {
         get
         {
-            TimeSpan three = options.Value.EffectiveHealthInterval * 3;
+            TimeSpan three = settings.EffectiveHealthInterval * 3;
             return three > TimeSpan.FromMinutes(5) ? three : TimeSpan.FromMinutes(5);
         }
     }
@@ -203,7 +203,7 @@ internal sealed class HealthService : IHealthService
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(request);
 
-        ResolvedScope resolved;
+        ResolvedSource resolved;
 
         try
         {
@@ -220,9 +220,11 @@ internal sealed class HealthService : IHealthService
 
         // The store by its registered key and the database by its identity - not the visitor's spelling of either, a store
         // key matching in any case and a database id often empty (D29) - for every question, the audit and the mute keys.
-        string storeKey = resolved.Registration.Key;
-        string databaseId = resolved.Database.Id.Identity;
-        ResolvedScope whole = new(new StudioScope(storeKey, databaseId, null), resolved.Registration, resolved.Store, resolved.Database);
+        // A copy of the resolver's own record with the scope replaced, never one rebuilt from its parts: a studio's checks
+        // read the record's subtype (MartenStudio's ResolvedScope).
+        string storeKey = resolved.Source.Key;
+        string databaseId = resolved.Target.Identity;
+        ResolvedSource whole = resolved with { Scope = new StudioScope(storeKey, databaseId, null) };
 
         VisitorGate gate = new(this, whole.Scope);
 
@@ -283,7 +285,7 @@ internal sealed class HealthService : IHealthService
             WithheldReason = reasons.Count == 0 ? null : string.Join("; ", reasons),
             Checks = statuses,
             History = history.Read(storeKey, databaseId).Describe(cache.Now),
-            Cost = database ? meter.Total(CostKey(resolved.Database)) : null,
+            Cost = database ? meter.Total(CostKey(resolved.Target)) : null,
             CostWithheld = database ? null : gate.WhyNot(HealthGate.Database),
             DeeperChecksExist = deeperExist,
             DeeperChecksAllowed = deeperAllowed,
@@ -353,9 +355,9 @@ internal sealed class HealthService : IHealthService
     /// The key the studio-cost meter files this database under - read off an unopened connection's settings,
     /// which costs no I/O.
     /// </summary>
-    private static string CostKey(Marten.Storage.IMartenDatabase database)
+    private static string CostKey(IStudioDatabase database)
     {
-        using Npgsql.NpgsqlConnection connection = database.CreateConnection(Marten.Storage.ConnectionUsage.ReadWrite);
+        using Npgsql.NpgsqlConnection connection = database.CreateConnection(StudioConnectionUsage.ReadWrite);
         return StudioDatabaseTime.KeyOf(connection);
     }
 
@@ -420,7 +422,7 @@ internal sealed class HealthService : IHealthService
     /// a fact about the database, not about the visitor - is remembered per store, database and tenant for
     /// <see cref="TenantPlacementTimeToLive" />, tenant discovery's own window, and for this circuit only. It is read
     /// through discovery's own minute-long list, so it can lag a tenant that moved by up to two minutes; the scope
-    /// selector's refresh moves <see cref="TenantDiscovery.Generation" />, and an answer read under an earlier generation
+    /// selector's refresh moves <see cref="IStudioSourceProvider.Generation" />, and an answer read under an earlier generation
     /// is read again. A refusal by the policy and a store that would not build are not facts about the database and are
     /// never remembered. Anything that refuses or fails answers <see langword="false" /> - a decoration fails closed and
     /// quietly.
@@ -444,7 +446,7 @@ internal sealed class HealthService : IHealthService
         DateTimeOffset now = cache.Now;
 
         // Taken before the resolve: a refresh that lands while it runs leaves this answer a generation behind.
-        long generation = tenantDiscovery.Generation;
+        long generation = sources.Generation;
 
         lock (placementGate)
         {
@@ -500,7 +502,7 @@ internal sealed class HealthService : IHealthService
     /// never from the request alone - and otherwise only a recent one still in the cache.
     /// </summary>
     private async Task<HealthSweep?> SweepOfAsync(
-        ResolvedScope whole,
+        ResolvedSource whole,
         HealthSweepKind kind,
         bool start,
         StudioScope scope,
@@ -561,7 +563,7 @@ internal sealed class HealthService : IHealthService
                     : finding.TenantId is not null && !await gate.TenantAsync(finding.TenantId).ConfigureAwait(false)
                         ? "names a tenant the store policy does not show you"
                         : finding.GatedSchemas.Count > 0
-                            ? await SchemaRefusalAsync(finding.GatedSchemas, browserGate).ConfigureAwait(false)
+                            ? await SchemaRefusalAsync(settings, finding.GatedSchemas, browserGate).ConfigureAwait(false)
                             : null;
 
                 if (reason is not null)
@@ -593,7 +595,7 @@ internal sealed class HealthService : IHealthService
                         // Another program's text, masked for this visitor by Database › Sessions' own rule - and never
                         // handed on as it is: the item a page receives carries only what this visitor may read.
                         StatementScreen visitor = screen is null
-                            ? StatementScreen.Unchecked(options.Value.IsDocumentTypeVisible is not null)
+                            ? StatementScreen.Unchecked(settings.IsDocumentTypeVisible is not null)
                             : await screen().ConfigureAwait(false);
 
                         SessionStatementText masked = SessionQueryText.Present(statement.Text, statement.Truncated, visitor);
@@ -610,8 +612,8 @@ internal sealed class HealthService : IHealthService
                     activityShown.Add(finding.Code);
                 }
 
-                RuntimeFeature? feature = finding.Remedy?.Requires;
-                bool available = feature is null || feature.IsAvailable(runtime);
+                StudioFeatureRequirement? feature = finding.Remedy?.Requires;
+                bool available = feature is null || runtime.IsAvailable(feature);
 
                 shown.Add(new HealthReportFinding(
                     finding,
@@ -619,7 +621,7 @@ internal sealed class HealthService : IHealthService
                     MuteKeyOf(storeKey, databaseId, finding),
                     result.Check.DocsUrl,
                     available,
-                    available || feature is null ? null : runtime.DescribeHost(feature.Package)));
+                    available || feature is null ? null : runtime.DescribeHost(feature)));
             }
         }
 
@@ -659,10 +661,19 @@ internal sealed class HealthService : IHealthService
         return (shown, withheld, reasons);
     }
 
-    /// <summary>What withholds a finding naming a table in a schema outside the store's own from a visitor short of the browser's gate.</summary>
-    internal const string WithheldSchemaReason =
-        "names a table in a schema the database browser does not show you (it needs MartenStudioOptions.Capabilities.BrowseDatabase, "
-        + "the write policy and a BrowsableSchemas entry for that schema)";
+    /// <summary>
+    /// What withholds a finding naming a table in a schema outside the store's own from a visitor short of the browser's
+    /// gate - naming the option the way the studio's own registration spells it.
+    /// </summary>
+    /// <param name="settings">The studio's settings.</param>
+    internal static string WithheldSchemaReasonFor(IStudioSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        return "names a table in a schema the database browser does not show you (it needs "
+            + settings.CapabilityOption(StudioCapability.BrowseDatabase)
+            + ", the write policy and a BrowsableSchemas entry for that schema)";
+    }
 
     /// <summary>What withholds such a finding when the browser's gate could not be read for this visitor.</summary>
     internal const string UncheckedSchemaReason =
@@ -676,7 +687,10 @@ internal sealed class HealthService : IHealthService
     /// Asked with <see cref="DatabaseGate.IsWithheld" />, not against <see cref="DatabaseGate.WithheldSchemas" />: a schema
     /// created after the gate's schema list was read is in neither list, and the gate counts it as withheld.
     /// </remarks>
-    private static async Task<string?> SchemaRefusalAsync(IReadOnlyList<string> schemas, Func<Task<DatabaseGateRead?>>? browserGate)
+    private static async Task<string?> SchemaRefusalAsync(
+        IStudioSettings settings,
+        IReadOnlyList<string> schemas,
+        Func<Task<DatabaseGateRead?>>? browserGate)
     {
         DatabaseGateRead? read = browserGate is null ? null : await browserGate().ConfigureAwait(false);
 
@@ -686,7 +700,7 @@ internal sealed class HealthService : IHealthService
         }
 
         DatabaseGate gate = read.Gate;
-        return schemas.Any(gate.IsWithheld) ? WithheldSchemaReason : null;
+        return schemas.Any(gate.IsWithheld) ? WithheldSchemaReasonFor(settings) : null;
     }
 
     /// <summary>
@@ -694,7 +708,7 @@ internal sealed class HealthService : IHealthService
     /// statement masking, findings about tables outside the store's own schemas and Postgres' words - or
     /// <see langword="null" /> when it cannot be read, which withholds all three.
     /// </summary>
-    private async Task<DatabaseGateRead?> BrowserGateAsync(ResolvedScope whole, CancellationToken cancellationToken)
+    private async Task<DatabaseGateRead?> BrowserGateAsync(ResolvedSource whole, CancellationToken cancellationToken)
     {
         if (services.GetService<DatabaseAccess>() is not { } access)
         {
@@ -849,7 +863,7 @@ internal sealed class HealthService : IHealthService
     /// </summary>
     private async Task<StatementScreen> StatementScreenAsync(Func<Task<DatabaseGateRead?>> browserGate)
     {
-        bool hidesDocumentTypes = options.Value.IsDocumentTypeVisible is not null;
+        bool hidesDocumentTypes = settings.IsDocumentTypeVisible is not null;
 
         DatabaseGateRead? read = await browserGate().ConfigureAwait(false);
         return read is null ? StatementScreen.Unchecked(hidesDocumentTypes) : StatementScreen.Of(read, hidesDocumentTypes);
@@ -893,7 +907,7 @@ internal sealed class HealthService : IHealthService
         public string WhyNot(HealthGate gate) => gate switch
         {
             HealthGate.Database => "needs the store policy to allow this database as a whole, with no tenant selected in the policy's resource",
-            HealthGate.Activity => activityRefusal ?? "needs " + StudioCapabilityGuard.OptionName(StudioCapability.ViewDatabaseActivity),
+            HealthGate.Activity => activityRefusal ?? "needs " + owner.capabilities.OptionFor(StudioCapability.ViewDatabaseActivity),
             _ => "withheld",
         };
 
@@ -917,8 +931,8 @@ internal sealed class HealthService : IHealthService
             if (!owner.capabilities.IsEnabled(StudioCapability.ViewDatabaseActivity))
             {
                 activityRefusal = owner.capabilities.ReadOnly
-                    ? "needs ViewDatabaseActivity, and MartenStudioOptions.ReadOnly is true, which turns every capability off"
-                    : "needs " + StudioCapabilityGuard.OptionName(StudioCapability.ViewDatabaseActivity);
+                    ? "needs ViewDatabaseActivity, and " + owner.settings.ReadOnlyOption() + " is true, which turns every capability off"
+                    : "needs " + owner.capabilities.OptionFor(StudioCapability.ViewDatabaseActivity);
                 activity = false;
                 return false;
             }

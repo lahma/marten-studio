@@ -1,9 +1,8 @@
 using System.Globalization;
 
-using Marten.Storage;
-
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Database;
+using MartenStudio.Services.Sources;
 
 using Npgsql;
 
@@ -80,7 +79,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
         // The studio meters each database under its connection string's host, port and database; an unopened
         // connection says which, with no I/O.
         string meterKey;
-        using (NpgsqlConnection unopened = context.Database.CreateConnection(ConnectionUsage.ReadWrite))
+        using (NpgsqlConnection unopened = context.Target.CreateConnection(StudioConnectionUsage.ReadWrite))
         {
             meterKey = StudioDatabaseTime.KeyOf(unopened);
         }

@@ -6,6 +6,8 @@ using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Health;
+using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
@@ -130,7 +132,16 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddSingleton<ISessionLockLabeler, MartenSessionLockLabeler>();
         services.TryAddScoped<IDatabaseDeclarationsSource, MartenDatabaseDeclarationsSource>();
         services.TryAddSingleton<IHealthTableSource, MartenHealthTableSource>();
-        services.TryAddSingleton<IHealthRemedyProvider, MartenHealthRemedyProvider>();
+        services.TryAddSingleton<IHealthRemedyProvider>(MartenHealthRemedyProvider.Instance);
+
+        // PS-1c: the rest of the health engine's seams, in Marten's terms - the remedy lines the table checks offer, what a
+        // plan of a document table filters on, the daemon's part in T14, and the Marten this host runs (a test may register
+        // a made-up MartenRuntime first, which this one then reads).
+        services.TryAddSingleton<IHealthTableRemedies>(MartenHealthRemedyProvider.Instance);
+        services.TryAddSingleton<IHealthPlanAdvisor>(MartenStatementPlanAdvisor.Instance);
+        services.TryAddSingleton<IHorizonContributor, MartenHorizonContributor>();
+        services.TryAddSingleton<IStudioRuntime>(static provider =>
+            new MartenStudioRuntime(provider.GetService<MartenRuntime>() ?? MartenRuntime.Current));
         services.TryAddScoped<SqlConsoleService>();
         services.TryAddScoped<ISqlConsoleService>(static provider => provider.GetRequiredService<SqlConsoleService>());
         services.TryAddScoped<IRelationshipNodeSource, MartenRelationshipNodeSource>();

@@ -156,6 +156,28 @@ public class HealthExportTests
         harness.StudioWarnings.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// PS-1c: the run reads the studio's sources through <c>IStudioSourceProvider</c>, a circuit's service, and has no
+    /// circuit - so it resolves the provider from a scope of its own run. A Development host validates scopes, and would
+    /// refuse a scoped provider resolved from the root container: the probe would be Degraded with the exception's type.
+    /// </summary>
+    [Fact]
+    public async Task A_host_that_validates_scopes_builds_and_runs_one_export()
+    {
+        await using HealthExportHarness harness = HealthExportHarness.Create(validateScopes: true);
+
+        Action fromRoot = () => harness.Services.GetService<MartenStudio.Services.Sources.IStudioSourceProvider>();
+        fromRoot.Should().Throw<InvalidOperationException>("the container validates scopes, so this test can tell a root resolution");
+
+        HealthReportEntry entry = await harness.ProbeAsync();
+
+        entry.Status.Should().Be(HealthStatus.Healthy, entry.Description);
+        entry.Data["databases"].Should().Be(1);
+        harness.Runner.RunCount.Should().Be(1);
+        harness.Script.Runs.Should().ContainKeys("K90", "T90");
+        harness.StudioWarnings.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task A_critical_finding_reports_Unhealthy_and_names_its_code()
     {

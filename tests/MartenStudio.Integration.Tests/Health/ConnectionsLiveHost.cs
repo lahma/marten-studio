@@ -178,13 +178,13 @@ internal sealed class ConnectionsLiveHost : IAsyncDisposable
 
         MartenStudioOptions value = Provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
 
-        await using HealthConnection connection = new(resolved.Database);
+        await using HealthConnection connection = new(resolved.Target);
         HealthSqlRunner sql = new(connection, new ReadOnlySqlOptions { StatementTimeout = TimeSpan.FromSeconds(15), Role = value.SqlConsoleRole }, null);
 
         HealthCheckContext context = new(
             resolved,
-            value,
-            MartenRuntime.Current,
+            MartenStudioSettings.Of(value),
+            MartenStudioRuntime.Current,
             circuit.ServiceProvider,
             sql,
             Clock?.GetUtcNow() ?? DateTimeOffset.UtcNow,

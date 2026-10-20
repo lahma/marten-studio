@@ -1,11 +1,10 @@
-using Marten;
-using Marten.Storage;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 
 namespace MartenStudio.Services.Health.Export;
 
@@ -84,8 +83,10 @@ internal sealed record HealthExportLimits(int MaxDatabases, TimeSpan? Budget = n
 /// <see cref="HealthExportSummary" />: codes and counts, built from nothing a finding wrote.
 /// </para>
 /// <para>
-/// <b>The databases are the ones the tenancy holds</b> (<see cref="HeldDatabases" />), so the export's own
-/// listing never makes a master-table, sharded or single-server tenancy apply, seed, query or create anything.
+/// <b>The databases are the ones the sources already hold</b> (<see cref="IStudioSourceProvider.SweepTargetsAsync" />;
+/// MartenStudio's are the ones each tenancy holds), so the export's own listing never makes a master-table, sharded or
+/// single-server tenancy apply, seed, query or create anything. The provider is a circuit's service, so a run resolves it
+/// from a scope of its own and disposes the scope when it ends.
 /// One thing inside the sweep still enumerates, and it is Marten's: with a projection coordinator hosted in this
 /// process, the daemon checks ask that coordinator for its daemons (<c>AllDaemonsAsync()</c>, once per sweep),
 /// which enumerates the store as the coordinator's own leadership loop does on every cycle. A probe can be the
@@ -144,7 +145,7 @@ internal sealed class HealthExportRunner
     internal int RunCount => Volatile.Read(ref runCount);
 
     /// <summary>
-    /// How long a result is held before a probe starts the next run: <c>MartenStudioOptions.EffectiveHealthInterval</c>,
+    /// How long a result is held before a probe starts the next run: the studio's <c>EffectiveHealthInterval</c>,
     /// the advisor's own cadence, or a minute when the studio's options cannot be read.
     /// </summary>
     public TimeSpan Interval
@@ -153,7 +154,7 @@ internal sealed class HealthExportRunner
         {
             try
             {
-                return services.GetService<IOptions<MartenStudioOptions>>()?.Value.EffectiveHealthInterval ?? FallbackInterval;
+                return services.GetService<IStudioSettings>()?.EffectiveHealthInterval ?? FallbackInterval;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -259,23 +260,27 @@ internal sealed class HealthExportRunner
         return summary;
     }
 
-    /// <summary>Every store, every database its tenancy holds, one regular sweep each, in order.</summary>
+    /// <summary>Every source, every database it already holds, one regular sweep each, in order.</summary>
     private async Task<HealthExportSummary> RunAsync(DateTimeOffset started)
     {
-        MartenStoreRegistry? registry = services.GetService<MartenStoreRegistry>();
         HealthSweeper? sweeper = services.GetService<HealthSweeper>();
+        IStudioSettings? settings = services.GetService<IStudioSettings>();
 
-        if (registry is null || sweeper is null)
+        if (sweeper is null || settings is null)
         {
             return HealthExportSummary.NotRegistered(started);
         }
 
-        // Registered by AddMartenStudio(), which the registry's presence has just proved was called.
-        IOptions<MartenStudioOptions> options = services.GetRequiredService<IOptions<MartenStudioOptions>>();
+        // The source provider is a circuit's service - it caches discovered tenants per circuit - and a run has no circuit,
+        // so it gets a scope of its own, disposed when the run ends, and never the root container's.
+        await using AsyncServiceScope scope = services.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
 
-        IReadOnlyList<MartenStoreRegistration> registrations = registry.Registrations(options);
+        if (scope.ServiceProvider.GetService<IStudioSourceProvider>() is not { } sources)
+        {
+            return HealthExportSummary.NotRegistered(started);
+        }
 
-        if (registrations.Count == 0)
+        if (sources.Registrations().Count == 0)
         {
             return HealthExportSummary.NoStores(started);
         }
@@ -283,7 +288,7 @@ internal sealed class HealthExportRunner
         // The run's own budget, on top of each sweep's (one interval each), so that a store of many slow databases
         // cannot hold the one run every probe is answered from for ever - and the host's stopping, so that it
         // cannot outlive the application either.
-        using CancellationTokenSource timer = new(limits.BudgetFor(options.Value.EffectiveHealthInterval), timeProvider);
+        using CancellationTokenSource timer = new(limits.BudgetFor(settings.EffectiveHealthInterval), timeProvider);
         using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(timer.Token, stopping);
 
         List<HealthSweep> sweeps = [];
@@ -294,83 +299,61 @@ internal sealed class HealthExportRunner
         int notEnumerated = 0;
         int unnamed = 0;
 
-        foreach (MartenStoreRegistration registration in registrations)
+        // Streamed, and never cancelled by the budget: the enumeration goes on past the budget and the cap only to count
+        // what was left out, and it names databases, never connects to them.
+        await foreach (StudioSweepTarget target in sources.SweepTargetsAsync(CancellationToken.None).ConfigureAwait(false))
         {
-            StoreAvailability availability = registry.TryResolve(registration, services, out IDocumentStore? store);
-
-            if (!availability.IsAvailable || store is null)
+            switch (target.Outcome)
             {
-                // TryResolve has logged why, throttled (9210); the endpoint says only that a store was not reached.
-                notReached++;
-                continue;
-            }
+                case StudioSweepTargetOutcome.SourceNotReached:
+                    // The source has logged why, throttled (9210 or 9213); the endpoint says only that a store was not reached.
+                    notReached++;
+                    break;
 
-            HeldDatabaseList listed;
+                case StudioSweepTargetOutcome.Unnamed:
+                    // Held, but under an id the tenancy would correct before it looked in its cache: not looked up.
+                    unnamed += target.Count;
+                    break;
 
-            try
-            {
-                listed = await HeldDatabases.ListAsync(store).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                // The same event, and the same throttle key, as the scope selector's and the Overview's (9213).
-                LogLevel level = StudioLogThrottle.LevelOrWarning(
-                    throttle, "Store.Databases", registration.Key, null, StudioLogThrottle.KindOf(exception));
-                logger.StoreDatabasesUnreadable(level, exception, registration.Key);
+                case StudioSweepTargetOutcome.SourceNotEnumerated:
+                    // An expected state, and the host's own: its tenancy holds no database in this process yet, or is one
+                    // the studio cannot ask without making it build.
+                    if (logger.IsEnabled(LogLevel.Debug))
+                    {
+                        logger.LogDebug(
+                            "Marten Studio's health export left store {StoreKey} out: its tenancy holds no database it can name without building one ({Shape})",
+                            target.Source.Key,
+                            target.Detail);
+                    }
 
-                notReached++;
-                continue;
-            }
+                    notEnumerated++;
+                    break;
 
-            // Held, but under an id the tenancy would correct before it looked in its cache: not looked up.
-            unnamed += listed.Unnamed;
+                case StudioSweepTargetOutcome.Database when target.Resolved is { } resolved:
+                    if (attempted >= limits.MaxDatabases)
+                    {
+                        skipped++;
+                        break;
+                    }
 
-            if (listed.Databases.Count == 0 && listed.Unnamed == 0)
-            {
-                // An expected state, and the host's own: its tenancy holds no database in this process yet, or is one
-                // the studio cannot ask without making it build.
-                if (logger.IsEnabled(LogLevel.Debug))
-                {
-                    logger.LogDebug(
-                        "Marten Studio's health export left store {StoreKey} out: its tenancy holds no database it can name without building one ({Shape})",
-                        registration.Key,
-                        listed.Shape);
-                }
+                    if (budget.IsCancellationRequested)
+                    {
+                        timedOut++;
+                        break;
+                    }
 
-                notEnumerated++;
-                continue;
-            }
+                    attempted++;
 
-            foreach (IMartenDatabase database in listed.Databases)
-            {
-                if (attempted >= limits.MaxDatabases)
-                {
-                    skipped++;
-                    continue;
-                }
+                    try
+                    {
+                        sweeps.Add(await sweeper.SweepAsync(resolved, HealthSweepKind.Regular, budget.Token).ConfigureAwait(false));
+                    }
+                    catch (OperationCanceledException) when (budget.IsCancellationRequested)
+                    {
+                        timedOut++;
+                    }
 
-                if (budget.IsCancellationRequested)
-                {
-                    timedOut++;
-                    continue;
-                }
-
-                attempted++;
-
-                ResolvedScope resolved = new(
-                    new StudioScope(registration.Key, database.Id.Identity, null),
-                    registration,
-                    store,
-                    database);
-
-                try
-                {
-                    sweeps.Add(await sweeper.SweepAsync(resolved, HealthSweepKind.Regular, budget.Token).ConfigureAwait(false));
-                }
-                catch (OperationCanceledException) when (budget.IsCancellationRequested)
-                {
-                    timedOut++;
-                }
+                    break;
             }
         }
 

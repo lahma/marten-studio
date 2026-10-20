@@ -1,8 +1,8 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Query;
+using MartenStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -52,8 +52,8 @@ internal sealed record ExpensiveStatementFacts(StatementRead Read, IReadOnlyList
 /// So a sequential scan filtering on <c>data -&gt;&gt; $n</c> is never taken as a missing index: the finding says the
 /// member cannot be named and links to the Query page's advisor, which can. What the plan does say soundly is a scan
 /// filtering on a duplicated column, a containment (<c>@&gt;</c>) test, a JSON path written with literal keys - and a
-/// read of the whole table with no filter at all - and those go to the existing <see cref="IndexAdvisor" />, whose
-/// verdict is the remedy.
+/// read of the whole table with no filter at all - and those go to the studio's own index advisor
+/// (<see cref="IHealthPlanAdvisor" />; MartenStudio's is the Query page's), whose verdict is the remedy.
 /// </para>
 /// </remarks>
 [HealthCheck("T02", HealthArea.Tables, HealthCostTier.Statements, "Expensive statements", Gate = HealthGate.Activity)]
@@ -123,10 +123,10 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
         }
 
         bool readsWholeDocumentTable = plans.Any(plan => plan.Scans.Any(scan =>
-            IsSequential(scan) && TableOf(read.Statements.First(x => x.QueryId == plan.QueryId), scan) is { Kind: MartenTableKind.Document }));
+            IsSequential(scan) && TableOf(read.Statements.First(x => x.QueryId == plan.QueryId), scan) is { Kind: StudioTableKind.DocumentTable }));
 
         IReadOnlyList<IndexFacts> indexes = readsWholeDocumentTable
-            ? await MartenTables.IndexesAsync(context).ConfigureAwait(false)
+            ? await HealthTables.IndexesAsync(context).ConfigureAwait(false)
             : [];
 
         return new ExpensiveStatementFacts(read, plans, indexes);
@@ -445,7 +445,9 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
 
         // A withheld text is never planned (PlanCandidates), and a plan is never read for one even if it were.
         StatementPlan? plan = statement.TextWithheld is null ? facts.Plans.FirstOrDefault(x => x.QueryId == statement.QueryId) : null;
-        StatementPlanAdvice.Reading? reading = plan is { NotPlanned: null } ? StatementPlanAdvice.Read(plan.Scans, statement, facts.Indexes) : null;
+        StatementPlanAdvice.Reading? reading = plan is { NotPlanned: null }
+            ? StatementPlanAdvice.Read(plan.Scans, statement, facts.Indexes, evaluation.PlanAdvisor)
+            : null;
 
         evidence.Add(new HealthEvidence("Plan", reading?.Summary
             ?? plan?.NotPlanned
@@ -455,12 +457,12 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
 
         if (reading is { Verdicts.Count: > 0 })
         {
-            evidence.Add(new HealthEvidence("Index advice", string.Join(" ", reading.Verdicts.Select(static x => x.Subject + ": " + x.Verdict.Reason))));
+            evidence.Add(new HealthEvidence("Index advice", string.Join(" ", reading.Verdicts.Select(static x => x.Subject + ": " + x.Reason))));
         }
 
         evidence.Add(new HealthEvidence("Window", StatementWindows.Describe(window, read.ReadAt)));
 
-        MartenTable? document = statement.Tables.FirstOrDefault(static x => x.Kind == MartenTableKind.Document);
+        StudioTable? document = statement.Tables.FirstOrDefault(static x => x.Kind == StudioTableKind.DocumentTable);
 
         return new HealthFinding
         {
@@ -480,7 +482,7 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
                   + "win back is usually here, with an index or a narrower query.",
             Evidence = evidence,
             Caveat = StatementWindows.Caveat(read, window, evaluation.History) + (reading is not null ? GenericPlanCaveat : string.Empty),
-            Remedy = Remedy(reading, document),
+            Remedy = Remedy(reading, document, evaluation.TableRemedies),
             Link = document is { Alias: { } alias }
                 ? new HealthLink(
                     "Open the index advisor in Query",
@@ -501,14 +503,14 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
             ? TableText.Percent(load) + " of the window's time"
             : load.ToString("0.0", CultureInfo.InvariantCulture) + " times the window's length - several connections ran it at once";
 
-    private static HealthRemedy? Remedy(StatementPlanAdvice.Reading? reading, MartenTable? document)
+    private static HealthRemedy? Remedy(StatementPlanAdvice.Reading? reading, StudioTable? document, IHealthTableRemedies? remedies)
     {
         if (reading is null)
         {
             return null;
         }
 
-        List<string> lines = [.. reading.Verdicts.Select(static x => x.Verdict.Suggestion).OfType<string>().Distinct(StringComparer.Ordinal)];
+        List<string> lines = [.. reading.Verdicts.Select(static x => x.Suggestion).Distinct(StringComparer.Ordinal)];
 
         if (lines.Count > 0)
         {
@@ -518,34 +520,20 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
                 + "every index, so add the one this statement needs and no other.");
         }
 
-        if (reading.UnnamedMember && document is { TypeName: { } type, Alias: { } alias })
-        {
-            return new HealthRemedy(
-                "// The member this statement filters on, which pg_stat_statements does not name -\n"
-                + "// if no index on that member exists already:\n"
-                + "opts.Schema.For<" + type + ">().Index(x => x.FilteredMember);\n"
-                + "// or, where it is also sorted on or compared as a column:\n"
-                + "opts.Schema.For<" + type + ">().Duplicate(x => x.FilteredMember);",
-                "pg_stat_statements records this statement's constants as placeholders - the JSON member names Marten writes into "
-                + "its SQL included - so neither the plan nor the advisor can say which member this filters on, nor whether an index "
-                + "on it exists already: a generic plan cannot use one for a placeholder key. Query in Marten mode, on the " + alias
-                + " collection, judges a where clause and names it; add the line only if it finds no index on that member.");
-        }
-
-        return null;
+        return reading.UnnamedMember && document is not null ? remedies?.IndexTheUnnamedMember(document) : null;
     }
 
     private static bool IsSequential(ExplainPlanScan scan) => scan.NodeType.Equals("Seq Scan", StringComparison.Ordinal);
 
     /// <summary>The statement's own table a scan reads, by the name a plan prints - never a table it does not name.</summary>
-    internal static MartenTable? TableOf(ObservedStatement statement, ExplainPlanScan scan) =>
+    internal static StudioTable? TableOf(ObservedStatement statement, ExplainPlanScan scan) =>
         scan.Relation is { } relation
             ? statement.Tables.FirstOrDefault(x => string.Equals(x.Table, relation, StringComparison.OrdinalIgnoreCase))
             : null;
 }
 
 /// <summary>What T02 reads out of a plan: which of the statement's own tables it scans and how, and the advisor's verdicts.</summary>
-internal static partial class StatementPlanAdvice
+internal static class StatementPlanAdvice
 {
     /// <summary>The most scans a plan's summary describes.</summary>
     public const int MaxDescribed = 4;
@@ -554,17 +542,25 @@ internal static partial class StatementPlanAdvice
     /// <param name="Summary">The scans of the statement's own tables, in words.</param>
     /// <param name="Verdicts">The advisor's verdicts on what a whole-table read filters on - only the ones that need an index.</param>
     /// <param name="UnnamedMember">Whether a whole-table read filters on a JSON member the recorded text does not name.</param>
-    internal sealed record Reading(string Summary, IReadOnlyList<(string Subject, IndexVerdict Verdict)> Verdicts, bool UnnamedMember);
+    internal sealed record Reading(string Summary, IReadOnlyList<HealthIndexVerdict> Verdicts, bool UnnamedMember);
 
     /// <summary>Reads <paramref name="scans" /> for <paramref name="statement" />. Pure.</summary>
-    public static Reading Read(IReadOnlyList<ExplainPlanScan> scans, ObservedStatement statement, IReadOnlyList<IndexFacts> indexes)
+    /// <param name="scans">The plan's scans.</param>
+    /// <param name="statement">The statement planned.</param>
+    /// <param name="indexes">The indexes on the judged tables, as the sweep read them.</param>
+    /// <param name="advisor">What the studio can say about a whole-table read of one of its tables, or <see langword="null" />.</param>
+    public static Reading Read(
+        IReadOnlyList<ExplainPlanScan> scans,
+        ObservedStatement statement,
+        IReadOnlyList<IndexFacts> indexes,
+        IHealthPlanAdvisor? advisor)
     {
         ArgumentNullException.ThrowIfNull(scans);
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(indexes);
 
         List<string> described = [];
-        List<(string Subject, IndexVerdict Verdict)> verdicts = [];
+        List<HealthIndexVerdict> verdicts = [];
         int others = 0;
         bool unnamed = false;
 
@@ -579,29 +575,20 @@ internal static partial class StatementPlanAdvice
 
             string how = scan.Index is { } index ? scan.NodeType + " using " + index + " on " + table.Table : scan.NodeType + " on " + table.Table;
 
-            if (scan.NodeType.Equals("Seq Scan", StringComparison.Ordinal) && table is { Kind: MartenTableKind.Document, DocumentType: { } type })
+            if (scan.NodeType.Equals("Seq Scan", StringComparison.Ordinal)
+                && advisor?.AdviseSequentialScan(
+                    table,
+                    scan.Filter,
+                    [.. indexes.Where(x => string.Equals(x.Table.Key, table.Key, StringComparison.OrdinalIgnoreCase))]) is { } advice)
             {
-                DocumentTableInfo info = DocumentTableInfo.FromDocumentType(type);
-                Filter filter = FilterOf(scan.Filter, info);
-                unnamed |= filter.UnnamedMember;
+                unnamed |= advice.UnnamedMember;
 
-                how += filter.Members.Count == 0 && !filter.UnnamedMember
+                how += advice.Subjects.Count == 0 && !advice.UnnamedMember
                     ? ", reading every row with no filter on it"
-                    : ", reading every row to filter on " + string.Join(", ", filter.Members.Select(static x => x.Subject)
-                        .Concat(filter.UnnamedMember ? ["a JSON member the recorded statement does not name"] : []));
+                    : ", reading every row to filter on " + string.Join(", ", advice.Subjects
+                        .Concat(advice.UnnamedMember ? ["a JSON member the recorded statement does not name"] : []));
 
-                IReadOnlyList<PostgresIndex> onTable =
-                    [.. indexes.Where(x => string.Equals(x.Table.Key, table.Key, StringComparison.OrdinalIgnoreCase)).Select(static x => new PostgresIndex(x.Row.Name, x.Row.Definition))];
-
-                foreach ((string subject, DocumentPredicate predicate) in filter.Members)
-                {
-                    IndexVerdict verdict = IndexAdvisor.Evaluate(info, onTable, predicate);
-
-                    if (verdict.Level != IndexVerdictLevel.Green && verdict.Suggestion is not null)
-                    {
-                        verdicts.Add((subject, verdict));
-                    }
-                }
+                verdicts.AddRange(advice.Verdicts);
             }
 
             if (described.Count < MaxDescribed)
@@ -623,137 +610,4 @@ internal static partial class StatementPlanAdvice
         return new Reading(summary + ".", verdicts, unnamed);
     }
 
-    /// <summary>What a whole-table read filters on, as far as its deparsed filter says.</summary>
-    /// <param name="Members">Each member it filters on, with the predicate the advisor judges.</param>
-    /// <param name="UnnamedMember">Whether it filters on a JSON member whose key is a placeholder.</param>
-    internal sealed record Filter(IReadOnlyList<(string Subject, DocumentPredicate Predicate)> Members, bool UnnamedMember);
-
-    /// <summary>
-    /// The members <paramref name="filter" /> - a plan's deparsed <c>Filter</c> - reads: a duplicated column by its name, a
-    /// JSON path whose keys are literals, a containment test; and whether it reads a JSON member through a placeholder.
-    /// </summary>
-    internal static Filter FilterOf(string? filter, DocumentTableInfo table)
-    {
-        ArgumentNullException.ThrowIfNull(table);
-
-        if (string.IsNullOrWhiteSpace(filter))
-        {
-            return new Filter([], false);
-        }
-
-        // Postgres parenthesises every operator it deparses; none of the shapes below needs them.
-        string flat = filter.Replace('(', ' ').Replace(')', ' ');
-        List<(string Subject, DocumentPredicate Predicate)> members = [];
-        HashSet<string> seen = new(StringComparer.Ordinal);
-        bool unnamed = false;
-
-        void Add(string subject, DocumentPredicate predicate)
-        {
-            if (seen.Add(subject + "\u001f" + predicate.GetType().Name))
-            {
-                members.Add((subject, predicate));
-            }
-        }
-
-        foreach (Match match in JsonChain().Matches(flat))
-        {
-            List<string> path = [];
-            bool placeholder = false;
-
-            foreach (Match step in JsonStep().Matches(match.Groups["chain"].Value))
-            {
-                string key = step.Groups["key"].Value;
-
-                if (key.StartsWith('$'))
-                {
-                    placeholder = true;
-                    break;
-                }
-
-                path.Add(key[1..^1].Replace("''", "'", StringComparison.Ordinal));
-            }
-
-            if (placeholder)
-            {
-                unnamed = true;
-                continue;
-            }
-
-            bool like = Like().IsMatch(flat[(match.Index + match.Length)..]);
-            string subject = string.Join('.', path);
-
-            Add(subject, like
-                ? new DocumentPredicate.FieldLike(path, string.Empty)
-                : new DocumentPredicate.FieldCompare(path, ComparisonOperator.Equal, new SearchValue.Text(string.Empty)));
-        }
-
-        foreach (Match match in JsonPathOperator().Matches(flat))
-        {
-            if (!match.Groups["path"].Success)
-            {
-                unnamed = true;
-                continue;
-            }
-
-            string[] path = match.Groups["path"].Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-
-            if (path.Length > 0)
-            {
-                Add(string.Join('.', path), new DocumentPredicate.FieldCompare(path, ComparisonOperator.Equal, new SearchValue.Text(string.Empty)));
-            }
-        }
-
-        if (Containment().IsMatch(flat))
-        {
-            Add("JSON containment (@>)", new DocumentPredicate.Contains("{}"));
-        }
-
-        // A duplicated column by its own name, outside any literal - which is where a JSON key would be.
-        string unquoted = Literal().Replace(flat, "''");
-
-        foreach (DuplicatedColumnInfo column in table.DuplicatedColumns)
-        {
-            if (Regex.IsMatch(
-                    unquoted,
-                    "(?<![A-Za-z0-9_$])(?:[A-Za-z_][A-Za-z0-9_]*\\.)?" + Regex.Escape(column.ColumnName) + "(?![A-Za-z0-9_$])",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                    TimeSpan.FromSeconds(1)))
-            {
-                Add(column.MemberPath + " (duplicated column " + column.ColumnName + ")",
-                    new DocumentPredicate.FieldCompare(column.MemberPath.Split('.'), ComparisonOperator.Equal, new SearchValue.Text(string.Empty)));
-            }
-        }
-
-        return new Filter(members, unnamed);
-    }
-
-    /// <summary><c>data -&gt; 'A' -&gt;&gt; 'B'</c>, a key a literal or a placeholder, optionally qualified by an alias.</summary>
-    [GeneratedRegex(
-        @"(?<![A-Za-z0-9_$])(?:[A-Za-z_][A-Za-z0-9_]*\.)?data(?<chain>(?:\s*->>?\s*(?:'(?:[^']|'')*'|\$[0-9]+)(?:\s*::\s*[a-z]+)?)+)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-        matchTimeoutMilliseconds: 1000)]
-    private static partial Regex JsonChain();
-
-    /// <summary>One step of a <see cref="JsonChain" />.</summary>
-    [GeneratedRegex(@"->>?\s*(?<key>'(?:[^']|'')*'|\$[0-9]+)", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex JsonStep();
-
-    /// <summary><c>data #&gt;&gt; '{A,B}'</c>, or with a placeholder for the path.</summary>
-    [GeneratedRegex(
-        @"(?<![A-Za-z0-9_$])(?:[A-Za-z_][A-Za-z0-9_]*\.)?data\s*#>>?\s*(?:'\{(?<path>[^}']*)\}'|\$[0-9]+)",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-        matchTimeoutMilliseconds: 1000)]
-    private static partial Regex JsonPathOperator();
-
-    /// <summary><c>data @&gt;</c>: a containment test on the whole document.</summary>
-    [GeneratedRegex(@"(?<![A-Za-z0-9_$])(?:[A-Za-z_][A-Za-z0-9_]*\.)?data\s*@>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex Containment();
-
-    /// <summary>What a LIKE (<c>~~</c>) or ILIKE (<c>~~*</c>) after a JSON path looks like, casts allowed between.</summary>
-    [GeneratedRegex(@"^\s*(?:::\s*[a-z]+\s*)*~~", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex Like();
-
-    /// <summary>A string literal.</summary>
-    [GeneratedRegex("'(?:[^']|'')*'", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex Literal();
 }

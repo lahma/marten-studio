@@ -1,13 +1,14 @@
 using System.Globalization;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Sources;
 
 namespace MartenStudio.Services.Health.Checks;
 
 /// <summary>One of the store's tables and its oldest multixact age.</summary>
 /// <param name="Table">The declared table.</param>
 /// <param name="Age">The oldest <c>mxid_age(relminmxid)</c> over it, its TOAST table and its partitions.</param>
-internal sealed record TableMultixactAge(MartenTable Table, long Age);
+internal sealed record TableMultixactAge(StudioTable Table, long Age);
 
 /// <summary>What T13 reads.</summary>
 /// <param name="Database">The database-wide facts: the multixact settings, ages and counter.</param>
@@ -73,7 +74,7 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
     /// <inheritdoc />
     public override async Task<MultixactAgeFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        MartenTableSet set = await MartenTables.SetAsync(context).ConfigureAwait(false);
+        IStudioTableSet set = await HealthTables.SetAsync(context).ConfigureAwait(false);
         WraparoundFacts wraparound = await Wraparound.SharedAsync(context).ConfigureAwait(false);
 
         List<TableMultixactAge> tables = [];
@@ -230,7 +231,7 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
             DocumentTypes = [.. past.SelectMany(static x => x.Table.DocumentTypes).Distinct()],
 
             // No GatedSchemas: a database-wide wraparound warning must not vanish because the oldest table is one in a
-            // schema the browser withholds, so such a table is named generically (MartenTable.NoteName) throughout.
+            // schema the browser withholds, so such a table is named generically (StudioTableText.NoteName) throughout.
             Title = forecastOnly
                 ? Capitalised(forecast!.AtTheRate) + ", Postgres would stop creating multixacts in " + HorizonForecast.Span(toRefusal!.Value)
                   + ": " + whose + " is past autovacuum_multixact_freeze_max_age and has not been frozen"

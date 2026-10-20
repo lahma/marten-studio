@@ -65,7 +65,7 @@ internal sealed class PoolSaturationCheck : HealthCheck<PoolFacts>
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        DatabasePoolSettings settings = DatabasePoolSettings.Of(context.Database)
+        DatabasePoolSettings settings = DatabasePoolSettings.Of(context.Target)
             ?? throw new HealthCheckUnavailableException(
                 "This database's data source is not one the studio can read pool settings from, so its pool is not judged.");
 
@@ -80,7 +80,7 @@ internal sealed class PoolSaturationCheck : HealthCheck<PoolFacts>
         using SessionPoolLease lease = observer.Lease();
         IReadOnlyList<NpgsqlPoolReading> pools = lease.Read();
 
-        NpgsqlPoolReading? mine = pools.FirstOrDefault(x => DatabasePoolSettings.IsPoolOf(context.Database, x.PoolName))
+        NpgsqlPoolReading? mine = pools.FirstOrDefault(x => DatabasePoolSettings.IsPoolOf(context.Target, x.PoolName))
             ?? throw new HealthCheckUnavailableException(
                 "This database's Npgsql pool is not among the pools Npgsql reports in this process - most likely its data "
                 + "source was given a name of its own (NpgsqlDataSourceBuilder.Name), which Npgsql reports instead of the "

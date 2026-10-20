@@ -2,6 +2,9 @@ using System.Globalization;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Database;
+using MartenStudio.Services.Sources;
+
+using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 
@@ -87,7 +90,7 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        SessionLockLabels labels = SessionLockLabels.For(context.Store, context.StoreKey, Classifier(context));
+        SessionLockLabels labels = context.Services.GetRequiredService<ISessionLockLabeler>().For(context.Source, Classifier(context));
 
         IReadOnlyList<(SessionVisibility Visibility, LockWaiter? Waiter, long Total)> rows = await context.Sql
             .QueryAsync(HealthConnectionQueries.LockWaits(ConnectionThresholds.CandidateFloor), reader => MapWaiter(reader, labels), cancellationToken)
@@ -240,20 +243,19 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
     }
 
     /// <summary>
-    /// The classifier over every registered store's declarations - the one the database browser uses, read afresh
-    /// for the sweep, which has no circuit - or <see langword="null" /> when they cannot all be read, which names no
+    /// The classifier over every registered source's declarations - the one the database browser uses, read afresh
+    /// for the sweep, which has no circuit (<see cref="IDatabaseDeclarationsSource.ReadUncached" />) - or
+    /// <see langword="null" /> when they cannot all be read, or the studio registers no declarations, which names no
     /// relation at all (fail closed).
     /// </summary>
     private static DatabaseObjectClassifier? Classifier(HealthCheckContext context)
     {
-        if (context.Services.GetService(typeof(MartenStoreRegistry)) is not MartenStoreRegistry registry)
+        if (context.Services.GetService<IDatabaseDeclarationsSource>() is not { } declarations)
         {
             return null;
         }
 
-        DatabaseDeclarations declared = DatabaseAccess.DeclareEveryStore(
-            registry, context.Services, context.Scope.Registration, context.Store, context.StudioOptions.IsDocumentTypeVisible);
-
+        DatabaseDeclarations declared = declarations.ReadUncached(context.Source);
         return declared.Succeeded ? declared.Classifier : null;
     }
 

@@ -1,5 +1,7 @@
 using System.Globalization;
 
+using MartenStudio.Services.Sources;
+
 namespace MartenStudio.Services.Health.Checks;
 
 /// <summary>What T08 reads: every declared table's estimate, its modifications since the last analyze, and when that was.</summary>
@@ -68,7 +70,7 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
     /// <inheritdoc />
     public override async Task<StatisticsFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        return new StatisticsFacts(context.Now, await MartenTables.TablesAsync(context).ConfigureAwait(false));
+        return new StatisticsFacts(context.Now, await HealthTables.TablesAsync(context).ConfigureAwait(false));
     }
 
     /// <inheritdoc />
@@ -128,7 +130,7 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
                 continue;
             }
 
-            findings.Add(Finding(table, problem, held));
+            findings.Add(Finding(table, problem, held, evaluation.TableRemedies));
         }
 
         if (findings.Count > 0)
@@ -143,9 +145,9 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
               + ", because autovacuum analyses a freshly loaded table within a minute or two.");
     }
 
-    private static HealthFinding Finding(TableFacts table, StatisticsProblem problem, TimeSpan held)
+    private static HealthFinding Finding(TableFacts table, StatisticsProblem problem, TimeSpan held, IHealthTableRemedies? remedies)
     {
-        MartenTable declared = table.Table;
+        StudioTable declared = table.Table;
         string scale = SuggestedScaleFactor.ToString(CultureInfo.InvariantCulture);
         bool never = problem == StatisticsProblem.NeverAnalysed;
 
@@ -186,6 +188,7 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
                       + "partitioned parent."
                     : string.Empty),
             Remedy = Autovacuum.Remedy(
+                remedies,
                 table,
                 "autovacuum_analyze_scale_factor",
                 scale,

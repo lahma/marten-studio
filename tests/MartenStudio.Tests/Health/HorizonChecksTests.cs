@@ -196,7 +196,7 @@ public class HorizonChecksTests
     [InlineData("T13")]
     public void A_wraparound_finding_whose_oldest_table_is_outside_the_stores_schemas_stays_visible_and_names_it_generically(string code)
     {
-        MartenTable gated = new("xso_own", "xso_things", MartenTableKind.Managed, OutsideStoreSchemas: true);
+        MartenTable gated = MartenTables.Table("xso_own", "xso_things", MartenTableKind.Managed, outsideStoreSchemas: true);
 
         HealthVerdict verdict = code == "T12"
             ? new TransactionIdAgeCheck().Evaluate(

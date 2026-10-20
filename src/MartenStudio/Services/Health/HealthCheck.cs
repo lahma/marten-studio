@@ -2,8 +2,6 @@ using System.Globalization;
 using System.Reflection;
 using System.Text;
 
-using MartenStudio.Services.Configuration;
-
 namespace MartenStudio.Services.Health;
 
 /// <summary>
@@ -53,9 +51,10 @@ internal sealed class HealthCheckAttribute(string code, HealthArea area, HealthC
     public HealthGate Gate { get; set; } = HealthGate.Database;
 
     /// <summary>
-    /// The <see cref="RuntimeFeature" /> the check needs to run at all, by its field name
-    /// (<c>nameof(RuntimeFeature.X)</c>), or <see langword="null" /> for one that runs on the floor. On a
-    /// host without it the check is listed as not applicable, with the version it needs, and never run.
+    /// The feature of the studio's runtime (<see cref="IStudioRuntime.FindFeature" />) the check needs to run at all, by
+    /// its name - in MartenStudio a field of its probe table, <c>nameof(RuntimeFeature.X)</c> - or <see langword="null" />
+    /// for one that runs on the floor. On a host without it the check is listed as not applicable, with the version it
+    /// needs, and never run.
     /// </summary>
     public string? RequiresFeature { get; set; }
 }
@@ -74,7 +73,7 @@ internal sealed record HealthCheckInfo(
     HealthCostTier Tier,
     HealthGate Gate,
     string Title,
-    RuntimeFeature? Requires,
+    StudioFeatureRequirement? Requires,
     Type CheckType)
 {
     /// <summary>

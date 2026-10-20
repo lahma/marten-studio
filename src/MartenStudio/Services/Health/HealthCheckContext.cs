@@ -1,15 +1,14 @@
-using Marten;
-using Marten.Storage;
-
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
+using MartenStudio.Services.Health.Checks;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 using Npgsql;
 
 namespace MartenStudio.Services.Health;
 
 /// <summary>
-/// What a check's gatherer is handed: the database being swept, the host's configuration, and the only way
+/// What a check's gatherer is handed: the database being swept, the studio's settings, and the only way
 /// to query it.
 /// </summary>
 /// <remarks>
@@ -20,6 +19,14 @@ namespace MartenStudio.Services.Health;
 /// database as a whole (<c>TenantId = null</c>). Who is shown what is decided afterwards, per visitor
 /// (<see cref="HealthGate" />). A gatherer that asked for <c>StudioAuthorization</c> or the circuit's state
 /// would be answering one visitor's question into everybody's cache.
+/// </para>
+/// <para>
+/// <b>What the source is, through seams.</b> <see cref="Source" /> is the resolved source and <see cref="Target" /> its
+/// database; what only a studio knows - its tables (<see cref="IHealthTableSource" />), its lock labels
+/// (<see cref="ISessionLockLabeler" />), its daemon's facts (<see cref="IHorizonContributor" />) - a gatherer asks
+/// <see cref="Services" /> for. A studio adds its own reading of the context as C# extension members over this type
+/// (MartenStudio's <c>Store</c>, <c>StoreOptions</c>, <c>Database</c>, <c>Runtime</c>), and a check of that studio's
+/// own assembly is only ever handed that studio's sources.
 /// </para>
 /// <para>
 /// <b>SQL only through <see cref="Sql" />.</b> Its statements come from the builders under
@@ -38,58 +45,57 @@ namespace MartenStudio.Services.Health;
 /// </remarks>
 internal sealed class HealthCheckContext
 {
-    private readonly Func<Type, bool>? isDocumentTypeVisible;
     private readonly HealthSweepMemo memo;
     private readonly CancellationToken sweepToken;
 
     internal HealthCheckContext(
-        ResolvedScope scope,
-        MartenStudioOptions studioOptions,
-        MartenRuntime runtime,
+        ResolvedSource source,
+        IStudioSettings settings,
+        IStudioRuntime studioRuntime,
         IServiceProvider services,
         HealthSqlRunner sql,
         DateTimeOffset now,
         HealthSweepMemo memo,
         CancellationToken sweepToken)
     {
-        Scope = scope;
-        StudioOptions = studioOptions;
-        Runtime = runtime;
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(studioRuntime);
+
+        Source = source;
+        Settings = settings;
+        StudioRuntime = studioRuntime;
         Services = services;
         Sql = sql;
         Now = now;
         this.memo = memo;
         this.sweepToken = sweepToken;
-        isDocumentTypeVisible = studioOptions.IsDocumentTypeVisible;
     }
 
-    /// <summary>The store and database being swept, resolved with no tenant.</summary>
-    public ResolvedScope Scope { get; }
-
-    /// <summary>The store.</summary>
-    public IDocumentStore Store => Scope.Store;
-
-    /// <summary>What the host told Marten.</summary>
-    public IReadOnlyStoreOptions StoreOptions => Scope.Store.Options;
+    /// <summary>
+    /// The source and database being swept, resolved with no tenant - the resolver's own record, whose subtype a studio's
+    /// extension members read (MartenStudio's <c>ResolvedScope</c>), so it is never rebuilt from its parts.
+    /// </summary>
+    public ResolvedSource Source { get; }
 
     /// <summary>The database.</summary>
-    public IMartenDatabase Database => Scope.Database;
+    public IStudioDatabase Target => Source.Target;
 
-    /// <summary>The store's registration key.</summary>
-    public string StoreKey => Scope.Registration.Key;
+    /// <summary>The source's registration key.</summary>
+    public string StoreKey => Source.Source.Key;
 
     /// <summary>The database's identity.</summary>
-    public string DatabaseId => Scope.Database.Id.Identity;
+    public string DatabaseId => Source.Target.Identity;
 
-    /// <summary>The studio's own options.</summary>
-    public MartenStudioOptions StudioOptions { get; }
+    /// <summary>The studio's settings.</summary>
+    public IStudioSettings Settings { get; }
 
-    /// <summary>The Marten this host runs, and its light-up probes.</summary>
-    public MartenRuntime Runtime { get; }
+    /// <summary>The libraries the studio's sources run on, and their light-up probes.</summary>
+    public IStudioRuntime StudioRuntime { get; }
 
     /// <summary>
     /// A DI scope of the sweep's own, from the root container - for a host service such as
-    /// <c>IHostEnvironment</c>, which may be absent (a value, not an error).
+    /// <c>IHostEnvironment</c>, which may be absent (a value, not an error), and for the studio's seams.
     /// </summary>
     public IServiceProvider Services { get; }
 
@@ -100,11 +106,11 @@ internal sealed class HealthCheckContext
     public DateTimeOffset Now { get; }
 
     /// <summary>
-    /// Whether <c>MartenStudioOptions.IsDocumentTypeVisible</c> lets the studio show
+    /// Whether the studio's document-type filter (<see cref="IStudioSettings.IsDocumentTypeVisible" />) lets it show
     /// <paramref name="documentType" />. A gatherer leaves a hidden type out of what it reads where it can;
     /// the sweep drops any finding that names one either way.
     /// </summary>
-    public bool IsDocumentTypeVisible(Type documentType) => isDocumentTypeVisible?.Invoke(documentType) ?? true;
+    public bool IsDocumentTypeVisible(Type documentType) => Settings.IsDocumentTypeVisible?.Invoke(documentType) ?? true;
 
     /// <summary>
     /// A read that several checks of one sweep need, run once for the sweep and handed to every check that
@@ -142,15 +148,27 @@ internal sealed class HealthCheckContext
 
 /// <summary>What a check's evaluator is handed besides its facts: everything it may use, as data.</summary>
 /// <param name="Now">When the facts were read. An evaluator never asks the clock.</param>
-/// <param name="Runtime">The Marten the host runs, for a remedy that needs a newer one.</param>
+/// <param name="StudioRuntime">The libraries the studio's sources run on, for a judgement or a remedy that needs a newer one.</param>
 /// <param name="History">
 /// The database's samples from regular sweeps, oldest first, this sweep's included when it is a regular one.
 /// </param>
-internal sealed record HealthEvaluation(DateTimeOffset Now, MartenRuntime Runtime, HealthHistoryView History)
+internal sealed record HealthEvaluation(DateTimeOffset Now, IStudioRuntime StudioRuntime, HealthHistoryView History)
 {
+    /// <summary>
+    /// How the studio words a table remedy, or <see langword="null" /> for a studio that offers none - pure text, read by
+    /// the sweep from its own scope.
+    /// </summary>
+    public IHealthTableRemedies? TableRemedies { get; init; }
+
+    /// <summary>What the studio can say about a sequential scan of one of its tables (T02), or <see langword="null" />.</summary>
+    public IHealthPlanAdvisor? PlanAdvisor { get; init; }
+
     /// <summary>An evaluation at <paramref name="now" />, for a unit test.</summary>
-    public static HealthEvaluation At(DateTimeOffset now, MartenRuntime? runtime = null, HealthHistoryView? history = null) =>
-        new(now, runtime ?? MartenRuntime.Current, history ?? HealthHistoryView.Empty);
+    /// <param name="now">When.</param>
+    /// <param name="runtime">The runtime, or <see langword="null" /> for none (<see cref="NoStudioRuntime" />).</param>
+    /// <param name="history">The history, or none.</param>
+    public static HealthEvaluation At(DateTimeOffset now, IStudioRuntime? runtime = null, HealthHistoryView? history = null) =>
+        new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty);
 }
 
 /// <summary>
@@ -478,8 +496,8 @@ internal sealed class HealthSqlRunner
 /// <summary>The sweep's one connection, opened on first use and disposed with the sweep.</summary>
 /// <remarks>
 /// <para>
-/// <b>The primary.</b> It is opened for <c>ConnectionUsage.ReadWrite</c>, which on a multi-host data source
-/// targets the host Marten writes to, even though every read on it runs inside a read-only transaction.
+/// <b>The primary.</b> It is opened for <see cref="StudioConnectionUsage.ReadWrite" />, which on a multi-host data
+/// source targets the host the application writes to, even though every read on it runs inside a read-only transaction.
 /// A health read describes the database the application writes to - its sessions, its locks, its counters -
 /// and a standby's would be a different database's numbers under this one's name.
 /// </para>
@@ -491,16 +509,11 @@ internal sealed class HealthSqlRunner
 /// </remarks>
 internal sealed class HealthConnection : IAsyncDisposable
 {
-    private readonly Sources.IStudioDatabase database;
+    private readonly IStudioDatabase database;
     private NpgsqlConnection? connection;
     private System.Runtime.ExceptionServices.ExceptionDispatchInfo? openFailure;
 
-    public HealthConnection(Sources.IStudioDatabase database) => this.database = database;
-
-    public HealthConnection(IMartenDatabase database)
-        : this(MartenStudioDatabase.Of(database))
-    {
-    }
+    public HealthConnection(IStudioDatabase database) => this.database = database;
 
     /// <summary>Whether a check has needed it yet, for a test and for nothing else.</summary>
     internal bool WasOpened { get; private set; }
@@ -517,7 +530,7 @@ internal sealed class HealthConnection : IAsyncDisposable
 
         await ResetAsync().ConfigureAwait(false);
 
-        NpgsqlConnection fresh = database.CreateConnection(Sources.StudioConnectionUsage.ReadWrite);
+        NpgsqlConnection fresh = database.CreateConnection(StudioConnectionUsage.ReadWrite);
 
         try
         {

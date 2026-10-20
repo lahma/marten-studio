@@ -1,5 +1,6 @@
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Schema;
+using MartenStudio.Services.Sources;
 
 namespace MartenStudio.Services.Health.Checks;
 
@@ -29,7 +30,7 @@ internal sealed class RedundantIndexCheck : HealthCheck<RedundantIndexFacts>
     /// <inheritdoc />
     public override async Task<RedundantIndexFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        return new RedundantIndexFacts(await MartenTables.IndexesAsync(context).ConfigureAwait(false));
+        return new RedundantIndexFacts(await HealthTables.IndexesAsync(context).ConfigureAwait(false));
     }
 
     /// <inheritdoc />
@@ -52,12 +53,13 @@ internal sealed class RedundantIndexCheck : HealthCheck<RedundantIndexFacts>
             IndexFacts index = byRow[found.Index];
             IndexFacts cover = byRow[found.CoveredBy];
 
-            if (index.Origin is IndexOrigin.PrimaryKey or IndexOrigin.Structural or IndexOrigin.EventStore)
+            // A library's table is exempt from the index-design rules (issue #8, G1): its indexes are the library's design.
+            if (index.Origin is IndexOrigin.PrimaryKey or IndexOrigin.Structural or IndexOrigin.EventStore || index.Table.ExemptFromIndexDesign)
             {
                 continue;
             }
 
-            findings.Add(Finding(index, cover, found.Kind));
+            findings.Add(Finding(index, cover, found.Kind, evaluation.TableRemedies));
         }
 
         return findings.Count == 0 ? HealthVerdict.Quiet() : new HealthVerdict(findings);
@@ -69,14 +71,14 @@ internal sealed class RedundantIndexCheck : HealthCheck<RedundantIndexFacts>
         IndexOrigin.PrimaryKey => 6,
         IndexOrigin.Structural => 5,
         IndexOrigin.EventStore => 4,
-        IndexOrigin.Declared or IndexOrigin.Managed => 3,
+        IndexOrigin.Declared or IndexOrigin.Managed or IndexOrigin.Host => 3,
         IndexOrigin.Ignored => 2,
         _ => 1,
     };
 
-    private static HealthFinding Finding(IndexFacts index, IndexFacts cover, RedundancyKind kind)
+    private static HealthFinding Finding(IndexFacts index, IndexFacts cover, RedundancyKind kind, IHealthTableRemedies? remedies)
     {
-        MartenTable table = index.Table;
+        StudioTable table = index.Table;
         string how = kind == RedundancyKind.Duplicate
             ? "an exact duplicate of " + cover.Row.Name
             : "a leading prefix of " + cover.Row.Name + "'s keys";
@@ -108,30 +110,7 @@ internal sealed class RedundantIndexCheck : HealthCheck<RedundantIndexFacts>
             Caveat =
                 "Compared as Postgres prints each index, column by column. A planner can still prefer the smaller index for a "
                 + "query that reads only its columns, so drop it on purpose; a scan count above zero says some query chose it.",
-            Remedy = Remedy(index, cover),
-        };
-    }
-
-    private static HealthRemedy? Remedy(IndexFacts index, IndexFacts cover)
-    {
-        string name = index.Row.Name;
-
-        return index.Origin switch
-        {
-            IndexOrigin.Declared when index.Table.TypeName is { } type => new HealthRemedy(
-                "// opts.Schema.For<" + type + ">() declares " + name + ", which " + cover.Row.Name + " already covers:\n"
-                + "// remove the .Index(...), .Duplicate(...) or .UniqueIndex(...) that declares it from the registration.",
-                "The next apply then drops it. Removing a Duplicate(...) removes its column along with its index, so where a "
-                + "query or a sort reads that column, keep it and remove the declaration of the other index instead."),
-            IndexOrigin.Managed => new HealthRemedy(
-                "// Remove " + name + " from the Weasel table's Indexes where the Marten-managed table is defined.",
-                "The next apply then drops it, as it drops any index such a table does not declare."),
-            IndexOrigin.Ignored when index.Table.TypeName is { } type => new HealthRemedy(
-                "// Stop ignoring it, and the next apply drops it:\n"
-                + "// remove opts.Schema.For<" + type + ">().IgnoreIndex(\"" + name + "\") from the registration.",
-                "AutoCreate.CreateOrUpdate drops every index on a Marten table that the configuration does not declare, once the "
-                + "configuration no longer says to leave it alone."),
-            _ => null,
+            Remedy = remedies?.RemoveRedundantIndex(table, index.Row, index.Origin, cover.Row),
         };
     }
 }

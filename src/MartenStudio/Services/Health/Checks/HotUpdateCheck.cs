@@ -1,4 +1,4 @@
-using MartenStudio.Services.Configuration;
+using MartenStudio.Services.Sources;
 
 namespace MartenStudio.Services.Health.Checks;
 
@@ -57,8 +57,8 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
     /// <inheritdoc />
     public override async Task<HotUpdateFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        IReadOnlyList<TableFacts> tables = await MartenTables.TablesAsync(context).ConfigureAwait(false);
-        IReadOnlyList<IndexFacts> indexes = await MartenTables.IndexesAsync(context).ConfigureAwait(false);
+        IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
+        IReadOnlyList<IndexFacts> indexes = await HealthTables.IndexesAsync(context).ConfigureAwait(false);
 
         return new HotUpdateFacts(tables, indexes, DatabaseStatistics.Of(tables));
     }
@@ -68,7 +68,7 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
     {
         foreach (TableFacts table in facts.Tables)
         {
-            if (table.Table.Kind == MartenTableKind.Document && table.Row is { Updates: { } updates, HotUpdates: { } hot })
+            if (table.Table.Kind == StudioTableKind.DocumentTable && table.Row is { Updates: { } updates, HotUpdates: { } hot })
             {
                 yield return new HealthSamplePart(UpdatesSeries + table.Key, updates);
                 yield return new HealthSamplePart(HotUpdatesSeries + table.Key, hot);
@@ -84,7 +84,7 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
 
         foreach (TableFacts table in facts.Tables)
         {
-            if (table.Table.Kind != MartenTableKind.Document)
+            if (table.Table.Kind != StudioTableKind.DocumentTable)
             {
                 continue;
             }
@@ -180,11 +180,7 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
         Evidence = Evidence(table, updates, share),
         Caveat =
             "Measured over " + TableText.Span(updates.Span) + " of history. " + TableText.CountersSince(facts.Database.StatsReset, evaluation.Now),
-        Remedy = new HealthRemedy(
-            "opts.Schema.For<" + table.Table.TypeName + ">().FillFactor(" + SuggestedFillFactor.ToString(System.Globalization.CultureInfo.InvariantCulture) + ");",
-            "Leaves a fifth of each page free for an update to stay on. It costs about a quarter more heap, and - in Marten's own "
-            + "words - affects only pages written after the change: existing rows are not repacked until the table is rewritten.",
-            RuntimeFeature.DocumentFillFactor),
+        Remedy = evaluation.TableRemedies?.LeaveRoomForHotUpdates(table.Table, SuggestedFillFactor),
     };
 
     private static HealthFinding CannotHelpFinding(
@@ -223,14 +219,7 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
             Caveat =
                 "Measured over " + TableText.Span(updates.Span) + " of history. The indexed columns are Postgres' own record of what "
                 + "each index reads (pg_depend).",
-            Remedy = computed
-                ? new HealthRemedy(
-                    "// A computed index reads data, which every upsert rewrites. A duplicated field is a column of its own,\n"
-                    + "// changed only when the member is, so its index lets the other updates stay HOT:\n"
-                    + "opts.Schema.For<" + table.Table.TypeName + ">().Duplicate(x => x.IndexedMember);  // in place of .Index(x => x.IndexedMember)",
-                    "Worth it only for a member that changes less often than the document does. A GIN index on the whole document "
-                    + "and IndexLastModified() block HOT by design; keep them only where a query needs them.")
-                : null,
+            Remedy = computed ? evaluation.TableRemedies?.IndexAColumnInPlaceOfAnExpression(table.Table) : null,
         };
     }
 }

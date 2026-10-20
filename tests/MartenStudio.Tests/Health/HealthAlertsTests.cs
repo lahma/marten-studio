@@ -39,7 +39,7 @@ public class HealthAlertsTests
     {
         MartenStudioOptions options = new();
         configure?.Invoke(options);
-        return new HealthAlerts(toasts, Microsoft.Extensions.Options.Options.Create(options));
+        return new HealthAlerts(toasts, MartenStudioSettings.Of(options));
     }
 
     [Fact]

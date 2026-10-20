@@ -1,10 +1,4 @@
-using System.Collections;
 using System.Globalization;
-using System.Reflection;
-
-using Marten.Schema;
-
-using MartenStudio.Services.Configuration;
 
 namespace MartenStudio.Services.Schema;
 
@@ -40,16 +34,14 @@ internal enum StorageParameterStatus
 internal sealed record StorageParameterState(string Name, string? Declared, string? Actual, StorageParameterStatus Status);
 
 /// <summary>
-/// A table's storage parameters (<c>reloptions</c>) read, and compared with the ones a document mapping
-/// declares - on a Marten that can declare them.
+/// A table's storage parameters (<c>reloptions</c>) read, and compared with the ones a configuration declares -
+/// where the configuration can declare them.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>Schema.For&lt;T&gt;().FillFactor(n)</c> and <c>.StorageParameter(name, value)</c> arrived in Marten 9.47
-/// (<see cref="RuntimeFeature.DeclaredStorageParameters" />). Below it a document mapping declares none, so
-/// there is nothing to compare against and the Tables tab shows the table's own parameters as they are.
-/// Above it the declared set is read by reflection off <c>DocumentMapping.StorageParameters</c>, a
-/// non-generic <c>OrderedDictionary</c> keyed by the parameter's name.
+/// What is declared is the source's to say: in MartenStudio, <c>Schema.For&lt;T&gt;().FillFactor(n)</c> and
+/// <c>.StorageParameter(name, value)</c> from Marten 9.47, read by <c>DeclaredStorageParameters</c>. Where nothing can be
+/// declared there is nothing to compare against, and the table's own parameters are shown as they are.
 /// </para>
 /// <para>
 /// <b>Values are compared as Postgres would.</b> <c>reloptions</c> keeps the text it was given, and a declared
@@ -114,46 +106,6 @@ internal static class StorageParameters
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString() ?? string.Empty,
     };
-
-    /// <summary>
-    /// The storage parameters <paramref name="documentType" /> declares, or <see langword="null" /> when this
-    /// Marten cannot declare any - which is "unknown", never "none".
-    /// </summary>
-    public static IReadOnlyList<KeyValuePair<string, string>>? Declared(IDocumentType documentType, MartenRuntime runtime)
-    {
-        ArgumentNullException.ThrowIfNull(documentType);
-        ArgumentNullException.ThrowIfNull(runtime);
-
-        if (!RuntimeFeature.DeclaredStorageParameters.IsAvailable(runtime) || documentType is not DocumentMapping mapping)
-        {
-            return null;
-        }
-
-        try
-        {
-            if (typeof(DocumentMapping).GetProperty("StorageParameters", BindingFlags.Public | BindingFlags.Instance)?.GetValue(mapping)
-                is not IDictionary declared)
-            {
-                return null;
-            }
-
-            List<KeyValuePair<string, string>> parameters = [];
-            foreach (DictionaryEntry entry in declared)
-            {
-                if (entry.Key?.ToString() is { Length: > 0 } name)
-                {
-                    parameters.Add(new KeyValuePair<string, string>(name.ToLowerInvariant(), Format(entry.Value)));
-                }
-            }
-
-            return parameters;
-        }
-        catch (Exception exception) when (exception is TargetInvocationException or InvalidCastException or MemberAccessException)
-        {
-            // A light-up read that cannot be made is "unknown", the same as a Marten that has no such member.
-            return null;
-        }
-    }
 
     /// <summary>
     /// Every parameter the table has or the configuration declares, and how each stands - declared ones first,

@@ -250,7 +250,7 @@ public class TableHealthBuildLiveTests(PostgresFixture postgres)
     private static async Task<TableFacts> PartitionedTableAsync(HealthLiveHost host)
     {
         await using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
-        await using HealthConnection connection = new(host.Store.Storage.Database);
+        await using HealthConnection connection = new(MartenStudioDatabase.Of(host.Store.Storage.Database));
 
         HealthCheckContext context = new(
             new ResolvedScope(
@@ -258,8 +258,8 @@ public class TableHealthBuildLiveTests(PostgresFixture postgres)
                 new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
                 host.Store,
                 host.Store.Storage.Database),
-            new MartenStudioOptions(),
-            MartenRuntime.Current,
+            MartenStudioSettings.Of(new MartenStudioOptions()),
+            MartenStudioRuntime.Current,
             services,
             new HealthSqlRunner(connection, new ReadOnlySqlOptions(), null),
             DateTimeOffset.UtcNow,

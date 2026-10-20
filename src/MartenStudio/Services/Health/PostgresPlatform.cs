@@ -1,15 +1,12 @@
 using System.Globalization;
 
-using Marten.Storage;
-
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
-
-using Weasel.Postgresql;
 
 namespace MartenStudio.Services.Health;
 
@@ -213,6 +210,12 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
     }
 
     /// <summary>Reads it.</summary>
+    /// <remarks>
+    /// One read per database per sweep, of the database the context names (<see cref="HealthCheckContext.Target" />), and
+    /// nothing in it is about a source: a per-instance fact Postgres or a platform answers in SQL - which Aurora instance
+    /// answered (issue #8, A1) - belongs in this same statement and record, and one a host supplies (A8's capacity) beside
+    /// it from <see cref="HealthCheckContext.Services" />.
+    /// </remarks>
     public static async Task<PostgresServerFacts> ReadAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -233,7 +236,7 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
         }
 
         (int number, string version, PostgresPlatformMarkers markers) = rows[0];
-        PostgresPlatform platform = PostgresPlatform.Detect(markers, DataSourceEndpoints.Of(context.Database)?.Hosts ?? []);
+        PostgresPlatform platform = PostgresPlatform.Detect(markers, DataSourceEndpoints.Of(context.Target)?.Hosts ?? []);
 
         ILogger? logger = context.Services.GetService<ILogger<PostgresPlatform>>();
         if (logger?.IsEnabled(LogLevel.Debug) == true)
@@ -257,19 +260,20 @@ internal sealed record DataSourceEndpoints(IReadOnlyList<(string Host, int Port)
     public IReadOnlyList<string> Hosts => [.. Endpoints.Select(static x => x.Host)];
 
     /// <summary>
-    /// The endpoints of <paramref name="database" />'s data source, or <see langword="null" /> when it is not one the
-    /// studio can read (not Weasel's <see cref="PostgresqlDatabase" />, or a connection string Npgsql will not parse).
+    /// The endpoints of <paramref name="database" />'s data source, or <see langword="null" /> when it exposes none the
+    /// studio can read (<see cref="IStudioDatabase.DataSource" /> is <see langword="null" />, or a connection string Npgsql
+    /// will not parse).
     /// </summary>
     /// <remarks>
     /// Read the way <c>DatabasePoolSettings</c> reads the pool settings, without opening a connection, and without
     /// keeping the connection string. A multi-host data source names its hosts comma-separated, each with an optional
     /// <c>:port</c> of its own; a host without one uses <c>Port</c>.
     /// </remarks>
-    public static DataSourceEndpoints? Of(IMartenDatabase database)
+    public static DataSourceEndpoints? Of(IStudioDatabase database)
     {
         ArgumentNullException.ThrowIfNull(database);
 
-        if (database is not PostgresqlDatabase { DataSource: { } dataSource })
+        if (database.DataSource is not { } dataSource)
         {
             return null;
         }

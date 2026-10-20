@@ -1,11 +1,12 @@
 using System.Diagnostics;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
+using MartenStudio.Services.Health.Checks;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 using Npgsql;
 
@@ -195,9 +196,14 @@ internal sealed record HealthSweep(
 /// because a page polls this. A database that will not take a connection is one failure, not one per check.
 /// </para>
 /// <para>
-/// <b>Hidden document types never appear.</b> A finding that names a type
-/// <c>MartenStudioOptions.IsDocumentTypeVisible</c> hides is dropped here, before it is cached, because the
+/// <b>Hidden document types never appear.</b> A finding that names a type the studio's document-type filter
+/// (<see cref="IStudioSettings.IsDocumentTypeVisible" />) hides is dropped here, before it is cached, because the
 /// option is the process's and the cache is everybody's.
+/// </para>
+/// <para>
+/// <b>What the studio says, it says through the sweep's own scope.</b> How it words a table remedy
+/// (<see cref="IHealthTableRemedies" />) and what it can say of a plan (<see cref="IHealthPlanAdvisor" />) are read from
+/// the scope the sweep creates and handed to every evaluator in <see cref="HealthEvaluation" />, with the studio's runtime.
 /// </para>
 /// </remarks>
 internal sealed class HealthSweeper
@@ -211,32 +217,32 @@ internal sealed class HealthSweeper
     private readonly HealthCheckRegistry registry;
     private readonly HealthHistory history;
     private readonly IServiceScopeFactory scopes;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<HealthSweeper> logger;
     private readonly TimeProvider timeProvider;
-    private readonly MartenRuntime runtime;
+    private readonly IStudioRuntime runtime;
     private readonly IHealthStatementObserver? observer;
 
     public HealthSweeper(
         HealthCheckRegistry registry,
         HealthHistory history,
         IServiceScopeFactory scopes,
-        IOptions<MartenStudioOptions> options,
+        IStudioSettings settings,
         StudioLogThrottle throttle,
         ILogger<HealthSweeper> logger,
         TimeProvider? timeProvider = null,
-        MartenRuntime? runtime = null,
+        IStudioRuntime? runtime = null,
         IHealthStatementObserver? observer = null)
     {
         this.registry = registry;
         this.history = history;
         this.scopes = scopes;
-        this.options = options;
+        this.settings = settings;
         this.throttle = throttle;
         this.logger = logger;
         this.timeProvider = timeProvider ?? TimeProvider.System;
-        this.runtime = runtime ?? MartenRuntime.Current;
+        this.runtime = runtime ?? NoStudioRuntime.Instance;
         this.observer = observer;
     }
 
@@ -256,34 +262,41 @@ internal sealed class HealthSweeper
     };
 
     /// <summary>Sweeps one database. Never throws but for cancellation of the sweep itself.</summary>
-    /// <param name="resolved">The database, resolved with no tenant by a visitor the store policy passed.</param>
+    /// <param name="resolved">
+    /// The database, resolved with no tenant by a visitor the store policy passed - the resolver's own record, never one
+    /// rebuilt from its parts, because a studio's checks read its subtype.
+    /// </param>
     /// <param name="kind">Which tiers to run.</param>
     /// <param name="cancellationToken">Cancels the whole sweep.</param>
-    public async Task<HealthSweep> SweepAsync(ResolvedScope resolved, HealthSweepKind kind, CancellationToken cancellationToken)
+    public async Task<HealthSweep> SweepAsync(ResolvedSource resolved, HealthSweepKind kind, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(resolved);
 
-        MartenStudioOptions value = options.Value;
         DateTimeOffset now = timeProvider.GetUtcNow();
         long started = Stopwatch.GetTimestamp();
 
-        string storeKey = resolved.Registration.Key;
-        string databaseId = resolved.Database.Id.Identity;
+        string storeKey = resolved.Source.Key;
+        string databaseId = resolved.Target.Identity;
         IReadOnlySet<HealthCostTier> tiers = TiersOf(kind);
+        TimeSpan interval = settings.EffectiveHealthInterval;
 
-        TimeSpan statementTimeout = value.QueryTimeout < MaxStatementTimeout ? value.QueryTimeout : MaxStatementTimeout;
+        TimeSpan statementTimeout = settings.QueryTimeout < MaxStatementTimeout ? settings.QueryTimeout : MaxStatementTimeout;
         ReadOnlySqlOptions sessionOptions = new()
         {
             StatementTimeout = statementTimeout,
-            Role = value.SqlConsoleRole,
+            Role = settings.SqlConsoleRole,
         };
 
         await using AsyncServiceScope scope = scopes.CreateAsyncScope();
-        await using HealthConnection connection = new(resolved.Database);
+        await using HealthConnection connection = new(resolved.Target);
+
+        // How the studio words what its evaluators conclude: read once for the sweep, from its own scope.
+        IHealthTableRemedies? tableRemedies = scope.ServiceProvider.GetService<IHealthTableRemedies>();
+        IHealthPlanAdvisor? planAdvisor = scope.ServiceProvider.GetService<IHealthPlanAdvisor>();
 
         // The whole sweep's budget: one interval. A check whose turn comes after it is not started.
         using CancellationTokenSource sweepBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        sweepBudget.CancelAfter(SweepBudget ?? value.EffectiveHealthInterval);
+        sweepBudget.CancelAfter(SweepBudget ?? interval);
 
         HealthSweepMemo memo = new();
 
@@ -313,7 +326,7 @@ internal sealed class HealthSweeper
 
         if (kind is HealthSweepKind.Regular or HealthSweepKind.Statements)
         {
-            history.Append(storeKey, ring, new HealthSample(now, sample) { Gates = sampleGates }, value.EffectiveHealthInterval / 2);
+            history.Append(storeKey, ring, new HealthSample(now, sample) { Gates = sampleGates }, interval / 2);
         }
 
         HealthHistoryView view = history.Read(storeKey, ring);
@@ -325,7 +338,11 @@ internal sealed class HealthSweeper
         {
             if (!evaluations.TryGetValue(gate, out HealthEvaluation? evaluation))
             {
-                evaluation = new HealthEvaluation(now, runtime, view.VisibleAt(gate));
+                evaluation = new HealthEvaluation(now, runtime, view.VisibleAt(gate))
+                {
+                    TableRemedies = tableRemedies,
+                    PlanAdvisor = planAdvisor,
+                };
                 evaluations[gate] = evaluation;
             }
 
@@ -342,14 +359,14 @@ internal sealed class HealthSweeper
             HealthCheckInfo info = descriptor.Info;
             long checkStarted = Stopwatch.GetTimestamp();
 
-            if (info.Requires is { } feature && !feature.IsAvailable(runtime))
+            if (info.Requires is { } feature && !runtime.IsAvailable(feature))
             {
                 return Gathered.Without(descriptor, HealthCheckOutcome.NotApplicable,
-                    $"Needs {feature.Requirement}; this host runs {runtime.DescribeHost(feature.Package)}.", null, [], checkStarted);
+                    $"Needs {feature.Needs}; this host runs {runtime.DescribeHost(feature)}.", null, [], checkStarted);
             }
 
             HealthSqlRunner sql = new(connection, sessionOptions, observer);
-            HealthCheckContext context = new(resolved, value, runtime, scope.ServiceProvider, sql, now, memo, sweepBudget.Token);
+            HealthCheckContext context = new(resolved, settings, runtime, scope.ServiceProvider, sql, now, memo, sweepBudget.Token);
 
             using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(sweepBudget.Token);
             budget.CancelAfter(statementTimeout + BudgetMargin);
@@ -439,7 +456,7 @@ internal sealed class HealthSweeper
                         $"{info.Code}'s finding '{finding.Key}' has two pieces of evidence labelled '{twice.Key}'; each label is one row.");
                 }
 
-                if (finding.DocumentTypes.Any(type => options.Value.IsDocumentTypeVisible?.Invoke(type) == false))
+                if (finding.DocumentTypes.Any(type => settings.IsDocumentTypeVisible?.Invoke(type) == false))
                 {
                     continue;
                 }

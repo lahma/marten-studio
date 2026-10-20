@@ -439,7 +439,7 @@ internal sealed class SchemaDataService : ISchemaDataService
 
             // F6: what the mapping declares, on a Marten that can declare it (9.47+); null below, which is
             // "unknown", never "none".
-            declaredParameters[key] = StorageParameters.Declared(documentType, MartenRuntime.Current);
+            declaredParameters[key] = DeclaredStorageParameters.Of(documentType, MartenRuntime.Current);
         }
 
         try

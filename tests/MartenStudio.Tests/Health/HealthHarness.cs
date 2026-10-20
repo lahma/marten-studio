@@ -270,7 +270,7 @@ internal sealed class HealthHarness : IAsyncDisposable
             // HealthSweeper and HealthService take an optional MartenRuntime; registered, it is the one they ask.
             services.AddSingleton(runtime);
         }
-        services.AddSingleton(HealthCheckRegistry.ForTypes(checks ?? ScriptedChecks));
+        services.AddSingleton(HealthCheckRegistry.ForTypes(checks ?? ScriptedChecks, MartenStudio.Services.Configuration.MartenStudioRuntime.Current));
 
         if (environment is not null)
         {

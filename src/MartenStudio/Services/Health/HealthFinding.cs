@@ -1,7 +1,5 @@
 using System.Text.RegularExpressions;
 
-using MartenStudio.Services.Configuration;
-
 namespace MartenStudio.Services.Health;
 
 /// <summary>One fact behind a finding: a number, a setting, a name.</summary>
@@ -64,10 +62,10 @@ internal sealed record HealthStatement(string Sql, IReadOnlyList<string> Paramet
 /// fails its check - a "could not check" row - rather than putting it on the page.
 /// </para>
 /// <para>
-/// A line that needs a newer Marten than the floor names the <see cref="RuntimeFeature" /> it needs, and the
-/// page prints the feature's requirement ("Marten 9.47+") beside it and, on a host that lacks it, what this
-/// host runs. A feature can only come from the probe table, so a remedy cannot claim a version the probe
-/// does not check.
+/// A line that needs a newer library than the floor names the <see cref="StudioFeatureRequirement" /> it needs, and
+/// the page prints the feature's requirement ("Marten 9.47+") beside it and, on a host that lacks it, what this
+/// host runs (<see cref="IStudioRuntime" />). A feature can only come from the studio's probe table, so a remedy
+/// cannot claim a version the probe does not check.
 /// </para>
 /// </remarks>
 internal sealed record HealthRemedy
@@ -76,7 +74,7 @@ internal sealed record HealthRemedy
     /// <param name="explanation">What it changes, and what it costs.</param>
     /// <param name="requires">The newer-than-floor feature the line needs, or <see langword="null" />.</param>
     /// <exception cref="ArgumentException"><paramref name="code" /> is empty, or begins a DDL statement.</exception>
-    public HealthRemedy(string code, string? explanation = null, RuntimeFeature? requires = null)
+    public HealthRemedy(string code, string? explanation = null, StudioFeatureRequirement? requires = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
 
@@ -99,7 +97,7 @@ internal sealed record HealthRemedy
     public string? Explanation { get; }
 
     /// <summary>The newer-than-floor feature the line needs, or <see langword="null" />.</summary>
-    public RuntimeFeature? Requires { get; }
+    public StudioFeatureRequirement? Requires { get; }
 }
 
 /// <summary>What a remedy may not be.</summary>
@@ -175,14 +173,15 @@ internal sealed record HealthFinding
     public HealthLink? Link { get; init; }
 
     /// <summary>
-    /// The document types it is about. A type <c>MartenStudioOptions.IsDocumentTypeVisible</c> hides takes
-    /// the whole finding with it: a hidden type never appears in a finding.
+    /// The document types it is about. A type the studio's document-type filter hides
+    /// (<c>IStudioSettings.IsDocumentTypeVisible</c>) takes the whole finding with it: a hidden type never appears in a
+    /// finding.
     /// </summary>
     public IReadOnlyList<Type> DocumentTypes { get; init; } = [];
 
     /// <summary>
-    /// The schemas of the tables it names that are not one of the store's own schemas - an
-    /// <c>ExtendedSchemaObjects</c> table in a schema of its own (<see cref="Checks.MartenTable.OutsideStoreSchemas" />).
+    /// The schemas of the tables it names that are not one of the source's own schemas - an
+    /// <c>ExtendedSchemaObjects</c> table in a schema of its own (<see cref="Sources.StudioTable.GatedSchemas" />).
     /// Empty for everything else, which is nearly everything.
     /// </summary>
     /// <remarks>
