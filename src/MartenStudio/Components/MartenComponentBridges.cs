@@ -14,8 +14,8 @@ internal static class MartenComponentBridges
     {
         /// <summary>
         /// <see cref="StudioLink.To(Services.Settings.IStudioSettings, string)" /> with MartenStudio's options. Shared-bound
-        /// callers left at PS-1a: <c>DatabaseLinks</c>, <c>SessionActivityModels</c> and <c>DocumentLinks.WithScope</c>'s
-        /// half (PS-1b), <c>Query.razor</c> (PS-1d).
+        /// callers left at PS-1b: <c>Query.razor</c> (PS-1d). (<c>DocumentLinks</c> is MartenStudio's: its shared half,
+        /// <c>WithScope</c>, is <see cref="StudioScopeQuery.Append(string, StudioScope?, string)" />.)
         /// </summary>
         /// <param name="options">MartenStudio's options.</param>
         /// <param name="subPath">The path below the studio root, with no leading slash.</param>
@@ -34,7 +34,7 @@ internal static class MartenComponentBridges
 
         /// <summary>
         /// <see cref="StudioLink.TryStripDashboardPrefix(string, Services.Settings.IStudioSettings, out string)" /> with
-        /// MartenStudio's options. Shared-bound caller left at PS-1a: <c>SafeReturnLink</c> (PS-1b).
+        /// MartenStudio's options. No shared-bound caller is left (PS-1b moved <c>SafeReturnLink</c> onto the settings).
         /// </summary>
         /// <param name="normalizedPath">An already-normalized base-relative path.</param>
         /// <param name="options">MartenStudio's options.</param>
@@ -47,7 +47,7 @@ internal static class MartenComponentBridges
     {
         /// <summary>
         /// MartenStudio's source parameter, <c>store</c> (<see cref="MartenStudioDescriptor.SourceQueryParameter" />).
-        /// Shared-bound caller left at PS-1a: <c>DatabaseLinks</c> (PS-1b).
+        /// No shared-bound caller is left (PS-1b moved <c>DatabaseLinks</c> onto the descriptor's parameter).
         /// </summary>
         internal static string StoreKeyParameter => MartenStudioDescriptor.SourceQueryParameter;
 

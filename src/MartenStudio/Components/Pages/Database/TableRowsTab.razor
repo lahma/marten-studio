@@ -1,6 +1,6 @@
 @using System.Globalization
 @using Microsoft.AspNetCore.WebUtilities
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using Microsoft.Extensions.Primitives
 @using MartenStudio.Internal.Sql
 @using MartenStudio.Services.Database
@@ -12,7 +12,8 @@
 @inject DatabaseBrowserState Browser
 @inject StudioState State
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 @inject IJSRuntime JsRuntime
 
 @*
@@ -38,7 +39,7 @@
     <RowToolbar Label="@Qualified"
                 Filter="@url.Filter"
                 PageSize="PageSize"
-                MaxPageSize="Options.Value.MaxPageSize"
+                MaxPageSize="Settings.MaxPageSize"
                 MaxOffset="TableRowQueryBuilder.MaxOffset"
                 OffsetPaging="OffsetPreferred"
                 KeysetAvailable="KeysetAvailable"
@@ -168,7 +169,7 @@
 
     private string Qualified => DatabaseLinks.QualifiedName(Schema, Name);
 
-    private int PageSize => Math.Clamp(url.Size ?? Options.Value.DefaultPageSize, 1, Math.Max(1, Options.Value.MaxPageSize));
+    private int PageSize => Math.Clamp(url.Size ?? Settings.DefaultPageSize, 1, Math.Max(1, Settings.MaxPageSize));
 
     private int CurrentPage => Math.Max(1, url.Page ?? 1);
 
@@ -484,7 +485,7 @@
                 <button type="button"
                         class="ms-btn ms-btn-sm ms-row-count-button"
                         disabled="@counting"
-                        title="@(string.IsNullOrWhiteSpace(url.Filter) ? "Count the rows exactly, within MartenStudioOptions.ExactCountThreshold" : "Count the rows this filter matches, up to MartenStudioOptions.ExactCountThreshold")"
+                        title="@(string.IsNullOrWhiteSpace(url.Filter) ? "Count the rows exactly, within " + Settings.OptionName("ExactCountThreshold") : "Count the rows this filter matches, up to " + Settings.OptionName("ExactCountThreshold"))"
                         aria-label="Count exactly"
                         @onclick="CountAsync">=</button>
             }
@@ -634,7 +635,7 @@
 
     private void Navigate(RowsUrl next, bool replace = false) =>
         Navigation.NavigateTo(
-            DatabaseLinks.ToObject(Options.Value, State.ActiveScope, Schema, Name, DatabaseObjectTab.Rows, next.Pairs()),
+            DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, Schema, Name, DatabaseObjectTab.Rows, next.Pairs()),
             replace: replace);
 
     private List<string?> History => Browser.CursorHistory(Schema, Name);

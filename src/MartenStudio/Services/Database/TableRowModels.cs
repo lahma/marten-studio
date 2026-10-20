@@ -291,7 +291,7 @@ internal sealed record TableRowRequest
     /// <summary>Keyset where possible, or offset.</summary>
     public TableRowPagingPreference Paging { get; init; } = TableRowPagingPreference.Keyset;
 
-    /// <summary>Rows per page; zero or less means <see cref="MartenStudioOptions.DefaultPageSize" />.</summary>
+    /// <summary>Rows per page; zero or less means <c>DefaultPageSize</c>.</summary>
     public int PageSize { get; init; }
 
     /// <summary>The columns to show, by name; <see langword="null" /> for all of them.</summary>
@@ -725,7 +725,7 @@ internal sealed record TableRowCount
     public static TableRowCount Refused(DatabaseRefusal refusal, string reason) => new() { Refusal = refusal, Reason = reason };
 }
 
-/// <summary>One cell, whole - up to <see cref="MartenStudioOptions.MaxInlineDocumentBytes" />.</summary>
+/// <summary>One cell, whole - up to <c>MaxInlineDocumentBytes</c>.</summary>
 internal sealed record TableCellValue
 {
     /// <summary>The gate that refused, or <see cref="DatabaseRefusal.None" />.</summary>
@@ -762,7 +762,7 @@ internal sealed record TableCellValue
     public long FullLength { get; init; }
 
     /// <summary>
-    /// The cap it was read under, in bytes: <see cref="MartenStudioOptions.MaxInlineDocumentBytes" />. A text
+    /// The cap it was read under, in bytes: <c>MaxInlineDocumentBytes</c>. A text
     /// value is cut to that many bytes of UTF-8 on a character boundary, a <c>bytea</c> to that many bytes.
     /// </summary>
     public int Cap { get; init; }

@@ -1,10 +1,10 @@
 using MartenStudio.Internal;
+using MartenStudio.Services.Settings;
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace MartenStudio.Services.Database;
 
@@ -24,39 +24,39 @@ namespace MartenStudio.Services.Database;
 /// is, by the project's first rule, the application it was: so nothing here happens unless a studio
 /// endpoint exists. That is checked in <see cref="StartedAsync" /> rather than earlier, because a
 /// <c>MapGroup</c> or a <c>Startup.Configure</c> finishes its endpoints only while the web host starts - the
-/// same reason the startup guard checks again there. Only then are the options read, which builds them and
-/// runs their validation; and whatever that throws - a validation failure, or a configure callback of the
+/// same reason the startup guard checks again there. Only then are the settings read - the studio's live
+/// adapter over its options, which builds them and runs their validation on first read; and whatever that throws - a validation failure, or a configure callback of the
 /// host's own that fails - is swallowed and left to surface exactly where it did before, on first use.
 /// Cancellation is the one exception that is not this service's to swallow.
 /// </para>
 /// </remarks>
 internal sealed class DatabaseBrowserConfigurationNotice : IHostedLifecycleService
 {
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
     private readonly ILogger<DatabaseBrowserConfigurationNotice> logger;
     private readonly MartenStudioMappedEndpoints? mappedEndpoints;
     private readonly EndpointDataSource? containerEndpoints;
     private int logged;
 
     public DatabaseBrowserConfigurationNotice(
-        IOptions<MartenStudioOptions> options,
+        IStudioSettings settings,
         ILogger<DatabaseBrowserConfigurationNotice> logger,
         MartenStudioMappedEndpoints? mappedEndpoints = null,
         EndpointDataSource? containerEndpoints = null)
     {
-        this.options = options;
+        this.settings = settings;
         this.logger = logger;
         this.mappedEndpoints = mappedEndpoints;
         this.containerEndpoints = containerEndpoints;
     }
 
     /// <summary>Whether the configuration is the one worth warning about.</summary>
-    internal static bool ShouldWarn(MartenStudioOptions value)
+    internal static bool ShouldWarn(IStudioSettings settings)
     {
-        ArgumentNullException.ThrowIfNull(value);
+        ArgumentNullException.ThrowIfNull(settings);
 
-        return BrowsableSchemaMatcher.IncludesEverything(value.BrowsableSchemas)
-            && string.IsNullOrWhiteSpace(value.SqlConsoleRole);
+        return BrowsableSchemaMatcher.IncludesEverything(settings.BrowsableSchemas)
+            && string.IsNullOrWhiteSpace(settings.SqlConsoleRole);
     }
 
     /// <inheritdoc />
@@ -76,7 +76,7 @@ internal sealed class DatabaseBrowserConfigurationNotice : IHostedLifecycleServi
                 return Task.CompletedTask;
             }
 
-            if (ShouldWarn(options.Value) && Interlocked.Exchange(ref logged, 1) == 0)
+            if (ShouldWarn(settings) && Interlocked.Exchange(ref logged, 1) == 0)
             {
                 logger.DatabaseBrowserOpenToEverySchemaWithoutRole();
             }

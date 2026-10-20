@@ -1,13 +1,11 @@
-using Marten.Storage;
+using MartenStudio.Services.Sources;
 
 using Npgsql;
-
-using Weasel.Postgresql;
 
 namespace MartenStudio.Services.Database;
 
 /// <summary>
-/// What a store database's own connection pool is configured to be, read from its <c>NpgsqlDataSource</c>'s
+/// What a database's own connection pool is configured to be, read from its <c>NpgsqlDataSource</c>'s
 /// connection string - without opening a connection.
 /// </summary>
 /// <param name="Pooling">Whether the data source pools at all (<c>Pooling=false</c> opens a physical connection each time).</param>
@@ -21,22 +19,21 @@ internal sealed record DatabasePoolSettings(bool Pooling, int MaxPoolSize, strin
 {
     /// <summary>
     /// The pool settings of <paramref name="database" />, or <see langword="null" /> when its data source is not
-    /// one the studio can read (a database that is not Weasel's <see cref="PostgresqlDatabase" />, or a
+    /// one the studio can read (a source that exposes no <see cref="IStudioDatabase.DataSource" />, or a
     /// connection string Npgsql will not parse).
     /// </summary>
     /// <remarks>
-    /// Marten 9's <c>MartenDatabase</c> derives from Weasel's <see cref="PostgresqlDatabase" />, whose public
-    /// <see cref="PostgresqlDatabase.DataSource" /> is the data source every connection of that database comes
-    /// from - the async daemon's leadership lock included (<c>ProjectionCoordinator</c> builds its
-    /// <c>AdvisoryLock</c> on the same <c>DataSource</c>, read at Marten V9.39.0). Its
-    /// <see cref="NpgsqlDataSource.ConnectionString" /> is the connection string without the password, unless
-    /// <c>Persist Security Info</c> is on; it is parsed here and never kept.
+    /// <see cref="IStudioDatabase.DataSource" /> is the data source every connection of that database comes from -
+    /// for a Marten store, Weasel's <c>PostgresqlDatabase.DataSource</c>, which the async daemon's leadership lock
+    /// uses too (<c>ProjectionCoordinator</c> builds its <c>AdvisoryLock</c> on the same <c>DataSource</c>, read at
+    /// Marten V9.39.0). Its <see cref="NpgsqlDataSource.ConnectionString" /> is the connection string without the
+    /// password, unless <c>Persist Security Info</c> is on; it is parsed here and never kept.
     /// </remarks>
-    public static DatabasePoolSettings? Of(IMartenDatabase database)
+    public static DatabasePoolSettings? Of(IStudioDatabase database)
     {
         ArgumentNullException.ThrowIfNull(database);
 
-        if (database is not PostgresqlDatabase { DataSource: { } dataSource })
+        if (database.DataSource is not { } dataSource)
         {
             return null;
         }
@@ -64,12 +61,12 @@ internal sealed record DatabasePoolSettings(bool Pooling, int MaxPoolSize, strin
     /// (<c>NpgsqlDataSourceBuilder.Name</c>, which Npgsql keeps internal); such a pool cannot be matched, and
     /// C01 says so rather than guessing.
     /// </summary>
-    public static bool IsPoolOf(IMartenDatabase database, string poolName)
+    public static bool IsPoolOf(IStudioDatabase database, string poolName)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(poolName);
 
-        return database is PostgresqlDatabase { DataSource: { } dataSource }
+        return database.DataSource is { } dataSource
             && string.Equals(dataSource.ConnectionString, poolName, StringComparison.Ordinal);
     }
 }

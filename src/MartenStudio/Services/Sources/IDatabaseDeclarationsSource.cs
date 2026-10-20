@@ -36,6 +36,15 @@ internal interface IDatabaseDeclarationsSource
     DatabaseDeclarations Read(ResolvedSource resolved);
 
     /// <summary>
+    /// The same, with <paramref name="source" /> as the resolved one, before any database of it is resolved - for the
+    /// database browser's routing, which decides from the declarations alone whether a read is the source's own
+    /// structure or a <c>BrowseDatabase</c> read, and must do so before the capability is asked and so before any
+    /// database or tenant of the source is enumerated or discovered (AGENTS.md hard rule 14, D27).
+    /// </summary>
+    /// <param name="source">The source the visitor's scope names, found and built but not resolved to a database.</param>
+    DatabaseDeclarations Read(IStudioSource source);
+
+    /// <summary>
     /// The same, read afresh and remembered nowhere - for a caller with no circuit: a health check labelling the locks
     /// it reads (C06).
     /// </summary>
@@ -48,7 +57,7 @@ internal interface IDatabaseDeclarationsSource
     /// policy with <c>BrowseDatabase</c> while the capability is on.
     /// </summary>
     /// <param name="resolved">The scope, resolved.</param>
-    /// <param name="classifier">The classifier <see cref="Read" /> answered.</param>
+    /// <param name="classifier">The classifier <see cref="Read(ResolvedSource)" /> answered.</param>
     /// <param name="capabilityEnabled">Whether <c>BrowseDatabase</c> is on for the process.</param>
     /// <param name="cancellationToken">Cancels the policy questions.</param>
     /// <returns>By source key, ignoring case; empty when no other source owns anything here.</returns>

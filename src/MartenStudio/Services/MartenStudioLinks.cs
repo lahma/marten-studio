@@ -1,5 +1,6 @@
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
+using MartenStudio.Services.Events;
 using MartenStudio.Services.Settings;
 
 using Microsoft.Extensions.Options;
@@ -33,14 +34,15 @@ internal sealed class MartenStudioLinks : IStudioLinks
     public string? ToDocument(StudioScope? scope, string alias, string id) => DocumentLinks.ToDocument(options.Value, scope, alias, id);
 
     /// <inheritdoc />
-    public string? ToStreams(StudioScope? scope) => DatabaseLinks.ToStreams(options.Value, scope);
+    public string? ToStreams(StudioScope? scope) => EventLinks.To(options.Value, EventLinks.StreamsRoute, scope);
 
     /// <inheritdoc />
-    public string? ToFeed(StudioScope? scope) => DatabaseLinks.ToFeed(options.Value, scope);
+    public string? ToFeed(StudioScope? scope) => EventLinks.To(options.Value, EventLinks.FeedRoute, scope);
 
     /// <inheritdoc />
-    public string? ToProjections(StudioScope? scope) => DatabaseLinks.ToProjections(options.Value, scope);
+    public string? ToProjections(StudioScope? scope) => EventLinks.To(options.Value, "projections", scope);
 
     /// <inheritdoc />
-    public string? ToSchema(StudioScope? scope, string tab = "tables") => DatabaseLinks.ToSchema(options.Value, scope, tab);
+    public string? ToSchema(StudioScope? scope, string tab = "tables") =>
+        EventLinks.To(options.Value, "schema", scope, [new KeyValuePair<string, string?>(DatabaseLinks.TabParameter, tab)]);
 }

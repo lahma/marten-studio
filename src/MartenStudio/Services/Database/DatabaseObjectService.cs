@@ -1,6 +1,6 @@
 using MartenStudio.Internal.Sql;
-
-using Microsoft.Extensions.Options;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 namespace MartenStudio.Services.Database;
 
@@ -16,7 +16,7 @@ namespace MartenStudio.Services.Database;
 /// of the store's own - and nothing about the database or the tenant is asked yet. A request that needs
 /// <c>BrowseDatabase</c> then goes through <see cref="DatabaseAccess.RequireBrowseAsync" /> - the capability,
 /// then the two policies for the database as a whole, then the scope resolved <em>with no tenant</em> - and
-/// the schema against <see cref="MartenStudioOptions.BrowsableSchemas" />, settled from the options alone
+/// the schema against the studio's <c>BrowsableSchemas</c> option, settled from the options alone
 /// wherever it can be, all before the database is asked anything about that schema. Every one of those
 /// refusals is audited. The visitor's own tenant-bearing scope is resolved only on the path that needs no
 /// capability - the store's own structure - so a request the capability refuses never runs tenant
@@ -41,24 +41,24 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     /// <summary>What the audit ring calls reading a sequence's value.</summary>
     internal const string SequenceValueAction = "Read database sequence value";
 
-    private readonly StudioScopeResolver resolver;
+    private readonly StudioSourceResolver resolver;
     private readonly DatabaseAccess access;
     private readonly DatabaseCatalog catalog;
     private readonly StudioActionLog audit;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
 
     public DatabaseObjectService(
-        StudioScopeResolver resolver,
+        StudioSourceResolver resolver,
         DatabaseAccess access,
         DatabaseCatalog catalog,
         StudioActionLog audit,
-        IOptions<MartenStudioOptions> options)
+        IStudioSettings settings)
     {
         this.resolver = resolver;
         this.access = access;
         this.catalog = catalog;
         this.audit = audit;
-        this.options = options;
+        this.settings = settings;
     }
 
     /// <inheritdoc />
@@ -66,7 +66,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        (ResolvedScope? resolved, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
+        (ResolvedSource? resolved, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
         if (resolved is null)
         {
             return DatabaseBrowserOverview.Unavailable(refused!);
@@ -86,7 +86,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
             // Counted by a query of its own, grouped by schema - exact, whatever a list's cap is.
             IReadOnlyList<CatalogObjectCount> counts = await catalog
-                .CountsAsync(resolved.Database, gate.VisibleSchemas, gate.Classifier.HiddenTablesAndRoutines(), cancellationToken)
+                .CountsAsync(resolved.Target, gate.VisibleSchemas, gate.Classifier.HiddenTablesAndRoutines(), cancellationToken)
                 .ConfigureAwait(false);
 
             return DatabaseObjectAssembler.Overview(gate, counts);
@@ -154,7 +154,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             IReadOnlyList<string> schemas = clamped.Schema is { } one ? [one] : gate.VisibleSchemas;
 
             CatalogSnapshot snapshot = await catalog
-                .SnapshotAsync(route.Resolved.Database, schemas, PartsFor(clamped.Category), clamped.NameFilter, cancellationToken)
+                .SnapshotAsync(route.Resolved.Target, schemas, PartsFor(clamped.Category), clamped.NameFilter, cancellationToken)
                 .ConfigureAwait(false);
 
             return DatabaseObjectAssembler.List(gate, snapshot, clamped, limit);
@@ -218,7 +218,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             }
 
             CatalogRelationDetail? detail = await catalog
-                .RelationAsync(route.Resolved.Database, schema, name, cancellationToken)
+                .RelationAsync(route.Resolved.Target, schema, name, cancellationToken)
                 .ConfigureAwait(false);
 
             return detail is null
@@ -415,7 +415,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             // The list row first: lock-free, and what says whose it is - a sequence one of a hidden type's
             // columns owns is not there for this visitor.
             CatalogSequence? sequence = await catalog
-                .SequenceAsync(route.Resolved.Database, schema, name, cancellationToken)
+                .SequenceAsync(route.Resolved.Target, schema, name, cancellationToken)
                 .ConfigureAwait(false);
 
             if (sequence is null
@@ -434,15 +434,15 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             {
                 return Refuse(
                     DatabaseRefusal.NoPrivilege,
-                    options.Value.SqlConsoleRole is { } role
-                        ? "The role '" + role + "' (MartenStudioOptions.SqlConsoleRole) has neither SELECT nor USAGE on it."
+                    settings.SqlConsoleRole is { } role
+                        ? "The role '" + role + "' (" + settings.OptionName("SqlConsoleRole") + ") has neither SELECT nor USAGE on it."
                         : "The store's Postgres role has neither SELECT nor USAGE on it.",
                     audited: false);
             }
 
             // Only now anything that locks: one sequence, briefly, in a transaction of its own.
             CatalogSequenceValue? value = await catalog
-                .SequenceValueAsync(route.Resolved.Database, sequence.Schema, sequence.Name, cancellationToken)
+                .SequenceValueAsync(route.Resolved.Target, sequence.Schema, sequence.Name, cancellationToken)
                 .ConfigureAwait(false);
 
             return value is { CanReadValue: true }
@@ -456,7 +456,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     }
 
     private async Task<DatabaseObjectDefinition> ReadDefinitionAsync(
-        ResolvedScope resolved,
+        ResolvedSource resolved,
         DatabaseGate gate,
         DatabaseObjectRef reference,
         CancellationToken cancellationToken)
@@ -474,7 +474,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 // called and whoever owns it. A view named mt_ over a hidden type's table is Marten's by name
                 // and needs no capability to ask about, and its query names that table all the same.
                 CatalogRelationDetail? detail = await catalog
-                    .RelationAsync(resolved.Database, schema, name, cancellationToken)
+                    .RelationAsync(resolved.Target, schema, name, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (detail is null || detail.Relation.Kind is not ("v" or "m"))
@@ -495,7 +495,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 }
 
                 CatalogDefinition? view = await catalog
-                    .ViewDefinitionAsync(resolved.Database, schema, name, cancellationToken)
+                    .ViewDefinitionAsync(resolved.Target, schema, name, cancellationToken)
                     .ConfigureAwait(false);
 
                 return view?.Sql is { } sql
@@ -514,7 +514,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 }
 
                 CatalogDefinition? routine = await catalog
-                    .RoutineDefinitionAsync(resolved.Database, schema, name, arguments, cancellationToken)
+                    .RoutineDefinitionAsync(resolved.Target, schema, name, arguments, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (routine is null)
@@ -535,7 +535,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             case DatabaseObjectKind.Trigger:
             {
                 CatalogDefinition? trigger = await catalog
-                    .TriggerDefinitionAsync(resolved.Database, schema, reference.Table!, name, cancellationToken)
+                    .TriggerDefinitionAsync(resolved.Target, schema, reference.Table!, name, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (trigger?.Sql is not { } sql)
@@ -564,7 +564,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 // Through the same read the Types list makes, so a type's "used by N columns" is counted
                 // over the same schemas here as there - the visitor's, and nothing withheld.
                 CatalogSnapshot snapshot = await catalog
-                    .SnapshotAsync(resolved.Database, gate.VisibleSchemas, CatalogParts.Types, name, cancellationToken)
+                    .SnapshotAsync(resolved.Target, gate.VisibleSchemas, CatalogParts.Types, name, cancellationToken)
                     .ConfigureAwait(false);
 
                 CatalogType? type = snapshot.Types.Items.FirstOrDefault(x =>
@@ -590,7 +590,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     /// type exists - and is answered as not found.
     /// </remarks>
     private async Task<string?> IdentityArgumentsAsync(
-        ResolvedScope resolved,
+        ResolvedSource resolved,
         DatabaseGate gate,
         DatabaseObjectRef reference,
         CancellationToken cancellationToken)
@@ -603,7 +603,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         }
 
         CatalogSnapshot overloads = await catalog
-            .SnapshotAsync(resolved.Database, [reference.Schema], CatalogParts.Routines, reference.Name, cancellationToken)
+            .SnapshotAsync(resolved.Target, [reference.Schema], CatalogParts.Routines, reference.Name, cancellationToken)
             .ConfigureAwait(false);
 
         string[] matching =
@@ -706,7 +706,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         {
             // 2a. The store's own structure: the visitor's own scope, tenant and all, as every other screen
             //     resolves it. No capability is needed, so nothing is refused here that a capability would.
-            (ResolvedScope? resolved, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
+            (ResolvedSource? resolved, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
 
             return resolved is null
                 ? Route.Refused(DatabaseRefusal.Unavailable, refused!)
@@ -739,7 +739,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
         if (schema is not null)
         {
-            IReadOnlyList<string> entries = [.. options.Value.BrowsableSchemas];
+            IReadOnlyList<string> entries = [.. settings.BrowsableSchemas];
 
             if (!BrowsableSchemaMatcher.MightMatch(entries, schema))
             {
@@ -783,7 +783,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     /// The visitor's scope, resolved as a read - or the resolver's own sentence, which says the same thing
     /// for a scope that is refused and one that does not exist.
     /// </summary>
-    private async Task<(ResolvedScope? Resolved, string? Refused)> ResolveAsync(
+    private async Task<(ResolvedSource? Resolved, string? Refused)> ResolveAsync(
         StudioScope scope,
         CancellationToken cancellationToken)
     {
@@ -815,7 +815,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     /// <param name="Resolved">The scope - the visitor's own, or the tenant-less one a grant carries.</param>
     /// <param name="Refusal">Which gate refused.</param>
     /// <param name="Reason">The sentence.</param>
-    private sealed record Route(ResolvedScope? Resolved, DatabaseRefusal Refusal, string? Reason)
+    private sealed record Route(ResolvedSource? Resolved, DatabaseRefusal Refusal, string? Reason)
     {
         [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(Resolved))]
         public bool Allowed => Resolved is not null;

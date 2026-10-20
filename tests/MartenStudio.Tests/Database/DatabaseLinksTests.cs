@@ -1,6 +1,7 @@
 using MartenStudio.Components;
 using MartenStudio.Services;
 using MartenStudio.Services.Database;
+using MartenStudio.Services.Settings;
 
 namespace MartenStudio.Tests.Database;
 
@@ -12,6 +13,12 @@ namespace MartenStudio.Tests.Database;
 public class DatabaseLinksTests
 {
     private static readonly MartenStudioOptions Options = new();
+
+    private static readonly IStudioSettings Settings = MartenStudioSettings.Of(Options);
+
+    private static readonly StudioDescriptor Descriptor = MartenStudioDescriptor.Instance;
+
+    private static readonly IStudioLinks Links = new MartenStudioLinks(Microsoft.Extensions.Options.Options.Create(Options));
 
     private static readonly StudioScope Scope = new("default", "localhost.marten", "acme");
 
@@ -27,7 +34,7 @@ public class DatabaseLinksTests
     [Fact]
     public void The_browser_link_carries_the_schema_kind_owner_filter_and_scope()
     {
-        string url = DatabaseLinks.ToBrowser(Options, Scope, "quartz", DatabaseObjectCategory.Views, DatabaseOwnerFilter.Other, "trig");
+        string url = DatabaseLinks.ToBrowser(Settings,Descriptor, Scope, "quartz", DatabaseObjectCategory.Views, DatabaseOwnerFilter.Other, "trig");
 
         url.Should().StartWith("database?");
         url.Should().Contain("schema=quartz").And.Contain("kind=views").And.Contain("owner=other").And.Contain("q=trig");
@@ -37,9 +44,9 @@ public class DatabaseLinksTests
     [Fact]
     public void The_browser_link_leaves_out_what_is_the_default_or_blank()
     {
-        DatabaseLinks.ToBrowser(Options, null).Should().Be("database");
+        DatabaseLinks.ToBrowser(Settings,Descriptor, null).Should().Be("database");
 
-        string url = DatabaseLinks.ToBrowser(Options, null, schema: null, kind: DatabaseObjectCategory.Tables, owner: DatabaseOwnerFilter.All, nameFilter: "  ");
+        string url = DatabaseLinks.ToBrowser(Settings,Descriptor, null, schema: null, kind: DatabaseObjectCategory.Tables, owner: DatabaseOwnerFilter.All, nameFilter: "  ");
 
         url.Should().Be("database?kind=tables", "owner=all is the default and a blank filter is no filter");
     }
@@ -48,7 +55,7 @@ public class DatabaseLinksTests
     [MemberData(nameof(OddNames))]
     public void An_object_link_round_trips_any_name(string schema, string name)
     {
-        string url = DatabaseLinks.ToObject(Options, Scope, schema, name, DatabaseObjectTab.Keys);
+        string url = DatabaseLinks.ToObject(Settings,Descriptor, Scope, schema, name, DatabaseObjectTab.Keys);
 
         url.Should().StartWith("database/object?", "the name travels in the query string, never as a segment");
 
@@ -72,7 +79,7 @@ public class DatabaseLinksTests
             new("naïve \"col\"", "v=1&w=2 + 3 % # ?"),
         ];
 
-        string url = DatabaseLinks.ToRow(Options, Scope, schema, name, key);
+        string url = DatabaseLinks.ToRow(Settings,Descriptor, Scope, schema, name, key);
 
         url.Should().StartWith("database/row?");
 
@@ -88,7 +95,8 @@ public class DatabaseLinksTests
     public void Each_key_column_is_its_own_readable_parameter()
     {
         string url = DatabaseLinks.ToRow(
-            Options,
+            Settings,
+            Descriptor,
             null,
             "quartz",
             "qrtz_triggers",
@@ -100,7 +108,7 @@ public class DatabaseLinksTests
     [Fact]
     public void The_key_prefix_is_stripped_exactly_once()
     {
-        string url = DatabaseLinks.ToRow(Options, null, "s", "t", [new("key.x", "1")]);
+        string url = DatabaseLinks.ToRow(Settings,Descriptor, null, "s", "t", [new("key.x", "1")]);
 
         url.Should().Contain("key.key.x=1");
         Pairs(DatabaseLinks.ReadKey(url)).Should().Equal(("key.x", "1"));
@@ -129,7 +137,8 @@ public class DatabaseLinksTests
     public void The_extra_parameters_ride_along_before_the_scope()
     {
         string url = DatabaseLinks.ToObject(
-            Options,
+            Settings,
+            Descriptor,
             Scope,
             "quartz",
             "qrtz_triggers",
@@ -191,7 +200,7 @@ public class DatabaseLinksTests
     public void A_document_table_lives_in_its_documents_collection()
     {
         string? href = DatabaseLinks.ToWhereItLives(
-            Options, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenDocument, "default", "customer"));
+            Links, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenDocument, "default", "customer"));
 
         href.Should().StartWith("documents/customer?").And.Contain("store=default").And.Contain("tenant=acme");
     }
@@ -199,27 +208,27 @@ public class DatabaseLinksTests
     [Fact]
     public void The_event_store_lives_in_streams_and_marten_s_bookkeeping_on_the_schema_screen()
     {
-        DatabaseLinks.ToWhereItLives(Options, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenEventStore, "default"))
+        DatabaseLinks.ToWhereItLives(Links, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenEventStore, "default"))
             .Should().StartWith("events/streams?").And.Contain("store=default");
 
-        DatabaseLinks.ToWhereItLives(Options, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenInfrastructure, "default"))
+        DatabaseLinks.ToWhereItLives(Links, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenInfrastructure, "default"))
             .Should().StartWith("schema?tab=tables&").And.Contain("store=default");
     }
 
     [Fact]
     public void Relational_data_lives_right_here()
     {
-        DatabaseLinks.ToWhereItLives(Options, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenProjectionOrExtended, "default"))
+        DatabaseLinks.ToWhereItLives(Links, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenProjectionOrExtended, "default"))
             .Should().BeNull("a flat-table projection's rows are browsable in the database browser itself");
 
-        DatabaseLinks.ToWhereItLives(Options, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.Other, RecognisedAs: "Quartz.NET"))
+        DatabaseLinks.ToWhereItLives(Links, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.Other, RecognisedAs: "Quartz.NET"))
             .Should().BeNull();
     }
 
     [Fact]
     public void The_console_link_fills_the_editor_with_a_quoted_select()
     {
-        string? href = DatabaseLinks.ToQueryConsole(Options, Scope, "quartz", "qrtz_triggers");
+        string? href = DatabaseLinks.ToQueryConsole(Settings,Descriptor, Scope, "quartz", "qrtz_triggers");
 
         href.Should().StartWith("query?mode=sql&sql=");
         Parameter(href!, "sql").Should().Be("select * from \"quartz\".\"qrtz_triggers\" limit 100");
@@ -230,7 +239,7 @@ public class DatabaseLinksTests
     public void A_name_that_cannot_be_quoted_gets_no_statement_at_all()
     {
         MartenStudio.Internal.Sql.SqlLiteralText.SelectStatement("legacy", "bad\"name").Should().BeNull();
-        DatabaseLinks.ToQueryConsole(Options, Scope, "legacy", "bad\"name").Should().BeNull();
+        DatabaseLinks.ToQueryConsole(Settings,Descriptor, Scope, "legacy", "bad\"name").Should().BeNull();
         MartenStudio.Internal.Sql.SqlLiteralText.SelectStatement("my schema", "Mixed Case").Should().Be("select * from \"my schema\".\"Mixed Case\" limit 100");
     }
 

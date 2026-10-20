@@ -1,6 +1,7 @@
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Services.Database
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 @inject StudioState State
 
 @*
@@ -93,7 +94,7 @@
 
     private const string DefaultSort = "default";
 
-    /// <summary>The list, as a <c>DatabaseObjectList</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    /// <summary>The list, as a <c>DatabaseObjectList</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
     [Parameter]
     public object? Model { get; set; }
 
@@ -116,7 +117,7 @@
     private bool IsViews => List?.Query.Category == DatabaseObjectCategory.Views;
 
     private string ObjectHref(DatabaseRelationSummary relation) =>
-        DatabaseLinks.ToObject(Options.Value, State.ActiveScope, relation.Schema, relation.Name);
+        DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, relation.Schema, relation.Name);
 
     private IEnumerable<DatabaseRelationSummary> Sorted()
     {

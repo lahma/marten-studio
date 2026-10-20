@@ -235,8 +235,17 @@ internal sealed record TableRowListSpec
 /// </remarks>
 internal static class TableRowQueryBuilder
 {
-    /// <summary>The largest offset a page may start at: past it Postgres counts rows only to discard them.</summary>
-    public const int MaxOffset = DocumentQueryBuilder.MaxOffset;
+    /// <summary>
+    /// The largest offset a page may start at: past it Postgres counts rows only to discard them. The same ceiling
+    /// the documents list pages to.
+    /// </summary>
+    public const int MaxOffset = 10_000;
+
+    /// <summary>
+    /// One more than the largest page a read asks for, whatever the options say - the same ceiling the documents
+    /// list has, so a page of rows is never a bigger read than a page of documents.
+    /// </summary>
+    public const int MaxPageSize = 500;
 
     /// <summary>
     /// How many pointing rows an inbound count looks at before it stops - one more than it reports, so

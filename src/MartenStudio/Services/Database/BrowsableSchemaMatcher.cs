@@ -5,7 +5,7 @@ using MartenStudio.Internal.Sql;
 namespace MartenStudio.Services.Database;
 
 /// <summary>
-/// Turns <see cref="MartenStudioOptions.BrowsableSchemas" /> and the database's live schema list into the
+/// Turns <c>BrowsableSchemas</c> and the database's live schema list into the
 /// set of schemas the database browser may read beyond the store's own.
 /// </summary>
 /// <remarks>
@@ -13,7 +13,7 @@ namespace MartenStudio.Services.Database;
 /// <b>Live, because <c>"*"</c> is a statement about the database, not the configuration.</b> It means
 /// "every schema the reading role has <c>USAGE</c> on", so it cannot be settled without asking - and the
 /// asking is done inside the read-only session with <c>SET LOCAL ROLE</c>, so <c>USAGE</c> is the
-/// <see cref="MartenStudioOptions.SqlConsoleRole" />'s when one is set.
+/// <c>SqlConsoleRole</c>'s when one is set.
 /// </para>
 /// <para>
 /// <b>Never a system schema.</b> <c>pg_catalog</c>, <c>pg_toast</c>, the temporary schemas and
@@ -38,7 +38,7 @@ internal static class BrowsableSchemaMatcher
     public const int MaxIdentifierBytes = 63;
 
     /// <summary>
-    /// Whether <paramref name="entry" /> is one <see cref="MartenStudioOptions.BrowsableSchemas" /> accepts:
+    /// Whether <paramref name="entry" /> is one <c>BrowsableSchemas</c> accepts:
     /// <c>"*"</c>, or a schema name of at most 63 bytes with no double quote and no NUL.
     /// </summary>
     /// <remarks>

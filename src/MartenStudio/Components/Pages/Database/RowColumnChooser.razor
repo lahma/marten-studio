@@ -41,7 +41,7 @@
 </details>
 
 @code {
-    /// <summary>Every column, as an <c>IReadOnlyList&lt;TableRowColumn&gt;</c>; typed <see cref="object" /> for the reason <c>DocumentComponentModel</c> gives.</summary>
+    /// <summary>Every column, as an <c>IReadOnlyList&lt;TableRowColumn&gt;</c>; typed <see cref="object" /> for the reason <c>ComponentModel</c> gives.</summary>
     [Parameter]
     public object? AvailableModel { get; set; }
 
@@ -53,9 +53,9 @@
     [Parameter]
     public EventCallback<IReadOnlyList<string>> OnChanged { get; set; }
 
-    private IReadOnlyList<TableRowColumn> Available => DocumentComponentModel.ReadList<TableRowColumn>(AvailableModel);
+    private IReadOnlyList<TableRowColumn> Available => ComponentModel.ReadList<TableRowColumn>(AvailableModel);
 
-    private IReadOnlyList<TableRowColumn> Selected => DocumentComponentModel.ReadList<TableRowColumn>(SelectedModel);
+    private IReadOnlyList<TableRowColumn> Selected => ComponentModel.ReadList<TableRowColumn>(SelectedModel);
 
     private int SelectedCount => Selected.Count;
 

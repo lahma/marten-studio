@@ -1,5 +1,5 @@
 @page "/marten/database/object"
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Services.Database
 @using MartenStudio.Services.Live
 @implements IAsyncDisposable
@@ -8,7 +8,9 @@
 @inject StudioCapabilityGuard Capabilities
 @inject StudioAuthorization Authorization
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject IStudioLinks Links
 @inject IJSRuntime JsRuntime
 @inject ToastService Toasts
 
@@ -42,11 +44,11 @@
 
         <div class="ms-doc-main">
             <nav class="ms-db-breadcrumb" aria-label="Breadcrumb">
-                <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Database</a>
+                <a href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">Database</a>
                 @if (VisibleSchema is { Length: > 0 } crumb)
                 {
                     <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
-                    <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, crumb, RailCategory)">@crumb</a>
+                    <a href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, crumb, RailCategory)">@crumb</a>
                 }
             </nav>
 
@@ -56,7 +58,7 @@
                     <p class="ms-empty-title">No object asked for</p>
                     <p class="ms-empty-description">
                         This page opens one table or view, named in the query string
-                        (<code>?schema=&amp;name=</code>). Pick one from <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">the database browser</a>.
+                        (<code>?schema=&amp;name=</code>). Pick one from <a href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">the database browser</a>.
                     </p>
                 </div>
             }
@@ -80,7 +82,7 @@
                     @foreach (DatabaseObjectTab tab in Tabs)
                     {
                         <a class="@(tab == ActiveTab ? "ms-tab ms-tab-active" : "ms-tab")"
-                           href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, relation.Schema, relation.Name, tab)"
+                           href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, relation.Schema, relation.Name, tab)"
                            aria-current="@(tab == ActiveTab ? "page" : null)"
                            @key="tab">
                             @TabLabel(tab)
@@ -500,7 +502,7 @@
                 </h1>
 
                 <div class="ms-db-object-actions">
-                    @if (mayRunSql && DatabaseLinks.ToQueryConsole(Options.Value, State.ActiveScope, relation.Schema, relation.Name) is { } queryHref)
+                    @if (mayRunSql && DatabaseLinks.ToQueryConsole(Settings, Descriptor, State.ActiveScope, relation.Schema, relation.Name) is { } queryHref)
                     {
                         <a class="ms-btn ms-btn-sm" href="@queryHref" title="Open the SQL console with a SELECT of this relation written into it">Open in Query</a>
                     }
@@ -560,23 +562,33 @@
                                 tenant's rows and the soft-deleted ones as if they were live, in the JSON the
                                 serializer wrote rather than the document it means.
                             </p>
-                            <p><a class="ms-btn ms-btn-primary ms-btn-sm" href="@DatabaseLinks.ToWhereItLives(Options.Value, State.ActiveScope, relation.Ownership)">Open @(relation.Ownership.Alias ?? "the collection") in Documents</a></p>
+                            @* Each link is drawn only where the studio has the screen it opens (IStudioLinks). *@
+                            @if (DatabaseLinks.ToWhereItLives(Links, State.ActiveScope, relation.Ownership) is { } documentsHref)
+                            {
+                                <p><a class="ms-btn ms-btn-primary ms-btn-sm" href="@documentsHref">Open @(relation.Ownership.Alias ?? "the collection") in Documents</a></p>
+                            }
                             break;
 
                         case DatabaseObjectOwner.MartenEventStore when relation.Rows.Refusal == DatabaseRefusal.MartenOwned:
                             <p class="ms-db-rows-card-title">Browsed in Streams, the Feed and Projections</p>
                             <p class="ms-muted">@relation.Rows.Reason</p>
-                            <p class="ms-db-rows-card-links">
-                                <a class="ms-btn ms-btn-primary ms-btn-sm" href="@DatabaseLinks.ToStreams(Options.Value, State.ActiveScope)">Open Streams</a>
-                                <a class="ms-btn ms-btn-sm" href="@DatabaseLinks.ToFeed(Options.Value, State.ActiveScope)">Feed</a>
-                                <a class="ms-btn ms-btn-sm" href="@DatabaseLinks.ToProjections(Options.Value, State.ActiveScope)">Projections</a>
-                            </p>
+                            @if (Links.ToStreams(State.ActiveScope) is { } streamsHref)
+                            {
+                                <p class="ms-db-rows-card-links">
+                                    <a class="ms-btn ms-btn-primary ms-btn-sm" href="@streamsHref">Open Streams</a>
+                                    <a class="ms-btn ms-btn-sm" href="@Links.ToFeed(State.ActiveScope)">Feed</a>
+                                    <a class="ms-btn ms-btn-sm" href="@Links.ToProjections(State.ActiveScope)">Projections</a>
+                                </p>
+                            }
                             break;
 
                         case DatabaseObjectOwner.MartenInfrastructure when relation.Rows.Refusal == DatabaseRefusal.MartenOwned:
                             <p class="ms-db-rows-card-title">Marten's own bookkeeping is never browsed raw</p>
                             <p class="ms-muted">@relation.Rows.Reason</p>
-                            <p><a class="ms-btn ms-btn-sm" href="@DatabaseLinks.ToSchema(Options.Value, State.ActiveScope)">See it on the Schema screen</a></p>
+                            @if (Links.ToSchema(State.ActiveScope) is { } schemaHref)
+                            {
+                                <p><a class="ms-btn ms-btn-sm" href="@schemaHref">See it on the Schema screen</a></p>
+                            }
                             break;
 
                         default:
@@ -633,7 +645,7 @@
                 }
                 else
                 {
-                    <p class="ms-db-refusal" role="note">@DatabaseDefinitionWithheld.For(relation, found.Access, Options.Value.BrowsableSchemas)</p>
+                    <p class="ms-db-refusal" role="note">@DatabaseDefinitionWithheld.For(relation, found.Access, Settings.BrowsableSchemas)</p>
                 }
 
                 @if (found.Dependencies.Count > 0)
@@ -646,7 +658,7 @@
                                 <li>
                                     @if (dependency is { Visible: true, Schema: { } schema, Name: { } name })
                                     {
-                                        <a class="ms-db-name" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, name)">@DatabaseLinks.QualifiedName(schema, name)</a>
+                                        <a class="ms-db-name" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, name)">@DatabaseLinks.QualifiedName(schema, name)</a>
                                         <span class="ms-db-fk-meta">@DatabasePresentation.KindLabel(dependency.Kind)@(dependency.Depth > 1 ? ", through another view" : string.Empty)</span>
                                     }
                                     else
@@ -676,7 +688,7 @@
                 <p class="ms-empty-description ms-db-still-shown">@stillShown</p>
             }
             <p class="ms-empty-description">
-                <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Back to the database browser</a>
+                <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">Back to the database browser</a>
             </p>
         </div>;
 

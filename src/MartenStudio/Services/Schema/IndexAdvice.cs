@@ -2,21 +2,6 @@ using MartenStudio.Internal.Sql;
 
 namespace MartenStudio.Services.Schema;
 
-/// <summary>One index the store's configuration asks for, flattened out of <c>IDocumentType.Indexes</c>.</summary>
-/// <param name="CollectionAlias">The document type that declares it.</param>
-/// <param name="DocumentTypeName">The .NET type name.</param>
-/// <param name="Schema">The schema its table lives in.</param>
-/// <param name="Table">The table it is on.</param>
-/// <param name="Name">The index name.</param>
-/// <param name="Definition">The statement Weasel would write for it.</param>
-internal sealed record DeclaredIndex(
-    string CollectionAlias,
-    string DocumentTypeName,
-    string Schema,
-    string Table,
-    string Name,
-    string Definition);
-
 /// <summary>One document collection, as the advisor needs to know it.</summary>
 /// <param name="Alias">The alias Marten gave the type.</param>
 /// <param name="DocumentTypeName">

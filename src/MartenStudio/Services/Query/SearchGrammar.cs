@@ -123,12 +123,6 @@ internal abstract record DocumentPredicate
     public sealed record SubclassIs(string Alias) : DocumentPredicate;
 }
 
-/// <summary>Something the parser could not make sense of, and where it is.</summary>
-/// <param name="Message">What is wrong, phrased for the person who typed it.</param>
-/// <param name="Position">Zero-based offset into the search text.</param>
-/// <param name="Length">How much of the text the message is about; at least one character.</param>
-internal sealed record SearchGrammarError(string Message, int Position, int Length);
-
 /// <summary>The result of parsing a search box: what was understood, and what was not.</summary>
 /// <param name="Predicates">The terms that parsed, in the order typed.</param>
 /// <param name="Errors">Everything that did not, with positions.</param>

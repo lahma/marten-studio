@@ -55,7 +55,7 @@ internal static class DatabaseDefinitionWithheld
     /// <summary>The sentence for one object in a list or on its detail page.</summary>
     /// <param name="item">The object, whose <c>DefinitionAvailable</c> is <see langword="false" />.</param>
     /// <param name="access">The gate as the service described it with the list or the detail, when known.</param>
-    /// <param name="configuredEntries"><see cref="MartenStudioOptions.BrowsableSchemas" />, for the per-schema sentence.</param>
+    /// <param name="configuredEntries"><c>BrowsableSchemas</c>, for the per-schema sentence.</param>
     public static string For(
         DatabaseObjectSummary item,
         DatabaseAccessState? access,

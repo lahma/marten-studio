@@ -311,7 +311,7 @@ public class DatabaseAccessTests
 
         declarations.Succeeded.Should().BeFalse();
         declarations.Classifier.Should().BeNull();
-        declarations.Failure.Should().StartWith(DatabaseAccess.UnnamedStore + " could not be built")
+        declarations.Failure.Should().StartWith(MartenDatabaseDeclarationsSource.UnnamedStore + " could not be built")
             .And.NotContain(nameof(IBrokenStore), "the sentence any visitor may read names no other store");
         declarations.FailedStoreKey.Should().Be(nameof(IBrokenStore));
         declarations.NamedFailure.Should().Contain(nameof(IBrokenStore)).And.Contain("its connection string is wrong");
@@ -634,7 +634,7 @@ public class DatabaseAccessTests
 
         TenantScope.DatabaseId.Should().BeEmpty("the premise: the visitor's own id means this store's default");
         asked.DatabaseIdentifier.Should().Be(theirs, "that store's own identity for the resolved database");
-        asked.DatabaseIdentifier.Should().BeEquivalentTo(grant.Resolved!.Database.Id.Identity, "the same database, however its host is spelled");
+        asked.DatabaseIdentifier.Should().BeEquivalentTo(grant.Resolved!.Target.Identity, "the same database, however its host is spelled");
         asked.TenantId.Should().BeNull();
     }
 

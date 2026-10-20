@@ -91,7 +91,8 @@ public class TenancyEnumerationCallTests
             "names, for the Overview's cards - one enumeration per store per load (F8-D3 C3)"),
         new("src/MartenStudio/Services/TenantDiscovery.cs", "DescribeDatabasesAsync", 1,
             "tenant ids, for every tenancy but master-table and sharded, which are read from the instance (F8-D3 C4)"),
-        new("src/MartenStudio/Services/Database/DatabaseAccess.cs", "AllDatabases", 1,
+        // PS-1b: moved with the code, from DatabaseAccess.cs to MartenStudio's IDatabaseDeclarationsSource.
+        new("src/MartenStudio/Services/MartenDatabaseDeclarationsSource.cs", "AllDatabases", 1,
             "names: another store's spelling of this database's identity, walked only when a policy will be asked "
             + "and only on a Single or StaticMultiple store (F8-D3 C1)"),
         new("src/MartenStudio/Services/Configuration/ConfigurationService.cs", "DescribeDatabasesAsync", 1,

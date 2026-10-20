@@ -85,7 +85,7 @@ internal readonly record struct SqlToken(
 /// <remarks>
 /// <para>
 /// <b>One scanner, because the divergences are invisible.</b> <see cref="ReadOnlySqlGuard" /> and
-/// <see cref="QuerySqlComposer" /> ask different questions of different text and produce different refusal
+/// <c>QuerySqlComposer</c> ask different questions of different text and produce different refusal
 /// shapes, but they need the <em>same</em> answer to "is this character inside a literal?". They used to
 /// carry a private copy of the walk each, and three separate reviews found the same defect twice over: a
 /// dollar tag beginning with a digit had to be fixed in both, and a <c>--</c> comment that ended at LF but

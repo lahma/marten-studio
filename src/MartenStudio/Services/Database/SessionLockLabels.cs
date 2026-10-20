@@ -1,9 +1,5 @@
 using System.Globalization;
 
-using Marten;
-
-using MartenStudio.Services.Health.Checks;
-
 namespace MartenStudio.Services.Database;
 
 /// <summary>What a lock is on, in Marten's terms.</summary>
@@ -130,6 +126,12 @@ internal sealed record LockTarget(LockTargetKind Kind, string Label, string? Sch
 /// </summary>
 /// <remarks>
 /// <para>
+/// <b>Built by a source's labeler.</b> This class only labels: which advisory keys are the source's own, and whose
+/// each relation is, arrive from outside - from <see cref="Sources.ISessionLockLabeler" />, whose MartenStudio
+/// implementation reads them from the store's options (<see cref="Create" />), and whose implementation for a source
+/// that takes no advisory lock of its own names only the relations (<see cref="RelationsOnly" />).
+/// </para>
+/// <para>
 /// <b>Advisory keys.</b> Marten and Weasel take every advisory lock through
 /// <c>pg_try_advisory_lock(bigint)</c> / <c>pg_try_advisory_xact_lock(bigint)</c> with an <c>int</c> id, so the
 /// key <c>pg_locks</c> shows (reassembled from <c>classid</c> and <c>objid</c> where <c>objsubid = 1</c>) is the id
@@ -145,7 +147,7 @@ internal sealed record LockTarget(LockTargetKind Kind, string Label, string? Sch
 /// <b>Relations, by their owner.</b> A lock read never hands this class an index's, a partition's or a TOAST
 /// table's name: it hands it the table that relation belongs to and which part of it is locked
 /// (<see cref="LockedRelation" />). That owner is classified by the database browser's own classifier over
-/// <b>every</b> registered store's declarations (<see cref="DatabaseAccess.DeclareEveryStore" />, no connection),
+/// <b>every</b> registered store's declarations (<see cref="Sources.IDatabaseDeclarationsSource" />, no connection),
 /// and named in a label only when it is <b>this store's own declared, visible object</b> - its document tables by
 /// alias, its event tables, its declared infrastructure, its projection tables - or a Postgres system catalog.
 /// Everything else is labelled by kind:
@@ -192,42 +194,54 @@ internal sealed class SessionLockLabels
 
     /// <summary>
     /// Every advisory key Marten's daemon negotiates leadership with - the base id and every shard's - as the one
-    /// definition of the set has it (<see cref="DaemonCheckConfiguration.LockKeysFor" />, which D02 and D01's Explain
-    /// read too).
+    /// definition of the set has it (MartenStudio's <c>DaemonCheckConfiguration.LockKeysFor</c>, which D02 and D01's
+    /// Explain read too). Empty for a source that takes no advisory lock of its own.
     /// </summary>
     public IReadOnlyList<long> DaemonLockIds { get; }
 
-    /// <summary>The labels for <paramref name="store" />, registered under <paramref name="storeKey" />.</summary>
-    /// <param name="store">The store.</param>
-    /// <param name="storeKey">Its registration key.</param>
+    /// <summary>
+    /// The labels for the source registered under <paramref name="storeKey" />, given the advisory keys its own
+    /// machinery takes - what a source's <see cref="Sources.ISessionLockLabeler" /> builds from its configuration.
+    /// </summary>
+    /// <param name="storeKey">The source's registration key: a relation it declares is named as its own.</param>
+    /// <param name="applyChangesLockId">The schema-apply lock's key, or <see langword="null" /> when it has none.</param>
+    /// <param name="daemonLockId">The async daemon's leadership key, or <see langword="null" /> when it has none.</param>
+    /// <param name="shardLocks">Each async shard's key and the shard's identity, as a label names it.</param>
+    /// <param name="daemonLockIds">Every key the daemon negotiates leadership with, sorted (<see cref="DaemonLockIds" />).</param>
     /// <param name="classifier">
-    /// The classifier over every registered store's declarations (<see cref="DatabaseAccess.DeclareEveryStore" />
-    /// or <see cref="DatabaseAccess.ReadDeclarations(ResolvedScope)" />), or <see langword="null" /> when they
-    /// could not all be read - or when only advisory keys are wanted - which names no relation at all.
+    /// The classifier over every registered source's declarations
+    /// (<see cref="Sources.IDatabaseDeclarationsSource" />), or <see langword="null" /> when they could not all be read
+    /// - or when only advisory keys are wanted - which names no relation at all.
     /// </param>
-    public static SessionLockLabels For(IDocumentStore store, string storeKey, DatabaseObjectClassifier? classifier)
+    public static SessionLockLabels Create(
+        string storeKey,
+        long? applyChangesLockId,
+        long? daemonLockId,
+        IEnumerable<KeyValuePair<long, string>> shardLocks,
+        IReadOnlyList<long> daemonLockIds,
+        DatabaseObjectClassifier? classifier)
     {
-        ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(storeKey);
-
-        long? apply = store.Options is StoreOptions options ? options.ApplyChangesLockId : null;
-
-        // The daemon's ids from the one definition of the set, H2's: a projection that cannot list its shards lists
-        // none, and its locks read as "not Marten's" - a label, not a judgement, and C04 then treats such a session as
-        // it would any other; a shard whose id cannot be computed is nobody's, as it would be in pg_locks too.
-        string schema = store.Options.Events.DatabaseSchemaName;
-        int baseLockId = DaemonCheckConfiguration.DaemonLockIdOf(store.Options);
-        var asyncShards = DaemonCheckConfiguration.AsyncShardsOf(store);
+        ArgumentNullException.ThrowIfNull(shardLocks);
+        ArgumentNullException.ThrowIfNull(daemonLockIds);
 
         Dictionary<long, string> shards = [];
-        foreach ((long id, var shard) in DaemonCheckConfiguration.ShardLockIdsFor(schema, asyncShards, baseLockId))
+        foreach ((long id, string shard) in shardLocks)
         {
-            shards.TryAdd(id, shard.Identity);
+            shards.TryAdd(id, shard);
         }
 
-        return new SessionLockLabels(
-            storeKey, apply, baseLockId, shards, DaemonCheckConfiguration.LockKeysFor(schema, asyncShards, baseLockId), classifier);
+        return new SessionLockLabels(storeKey, applyChangesLockId, daemonLockId, shards, daemonLockIds, classifier);
     }
+
+    /// <summary>
+    /// The labels for a source that takes no advisory lock of its own: every advisory lock is "not Marten's", and the
+    /// relations are labelled through <paramref name="classifier" /> alone.
+    /// </summary>
+    /// <param name="storeKey">The source's registration key.</param>
+    /// <param name="classifier">The classifier, or <see langword="null" />, which names no relation at all.</param>
+    public static SessionLockLabels RelationsOnly(string storeKey, DatabaseObjectClassifier? classifier) =>
+        Create(storeKey, null, null, [], [], classifier);
 
     /// <summary>What one lock is on.</summary>
     /// <param name="lockType"><c>pg_locks.locktype</c>.</param>

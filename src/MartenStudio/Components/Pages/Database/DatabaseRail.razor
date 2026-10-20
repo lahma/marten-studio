@@ -1,7 +1,8 @@
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Services.Database
 @using MartenStudio.Services.Live
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 @inject StudioState State
 @inject IJSRuntime JsRuntime
 
@@ -157,7 +158,7 @@
                 <ul class="ms-rail-list">
                     <li class="ms-rail-item" @key="@("sessions")">
                         <div class="ms-rail-entry">
-                            <a class="@LinkClass(false)" href="@SessionLinks.ToSessions(Options.Value, State.ActiveScope)">
+                            <a class="@LinkClass(false)" href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope)">
                                 <span class="ms-db-rail-name">Sessions and locks</span>
                             </a>
                         </div>
@@ -203,7 +204,7 @@
     private string filter = string.Empty;
     private string? error;
 
-    /// <summary>The overview, as a <c>DatabaseBrowserOverview</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    /// <summary>The overview, as a <c>DatabaseBrowserOverview</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
     [Parameter]
     public object? Overview { get; set; }
 
@@ -431,10 +432,10 @@
         filter.Length == 0 || text.Contains(filter, StringComparison.OrdinalIgnoreCase);
 
     private string SchemaHref(string? schema) =>
-        DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, schema, Category);
+        DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, schema, Category);
 
     private string ObjectHref(string schema, string name) =>
-        DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, name);
+        DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, name);
 
     private int TotalOf(DatabaseSchemaSummary? schema) =>
         schema is null ? Schemas.Sum(CountFor) : CountFor(schema);

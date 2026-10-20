@@ -1,4 +1,6 @@
 @using MartenStudio.Services.Database
+@using MartenStudio.Services.Settings
+@inject IStudioSettings Settings
 
 @*
     Which gate is shut, in the words of the gate itself (DatabaseGate's sentences, which the service hands
@@ -26,7 +28,7 @@
                         <text>
                             What is shown is the structure of this store's own schemas, as the Schema screen
                             shows it. With <code>Capabilities.BrowseDatabase</code> on, this screen would also
-                            show the other schemas <code>MartenStudioOptions.BrowsableSchemas</code>
+                            show the other schemas <code>@Settings.OptionName("BrowsableSchemas")</code>
                             admits@(WithheldPhrase(access)), the definitions of views, functions and triggers
                             Marten does not own, and the rows of tables it does not own.
                         </text>
@@ -54,7 +56,7 @@
 }
 
 @code {
-    /// <summary>The gate, as a <c>DatabaseAccessState</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    /// <summary>The gate, as a <c>DatabaseAccessState</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
     [Parameter]
     public object? Model { get; set; }
 

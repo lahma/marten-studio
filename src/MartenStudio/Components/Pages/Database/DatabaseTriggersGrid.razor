@@ -1,9 +1,10 @@
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Services.Database
 @implements IDisposable
 @inject IDatabaseObjectService Data
 @inject StudioState State
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 
 @*
     Triggers a person wrote - never an internal one, never a partition's clone - on the browser's Triggers
@@ -72,7 +73,7 @@
                     @if (ShowTable)
                     {
                         <td class="ms-db-cell-name">
-                            <a class="ms-db-name ms-db-name-cut" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, trigger.Schema, trigger.Table)" title="@DatabaseLinks.QualifiedName(trigger.Schema, trigger.Table)"><span class="ms-db-schema-prefix">@(ShowSchema ? trigger.Schema + "." : null)</span>@trigger.Table</a>
+                            <a class="ms-db-name ms-db-name-cut" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, trigger.Schema, trigger.Table)" title="@DatabaseLinks.QualifiedName(trigger.Schema, trigger.Table)"><span class="ms-db-schema-prefix">@(ShowSchema ? trigger.Schema + "." : null)</span>@trigger.Table</a>
                         </td>
                     }
                     <td>@trigger.Timing</td>
@@ -82,7 +83,7 @@
                         @if (trigger.FunctionSchema is { } functionSchema && trigger.FunctionName is { } functionName)
                         {
                             <a class="ms-db-name"
-                               href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, functionSchema, DatabaseObjectCategory.Functions, nameFilter: functionName)"
+                               href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, functionSchema, DatabaseObjectCategory.Functions, nameFilter: functionName)"
                                title="Show this function on the Functions tab">@(DatabaseLinks.QualifiedName(functionSchema, functionName) + "()")</a>
                         }
                         else
@@ -111,7 +112,7 @@
                             }
                             else
                             {
-                                <p class="ms-db-refusal" role="note">@DatabaseDefinitionWithheld.For(trigger, AccessState, Options.Value.BrowsableSchemas)</p>
+                                <p class="ms-db-refusal" role="note">@DatabaseDefinitionWithheld.For(trigger, AccessState, Settings.BrowsableSchemas)</p>
                             }
                         </td>
                     </tr>
@@ -131,7 +132,7 @@
     /// <summary>
     /// The triggers: a <c>DatabaseObjectList</c> from the browser, or one table's
     /// <c>IReadOnlyList&lt;DatabaseTriggerSummary&gt;</c> from its detail. Typed <see cref="object" /> - see
-    /// <c>DocumentComponentModel</c>.
+    /// <c>ComponentModel</c>.
     /// </summary>
     [Parameter]
     public object? Model { get; set; }
@@ -139,7 +140,7 @@
     /// <summary>
     /// The gate as a <c>DatabaseAccessState</c>, for a <see cref="Model" /> that is a bare list of triggers - a
     /// table's detail hands over its own; a <c>DatabaseObjectList</c> carries one already. Typed
-    /// <see cref="object" /> - see <c>DocumentComponentModel</c>.
+    /// <see cref="object" /> - see <c>ComponentModel</c>.
     /// </summary>
     [Parameter]
     public object? Access { get; set; }

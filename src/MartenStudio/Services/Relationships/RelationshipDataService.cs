@@ -361,7 +361,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             // The same cached, read-only catalog read the database browser lists its tables from, over
             // exactly the schemas this visitor's gate admits.
             CatalogSnapshot snapshot = await catalog
-                .SnapshotAsync(resolved.Database, read.Gate.VisibleSchemas, CatalogParts.Relations, null, cancellationToken)
+                .SnapshotAsync(resolved.Target, read.Gate.VisibleSchemas, CatalogParts.Relations, null, cancellationToken)
                 .ConfigureAwait(false);
 
             return (new RelationshipDatabaseView(read.Gate, snapshot.Relations.Items, snapshot.Relations.Truncated), null);
@@ -420,7 +420,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         {
             try
             {
-                IReadOnlyList<CatalogSchema> live = await catalog.SchemasAsync(resolved.Database, cancellationToken)
+                IReadOnlyList<CatalogSchema> live = await catalog.SchemasAsync(resolved.Target, cancellationToken)
                     .ConfigureAwait(false);
 
                 set.UnionWith(BrowsableSchemaMatcher.Match(value.BrowsableSchemas, live));
@@ -732,7 +732,7 @@ internal sealed class RelationshipDataService : IRelationshipDataService
 
         try
         {
-            await using NpgsqlConnection connection = grant.Grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = grant.Grant.Resolved.Target.CreateConnection(Sources.StudioConnectionUsage.Read);
             await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             long count = await Session()

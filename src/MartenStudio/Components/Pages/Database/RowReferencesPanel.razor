@@ -1,11 +1,12 @@
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Components.Pages.Documents
 @using MartenStudio.Components.Pages.Relationships
 @using MartenStudio.Services.Database
-@using MartenStudio.Services.Documents
 @using MartenStudio.Services.Relationships
 @inject StudioState State
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject IStudioLinks Links
 
 @*
     What one row points at, and what points at it - row detail's right-hand pane, the relational side of a
@@ -90,11 +91,11 @@ else
 }
 
 @code {
-    /// <summary>The references, as a <c>TableRowReferences</c>; typed <see cref="object" /> for the reason <c>DocumentComponentModel</c> gives.</summary>
+    /// <summary>The references, as a <c>TableRowReferences</c>; typed <see cref="object" /> for the reason <c>ComponentModel</c> gives.</summary>
     [Parameter]
     public object? References { get; set; }
 
-    private TableRowReferences Model => DocumentComponentModel.Read(References, Empty);
+    private TableRowReferences Model => ComponentModel.Read(References, Empty);
 
     private static readonly TableRowReferences Empty = new() { Found = true };
 
@@ -120,13 +121,13 @@ else
 
             case RowReferenceState.Present when reference is { TargetsRowKey: true, ParentKey: { } parentKey, Schema: { } schema, Table: { } table }:
                 @Parent(reference)
-                <a class="ms-row-ref-key ms-mono" href="@DatabaseLinks.ToRow(Options.Value, State.ActiveScope, schema, table, Ordered(parentKey, reference.LinkedColumns))" title="Open the row this points at">@RowPresentation.KeyTuple(Ordered(parentKey, reference.LinkedColumns))</a>
+                <a class="ms-row-ref-key ms-mono" href="@DatabaseLinks.ToRow(Settings, Descriptor, State.ActiveScope, schema, table, Ordered(parentKey, reference.LinkedColumns))" title="Open the row this points at">@RowPresentation.KeyTuple(Ordered(parentKey, reference.LinkedColumns))</a>
                 @NotValid(reference)
                 break;
 
             case RowReferenceState.Present when reference is { Schema: { } schema, Table: { } table }:
                 @Parent(reference)
-                <a class="ms-row-ref-key ms-mono" href="@DatabaseLinks.ToRows(Options.Value, State.ActiveScope, schema, table, reference.ParentFilter)" title="The key references a unique key other than the row key: show the parent's rows that match">@Values(reference)</a>
+                <a class="ms-row-ref-key ms-mono" href="@DatabaseLinks.ToRows(Settings, Descriptor, State.ActiveScope, schema, table, reference.ParentFilter)" title="The key references a unique key other than the row key: show the parent's rows that match">@Values(reference)</a>
                 @NotValid(reference)
                 break;
 
@@ -154,7 +155,7 @@ else
     {
         if (reference is { Schema: { } schema, Table: { } table })
         {
-            <a class="ms-row-ref-table" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, table)">
+            <a class="ms-row-ref-table" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, table)">
                 <TableChip Schema="@schema" Name="@table" Hue="@RelationshipTableNode.SchemaHue(schema)" Small="true" />
             </a>
         }
@@ -173,7 +174,7 @@ else
         switch (reference.State)
         {
             case RowInboundState.Counted when reference.ChildFilter is { Length: > 0 } filter:
-                <a class="ms-row-ref-link" href="@DatabaseLinks.ToRows(Options.Value, State.ActiveScope, reference.Schema, reference.Table, filter)" title="@CountTitle(reference)">
+                <a class="ms-row-ref-link" href="@DatabaseLinks.ToRows(Settings, Descriptor, State.ActiveScope, reference.Schema, reference.Table, filter)" title="@CountTitle(reference)">
                     <TableChip Schema="@reference.Schema" Name="@reference.Table" Hue="@RelationshipTableNode.SchemaHue(reference.Schema)" Small="true" />
                     <span class="ms-referenced-count">@CountText(reference)</span>
                 </a>
@@ -187,7 +188,7 @@ else
                 break;
 
             case RowInboundState.MartenDocument when reference.DocumentAlias is { } alias:
-                <a class="ms-row-ref-link" href="@DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias)" title="A Marten document table: its rows are counted and browsed in Documents">
+                <a class="ms-row-ref-link" href="@Links.ToCollection(State.ActiveScope, alias)" title="A Marten document table: its rows are counted and browsed in Documents">
                     <CollectionChip Alias="@alias" Hue="@CollectionColorizer.HueFor(alias)" Small="true" />
                 </a>
                 break;
@@ -245,7 +246,7 @@ else
     }
 
     /// <summary>A Marten document parent, in Documents - in the store that declares it when that is not this one.</summary>
-    private string DocumentHref(RowOutboundReference reference, string alias, string id)
+    private string? DocumentHref(RowOutboundReference reference, string alias, string id)
     {
         StudioScope? scope = State.ActiveScope;
 
@@ -254,6 +255,6 @@ else
             scope = new StudioScope(store, string.Empty, null);
         }
 
-        return DocumentLinks.ToDocument(Options.Value, scope, alias, id);
+        return Links.ToDocument(scope, alias, id);
     }
 }

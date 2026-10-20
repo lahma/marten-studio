@@ -395,7 +395,7 @@ internal sealed class SchemaDataService : ISchemaDataService
     /// <remarks>
     /// <para>
     /// Classified by the database browser's own rules (<see cref="DatabaseObjectClassifier" />, read through
-    /// <see cref="DatabaseAccess.ReadDeclarations(ResolvedScope)" /> over every registered store). A store that
+    /// <see cref="DatabaseAccess.ReadDeclarations(Sources.ResolvedSource)" /> over every registered store). A store that
     /// cannot be read degrades the tab rather than blanking it (<see cref="SchemaClassification" />): what a
     /// readable store declares is listed, and what the unreadable one could own is withheld and counted. Only
     /// a configuration of the scope's own store that cannot be read is a tab that says so and lists nothing.
@@ -1039,7 +1039,7 @@ internal sealed class SchemaDataService : ISchemaDataService
     /// A failure only when the scope's own store's configuration cannot be read.
     /// </summary>
     /// <remarks>
-    /// Mirrors <see cref="DatabaseAccess.ReadDeclarations(ResolvedScope)" />: every registration, ancillary
+    /// Mirrors <see cref="DatabaseAccess.ReadDeclarations(Sources.ResolvedSource)" />: every registration, ancillary
     /// stores included whatever <see cref="MartenStudioOptions.IncludeAncillaryStores" /> says, the resolved
     /// store in its registration's place, options only and no database of any store enumerated. A store that
     /// cannot be read is named only to a visitor that store's store policy passes for the database with no
@@ -1242,7 +1242,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         IReadOnlyList<string> storeSchemas,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<CatalogSchema> live = await catalog.SchemasAsync(resolved.Database, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<CatalogSchema> live = await catalog.SchemasAsync(resolved.Target, cancellationToken).ConfigureAwait(false);
         HashSet<string> own = new(storeSchemas, StringComparer.Ordinal);
 
         return live

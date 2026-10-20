@@ -14,8 +14,8 @@ internal sealed record StoreDeclarations(string StoreKey, SchemaDeclarations Dec
 /// <remarks>
 /// <para>
 /// <b>Every registered store at once.</b> The classifier is built from the declarations of every store the
-/// registry can build (<see cref="MartenStoreRegistry.Registrations(bool)" /> with ancillary stores
-/// included, whatever <see cref="MartenStudioOptions.IncludeAncillaryStores" /> says), because another
+/// registry can build (<c>MartenStoreRegistry.Registrations(bool)</c> with ancillary stores
+/// included, whatever <c>IncludeAncillaryStores</c> says), because another
 /// store's table in a shared database is Marten's table, and labelling it "Other" would hand its rows to a
 /// raw reader that knows nothing of its tenancy or soft delete. The declarations are read from options
 /// only; no store's databases are enumerated. When two stores declare the same object the first
@@ -23,7 +23,7 @@ internal sealed record StoreDeclarations(string StoreKey, SchemaDeclarations Dec
 /// </para>
 /// <para>
 /// <b>A hidden type is not "Other", it is absent.</b> A table whose document type
-/// <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> hides answers <see langword="null" />, and so
+/// <c>IsDocumentTypeVisible</c> hides answers <see langword="null" />, and so
 /// does everything that is only about it - its triggers, a sequence one of its columns owns, and the
 /// per-type <c>mt_upsert_</c>/<c>mt_insert_</c>/<c>mt_update_</c>/<c>mt_overwrite_</c> functions an older Marten
 /// left beside it. A definition anybody else wrote that names its table is refused rather than shown. Its
@@ -74,7 +74,7 @@ internal sealed class DatabaseObjectClassifier
     /// <summary>Builds the classifier from every store's declarations.</summary>
     /// <param name="stores">Every registered store's declarations, the default store first.</param>
     /// <param name="hidesDocumentTypes">
-    /// Whether the host set <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> at all - which means a
+    /// Whether the host set <c>IsDocumentTypeVisible</c> at all - which means a
     /// document type Marten has not learned yet may be one it hides (see <see cref="MayHideDocumentTypes" />).
     /// </param>
     public DatabaseObjectClassifier(IReadOnlyList<StoreDeclarations> stores, bool hidesDocumentTypes = false)
@@ -108,7 +108,7 @@ internal sealed class DatabaseObjectClassifier
 
     /// <summary>
     /// Whether any document type may be hidden from the studio: one is known to be, or the host set
-    /// <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> at all.
+    /// <c>IsDocumentTypeVisible</c> at all.
     /// </summary>
     /// <remarks>
     /// The second half matters because Marten learns document types lazily: a type that was never

@@ -143,7 +143,7 @@ public class BrowseDatabaseOptionsTests
         var options = new MartenStudioOptions();
         options.BrowsableSchemas.Add("*");
 
-        var notice = new DatabaseBrowserConfigurationNotice(Options.Create(options), Logger(logs), containerEndpoints: MappedStudio());
+        var notice = new DatabaseBrowserConfigurationNotice(MartenStudioSettings.Of(options), Logger(logs), containerEndpoints: MappedStudio());
 
         await notice.StartedAsync(Token);
         await notice.StartedAsync(Token);
@@ -163,7 +163,7 @@ public class BrowseDatabaseOptionsTests
         var options = new MartenStudioOptions { SqlConsoleRole = role };
         options.BrowsableSchemas.Add(star ? "*" : "quartz");
 
-        await new DatabaseBrowserConfigurationNotice(Options.Create(options), Logger(logs), containerEndpoints: MappedStudio())
+        await new DatabaseBrowserConfigurationNotice(MartenStudioSettings.Of(options), Logger(logs), containerEndpoints: MappedStudio())
             .StartedAsync(Token);
 
         logs.Entries.Should().BeEmpty();

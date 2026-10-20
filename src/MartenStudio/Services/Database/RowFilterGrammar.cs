@@ -26,7 +26,7 @@ namespace MartenStudio.Services.Database;
 /// </para>
 /// <para>
 /// <b>It never throws.</b> Every problem is a <see cref="SearchGrammarError" /> with a position, and the
-/// terms around it still parse. Its own tokenizer, rather than <see cref="SearchGrammar" />'s: that one's
+/// terms around it still parse. Its own tokenizer, rather than <c>SearchGrammar</c>'s: that one's
 /// is private to the document grammar, whose paths are dotted and whose values are classified, and neither
 /// is true here.
 /// </para>

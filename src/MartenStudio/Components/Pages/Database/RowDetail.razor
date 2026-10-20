@@ -1,5 +1,5 @@
 @page "/marten/database/row"
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Components.Pages.Documents
 @using MartenStudio.Internal.Sql
 @using MartenStudio.Services.Database
@@ -11,7 +11,8 @@
 @inject StudioCapabilityGuard Capabilities
 @inject StudioAuthorization Authorization
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 @inject IJSRuntime JsRuntime
 @inject ToastService Toasts
 
@@ -37,11 +38,11 @@
 
 <div class="ms-page ms-db-page ms-row-detail-page">
     <nav class="ms-db-breadcrumb" aria-label="Breadcrumb">
-        <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Database</a>
+        <a href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">Database</a>
         @if (detail is { Found: true } && Schema is { Length: > 0 } schema && Name is { Length: > 0 } table)
         {
             <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
-            <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, schema, DatabaseObjectCategory.Tables)">@schema</a>
+            <a href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, schema, DatabaseObjectCategory.Tables)">@schema</a>
             <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
             <a href="@BackHref">@table</a>
             <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
@@ -56,7 +57,7 @@
             <p class="ms-empty-description">
                 This page opens one row of a table, named in the query string
                 (<code>?schema=&amp;name=&amp;key.&lt;column&gt;=</code>). Open one from a table's Rows tab in
-                <a href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">the database browser</a>.
+                <a href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">the database browser</a>.
             </p>
         </div>
     }
@@ -143,9 +144,9 @@
     public string? TenantId { get; set; }
 
     /// <summary>The <c>?from=</c> the link carried, but only when it is a return link into the database browser's object page.</summary>
-    private string? SafeFrom => SafeReturnLink.Sanitize(From, Options.Value, DatabaseLinks.ObjectRoute);
+    private string? SafeFrom => SafeReturnLink.Sanitize(From, Settings, DatabaseLinks.ObjectRoute);
 
-    private string BackHref => SafeFrom ?? DatabaseLinks.ToObject(Options.Value, State.ActiveScope, Schema ?? string.Empty, Name ?? string.Empty, DatabaseObjectTab.Rows);
+    private string BackHref => SafeFrom ?? DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, Schema ?? string.Empty, Name ?? string.Empty, DatabaseObjectTab.Rows);
 
     private IReadOnlyDictionary<string, string> KeyDictionary =>
         key.GroupBy(static x => x.Key, StringComparer.Ordinal).ToDictionary(static x => x.Key, static x => x.First().Value, StringComparer.Ordinal);
@@ -371,7 +372,7 @@
 
                 @if (mayRunSql && SqlLiteralText.RowStatement(row.Schema ?? Schema!, row.Name ?? Name!, KeyLiterals(shown)) is { } statement)
                 {
-                    <a class="ms-btn ms-btn-sm" href="@DatabaseLinks.ToQueryConsole(Options.Value, State.ActiveScope, statement)" title="Open the SQL console with a SELECT of this row written into it">Open in Query</a>
+                    <a class="ms-btn ms-btn-sm" href="@DatabaseLinks.ToQueryConsole(Settings, Descriptor, State.ActiveScope, statement)" title="Open the SQL console with a SELECT of this row written into it">Open in Query</a>
                 }
 
                 <MenuButton WrapperClass="ms-db-copy-menu ms-row-copy-menu"
@@ -495,14 +496,15 @@
                 <p class="ms-empty-description">There is no row with this key here that this studio shows you. It may have been deleted, or its key changed.</p>
             }
             <p class="ms-empty-description">
-                <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope)">Back to the database browser</a>
+                <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">Back to the database browser</a>
             </p>
         </div>
     };
 
     private string NeighbourHref(IReadOnlyList<KeyValuePair<string, string>> neighbour) =>
         DatabaseLinks.ToRow(
-            Options.Value,
+            Settings,
+            Descriptor,
             State.ActiveScope,
             Schema ?? string.Empty,
             Name ?? string.Empty,
@@ -531,7 +533,7 @@
         string? raw = isNull ? null : column.KeyPosition is not null && KeyDictionary.TryGetValue(column.Name, out string? keyed) ? keyed : cell.Text;
         string filter = RowPresentation.FilterFor(column.Name, raw);
 
-        return (DatabaseLinks.ToRows(Options.Value, State.ActiveScope, Schema ?? string.Empty, Name ?? string.Empty, filter), filter);
+        return (DatabaseLinks.ToRows(Settings, Descriptor, State.ActiveScope, Schema ?? string.Empty, Name ?? string.Empty, filter), filter);
     }
 
     private static IReadOnlyList<KeyValuePair<string, string?>> KeyLiterals(IReadOnlyList<KeyValuePair<string, string>> key) =>

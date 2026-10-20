@@ -1,15 +1,14 @@
 using System.Globalization;
 using System.Text;
 
-using Marten.Storage;
-
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Query;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 using Npgsql;
 
@@ -27,7 +26,7 @@ namespace MartenStudio.Services.Database;
 /// checked against what the catalog said (the filter's columns, the sort column, the cursor, the key), and
 /// a request that cannot be used is a value, not an exception. Only then is a connection opened, and every
 /// statement runs inside <see cref="ReadOnlySqlSession.InTransactionAsync{T}" /> as
-/// <see cref="MartenStudioOptions.SqlConsoleRole" />, under <see cref="MartenStudioOptions.QueryTimeout" />.
+/// the studio's <c>SqlConsoleRole</c> option, under the studio's <c>QueryTimeout</c> option.
 /// </para>
 /// <para>
 /// <b>Only the grant's names reach SQL.</b> The schema and name a page passes are compared by the gate and
@@ -69,13 +68,13 @@ internal sealed class TableRowService : ITableRowService
 
     /// <summary>
     /// The longest one reference check may run: the lesser of this and
-    /// <see cref="MartenStudioOptions.QueryTimeout" />.
+    /// the studio's <c>QueryTimeout</c> option.
     /// </summary>
     internal static readonly TimeSpan ReferenceStatementCap = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// How long all of one row's reference checks together may take before the rest are left unchecked: the
-    /// lesser of this and <see cref="MartenStudioOptions.QueryTimeout" />.
+    /// lesser of this and the studio's <c>QueryTimeout</c> option.
     /// </summary>
     internal static readonly TimeSpan ReferenceBudgetCap = TimeSpan.FromSeconds(10);
 
@@ -86,7 +85,7 @@ internal sealed class TableRowService : ITableRowService
     private readonly DatabaseAccess access;
     private readonly DatabaseCatalog catalog;
     private readonly StudioActionLog audit;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
     private readonly ILogger<TableRowService> logger;
     private readonly StudioLogThrottle throttle;
     private readonly AuthenticationStateProvider authentication;
@@ -101,7 +100,7 @@ internal sealed class TableRowService : ITableRowService
         DatabaseAccess access,
         DatabaseCatalog catalog,
         StudioActionLog audit,
-        IOptions<MartenStudioOptions> options,
+        IStudioSettings settings,
         ILogger<TableRowService> logger,
         StudioLogThrottle throttle,
         AuthenticationStateProvider authentication)
@@ -109,16 +108,14 @@ internal sealed class TableRowService : ITableRowService
         this.access = access;
         this.catalog = catalog;
         this.audit = audit;
-        this.options = options;
+        this.settings = settings;
         this.logger = logger;
         this.throttle = throttle;
         this.authentication = authentication;
     }
 
-    private MartenStudioOptions Options => options.Value;
-
     /// <summary>A little past the server-side <c>statement_timeout</c>, which is what should fire.</summary>
-    private int CommandTimeoutSeconds => (int) Math.Ceiling(Options.QueryTimeout.TotalSeconds) + 5;
+    private int CommandTimeoutSeconds => (int) Math.Ceiling(settings.QueryTimeout.TotalSeconds) + 5;
 
     // ---------------------------------------------------------------------------------------------------
     // Pages
@@ -201,17 +198,17 @@ internal sealed class TableRowService : ITableRowService
             };
         }
 
-        MartenStudioOptions value = Options;
+        IStudioSettings value = settings;
         int pageSize = Math.Clamp(
             request.PageSize <= 0 ? value.DefaultPageSize : request.PageSize,
             1,
-            Math.Max(1, Math.Min(value.MaxPageSize, DocumentListQuery.MaxPageSize - 1)));
+            Math.Max(1, Math.Min(value.MaxPageSize, TableRowQueryBuilder.MaxPageSize - 1)));
 
         TableRowStatement? statement = null;
 
         try
         {
-            await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = grant.Resolved.Target.CreateConnection(StudioConnectionUsage.Read);
             await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             // The version is on the connection already - Postgres sends it at startup - so asking costs
@@ -368,7 +365,7 @@ internal sealed class TableRowService : ITableRowService
 
         try
         {
-            await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = grant.Resolved.Target.CreateConnection(StudioConnectionUsage.Read);
             await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             (List<TableRow> rows, _, bool shortened) = await Session(2)
@@ -442,7 +439,7 @@ internal sealed class TableRowService : ITableRowService
         // Bytes, as the option says: the server sends one character past the cap and the reader cuts that
         // to the cap in UTF-8 bytes, on a character boundary. The builder binds one past the cap, so the
         // cap leaves room for it.
-        int cap = Math.Clamp(Options.MaxInlineDocumentBytes, 1, int.MaxValue - 1);
+        int cap = Math.Clamp(settings.MaxInlineValueBytes, 1, int.MaxValue - 1);
 
         TableRowStatement statement = TableRowQueryBuilder.BuildCell(
             relation.Schema,
@@ -463,7 +460,7 @@ internal sealed class TableRowService : ITableRowService
 
         try
         {
-            await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = grant.Resolved.Target.CreateConnection(StudioConnectionUsage.Read);
             await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             TableCellValue value = await Session()
@@ -528,7 +525,7 @@ internal sealed class TableRowService : ITableRowService
             };
         }
 
-        MartenStudioOptions value = Options;
+        IStudioSettings value = settings;
         long threshold = Math.Max(value.ExactCountThreshold, 0);
 
         // One past the threshold, so "more than" is a fact - and a threshold at long.MaxValue is its own cap.
@@ -546,7 +543,7 @@ internal sealed class TableRowService : ITableRowService
 
         try
         {
-            await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = grant.Resolved.Target.CreateConnection(StudioConnectionUsage.Read);
             await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             TableRowCount answer = await Session()
@@ -666,15 +663,15 @@ internal sealed class TableRowService : ITableRowService
 
         try
         {
-            await using NpgsqlConnection connection = grant.Resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = grant.Resolved.Target.CreateConnection(StudioConnectionUsage.Read);
             await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
             // One row's references are 1 + N statements, run one after another: each is held to a short
             // statement_timeout of its own, and all of them to one budget, past which the rest are left
             // unchecked rather than queued - a row with forty inbound keys is not forty QueryTimeouts.
             var budget = new ReferenceBudget(
-                ReferenceStatementTimeout(Options.QueryTimeout),
-                ReferenceBudgetFor(Options.QueryTimeout));
+                ReferenceStatementTimeout(settings.QueryTimeout),
+                ReferenceBudgetFor(settings.QueryTimeout));
 
             TableRowReferences references = await Session(statementTimeout: budget.PerStatement)
                 .InTransactionAsync(
@@ -785,7 +782,7 @@ internal sealed class TableRowService : ITableRowService
         try
         {
             CatalogRelationDetail? parent = await catalog
-                .RelationAsync(grant.Resolved.Database, key.LinkedSchema, key.LinkedTable, cancellationToken)
+                .RelationAsync(grant.Resolved.Target, key.LinkedSchema, key.LinkedTable, cancellationToken)
                 .ConfigureAwait(false);
 
             if (parent is null || gate.Classifier.ClassifyRelation(key.LinkedSchema, key.LinkedTable) is not { } ownership)
@@ -825,7 +822,7 @@ internal sealed class TableRowService : ITableRowService
         try
         {
             CatalogRelationDetail? child = await catalog
-                .RelationAsync(grant.Resolved.Database, key.Schema, key.Table, cancellationToken)
+                .RelationAsync(grant.Resolved.Target, key.Schema, key.Table, cancellationToken)
                 .ConfigureAwait(false);
 
             if (child is null || gate.Classifier.ClassifyRelation(key.Schema, key.Table) is not { } ownership)
@@ -842,7 +839,7 @@ internal sealed class TableRowService : ITableRowService
 
             // A bounded count still reads every row of a large table when no index finds the pointing rows:
             // "limit 1000" stops at the thousandth match, and a table with none scans to the end.
-            return UnindexedInboundCount(child, key.Columns, Options.ExactCountThreshold) is { } unindexed
+            return UnindexedInboundCount(child, key.Columns, settings.ExactCountThreshold) is { } unindexed
                 ? new InboundCheck(key, RowInboundState.NotChecked, ownership, unindexed)
                 : new InboundCheck(key, RowInboundState.Counted, ownership, null);
         }
@@ -1032,7 +1029,7 @@ internal sealed class TableRowService : ITableRowService
         {
             await transaction.RollbackAsync(savepoint, cancellationToken).ConfigureAwait(false);
 
-            TableRowError error = Redact(Describe(exception, null, Options), gate, statement);
+            TableRowError error = Redact(Describe(exception, null, settings), gate, statement);
 
             if (exception.SqlState != "57014")
             {
@@ -1532,7 +1529,7 @@ internal sealed class TableRowService : ITableRowService
 
     /// <summary>
     /// Why a read is withheld until "Run anyway", or <see langword="null" />: the relation is above
-    /// <see cref="MartenStudioOptions.ExactCountThreshold" /> (or, never analysed, above the heap size a
+    /// the studio's <c>ExactCountThreshold</c> option (or, never analysed, above the heap size a
     /// speculative count would scan) and a filter or sort column is one no index serves.
     /// </summary>
     internal static string? ShouldWithhold(CatalogRelation relation, RowFilterVerdict verdict, long threshold)
@@ -1797,8 +1794,8 @@ internal sealed class TableRowService : ITableRowService
             UserName(),
             action,
             target,
-            grant.Resolved.Registration.Key,
-            grant.Resolved.Database.Id.Identity,
+            grant.Resolved.Source.Key,
+            grant.Resolved.Target.Identity,
             request.Filter ?? string.Empty,
             sort);
     }
@@ -1834,8 +1831,8 @@ internal sealed class TableRowService : ITableRowService
             UserName(),
             CountAction,
             target,
-            grant.Resolved.Registration.Key,
-            grant.Resolved.Database.Id.Identity,
+            grant.Resolved.Source.Key,
+            grant.Resolved.Target.Identity,
             filter ?? string.Empty,
             "(a count)");
     }
@@ -1843,8 +1840,8 @@ internal sealed class TableRowService : ITableRowService
     /// <summary>What the ledger remembers a read under: the store, the database and the relation, and which kind of read.</summary>
     private static string LedgerKey(DatabaseRowGrant grant, string kind) =>
         TableRowAuditLedger.Key(
-            grant.Resolved.Registration.Key,
-            grant.Resolved.Database.Id.Identity,
+            grant.Resolved.Source.Key,
+            grant.Resolved.Target.Identity,
             grant.Relation.Relation.Schema,
             grant.Relation.Relation.Name,
             kind);
@@ -1864,8 +1861,8 @@ internal sealed class TableRowService : ITableRowService
             UserName(),
             action,
             Target(grant.Relation.Relation),
-            grant.Resolved.Registration.Key,
-            grant.Resolved.Database.Id.Identity,
+            grant.Resolved.Source.Key,
+            grant.Resolved.Target.Identity,
             text);
     }
 
@@ -1879,14 +1876,14 @@ internal sealed class TableRowService : ITableRowService
     /// <param name="statement">The statement that failed, when it had been built: the values it bound are the visitor's own and stay as typed.</param>
     private TableRowError Fail(Exception exception, DatabaseRowGrant grant, string action, TableRowStatement? statement)
     {
-        TableRowError error = Redact(Describe(exception, grant.Relation.Relation, Options), grant.Gate, statement);
+        TableRowError error = Redact(Describe(exception, grant.Relation.Relation, settings), grant.Gate, statement);
 
         LogLevel level = IsExpected(error.SqlState, exception)
             ? LogLevel.Debug
             : throttle.WarningOrDebug(
                 "TableRowService.Read",
-                grant.Resolved.Registration.Key,
-                grant.Resolved.Database.Id.Identity,
+                grant.Resolved.Source.Key,
+                grant.Resolved.Target.Identity,
                 StudioLogThrottle.KindOf(exception));
 
         if (logger.IsEnabled(level))
@@ -1896,8 +1893,8 @@ internal sealed class TableRowService : ITableRowService
                 exception,
                 action,
                 Target(grant.Relation.Relation),
-                grant.Resolved.Registration.Key,
-                grant.Resolved.Database.Id.Identity,
+                grant.Resolved.Source.Key,
+                grant.Resolved.Target.Identity,
                 error.SqlState.Length > 0 ? error.SqlState : null);
         }
 
@@ -1944,22 +1941,22 @@ internal sealed class TableRowService : ITableRowService
             : statement.Parameters.Select(static x => x.Value as string);
 
     /// <summary>A failed read as a value: the SQLSTATE and a sentence that names what governs it.</summary>
-    internal static TableRowError Describe(Exception exception, CatalogRelation? relation, MartenStudioOptions options)
+    internal static TableRowError Describe(Exception exception, CatalogRelation? relation, IStudioSettings settings)
     {
         ArgumentNullException.ThrowIfNull(exception);
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
 
         if (exception is PostgresException postgres)
         {
-            string timeout = options.QueryTimeout.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s";
+            string timeout = settings.QueryTimeout.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture) + " s";
 
             string sentence = postgres.SqlState switch
             {
                 "55000" when relation?.Kind == "m" => "This materialized view has never been refreshed.",
-                "42501" => options.SqlConsoleRole is { } role
-                    ? "The role '" + role + "' (MartenStudioOptions.SqlConsoleRole) has no privilege to read this."
+                "42501" => settings.SqlConsoleRole is { } role
+                    ? "The role '" + role + "' (" + settings.OptionName("SqlConsoleRole") + ") has no privilege to read this."
                     : "The store's Postgres role has no privilege to read this.",
-                "57014" => "The read took longer than MartenStudioOptions.QueryTimeout (" + timeout + ") and Postgres cancelled it." +
+                "57014" => "The read took longer than " + settings.OptionName("QueryTimeout") + " (" + timeout + ") and Postgres cancelled it." +
                            (relation?.Kind == "v"
                                ? " A view runs its whole query for every page."
                                : " Filter on an indexed column, or raise QueryTimeout."),
@@ -1993,8 +1990,8 @@ internal sealed class TableRowService : ITableRowService
 
     private ReadOnlySqlSession Session(int maxRows = 500, TimeSpan? statementTimeout = null) => new(new ReadOnlySqlOptions
     {
-        StatementTimeout = statementTimeout ?? Options.QueryTimeout,
-        Role = Options.SqlConsoleRole,
+        StatementTimeout = statementTimeout ?? settings.QueryTimeout,
+        Role = settings.SqlConsoleRole,
         MaxRows = Math.Max(maxRows, 1),
     });
 
@@ -2020,7 +2017,7 @@ internal sealed class TableRowService : ITableRowService
     /// </summary>
     /// <param name="child">The pointing table's catalog detail, indexes included.</param>
     /// <param name="columns">Its foreign key's columns.</param>
-    /// <param name="threshold"><see cref="MartenStudioOptions.ExactCountThreshold" />.</param>
+    /// <param name="threshold">The studio's <c>ExactCountThreshold</c> option.</param>
     internal static string? UnindexedInboundCount(CatalogRelationDetail child, IReadOnlyList<string> columns, long threshold)
     {
         ArgumentNullException.ThrowIfNull(child);
@@ -2287,7 +2284,7 @@ internal sealed class TableRowAuditLedger
 
     /// <summary>The ledger key for one kind of read of one relation, in one database of one store.</summary>
     /// <param name="storeKey">The store's registration key.</param>
-    /// <param name="databaseIdentity">The database's identity (<c>IMartenDatabase.Id.Identity</c>).</param>
+    /// <param name="databaseIdentity">The database's identity (<see cref="IStudioDatabase.Identity" />).</param>
     /// <param name="schema">The relation's schema, as the catalog spells it.</param>
     /// <param name="name">The relation's name, as the catalog spells it.</param>
     /// <param name="kind">Which kind of read: <c>rows</c> or <c>count</c>.</param>

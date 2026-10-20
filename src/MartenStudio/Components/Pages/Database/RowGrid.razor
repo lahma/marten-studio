@@ -1,5 +1,5 @@
 @using System.Text
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Components.Pages.Documents
 @using MartenStudio.Internal.Sql
 @using MartenStudio.Services.Database
@@ -8,7 +8,8 @@
 @inject ITableRowService Rows
 @inject StudioState State
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 
 @*
     One page of a non-Marten relation's rows: ResultGrid's sibling, drawing its cells through the same
@@ -102,7 +103,7 @@
                                 @if (reference is { Schema: { } parentSchema, Table: { } parentTable })
                                 {
                                     <a class="ms-row-fk-marker"
-                                       href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, parentSchema, parentTable)"
+                                       href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, parentSchema, parentTable)"
                                        title="@($"Foreign key {reference.ForeignKey}: points at {parentSchema}.{parentTable}")">→ @parentTable</a>
                                 }
                                 else
@@ -287,7 +288,7 @@
     private CellPanel? panel;
     private object? shownPage;
 
-    /// <summary>The page to draw, as a <c>TableRowPage</c>; typed <see cref="object" /> for the reason <c>DocumentComponentModel</c> gives.</summary>
+    /// <summary>The page to draw, as a <c>TableRowPage</c>; typed <see cref="object" /> for the reason <c>ComponentModel</c> gives.</summary>
     [Parameter]
     public object? Model { get; set; }
 
@@ -323,11 +324,11 @@
     [Parameter]
     public EventCallback OnToggleDateHints { get; set; }
 
-    private TableRowPage Page => DocumentComponentModel.Read(Model, EmptyPage);
+    private TableRowPage Page => ComponentModel.Read(Model, EmptyPage);
 
     private static readonly TableRowPage EmptyPage = new();
 
-    private IReadOnlyList<RowForeignKey> Keys => DocumentComponentModel.ReadList<RowForeignKey>(ForeignKeys);
+    private IReadOnlyList<RowForeignKey> Keys => ComponentModel.ReadList<RowForeignKey>(ForeignKeys);
 
     protected override void OnParametersSet()
     {
@@ -473,7 +474,8 @@
     private string? RowHref(TableRowPage page, TableRow row) =>
         row.Key is { Count: > 0 } key && page.RowKey is not null
             ? DatabaseLinks.ToRow(
-                Options.Value,
+                Settings,
+                Descriptor,
                 State.ActiveScope,
                 Schema,
                 Name,
@@ -526,7 +528,7 @@
             List<KeyValuePair<string, string>> parentKey = [.. key.ParentKey!
                 .Select(parent => values.First(x => string.Equals(x.Key, parent, StringComparison.Ordinal)))];
 
-            return (DatabaseLinks.ToRow(Options.Value, State.ActiveScope, key.Schema, key.Table, parentKey),
+            return (DatabaseLinks.ToRow(Settings, Descriptor, State.ActiveScope, key.Schema, key.Table, parentKey),
                 "Open the " + key.Table + " row this points at " + RowPresentation.KeyTuple(parentKey));
         }
 
@@ -537,7 +539,7 @@
 
         string filter = RowFilterGrammar.Format(values.Select(static x => (x.Key, RowFilterOperator.Equal, (string?) x.Value)));
 
-        return (DatabaseLinks.ToRows(Options.Value, State.ActiveScope, key.Schema, key.Table, filter),
+        return (DatabaseLinks.ToRows(Settings, Descriptor, State.ActiveScope, key.Schema, key.Table, filter),
             "Show the rows of " + key.Table + " where " + filter);
     }
 
@@ -682,7 +684,7 @@
                     Cut = value.Truncated,
                     Note = value.Truncated
                         ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
-                          " (MartenStudioOptions.MaxInlineDocumentBytes), so it is not offered for copying; the SQL console reads the rest."
+                          " (" + Settings.OptionName("MaxInlineDocumentBytes") + "), so it is not offered for copying; the SQL console reads the rest."
                         : null,
                 },
                 _ when isText => new CellPanel(title, column.Name)
@@ -690,7 +692,7 @@
                     Text = value.Text ?? (value.Bytes is { } read ? SqlCellFormat.DecodeText(read, value.Truncated) ?? Encoding.UTF8.GetString(read) : string.Empty),
                     Note = value.Truncated
                         ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
-                          " (MartenStudioOptions.MaxInlineDocumentBytes); the SQL console reads the rest."
+                          " (" + Settings.OptionName("MaxInlineDocumentBytes") + "); the SQL console reads the rest."
                         : null,
                 },
                 _ => new CellPanel(title, column.Name)
@@ -698,7 +700,7 @@
                     Json = value.Text ?? (value.Bytes is { } bytes ? Encoding.UTF8.GetString(bytes) : string.Empty),
                     Note = value.Truncated
                         ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
-                          " (MartenStudioOptions.MaxInlineDocumentBytes), so the viewer may not be able to read it as JSON."
+                          " (" + Settings.OptionName("MaxInlineDocumentBytes") + "), so the viewer may not be able to read it as JSON."
                         : null,
                 },
             };

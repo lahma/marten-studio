@@ -1,4 +1,5 @@
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services;
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Query;
@@ -205,13 +206,13 @@ public class TableRowServiceTests
         TableRowError error = TableRowService.Describe(
             Postgres("55000", "materialized view \"monthly_order_totals\" has not been populated"),
             TableRowTestData.Relation("m"),
-            new MartenStudioOptions());
+            MartenStudioSettings.Of(new MartenStudioOptions()));
 
         error.SqlState.Should().Be("55000");
         error.Sentence.Should().Be("This materialized view has never been refreshed.");
         error.PostgresMessage.Should().Contain("has not been populated");
 
-        TableRowService.Describe(Postgres("55000", "x"), TableRowTestData.Relation("r"), new MartenStudioOptions())
+        TableRowService.Describe(Postgres("55000", "x"), TableRowTestData.Relation("r"), MartenStudioSettings.Of(new MartenStudioOptions()))
             .Sentence.Should().NotContain("materialized view");
     }
 
@@ -220,10 +221,10 @@ public class TableRowServiceTests
     {
         var options = new MartenStudioOptions { SqlConsoleRole = "studio_reader" };
 
-        TableRowService.Describe(Postgres("42501", "permission denied for table departments"), TableRowTestData.Relation(), options)
+        TableRowService.Describe(Postgres("42501", "permission denied for table departments"), TableRowTestData.Relation(), MartenStudioSettings.Of(options))
             .Sentence.Should().Contain("'studio_reader'").And.Contain("MartenStudioOptions.SqlConsoleRole");
 
-        TableRowService.Describe(Postgres("42501", "permission denied"), TableRowTestData.Relation(), new MartenStudioOptions())
+        TableRowService.Describe(Postgres("42501", "permission denied"), TableRowTestData.Relation(), MartenStudioSettings.Of(new MartenStudioOptions()))
             .Sentence.Should().Contain("store's Postgres role").And.NotContain("SqlConsoleRole");
     }
 
@@ -232,10 +233,10 @@ public class TableRowServiceTests
     {
         var options = new MartenStudioOptions { QueryTimeout = TimeSpan.FromSeconds(12) };
 
-        TableRowService.Describe(Postgres("57014", "canceling statement due to statement timeout"), TableRowTestData.Relation(), options)
+        TableRowService.Describe(Postgres("57014", "canceling statement due to statement timeout"), TableRowTestData.Relation(), MartenStudioSettings.Of(options))
             .Sentence.Should().Contain("MartenStudioOptions.QueryTimeout (12 s)");
 
-        TableRowService.Describe(Postgres("57014", "canceling"), TableRowTestData.Relation("v"), options)
+        TableRowService.Describe(Postgres("57014", "canceling"), TableRowTestData.Relation("v"), MartenStudioSettings.Of(options))
             .Sentence.Should().Contain("A view runs its whole query for every page.");
     }
 
@@ -245,20 +246,20 @@ public class TableRowServiceTests
         TableRowService.Describe(
                 Postgres("42704", "unrecognized configuration parameter \"app.tenant\""),
                 TableRowTestData.Relation(rowSecurity: true),
-                new MartenStudioOptions())
+                MartenStudioSettings.Of(new MartenStudioOptions()))
             .Sentence.Should().Contain("Row-level security is on");
 
-        TableRowService.Describe(Postgres("42704", "x"), TableRowTestData.Relation(), new MartenStudioOptions())
+        TableRowService.Describe(Postgres("42704", "x"), TableRowTestData.Relation(), MartenStudioSettings.Of(new MartenStudioOptions()))
             .Sentence.Should().NotContain("Row-level security");
     }
 
     [Fact]
     public void A_value_that_does_not_fit_and_a_lost_connection_are_values_too()
     {
-        TableRowService.Describe(Postgres("22P02", "invalid input syntax for type integer: \"abc\""), TableRowTestData.Relation(), new MartenStudioOptions())
+        TableRowService.Describe(Postgres("22P02", "invalid input syntax for type integer: \"abc\""), TableRowTestData.Relation(), MartenStudioSettings.Of(new MartenStudioOptions()))
             .Sentence.Should().Be("A filter or key value does not fit its column's type.", "the sentence never repeats the value");
 
-        TableRowError lost = TableRowService.Describe(new NpgsqlException("Exception while reading from stream"), null, new MartenStudioOptions());
+        TableRowError lost = TableRowService.Describe(new NpgsqlException("Exception while reading from stream"), null, MartenStudioSettings.Of(new MartenStudioOptions()));
         lost.SqlState.Should().BeEmpty();
         lost.Sentence.Should().Be("The database could not be reached.");
     }
@@ -273,14 +274,14 @@ public class TableRowServiceTests
     {
         var statement = new NpgsqlException("Exception while reading from stream", new TimeoutException());
 
-        TableRowService.Describe(statement, TableRowTestData.Relation(), new MartenStudioOptions())
+        TableRowService.Describe(statement, TableRowTestData.Relation(), MartenStudioSettings.Of(new MartenStudioOptions()))
             .Sentence.Should().Be("The read timed out before Postgres answered.");
         TableRowService.IsExpected(string.Empty, statement).Should().BeTrue();
 
         var exhausted = new NpgsqlException("The connection pool has been exhausted", new TimeoutException());
         MartenStudio.Services.PostgresFailure.MarkAsConnectionFailure(exhausted);
 
-        TableRowService.Describe(exhausted, TableRowTestData.Relation(), new MartenStudioOptions())
+        TableRowService.Describe(exhausted, TableRowTestData.Relation(), MartenStudioSettings.Of(new MartenStudioOptions()))
             .Sentence.Should().Be("The database could not be reached.");
         TableRowService.IsExpected(string.Empty, exhausted).Should().BeFalse("an operator needs to see a pool that ran dry");
     }

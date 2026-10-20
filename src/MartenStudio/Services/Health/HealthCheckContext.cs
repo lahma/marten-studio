@@ -491,11 +491,16 @@ internal sealed class HealthSqlRunner
 /// </remarks>
 internal sealed class HealthConnection : IAsyncDisposable
 {
-    private readonly IMartenDatabase database;
+    private readonly Sources.IStudioDatabase database;
     private NpgsqlConnection? connection;
     private System.Runtime.ExceptionServices.ExceptionDispatchInfo? openFailure;
 
-    public HealthConnection(IMartenDatabase database) => this.database = database;
+    public HealthConnection(Sources.IStudioDatabase database) => this.database = database;
+
+    public HealthConnection(IMartenDatabase database)
+        : this(MartenStudioDatabase.Of(database))
+    {
+    }
 
     /// <summary>Whether a check has needed it yet, for a test and for nothing else.</summary>
     internal bool WasOpened { get; private set; }
@@ -512,7 +517,7 @@ internal sealed class HealthConnection : IAsyncDisposable
 
         await ResetAsync().ConfigureAwait(false);
 
-        NpgsqlConnection fresh = database.CreateConnection(ConnectionUsage.ReadWrite);
+        NpgsqlConnection fresh = database.CreateConnection(Sources.StudioConnectionUsage.ReadWrite);
 
         try
         {

@@ -1,7 +1,9 @@
 @using System.Text
 @using MartenStudio.Services.Database
+@using MartenStudio.Services.Settings
 @inject ITableRowService Rows
 @inject StudioState State
+@inject IStudioSettings Settings
 
 @*
     One value of one row, read by a person: row detail's left pane, and the grid's inline expansion.
@@ -102,7 +104,7 @@ else
 
     /// <summary>
     /// For a pgvector column, its <c>PgVectorColumn</c> from the catalog, which shows the value collapsed. Typed
-    /// <see cref="object" /> for the reason <c>DocumentComponentModel</c> gives.
+    /// <see cref="object" /> for the reason <c>ComponentModel</c> gives.
     /// </summary>
     [Parameter]
     public object? Vector { get; set; }
@@ -354,7 +356,7 @@ else
                 wholeCut = value.Truncated;
                 wholeNote = value.Truncated
                     ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
-                      " (MartenStudioOptions.MaxInlineDocumentBytes); the SQL console reads the rest."
+                      " (" + Settings.OptionName("MaxInlineDocumentBytes") + "); the SQL console reads the rest."
                     : null;
             }
         }
