@@ -1,13 +1,13 @@
 using System.Text.RegularExpressions;
 
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Export;
+using PostgresStudio.Services.Health.Export;
 
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 using Npgsql;
 
-using StudioCheckResult = MartenStudio.Services.Health.HealthCheckResult;
+using StudioCheckResult = PostgresStudio.Services.Health.HealthCheckResult;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 
@@ -222,7 +222,7 @@ public class HealthExportSummaryTests
     public void Critical_reports_the_failure_status_and_nothing_reports_worse(
         string level, HealthStatus failureStatus, HealthStatus expected)
     {
-        MartenStudioHealthCheck.StatusOf(Enum.Parse<HealthExportLevel>(level), failureStatus).Should().Be(expected);
+        StudioHealthCheck.StatusOf(Enum.Parse<HealthExportLevel>(level), failureStatus).Should().Be(expected);
     }
 
     // ---- The data ------------------------------------------------------------------------------------

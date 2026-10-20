@@ -9,6 +9,7 @@ using MartenStudio.Tests.Components;
 using Microsoft.Extensions.DependencyInjection;
 
 using SchemaPage = MartenStudio.Components.Pages.Schema.Schema;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Schema;
 

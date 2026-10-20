@@ -1,4 +1,5 @@
 using System.Globalization;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
 

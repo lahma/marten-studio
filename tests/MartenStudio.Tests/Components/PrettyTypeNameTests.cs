@@ -1,4 +1,4 @@
-using MartenStudio.Components.Shared;
+using PostgresStudio.Components.Shared;
 
 namespace MartenStudio.Tests.Components;
 

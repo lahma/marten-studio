@@ -1,5 +1,8 @@
-@using MartenStudio.Services.Database
+@using PostgresStudio.Services.Database
 @using MartenStudio.Services.Schema
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Schema
 @implements IDisposable
 @inject ISchemaDataService SchemaData
 @inject StudioState State
@@ -246,10 +249,10 @@ else
     private const int WithheldFigureColumns = 7;
 
     /// <summary>The dead share T07 speaks above, so the tab marks what the advisor would.</summary>
-    private const double DeadShareWorth = MartenStudio.Services.Health.Checks.VacuumBehindCheck.MaxDeadShare;
+    private const double DeadShareWorth = PostgresStudio.Services.Health.Checks.VacuumBehindCheck.MaxDeadShare;
 
     /// <summary>The HOT share T06 speaks below.</summary>
-    private const double HotShareWorth = MartenStudio.Services.Health.Checks.HotUpdateCheck.MinHotShare;
+    private const double HotShareWorth = PostgresStudio.Services.Health.Checks.HotUpdateCheck.MinHotShare;
 
     private readonly CancellationTokenSource lifetime = new();
 
@@ -283,14 +286,14 @@ else
     /// <summary>The dead-share cell, marked past T07's share and its minimum of dead rows.</summary>
     private static string DeadClass(TableStats table) =>
         "ms-table-cell ms-num ms-schema-dead" +
-        (table.DeadShare > DeadShareWorth && table.DeadRows >= MartenStudio.Services.Health.Checks.VacuumBehindCheck.MinDeadRows
+        (table.DeadShare > DeadShareWorth && table.DeadRows >= PostgresStudio.Services.Health.Checks.VacuumBehindCheck.MinDeadRows
             ? " ms-schema-share-high"
             : string.Empty);
 
     /// <summary>The HOT-share cell, marked below T06's share once the table has had T06's minimum of updates.</summary>
     private static string HotClass(TableStats table) =>
         "ms-table-cell ms-num ms-schema-hot" +
-        (table.HotShare < HotShareWorth && table.Updates >= MartenStudio.Services.Health.Checks.HotUpdateCheck.MinUpdates
+        (table.HotShare < HotShareWorth && table.Updates >= PostgresStudio.Services.Health.Checks.HotUpdateCheck.MinUpdates
             ? " ms-schema-share-high"
             : string.Empty);
 

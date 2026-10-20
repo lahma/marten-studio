@@ -1,6 +1,7 @@
-using MartenStudio.Components.Shared;
+using PostgresStudio.Components.Shared;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Query;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Components.Pages.Documents;
 

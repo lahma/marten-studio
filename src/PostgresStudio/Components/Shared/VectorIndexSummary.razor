@@ -1,0 +1,64 @@
+@using PostgresStudio.Services.Database
+@*
+    A pgvector HNSW or IVFFlat index, read off the catalog: its access method, each key column's operator class
+    and the distance that class serves - with the operator a query has to order by, because pgvector uses the
+    index only for that one and is otherwise silently a sequential scan - and its build parameters from
+    pg_class.reloptions. A parameter the index does not set is not in reloptions at all; it is shown with
+    pgvector's default and says that it is the default. Drawn under the definition on Schema > Indexes and on
+    the database browser's Keys tab, so the two say it the same way.
+*@
+
+@if (Index is { } index)
+{
+    <div class="ms-vector-index" role="group" aria-label="@($"pgvector {index.Label} index")">
+        <span class="ms-index-flag ms-index-flag-info ms-vector-index-method" title="@MethodTitle(index)">pgvector @index.Label</span>
+        @foreach (PgVectorIndexColumn column in index.Columns)
+        {
+            <span class="ms-vector-index-column">
+                @if (column.Definition.Length > 0)
+                {
+                    <code class="ms-vector-index-key">@column.Definition</code>
+                }
+                <span class="ms-vector-index-opclass" title="The column's operator class">@column.OperatorClass</span>
+                @if (column.Distance is { } distance)
+                {
+                    <span class="ms-vector-index-distance"
+                          title="@($"Serves only a query that orders by {distance.Operator}; a search by any other distance does not use this index.")">@distance.Name, <code>@distance.Operator</code></span>
+                }
+            </span>
+        }
+        <span class="ms-vector-index-parameters">
+            @foreach (PgVectorIndexParameter parameter in index.Parameters)
+            {
+                <span class="@(parameter.IsDefault ? "ms-vector-param ms-vector-param-default" : "ms-vector-param")"
+                      data-default="@(parameter.IsDefault ? "true" : "false")"
+                      title="@ParameterTitle(parameter)">@ParameterText(parameter)</span>
+            }
+        </span>
+    </div>
+}
+
+@code {
+    /// <summary>The index's <c>PgVectorIndex</c>; typed <see cref="object" /> for the reason <c>DocumentComponentModel</c> gives.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    private PgVectorIndex? Index => Model as PgVectorIndex;
+
+    private static string MethodTitle(PgVectorIndex index) =>
+        index.AccessMethod == PgVector.Hnsw
+            ? "An HNSW graph index (pgvector): approximate nearest-neighbour search, whose recall at query time is hnsw.ef_search."
+            : "An IVFFlat inverted-list index (pgvector): approximate nearest-neighbour search over clusters fixed when the index was built, whose recall at query time is ivfflat.probes.";
+
+    private static string ParameterText(PgVectorIndexParameter parameter) =>
+        parameter.Name + " = " + parameter.Value + (parameter.IsDefault ? " (default)" : string.Empty);
+
+    private static string ParameterTitle(PgVectorIndexParameter parameter)
+    {
+        string set = parameter.IsDefault
+            ? "Not set on the index, so pgvector's default applies (" + PgVector.DefaultsSource + ")."
+            : "Set on the index (pg_class.reloptions).";
+
+        return parameter.Meaning.Length > 0 ? parameter.Meaning + " " + set : set;
+    }
+}

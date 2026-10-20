@@ -1,11 +1,11 @@
 using System.Text.Json;
 
 using MartenStudio.Integration.Tests.Logging;
-using MartenStudio.Services;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Database;
 

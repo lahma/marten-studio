@@ -2,15 +2,15 @@ using System.Globalization;
 
 using JasperFx;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain.Documents;
-using MartenStudio.Services.Health;
 
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 
 using static MartenStudio.Integration.Tests.Health.TableHealthLive;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

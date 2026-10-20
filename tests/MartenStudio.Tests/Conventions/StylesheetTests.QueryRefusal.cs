@@ -94,7 +94,7 @@ public partial class StylesheetTests
     [Fact]
     public void The_refusal_section_comes_last()
     {
-        string css = File.ReadAllText(RepositoryRoot.Combine("src", "MartenStudio", "wwwroot", "css", "marten-studio.css"));
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "wwwroot", "css", "studio.css"));
 
         int section = css.IndexOf("UX-8. A query refusal on a narrow screen", StringComparison.Ordinal);
         section.Should().BePositive();

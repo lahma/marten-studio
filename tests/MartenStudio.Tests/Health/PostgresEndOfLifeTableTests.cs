@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 
-using MartenStudio.Services.Health.Checks;
 using MartenStudio.Tests.Conventions;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Tests.Health;
 

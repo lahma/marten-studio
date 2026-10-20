@@ -13,6 +13,8 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 
 using Weasel.Core;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Services.Documents;
 

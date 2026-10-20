@@ -4,13 +4,13 @@ using System.Text.Json;
 using Marten;
 
 using MartenStudio.Integration.Tests.Database;
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests.Schema;
 

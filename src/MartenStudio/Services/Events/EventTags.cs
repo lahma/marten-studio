@@ -7,6 +7,7 @@ using Marten;
 using Marten.Events;
 
 using MartenStudio.Services.Query;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Services.Events;
 

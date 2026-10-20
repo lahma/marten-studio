@@ -1,0 +1,369 @@
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
+@implements IAsyncDisposable
+@inject NavigationManager Navigation
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject StudioState State
+@inject INavIndicatorService Indicators
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject HealthMutes HealthMutes
+@inject HealthAlerts HealthAlerts
+@inject IJSRuntime JsRuntime
+
+<div class="ms-sidebar-brand">
+    <svg class="ms-sidebar-brand-logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <ellipse cx="14" cy="7" rx="10" ry="4" stroke="currentColor" stroke-width="2" />
+        <path d="M4 7v14c0 2.2 4.5 4 10 4s10-1.8 10-4V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        <path d="M4 14c0 2.2 4.5 4 10 4s10-1.8 10-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+    </svg>
+    <span class="ms-sidebar-brand-text">@Settings.Title</span>
+</div>
+
+<nav>
+    <ul class="ms-sidebar-nav">
+        @foreach (StudioNavSection section in Descriptor.Navigation)
+        {
+            <li class="ms-sidebar-section" @key="section.Title">@section.Title</li>
+
+            @foreach (StudioNavItem item in section.Items.Where(Shown))
+            {
+                <li class="ms-nav-item" @key="item.Label">
+                    @if (item.Route is null)
+                    {
+                        @* No @page yet: rendered as a disabled entry rather than omitted, so the
+                           information architecture is visible from the first release and the route
+                           table's fail-fast is not tripped by a template nothing can match. *@
+                        <span class="ms-nav-link ms-nav-link-disabled" aria-disabled="true" title="@ComingSoon">
+                            @Icon(item.Icon)
+                            <span class="ms-nav-link-text">@item.Label</span>
+                        </span>
+                    }
+                    else
+                    {
+                        @* `title` as well as the label: below 1024 px the rail is 56 px wide and the
+                           label is visually hidden (the sr-only technique, so the link keeps its
+                           accessible name), which leaves a sighted mouse user with ten icons and no
+                           way to read what they are. The tooltip is that way. An entry whose one-word
+                           label undersells it - "Tables" is six kinds of object - says more there. *@
+                        <a class="ms-nav-link @NavClass(item.Route)" href="@Link(item.Route)" title="@(item.Title ?? item.Label)">
+                            @Icon(item.Icon)
+                            <span class="ms-nav-link-text">@item.Label</span>
+                            @if (BadgeFor(item.BadgeKey) is { } badge)
+                            {
+                                @* A sibling of the label, never part of it: the link's text is what a
+                                   screen reader announces and what every navigation test matches on, and
+                                   a count folded into it would change the name of the page. *@
+                                <span class="ms-nav-badge @badge.CssClass" title="@badge.Title" aria-label="@badge.Title">
+                                    @badge.Text
+                                </span>
+                            }
+                        </a>
+                    }
+                </li>
+            }
+        }
+    </ul>
+</nav>
+
+@code
+{
+    private const string ComingSoon = "Coming in a later release";
+
+    /// <summary>
+    /// Whether an entry is drawn: every one whose descriptor has no condition, and otherwise what the condition says -
+    /// MartenStudio's Dead letters entry is absent while the host hides <c>DeadLetterEvent</c>, failing closed, as a
+    /// hidden document type is absent (D27) and the page it would link to says why if it is reached by its address.
+    /// </summary>
+    private bool Shown(StudioNavItem item) => item.IsShown is null || item.IsShown(Settings);
+
+    private readonly CancellationTokenSource cancellation = new();
+
+    /// <summary>
+    /// The sidebar's own polling loop, built rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// <c>StudioLiveUpdates</c> is <c>IAsyncDisposable</c>, so a transient registration would leave the
+    /// circuit's container holding one per navigation for the life of the circuit. This component owns
+    /// the loop and disposes it. It is a second loop beside the current page's, which costs one extra
+    /// visibility watcher and one cached read per interval: the snapshot cache behind
+    /// <see cref="INavIndicatorService" /> is what keeps it from being a second pair of queries.
+    /// </remarks>
+    private StudioLiveUpdates? live;
+
+    private NavIndicators indicators = NavIndicators.None;
+    private string? currentRelativePath;
+    private bool started;
+    private bool disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        UpdateCurrentRelativePath(Navigation.Uri);
+        Navigation.LocationChanged += OnLocationChanged;
+        State.ScopeChanged += OnScopeChangedAsync;
+        HealthMutes.Changed += OnHealthMutesChangedAsync;
+
+        await RefreshIndicatorsAsync(cancellation.Token);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || started || disposed)
+        {
+            return;
+        }
+
+        started = true;
+
+        // The browser's muted findings, once per circuit - a JS call, not a query - so the health badge counts
+        // only what this browser has not muted. Its Changed event re-reads the badge.
+        await HealthMutes.LoadAsync(JsRuntime, cancellation.Token);
+
+        // The first interactive look at the health glance only takes note of what is already Critical: those
+        // are on screen already, and a toast saying they just appeared would be false.
+        await HealthAlerts.ObserveAsync(State.ActiveScope, indicators.Health);
+
+        live = LiveFactory.Create();
+
+        // No Failed handler: a badge that could not be read is a badge that is not drawn, and the
+        // sidebar is the last place in the studio that should put an error on the screen.
+        await live.StartAsync(Settings.RefreshInterval, TickAsync, cancellation.Token);
+    }
+
+    // The poll runs on the thread pool and a scope change on the renderer, and both write `indicators`. So each hands the
+    // toast the glance of the read it made itself, never the shared field, together with the scope the visitor is on now;
+    // HealthAlerts ignores a glance stamped with any other scope, so a read that the scope outran is not a first look.
+    private async Task TickAsync(CancellationToken cancellationToken)
+    {
+        if (await RefreshIndicatorsAsync(cancellationToken) is { } read)
+        {
+            await HealthAlerts.ObserveAsync(State.ActiveScope, read.Health);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        NavIndicators? read = await RefreshIndicatorsAsync(cancellation.Token);
+
+        if (started && read is not null)
+        {
+            await HealthAlerts.ObserveAsync(State.ActiveScope, read.Health);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnHealthMutesChangedAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        await RefreshIndicatorsAsync(cancellation.Token);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Reads the indicators for the active scope, treats every failure as "no badge", and answers what it read - or
+    /// <see langword="null" /> when the read was cancelled or the scope changed while it was in flight.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The service already answers <c>NavIndicators.None</c> rather than throwing; this is the second
+    /// belt, because the one thing the navigation must never do is stop rendering.
+    /// </para>
+    /// <para>
+    /// A read the scope outran is not drawn: the scope change that outran it starts a read of its own for the new
+    /// scope, and a badge of the old database's counts under the new one would be wrong until the next poll.
+    /// </para>
+    /// </remarks>
+    private async Task<NavIndicators?> RefreshIndicatorsAsync(CancellationToken cancellationToken)
+    {
+        StudioScope? readFor = State.ActiveScope;
+        NavIndicators read;
+
+        try
+        {
+            read = await Indicators.ReadAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception)
+        {
+            read = NavIndicators.None;
+        }
+
+        if (State.ActiveScope != readFor)
+        {
+            return null;
+        }
+
+        indicators = read;
+        return read;
+    }
+
+    /// <summary>
+    /// The badge an entry wears right now, or <see langword="null" /> for none: the health glance, drawn here, or the
+    /// badge the indicator service read for the entry's key.
+    /// </summary>
+    private StudioNavBadge? BadgeFor(string? key) => key switch
+    {
+        null => null,
+
+        // A count of what this visitor may see, coloured by the worst of it. Findings they are not shown are said in
+        // the tooltip and never counted or drawn on their own: their severity is the gate's to withhold, and a badge
+        // that cannot say how bad would sit on every page of a host whose visitors are short of a gate. An absent badge
+        // is no claim that all is well; the Health page and the Overview say what is withheld.
+        StudioNavBadgeKeys.Health => indicators.Health is { Worst: not null } health
+            ? new StudioNavBadge(
+                (health.Critical + health.Warning).ToString("N0", System.Globalization.CultureInfo.InvariantCulture),
+                health.Critical > 0 ? "ms-nav-badge-danger" : "ms-nav-badge-warning",
+                HealthBadgeTitle(health))
+            : null,
+
+        _ => indicators.Badges.TryGetValue(key, out StudioNavBadge? badge) ? badge : null,
+    };
+
+    /// <summary>The health badge's tooltip and accessible name: what it counts, what it leaves out, and as of when.</summary>
+    private string HealthBadgeTitle(HealthGlance health)
+    {
+        List<string> parts = [];
+
+        if (health.Critical > 0)
+        {
+            parts.Add(health.Critical == 1 ? "1 critical finding" : $"{health.Critical:N0} critical findings");
+        }
+
+        if (health.Warning > 0)
+        {
+            parts.Add(health.Warning == 1 ? "1 warning" : $"{health.Warning:N0} warnings");
+        }
+
+        string withheld = health.Withheld switch
+        {
+            0 => string.Empty,
+            1 => ", and 1 finding not shown to you",
+            _ => $", and {health.Withheld:N0} findings not shown to you",
+        };
+
+        return string.Join(" and ", parts) + withheld + ", as of " + State.FormatInSelectedTimeZone(health.MeasuredAt, "HH:mm");
+    }
+
+    private string Link(string subPath) => StudioLink.To(Settings, subPath);
+
+    private void UpdateCurrentRelativePath(string uri)
+    {
+        // Resolved once per location change (NavClass runs for every nav link on every render):
+        // ToDashboardRelativePath handles both the prerender and the interactive base URI shapes, and
+        // ResolveLeaf applies the same prefix-strip retry as route matching so highlighting is correct
+        // even when the application path base ends with the custom studio path.
+        string? relative = StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings);
+        currentRelativePath = relative is null ? null : Descriptor.Routes.ResolveLeaf(relative, Settings);
+    }
+
+    private string NavClass(string route)
+    {
+        string? relativePath = currentRelativePath;
+        if (relativePath is null)
+        {
+            return string.Empty;
+        }
+
+        // Exact match for the studio root, prefix match for sub-pages.
+        if (route.Length == 0)
+        {
+            return relativePath.Length == 0 ? "ms-nav-active" : string.Empty;
+        }
+
+        bool isActive = relativePath.Equals(route, StringComparison.OrdinalIgnoreCase)
+            || relativePath.StartsWith(route + "/", StringComparison.OrdinalIgnoreCase);
+
+        return isActive ? "ms-nav-active" : string.Empty;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        UpdateCurrentRelativePath(e.Location);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Unsubscribes, stops the loop and cancels the token - in that order, and all of them however the
+    /// loop's own disposal goes.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent, because Blazor disposes a component once and a test context disposes it again, and a
+    /// <see cref="CancellationTokenSource" /> that has already been disposed throws from
+    /// <c>CancelAsync</c>. A second disposal must never be the thing that finally puts an exception on
+    /// the circuit.
+    /// </remarks>
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        Navigation.LocationChanged -= OnLocationChanged;
+        State.ScopeChanged -= OnScopeChangedAsync;
+        HealthMutes.Changed -= OnHealthMutesChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            try
+            {
+                await cancellation.CancelAsync();
+            }
+            finally
+            {
+                cancellation.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// One hand-drawn icon. Constant markup only - no icon library, ever (AGENTS.md hard rule 3).
+    /// </summary>
+    private static MarkupString Icon(string name)
+    {
+        string body = name switch
+        {
+            "grid" => """<rect x="1" y="1" width="7" height="7" rx="1" /><rect x="10" y="1" width="7" height="7" rx="1" /><rect x="1" y="10" width="7" height="7" rx="1" /><rect x="10" y="10" width="7" height="7" rx="1" />""",
+            "doc" => """<path d="M4 1h7l3 3v13H4z" /><polyline points="11,1 11,4 14,4" /><line x1="6" y1="8" x2="12" y2="8" /><line x1="6" y1="11" x2="12" y2="11" />""",
+            "query" => """<circle cx="8" cy="8" r="6" /><line x1="12.5" y1="12.5" x2="17" y2="17" />""",
+            "graph" => """<circle cx="4" cy="9" r="2.5" /><circle cx="14" cy="4" r="2.5" /><circle cx="14" cy="14" r="2.5" /><line x1="6.3" y1="8" x2="11.7" y2="5" /><line x1="6.3" y1="10" x2="11.7" y2="13" />""",
+            "stream" => """<ellipse cx="9" cy="4" rx="6" ry="2.5" /><path d="M3 4v10c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V4" /><path d="M3 9c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5" />""",
+            "feed" => """<path d="M3 3a12 12 0 0 1 12 12" /><path d="M3 8a7 7 0 0 1 7 7" /><circle cx="4" cy="14" r="1.5" fill="currentColor" />""",
+            "tag" => """<path d="M2 2h7l7 7-7 7-7-7z" /><circle cx="6" cy="6" r="1.2" fill="currentColor" />""",
+            "alert" => """<path d="M9 2 17 16H1z" /><line x1="9" y1="7" x2="9" y2="11" /><circle cx="9" cy="13.5" r="0.8" fill="currentColor" />""",
+            "projection" => """<rect x="1" y="3" width="6" height="12" rx="1" /><rect x="11" y="3" width="6" height="12" rx="1" /><line x1="7" y1="9" x2="11" y2="9" /><polyline points="9,7 11,9 9,11" />""",
+            "schema" => """<rect x="2" y="2" width="14" height="4" rx="1" /><rect x="2" y="7" width="14" height="4" rx="1" /><rect x="2" y="12" width="14" height="4" rx="1" />""",
+            "table" => """<rect x="1.5" y="2.5" width="15" height="13" rx="1.5" /><line x1="1.5" y1="6.5" x2="16.5" y2="6.5" /><line x1="1.5" y1="11" x2="16.5" y2="11" /><line x1="7" y1="6.5" x2="7" y2="15.5" />""",
+            "pulse" => """<polyline points="1,9 5,9 7,4 11,14 13,9 17,9" />""",
+            "cog" => """<circle cx="9" cy="9" r="3" /><path d="M9 1v2M9 15v2M1 9h2M15 9h2M3.5 3.5l1.5 1.5M13 13l1.5 1.5M14.5 3.5 13 5M5 13l-1.5 1.5" />""",
+            _ => """<line x1="3" y1="4" x2="15" y2="4" /><line x1="3" y1="9" x2="15" y2="9" /><line x1="3" y1="14" x2="15" y2="14" />"""
+        };
+
+        return new MarkupString(
+            $"""<svg class="ms-nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{body}</svg>""");
+    }
+}

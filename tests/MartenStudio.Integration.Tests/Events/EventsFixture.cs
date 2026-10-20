@@ -8,13 +8,13 @@ using Marten;
 using Marten.Events.Aggregation;
 using Marten.Events.Projections;
 
-using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Events;
 

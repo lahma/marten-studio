@@ -1,3 +1,5 @@
+using PostgresStudio.Services;
+
 namespace MartenStudio.Services.Query;
 
 /// <summary>
@@ -14,7 +16,7 @@ namespace MartenStudio.Services.Query;
 /// The asymmetry between this mode and the SQL console is the point. A <c>where</c> clause is a read against one
 /// document type the host registered and needs no capability; the SQL console is arbitrary SQL against the whole
 /// database, gated on <see cref="MartenStudioCapabilities.RunSql" />, resolved with write-policy semantics and
-/// audited statement by statement (D13) - and it is the shared <see cref="Sources.ISqlConsoleService" />, not a
+/// audited statement by statement (D13) - and it is the shared <see cref="PostgresStudio.Services.Sources.ISqlConsoleService" />, not a
 /// member of this interface.
 /// </para>
 /// </remarks>

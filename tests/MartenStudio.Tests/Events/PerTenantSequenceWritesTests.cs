@@ -9,6 +9,7 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Events;
 

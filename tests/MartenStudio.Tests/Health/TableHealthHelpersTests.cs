@@ -1,9 +1,7 @@
 using Marten;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Schema;
 using MartenStudio.Tests.Sql;
@@ -11,6 +9,11 @@ using MartenStudio.Tests.Sql;
 using Microsoft.Extensions.DependencyInjection;
 
 using static MartenStudio.Tests.Health.TableCheckBuilders;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Tests.Health;
 

@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 using JasperFxDaemonMode = JasperFx.Events.Daemon.DaemonMode;
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Projections;
 

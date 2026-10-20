@@ -1,6 +1,6 @@
 using Bunit;
 
-using MartenStudio.Components.Shared;
+using PostgresStudio.Components.Shared;
 using MartenStudio.Tests.Components;
 
 using Microsoft.AspNetCore.Components;

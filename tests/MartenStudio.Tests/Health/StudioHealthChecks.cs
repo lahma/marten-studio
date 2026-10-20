@@ -1,6 +1,6 @@
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

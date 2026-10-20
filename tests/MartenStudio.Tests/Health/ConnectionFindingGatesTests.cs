@@ -1,9 +1,9 @@
-using MartenStudio.Services;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Checks;
+using PostgresStudio.Services.Database;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Tests.Health;
 

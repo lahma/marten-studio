@@ -1,8 +1,8 @@
 using Marten;
 
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Health.Checks;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Sources;
 
 namespace MartenStudio.Services;
 

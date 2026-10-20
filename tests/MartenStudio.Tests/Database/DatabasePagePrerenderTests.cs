@@ -2,9 +2,8 @@ using Bunit;
 
 using Marten;
 
-using MartenStudio.Components.Pages.Database;
-using MartenStudio.Services;
-using MartenStudio.Services.Database;
+using PostgresStudio.Components.Pages.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
@@ -15,6 +14,7 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.HtmlRendering;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Database;
 

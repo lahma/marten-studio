@@ -1,9 +1,10 @@
 using Bunit;
 
 using MartenStudio.Services;
-using MartenStudio.Services.Health;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

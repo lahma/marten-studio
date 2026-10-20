@@ -2,11 +2,10 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text.RegularExpressions;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Checks;
-
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Tests.Conventions;
 
@@ -41,11 +40,11 @@ namespace MartenStudio.Tests.Conventions;
 /// </remarks>
 public class StatementChecksFenceTests
 {
-    private const string Runner = "src/MartenStudio/Services/Health/HealthCheckContext.cs";
+    private const string Runner = "src/PostgresStudio/Services/Health/HealthCheckContext.cs";
 
-    private const string Reads = "src/MartenStudio/Services/Health/Checks/StatementReads.cs";
+    private const string Reads = "src/PostgresStudio/Services/Health/Checks/StatementReads.cs";
 
-    private const string Planner = "src/MartenStudio/Services/Health/Checks/ExpensiveStatementsCheck.cs";
+    private const string Planner = "src/PostgresStudio/Services/Health/Checks/ExpensiveStatementsCheck.cs";
 
     private static readonly Regex Name = new(@"\bQueryAsApplicationRoleAsync\b", RegexOptions.None, TimeSpan.FromSeconds(5));
 
@@ -148,7 +147,7 @@ public class StatementChecksFenceTests
     // The plan is the planner's.
     [InlineData(Planner, "var query = HealthStatementQueries.Explain(statement.QueryId, statement.Text!, statement.TextTruncated);", false)]
     [InlineData(Reads, "var query = HealthStatementQueries.Explain(id, text, false);", true)]
-    [InlineData("src/MartenStudio/Services/Health/Checks/JitShareCheck.cs", "var plan = HealthStatementQueries .Explain(id, text, false);", true)]
+    [InlineData("src/PostgresStudio/Services/Health/Checks/JitShareCheck.cs", "var plan = HealthStatementQueries .Explain(id, text, false);", true)]
     // The one statement outside a transaction is T02's deallocate, and the runner only declares it.
     [InlineData(Planner, "await context.Sql.ExecuteOutsideTransactionAsync(HealthStatementQueries.Deallocate(), again.Token);", false)]
     [InlineData(Planner, "await context.Sql.ExecuteOutsideTransactionAsync(HealthStatementQueries.Extension(), token);", true)]

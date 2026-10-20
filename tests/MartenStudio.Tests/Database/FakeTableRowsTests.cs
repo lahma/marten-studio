@@ -1,8 +1,8 @@
 using System.Text;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Support;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Tests.Database;
 
@@ -59,7 +59,7 @@ public class FakeTableRowsTests
     public async Task The_fake_answers_from_the_sample_and_records_what_it_was_asked()
     {
         var fake = new FakeTableRowService();
-        var scope = new MartenStudio.Services.StudioScope("default", string.Empty, null);
+        var scope = new PostgresStudio.Services.StudioScope("default", string.Empty, null);
         CancellationToken token = TestContext.Current.CancellationToken;
 
         (await fake.ListRowsAsync(scope, FakeTableRows.Schema, FakeTableRows.Table, new TableRowRequest { Filter = "x = 1" }, token))

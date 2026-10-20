@@ -6,7 +6,6 @@ using JasperFx;
 using Marten;
 using Marten.Schema;
 
-using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Schema;
 
@@ -15,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Schema;
 

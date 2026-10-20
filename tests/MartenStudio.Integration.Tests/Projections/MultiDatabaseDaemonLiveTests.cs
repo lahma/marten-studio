@@ -9,7 +9,6 @@ using Marten;
 using Marten.Storage;
 
 using MartenStudio.Integration.Tests.Documents;
-using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain.Events;
 using MartenStudio.Services;
 using MartenStudio.Services.Projections;
@@ -23,6 +22,8 @@ using Microsoft.Extensions.Logging;
 using Npgsql;
 
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Projections;
 

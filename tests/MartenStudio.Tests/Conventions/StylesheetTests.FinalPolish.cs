@@ -39,7 +39,7 @@ public partial class StylesheetTests
     [Fact]
     public void The_final_polish_follows_the_database_polish()
     {
-        string css = File.ReadAllText(RepositoryRoot.Combine("src", "MartenStudio", "wwwroot", "css", "marten-studio.css"));
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "wwwroot", "css", "studio.css"));
 
         int section = css.IndexOf("UX-7. Final polish", StringComparison.Ordinal);
         section.Should().BePositive();

@@ -2,7 +2,9 @@ using System.Text.RegularExpressions;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Query;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Sources;
+using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Services.Health.Checks;
 

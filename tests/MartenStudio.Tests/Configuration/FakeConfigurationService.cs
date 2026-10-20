@@ -1,5 +1,5 @@
-using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Configuration;
 

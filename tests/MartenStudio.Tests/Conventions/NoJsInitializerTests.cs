@@ -27,7 +27,7 @@ public class NoJsInitializerTests
     private static readonly string WebRoot = RepositoryRoot.Combine("src", "MartenStudio", "wwwroot");
 
     /// <summary>The script the shell loads instead, as an asset path and as a file.</summary>
-    private const string HelperScript = "_content/MartenStudio/js/marten-studio.js";
+    private const string HelperScript = "_content/PostgresStudio/js/studio.js";
 
     [Fact]
     public void No_static_web_asset_is_named_like_a_Blazor_JS_initializer()
@@ -93,7 +93,7 @@ public class NoJsInitializerTests
 
         // The shared document every studio's root component renders (0.5, PS-1a): MartenStudioApp is its root only.
         string shell = File.ReadAllText(
-            RepositoryRoot.Combine("src", "MartenStudio", "Components", "StudioDocument.razor"));
+            RepositoryRoot.Combine("src", "PostgresStudio", "Components", "StudioDocument.razor"));
 
         shell.Should().Contain($"<script src=\"{HelperScript}\">",
             "the shell is what loads the helpers now that no convention does it");

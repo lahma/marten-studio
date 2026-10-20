@@ -3,16 +3,16 @@ using JasperFx;
 using Marten;
 
 using MartenStudio.Integration.Tests.Database;
-using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.SampleDomain.Documents;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Health.Checks;
+using PostgresStudio.Services.Database;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Integration.Tests.Health;
 

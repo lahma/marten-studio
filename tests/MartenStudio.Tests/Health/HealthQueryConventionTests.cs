@@ -2,8 +2,8 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text.RegularExpressions;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Tests.Conventions;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Tests.Health;
 
@@ -58,7 +58,7 @@ public class HealthQueryConventionTests
     private const string Builders = "src/MartenStudio/Internal/Sql/";
 
     /// <summary>The runner: it takes a query, so it names the type, and it builds none.</summary>
-    private const string Runner = "src/MartenStudio/Services/Health/HealthCheckContext.cs";
+    private const string Runner = "src/PostgresStudio/Services/Health/HealthCheckContext.cs";
 
     private const string BuildersNamespace = "MartenStudio.Internal.Sql";
 
@@ -169,7 +169,7 @@ public class HealthQueryConventionTests
     [InlineData(Runner, "private static HealthQuery Probe() => new(\"select 1\");", true)]
     [InlineData(Runner, "var copy = query with { Sql = query.Sql + suffix };", true)]
     // The with rule is the health files' only: the database browser's page record has a Sql of its own.
-    [InlineData("src/MartenStudio/Services/Database/TableRowService.cs", "page = page with { Sql = statement.Sql };", false)]
+    [InlineData("src/PostgresStudio/Services/Database/TableRowService.cs", "page = page with { Sql = statement.Sql };", false)]
     public void The_exemptions_are_exactly_the_builders_and_the_runners_parameter_types(string path, string source, bool offends)
     {
         Offends(path, source).Should().Be(offends);
@@ -183,7 +183,7 @@ public class HealthQueryConventionTests
     [Fact]
     public void A_query_cannot_be_rewritten_by_a_with_expression()
     {
-        typeof(MartenStudio.Services.Health.HealthStatement).GetProperty("Sql")!.SetMethod.Should().NotBeNull(
+        typeof(PostgresStudio.Services.Health.HealthStatement).GetProperty("Sql")!.SetMethod.Should().NotBeNull(
             "a positional record property is init-only, which reflection reports as a setter - the shape HealthQuery must not have");
 
         foreach (string name in new[] { nameof(HealthQuery.Sql), nameof(HealthQuery.Parameters) })
@@ -289,7 +289,7 @@ public class HealthQueryConventionTests
     // What a file outside the folder may write.
     [InlineData("using MartenStudio.Internal.Sql;\nnamespace MartenStudio.Services.Health;\nclass C { }", false)]
     [InlineData("// namespace MartenStudio.Internal.Sql;\nnamespace MartenStudio.Services;\nclass C { }", false)]
-    [InlineData("/// <see cref=\"MartenStudio.Internal.Sql.HealthQuery\" />, as in namespace MartenStudio.Internal.Sql\nnamespace X;\nclass C { }", false)]
+    [InlineData("/// <see cref=\"PostgresStudio.Internal.Sql.HealthQuery\" />, as in namespace MartenStudio.Internal.Sql\nnamespace X;\nclass C { }", false)]
     [InlineData("/* namespace MartenStudio.Internal.Sql { } */\nnamespace X;\nclass C { }", false)]
     [InlineData("namespace X;\nclass C { string s = \"namespace MartenStudio.Internal.Sql;\"; }", false)]
     [InlineData("namespace MartenStudio.Internal.SqlHelpers;\nclass C { }", false)]
@@ -297,7 +297,7 @@ public class HealthQueryConventionTests
     [InlineData("namespace MartenStudio.Internal { class Sql { } }", false)]
     [InlineData("namespace MartenStudio.Internal { class A { } }\nnamespace Sql { class C { } }", false)]
     [InlineData("@* @namespace MartenStudio.Internal.Sql *@\n@namespace MartenStudio.Components\n<p>a component</p>", false)]
-    [InlineData("namespace X;\nclass C { void M() { var x = MartenStudio.Internal.Sql.SqlIdentifier.Quote(\"a\"); } }", false)]
+    [InlineData("namespace X;\nclass C { void M() { var x = PostgresStudio.Internal.Sql.SqlIdentifier.Quote(\"a\"); } }", false)]
     public void The_namespace_fence_finds_every_spelling_and_ignores_prose(string source, bool offends)
     {
         string code = Escaped(source);
@@ -330,7 +330,7 @@ public class HealthQueryConventionTests
     [InlineData(Builders + "Nested/Deeper.cs", false)]
     [InlineData("src/MartenStudio/Internal/SqlHelpers/Stray.cs", true)]
     [InlineData("src/MartenStudio/Internal/Stray.cs", true)]
-    [InlineData("src/MartenStudio/Services/Health/HealthCheckContext.cs", true)]
+    [InlineData("src/PostgresStudio/Services/Health/HealthCheckContext.cs", true)]
     public void The_namespace_may_be_declared_under_the_folder_and_nowhere_else(string path, bool offends)
     {
         DeclaresBuildersNamespaceOutsideTheFolder(path, "namespace MartenStudio.Internal.Sql;\nclass C { }").Should().Be(offends);

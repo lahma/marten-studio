@@ -2,7 +2,7 @@ using AngleSharp.Dom;
 
 using Bunit;
 
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-using DetailPage = MartenStudio.Components.Pages.Database.ObjectDetail;
+using DetailPage = PostgresStudio.Components.Pages.Database.ObjectDetail;
 
 namespace MartenStudio.Tests.Database;
 

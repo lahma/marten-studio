@@ -9,6 +9,8 @@ using MartenStudio.Services.Events;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
 

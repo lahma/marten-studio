@@ -1,11 +1,11 @@
 using System.Globalization;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests.Database;
 

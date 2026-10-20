@@ -1,7 +1,8 @@
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 
 using static MartenStudio.Tests.Database.DatabaseTestStores;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Tests.Schema;
 

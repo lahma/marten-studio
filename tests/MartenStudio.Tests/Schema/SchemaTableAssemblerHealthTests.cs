@@ -3,6 +3,7 @@ using MartenStudio.Services.Schema;
 using MartenStudio.Tests.Database;
 
 using static MartenStudio.Tests.Database.DatabaseTestStores;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Tests.Schema;
 

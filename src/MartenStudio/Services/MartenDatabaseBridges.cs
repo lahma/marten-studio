@@ -1,9 +1,10 @@
 using Marten.Storage;
 
-using MartenStudio.Components.Pages.Documents;
 using MartenStudio.Services;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Documents;
+using PostgresStudio.Components.Shared;
+using PostgresStudio.Services;
 
 namespace MartenStudio;
 
@@ -29,7 +30,7 @@ internal static class MartenDatabaseBridges
     {
         /// <summary>
         /// The policy a store-policy refusal names in event 9203, from MartenStudio's options
-        /// (<see cref="DatabaseAccess.StorePolicyName(Services.Settings.IStudioSettings)" />). Caller: <c>SchemaDataService</c>.
+        /// (<see cref="DatabaseAccess.StorePolicyName(PostgresStudio.Services.Settings.IStudioSettings)" />). Caller: <c>SchemaDataService</c>.
         /// </summary>
         /// <param name="options">MartenStudio's options.</param>
         internal static string StorePolicyName(MartenStudioOptions options) =>
@@ -39,7 +40,7 @@ internal static class MartenDatabaseBridges
     extension(DatabasePoolSettings)
     {
         /// <summary>
-        /// The pool settings of a Marten database (<see cref="DatabasePoolSettings.Of(Services.Sources.IStudioDatabase)" />).
+        /// The pool settings of a Marten database (<see cref="DatabasePoolSettings.Of(PostgresStudio.Services.Sources.IStudioDatabase)" />).
         /// Callers: <c>ConnectionBudgetCheck</c> and <c>DaemonPoolCheck</c>.
         /// </summary>
         /// <param name="database">The Marten database.</param>

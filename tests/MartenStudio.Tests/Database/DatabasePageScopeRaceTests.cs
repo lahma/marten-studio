@@ -2,13 +2,13 @@ using Bunit;
 
 using JasperFx.Descriptors;
 
-using MartenStudio.Components.Pages.Database;
-using MartenStudio.Services;
+using PostgresStudio.Components.Pages.Database;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Database;
 

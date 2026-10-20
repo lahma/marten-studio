@@ -3,10 +3,10 @@ using System.Reflection;
 using Marten;
 using Marten.Storage;
 
-using MartenStudio.Services.Health.Checks;
 using MartenStudio.Tests.Sql;
 
 using Npgsql;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Tests.Marten;
 

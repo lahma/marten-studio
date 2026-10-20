@@ -1,6 +1,6 @@
 using System.Globalization;
 
-using MartenStudio.Services.Relationships;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Relationships;
 

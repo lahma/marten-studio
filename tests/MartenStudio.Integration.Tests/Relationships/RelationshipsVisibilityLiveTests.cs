@@ -1,7 +1,7 @@
 using Marten;
 
 using MartenStudio.SampleDomain.Documents;
-using MartenStudio.Services.Relationships;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Integration.Tests.Relationships;
 

@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-using MartenStudio.Services.Health;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Conventions;
 
@@ -31,7 +31,7 @@ namespace MartenStudio.Tests.Conventions;
 /// </remarks>
 public class ActivityViewsOffThePollPathTests
 {
-    private const string Builder = "src/MartenStudio/Internal/Sql/HealthConnectionQueries.cs";
+    private const string Builder = "src/PostgresStudio/Internal/Sql/HealthConnectionQueries.cs";
 
     /// <summary>
     /// The daemon checks' builder: D02 reads the advisory locks in <c>pg_locks</c> and D01's Explain reads
@@ -49,7 +49,7 @@ public class ActivityViewsOffThePollPathTests
     /// in the regular sweep, at <c>HealthInterval</c>, and only T14 calls it (the third net below), with H3's own session
     /// predicate (<c>HealthConnectionQueries.ClientSession</c>), which is why it is the one builder that may name H3's.
     /// </summary>
-    private const string HorizonBuilder = "src/MartenStudio/Internal/Sql/HealthHorizonQueries.cs";
+    private const string HorizonBuilder = "src/PostgresStudio/Internal/Sql/HealthHorizonQueries.cs";
 
     /// <summary>SQL that reads one of the views: from or join it, or call <c>pg_blocking_pids</c>.</summary>
     internal static readonly Regex ReadsAnActivityView = new(
@@ -123,7 +123,7 @@ public class ActivityViewsOffThePollPathTests
         callers.Should().NotBeEmpty();
         callers.Should().OnlyContain(
             static x => x.StartsWith("src/MartenStudio/Services/Health/Checks/", StringComparison.Ordinal)
-                || x == "src/MartenStudio/Services/Database/SessionActivityReader.cs"
+                || x == "src/PostgresStudio/Services/Database/SessionActivityReader.cs"
                 || x == HorizonBuilder,
             "every other caller would be a new path to the process array and the lock table; the horizon builder takes only H3's session predicate");
     }
@@ -138,10 +138,10 @@ public class ActivityViewsOffThePollPathTests
                 .Select(SourceScanner.Relative),
         ];
 
-        users.Should().Contain("src/MartenStudio/Components/Pages/Database/Sessions.razor");
+        users.Should().Contain("src/PostgresStudio/Components/Pages/Database/Sessions.razor");
         users.Should().OnlyContain(
-            static x => x == "src/MartenStudio/Components/Pages/Database/Sessions.razor"
-                || x == "src/MartenStudio/Services/Settings/StudioCoreRegistration.cs"
+            static x => x == "src/PostgresStudio/Components/Pages/Database/Sessions.razor"
+                || x == "src/PostgresStudio/Services/Settings/StudioCoreRegistration.cs"
                 || x.StartsWith("src/MartenStudio/Services/Database/", StringComparison.Ordinal),
             "the sidebar, the Overview and every other page poll every RefreshInterval");
     }
@@ -150,7 +150,7 @@ public class ActivityViewsOffThePollPathTests
     public void The_sessions_page_polls_at_the_health_interval_and_never_the_refresh_interval()
     {
         string page = SourceScanner.StripCommentsAndStrings(
-            File.ReadAllText(RepositoryRoot.Combine("src", "MartenStudio", "Components", "Pages", "Database", "Sessions.razor")));
+            File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Components", "Pages", "Database", "Sessions.razor")));
 
         page.Should().Contain("EffectiveHealthInterval");
         page.Should().NotContain("RefreshInterval");

@@ -4,9 +4,9 @@ using Bunit;
 
 using Marten;
 
-using MartenStudio.Components.Pages.Database;
+using PostgresStudio.Components.Pages.Database;
 using MartenStudio.Services;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
@@ -17,7 +17,8 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-using BrowserPage = MartenStudio.Components.Pages.Database.DatabaseObjects;
+using BrowserPage = PostgresStudio.Components.Pages.Database.DatabaseObjects;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Database;
 

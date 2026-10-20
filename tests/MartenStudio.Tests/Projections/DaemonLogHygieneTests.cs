@@ -18,6 +18,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Projections;
 

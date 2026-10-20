@@ -5,8 +5,6 @@ using JasperFx.MultiTenancy;
 
 using Marten;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Events;
 
@@ -17,6 +15,8 @@ using Npgsql;
 
 // JasperFx.Events has a StreamState of its own; the studio's is the page's record.
 using StreamState = MartenStudio.Services.Events.StreamState;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Events;
 

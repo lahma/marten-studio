@@ -2,8 +2,8 @@ using AngleSharp.Dom;
 
 using Bunit;
 
-using MartenStudio.Components.Pages.Database;
-using MartenStudio.Services.Database;
+using PostgresStudio.Components.Pages.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;

@@ -2,8 +2,8 @@ using AngleSharp.Dom;
 
 using Bunit;
 
-using MartenStudio.Components.Pages.Query;
 using MartenStudio.Tests.Components;
+using PostgresStudio.Components.Pages.Query;
 
 namespace MartenStudio.Tests.Query;
 

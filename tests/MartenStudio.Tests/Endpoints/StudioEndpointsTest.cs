@@ -1,6 +1,5 @@
 using System.Net;
 
-using MartenStudio.Internal;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Antiforgery;
@@ -12,6 +11,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using PostgresStudio.Internal;
 
 namespace MartenStudio.Tests.Endpoints;
 
@@ -48,7 +48,7 @@ public class StudioEndpointsTest
             .ToList();
 
     private static RouteEndpoint GetStaticAssetEndpoint(WebApplication app) =>
-        GetRouteEndpoints(app).Single(x => x.RoutePattern.RawText == "_content/MartenStudio/{**path}");
+        GetRouteEndpoints(app).Single(x => x.RoutePattern.RawText == "_content/PostgresStudio/{**path}");
 
     // -------------------------------------------------------------------------------------------
     // The plan section 4.3 matrix, default path
@@ -166,11 +166,11 @@ public class StudioEndpointsTest
         var endpoints = GetRouteEndpoints(app);
 
         endpoints.First(x => x.RoutePattern.RawText == "/marten")
-            .Metadata.GetMetadata<MartenStudioEndpointMarker>()!.IsPage.Should().BeTrue();
+            .Metadata.GetMetadata<StudioEndpointMarker>()!.IsPage.Should().BeTrue();
 
         GetCircuitEndpoints(app).Should().OnlyContain(
-            x => x.Metadata.GetMetadata<MartenStudioEndpointMarker>() != null
-                && !x.Metadata.GetMetadata<MartenStudioEndpointMarker>()!.IsPage);
+            x => x.Metadata.GetMetadata<StudioEndpointMarker>() != null
+                && !x.Metadata.GetMetadata<StudioEndpointMarker>()!.IsPage);
     }
 
     // -------------------------------------------------------------------------------------------
@@ -199,8 +199,8 @@ public class StudioEndpointsTest
 
         patterns.Should().Contain("/ops/marten/_framework/blazor.web.js");
         patterns.Should().Contain("/ops/marten/_framework/opaque-redirect");
-        patterns.Should().Contain("/ops/marten/_content/MartenStudio/{**path}");
-        patterns.Should().Contain("_content/MartenStudio/{**path}");
+        patterns.Should().Contain("/ops/marten/_content/PostgresStudio/{**path}");
+        patterns.Should().Contain("_content/PostgresStudio/{**path}");
     }
 
     [Fact]
@@ -226,7 +226,7 @@ public class StudioEndpointsTest
             .Metadata.GetMetadata<IAuthorizeData>()!.Policy.Should().Be("studio-policy");
         endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_framework/opaque-redirect")
             .Metadata.GetMetadata<IAuthorizeData>()!.Policy.Should().Be("studio-policy");
-        endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_content/MartenStudio/{**path}")
+        endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_content/PostgresStudio/{**path}")
             .Metadata.GetMetadata<IAuthorizeData>()!.Policy.Should().Be("studio-policy");
     }
 
@@ -248,7 +248,7 @@ public class StudioEndpointsTest
         // FallbackPolicy, because a studio without its stylesheet is not a security win.
         endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_framework/blazor.web.js")
             .Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull();
-        endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_content/MartenStudio/{**path}")
+        endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_content/PostgresStudio/{**path}")
             .Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull();
 
         // The enhanced-navigation redirect endpoint comes out of the studio's own MapRazorComponents, so
@@ -348,9 +348,9 @@ public class StudioEndpointsTest
             // Studio-rooted, at the default path too: the studio always takes its own /_blazor, framework
             // script and asset mirror under Path, and the document base is what points the browser there.
             body.Should().Contain("<base href=\"/marten/\"");
-            body.Should().Contain("<script src=\"_content/MartenStudio/js/marten-studio.js\">");
+            body.Should().Contain("<script src=\"_content/PostgresStudio/js/studio.js\">");
             body.Should().Contain("<script src=\"_framework/blazor.web.js\">");
-            body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/MartenStudio/css/marten-studio.css\"");
+            body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/PostgresStudio/css/studio.css\"");
             body.Should().Contain("<title>Marten Studio</title>");
         }
         finally
@@ -412,7 +412,7 @@ public class StudioEndpointsTest
         app.MapMartenStudio().AllowAnonymous();
 
         var studioEndpoints = GetRouteEndpoints(app)
-            .Where(x => x.Metadata.GetMetadata<MartenStudioEndpointMarker>() is not null)
+            .Where(x => x.Metadata.GetMetadata<StudioEndpointMarker>() is not null)
             .ToList();
 
         studioEndpoints.Should().NotBeEmpty();
@@ -484,8 +484,8 @@ public class StudioEndpointsTest
             builder => builder.Environment.WebRootFileProvider = new TestFileProvider(new Dictionary<string, byte[]>
             {
                 ["_framework/blazor.web.js"] = "// blazor.web.js"u8.ToArray(),
-                ["_content/MartenStudio/css/marten-studio.css"] = ":root { }"u8.ToArray(),
-                ["_content/MartenStudio/js/marten-studio.js"] = "// marten-studio.js"u8.ToArray(),
+                ["_content/PostgresStudio/css/studio.css"] = ":root { }"u8.ToArray(),
+                ["_content/PostgresStudio/js/studio.js"] = "// marten-studio.js"u8.ToArray(),
             }));
 
         app.MapMartenStudio().AllowAnonymous();
@@ -494,7 +494,7 @@ public class StudioEndpointsTest
         {
             using var client = app.GetTestClient();
 
-            using var css = await client.GetAsync(new Uri("/ops/marten/_content/MartenStudio/css/marten-studio.css", UriKind.Relative), Token);
+            using var css = await client.GetAsync(new Uri("/ops/marten/_content/PostgresStudio/css/studio.css", UriKind.Relative), Token);
             css.StatusCode.Should().Be(HttpStatusCode.OK);
             css.Content.Headers.ContentType!.MediaType.Should().Be("text/css");
 
@@ -507,13 +507,13 @@ public class StudioEndpointsTest
             // Blazor convention loads any more (D24). The media type is the assertion that matters: this
             // is the file whose text/html response filled a host's console with MIME-type errors, and a
             // wrong type here stops being cosmetic the moment a host sends X-Content-Type-Options: nosniff.
-            using var helpers = await client.GetAsync(new Uri("/ops/marten/_content/MartenStudio/js/marten-studio.js", UriKind.Relative), Token);
+            using var helpers = await client.GetAsync(new Uri("/ops/marten/_content/PostgresStudio/js/studio.js", UriKind.Relative), Token);
             helpers.StatusCode.Should().Be(HttpStatusCode.OK);
             helpers.Content.Headers.ContentType!.MediaType.Should().Be("text/javascript");
             (await helpers.Content.ReadAsByteArrayAsync(Token)).Should().NotBeEmpty();
 
             // The root-level asset endpoint stays for hosts that do not path-forward.
-            using var rootCss = await client.GetAsync(new Uri("/_content/MartenStudio/css/marten-studio.css", UriKind.Relative), Token);
+            using var rootCss = await client.GetAsync(new Uri("/_content/PostgresStudio/css/studio.css", UriKind.Relative), Token);
             rootCss.StatusCode.Should().Be(HttpStatusCode.OK);
         }
         finally
@@ -661,8 +661,8 @@ public class StudioEndpointsTest
         patterns.Should().Contain("/marten/_blazor/negotiate");
         patterns.Should().Contain("/marten/_framework/opaque-redirect");
         patterns.Should().Contain("/marten/_framework/blazor.web.js");
-        patterns.Should().Contain("/marten/_content/MartenStudio/{**path}");
-        patterns.Should().Contain("_content/MartenStudio/{**path}");
+        patterns.Should().Contain("/marten/_content/PostgresStudio/{**path}");
+        patterns.Should().Contain("_content/PostgresStudio/{**path}");
     }
 
     [Fact]
@@ -738,7 +738,7 @@ public class StudioEndpointsTest
         await using var app = CreateApp(
             configureBuilder: builder => builder.Environment.WebRootFileProvider = new TestFileProvider(new Dictionary<string, byte[]>
             {
-                ["_content/MartenStudio/_framework/blazor.web.js"] = "// the package's own"u8.ToArray(),
+                ["_content/PostgresStudio/_framework/blazor.web.js"] = "// the package's own"u8.ToArray(),
             }));
 
         app.MapMartenStudio().AllowAnonymous();
@@ -857,7 +857,7 @@ public class StudioEndpointsTest
         await app.StartAsync(Token);
         try
         {
-            app.Services.GetRequiredService<MartenStudioMappedEndpoints>().ServedAnonymously.Should().BeTrue();
+            app.Services.GetRequiredService<StudioMappedEndpoints>().ServedAnonymously.Should().BeTrue();
         }
         finally
         {
@@ -873,7 +873,7 @@ public class StudioEndpointsTest
         await app.StartAsync(Token);
         try
         {
-            app.Services.GetRequiredService<MartenStudioMappedEndpoints>().ServedAnonymously.Should().BeFalse();
+            app.Services.GetRequiredService<StudioMappedEndpoints>().ServedAnonymously.Should().BeFalse();
         }
         finally
         {
@@ -896,7 +896,7 @@ public class StudioEndpointsTest
                 builder.Environment.WebRootFileProvider = new TestFileProvider(new Dictionary<string, byte[]>
                 {
                     ["_framework/blazor.web.js"] = "// blazor.web.js"u8.ToArray(),
-                    ["_content/MartenStudio/css/marten-studio.css"] = ":root { }"u8.ToArray(),
+                    ["_content/PostgresStudio/css/studio.css"] = ":root { }"u8.ToArray(),
                 });
             });
 
@@ -906,7 +906,7 @@ public class StudioEndpointsTest
         {
             using var client = app.GetTestClient();
 
-            using var css = await client.GetAsync(new Uri("/ops/marten/_content/MartenStudio/css/marten-studio.css", UriKind.Relative), Token);
+            using var css = await client.GetAsync(new Uri("/ops/marten/_content/PostgresStudio/css/studio.css", UriKind.Relative), Token);
             css.StatusCode.Should().Be(HttpStatusCode.OK);
 
             using var script = await client.GetAsync(new Uri("/ops/marten/_framework/blazor.web.js", UriKind.Relative), Token);

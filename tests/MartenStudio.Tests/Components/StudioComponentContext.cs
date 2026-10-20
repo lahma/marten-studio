@@ -1,11 +1,9 @@
 using Bunit;
 
-using MartenStudio.Internal;
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
-using MartenStudio.Services.Settings;
+using PostgresStudio.Services.Settings;
 using MartenStudio.Tests.Events;
 using MartenStudio.Tests.Projections;
 using MartenStudio.Tests.Support;
@@ -20,6 +18,9 @@ using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using PostgresStudio.Internal;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Tests.Components;
 
@@ -69,7 +70,7 @@ internal class StudioComponentContext : BunitContext
         RelationshipData = new FakeRelationshipDataService();
         DatabaseObjects = new FakeDatabaseObjectService();
         TableRows = new FakeTableRowService();
-        DatabaseBrowser = new MartenStudio.Services.Database.DatabaseBrowserState();
+        DatabaseBrowser = new PostgresStudio.Services.Database.DatabaseBrowserState();
         AuthorizationService = new TestStoreAuthorizationService();
         AuthenticationState = new TestAuthenticationStateProvider();
 
@@ -101,12 +102,12 @@ internal class StudioComponentContext : BunitContext
 
         // Document detail renders the "referenced by" panel, so every detail test needs this one too. A
         // test about the relationships screen registers its own instance through the hook, which wins.
-        Services.AddSingleton<MartenStudio.Services.Relationships.IRelationshipDataService>(RelationshipData);
+        Services.AddSingleton<PostgresStudio.Services.Relationships.IRelationshipDataService>(RelationshipData);
 
         // The database browser's pages read through this one; a test that needs other answers sets them on
         // the fake rather than registering its own.
-        Services.AddSingleton<MartenStudio.Services.Database.IDatabaseObjectService>(DatabaseObjects);
-        Services.AddSingleton<MartenStudio.Services.Database.ITableRowService>(TableRows);
+        Services.AddSingleton<PostgresStudio.Services.Database.IDatabaseObjectService>(DatabaseObjects);
+        Services.AddSingleton<PostgresStudio.Services.Database.ITableRowService>(TableRows);
         Services.AddSingleton(DatabaseBrowser);
 
         // Every live page builds its own loop from this, so the circuit's container never tracks one.
@@ -115,9 +116,9 @@ internal class StudioComponentContext : BunitContext
         // H1: the Overview's Health region, the Health page and the sidebar's badge all read through this;
         // the mutes and the toast memory are the real ones, because they are per circuit and cheap.
         Health = new MartenStudio.Tests.Health.FakeHealthService();
-        Services.AddSingleton<MartenStudio.Services.Health.IHealthService>(Health);
-        Services.AddSingleton<MartenStudio.Services.Health.HealthMutes>();
-        Services.AddSingleton<MartenStudio.Services.Health.HealthAlerts>();
+        Services.AddSingleton<PostgresStudio.Services.Health.IHealthService>(Health);
+        Services.AddSingleton<PostgresStudio.Services.Health.HealthMutes>();
+        Services.AddSingleton<PostgresStudio.Services.Health.HealthAlerts>();
 
         Services.AddSingleton<IAuthorizationService>(AuthorizationService);
         Services.AddSingleton<AuthenticationStateProvider>(AuthenticationState);
@@ -142,7 +143,7 @@ internal class StudioComponentContext : BunitContext
         // What the layout reads to decide whether to draw the "served to anyone" banner. The real
         // singleton, so a test says what it says by handing it real endpoint metadata. Constructed
         // here rather than resolved, so it does not seal the service provider either.
-        MappedEndpoints = new MartenStudioMappedEndpoints();
+        MappedEndpoints = new StudioMappedEndpoints();
         Services.AddSingleton(MappedEndpoints);
 
         // AddRazorComponents() would register these; a bUnit context has neither, and the layout carries
@@ -192,7 +193,7 @@ internal class StudioComponentContext : BunitContext
     public FakeTableRowService TableRows { get; }
 
     /// <summary>The Rows tab's per-circuit memory - "Run anyway", keyset history, the page a row came from.</summary>
-    public MartenStudio.Services.Database.DatabaseBrowserState DatabaseBrowser { get; }
+    public PostgresStudio.Services.Database.DatabaseBrowserState DatabaseBrowser { get; }
 
     /// <summary>The policy engine, and the record of what it was asked.</summary>
     public TestStoreAuthorizationService AuthorizationService { get; }
@@ -207,7 +208,7 @@ internal class StudioComponentContext : BunitContext
     public StudioState State => Services.GetRequiredService<StudioState>();
 
     /// <summary>What the startup guard observed about the mapping, as the layout reads it.</summary>
-    public MartenStudioMappedEndpoints MappedEndpoints { get; }
+    public StudioMappedEndpoints MappedEndpoints { get; }
 
     public ToastService Toasts => Services.GetRequiredService<ToastService>();
 
@@ -314,7 +315,7 @@ internal class StudioComponentContext : BunitContext
             RoutePatternFactory.Parse("/marten"),
             order: 0);
 
-        endpoint.Metadata.Add(new MartenStudioEndpointMarker("Marten Studio", "(remedies)", isPage: true));
+        endpoint.Metadata.Add(new StudioEndpointMarker("Marten Studio", "(remedies)", isPage: true));
         endpoint.Metadata.Add(new AllowAnonymousAttribute());
 
         MappedEndpoints.ObserveAnonymousPages([endpoint.Build()]);

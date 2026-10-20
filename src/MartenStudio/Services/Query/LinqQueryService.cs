@@ -13,7 +13,7 @@ using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -24,6 +24,8 @@ using Npgsql;
 using NpgsqlTypes;
 
 using Weasel.Core;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Services.Query;
 

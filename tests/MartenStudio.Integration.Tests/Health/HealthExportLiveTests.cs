@@ -5,7 +5,6 @@ using Marten;
 using Marten.Storage;
 
 using MartenStudio.Integration.Tests.Tenancy;
-using MartenStudio.Internal.Sql;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -14,6 +13,7 @@ using Microsoft.Extensions.Hosting;
 using Npgsql;
 
 using AspNetCoreHealthReport = Microsoft.Extensions.Diagnostics.HealthChecks.HealthReport;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests.Health;
 
@@ -73,7 +73,7 @@ public class HealthExportLiveTests(PostgresFixture postgres)
             "health_export_k01",
             Environments.Production,
             static options => options.AutoCreateSchemaObjects = AutoCreate.All,
-            static services => services.AddSingleton(global::MartenStudio.Services.Health.HealthCheckRegistry.ForTypes(
+            static services => services.AddSingleton(global::PostgresStudio.Services.Health.HealthCheckRegistry.ForTypes(
                 [typeof(global::MartenStudio.Services.Health.Checks.AutoCreateInProductionCheck)])));
 
         HealthReportEntry entry = await ProbeAsync(host);

@@ -2,6 +2,7 @@ using JasperFx;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
 

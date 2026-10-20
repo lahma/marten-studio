@@ -5,10 +5,11 @@ using Bunit;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Documents;
-using MartenStudio.Services.Json;
+using PostgresStudio.Services.Json;
 
 using DetailPage = MartenStudio.Components.Pages.Documents.DocumentDetail;
 using DetailModel = MartenStudio.Services.Documents.DocumentDetail;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Documents;
 

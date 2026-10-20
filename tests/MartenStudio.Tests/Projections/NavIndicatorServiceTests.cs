@@ -1,13 +1,14 @@
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Live;
-using MartenStudio.Services.Settings;
+using PostgresStudio.Services.Settings;
 using MartenStudio.Tests.Events;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Tests.Projections;
 
@@ -332,7 +333,7 @@ public class NavIndicatorServiceTests
     }
 
     /// <summary>A contributor that answers what it is told to.</summary>
-    private sealed class StubContributor(params (string Key, string Text)[] badges) : MartenStudio.Services.Sources.INavIndicatorContributor
+    private sealed class StubContributor(params (string Key, string Text)[] badges) : PostgresStudio.Services.Sources.INavIndicatorContributor
     {
         public Exception? Failure { get; init; }
 
@@ -387,7 +388,7 @@ public class NavIndicatorServiceTests
         }
 
         /// <summary>The same service - same circuit, policy and cache - over other contributors.</summary>
-        public NavIndicatorService With(params MartenStudio.Services.Sources.INavIndicatorContributor[] contributors) =>
+        public NavIndicatorService With(params PostgresStudio.Services.Sources.INavIndicatorContributor[] contributors) =>
             new(
                 State,
                 MartenSpine.Authorization(Options.Create(options), Authorization, AuthenticationState),

@@ -1,8 +1,8 @@
 using JasperFx.Events.Projections;
 
-using MartenStudio.Services;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Projections;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Projections;
 

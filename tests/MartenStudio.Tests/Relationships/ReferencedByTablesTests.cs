@@ -3,13 +3,13 @@ using Bunit;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Documents;
-using MartenStudio.Services.Relationships;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Documents;
 
 using DetailModel = MartenStudio.Services.Documents.DocumentDetail;
 using DetailPage = MartenStudio.Components.Pages.Documents.DocumentDetail;
 using ReferencedByPanel = MartenStudio.Components.Pages.Documents.ReferencedBy;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Relationships;
 

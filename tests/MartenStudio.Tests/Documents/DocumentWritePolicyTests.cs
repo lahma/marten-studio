@@ -13,6 +13,7 @@ using DetailModel = MartenStudio.Services.Documents.DocumentDetail;
 using DetailPage = MartenStudio.Components.Pages.Documents.DocumentDetail;
 using ListPage = MartenStudio.Components.Pages.Documents.Documents;
 using WriteActions = MartenStudio.Components.Pages.Documents.DocumentWriteActions;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Documents;
 

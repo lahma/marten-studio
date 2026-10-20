@@ -9,9 +9,7 @@ using Marten;
 using Marten.Events.Projections;
 
 using MartenStudio.Integration.Tests.Projections;
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +17,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 using static MartenStudio.Integration.Tests.Health.DaemonSweeps;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

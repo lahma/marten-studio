@@ -4,13 +4,14 @@ using Marten;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain.Events;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Projections;
 
 using Npgsql;
 
 using static MartenStudio.Integration.Tests.Health.DaemonSweeps;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

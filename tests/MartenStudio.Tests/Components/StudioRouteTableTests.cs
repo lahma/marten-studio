@@ -1,9 +1,11 @@
 using MartenStudio.Components;
 using MartenStudio.Components.Pages;
-using MartenStudio.Services.Settings;
+using PostgresStudio.Services.Settings;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
+using PostgresStudio.Components;
+using PostgresStudio.Components.Pages;
 
 namespace MartenStudio.Tests.Components;
 

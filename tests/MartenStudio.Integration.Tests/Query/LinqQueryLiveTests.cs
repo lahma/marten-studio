@@ -1,8 +1,9 @@
-using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Query;
 
 using Npgsql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Integration.Tests.Query;
 
@@ -187,12 +188,12 @@ public class LinqQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
         string alias = await harness.AliasOfAsync<LinqLiveOrder>();
 
         await using NpgsqlConnection connection = harness.Store.Storage.Database.CreateConnection();
-        string key = MartenStudio.Internal.Sql.StudioDatabaseTime.KeyOf(connection);
-        long before = MartenStudio.Internal.Sql.StudioDatabaseTime.Shared.SessionsEver(key);
+        string key = PostgresStudio.Internal.Sql.StudioDatabaseTime.KeyOf(connection);
+        long before = PostgresStudio.Internal.Sql.StudioDatabaseTime.Shared.SessionsEver(key);
 
         (await RunAsync(LinqQueryHarness.For(LinqQueryHarness.Acme), alias, "Name == \"Ada\"")).Error.Should().BeNull();
 
-        MartenStudio.Internal.Sql.StudioDatabaseTime.Shared.SessionsEver(key).Should().BeGreaterThanOrEqualTo(before + 2,
+        PostgresStudio.Internal.Sql.StudioDatabaseTime.Shared.SessionsEver(key).Should().BeGreaterThanOrEqualTo(before + 2,
             "the read and its plan each run in a ReadOnlySqlSession, which is what the health advisor's studio-cost line counts");
     }
 

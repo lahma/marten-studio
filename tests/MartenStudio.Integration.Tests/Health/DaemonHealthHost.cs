@@ -15,7 +15,6 @@ using MartenStudio.Integration.Tests.Projections;
 using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.Services;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Projections;
 
 using Microsoft.AspNetCore.Authorization;
@@ -25,6 +24,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 
@@ -142,7 +144,7 @@ internal sealed class DaemonHealthHost : IAsyncDisposable
             services.GetRequiredService<HealthCheckRegistry>(),
             services.GetRequiredService<HealthHistory>(),
             services.GetRequiredService<IServiceScopeFactory>(),
-            services.GetRequiredService<MartenStudio.Services.Settings.IStudioSettings>(),
+            services.GetRequiredService<PostgresStudio.Services.Settings.IStudioSettings>(),
             services.GetRequiredService<StudioLogThrottle>(),
             services.GetRequiredService<ILogger<HealthSweeper>>(),
             clock,

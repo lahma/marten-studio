@@ -1,9 +1,8 @@
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Checks;
-using MartenStudio.Services.Query;
-
 using static MartenStudio.Tests.Health.StatementBuilders;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Health;
 

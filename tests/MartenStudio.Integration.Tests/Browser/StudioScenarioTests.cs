@@ -277,8 +277,8 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
             foreach (string path in new[]
                      {
                          BrowserSuiteFixture.SubPath + "/_framework/blazor.web.js",
-                         BrowserSuiteFixture.SubPath + "/_content/MartenStudio/css/marten-studio.css",
-                         BrowserSuiteFixture.SubPath + "/_content/MartenStudio/js/marten-studio.js",
+                         BrowserSuiteFixture.SubPath + "/_content/PostgresStudio/css/studio.css",
+                         BrowserSuiteFixture.SubPath + "/_content/PostgresStudio/js/studio.js",
                      })
             {
                 IAPIResponse response = await studio.Page.APIRequest.GetAsync(host.Url(path));

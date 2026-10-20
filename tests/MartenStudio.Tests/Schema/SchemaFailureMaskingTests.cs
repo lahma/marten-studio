@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Schema;
 

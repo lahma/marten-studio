@@ -4,12 +4,9 @@ using JasperFx.Events.Daemon;
 
 using Marten;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.SampleDomain.Events;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Checks;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -20,6 +17,9 @@ using Npgsql;
 using Testcontainers.PostgreSql;
 
 using static MartenStudio.Integration.Tests.Health.TableHealthLive;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Integration.Tests.Health;
 

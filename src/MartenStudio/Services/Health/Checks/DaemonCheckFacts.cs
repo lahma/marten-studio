@@ -14,6 +14,7 @@ using MartenStudio.Services.Projections;
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
 

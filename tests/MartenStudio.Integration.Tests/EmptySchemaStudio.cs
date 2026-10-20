@@ -7,7 +7,6 @@ using Marten.Schema;
 
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 
 using Microsoft.AspNetCore.Components.Authorization;
@@ -15,6 +14,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Integration.Tests;
 
@@ -154,7 +155,7 @@ internal sealed class EmptySchemaStudio : IAsyncDisposable
         await state.EnsureInitializedAsync(TestContext.Current.CancellationToken);
 
         MartenNavIndicatorContributor contributor = scope.ServiceProvider
-            .GetServices<MartenStudio.Services.Sources.INavIndicatorContributor>()
+            .GetServices<PostgresStudio.Services.Sources.INavIndicatorContributor>()
             .OfType<MartenNavIndicatorContributor>()
             .Single();
 

@@ -1,4 +1,5 @@
 using MartenStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
 

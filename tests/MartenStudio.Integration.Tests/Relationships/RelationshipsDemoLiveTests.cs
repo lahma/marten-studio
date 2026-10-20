@@ -7,12 +7,9 @@ using Marten;
 using MartenStudio.Integration.Tests.Browser;
 using MartenStudio.Integration.Tests.Database;
 using MartenStudio.Integration.Tests.Logging;
-using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.Services;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Live;
-using MartenStudio.Services.Relationships;
+using PostgresStudio.Services.Database;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -20,6 +17,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Live;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Integration.Tests.Relationships;
 

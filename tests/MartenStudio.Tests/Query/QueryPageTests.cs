@@ -2,8 +2,6 @@ using System.Reflection;
 
 using Bunit;
 
-using MartenStudio.Components.Pages.Query;
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
@@ -13,6 +11,10 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
 
 using QueryPage = MartenStudio.Components.Pages.Query.Query;
+using PostgresStudio.Components.Pages.Query;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Query;
 
@@ -48,7 +50,7 @@ public class QueryPageTests
     private sealed class QueryServices(FakeQueryService instance) : IServiceProvider
     {
         public object? GetService(Type requested) =>
-            requested == typeof(IQueryService) || requested == typeof(MartenStudio.Services.Sources.ISqlConsoleService)
+            requested == typeof(IQueryService) || requested == typeof(PostgresStudio.Services.Sources.ISqlConsoleService)
                 ? instance
                 : null;
     }

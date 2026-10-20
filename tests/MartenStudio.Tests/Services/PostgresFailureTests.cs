@@ -1,7 +1,7 @@
-using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Services;
 

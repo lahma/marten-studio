@@ -10,6 +10,9 @@ using MartenStudio.Services.Health.Checks;
 using MartenStudio.Tests.Sql;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

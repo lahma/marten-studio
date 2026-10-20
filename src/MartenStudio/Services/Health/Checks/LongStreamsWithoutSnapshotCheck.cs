@@ -6,6 +6,7 @@ using Marten;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Events;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
 

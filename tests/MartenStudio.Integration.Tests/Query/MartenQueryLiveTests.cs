@@ -5,12 +5,14 @@ using JasperFx.MultiTenancy;
 using Marten.Schema;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
 using MartenStudio.Services.Query;
 
 using Npgsql;
 
 using NpgsqlTypes;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Integration.Tests.Query;
 

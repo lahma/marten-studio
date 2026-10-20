@@ -6,11 +6,12 @@ using Marten;
 using MartenStudio.Integration.Tests.Health;
 using MartenStudio.SampleDomain;
 using MartenStudio.Services;
-using MartenStudio.Services.Health;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Generation;
 

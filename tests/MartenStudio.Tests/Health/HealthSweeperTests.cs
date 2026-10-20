@@ -1,11 +1,11 @@
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

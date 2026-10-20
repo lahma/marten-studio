@@ -1,6 +1,6 @@
 using System.Globalization;
 
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 
 namespace MartenStudio.Services.Schema;
 

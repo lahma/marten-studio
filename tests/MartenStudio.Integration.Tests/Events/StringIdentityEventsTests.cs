@@ -3,13 +3,13 @@ using JasperFx.Events;
 
 using Marten;
 
-using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 
 using StreamState = MartenStudio.Services.Events.StreamState;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Events;
 

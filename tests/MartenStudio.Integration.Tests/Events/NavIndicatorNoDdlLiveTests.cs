@@ -3,10 +3,11 @@ using Marten.Storage;
 
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Integration.Tests.Events;
 

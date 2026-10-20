@@ -4,6 +4,8 @@ using MartenStudio.Components.Pages;
 using MartenStudio.Services;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Components.Pages;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Components;
 

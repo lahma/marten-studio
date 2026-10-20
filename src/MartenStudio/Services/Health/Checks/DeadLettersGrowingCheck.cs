@@ -6,6 +6,7 @@ using JasperFx.Events.Daemon;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
 

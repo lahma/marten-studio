@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
 
-using MartenStudio.Internal.Sql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Services.Health.Checks;
 

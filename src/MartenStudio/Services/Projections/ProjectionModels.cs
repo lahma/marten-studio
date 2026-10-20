@@ -2,7 +2,8 @@ using System.Globalization;
 
 using JasperFx.Events.Projections;
 
-using MartenStudio.Services.Health;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Projections;
 

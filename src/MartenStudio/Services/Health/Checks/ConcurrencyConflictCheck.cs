@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Services.Health.Checks;
 

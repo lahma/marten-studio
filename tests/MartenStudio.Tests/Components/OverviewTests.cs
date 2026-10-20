@@ -8,6 +8,7 @@ using MartenStudio.Components.Pages;
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
 using MartenStudio.Tests.Events;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Components;
 
@@ -546,7 +547,7 @@ public class OverviewTests
     /// With no per-store policy configured the ring costs nothing at all.
     /// </summary>
     /// <remarks>
-    /// The fast path <see cref="MartenStudio.Services.StudioAuthorization.FilterAsync{T}" /> takes, and
+    /// The fast path <see cref="PostgresStudio.Services.StudioAuthorization.FilterAsync{T}" /> takes, and
     /// the reason an application that never set the option pays nothing for this panel.
     /// </remarks>
     [Fact]

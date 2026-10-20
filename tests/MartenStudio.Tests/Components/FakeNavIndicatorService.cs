@@ -1,5 +1,5 @@
 using MartenStudio.Services;
-using MartenStudio.Services.Live;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Tests.Components;
 
@@ -51,7 +51,7 @@ internal sealed class FakeNavIndicatorService : INavIndicatorService
     public Exception? Failure { get; set; }
 
     /// <summary>The health glance the badge is told about (H1), or <see langword="null" /> for none.</summary>
-    public MartenStudio.Services.Health.HealthGlance? Health { get; set; }
+    public PostgresStudio.Services.Health.HealthGlance? Health { get; set; }
 
     public Task<NavIndicators> ReadAsync(CancellationToken cancellationToken = default)
     {

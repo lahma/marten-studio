@@ -1,0 +1,1189 @@
+@using System.Collections.Immutable
+@using System.Text.Json
+@using PostgresStudio.Components.Json
+@using PostgresStudio.Services.Json
+@using PostgresStudio.Services.Live
+@inject IJSRuntime JsRuntime
+
+@*
+    The JSON viewer. It renders a flat list of visible rows out of an immutable node array, keyed by node
+    id - never a recursive component tree. A document with a thousand nodes is a thousand array entries
+    and however many rows are actually on screen, not a thousand live components each with their own
+    lifecycle, parameter diffing and disposal.
+
+    Nothing here reaches for Marten, for MartenStudioOptions or for any scoped service: a viewer is given
+    a string of JSON and a few numbers, which is what makes it testable and reusable on every page that
+    needs to show a document, an event body or a projection's state.
+*@
+
+<div class="@RootClass">
+    @if (ShowToolbar)
+    {
+        <JsonViewToolbar RawMode="_rawMode"
+                         RawModeChanged="SetRawModeAsync"
+                         TreeAvailable="_model.HasNodes"
+                         Depth="_depth"
+                         DepthChanged="SetDepthAsync"
+                         Wrap="_wrap"
+                         WrapChanged="SetWrapAsync"
+                         ShowLineNumbers="_lineNumbers"
+                         ShowLineNumbersChanged="SetLineNumbersAsync"
+                         OnCopyDocument="CopyDocumentAsync"
+                         OnExpandAll="ExpandAllAsync"
+                         OnCollapseAll="CollapseAllAsync"
+                         DownloadHref="@DownloadHref"
+                         DownloadFileName="@DownloadFileName" />
+    }
+
+    @if (ShowSearch && !_rawMode && _model.HasNodes)
+    {
+        <JsonSearchBar @ref="_searchBar"
+                       MatchCount="_matches.Length"
+                       MatchIndex="_matchIndex"
+                       DebounceMilliseconds="SearchDebounceMilliseconds"
+                       OnTermChanged="SetSearchTermAsync"
+                       OnNext="NextMatchAsync"
+                       OnPrevious="PreviousMatchAsync" />
+    }
+
+    @if (_model.HasError)
+    {
+        <p class="ms-alert ms-alert-error ms-json-banner" role="alert">
+            This is not valid JSON: @_model.Error
+        </p>
+    }
+    else if (_model.Truncated)
+    {
+        <div class="ms-alert ms-alert-warning ms-json-banner" role="status">
+            <span class="ms-json-banner-text">@_model.Reason</span>
+            <button type="button" class="ms-btn ms-btn-sm" @onclick="BuildAnywayAsync">Build the tree anyway</button>
+        </div>
+    }
+
+    @if (_rawMode || !_model.HasNodes)
+    {
+        <JsonRawView Json="@Json"
+                     Wrap="_wrap"
+                     ShowLineNumbers="_lineNumbers"
+                     MaxBytes="MaxBytesForRaw"
+                     MaxLines="MaxRawLines"
+                     Label="@Label" />
+    }
+    else
+    {
+        <div class="ms-json-tree"
+             role="tree"
+             aria-label="@Label"
+             tabindex="-1"
+             @ref="_treeElement"
+             @onkeydown="OnTreeKeyDownAsync">
+            @foreach (var row in _rows)
+            {
+                if (row.IsMore)
+                {
+                    <JsonViewMoreRow @key="row.Key"
+                                     NodeId="row.NodeId"
+                                     Depth="row.Depth"
+                                     Shown="row.Shown"
+                                     Total="row.Total"
+                                     ChildWindow="ChildWindow"
+                                     Focused="_focusedIsMore && row.NodeId == _focusedNodeId"
+                                     AutoFocus="_autoFocusIsMore && row.NodeId == _autoFocusNodeId"
+                                     OnShowMore="ShowMoreAsync"
+                                     OnShowAll="ShowAllAsync" />
+                }
+                else
+                {
+                    var node = _model.Nodes[row.NodeId];
+                    <JsonViewRow @key="row.Key"
+                                 NodeId="row.NodeId"
+                                 Depth="node.Depth"
+                                 Label="@LabelOf(row.NodeId)"
+                                 IsIndex="node.IsArrayElement"
+                                 Kind="node.Kind"
+                                 Display="@node.Display"
+                                 Semantic="@SemanticOf(row.NodeId)"
+                                 ChildCount="node.ChildCount"
+                                 IsContainer="node.IsContainer"
+                                 IsArray="node.Kind == JsonValueKind.Array"
+                                 NumberPreview="@_numberArrays.GetValueOrDefault(row.NodeId)"
+                                 Expanded="_expanded.Contains(row.NodeId)"
+                                 SetSize="row.SetSize"
+                                 PosInSet="row.PosInSet"
+                                 Focused="!_focusedIsMore && row.NodeId == _focusedNodeId"
+                                 AutoFocus="!_autoFocusIsMore && row.NodeId == _autoFocusNodeId"
+                                 SearchTerm="@_searchTerm"
+                                 MatchBadge="@BadgeOf(row.NodeId)"
+                                 ShowFullString="_expandedStrings.Contains(row.NodeId)"
+                                 MaxInlineLength="LongString"
+                                 MenuElementId="@_menuElementId"
+                                 OnToggle="ToggleAsync"
+                                 OnFocusRequested="FocusRowAsync"
+                                 OnMenuRequested="OpenMenuAsync"
+                                 OnToggleString="ToggleStringAsync" />
+                }
+            }
+
+            @if (_rowsClamped)
+            {
+                @* Not a treeitem: it is a sentence about the tree, not a node in it. *@
+                <div class="ms-json-row ms-json-row-more ms-json-row-clamp" role="presentation">
+                    <span class="ms-json-count">
+                        Showing the first @MaxVisibleRows rows. Collapse a level or search to see the rest.
+                    </span>
+                </div>
+            }
+        </div>
+    }
+
+    <JsonCopyMenu @ref="_menu"
+                  ElementId="@_menuElementId"
+                  Path="@_menuPath"
+                  ValueJson="@_menuValue"
+                  JsonPath="@_menuJsonPath"
+                  PgExpression="@_menuPg"
+                  PgTextPath="@_menuPgPath"
+                  LinqPath="@_menuLinq"
+                  LinqNote="@_menuLinqNote"
+                  ContainmentFilter="@_menuFilter"
+                  OnCopied="AnnounceAsync" />
+
+    <p class="ms-json-live ms-sr-only" role="status" aria-live="polite">@_announcement</p>
+</div>
+
+@code {
+    /// <summary>How many numbers a collapsed number array shows before its "…".</summary>
+    private const int NumberArrayPreview = 3;
+
+    private readonly HashSet<int> _expanded = [];
+    private readonly HashSet<int> _expandedStrings = [];
+
+    /// <summary>The arrays drawn collapsed as numbers - an embedding - by node id, with the start of each (see <see cref="FindNumberArrays" />).</summary>
+    private readonly Dictionary<int, string> _numberArrays = [];
+    private readonly Dictionary<int, int> _windows = [];
+    private readonly List<JsonRow> _rows = [];
+    private readonly string _menuElementId = "ms-json-menu-" + Guid.NewGuid().ToString("N")[..8];
+
+    private JsonModel _model = JsonModel.Empty;
+    private JsonCopyMenu? _menu;
+    private JsonSearchBar? _searchBar;
+    private Dictionary<int, int> _badges = [];
+    private ImmutableArray<JsonMatch> _matches = ImmutableArray<JsonMatch>.Empty;
+
+    private string? _builtFrom;
+    private string? _builtColumn;
+    private JsonModelOptions? _builtOptions;
+    private int _builtVisibleRows;
+    private bool _built;
+    private bool _forceTree;
+    private bool _rawMode;
+    private bool _rowsClamped;
+    private bool _wrap;
+    private bool _lineNumbers = true;
+    private int _depth = 2;
+    private int _focusedNodeId = -1;
+    private int _autoFocusNodeId = -1;
+    private bool _focusedIsMore;
+    private bool _autoFocusIsMore;
+    private ElementReference _treeElement;
+    private string? _capturedTreeId;
+    private int _matchIndex = -1;
+    private string _searchTerm = string.Empty;
+
+    /// <summary>What <see cref="ShowSearch" /> was on the previous parameter set; null before the first.</summary>
+    private bool? _searchShown;
+    private string _announcement = string.Empty;
+    private string? _downloadHref;
+    private string _typeahead = string.Empty;
+    private long _typeaheadAt;
+
+    private string _menuPath = string.Empty;
+    private string _menuValue = string.Empty;
+    private string _menuJsonPath = "$";
+    private string _menuPg = string.Empty;
+    private string _menuPgPath = string.Empty;
+    private string _menuLinq = "x";
+    private string? _menuLinqNote;
+    private string _menuFilter = string.Empty;
+
+    /// <summary>The document to show.</summary>
+    [Parameter]
+    public string? Json { get; set; }
+
+    /// <summary>The document's CLR type, when it is known, so a Marten LINQ path can be resolved.</summary>
+    [Parameter]
+    public Type? DocumentType { get; set; }
+
+    /// <summary>The serializer's naming policy, so <c>first_name</c> can find <c>FirstName</c>.</summary>
+    [Parameter]
+    public JsonNamingPolicy? NamingPolicy { get; set; }
+
+    /// <summary>The jsonb column the Postgres expressions start from.</summary>
+    [Parameter]
+    public string Column { get; set; } = JsonPathExpressions.DefaultColumn;
+
+    /// <summary>The accessible name of the tree and of the raw view.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Document JSON";
+
+    /// <summary>Extra classes for the viewer's root element.</summary>
+    [Parameter]
+    public string? Class { get; set; }
+
+    /// <summary>Whether the toolbar is shown.</summary>
+    [Parameter]
+    public bool ShowToolbar { get; set; } = true;
+
+    /// <summary>Whether the search bar is shown.</summary>
+    [Parameter]
+    public bool ShowSearch { get; set; } = true;
+
+    /// <summary>Whether to open in the raw view rather than the tree.</summary>
+    [Parameter]
+    public bool StartInRawView { get; set; }
+
+    /// <summary>The file name the download anchor suggests.</summary>
+    [Parameter]
+    public string DownloadFileName { get; set; } = "document.json";
+
+    /// <summary>Above this many nodes the document is shown raw until the user asks for the tree.</summary>
+    [Parameter]
+    public int MaxNodesForTree { get; set; } = JsonModelOptions.Default.MaxNodesForTree;
+
+    /// <summary>Above this many UTF-8 bytes the document is shown raw until the user asks for the tree.</summary>
+    [Parameter]
+    public int MaxBytesForTree { get; set; } = JsonModelOptions.Default.MaxBytesForTree;
+
+    /// <summary>Above this many UTF-8 bytes even the raw view is truncated.</summary>
+    [Parameter]
+    public int MaxBytesForRaw { get; set; } = JsonModelOptions.Default.MaxBytesForRaw;
+
+    /// <summary>How many levels are expanded on first render.</summary>
+    [Parameter]
+    public int AutoExpandDepth { get; set; } = JsonModelOptions.Default.AutoExpandDepth;
+
+    /// <summary>The most rows auto-expansion may produce.</summary>
+    [Parameter]
+    public int AutoExpandNodeBudget { get; set; } = JsonModelOptions.Default.AutoExpandNodeBudget;
+
+    /// <summary>How many more children a windowed container reveals per click.</summary>
+    [Parameter]
+    public int ChildWindow { get; set; } = JsonModelOptions.Default.ChildWindow;
+
+    /// <summary>A container with more children than this is windowed.</summary>
+    [Parameter]
+    public int LargeContainer { get; set; } = JsonModelOptions.Default.LargeContainer;
+
+    /// <summary>How many characters of a string are shown before it is truncated.</summary>
+    [Parameter]
+    public int LongString { get; set; } = JsonModelOptions.Default.LongString;
+
+    /// <summary>
+    /// The fewest numbers an array of numbers, not all whole, needs to be drawn collapsed as an embedding
+    /// (<see cref="JsonModelOptions.CollapsedNumberArray" />).
+    /// </summary>
+    [Parameter]
+    public int CollapsedNumberArray { get; set; } = JsonModelOptions.Default.CollapsedNumberArray;
+
+    /// <summary>The most rows the tree will put in the DOM at once.</summary>
+    [Parameter]
+    public int MaxVisibleRows { get; set; } = 2_000;
+
+    /// <summary>The most lines the raw view will put in the DOM at once.</summary>
+    [Parameter]
+    public int MaxRawLines { get; set; } = JsonPrettyPrinter.DefaultMaxLines;
+
+    /// <summary>How long to wait after a keystroke before searching.</summary>
+    [Parameter]
+    public int SearchDebounceMilliseconds { get; set; } = 250;
+
+    /// <summary>The largest document offered as a browser download, in UTF-8 bytes.</summary>
+    /// <remarks>
+    /// Lower than the tree threshold on purpose. Without a <c>download.text</c> helper in marten-studio.js
+    /// the only way to offer a download is a <c>data:</c> URL, and that URL is a second, percent-encoded
+    /// copy of the whole document sitting in the render tree. 128 KiB keeps that copy from dominating the
+    /// page; raising it is safe as soon as the download goes through JS instead.
+    /// </remarks>
+    [Parameter]
+    public int MaxDownloadBytes { get; set; } = 128 * 1024;
+
+    /// <summary>The rows currently rendered; the tests read this to assert what is on screen.</summary>
+    internal IReadOnlyList<JsonRow> Rows => _rows;
+
+    /// <summary>The parsed model, for tests and for a host page that wants the node count.</summary>
+    internal JsonModel Model => _model;
+
+    private string? DownloadHref => _downloadHref;
+
+    private string RootClass => string.IsNullOrWhiteSpace(Class) ? "ms-json" : "ms-json " + Class;
+
+    protected override void OnParametersSet()
+    {
+        // A host that takes the search bar away takes the only controls that could step through or
+        // clear the matches with it - and the highlighting, the badges on collapsed containers and the
+        // scroll position it moved to all survive a parameter change, because they are not part of the
+        // model. So a viewer that loses its search bar loses its search: this runs before the
+        // short-circuit below, because a parent may change only this parameter (an event card does
+        // exactly that when its toolbar closes) and the model is then untouched.
+        if (_searchShown == true && !ShowSearch)
+        {
+            ClearSearch();
+        }
+
+        _searchShown = ShowSearch;
+
+        // Everything the model is built from, not just the document. A parent that re-renders with the
+        // same Json and a different Column - or a raised MaxNodesForTree, or a different LongString -
+        // has asked for a different model, and short-circuiting on the document alone left the old one
+        // on screen: the copy menu went on offering Postgres expressions against the previous column,
+        // and "the tree is too large" survived being told it was not.
+        var options = BuildOptions();
+        var sameModel = _built &&
+            ReferenceEquals(_builtFrom, Json) &&
+            string.Equals(_builtColumn, Column, StringComparison.Ordinal) &&
+            options == _builtOptions;
+
+        if (sameModel && _builtVisibleRows == MaxVisibleRows)
+        {
+            return;
+        }
+
+        _builtVisibleRows = MaxVisibleRows;
+
+        if (sameModel)
+        {
+            // Only the row clamp moved. The model and every expansion the user has made still stand.
+            RebuildRows();
+            return;
+        }
+
+        _built = true;
+        _builtFrom = Json;
+        _builtColumn = Column;
+        _builtOptions = options;
+        _forceTree = false;
+        Rebuild(options);
+    }
+
+    private JsonModelOptions BuildOptions() => new()
+    {
+        MaxNodesForTree = MaxNodesForTree,
+        MaxBytesForTree = MaxBytesForTree,
+        MaxBytesForRaw = MaxBytesForRaw,
+        AutoExpandDepth = AutoExpandDepth,
+        AutoExpandNodeBudget = AutoExpandNodeBudget,
+        ChildWindow = ChildWindow,
+        LargeContainer = LargeContainer,
+        LongString = LongString,
+        CollapsedNumberArray = CollapsedNumberArray,
+    };
+
+    /// <summary>Everything a search leaves behind: the term, the hits, the cursor and the badges.</summary>
+    private void ClearSearch()
+    {
+        _matches = ImmutableArray<JsonMatch>.Empty;
+        _badges = [];
+        _matchIndex = -1;
+        _searchTerm = string.Empty;
+    }
+
+    private void Rebuild() => Rebuild(BuildOptions());
+
+    private void Rebuild(JsonModelOptions options)
+    {
+        _model = JsonModelBuilder.Build(Json, options, Column, _forceTree);
+        _expanded.Clear();
+        _expandedStrings.Clear();
+        _windows.Clear();
+        ClearSearch();
+        _focusedNodeId = _model.HasNodes ? 0 : -1;
+        _autoFocusNodeId = -1;
+        _focusedIsMore = false;
+        _autoFocusIsMore = false;
+        _depth = Math.Clamp(AutoExpandDepth, JsonViewToolbar.MinDepth, JsonViewToolbar.MaxDepth);
+        _rawMode = StartInRawView || !_model.HasNodes;
+        _downloadHref = BuildDownloadHref();
+
+        FindNumberArrays(options.CollapsedNumberArray);
+        ExpandToDepth(AutoExpandDepth, AutoExpandNodeBudget);
+    }
+
+    /// <summary>
+    /// Every array of at least <see cref="JsonModelOptions.CollapsedNumberArray" /> numbers and nothing else, at least
+    /// one of them with a fraction or an exponent, with the start of it - "[0.0123, -0.0441, 0.2, …]".
+    /// </summary>
+    /// <remarks>
+    /// That is the shape an embedding takes inside a Marten document: Marten.PgVector stores one as a <c>float[]</c>
+    /// member of the document's JSON and casts it to <c>vector(n)</c> at query time, so a document with a
+    /// 1536-dimension embedding is 1536 rows of numbers that mean nothing one at a time. Such an array is drawn
+    /// collapsed with its first components and its length, and auto-expansion and the depth control pass over it;
+    /// its toggle, Expand all and the copy menu still open and copy the whole of it. Found once per model, over the
+    /// children the model already holds contiguously.
+    /// </remarks>
+    private void FindNumberArrays(int minimum)
+    {
+        _numberArrays.Clear();
+
+        if (!_model.HasNodes || minimum < 1)
+        {
+            return;
+        }
+
+        foreach (var node in _model.Nodes)
+        {
+            if (node.Kind != JsonValueKind.Array || node.ChildCount < minimum || node.ChildStart < 0)
+            {
+                continue;
+            }
+
+            bool numbers = true;
+            bool fractional = false;
+            for (int i = node.ChildStart; i < node.ChildStart + node.ChildCount; i++)
+            {
+                if (_model.Nodes[i].Kind != JsonValueKind.Number)
+                {
+                    numbers = false;
+                    break;
+                }
+
+                fractional |= _model.Nodes[i].Raw.AsSpan().IndexOfAny('.', 'e', 'E') >= 0;
+            }
+
+            // Only numbers, and not only whole ones: an embedding is floats, and an array of ids or counts is
+            // read element by element as it always was.
+            if (!numbers || !fractional)
+            {
+                continue;
+            }
+
+            var preview = new System.Text.StringBuilder("[");
+            int shown = Math.Min(node.ChildCount, NumberArrayPreview);
+
+            for (int i = 0; i < shown; i++)
+            {
+                preview.Append(i == 0 ? string.Empty : ", ").Append(_model.Nodes[node.ChildStart + i].Display);
+            }
+
+            preview.Append(node.ChildCount > shown ? ", …]" : "]");
+            _numberArrays[node.Id] = preview.ToString();
+        }
+    }
+
+    private string? BuildDownloadHref()
+    {
+        if (string.IsNullOrEmpty(Json) || System.Text.Encoding.UTF8.GetByteCount(Json) > MaxDownloadBytes)
+        {
+            return null;
+        }
+
+        // A data: URL rather than a JS-driven save, because marten-studio.js has no download helper yet and
+        // an anchor needs no interop at all. See the packet report.
+        return "data:application/json;charset=utf-8," + Uri.EscapeDataString(Json);
+    }
+
+    /// <summary>Expands every container above <paramref name="depth"/>, stopping if the budget is spent.</summary>
+    private void ExpandToDepth(int depth, int? budget)
+    {
+        _expanded.Clear();
+        if (!_model.HasNodes)
+        {
+            RebuildRows();
+            return;
+        }
+
+        for (var level = 0; level < depth; level++)
+        {
+            var added = new List<int>();
+            foreach (var node in _model.Nodes)
+            {
+                if (node.Depth == level && node.HasChildren && !_numberArrays.ContainsKey(node.Id) && _expanded.Add(node.Id))
+                {
+                    added.Add(node.Id);
+                }
+            }
+
+            if (added.Count == 0)
+            {
+                break;
+            }
+
+            RebuildRows();
+
+            // The root level is exempt from the budget. Collapsing it would leave nothing on screen but
+            // "{...} 300 properties", and a container that large is already windowed to ChildWindow rows.
+            if (level > 0 && budget is int limit && _rows.Count > limit)
+            {
+                foreach (var id in added)
+                {
+                    _expanded.Remove(id);
+                }
+
+                break;
+            }
+        }
+
+        RebuildRows();
+    }
+
+    private void RebuildRows()
+    {
+        _rows.Clear();
+        _rowsClamped = false;
+        if (!_model.HasNodes)
+        {
+            return;
+        }
+
+        Walk(0, 1, 1);
+
+        void Walk(int id, int setSize, int posInSet)
+        {
+            if (_rows.Count >= MaxVisibleRows)
+            {
+                _rowsClamped = true;
+                return;
+            }
+
+            var node = _model.Nodes[id];
+            _rows.Add(new JsonRow("n" + id, id, node.Depth, false, 0, 0, setSize, posInSet));
+
+            if (!node.HasChildren || !_expanded.Contains(id))
+            {
+                return;
+            }
+
+            var shown = ShownChildren(node);
+            for (var i = 0; i < shown; i++)
+            {
+                Walk(node.ChildStart + i, node.ChildCount, i + 1);
+                if (_rowsClamped)
+                {
+                    return;
+                }
+            }
+
+            if (shown < node.ChildCount)
+            {
+                _rows.Add(new JsonRow("m" + id, id, node.Depth + 1, true, shown, node.ChildCount, 0, 0));
+            }
+        }
+    }
+
+    private int ShownChildren(JsonViewNode node) =>
+        node.ChildCount <= LargeContainer
+            ? node.ChildCount
+            : Math.Min(node.ChildCount, _windows.GetValueOrDefault(node.Id, ChildWindow));
+
+    private string? LabelOf(int nodeId)
+    {
+        var node = _model.Nodes[nodeId];
+        if (node.Key is not null)
+        {
+            return node.Key;
+        }
+
+        return node.IsArrayElement ? node.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+    }
+
+    private string SemanticOf(int nodeId) => _model.Nodes[nodeId].Semantic switch
+    {
+        JsonSemanticKind.DateTime => "date",
+        JsonSemanticKind.Guid => "guid",
+        JsonSemanticKind.Url => "url",
+        JsonSemanticKind.Base64 => "base64",
+        JsonSemanticKind.LongText => "text",
+        _ => string.Empty,
+    };
+
+    private int BadgeOf(int nodeId) =>
+        _expanded.Contains(nodeId) ? 0 : _badges.GetValueOrDefault(nodeId);
+
+    private Task SetRawModeAsync(bool raw)
+    {
+        _rawMode = raw;
+        return Task.CompletedTask;
+    }
+
+    private Task SetWrapAsync(bool wrap)
+    {
+        _wrap = wrap;
+        return Task.CompletedTask;
+    }
+
+    private Task SetLineNumbersAsync(bool show)
+    {
+        _lineNumbers = show;
+        return Task.CompletedTask;
+    }
+
+    private Task SetDepthAsync(int depth)
+    {
+        _depth = depth;
+        ExpandToDepth(depth, budget: null);
+        RecomputeBadges();
+        return Task.CompletedTask;
+    }
+
+    private Task ExpandAllAsync()
+    {
+        foreach (var node in _model.Nodes)
+        {
+            if (node.HasChildren)
+            {
+                _expanded.Add(node.Id);
+            }
+        }
+
+        _depth = JsonViewToolbar.MaxDepth;
+        RebuildRows();
+        RecomputeBadges();
+        return Task.CompletedTask;
+    }
+
+    private Task CollapseAllAsync()
+    {
+        _expanded.Clear();
+        if (_model.HasNodes && _model.Nodes[0].HasChildren)
+        {
+            _expanded.Add(0);
+        }
+
+        _depth = JsonViewToolbar.MinDepth;
+        RebuildRows();
+        RecomputeBadges();
+        return Task.CompletedTask;
+    }
+
+    private Task ToggleAsync(int nodeId)
+    {
+        if (!_expanded.Remove(nodeId))
+        {
+            _expanded.Add(nodeId);
+        }
+
+        _focusedNodeId = nodeId;
+        _focusedIsMore = false;
+        RebuildRows();
+        RecomputeBadges();
+        return Task.CompletedTask;
+    }
+
+    private Task ToggleStringAsync(int nodeId)
+    {
+        if (!_expandedStrings.Remove(nodeId))
+        {
+            _expandedStrings.Add(nodeId);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task FocusRowAsync(int nodeId)
+    {
+        _focusedNodeId = nodeId;
+        _focusedIsMore = false;
+        return Task.CompletedTask;
+    }
+
+    private Task ShowMoreAsync(int nodeId) => WidenAsync(nodeId, all: false);
+
+    private Task ShowAllAsync(int nodeId) => WidenAsync(nodeId, all: true);
+
+    private Task WidenAsync(int nodeId, bool all)
+    {
+        var node = _model.Nodes[nodeId];
+        var shown = ShownChildren(node);
+        _windows[nodeId] = all ? node.ChildCount : Math.Min(node.ChildCount, shown + ChildWindow);
+
+        // The row the user pressed keeps the roving tabindex if it is still there; when the container is
+        // now whole, the last child it just revealed takes it, so focus never lands on nothing.
+        _focusedNodeId = nodeId;
+        _focusedIsMore = _windows[nodeId] < node.ChildCount;
+        if (!_focusedIsMore)
+        {
+            _focusedNodeId = node.ChildStart + node.ChildCount - 1;
+        }
+
+        _autoFocusNodeId = _focusedNodeId;
+        _autoFocusIsMore = _focusedIsMore;
+        RebuildRows();
+        return Task.CompletedTask;
+    }
+
+    private async Task BuildAnywayAsync()
+    {
+        _forceTree = true;
+        Rebuild();
+        _rawMode = false;
+        await AnnounceAsync("Built the tree for a document over the size limit.");
+    }
+
+    private Task AnnounceAsync(string message)
+    {
+        _announcement = message;
+        return Task.CompletedTask;
+    }
+
+    private async Task CopyDocumentAsync()
+    {
+        var text = Json ?? string.Empty;
+        try
+        {
+            text = JsonPrettyPrinter.PrettyPrint(text);
+        }
+        catch (JsonException)
+        {
+            // Copy what is there rather than nothing; the document is already flagged as unparseable.
+        }
+
+        var copied = false;
+        try
+        {
+            copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", new object?[] { text });
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+        }
+
+        await AnnounceAsync(copied ? "Copied the whole document." : "Could not copy the document.");
+    }
+
+    private async Task OpenMenuAsync(int nodeId)
+    {
+        PrepareMenu(nodeId);
+        if (_menu is not null)
+        {
+            await _menu.ShowAsync();
+        }
+    }
+
+    /// <summary>Works out every string the copy menu offers for one node.</summary>
+    private void PrepareMenu(int nodeId)
+    {
+        if (!_model.HasNodes || nodeId < 0 || nodeId >= _model.Nodes.Length)
+        {
+            return;
+        }
+
+        var node = _model.Nodes[nodeId];
+        var segments = _model.SegmentsOf(nodeId);
+
+        _menuPath = node.Path.Length == 0 ? "$" : node.Path;
+        _menuJsonPath = node.JsonPath;
+        _menuPg = node.PgExpression;
+        _menuPgPath = JsonPathExpressions.ToPostgresTextPath(segments, Column);
+        _menuValue = ValueJsonOf(node, segments);
+        _menuFilter = JsonPathExpressions.ToContainmentFilter(segments, _menuValue);
+
+        var resolution = JsonPathExpressions.ResolveClrPath(DocumentType, segments, NamingPolicy);
+        _menuLinq = resolution.Path;
+        _menuLinqNote = resolution.Note;
+    }
+
+    private string ValueJsonOf(JsonViewNode node, ImmutableArray<JsonPathSegment> segments)
+    {
+        if (!node.IsContainer)
+        {
+            return node.Kind == JsonValueKind.String
+                ? JsonPathExpressions.ToJsonStringLiteral(node.Display)
+                : node.Raw;
+        }
+
+        // A container's own text is not kept in the model - holding it would store the document once per
+        // level of nesting - so it is read back out of the source, once, when somebody asks for it.
+        if (string.IsNullOrEmpty(Json))
+        {
+            return node.Kind == JsonValueKind.Array ? "[]" : "{}";
+        }
+
+        var fallback = node.Kind == JsonValueKind.Array ? "[]" : "{}";
+
+        try
+        {
+            using var document = JsonDocument.Parse(Json);
+            var element = document.RootElement;
+            foreach (var segment in segments)
+            {
+                if (segment.IsIndex)
+                {
+                    if (!TryGetItem(element, segment.Index, out var item))
+                    {
+                        return fallback;
+                    }
+
+                    element = item;
+                }
+                else
+                {
+                    if (!element.TryGetProperty(segment.Key!, out var property))
+                    {
+                        return fallback;
+                    }
+
+                    element = property;
+                }
+            }
+
+            return element.GetRawText();
+        }
+        catch (JsonException)
+        {
+            return fallback;
+        }
+        catch (InvalidOperationException)
+        {
+            return fallback;
+        }
+    }
+
+    private static bool TryGetItem(JsonElement array, int index, out JsonElement item)
+    {
+        item = default;
+        if (array.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var position = 0;
+        foreach (var candidate in array.EnumerateArray())
+        {
+            if (position == index)
+            {
+                item = candidate;
+                return true;
+            }
+
+            position++;
+        }
+
+        return false;
+    }
+
+    private async Task SetSearchTermAsync(string term)
+    {
+        _searchTerm = term;
+        _matches = JsonSearch.Find(_model, term);
+        RecomputeBadges();
+        _matchIndex = _matches.Length > 0 ? 0 : -1;
+
+        if (_matchIndex >= 0)
+        {
+            GoToMatch(_matchIndex);
+        }
+        else
+        {
+            RebuildRows();
+        }
+
+        await AnnounceAsync(term.Length == 0
+            ? "Search cleared."
+            : _matches.Length == 0
+                ? "No matches for " + term + "."
+                : _matches.Length + " matches for " + term + ".");
+    }
+
+    private Task NextMatchAsync() => MoveMatchAsync(1);
+
+    private Task PreviousMatchAsync() => MoveMatchAsync(-1);
+
+    private Task MoveMatchAsync(int direction)
+    {
+        if (_matches.Length == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        _matchIndex = (_matchIndex + direction + _matches.Length) % _matches.Length;
+        GoToMatch(_matchIndex);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Expands the way to a match, widens any window hiding it, and puts focus on its row.</summary>
+    private void GoToMatch(int matchIndex)
+    {
+        var nodeId = _matches[matchIndex].NodeId;
+
+        foreach (var ancestor in _model.AncestorsOf(nodeId))
+        {
+            _expanded.Add(ancestor);
+        }
+
+        var child = nodeId;
+        foreach (var ancestor in _model.AncestorsOf(nodeId))
+        {
+            var parent = _model.Nodes[ancestor];
+            var position = child - parent.ChildStart;
+            if (parent.ChildCount > LargeContainer && position >= ShownChildren(parent))
+            {
+                _windows[ancestor] = Math.Min(parent.ChildCount, position + 1);
+            }
+
+            child = ancestor;
+        }
+
+        FocusNode(nodeId);
+        RebuildRows();
+        RecomputeBadges();
+    }
+
+    private void RecomputeBadges() => _badges = JsonSearch.CountByAncestor(_model, _matches);
+
+    private async Task OnTreeKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.CtrlKey || args.AltKey || args.MetaKey)
+        {
+            return;
+        }
+
+        switch (args.Key)
+        {
+            case "ArrowDown":
+                MoveFocus(1);
+                return;
+            case "ArrowUp":
+                MoveFocus(-1);
+                return;
+            case "Home":
+                FocusRowAt(0);
+                return;
+            case "End":
+                FocusRowAt(_rows.Count - 1);
+                return;
+            case "ArrowRight":
+                ExpandOrDescend();
+                return;
+            case "ArrowLeft":
+                CollapseOrAscend();
+                return;
+            case "*":
+                if (!_focusedIsMore)
+                {
+                    ExpandSubtree(_focusedNodeId);
+                }
+
+                return;
+            case "Enter":
+            case " ":
+                // A "show more" row is two real buttons and holds real DOM focus, so the browser's own
+                // activation does the work; stepping in here would run it twice. And with nothing
+                // focused there is no menu to open - opening one anyway showed whichever node the menu
+                // had last been prepared for, which is the one thing worse than doing nothing.
+                if (!_focusedIsMore && _focusedNodeId >= 0)
+                {
+                    await OpenMenuAsync(_focusedNodeId);
+                }
+
+                return;
+            case "/":
+                if (_searchBar is not null)
+                {
+                    await _searchBar.FocusAsync();
+                }
+
+                return;
+            case "Escape":
+                _typeahead = string.Empty;
+                return;
+            default:
+                break;
+        }
+
+        if (args.Key.Length == 1 && !char.IsControl(args.Key[0]))
+        {
+            Typeahead(args.Key);
+        }
+    }
+
+    /// <summary>
+    /// Asks the browser to stop scrolling the page when the tree's own keys are pressed.
+    /// </summary>
+    /// <remarks>
+    /// Razor's <c>@@onkeydown:preventDefault</c> is evaluated when the component renders, not when the
+    /// key arrives, so it can only ever be "always" or "never" - and "always" would swallow Tab and take
+    /// the tree out of the page's focus order. The condition is "this key, and only when the tree row
+    /// itself is the target", which is a runtime question, so it is answered in JS. The helper is
+    /// idempotent per element and its absence costs nothing but a scrolled page.
+    /// </remarks>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var id = _treeElement.Id;
+        if (string.IsNullOrEmpty(id) || string.Equals(id, _capturedTreeId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _capturedTreeId = id;
+
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.json.captureTreeKeys", _treeElement);
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+        }
+    }
+
+    /// <summary>
+    /// Moves the roving tabindex one row, including onto a "show more" row.
+    /// </summary>
+    /// <remarks>
+    /// A "show more" row used to be skipped, which left its two buttons reachable only by Tab - and they
+    /// were in the tab order, so a windowed array put two tab stops in the middle of a page whose whole
+    /// point is that it is navigated with the arrow keys. They are out of the tab order now, so the arrow
+    /// keys have to be able to reach them or nothing can.
+    /// </remarks>
+    private void MoveFocus(int direction) => FocusRowAt(IndexOfFocusedRow() + direction);
+
+    private void FocusRowAt(int rowIndex)
+    {
+        if (rowIndex < 0 || rowIndex >= _rows.Count)
+        {
+            return;
+        }
+
+        var row = _rows[rowIndex];
+        _focusedNodeId = row.NodeId;
+        _focusedIsMore = row.IsMore;
+        _autoFocusNodeId = row.NodeId;
+        _autoFocusIsMore = row.IsMore;
+    }
+
+    private int IndexOfFocusedRow()
+    {
+        for (var i = 0; i < _rows.Count; i++)
+        {
+            if (_rows[i].IsMore == _focusedIsMore && _rows[i].NodeId == _focusedNodeId)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private void ExpandOrDescend()
+    {
+        if (_focusedNodeId < 0 || _focusedIsMore || !_model.HasNodes)
+        {
+            return;
+        }
+
+        var node = _model.Nodes[_focusedNodeId];
+        if (!node.HasChildren)
+        {
+            return;
+        }
+
+        if (_expanded.Add(_focusedNodeId))
+        {
+            RebuildRows();
+            RecomputeBadges();
+            return;
+        }
+
+        FocusNode(node.ChildStart);
+    }
+
+    private void CollapseOrAscend()
+    {
+        if (_focusedNodeId < 0 || !_model.HasNodes)
+        {
+            return;
+        }
+
+        if (_focusedIsMore)
+        {
+            // Left from a "show more" row goes to the container it belongs to, the same place left from
+            // the container's last child goes.
+            FocusNode(_focusedNodeId);
+            return;
+        }
+
+        var node = _model.Nodes[_focusedNodeId];
+        if (node.HasChildren && _expanded.Remove(_focusedNodeId))
+        {
+            RebuildRows();
+            RecomputeBadges();
+            return;
+        }
+
+        if (node.ParentId >= 0)
+        {
+            FocusNode(node.ParentId);
+        }
+    }
+
+    private void FocusNode(int nodeId)
+    {
+        _focusedNodeId = nodeId;
+        _autoFocusNodeId = nodeId;
+        _focusedIsMore = false;
+        _autoFocusIsMore = false;
+    }
+
+    private void ExpandSubtree(int nodeId)
+    {
+        if (nodeId < 0 || !_model.HasNodes)
+        {
+            return;
+        }
+
+        var stack = new Stack<int>();
+        stack.Push(nodeId);
+        while (stack.Count > 0)
+        {
+            var id = stack.Pop();
+            var node = _model.Nodes[id];
+            if (!node.HasChildren)
+            {
+                continue;
+            }
+
+            _expanded.Add(id);
+            for (var i = 0; i < node.ChildCount; i++)
+            {
+                stack.Push(node.ChildStart + i);
+            }
+        }
+
+        RebuildRows();
+        RecomputeBadges();
+    }
+
+    /// <summary>Type a few letters to jump to the next member whose name starts with them.</summary>
+    private void Typeahead(string key)
+    {
+        var now = Environment.TickCount64;
+        _typeahead = now - _typeaheadAt > 800 ? key : _typeahead + key;
+        _typeaheadAt = now;
+
+        var start = IndexOfFocusedRow();
+        for (var offset = 1; offset <= _rows.Count; offset++)
+        {
+            var index = (start + offset + _rows.Count) % _rows.Count;
+            var row = _rows[index];
+            if (row.IsMore)
+            {
+                continue;
+            }
+
+            var label = LabelOf(row.NodeId);
+            if (label is not null && label.StartsWith(_typeahead, StringComparison.OrdinalIgnoreCase))
+            {
+                FocusRowAt(index);
+                return;
+            }
+        }
+    }
+
+    /// <summary>One rendered line: a node, or the "show more" control that stands in for the rest of a container.</summary>
+    internal readonly record struct JsonRow(
+        string Key,
+        int NodeId,
+        int Depth,
+        bool IsMore,
+        int Shown,
+        int Total,
+        int SetSize,
+        int PosInSet);
+}

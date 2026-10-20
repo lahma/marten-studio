@@ -1,9 +1,8 @@
-using MartenStudio.Services.Health;
-
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 using Npgsql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

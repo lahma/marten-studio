@@ -1,9 +1,7 @@
 using System.Reflection;
 
 using MartenStudio.Integration.Tests.Health;
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Schema;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -11,6 +9,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 using static MartenStudio.Integration.Tests.Health.TableHealthLive;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Integration.Tests.Schema;
 

@@ -3,26 +3,31 @@ using System.Text;
 
 using Marten;
 
-using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
-using MartenStudio.Services.Relationships;
 using MartenStudio.Services.Schema;
-using MartenStudio.Services.Settings;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Settings;
+using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using PostgresStudio.Internal;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Live;
+using PostgresStudio.Services.Query;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Services;
 
@@ -59,8 +64,8 @@ public class StudioRegistrationTests
         (typeof(StudioRegistrationMarker), ServiceLifetime.Singleton, How.Instance, typeof(StudioRegistrationMarker)),
         (typeof(StudioDescriptor), ServiceLifetime.Singleton, How.Instance, typeof(StudioDescriptor)),
         (typeof(IStudioSettings), ServiceLifetime.Singleton, How.Factory, typeof(IStudioSettings)),
-        (typeof(MartenStudioMappedEndpoints), ServiceLifetime.Singleton, How.Type, typeof(MartenStudioMappedEndpoints)),
-        (typeof(IHostedService), ServiceLifetime.Singleton, How.Type, typeof(MartenStudioEndpointAuthorizationGuard)),
+        (typeof(StudioMappedEndpoints), ServiceLifetime.Singleton, How.Type, typeof(StudioMappedEndpoints)),
+        (typeof(IHostedService), ServiceLifetime.Singleton, How.Type, typeof(StudioEndpointAuthorizationGuard)),
         (typeof(StudioCapabilityGuard), ServiceLifetime.Singleton, How.Type, typeof(StudioCapabilityGuard)),
         (typeof(StudioActionLogService), ServiceLifetime.Singleton, How.Type, typeof(StudioActionLogService)),
         (typeof(StudioLogThrottle), ServiceLifetime.Singleton, How.Factory, typeof(StudioLogThrottle)),

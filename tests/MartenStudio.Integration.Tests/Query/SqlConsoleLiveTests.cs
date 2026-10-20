@@ -1,10 +1,11 @@
 using System.Globalization;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
 using MartenStudio.Services.Query;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Integration.Tests.Query;
 

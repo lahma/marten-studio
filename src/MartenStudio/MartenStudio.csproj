@@ -34,6 +34,7 @@
     <!-- The JasperFx source generator Marten bundles is taken out of this compilation by the
          MartenStudioWithoutTheJasperFxSourceGenerator target at the end of this file. -->
     <PackageReference Include="Marten" />
+    <ProjectReference Include="../PostgresStudio/PostgresStudio.csproj" />
     <!--
       blazor.web.js, for the host.
 
@@ -63,7 +64,6 @@
       has no .razor file, does not set RequiresAspNetWebAssets and references only the MartenStudio
       nupkg: /_framework/blazor.web.js 200, /marten/_framework/blazor.web.js 200, negotiate 200.
     -->
-    <PackageReference Include="Microsoft.AspNetCore.App.Internal.Assets" />
   </ItemGroup>
 
   <ItemGroup>

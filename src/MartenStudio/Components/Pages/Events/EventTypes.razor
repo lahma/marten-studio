@@ -2,10 +2,13 @@
 @using System.Globalization
 @using Microsoft.Extensions.Logging
 @using Microsoft.Extensions.Options
-@using MartenStudio.Components.Pages.Health
+@using PostgresStudio.Components.Pages.Health
 @using MartenStudio.Services
 @using MartenStudio.Services.Events
 @using MartenStudio.Services.Health
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Health
 @implements IAsyncDisposable
 @inject IEventDataService Events
 @inject IHealthService Health
@@ -259,8 +262,8 @@
     private static string VerdictText(EventTagTypeInfo tag) =>
         tag.FilterLevel switch
         {
-            MartenStudio.Services.Query.IndexVerdictLevel.Green => "indexed",
-            MartenStudio.Services.Query.IndexVerdictLevel.Amber => "partly indexed",
+            PostgresStudio.Services.Query.IndexVerdictLevel.Green => "indexed",
+            PostgresStudio.Services.Query.IndexVerdictLevel.Amber => "partly indexed",
             _ => "full scan",
         };
 

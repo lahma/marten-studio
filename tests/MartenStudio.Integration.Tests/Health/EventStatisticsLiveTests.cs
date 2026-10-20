@@ -4,7 +4,7 @@ using JasperFx.Events.Projections;
 using Marten;
 using Marten.Events.Projections;
 
-using MartenStudio.Services.Health;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text;
 
 using MartenStudio.Components;
+using PostgresStudio.Components;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Services.Events;
 

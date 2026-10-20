@@ -1,6 +1,5 @@
-using MartenStudio.Internal;
 using MartenStudio.Services;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Builder;
@@ -10,6 +9,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using PostgresStudio.Internal;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Database;
 
@@ -298,6 +299,6 @@ public class BrowseDatabaseOptionsTests
         new DefaultEndpointDataSource(
             new Endpoint(
                 static _ => Task.CompletedTask,
-                new EndpointMetadataCollection(new MartenStudioEndpointMarker("the studio", "(test)", isPage: true)),
+                new EndpointMetadataCollection(new StudioEndpointMarker("the studio", "(test)", isPage: true)),
                 "studio page"));
 }

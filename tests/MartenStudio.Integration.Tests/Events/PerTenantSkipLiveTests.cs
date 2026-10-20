@@ -6,7 +6,6 @@ using Marten;
 
 using MartenStudio.Integration.Tests.Documents;
 using MartenStudio.Integration.Tests.Logging;
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Events;
@@ -17,6 +16,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Events;
 

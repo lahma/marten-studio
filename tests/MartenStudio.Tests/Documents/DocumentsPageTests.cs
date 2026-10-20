@@ -1,12 +1,12 @@
 using Bunit;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Documents;
-using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Documents;
 

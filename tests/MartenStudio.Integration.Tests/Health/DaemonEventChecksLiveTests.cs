@@ -1,11 +1,12 @@
 using JasperFx.Events.Daemon;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Health;
 
 using Microsoft.Extensions.DependencyInjection;
 
 using Testcontainers.PostgreSql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

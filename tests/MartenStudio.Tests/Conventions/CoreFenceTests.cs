@@ -196,7 +196,7 @@ public class CoreFenceTests
 
         CoreManifest.Entries.Single(static x => x.Path == "Services/Documents/SearchChip.cs").NewNamespace
             .Should().Be("PostgresStudio.Services.Query", "the namespace after the move is the new folder's");
-        CoreManifest.Entries.Single(static x => x.Path == "MartenStudioConventionBuilder.cs").NewNamespace.Should().Be("PostgresStudio");
+        CoreManifest.Entries.Single(static x => x.Path == "StudioConventionBuilder.cs").NewNamespace.Should().Be("PostgresStudio");
         CoreManifest.Entries.Single(static x => x.Path == "wwwroot/css/marten-studio.css").NewNamespace.Should().BeNull();
     }
 
@@ -347,7 +347,7 @@ public class CoreFenceTests
     [InlineData("/// <c>MartenStoreRegistry</c> used to do this.\nclass C { }", null)]
     [InlineData("class C { string s = \"Marten.IDocumentStore\"; }", null)]
     [InlineData("@* MartenStudioOptions.ReadOnly *@\n<p>x</p>", null)]
-    [InlineData("using MartenStudio.Services;\nnamespace MartenStudio.Components;\nclass C { MartenStudio.Services.StudioScope? s; }", null)]
+    [InlineData("using MartenStudio.Services;\nnamespace MartenStudio.Components;\nclass C { PostgresStudio.Services.StudioScope? s; }", null)]
     [InlineData("<p>registered with Marten.</p>", null)]
     [InlineData("/// <see cref=\"StudioScope\" />\nclass C { }", null)]
     public void The_scanner_finds_each_kind_of_lean_and_ignores_prose(string source, string? expected)
@@ -588,7 +588,7 @@ public class CoreFenceTests
 
     /// <summary>The alias collector, on synthetic files: a global alias is found; a local alias and a plain using are not.</summary>
     [Theory]
-    [InlineData("global using MartenTable = MartenStudio.Services.Sources.StudioTable;\nnamespace N;", "MartenTable")]
+    [InlineData("global using MartenTable = PostgresStudio.Services.Sources.StudioTable;\nnamespace N;", "MartenTable")]
     [InlineData("  global using Db = Marten.Storage.IMartenDatabase;\nglobal using Other=System.String;", "Db,Other")]
     [InlineData("using Local = System.String;\nnamespace N;", "")]
     [InlineData("global using System.Text;\nglobal using static System.Math;", "")]

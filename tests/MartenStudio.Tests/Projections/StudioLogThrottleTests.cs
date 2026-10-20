@@ -1,12 +1,12 @@
 using System.Globalization;
 using System.Net.Sockets;
 
-using MartenStudio.Services;
 using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Projections;
 

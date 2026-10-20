@@ -1,4 +1,5 @@
 using MartenStudio.Internal.Sql;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Services.Schema;
 
@@ -248,7 +249,7 @@ internal static class IndexAdvice
                 ignored)
             {
                 AccessMethod = row.AccessMethod,
-                Vector = MartenStudio.Services.Database.PgVector.Index(
+                Vector = PostgresStudio.Services.Database.PgVector.Index(
                     row.AccessMethodIsPgVector, row.AccessMethod, row.KeyDefinitions, row.OperatorClasses, row.Options),
             });
         }

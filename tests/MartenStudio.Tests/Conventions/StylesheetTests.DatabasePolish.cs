@@ -34,7 +34,7 @@ public partial class StylesheetTests
         Declaration(".ms-studio h1:focus-visible", "outline").Should().Contain("var(--ms-color-primary)",
             "the keyboard ring itself is still the shell's, untouched");
 
-        File.ReadAllText(RepositoryRoot.Combine("src", "MartenStudio", "wwwroot", "js", "marten-studio.js"))
+        File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "wwwroot", "js", "studio.js"))
             .Should().Contain("data-ms-keyboard", "the attribute the rule reads is the one the script writes");
     }
 

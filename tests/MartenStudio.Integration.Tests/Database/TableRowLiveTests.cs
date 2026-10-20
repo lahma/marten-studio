@@ -1,14 +1,14 @@
 using System.Globalization;
 
 using MartenStudio.Integration.Tests.Logging;
-using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain.Documents;
-using MartenStudio.Services;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Query;
+using PostgresStudio.Services.Database;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Integration.Tests.Database;
 

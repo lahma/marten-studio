@@ -1,10 +1,12 @@
 @page "/marten/events/dead-letters"
 @using System.Globalization
 @using Microsoft.Extensions.Options
-@using MartenStudio.Components.Json
+@using PostgresStudio.Components.Json
 @using MartenStudio.Services
 @using MartenStudio.Services.Events
 @using MartenStudio.Services.Projections
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
 @implements IAsyncDisposable
 @inject IEventDataService Events
 @inject IProjectionDataService ProjectionData

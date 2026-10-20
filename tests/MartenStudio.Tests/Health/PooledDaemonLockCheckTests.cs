@@ -5,6 +5,7 @@ using Marten;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

@@ -2,11 +2,11 @@ using Marten;
 
 using MartenStudio.SampleDomain;
 using MartenStudio.SampleDomain.Documents;
-using MartenStudio.Services.Health;
 
 using Npgsql;
 
 using static MartenStudio.Integration.Tests.Health.TableHealthLive;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

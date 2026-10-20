@@ -1,8 +1,7 @@
 using Marten;
 
 using MartenStudio.Services;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Sources;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authorization;
@@ -11,6 +10,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

@@ -4,11 +4,12 @@ using Bunit;
 
 using JasperFx.Descriptors;
 
-using MartenStudio.Components.Layout;
+using PostgresStudio.Components.Layout;
 using MartenStudio.Services;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Components;
 

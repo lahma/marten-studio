@@ -2,7 +2,7 @@ using JasperFx.MultiTenancy;
 
 using Marten;
 
-using MartenStudio.Services.Health;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

@@ -1,4 +1,5 @@
 using MartenStudio.Services;
+using PostgresStudio.Components;
 
 namespace MartenStudio.Components;
 
@@ -12,7 +13,7 @@ internal static class MartenComponentBridges
     extension(StudioLink)
     {
         /// <summary>
-        /// <see cref="StudioLink.To(Services.Settings.IStudioSettings, string)" /> with MartenStudio's options. Callers, all
+        /// <see cref="StudioLink.To(PostgresStudio.Services.Settings.IStudioSettings, string)" /> with MartenStudio's options. Callers, all
         /// MartenStudio's own (PS-1e): <c>DocumentLinks</c>, <c>EventLinks</c>, <c>LinqQueryPanel.razor</c> and
         /// <c>Schema.razor</c>.
         /// </summary>

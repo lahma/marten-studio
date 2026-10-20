@@ -2,9 +2,9 @@ using System.Collections.Frozen;
 
 using MartenStudio.Components;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Settings;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Settings;
+using PostgresStudio.Services.Sources;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services;
 
@@ -44,7 +44,11 @@ internal static class MartenStudioDescriptor
     {
         Key = Key,
         ProductName = "Marten Studio",
-        PageAssemblies = [new StudioPageAssembly(typeof(MartenStudioApp).Assembly, MartenStudioOptions.DefaultPath)],
+        PageAssemblies =
+        [
+            new StudioPageAssembly(typeof(MartenStudioApp).Assembly, MartenStudioOptions.DefaultPath),
+            new StudioPageAssembly(typeof(PostgresStudio.Components.Pages.StudioHome).Assembly, "/postgres"),
+        ],
         // The shared checks run against any source; MartenStudio's own read the store and only ever run against one. Until
         // the shared assembly is split out (PS-2) both entries name this assembly, and a check runs against a kind both
         // admit - a Marten store, which is every source MartenStudio has.

@@ -1,6 +1,6 @@
 using Bunit;
 
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 using MartenStudio.Tests.Components;
 
@@ -241,7 +241,7 @@ public class SchemaScriptGatePageTests
         var page = RenderTab(context, "tables");
 
         page.Find(".ms-schema-object-link").GetAttribute("href").Should().Be(
-            DatabaseLinks.ToObject(context.Options, new MartenStudio.Services.StudioScope("default", "localhost.marten", null), "studio", "host settings"));
+            DatabaseLinks.ToObject(context.Options, new PostgresStudio.Services.StudioScope("default", "localhost.marten", null), "studio", "host settings"));
     }
 
     // ------------------------------------------------------------------------------------------------

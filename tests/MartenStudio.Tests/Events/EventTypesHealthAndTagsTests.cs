@@ -3,12 +3,13 @@ using Bunit;
 using MartenStudio.Components.Pages.Events;
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Health;
 
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Events;
 

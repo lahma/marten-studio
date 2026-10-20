@@ -7,6 +7,9 @@ using MartenStudio.Services.Documents;
 using MartenStudio.Services.Schema;
 
 using Weasel.Postgresql.Tables;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Services.Relationships;
 

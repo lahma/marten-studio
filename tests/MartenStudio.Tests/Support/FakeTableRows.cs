@@ -1,10 +1,9 @@
 using System.Globalization;
 using System.Text;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Documents;
-using MartenStudio.Services.Query;
+using PostgresStudio.Services.Database;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Support;
 

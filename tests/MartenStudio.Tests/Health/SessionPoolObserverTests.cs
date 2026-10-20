@@ -1,6 +1,6 @@
 using System.Diagnostics.Metrics;
 
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 
 using Npgsql;
 

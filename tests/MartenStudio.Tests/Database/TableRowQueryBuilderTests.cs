@@ -1,9 +1,9 @@
 using System.Text.RegularExpressions;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Database;
+using PostgresStudio.Services.Database;
 
 using NpgsqlTypes;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Tests.Database;
 

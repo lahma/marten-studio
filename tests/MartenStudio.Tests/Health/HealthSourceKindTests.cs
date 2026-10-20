@@ -1,7 +1,8 @@
 using MartenStudio.Services;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Settings;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Settings;
+using PostgresStudio.Services.Sources;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
 

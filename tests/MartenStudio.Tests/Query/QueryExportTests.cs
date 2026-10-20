@@ -1,7 +1,8 @@
 using System.Text.Json;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Query;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Query;
 

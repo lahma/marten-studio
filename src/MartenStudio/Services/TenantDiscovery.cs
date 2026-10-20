@@ -7,12 +7,12 @@ using Marten;
 using Marten.Schema;
 using Marten.Storage;
 
-using MartenStudio.Internal.Sql;
-
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Services;
 

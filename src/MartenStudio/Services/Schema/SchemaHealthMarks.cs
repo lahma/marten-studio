@@ -1,4 +1,4 @@
-using MartenStudio.Services.Health;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Schema;
 

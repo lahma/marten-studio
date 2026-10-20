@@ -1,8 +1,7 @@
 using JasperFx;
 
-using MartenStudio.Services.Health;
-
 using Microsoft.Extensions.Hosting;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

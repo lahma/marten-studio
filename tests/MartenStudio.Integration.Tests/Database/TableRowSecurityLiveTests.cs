@@ -2,14 +2,14 @@ using System.Diagnostics;
 using System.Text;
 
 using MartenStudio.Integration.Tests.Logging;
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Query;
+using PostgresStudio.Services.Database;
 
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Integration.Tests.Database;
 

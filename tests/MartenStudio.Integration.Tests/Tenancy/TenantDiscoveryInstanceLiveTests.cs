@@ -1,13 +1,14 @@
 using Marten;
 using Marten.Storage;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 using Npgsql;
+using PostgresStudio.Services;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests.Tenancy;
 

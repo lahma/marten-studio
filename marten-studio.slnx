@@ -20,6 +20,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/MartenStudio/MartenStudio.csproj" />
+    <Project Path="src/PostgresStudio/PostgresStudio.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/MartenStudio.SampleDomain/MartenStudio.SampleDomain.csproj" />

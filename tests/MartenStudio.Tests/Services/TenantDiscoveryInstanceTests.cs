@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 using Npgsql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Services;
 

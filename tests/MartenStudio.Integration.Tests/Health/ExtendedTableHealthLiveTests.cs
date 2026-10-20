@@ -1,8 +1,6 @@
 using MartenStudio.Integration.Tests.Database;
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Health;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 
 using Microsoft.AspNetCore.Authorization;
@@ -12,6 +10,10 @@ using Weasel.Postgresql;
 using Weasel.Postgresql.Tables;
 
 using static MartenStudio.Integration.Tests.Health.TableHealthLive;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Integration.Tests.Health;
 

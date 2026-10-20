@@ -70,7 +70,7 @@ internal sealed record IndexInfo(
     /// For a pgvector HNSW or IVFFlat index, each key column's operator class and the index's build parameters, set
     /// or defaulted; otherwise <see langword="null" />.
     /// </summary>
-    public MartenStudio.Services.Database.PgVectorIndex? Vector { get; init; }
+    public PostgresStudio.Services.Database.PgVectorIndex? Vector { get; init; }
 }
 
 /// <summary>An index the configuration asks for that is not in the database.</summary>

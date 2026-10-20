@@ -1,5 +1,5 @@
 using MartenStudio.Services;
-using MartenStudio.Services.Settings;
+using PostgresStudio.Services.Settings;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;

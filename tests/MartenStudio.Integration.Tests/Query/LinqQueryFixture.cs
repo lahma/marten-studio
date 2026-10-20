@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Weasel.Core;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Query;
 

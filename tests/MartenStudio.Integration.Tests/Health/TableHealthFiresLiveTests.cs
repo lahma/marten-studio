@@ -2,17 +2,17 @@ using System.Linq.Expressions;
 
 using Marten;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health;
-using MartenStudio.Services.Health.Checks;
 
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 
 using static MartenStudio.Integration.Tests.Health.TableHealthLive;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Integration.Tests.Health;
 
@@ -297,7 +297,7 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
 
         // The shared table checks read the store's tables through the studio's table source, as a sweep's scope has it.
         await using ServiceProvider services = new ServiceCollection()
-            .AddSingleton<MartenStudio.Services.Sources.IHealthTableSource, MartenHealthTableSource>()
+            .AddSingleton<PostgresStudio.Services.Sources.IHealthTableSource, MartenHealthTableSource>()
             .BuildServiceProvider();
         await using HealthConnection connection = new(MartenStudioDatabase.Of(host.Store.Storage.Database));
 

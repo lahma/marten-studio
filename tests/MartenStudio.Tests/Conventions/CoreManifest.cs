@@ -86,11 +86,11 @@ internal static class CoreManifest
     /// </summary>
     public static IReadOnlyDictionary<string, string> TypeRenames { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["MartenStudioEndpointAuthorizationGuard"] = "StudioEndpointAuthorizationGuard",
-        ["MartenStudioEndpointMarker"] = "StudioEndpointMarker",
-        ["MartenStudioMappedEndpoints"] = "StudioMappedEndpoints",
-        ["MartenStudioConventionBuilder"] = "StudioConventionBuilder",
-        ["MartenStudioHealthCheck"] = "StudioHealthCheck",
+        ["StudioEndpointAuthorizationGuard"] = "StudioEndpointAuthorizationGuard",
+        ["StudioEndpointMarker"] = "StudioEndpointMarker",
+        ["StudioMappedEndpoints"] = "StudioMappedEndpoints",
+        ["StudioConventionBuilder"] = "StudioConventionBuilder",
+        ["StudioHealthCheck"] = "StudioHealthCheck",
     };
 
     /// <summary>Every row, grouped by packet.</summary>
@@ -111,11 +111,11 @@ internal static class CoreManifest
         new("Components/StudioRoutes.razor", Packet.PS1a),
         new("Components/StudioRouteTable.cs", Packet.PS1a),
         new("Components/StudioScopeQuery.cs", Packet.PS1a),
-        new("Internal/MartenStudioEndpointAuthorizationGuard.cs", Packet.PS1a, "Internal/StudioEndpointAuthorizationGuard.cs"),
-        new("Internal/MartenStudioEndpointMarker.cs", Packet.PS1a, "Internal/StudioEndpointMarker.cs"),
-        new("Internal/MartenStudioMappedEndpoints.cs", Packet.PS1a, "Internal/StudioMappedEndpoints.cs"),
+        new("Internal/StudioEndpointAuthorizationGuard.cs", Packet.PS1a, "Internal/StudioEndpointAuthorizationGuard.cs"),
+        new("Internal/StudioEndpointMarker.cs", Packet.PS1a, "Internal/StudioEndpointMarker.cs"),
+        new("Internal/StudioMappedEndpoints.cs", Packet.PS1a, "Internal/StudioMappedEndpoints.cs"),
         new("Internal/StudioEndpointMapper.cs", Packet.PS1a),
-        new("MartenStudioConventionBuilder.cs", Packet.PS1a, "StudioConventionBuilder.cs"),
+        new("StudioConventionBuilder.cs", Packet.PS1a, "StudioConventionBuilder.cs"),
         new("Services/Settings/IStudioLinks.cs", Packet.PS1a),
         new("Services/Settings/IStudioSettings.cs", Packet.PS1a),
         new("Services/Settings/StudioCoreRegistration.cs", Packet.PS1a),
@@ -269,7 +269,7 @@ internal static class CoreManifest
         new("Services/Health/Checks/VacuumBehindCheck.cs", Packet.PS1c),
         new("Services/Health/Export/HealthExportRunner.cs", Packet.PS1c),
         new("Services/Health/Export/HealthExportSummary.cs", Packet.PS1c),
-        new("Services/Health/Export/MartenStudioHealthCheck.cs", Packet.PS1c, "Services/Health/Export/StudioHealthCheck.cs"),
+        new("Services/Health/Export/StudioHealthCheck.cs", Packet.PS1c, "Services/Health/Export/StudioHealthCheck.cs"),
         new("Services/Health/HealthCheck.cs", Packet.PS1c),
         new("Services/Health/HealthCheckContext.cs", Packet.PS1c),
         new("Services/Health/HealthCheckRegistry.cs", Packet.PS1c),

@@ -25,8 +25,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 using MartenStudio.Components;
-using MartenStudio.Internal;
-using MartenStudio.Services.Settings;
+using PostgresStudio.Services.Settings;
+using PostgresStudio.Internal;
 
 namespace MartenStudio;
 

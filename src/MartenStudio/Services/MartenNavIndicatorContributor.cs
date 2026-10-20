@@ -2,8 +2,9 @@ using System.Globalization;
 
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Projections;
-using MartenStudio.Services.Settings;
-using MartenStudio.Services.Sources;
+using PostgresStudio.Services.Settings;
+using PostgresStudio.Services.Sources;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Services;
 

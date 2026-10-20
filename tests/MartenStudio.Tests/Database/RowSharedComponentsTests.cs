@@ -1,15 +1,15 @@
 using Bunit;
 
-using MartenStudio.Components.Pages.Relationships;
-using MartenStudio.Components.Shared;
-using MartenStudio.Services.Relationships;
+using PostgresStudio.Components.Pages.Relationships;
+using PostgresStudio.Components.Shared;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using ReferencedByModel = MartenStudio.Services.Relationships.ReferencedBy;
+using ReferencedByModel = PostgresStudio.Services.Relationships.ReferencedBy;
 using ReferencedByPanel = MartenStudio.Components.Pages.Documents.ReferencedBy;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Database;
 

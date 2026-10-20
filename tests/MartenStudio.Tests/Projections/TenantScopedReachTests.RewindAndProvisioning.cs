@@ -7,6 +7,7 @@ using MartenStudio.Services;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Events;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Projections;
 

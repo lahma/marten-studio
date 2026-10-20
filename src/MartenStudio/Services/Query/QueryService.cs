@@ -12,6 +12,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Services.Query;
 

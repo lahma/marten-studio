@@ -18,6 +18,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
 using MartensCoordinator = Marten.Events.Daemon.Coordination.ProjectionCoordinator;
 using MartensExplicitCoordinator = Marten.Events.Daemon.Coordination.ExplicitProjectionCoordinator;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Projections;
 

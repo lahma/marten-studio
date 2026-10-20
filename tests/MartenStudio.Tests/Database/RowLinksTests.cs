@@ -1,11 +1,12 @@
-using MartenStudio.Components.Pages.Documents;
-using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
-using MartenStudio.Services.Database;
-using MartenStudio.Services.Settings;
+using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Primitives;
+using PostgresStudio.Components.Shared;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Database;
 

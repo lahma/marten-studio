@@ -1,3 +1,5 @@
+using PostgresStudio.Services.Health;
+
 namespace MartenStudio.Services.Health.Checks;
 
 /// <summary>

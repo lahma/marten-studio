@@ -2,13 +2,16 @@
 @using System.Text.Json
 @using Microsoft.Extensions.Options
 @using MartenStudio.Services.Documents
-@using MartenStudio.Services.Json
+@using PostgresStudio.Services.Json
 @using DocumentModel = MartenStudio.Services.Documents.DocumentDetail
 @using RelatedModel = MartenStudio.Services.Documents.RelatedDocuments
-@using ReferencedByModel = MartenStudio.Services.Relationships.ReferencedBy
+@using ReferencedByModel = PostgresStudio.Services.Relationships.ReferencedBy
+@using PostgresStudio.Components.Json
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
 @implements IAsyncDisposable
 @inject IDocumentDataService Data
-@inject MartenStudio.Services.Relationships.IRelationshipDataService RelationshipData
+@inject PostgresStudio.Services.Relationships.IRelationshipDataService RelationshipData
 @inject IDocumentWriteService Writes
 @inject DocumentBrowserState Browser
 @inject StudioState State
@@ -375,7 +378,7 @@
             <p><a class="ms-btn ms-btn-sm" href="@BackHref">Back to @Alias</a></p>
         </div>;
 
-    private int Hue => Services.CollectionColorizer.HueFor(Alias);
+    private int Hue => PostgresStudio.Services.CollectionColorizer.HueFor(Alias);
 
     /// <summary>
     /// The <c>?from=</c> the link carried, but only when it is a return link this page may render.

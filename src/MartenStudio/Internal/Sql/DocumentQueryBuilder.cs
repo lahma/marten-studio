@@ -7,6 +7,8 @@ using MartenStudio.Services.Query;
 using Npgsql;
 
 using NpgsqlTypes;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Internal.Sql;
 

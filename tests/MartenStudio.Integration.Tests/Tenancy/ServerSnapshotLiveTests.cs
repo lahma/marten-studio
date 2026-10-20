@@ -1,6 +1,6 @@
 using Marten;
 
-using MartenStudio.Internal.Sql;
+using PostgresStudio.Internal.Sql;
 
 namespace MartenStudio.Integration.Tests.Tenancy;
 

@@ -3,6 +3,7 @@ using System.Globalization;
 using JasperFx.Events.Daemon;
 
 using MartenStudio.Services.Configuration;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
 

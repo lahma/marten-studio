@@ -2,15 +2,15 @@ using AngleSharp.Dom;
 
 using Bunit;
 
-using MartenStudio.Services.Relationships;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 
-using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph;
-using RelationshipsPage = MartenStudio.Components.Pages.Relationships.Relationships;
+using GraphModel = PostgresStudio.Services.Relationships.RelationshipGraph;
+using RelationshipsPage = PostgresStudio.Components.Pages.Relationships.Relationships;
+using PostgresStudio.Services.Relationships;
 
 namespace MartenStudio.Tests.Relationships;
 

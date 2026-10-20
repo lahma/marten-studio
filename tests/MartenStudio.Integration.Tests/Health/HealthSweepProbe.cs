@@ -1,6 +1,5 @@
-using MartenStudio.Services.Health;
-
 using Npgsql;
+using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Integration.Tests.Health;
 

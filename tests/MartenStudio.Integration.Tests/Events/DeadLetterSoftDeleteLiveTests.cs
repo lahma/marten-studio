@@ -4,7 +4,6 @@ using JasperFx.Events.Daemon;
 using Marten;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services;
 using MartenStudio.Services.Events;
 
 using Microsoft.AspNetCore.Components.Authorization;
@@ -12,6 +11,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Events;
 

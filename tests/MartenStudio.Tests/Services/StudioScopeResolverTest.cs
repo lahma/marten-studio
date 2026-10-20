@@ -6,6 +6,7 @@ using MartenStudio.Tests.Support;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Services;
 

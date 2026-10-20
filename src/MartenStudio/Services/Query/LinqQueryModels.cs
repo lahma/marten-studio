@@ -1,3 +1,5 @@
+using PostgresStudio.Services.Query;
+
 namespace MartenStudio.Services.Query;
 
 /// <summary>Which half of a LINQ query a refusal is about.</summary>

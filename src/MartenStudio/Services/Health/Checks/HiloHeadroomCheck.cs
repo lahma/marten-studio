@@ -4,10 +4,11 @@ using JasperFx.Core.Reflection;
 
 using Marten.Schema;
 
-using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Schema;
-
 using Weasel.Core.Sequences;
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Services.Health.Checks;
 

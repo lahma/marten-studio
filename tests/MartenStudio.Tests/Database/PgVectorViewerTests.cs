@@ -1,9 +1,9 @@
 using Bunit;
 
-using MartenStudio.Components.Json;
-using MartenStudio.Components.Pages.Database;
-using MartenStudio.Components.Shared;
-using MartenStudio.Services.Database;
+using PostgresStudio.Components.Json;
+using PostgresStudio.Components.Pages.Database;
+using PostgresStudio.Components.Shared;
+using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Schema;
@@ -104,7 +104,7 @@ public class PgVectorViewerTests
     }
 
     /// <summary>A page of one row: its key, and a vector(5) cell as the server sent it.</summary>
-    private static TableRowPage VectorPage(MartenStudio.Internal.Sql.SqlCell cell) => new()
+    private static TableRowPage VectorPage(PostgresStudio.Internal.Sql.SqlCell cell) => new()
     {
         Schema = "legacy",
         Name = "items",
@@ -112,21 +112,21 @@ public class PgVectorViewerTests
         RowKey = new DatabaseRowKey(DatabaseRowKeySource.PrimaryKey, "items_pkey", ["id"]),
         Columns =
         [
-            new TableRowColumn("id", 1, "integer", false, true, true, MartenStudio.Internal.Sql.SqlCellKind.Number, 1, [],
-                MartenStudio.Services.Query.IndexVerdictLevel.Green, string.Empty, null),
-            new TableRowColumn("embedding", 2, "public.vector(5)", true, false, true, MartenStudio.Internal.Sql.SqlCellKind.Text, null, [],
-                MartenStudio.Services.Query.IndexVerdictLevel.Green, string.Empty, null, Vector5),
+            new TableRowColumn("id", 1, "integer", false, true, true, PostgresStudio.Internal.Sql.SqlCellKind.Number, 1, [],
+                PostgresStudio.Services.Query.IndexVerdictLevel.Green, string.Empty, null),
+            new TableRowColumn("embedding", 2, "public.vector(5)", true, false, true, PostgresStudio.Internal.Sql.SqlCellKind.Text, null, [],
+                PostgresStudio.Services.Query.IndexVerdictLevel.Green, string.Empty, null, Vector5),
         ],
         Rows =
         [
             new TableRow(
                 new Dictionary<string, string> { ["id"] = "1" },
                 null,
-                [new MartenStudio.Internal.Sql.SqlCell("1", MartenStudio.Internal.Sql.SqlCellKind.Number, false, 1), cell]),
+                [new PostgresStudio.Internal.Sql.SqlCell("1", PostgresStudio.Internal.Sql.SqlCellKind.Number, false, 1), cell]),
         ],
     };
 
-    private static IRenderedComponent<RowGrid> RenderGrid(StudioComponentContext context, MartenStudio.Internal.Sql.SqlCell cell) =>
+    private static IRenderedComponent<RowGrid> RenderGrid(StudioComponentContext context, PostgresStudio.Internal.Sql.SqlCell cell) =>
         context.Render<RowGrid>(parameters => parameters
             .Add(x => x.Model, (object?) VectorPage(cell))
             .Add(x => x.Schema, "legacy")
@@ -138,7 +138,7 @@ public class PgVectorViewerTests
         using var context = new StudioComponentContext();
         await context.ReadyAsync();
 
-        var grid = RenderGrid(context, new MartenStudio.Internal.Sql.SqlCell(Five, MartenStudio.Internal.Sql.SqlCellKind.Text, false, Five.Length));
+        var grid = RenderGrid(context, new PostgresStudio.Internal.Sql.SqlCell(Five, PostgresStudio.Internal.Sql.SqlCellKind.Text, false, Five.Length));
 
         grid.Find("button.ms-vector-chip").Click();
 
@@ -155,7 +155,7 @@ public class PgVectorViewerTests
 
         context.TableRows.Cell = new TableCellValue { Found = true, Text = "[0.1,0.2,0.3,0.4,0.5", Truncated = true, FullLength = 9_000_000, Cap = 1024 };
 
-        var grid = RenderGrid(context, new MartenStudio.Internal.Sql.SqlCell("[0.1,0.2,0.3", MartenStudio.Internal.Sql.SqlCellKind.Text, true, 9_000_000));
+        var grid = RenderGrid(context, new PostgresStudio.Internal.Sql.SqlCell("[0.1,0.2,0.3", PostgresStudio.Internal.Sql.SqlCellKind.Text, true, 9_000_000));
 
         grid.Find("button.ms-vector-chip").Click();
 
@@ -171,11 +171,11 @@ public class PgVectorViewerTests
         using var context = new StudioComponentContext();
         await context.ReadyAsync();
 
-        RenderGrid(context, MartenStudio.Internal.Sql.SqlCell.Null).FindAll("button.ms-vector-chip").Should().BeEmpty();
+        RenderGrid(context, PostgresStudio.Internal.Sql.SqlCell.Null).FindAll("button.ms-vector-chip").Should().BeEmpty();
 
         context.TableRows.Cell = new TableCellValue { Found = true, IsNull = true };
 
-        var grid = RenderGrid(context, new MartenStudio.Internal.Sql.SqlCell("[0.1,0.2,0.3", MartenStudio.Internal.Sql.SqlCellKind.Text, true, 4_000));
+        var grid = RenderGrid(context, new PostgresStudio.Internal.Sql.SqlCell("[0.1,0.2,0.3", PostgresStudio.Internal.Sql.SqlCellKind.Text, true, 4_000));
 
         grid.Find("button.ms-vector-chip").Click();
 
