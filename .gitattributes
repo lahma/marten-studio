@@ -11,6 +11,7 @@
 *.yml          text eol=lf
 *.md           text eol=lf
 *.slnx         text eol=lf
+*.slnf         text eol=lf
 *.diff         text eol=lf
 *.editorconfig text eol=lf
 

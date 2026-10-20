@@ -74,7 +74,11 @@ model, the phased delivery plan — lives in the approved plan at
    three static classes, two classes and one record; anything else appearing in
    `tests/MartenStudio.Tests/Verify/PublicApiTest_MartenStudio.verified.txt` is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request
-   what moved and why, then accept the baseline.
+   what moved and why, then accept the baseline. PostgresStudio's public surface is its own six registration types
+   (three static classes, two classes, one record) and six inbound types (`IPostgresDatabaseSource`,
+   `IPostgresCapacitySource`, `PostgresComputeCapacity`, `PostgresDatabaseRef`, `PostgresServerInfo`,
+   `PostgresPlatformKind`), snapshot-tested in `tests/PostgresStudio.Tests/Verify/PublicApiTest_PostgresStudio.verified.txt`
+   under the same rule.
 8. **`.gitignore` must never contain a bare `build` rule.** The Fallout orchestrator lives in `build/`,
    and a stock Visual Studio .gitignore silently untracks the whole thing.
 9. **LF line endings everywhere** (`.gitattributes` enforces it), UTF-8 without BOM.
@@ -970,6 +974,16 @@ tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metad
 tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to leave to review
 tests/MartenStudio.Tests/Marten/         MartenApiSurfaceTest - the Marten 9.35 contract, pinned
 tests/MartenStudio.Integration.Tests/    Testcontainers Postgres + Playwright. Needs Docker
+src/PostgresStudio/Services/Postgres/    PostgresStudio's own: the source provider over the application's NpgsqlDataSources
+                                         and host database sources, settings, descriptor, the Overview's server read, and
+                                         the seams' plain-Postgres implementations (declarations, tables, remedies, locks, links)
+tests/PostgresStudio.Tests/              PostgresStudio's fast suite: no Docker, and no Marten anywhere in its graph
+tests/PostgresStudio.Tests/Components/   bUnit: PostgresStudioComponentContext and the core pages' smoke tests
+tests/PostgresStudio.Tests/Conventions/  The assembly fence: no Marten family in the assembly, the restore or the output folder
+tests/PostgresStudio.Tests/Endpoints/    An API-only host with one NpgsqlDataSource; the two registration guards
+tests/PostgresStudio.Tests/Sources/      The source provider over DI descriptors and host database sources
+tests/PostgresStudio.Tests/Support/      PostgresStudio's own test doubles (the shared ones are linked from MartenStudio.Tests)
+tests/PostgresStudio.Tests/Verify/       PostgresStudio's approved API baseline; never hand-edited (hard rule 7)
 src/PostgresStudio/Internal/Sql/         The shared builders, SqlIdentifier and SqlLexer: one of the two places a
                                          Postgres identifier becomes SQL text (hard rule 4)
 src/MartenStudio/Internal/Sql/           The Marten builders - documents, events, the daemon, projections: the

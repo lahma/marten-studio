@@ -2,7 +2,8 @@
   "solution": {
     "path": "marten-studio.slnx",
     "projects": [
-      "src\\PostgresStudio\\PostgresStudio.csproj"
+      "src\\PostgresStudio\\PostgresStudio.csproj",
+      "tests\\PostgresStudio.Tests\\PostgresStudio.Tests.csproj"
     ]
   }
 }
