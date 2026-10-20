@@ -65,12 +65,13 @@ internal static class StreamCompactionInvoker
         ArgumentNullException.ThrowIfNull(streamId);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(version);
 
-        // The last line of defence for the one id Marten reads as "no stream filter" (StreamCompactionRules,
-        // EmptyStreamId): the plan and the service refuse it first, and nothing reaches Marten with it.
+        // The last line of defence for the one id Marten below 9.51 reads as "no stream filter" (StreamCompactionRules,
+        // EmptyStreamId): the plan and the service refuse it first, and nothing reaches Marten with it. From 9.51
+        // Marten's CompactStreamAsync refuses it as well (#5695); this stays for the floor.
         if (StreamCompactionRules.IsWholeLogId(streamId))
         {
             throw new ArgumentException(
-                "An empty stream id is no stream filter to Marten's fetch, and compacting it would rewrite the whole event log.",
+                "An empty stream id is no stream filter to Marten's fetch below 9.51, and compacting it would rewrite the whole event log.",
                 nameof(streamId));
         }
 

@@ -52,7 +52,11 @@ namespace MartenStudio.Services;
 /// with no tenant, and the agents restart from the floor (<c>DocumentStore.EventStore.cs</c> and
 /// <c>JasperFxAsyncDaemon.RewindSubscriptionAsync</c>). A visitor allowed only <c>acme</c> who rewound a
 /// conjoined subscription deleted <c>globex</c>'s dead letters and re-applied <c>globex</c>'s poison
-/// event - live-proven by the DB-0-fix-2 review.
+/// event - live-proven by the DB-0-fix-2 review. The one exception is the per-tenant overload under
+/// <c>UseTenantPartitionedEvents</c>, from Marten 9.51 with JasperFx 2.91 (#5700, jasperfx#1025): it stops only that
+/// tenant's agents, rewrites only that tenant's shard rows and deletes only that tenant's dead letters of the shard, so
+/// <c>EventDataService.RewindTenantAsync</c> authorizes it as the tenant - and makes it only for an agent the daemon
+/// here runs. The store-global form is never made on such a store.
 /// </description></item>
 /// <item><description>
 /// The SQL console runs whatever it is given against the database, and nothing puts a tenant into a

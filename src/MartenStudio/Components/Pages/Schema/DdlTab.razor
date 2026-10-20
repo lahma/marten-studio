@@ -1,3 +1,4 @@
+@using MartenStudio.Services.Configuration
 @using MartenStudio.Services.Schema
 @implements IDisposable
 @inject ISchemaDataService SchemaData
@@ -9,10 +10,12 @@
     why it is copyable and downloadable rather than only readable.
 
     It is behind a button for the same reason the Drift tab's two are. IMartenDatabase.ToDatabaseScript()
-    walks AllObjects(), AllObjects() is BuildFeatureSchemas(), and Marten's feature list reaches the lazy
-    HiLo Sequences feature, whose initialiser applies a migration under the database's own AutoCreate -
-    so producing this script can create mt_hilo and mt_get_next_hi in a schema that did not have them.
-    Navigating to a tab must never do that (packet P7-fix, finding B1).
+    walks AllObjects(), AllObjects() is BuildFeatureSchemas(), and below Marten 9.50.3 Marten's feature
+    list reaches the lazy HiLo Sequences feature, whose initialiser applies a migration under the
+    database's own AutoCreate - so there producing this script can create mt_hilo and mt_get_next_hi in a
+    schema that did not have them. Navigating to a tab must never do that (packet P7-fix, finding B1).
+    From 9.50.3 (#5665) the script describes them without creating them, and the wording below follows
+    the Marten this host runs (RuntimeFeature.OfflineSchemaEnumeration); it stays a button either way.
 
     The script spans the whole database: every tenant's partition by name, every document type's table,
     the hidden ones included. The service answers only a visitor who may see all of it (SchemaScriptGate)
@@ -60,12 +63,27 @@ else if (!generated)
             <strong>Generate script</strong> asks Marten for the DDL it would run against an empty
             database - every table, index and function this store configures.
         </p>
-        <p class="ms-empty-description ms-schema-caution">
-            Producing it makes Marten build its feature schemas, and that step can create Marten's own
-            bookkeeping objects - the HiLo sequence table <code>mt_hilo</code> and
-            <code>mt_get_next_hi</code> - in a schema that does not have them yet. Nothing else in the
-            script is applied.
-        </p>
+        @if (MigrationRisk.FeatureSchemasMayCreateHilo(MartenRuntime.Current))
+        {
+            <p class="ms-empty-description ms-schema-caution">
+                Producing it makes Marten build its feature schemas, and on this host's Marten
+                (@MartenRuntime.Current.Describe(RuntimePackage.Marten)) that step can create Marten's own
+                bookkeeping objects - the HiLo sequence table <code>mt_hilo</code> and
+                <code>mt_get_next_hi</code> - in a schema that does not have them yet. Nothing else in the
+                script is applied. (@RuntimeFeature.OfflineSchemaEnumeration.Requirement builds them without
+                creating anything.)
+            </p>
+        }
+        else
+        {
+            <p class="ms-empty-description ms-schema-note">
+                Producing it makes Marten build its feature schemas, which this host's Marten
+                (@MartenRuntime.Current.Describe(RuntimePackage.Marten)) does without creating anything: the script
+                is written to a string, and nothing in it is applied. (Below Marten 9.50.3 that step could create
+                the HiLo objects, <code>mt_hilo</code> and <code>mt_get_next_hi</code>, in a schema that did not
+                have them yet.)
+            </p>
+        }
     </div>
 }
 else if (script.HasText)

@@ -60,6 +60,13 @@ internal sealed record MigrationPreview(
 
     /// <summary>Whether applying this would remove or rewrite an object.</summary>
     public bool IsDestructive => DestructiveStatements.Count > 0;
+
+    /// <summary>
+    /// The statements in this script that remove nothing but are worth reading before it runs: an index build that makes
+    /// writers wait, and Weasel 9.46's partition-index rebuild (<see cref="MigrationRisk.Notes" />). Computed, like
+    /// <see cref="DestructiveStatements" />, so it cannot disagree with <see cref="Sql" />.
+    /// </summary>
+    public IReadOnlyList<MigrationNote> Notes => MigrationRisk.Notes(Sql);
 }
 
 /// <summary>What applying a migration did.</summary>

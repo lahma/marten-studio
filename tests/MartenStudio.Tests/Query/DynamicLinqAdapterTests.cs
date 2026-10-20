@@ -22,7 +22,38 @@ public class DynamicLinqAdapterTests
         bool probed = RuntimeFeature.DynamicLinqQuery.IsAvailable(MartenRuntime.Current);
 
         (DynamicLinqAdapter.Current is not null).Should().Be(probed,
-            "every member the adapter needs is in JasperFx 2.84.0 to 2.89.0, and none is below it");
+            "every member the adapter needs is in JasperFx 2.84.0 to 2.91.0, and none is below it");
+    }
+
+    /// <summary>
+    /// L6: the studio's date correction is on exactly where this JasperFx reads an offset-less date in the server's zone -
+    /// JasperFx 2.84.0 to 2.90.2, on a server that is not on UTC - and off from 2.91.0 (jasperfx#1024), on every server.
+    /// </summary>
+    /// <remarks>
+    /// At 2.91.0 and later the assertion is zone-free, so it holds on a UTC CI runner too: a JasperFx that read server
+    /// time again, on any server east or west of Greenwich, fails it - and so does a probe that stopped being able to read
+    /// its date at all, which answers "true" on every server. Below 2.91.0 it is the measurement itself, checked against
+    /// this server's own offsets on the two probe dates.
+    /// </remarks>
+    [DynamicLinqFact]
+    public void The_date_correction_is_on_exactly_where_this_JasperFx_reads_dates_in_server_time()
+    {
+        DynamicLinqAdapter adapter = DynamicLinqAdapter.Current!;
+        Version jasperFx = MartenRuntime.Current.VersionOf(RuntimePackage.JasperFx)!;
+
+        bool serverOffUtc = new[] { new DateTime(2000, 1, 15), new DateTime(2000, 7, 15) }
+            .Any(static x => TimeZoneInfo.Local.GetUtcOffset(x) != TimeSpan.Zero);
+
+        if (jasperFx >= new Version(2, 91, 0))
+        {
+            adapter.ReadsDatesInServerTime.Should().BeFalse(
+                "JasperFx {0} reads an offset-less date as UTC itself, so the studio's correction must be idle", jasperFx);
+        }
+        else
+        {
+            adapter.ReadsDatesInServerTime.Should().Be(serverOffUtc,
+                "JasperFx {0} reads an offset-less date in the server's zone, which moves it exactly when that zone is not UTC", jasperFx);
+        }
     }
 
     [Fact]

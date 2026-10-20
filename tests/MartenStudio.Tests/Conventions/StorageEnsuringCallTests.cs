@@ -163,7 +163,8 @@ public class StorageEnsuringCallTests
             "DiscardDeadLetterAsync: whether a missed id belongs to another tenant, so the refusal is a refusal"),
         new("src/MartenStudio/Services/Events/EventDataService.cs", "MarkEventsAsSkipped",
             ["SkipEventAsync"],
-            "SkipEventAsync (ManageDeadLetters), audited; NoSchemaBuildingCallTests allows it too"),
+            "SkipEventAsync (ManageDeadLetters), audited; NoSchemaBuildingCallTests allows it too. Its 9.51 tenant overload "
+            + "is reached by reflection from the same write (see the shapes neither layer sees)"),
         new("src/MartenStudio/Services/Events/StreamCompactionInvoker.cs", "CompactStreamAsync",
             ["CompactAndSaveAsync", "CompactAndSaveAsync"],
             "the compaction (CompactStreams), Guid and string ids, audited by EventDataService.CompactStreamAsync"),
@@ -200,6 +201,30 @@ public class StorageEnsuringCallTests
             + "under the database's AutoCreate the first time the process asks. A read reads with the studio's own SQL "
             + "(Internal/Sql); a write behind a capability goes on AllowedSites with what it needs. Offenders: "
             + string.Join(", ", offenders));
+    }
+
+    /// <summary>
+    /// The reflected call neither layer above sees - Marten 9.51's tenant overload of <c>MarkEventsAsSkipped</c>, which
+    /// ensures the event storage - is reached through exactly one studio method, and that method is called from exactly
+    /// one place: <c>SkipEventAsync</c>, the capability-gated, audited write the listed tenant-less call is made in.
+    /// </summary>
+    [Fact]
+    public void The_reflected_tenant_skip_is_reached_only_from_SkipEventAsync()
+    {
+        MethodInfo helper = typeof(MartenStudio.Services.Events.EventDataService).GetMethod(
+            nameof(MartenStudio.Services.Events.EventDataService.MarkTenantEventAsSkippedAsync),
+            BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static)!;
+
+        helper.Should().NotBeNull("the one method that makes the reflected call");
+
+        IlScan.Result scan = IlScan.Scan(typeof(MartenStudioOptions).Assembly, target => target == helper);
+
+        scan.Unresolved.Should().BeEmpty();
+        scan.Calls.Should().ContainSingle("only EventDataService calls it").Which.Key.Should().Be(
+            (typeof(MartenStudio.Services.Events.EventDataService).FullName!, helper.Name));
+        scan.Calls.Single().Value.Should().Equal(
+            [nameof(MartenStudio.Services.Events.EventDataService.SkipEventAsync)],
+            "a second caller would be a second path into a storage-ensuring Marten write that the allow-list above cannot see");
     }
 
     /// <summary>The allow-list is a statement about code that exists, not a permanent exemption.</summary>
@@ -407,7 +432,12 @@ public class StorageEnsuringCallTests
     /// <list type="bullet">
     /// <item><description>A call made through <b>reflection</b> names the member as a string - <c>DocumentWriteService</c>
     /// builds its typed <c>Delete</c> and <c>UndoDeleteWhere</c> calls that way, and they queue operations that only its
-    /// <c>SaveChangesAsync</c> (on the list) runs.</description></item>
+    /// <c>SaveChangesAsync</c> (on the list) runs. So does <c>EventDataService.MarkTenantEventAsSkippedAsync</c>: Marten
+    /// 9.51's tenant overload of <c>MarkEventsAsSkipped</c>, which ensures the event storage like the tenant-less one on
+    /// the list, and is reached by reflection because the floor has no such member to compile against. It is made only
+    /// from <c>SkipEventAsync</c> - the same capability-gated, audited write as the listed site, which
+    /// <see cref="The_reflected_tenant_skip_is_reached_only_from_SkipEventAsync" /> pins - and its declaration is
+    /// looked up by name in <c>RuntimeFeature.TenantSkipMethod</c>, a string this scanner blanks.</description></item>
     /// <item><description>A call inside an <b>interpolation hole</b> is blanked with its string by the source layer; the
     /// compiled layer still sees it.</description></item>
     /// <item><description>A member named in an <b>expression tree</b> is an <c>ldtoken</c>, not a call, and is not counted:

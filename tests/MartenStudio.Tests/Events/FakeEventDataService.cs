@@ -133,6 +133,12 @@ internal sealed partial class FakeEventDataService : IEventDataService
     /// <summary>The event sequences that were marked skipped.</summary>
     public List<long> Skipped { get; } = [];
 
+    /// <summary>The scope each skip was asked in, in order.</summary>
+    public List<StudioScope> SkipScopes { get; } = [];
+
+    /// <summary>The scope each rewind was asked in, in order.</summary>
+    public List<StudioScope> RewindScopes { get; } = [];
+
     /// <summary>Whether counts were asked for.</summary>
     public bool CountsRequested { get; private set; }
 
@@ -331,6 +337,7 @@ internal sealed partial class FakeEventDataService : IEventDataService
         }
 
         Skipped.Add(sequence);
+        SkipScopes.Add(scope);
         return Task.CompletedTask;
     }
 
@@ -346,6 +353,7 @@ internal sealed partial class FakeEventDataService : IEventDataService
         }
 
         Rewinds.Add(projectionName + "/" + eventSequence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        RewindScopes.Add(scope);
         return Task.CompletedTask;
     }
 

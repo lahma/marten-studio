@@ -12,11 +12,12 @@ namespace MartenStudio.Services.Events;
 
 /// <summary>How a store keeps its DCB event tags.</summary>
 /// <remarks>
-/// Read off <c>EventGraph.DcbStorageMode</c> and <c>EventGraph.TagTypes</c> (verified at Marten 9.39.0 and
-/// 9.50.2, where neither table shape changed): <see cref="TagTables" /> is one <c>mt_event_tag_&lt;suffix&gt;</c>
-/// table per registered tag type, keyed <c>(value[, tenant_id], seq_id)</c>; <see cref="HStore" /> is one
-/// nullable <c>hstore</c> column on <c>mt_events</c> itself, keyed by the suffix. A store with no tag type
-/// registered has neither, whatever its storage mode says.
+/// Read off <c>EventGraph.DcbStorageMode</c> and <c>EventGraph.TagTypes</c> (verified at Marten 9.39.0, 9.50.2 and
+/// 9.51.0): <see cref="TagTables" /> is one <c>mt_event_tag_&lt;suffix&gt;</c> table per registered tag type, keyed
+/// <c>(value[, tenant_id], seq_id)</c>; <see cref="HStore" /> is one nullable <c>hstore</c> column on <c>mt_events</c>
+/// itself, keyed by the suffix. A store with no tag type registered has neither, whatever its storage mode says. The
+/// key and the columns are the same at all three; from 9.51 (#5694) each tag table also declares
+/// <c>idx_mt_event_tag_&lt;suffix&gt;_seq_id</c>, so a tag table built below 9.51 shows that index as drift.
 /// </remarks>
 internal enum EventTagStorage
 {

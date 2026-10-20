@@ -129,6 +129,11 @@ internal sealed class ScriptedActivityCheck : ScriptedCheck;
 [HealthCheck("E90", HealthArea.Events, HealthCostTier.BoundedData, "Scripted deeper")]
 internal sealed class ScriptedDeeperCheck : ScriptedCheck;
 
+/// <summary>
+/// A check that lights up on JasperFx.Events 2.89's classifier - first in Marten 9.50.3, so present at the latest the
+/// suite runs at and absent at the floor. A test that needs it absent (or present) says so with the harness's made-up
+/// runtime rather than relying on which Marten this run resolved.
+/// </summary>
 [HealthCheck("D90", HealthArea.Daemon, HealthCostTier.Catalog, "Scripted light-up",
     RequiresFeature = nameof(MartenStudio.Services.Configuration.RuntimeFeature.TransientFailureClassifier))]
 internal sealed class ScriptedLightUpCheck : ScriptedCheck;
@@ -232,12 +237,17 @@ internal sealed class HealthHarness : IAsyncDisposable
     /// <param name="store">The store's options, on top of the refused connection.</param>
     /// <param name="environment">The host's environment, or <see langword="null" /> for a host that registers none.</param>
     /// <param name="policies">Whether the store and write policies are configured (and so asked).</param>
+    /// <param name="runtime">
+    /// The Marten the sweeper and the health service believe this host runs - a made-up one, so a light-up check's
+    /// applicability is the same at every Marten the suite runs at - or <see langword="null" /> for this process's own.
+    /// </param>
     public static HealthHarness Create(
         IEnumerable<Type>? checks = null,
         Action<MartenStudioOptions>? studio = null,
         Action<StoreOptions>? store = null,
         string? environment = "Development",
-        bool policies = false)
+        bool policies = false,
+        MartenStudio.Services.Configuration.MartenRuntime? runtime = null)
     {
         FakeTimeProvider clock = new(new DateTimeOffset(2026, 10, 15, 9, 0, 0, TimeSpan.Zero));
         CapturingLoggerProvider logs = new();
@@ -254,6 +264,12 @@ internal sealed class HealthHarness : IAsyncDisposable
 
         services.AddSingleton<TimeProvider>(clock);
         services.AddSingleton(new HealthScript());
+
+        if (runtime is not null)
+        {
+            // HealthSweeper and HealthService take an optional MartenRuntime; registered, it is the one they ask.
+            services.AddSingleton(runtime);
+        }
         services.AddSingleton(HealthCheckRegistry.ForTypes(checks ?? ScriptedChecks));
 
         if (environment is not null)

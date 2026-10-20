@@ -38,4 +38,34 @@ internal sealed partial class RuntimeFeature
         static () => typeof(DocumentStore).Assembly
             .GetType("Marten.Events.Daemon.HighWater.HighWaterDetector", throwOnError: false)?
             .GetMethod("refreshHighWaterFreshnessAsync", BindingFlags.NonPublic | BindingFlags.Instance) is not null);
+
+    /// <summary>
+    /// <c>IReadOnlyDaemonSettings.HighWaterProgressStallThreshold</c> - JasperFx.Events 2.91.0 (jasperfx#1027/#1028),
+    /// <c>src/JasperFx.Events/Daemon/DaemonSettings.cs</c>: a default interface property answering
+    /// <see langword="null" />, which <c>DaemonSettings</c> overrides with a settable one defaulting to two minutes.
+    /// Absent at V2.90.1; first in Marten 9.51.0, which brings 2.91.0 (9.50.3 brings 2.90.1).
+    /// </summary>
+    /// <remarks>
+    /// How long the high-water mark may stay below <c>max(seq_id)</c> before the health-check watchdog restarts the
+    /// high-water agent, with a warning each time; a restart re-reads the mark and never advances it, so a gap held
+    /// on purpose stays held. The Configuration page shows it beside "High water staleness"; nothing else reads it.
+    /// </remarks>
+    public static readonly RuntimeFeature HighWaterProgressStall = new(
+        nameof(HighWaterProgressStall),
+        RuntimePackage.JasperFxEvents,
+        "2.91.0",
+        "9.51.0",
+        "How long the high-water mark may stay below the events committed above it before the daemon restarts the high-water agent (DaemonSettings.HighWaterProgressStallThreshold).",
+        static () => HighWaterProgressStallProperty() is not null);
+
+    /// <summary>
+    /// <c>HighWaterProgressStallThreshold</c> as <c>IReadOnlyDaemonSettings</c> declares it, so reading it through the
+    /// interface reaches whichever implementation the store holds; <see langword="null" /> below JasperFx 2.91.
+    /// </summary>
+    internal static PropertyInfo? HighWaterProgressStallProperty() =>
+        typeof(JasperFx.Events.Daemon.IReadOnlyDaemonSettings).GetProperty(
+            "HighWaterProgressStallThreshold", BindingFlags.Public | BindingFlags.Instance) is { PropertyType: var type } property
+            && type == typeof(TimeSpan?)
+                ? property
+                : null;
 }

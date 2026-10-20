@@ -148,6 +148,7 @@ internal static class ConfigurationDescriber
             new("Health check polling", Duration(daemon.HealthCheckPollingTime), "StoreOptions.Events.Daemon.HealthCheckPollingTime"),
             new("Stale sequence threshold", Duration(daemon.StaleSequenceThreshold), "StoreOptions.Events.Daemon.StaleSequenceThreshold"),
             new("High water staleness", Duration(daemon.HighWaterStalenessThreshold), "StoreOptions.Events.Daemon.HighWaterStalenessThreshold"),
+            .. HighWaterProgressStall(daemon),
             new("Stop and drain timeout", Duration(daemon.StopAndDrainTimeout), "StoreOptions.Events.Daemon.StopAndDrainTimeout"),
 
             // What health check K04 prints beside the mode: a configuration finding says nothing this page does not.
@@ -298,6 +299,40 @@ internal static class ConfigurationDescriber
     }
 
     private static string TypeName(Type? type) => type?.Name ?? "unknown";
+
+    /// <summary>
+    /// The "High water progress stall" row, where this JasperFx has the setting (<see cref="RuntimeFeature.HighWaterProgressStall" />,
+    /// JasperFx.Events 2.91 / Marten 9.51) - and no row at all below it, where the watchdog it configures does not exist.
+    /// </summary>
+    /// <remarks>
+    /// Read through <c>IReadOnlyDaemonSettings</c>' own declaration, by reflection because the floor's JasperFx has no such
+    /// member to compile against; null or non-positive means the check is off, as JasperFx reads it. A read that fails is
+    /// "not reported" rather than a broken page.
+    /// </remarks>
+    internal static IEnumerable<ConfigurationValue> HighWaterProgressStall(JasperFx.Events.Daemon.IReadOnlyDaemonSettings daemon)
+    {
+        ArgumentNullException.ThrowIfNull(daemon);
+
+        if (!RuntimeFeature.HighWaterProgressStall.IsAvailable(MartenRuntime.Current)
+            || RuntimeFeature.HighWaterProgressStallProperty() is not { } property)
+        {
+            yield break;
+        }
+
+        string value;
+        try
+        {
+            value = property.GetValue(daemon) is TimeSpan threshold && threshold > TimeSpan.Zero
+                ? Duration(threshold)
+                : "off";
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            value = "not reported";
+        }
+
+        yield return new ConfigurationValue("High water progress stall", value, "StoreOptions.Events.Daemon.HighWaterProgressStallThreshold");
+    }
 
     private static string YesNo(bool value) => value ? "yes" : "no";
 

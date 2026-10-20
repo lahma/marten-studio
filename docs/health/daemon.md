@@ -205,8 +205,8 @@ open.
 Classified where JasperFx classifies: a start Marten Studio asked for and the daemon refused carries
 `ShardStartException.Reason` (`AgentPaused`, `HighWaterNotRunning`, `ShardNotRegistered`, `StartRace`, `Faulted`,
 `Rebuilding`) and whether a retry is expected to help (JasperFx 2.76+, Marten 9.41+); a live failure is classified
-as transient or permanent by `TransientFailures.IsTransient` where it exists (JasperFx 2.89, in no Marten release
-yet). A tenant's shard names that tenant, so its finding needs `ViewDatabaseActivity` and the store policy for that
+as transient or permanent by `TransientFailures.IsTransient` where it exists (JasperFx 2.89, Marten 9.50.3+). A
+tenant's shard names that tenant, so its finding needs `ViewDatabaseActivity` and the store policy for that
 tenant.
 
 What to change depends on the failure:

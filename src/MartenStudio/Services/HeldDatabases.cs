@@ -52,12 +52,13 @@ internal sealed record HeldDatabaseList(TenancyShape Shape, IReadOnlyList<IMarte
 /// <remarks>
 /// <para>
 /// <b>Why not simply <c>Storage.AllDatabases()</c>.</b> That is <c>Tenancy.BuildDatabases()</c>, which for the
-/// dynamic tenancies is not a read (read at Marten <c>V9.39.0</c> and <c>V9.50.2</c>):
+/// dynamic tenancies is not a read (read at Marten <c>V9.39.0</c>, <c>V9.50.2</c> and <c>v9.51.0</c>):
 /// </para>
 /// <list type="bullet">
 /// <item><description>
-/// <c>MasterTableTenancy</c> and <c>ShardedTenancy</c> apply their lookup tables' schema under the host's
-/// <c>AutoCreate</c> on the first call in a process (<c>maybeApplyChanges</c>), upsert their configured seed
+/// <c>MasterTableTenancy</c> and <c>ShardedTenancy</c> apply their lookup tables' schema on the first call in a
+/// process (<c>maybeApplyChanges</c>) - gated, and from 9.51 (#5692) run, under the tenancy's own <c>AutoCreate</c> when it
+/// sets one and the host's <c>AutoCreateSchemaObjects</c> otherwise, and below 9.51 always run under the host's - upsert their configured seed
 /// rows, and read the whole master table - building a data source for every tenant it names - on every call,
 /// outside the studio's read-only session. A master-table tenancy that has so far only resolved tenants one at
 /// a time (<c>GetTenantAsync</c>, which applies and seeds nothing) holds databases and has never been built.

@@ -54,9 +54,10 @@ namespace MartenStudio.Services.Schema;
 /// </para>
 /// <para>
 /// <b>No read path calls <c>AllSchemaNames()</c>, <c>AllObjects()</c>, <c>ToDatabaseScript()</c> or
-/// <c>CreateMigrationAsync()</c>.</b> The first two run Weasel migrations through Marten's lazy
-/// <c>Sequences</c> feature - an <c>AllSchemaNames()</c> call on an empty schema creates <c>mt_hilo</c>
-/// and <c>mt_get_next_hi</c>, proven live - and the last two are simply slow and connection-hungry.
+/// <c>CreateMigrationAsync()</c>.</b> Below Marten 9.50.3 the first two run Weasel migrations through Marten's
+/// lazy <c>Sequences</c> feature - an <c>AllSchemaNames()</c> call on an empty schema creates <c>mt_hilo</c>
+/// and <c>mt_get_next_hi</c>, proven live at the floor - and the last two are simply slow and connection-hungry.
+/// From 9.50.3 (#5665) the enumeration is offline, and the rule stays, because the floor is not.
 /// Everything a tab needs on navigation comes from <see cref="SchemaDeclarationReader" />, which reads
 /// <c>StoreOptions</c> and nothing else; <see cref="CheckAsync" />, <see cref="PreviewAsync" /> and
 /// <see cref="DdlAsync" /> are behind buttons and say what they may create.

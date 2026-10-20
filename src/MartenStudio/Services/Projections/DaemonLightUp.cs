@@ -101,7 +101,7 @@ internal static class DaemonLightUp
 
     /// <summary>
     /// Whether JasperFx classifies <paramref name="exception" /> as transient (<c>TransientFailures.IsTransient</c>,
-    /// JasperFx.Events 2.89 - in no Marten release as of 9.50.2), or <see langword="null" /> when it cannot say.
+    /// JasperFx.Events 2.89, first in Marten 9.50.3), or <see langword="null" /> when it cannot say.
     /// </summary>
     public static bool? IsTransient(Exception exception)
     {

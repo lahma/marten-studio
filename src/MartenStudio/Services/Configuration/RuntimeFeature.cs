@@ -180,14 +180,15 @@ internal sealed partial class RuntimeFeature
 
     /// <summary>
     /// <c>TransientFailures.IsTransient(Exception)</c> - JasperFx.Events 2.89.0,
-    /// <c>src/JasperFx.Events/Daemon/TransientFailures.cs</c> (absent at V2.88.0), in no Marten release as of
-    /// 9.50.2 (which brings 2.87.1).
+    /// <c>src/JasperFx.Events/Daemon/TransientFailures.cs</c> (absent at V2.88.0), first in Marten 9.50.3, whose
+    /// <c>Directory.Packages.props</c> brings 2.90.1 (9.50.2 brings 2.87.1) - the first feature of the table that
+    /// a patch release brings, which is why <see cref="Requirement" /> prints a patch number.
     /// </summary>
     public static readonly RuntimeFeature TransientFailureClassifier = new(
         nameof(TransientFailureClassifier),
         RuntimePackage.JasperFxEvents,
         "2.89.0",
-        null,
+        "9.50.3",
         "Whether a shard's failure is transient or permanent, as JasperFx classifies it (TransientFailures.IsTransient).",
         static () => typeof(IProjectionDaemon).Assembly
             .GetType("JasperFx.Events.Daemon.TransientFailures", throwOnError: false)?
@@ -217,12 +218,26 @@ internal sealed partial class RuntimeFeature
     public bool HasProbe => probe is not null;
 
     /// <summary>
-    /// What a remedy prints beside a line that needs this: "Marten 9.47+", or for a feature no Marten release
-    /// brings yet, the package that does.
+    /// What a remedy prints beside a line that needs this: "Marten 9.47+", "Marten 9.50.3+", or for a feature no
+    /// Marten release brings yet, the package that does.
     /// </summary>
+    /// <remarks>
+    /// The patch is printed whenever it is not zero (<see cref="Short" />): a feature first in 9.50.3 is absent from
+    /// 9.50.0 to 9.50.2, so "9.50+" would tell a host on 9.50.2 that it has something it does not.
+    /// </remarks>
     public string Requirement => FirstMarten is { } marten
-        ? "Marten " + marten.ToString(2) + "+"
-        : MartenRuntime.PackageName(Package) + " " + IntroducedIn.ToString(2) + "+ (in no Marten release yet)";
+        ? "Marten " + Short(marten) + "+"
+        : MartenRuntime.PackageName(Package) + " " + Short(IntroducedIn) + "+ (in no Marten release yet)";
+
+    /// <summary>
+    /// A version as short as it can be without saying something false: "9.47" for 9.47.0, "9.50.3" for 9.50.3.
+    /// </summary>
+    internal static string Short(Version version)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+
+        return version.Build > 0 ? version.ToString(3) : version.ToString(2);
+    }
 
     /// <summary>Every feature in the table, in package and version order.</summary>
     public static IReadOnlyList<RuntimeFeature> All => Table.Value;
@@ -274,15 +289,25 @@ internal sealed partial class RuntimeFeature
         MethodInfo? declared = typeof(IJasperFxEventStore).GetMethod(
             "CompactStreamAsync", BindingFlags.Public | BindingFlags.Instance, parameters);
 
+        return ImplementedBy(typeof(DocumentStore), typeof(IJasperFxEventStore), declared);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="implementation" /> maps the interface member <paramref name="declared" /> to a method
+    /// declared on itself - rather than inheriting the interface's default body, which for the members probed here is
+    /// a refusal (a <c>NotSupportedException</c>) or the historical behaviour the feature replaces.
+    /// </summary>
+    private static bool ImplementedBy(Type implementation, Type @interface, MethodInfo? declared)
+    {
         if (declared is null)
         {
             return false;
         }
 
-        InterfaceMapping map = typeof(DocumentStore).GetInterfaceMap(typeof(IJasperFxEventStore));
+        InterfaceMapping map = implementation.GetInterfaceMap(@interface);
         int index = Array.IndexOf(map.InterfaceMethods, declared);
 
-        return index >= 0 && map.TargetMethods[index].DeclaringType == typeof(DocumentStore);
+        return index >= 0 && map.TargetMethods[index].DeclaringType == implementation;
     }
 
     private static IReadOnlyList<RuntimeFeature> Discover() =>

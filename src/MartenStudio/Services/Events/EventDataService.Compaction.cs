@@ -3,6 +3,7 @@ using JasperFx.MultiTenancy;
 using Marten;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Configuration;
 
 using Npgsql;
 
@@ -206,7 +207,8 @@ internal sealed partial class EventDataService
             storeOptions.Events.TenancyStyle == TenancyStyle.Conjoined,
             resolved.TenantId,
             EventTagModel.From(storeOptions).Storage,
-            storeOptions.Events.EnableEventSkippingInProjectionsOrSubscriptions);
+            storeOptions.Events.EnableEventSkippingInProjectionsOrSubscriptions,
+            RuntimeFeature.TaggedStreamCompaction.IsAvailable(MartenRuntime.Current));
 
         return (plan, plan.IsOffered ? aggregate : null);
     }

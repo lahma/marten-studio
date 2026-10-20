@@ -6,7 +6,10 @@ and `ReadOnly` turns it off again. The write policy is asked about the scope as 
 with `CompactStreams` named. Every attempt is written to the audit log, whether it succeeds or fails.
 
 This page is the longer version of what the confirmation dialog says. Everything here was read from
-Marten's `EventStore.StreamCompacting.cs`, which is the same file at 9.39.0 (the studio's floor) and 9.50.2.
+Marten's `EventStore.StreamCompacting.cs`, which is the same file at 9.39.0 (the studio's floor) and 9.50.2,
+and at 9.51.0, which adds two things and changes nothing else: an empty stream id is refused (#5695), and the
+folded events' DCB tag rows are deleted with them (#5694). Both are below, each marked with the version that
+has it.
 
 ## What it does
 
@@ -101,10 +104,12 @@ The plan counts events by version. It cannot tell a skipped event from any other
 after its snapshot are all skipped is still offered. Compacting it then finds nothing to fold, and the
 studio says so.
 
-**The empty GUID.** Marten's stream fetch adds its stream predicate only when the id is not empty. A stream
-whose id is `00000000-0000-0000-0000-000000000000` would therefore fold every event of the tenant, or of the
-whole store, into one snapshot, and delete all the others. The studio never compacts that stream, and it
-does not replay it on the time-travel panel either.
+**The empty GUID.** Below Marten 9.51 the stream fetch adds its stream predicate only when the id is not
+empty. A stream whose id is `00000000-0000-0000-0000-000000000000` (or an empty key) would therefore fold every
+event of the tenant, or of the whole store, into one snapshot, and delete all the others. From 9.51 (#5695) the
+fetch reads only that stream, and `CompactStreamAsync` refuses an empty id itself. The studio never compacts
+that stream at any version, and it does not replay it on the time-travel panel either; the reason it gives
+names both ends.
 
 **Hidden aggregates.** A compaction writes the aggregate's state into the event log. For an aggregate the
 host keeps off the screen, the Events screens would then show that state as the snapshot event's data. The
@@ -133,11 +138,19 @@ chose.
 
 ## Streams that cannot be compacted
 
-**Tagged streams.** In the default tag-table mode, each tag row references its event through a foreign key
-to `mt_events(seq_id)`, and that key has no cascade. Compaction does not delete the tag rows first. So if any
-event before the last one carries a DCB tag, Postgres refuses the delete with `23503` and nothing changes.
-The studio reports this in its own words. In hstore mode the tags are kept on the event row and leave with
-it.
+**Tagged streams, below Marten 9.51.** In the default tag-table mode, each tag row references its event
+through a foreign key to `mt_events(seq_id)`, and that key has no cascade. Below 9.51 compaction does not
+delete the tag rows first. So if any event before the last one carries a DCB tag, Postgres refuses the delete
+with `23503` and nothing changes. The studio reports this in its own words. In hstore mode the tags are kept on
+the event row and leave with it.
+
+From 9.51 (#5694) the delete removes the folded events' tag rows first, in the same statement, each narrowed to
+the tenant on a conjoined store. A tagged stream then compacts: a tag query no longer finds the folded events,
+and the snapshot, which is written in place of the last event, keeps that event's tag rows. The dialog says
+whichever of the two this host's Marten does - the studio probes for it rather than comparing version numbers.
+The same release declares an index on `seq_id` for every tag table, so a store whose tag tables were built
+below 9.51 shows it as drift on the Schema screen; its apply section notes that the index is built without
+`CONCURRENTLY`, and that every append of a tagged event waits while it builds.
 
 **Migrations.** Like every Marten session write, `FetchStreamAsync` first applies any pending event-store
 migration under the host's own `AutoCreate`. That is a property of the write, not of the page: nothing

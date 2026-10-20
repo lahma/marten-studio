@@ -1,3 +1,4 @@
+@using MartenStudio.Services.Configuration
 @using MartenStudio.Services.Schema
 @implements IDisposable
 @inject ISchemaDataService SchemaData
@@ -10,11 +11,14 @@
     Nothing here runs on navigation, and the reason is stronger than "it is slow".
 
     Both buttons reach Weasel through IMartenDatabase, which builds every feature schema in the store to
-    get there - and Marten's feature list includes the lazy HiLo Sequences feature, whose initialiser
-    applies a migration under the database's own AutoCreate. So asking either question can create
-    Marten's own bookkeeping objects (mt_hilo, mt_get_next_hi) in a schema that did not have them. That
-    is a fine thing to do on purpose and an indefensible thing to do because somebody opened a tab, so
-    the tab arrives with two buttons that say what pressing them may do (packet P7-fix, finding B1).
+    get there - and below Marten 9.50.3 Marten's feature list includes the lazy HiLo Sequences feature,
+    whose initialiser applies a migration under the database's own AutoCreate. So there asking either
+    question can create Marten's own bookkeeping objects (mt_hilo, mt_get_next_hi) in a schema that did
+    not have them. That is a fine thing to do on purpose and an indefensible thing to do because somebody
+    opened a tab, so the tab arrives with two buttons that say what pressing them may do (packet P7-fix,
+    finding B1). From 9.50.3 (#5665) the enumeration describes the HiLo feature without applying it, and
+    the wording below says so for the Marten this host runs (RuntimeFeature.OfflineSchemaEnumeration).
+    The buttons stay buttons: both still connect, and the floor still has the hazard.
 
     And both answers span the whole database - every tenant's partition by name, every document type's
     table, the hidden ones included - so the service gives them only to a visitor who may see all of it
@@ -55,12 +59,27 @@
             <strong>Preview migration</strong> renders the SQL that would bring it into line, without
             running any of it.
         </p>
-        <p class="ms-empty-description ms-schema-caution">
-            Both ask Marten to build its feature schemas, and that step can create Marten's own
-            bookkeeping objects - the HiLo sequence table <code>mt_hilo</code> and
-            <code>mt_get_next_hi</code> - in a schema that does not have them yet. Neither applies
-            anything else, and nothing on this page runs until you press a button.
-        </p>
+        @if (MigrationRisk.FeatureSchemasMayCreateHilo(MartenRuntime.Current))
+        {
+            <p class="ms-empty-description ms-schema-caution">
+                Both ask Marten to build its feature schemas, and on this host's Marten
+                (@MartenRuntime.Current.Describe(RuntimePackage.Marten)) that step can create Marten's own
+                bookkeeping objects - the HiLo sequence table <code>mt_hilo</code> and
+                <code>mt_get_next_hi</code> - in a schema that does not have them yet. Neither applies
+                anything else, and nothing on this page runs until you press a button.
+                (@RuntimeFeature.OfflineSchemaEnumeration.Requirement builds them without creating anything.)
+            </p>
+        }
+        else
+        {
+            <p class="ms-empty-description ms-schema-note">
+                Both ask Marten to build its feature schemas, which this host's Marten
+                (@MartenRuntime.Current.Describe(RuntimePackage.Marten)) does without creating anything - its HiLo
+                objects, <code>mt_hilo</code> and <code>mt_get_next_hi</code>, are described, not created. Neither
+                applies anything, and nothing on this page runs until you press a button. (Below Marten 9.50.3
+                that step could create them in a schema that did not have them yet.)
+            </p>
+        }
     </div>
 }
 
@@ -227,6 +246,30 @@ else
                         that applying this removes or rewrites them.
                     </span>
                 </label>
+            </div>
+        </div>
+    }
+
+    @* Notes, not alarms: statements that remove nothing a person made but are worth reading before they run - an
+       index build that makes writers wait (a tag table's on the way to Marten 9.51 among them), and Weasel 9.46's
+       partition-index rebuild, which reads like a drop and is not. Nothing to tick: the destructive list above is
+       the one the apply waits for. *@
+    @if (preview.Notes is { Count: > 0 } notes)
+    {
+        <div class="ms-alert ms-alert-info ms-schema-notes" role="note">
+            <div class="ms-alert-content">
+                <p><strong>Worth knowing before you apply.</strong> These statements remove nothing, but:</p>
+                <ul class="ms-destructive-list">
+                    @for (int ordinal = 0; ordinal < notes.Count; ordinal++)
+                    {
+                        MigrationNote note = notes[ordinal];
+
+                        <li @key="ordinal">
+                            <span class="ms-destructive-kind">@note.Kind</span>
+                            <code class="ms-destructive-statement">@note.Statement</code>
+                        </li>
+                    }
+                </ul>
             </div>
         </div>
     }

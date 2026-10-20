@@ -1,3 +1,34 @@
+# 0.5.0
+
+- Marten 9.51.0 is the latest-tested Marten (from 9.50.2); the package still depends on Marten 9.39.0 or later.
+- On a store with `Events.UseTenantPartitionedEvents`, the dead-letter page's Skip event works from Marten 9.51: it
+  marks the dead letter's own tenant's event skipped and no other tenant's event of that number, and is asked as that
+  tenant (with "All tenants" selected, the dead letter's). Below 9.51 it stays refused, because Marten skips by number
+  alone.
+- Rewind subscription on such a store works from Marten 9.51 with JasperFx 2.91: it stops, rewinds and restarts the
+  dead letter's tenant's agents alone and deletes only that tenant's dead letters, so it is authorized for that tenant
+  rather than for the database as a whole, and it is offered only where the async daemon in this process runs that
+  tenant's agent of the projection (on HotCold's cold node or a distributed host it would otherwise start a second
+  one). The database-wide rewind is never offered on such a store; below 9.51 the rewind stays refused. A tenant id
+  with a `:` in it is not rewound, because its agents' name does not read back as that tenant's and Marten would
+  refuse only after the daemon had stopped them; and neither rewind lets Marten's "Unknown subscription name ...
+  Available options are ..." - every subscription the store has - reach the page or the audit log.
+- Compacting a stream whose folded events carry DCB tags works from Marten 9.51, which deletes their tag rows with
+  them; the snapshot keeps the last event's tags. Below 9.51 Postgres still refuses and nothing changes, and the
+  dialog says which this host's Marten does.
+- The Schema screen's Check schema, Preview migration and Generate script say what they may create on the host's
+  Marten: Marten's HiLo objects (`mt_hilo`, `mt_get_next_hi`) below 9.50.3, nothing from it.
+- The apply section lists notes beside the destructive statements: an index built without `CONCURRENTLY` on an
+  existing table, which makes writers wait while it builds (Marten 9.51's new `seq_id` index on each DCB tag table
+  built before it is one, and every tagged append waits for it), and Weasel 9.46's partition-index rebuild, whose
+  `DROP INDEX CONCURRENTLY IF EXISTS` is no longer listed as "drops an index". Any other `drop index` still is.
+- The Configuration page shows `HighWaterProgressStallThreshold` beside "High water staleness" where the host's
+  JasperFx has it (2.91, Marten 9.51).
+- A requirement first met by a patch release names the patch: "Marten 9.50.3+", not "Marten 9.50+". The
+  transient/permanent classification of a shard failure is known to arrive with Marten 9.50.3.
+- LINQ mode: from JasperFx 2.91 (Marten 9.51) a date with no offset is read as UTC by JasperFx itself, and the
+  studio's own correction stays idle, as measured.
+
 # 0.4.0
 
 - A health advisor. The new **Health** page (`/marten/health`) reads the store's configuration and its

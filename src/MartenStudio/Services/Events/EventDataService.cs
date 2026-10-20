@@ -1,5 +1,7 @@
 using System.Data;
 using System.Globalization;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 
 using JasperFx.Events;
 using JasperFx.Events.Daemon;
@@ -11,6 +13,7 @@ using Marten.Services;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.Logging;
@@ -147,6 +150,8 @@ internal sealed partial class EventDataService : IEventDataService
                 HasTenantId = table.HasTenantId,
                 EventsConjoined = resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined,
                 PerTenantSequences = resolved.Store.Options.Events.UseTenantPartitionedEvents,
+                TenantSkipping = resolved.Store.Options.Events.UseTenantPartitionedEvents && TenantSkipAvailable,
+                TenantRewind = resolved.Store.Options.Events.UseTenantPartitionedEvents && TenantRewindAvailable,
                 HasIsArchived = table.HasIsArchived,
                 HasIsSkipped = table.HasIsSkipped,
                 HasBinaryData = table.HasBinaryData,
@@ -845,17 +850,21 @@ internal sealed partial class EventDataService : IEventDataService
                     candidate.Name, version, new EventDataError(parsed.Error ?? "That stream id is not usable.", null, false));
             }
 
-            // Marten's EventStatement emits its stream predicate only for a non-empty id, so a replay of the
-            // empty GUID would fetch - and fold into one aggregate - every event of the tenant or the store:
-            // a wrong answer, and a read of the whole log on one click (StreamCompactionRules.IsWholeLogId).
+            // Below Marten 9.51 EventStatement emits its stream predicate only for a non-empty id (#5695 fixed it), so
+            // a replay through Marten's stream fetch would fold every event of the tenant or the store into one
+            // aggregate. The studio's replay no longer goes through it - ReadReplayEventsAsync reads with
+            // StreamReadQueries, whose predicate is unconditional - so this guard no longer prevents a whole-log read at
+            // either end; it is kept so that a stream Marten cannot address is refused alike by every page that would
+            // hand it to Marten, as compaction refuses it (StreamCompactionRules.IsWholeLogId), and the message says
+            // why in Marten's terms rather than the studio's SQL's.
             if (StreamCompactionRules.IsWholeLogId(parsed.Value))
             {
                 return AggregateSnapshot.Failed(
                     candidate.Name,
                     version,
                     new EventDataError(
-                        "This stream's id is the empty GUID, which Marten's stream fetch reads as no stream filter at all, "
-                        + "so replaying it would fold every event in the log. The studio does not replay it.",
+                        "This stream's id is the empty GUID, which Marten's stream reads below 9.51 take as no stream filter at all, "
+                        + "so a replay through them would fold every event in the log. The studio does not replay it.",
                         null,
                         false));
             }
@@ -1603,14 +1612,27 @@ internal sealed partial class EventDataService : IEventDataService
             sequence.ToString(CultureInfo.InvariantCulture),
             async (resolved, token) =>
             {
-                // First, before anything is read: Marten's MarkEventsAsSkipped is `update mt_events set is_skipped = TRUE
-                // where seq_id = ANY(:sequences)` with no tenant predicate (MartenDatabase.EventStorage.cs, read at V9.39.0
-                // and V9.50.2), and under UseTenantPartitionedEvents every tenant numbers seq_id on its own - so skipping
-                // acme's #42 skipped every tenant's #42, whatever the proof below found (SEC1-fix4). Refused, and audited
-                // as failed; the page disables the button with the same sentence.
-                if (resolved.Store.Options.Events.UseTenantPartitionedEvents)
+                // First, before anything is read: below Marten 9.51 MarkEventsAsSkipped is `update mt_events set
+                // is_skipped = TRUE where seq_id = ANY(:sequences)` with no tenant predicate (MartenDatabase.EventStorage.cs,
+                // read at V9.39.0 and V9.50.2), and under UseTenantPartitionedEvents every tenant numbers seq_id on its own -
+                // so skipping acme's #42 skipped every tenant's #42, whatever the proof below found (SEC1-fix4). Refused, and
+                // audited as failed; the page disables the button with the same sentence. From 9.51 (#5698) Marten has a
+                // tenant overload that adds `and tenant_id = :tenant_id` on a conjoined event store - which
+                // UseTenantPartitionedEvents requires - so there the skip is one tenant's, and needs one (the page pins
+                // the dead letter's own). The reach is that tenant's events and nothing else, so the scope the write policy
+                // was asked about, (store, database, tenant), is the whole of it (SEC1-fix4's rule, kept).
+                bool perTenant = resolved.Store.Options.Events.UseTenantPartitionedEvents;
+                if (perTenant)
                 {
-                    throw new InvalidOperationException(StreamCompactionRules.SkipNeedsOneSequence);
+                    if (!TenantSkipAvailable)
+                    {
+                        throw new InvalidOperationException(StreamCompactionRules.SkipNeedsOneSequence);
+                    }
+
+                    if (resolved.TenantId is null)
+                    {
+                        throw new InvalidOperationException(StreamCompactionRules.SkipNeedsTenant);
+                    }
                 }
 
                 await using (NpgsqlConnection connection = await OpenAsync(resolved, token).ConfigureAwait(false))
@@ -1648,11 +1670,66 @@ internal sealed partial class EventDataService : IEventDataService
                     }
                 }
 
+                if (perTenant)
+                {
+                    await MarkTenantEventAsSkippedAsync(resolved.Database, resolved.TenantId!, sequence, token).ConfigureAwait(false);
+
+                    return "marked as skipped in tenant " + resolved.TenantId;
+                }
+
                 await resolved.Database.MarkEventsAsSkipped([sequence], token).ConfigureAwait(false);
 
                 return "marked as skipped";
             },
             cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether this Marten skips one tenant's event (<see cref="RuntimeFeature.TenantEventSkipping" />, 9.51+) - asked of
+    /// this process's own runtime, so the probe answers for the assemblies actually loaded.
+    /// </summary>
+    private static bool TenantSkipAvailable => RuntimeFeature.TenantEventSkipping.IsAvailable(MartenRuntime.Current);
+
+    /// <summary>
+    /// Whether this process's JasperFx and Marten rewind one tenant's agents (<see cref="RuntimeFeature.TenantSubscriptionRewind" />,
+    /// 9.51+).
+    /// </summary>
+    private static bool TenantRewindAvailable => RuntimeFeature.TenantSubscriptionRewind.IsAvailable(MartenRuntime.Current);
+
+    /// <summary>
+    /// <c>IMartenDatabase.MarkEventsAsSkipped(tenantId, sequences, token)</c>, Marten 9.51's tenant overload, reached by
+    /// reflection because the floor the studio compiles against has no such member.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The one call of it, so the argument order is chosen once. Invoked through the interface's declaration, which
+    /// dispatches to <c>MartenDatabase</c>'s implementation - the probe has already said there is one rather than the
+    /// interface's throwing default - and a missing member is a refusal in the floor's words rather than a call that
+    /// fails half-way. Like the tenant-less overload it opens with <c>EnsureStorageExistsAsync(typeof(IEvent))</c>, and is
+    /// a capability-gated, audited write for the same reason; <c>StorageEnsuringCallTests</c> cannot see a reflected
+    /// call, and lists that among the shapes it does not see.
+    /// </para>
+    /// </remarks>
+    internal static Task MarkTenantEventAsSkippedAsync(IMartenDatabase database, string tenantId, long sequence, CancellationToken token)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+
+        if (RuntimeFeature.TenantSkipMethod() is not { } method)
+        {
+            throw new InvalidOperationException(StreamCompactionRules.SkipNeedsOneSequence);
+        }
+
+        try
+        {
+            return method.Invoke(database, [tenantId, new[] { sequence }, token]) as Task
+                ?? throw new InvalidOperationException("Marten's MarkEventsAsSkipped(tenantId, sequences) returned no task.");
+        }
+        catch (TargetInvocationException wrapped) when (wrapped.InnerException is { } inner)
+        {
+            ExceptionDispatchInfo.Capture(inner).Throw();
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -1677,19 +1754,23 @@ internal sealed partial class EventDataService : IEventDataService
                 // DeadLetterEvent, and a hidden type is refused - audited as refused - before any policy is asked of it.
                 RequireDeadLettersVisible(resolved);
 
-                // Then, before the whole-database question: under UseTenantPartitionedEvents a rewind has no floor that means one
-                // thing. The daemon's RewindSubscriptionAsync (JasperFxAsyncDaemon, read at JasperFx V2.74.0 and V2.87.1)
-                // stops every agent of the subscription - each tenant's, since the agents are distributed per tenant there
-                // (IEventStore.DistributesAgentsPerTenant) - has Marten write the floor into the store-global shards'
-                // progression rows only (RewindSubscriptionProgressAsync over Options.Projections.AllShards(), and deletes
-                // the projection's dead letters at or above the floor in every tenant, read at V9.39.0 and V9.50.2), then
-                // starts store-global agents, whose event loader has no tenant filter, from that floor: one tenant's event
-                // number applied to every tenant's events. The per-tenant overload IProjectionDaemon declares
-                // (jasperfx#407) throws for a tenant by default and the daemon does not override it at either version.
-                // Refused, and audited as failed; the page disables the button with the same sentence (SEC1-fix4).
+                // Then, before the whole-database question: under UseTenantPartitionedEvents a store-global rewind has no
+                // floor that means one thing. Below JasperFx 2.91 the daemon's RewindSubscriptionAsync (JasperFxAsyncDaemon,
+                // read at JasperFx V2.74.0 and V2.87.1) stops every agent of the subscription - each tenant's, since the
+                // agents are distributed per tenant there (IEventStore.DistributesAgentsPerTenant) - has Marten write the
+                // floor into the store-global shards' progression rows only (RewindSubscriptionProgressAsync over
+                // Options.Projections.AllShards(), and deletes the projection's dead letters at or above the floor in every
+                // tenant, read at V9.39.0 and V9.50.2), then starts store-global agents, whose event loader has no tenant
+                // filter, from that floor: one tenant's event number applied to every tenant's events. The per-tenant
+                // overload IProjectionDaemon declares (jasperfx#407) throws for a tenant by default, and no daemon below
+                // 2.91 overrides it. From JasperFx 2.91 (jasperfx#1025) the store-global form rewinds each tenant whose agent
+                // this daemon runs and refuses a floor above zero, while the per-tenant overload rewinds one tenant - which
+                // Marten 9.51 (#5700) is what makes work, by taking the tenant agent's identity. So the store-global form is
+                // refused here at every version (SEC1-fix4), and the per-tenant one is the only rewind offered on such a
+                // store (RewindTenantAsync).
                 if (resolved.Store.Options.Events.UseTenantPartitionedEvents)
                 {
-                    throw new InvalidOperationException(StreamCompactionRules.RewindNeedsOneSequence);
+                    return await RewindTenantAsync(resolved, projectionName, eventSequence, token).ConfigureAwait(false);
                 }
 
                 // Then, what the rewind reaches, which is not the tenant in the scope. Marten 9.31's
@@ -1768,7 +1849,8 @@ internal sealed partial class EventDataService : IEventDataService
 
                 long floor = RewindFloor(eventSequence);
 
-                await RewindToFloorAsync(daemon, projectionName, floor, token).ConfigureAwait(false);
+                await RewindToFloorAsync(
+                    daemon, projectionName, floor, logger, resolved.Registration.Key, resolved.Database.Id.Identity, token).ConfigureAwait(false);
 
                 return floor == 0
                     ? "progression row removed, so the subscription replays from the first event"
@@ -1776,6 +1858,275 @@ internal sealed partial class EventDataService : IEventDataService
                         + $"#{eventSequence.ToString(CultureInfo.InvariantCulture)} and everything after it is re-applied";
             },
             cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Rewind subscription on a store that numbers its events per tenant (<c>UseTenantPartitionedEvents</c>): one
+    /// tenant's agents of the projection, or a refusal.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only from Marten 9.51 with JasperFx 2.91</b> (<see cref="RuntimeFeature.TenantSubscriptionRewind" />). There the
+    /// daemon's per-tenant <c>RewindSubscriptionAsync(name, tenantId, token, floor)</c> (jasperfx#1025) stops that
+    /// tenant's agents of the subscription and no others, has Marten rewrite each of that tenant's shard rows through the
+    /// tenant agent's own identity, <c>{Name}:{ShardKey}:{tenant}</c> - which Marten 9.51 resolves (#5700,
+    /// <c>findTenantShard</c>) where 9.50 threw "Unknown subscription name" - and restarts them against that tenant's own
+    /// high-water mark. Marten deletes only the dead letters with that projection, that shard key, that tenant and a
+    /// sequence at or above the floor (<c>DocumentStore.EventStore.cs</c> at v9.51.0). Below either, the floor's refusal
+    /// (SEC1-fix4) stands.
+    /// </para>
+    /// <para>
+    /// <b>Reach is the tenant.</b> The progression rows, the dead letters and the agents it touches are all that
+    /// tenant's, so the scope the write policy was asked about - (store, database, tenant) - is the whole of it, and the
+    /// whole-database question the store-global rewind needs (<see cref="DatabaseReachAuthorization" />, D27's "reach,
+    /// not scope") is not asked. That is the one exception to that list, and it holds only for this overload.
+    /// </para>
+    /// <para>
+    /// <b>Only for a tenant whose agent this process runs.</b> The per-tenant overload starts the tenant's agents in the
+    /// daemon it is asked of whether or not that daemon ran them - so under HotCold on the cold node, or a host that
+    /// distributes agents across nodes (Wolverine), it would run a second agent beside the one on the node that has it.
+    /// So the daemon here has to hold an agent of that projection for that tenant (<c>CurrentAgents()</c>), and the call
+    /// is made with that agent's own projection name and tenant id: JasperFx stops a tenant's agents by an ordinal
+    /// comparison of both, and a name in another case would leave the running agent going beside the new one. That
+    /// agent's identity must also read back, through <c>ShardName.TryParse</c>, as the same projection, shard and tenant
+    /// (<see cref="TenantRewind.RoundTrips" />): Marten 9.51 resolves the tenant shard by parsing the identity the daemon
+    /// hands it, and a tenant id with a <c>:</c> in it does not parse - by then the daemon has hard-stopped the tenant's
+    /// agents, and Marten answers "Unknown subscription name", so such a tenant is refused before the daemon is asked.
+    /// </para>
+    /// <para>
+    /// <b>The window that remains.</b> The agent check is a snapshot of <c>CurrentAgents()</c>, and nothing awaits
+    /// between it and the call (the user is looked up before it). But the window is the whole daemon call, not that gap:
+    /// JasperFx stops the tenant's agents, has Marten rewrite their progression rows, polls the tenant's high-water mark
+    /// and only then restarts them. Under HotCold the node can lose leadership at any point in that: its coordinator
+    /// stops every agent it runs, and the rewind, which takes no leadership lock, still restarts the tenant's agents here
+    /// at its end - beside the agents the new leader starts. The studio cannot close that window, only keep it to the
+    /// call itself; it is a known limit (<c>docs/security.md</c>). The extra agents last until this node's next
+    /// leadership poll, which stops every agent a node without the lock is running (<c>ProjectionCoordinatorBase</c>,
+    /// read at JasperFx <c>v2.91.0</c>) - at most one <c>LeadershipPollingTime</c> after they started.
+    /// </para>
+    /// </remarks>
+    private async Task<string> RewindTenantAsync(
+        ResolvedScope resolved,
+        string projectionName,
+        long eventSequence,
+        CancellationToken token)
+    {
+        if (!TenantRewindAvailable)
+        {
+            throw new InvalidOperationException(StreamCompactionRules.RewindNeedsOneSequence);
+        }
+
+        if (resolved.TenantId is not { } tenantId)
+        {
+            throw new InvalidOperationException(StreamCompactionRules.RewindNeedsTenant);
+        }
+
+        // A tenant id whose agent identity does not read back as that tenant's - one with a ':' in it - cannot be
+        // rewound: JasperFx hard-stops the tenant's agents first and Marten then fails to parse the identity it is
+        // handed ("Unknown subscription name"), leaving them stopped. Refused before anything is asked of the daemon.
+        if (!TenantRewind.IsAddressable(tenantId))
+        {
+            throw new InvalidOperationException(StreamCompactionRules.RewindTenantNotAddressable(tenantId));
+        }
+
+        if (!HasAsyncProjection(resolved.Store.Options.Events.Projections(), projectionName))
+        {
+            throw UnknownAsyncProjection(projectionName);
+        }
+
+        // The event the rewind starts from is this tenant's - the dead letter's sequence is a number in each tenant's
+        // own sequence, and a visitor scoped to acme is shown to be able to see acme's #N before it is used (hard rule
+        // 15). The refusal says nothing about whose event it is (D5).
+        await using (NpgsqlConnection connection = await OpenAsync(resolved, token).ConfigureAwait(false))
+        {
+            EventTableInfo table = await DescribeTablesAsync(resolved, connection, token).ConfigureAwait(false);
+
+            if (table.HasTenantId)
+            {
+                await using NpgsqlCommand lookup = EventQueryBuilder.BuildEventBySequence(table, eventSequence, tenantId);
+
+                lookup.Connection = connection;
+                lookup.CommandTimeout = CommandTimeoutSeconds;
+
+                List<EventRow> found = await ReadEventsAsync(lookup, table, token).ConfigureAwait(false);
+
+                if (found.Count == 0)
+                {
+                    throw new StudioNotAuthorizedException(resolved.Scope);
+                }
+            }
+        }
+
+        DaemonHosting hosting = await daemons.ForScopeAsync(resolved, token).ConfigureAwait(false);
+        if (!hosting.TryGetDaemon(out IProjectionDaemon daemon))
+        {
+            throw new StudioDaemonNotHostedException(hosting.Explanation);
+        }
+
+        if (!ImplementsTenantRewind(daemon))
+        {
+            throw new InvalidOperationException(
+                "The async daemon this process hosts does not rewind one tenant's agents (IProjectionDaemon.RewindSubscriptionAsync "
+                + "with a tenant), so Marten Studio does not rewind subscriptions on this store.");
+        }
+
+        // The user first, so that nothing awaits between the agent check and the call: the check is a snapshot of the
+        // daemon, and the window in which it can go stale (the remarks' HotCold case) is as short as this code makes it.
+        string user = await authorization.UserNameAsync().ConfigureAwait(false);
+
+        if (TenantAgentOf(daemon, projectionName, tenantId) is not { } agent)
+        {
+            throw new InvalidOperationException(StreamCompactionRules.RewindNeedsTenantAgentHere(projectionName, tenantId));
+        }
+
+        logger.DaemonControlRequested(
+            user,
+            RewindSubscriptionAction,
+            agent.Name + " (tenant " + agent.TenantId + ")",
+            resolved.Registration.Key,
+            resolved.Database.Id.Identity);
+
+        long floor = RewindFloor(eventSequence);
+
+        await RewindTenantToFloorAsync(
+            daemon, agent.Name, agent.TenantId!, floor, logger, resolved.Registration.Key, resolved.Database.Id.Identity, token).ConfigureAwait(false);
+
+        string tenant = " in tenant " + agent.TenantId;
+
+        return floor == 0
+            ? "progression rows removed" + tenant + ", so the subscription replays that tenant's events from the first"
+            : $"progression set to #{floor.ToString(CultureInfo.InvariantCulture)}{tenant}, so that tenant's event "
+                + $"#{eventSequence.ToString(CultureInfo.InvariantCulture)} and everything after it is re-applied";
+    }
+
+    /// <summary>
+    /// The shard name of the agent <paramref name="daemon" /> runs for <paramref name="projectionName" /> in
+    /// <paramref name="tenantId" />, or <see langword="null" /> when it runs none - the projection name compared as
+    /// Marten compares it (ignoring case), the tenant ordinally - and only one whose identity reads back as itself
+    /// (<see cref="TenantRewind.RoundTrips" />), because that identity is what Marten parses to find the tenant's shard.
+    /// </summary>
+    internal static ShardName? TenantAgentOf(IProjectionDaemon daemon, string projectionName, string tenantId)
+    {
+        ArgumentNullException.ThrowIfNull(daemon);
+
+        foreach (ISubscriptionAgent agent in daemon.CurrentAgents())
+        {
+            if (agent.Name is { TenantId: { } tenant } name
+                && string.Equals(tenant, tenantId, StringComparison.Ordinal)
+                && string.Equals(name.Name, projectionName, StringComparison.OrdinalIgnoreCase)
+                && TenantRewind.RoundTrips(name))
+            {
+                return name;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="daemon" /> itself implements the per-tenant <c>RewindSubscriptionAsync</c>, rather than
+    /// inheriting <c>IProjectionDaemon</c>'s default, which throws for a tenant - asked of the daemon actually handed over,
+    /// since a coordinator may hand over something other than Marten's own.
+    /// </summary>
+    internal static bool ImplementsTenantRewind(IProjectionDaemon daemon)
+    {
+        ArgumentNullException.ThrowIfNull(daemon);
+
+        return ImplementsTenantRewind(daemon.GetType());
+    }
+
+    /// <summary>The same question of a daemon type: whether it maps the per-tenant rewind to a method of a class.</summary>
+    internal static bool ImplementsTenantRewind(Type daemonType)
+    {
+        ArgumentNullException.ThrowIfNull(daemonType);
+
+        if (!typeof(IProjectionDaemon).IsAssignableFrom(daemonType))
+        {
+            return false;
+        }
+
+        MethodInfo? declared = typeof(IProjectionDaemon).GetMethod(
+            nameof(IProjectionDaemon.RewindSubscriptionAsync),
+            BindingFlags.Public | BindingFlags.Instance,
+            [typeof(string), typeof(string), typeof(CancellationToken), typeof(long?), typeof(DateTimeOffset?)]);
+
+        if (declared is null)
+        {
+            return false;
+        }
+
+        InterfaceMapping map = daemonType.GetInterfaceMap(typeof(IProjectionDaemon));
+        int index = Array.IndexOf(map.InterfaceMethods, declared);
+
+        return index >= 0 && map.TargetMethods[index].DeclaringType is { IsInterface: false };
+    }
+
+    /// <summary>
+    /// The one call that rewinds one tenant's agents, and the only place its argument order is chosen.
+    /// </summary>
+    /// <remarks>
+    /// <c>RewindSubscriptionAsync(string subscriptionName, string? tenantId, CancellationToken token, long? sequenceFloor,
+    /// DateTimeOffset? timestamp)</c> - the token <em>third</em>, between the tenant and the floor (declared on
+    /// <c>IProjectionDaemon</c> since at least JasperFx 2.74.0, implemented from 2.91.0). A floor of zero is Marten's
+    /// "delete the progression row". A refusal as an unknown subscription is logged whole (event 9320) and rethrown
+    /// without Marten's words (<see cref="ListsSubscriptions" />).
+    /// </remarks>
+    internal static async Task RewindTenantToFloorAsync(
+        IProjectionDaemon daemon,
+        string projectionName,
+        string tenantId,
+        long sequenceFloor,
+        ILogger logger,
+        string storeKey,
+        string databaseId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(daemon);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        try
+        {
+            await daemon.RewindSubscriptionAsync(projectionName, tenantId, cancellationToken, sequenceFloor).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (ListsSubscriptions(exception))
+        {
+            logger.SubscriptionRewindRefused(exception, projectionName, tenantId, storeKey, databaseId);
+            throw new InvalidOperationException(StreamCompactionRules.SubscriptionNotRecognised(projectionName, tenantId));
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="exception" />, or one it wraps, is Marten's or JasperFx's "Unknown subscription name 'x'.
+    /// Available options are A, B, C" - every shard the store has, joined into the message.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// That message would reach the audit ring and the page through the failure's own text, and tell whoever asked the
+    /// store's whole projection set (D5). The studio refuses an unknown name before either is asked, so this is the belt to
+    /// that: the two rewinds replace it with a sentence naming only what the caller supplied, and keep none of it - not
+    /// even as an inner exception. Marten's words go to the host's own log instead (event 9320), with the exception.
+    /// </para>
+    /// <para>
+    /// Every wrapped exception is walked: an <see cref="AggregateException" />'s <see cref="AggregateException.InnerExceptions" />
+    /// each, not only its first, since its own message carries its inner exceptions' messages but not theirs in turn.
+    /// </para>
+    /// </remarks>
+    internal static bool ListsSubscriptions(Exception? exception)
+    {
+        if (exception is null)
+        {
+            return false;
+        }
+
+        if (exception.Message.Contains("Available options", StringComparison.OrdinalIgnoreCase)
+            || exception.Message.Contains("Unknown subscription name", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return exception is AggregateException aggregate
+            ? aggregate.InnerExceptions.Any(ListsSubscriptions)
+            : ListsSubscriptions(exception.InnerException);
     }
 
     /// <summary>
@@ -1861,20 +2212,38 @@ internal sealed partial class EventDataService : IEventDataService
     /// both of the interesting arguments are optional and nullable (verified against JasperFx.Events
     /// 2.69.3). A call written in the usual order would compile and silently mean
     /// <c>sequenceFloor: 0</c>, which is a full replay of the projection rather than a rewind to one
-    /// event. There is also a five-argument overload that takes a tenant id; its default implementation
-    /// throws for a non-null tenant, and projection progression is per shard rather than per tenant, so
-    /// the studio uses the store-global one, authorizes it for the database as a whole
-    /// (<see cref="DatabaseReachAuthorization.RequireWholeDatabaseAsync" />), and the dialog says so.
+    /// event. There is also a five-argument overload that takes a tenant id; below JasperFx 2.91 its default
+    /// implementation throws for a non-null tenant, and outside <c>UseTenantPartitionedEvents</c> projection
+    /// progression is per shard rather than per tenant, so on such a store the studio uses this store-global one,
+    /// authorizes it for the database as a whole (<see cref="DatabaseReachAuthorization.RequireWholeDatabaseAsync" />),
+    /// and the dialog says so. Under per-tenant partitioning the tenant overload is the only rewind
+    /// (<see cref="RewindTenantToFloorAsync" />).
     /// </remarks>
-    internal static Task RewindToFloorAsync(
+    internal static async Task RewindToFloorAsync(
         IProjectionDaemon daemon,
         string projectionName,
         long sequenceFloor,
+        ILogger logger,
+        string storeKey,
+        string databaseId,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(daemon);
-        return daemon.RewindSubscriptionAsync(projectionName, cancellationToken, sequenceFloor);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        try
+        {
+            await daemon.RewindSubscriptionAsync(projectionName, cancellationToken, sequenceFloor).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (ListsSubscriptions(exception))
+        {
+            logger.SubscriptionRewindRefused(exception, projectionName, AllTenants, storeKey, databaseId);
+            throw new InvalidOperationException(StreamCompactionRules.SubscriptionNotRecognised(projectionName, tenantId: null));
+        }
     }
+
+    /// <summary>What event 9320 names as the tenant of a store-global rewind.</summary>
+    private const string AllTenants = "(all tenants)";
 
     /// <summary>
     /// The shape of every mutating call: capability, then scope with the write policy, then the

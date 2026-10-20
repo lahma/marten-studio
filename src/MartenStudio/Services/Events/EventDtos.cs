@@ -81,6 +81,19 @@ internal sealed record EventStoreShape
     /// </summary>
     public bool PerTenantSequences { get; init; }
 
+    /// <summary>
+    /// Whether, on such a store, Skip event marks one tenant's event of a number skipped: Marten 9.51's tenant overload of
+    /// <c>MarkEventsAsSkipped</c> (<c>RuntimeFeature.TenantEventSkipping</c>). Below it the studio refuses Skip there.
+    /// </summary>
+    public bool TenantSkipping { get; init; }
+
+    /// <summary>
+    /// Whether, on such a store, Rewind subscription can rewind one tenant's agents of a projection: JasperFx 2.91's
+    /// per-tenant daemon rewind and Marten 9.51's tenant shard identities (<c>RuntimeFeature.TenantSubscriptionRewind</c>).
+    /// Below them the studio refuses Rewind there; with them it is offered for a tenant whose agent this process runs.
+    /// </summary>
+    public bool TenantRewind { get; init; }
+
     /// <summary>Whether events can be archived.</summary>
     public bool HasIsArchived { get; init; }
 

@@ -13,8 +13,9 @@ namespace MartenStudio.Tests.Marten;
 /// <b>The same test is right at the floor and at the latest.</b> At the floor - Marten 9.39.0, which brings
 /// JasperFx and JasperFx.Events 2.74.0 (Marten's own <c>Directory.Packages.props</c> at <c>V9.39.0</c>) - every
 /// probe in the table must find nothing: the earliest of them is Marten 9.41.0's tenant compaction and
-/// JasperFx.Events 2.76.0's shard start reason. At the latest tested, 9.50.2 (JasperFx 2.87.1), every one but
-/// the 2.89 classifier must find its member. A probe that silently finds nothing at the latest - a renamed
+/// JasperFx.Events 2.76.0's shard start reason. At the latest tested, 9.51.0 (JasperFx 2.91.0), every one must
+/// find its member - the 2.89 classifier and the 9.50.3 offline enumeration included. A probe that silently finds
+/// nothing at the latest - a renamed
 /// member, a type that moved assembly, a namespace typo - is precisely the failure that light-up would
 /// otherwise hide forever, because "absent" is what the studio does without. So the general assertion is
 /// "present iff the version says so", over the table itself, and a feature added to the table is covered the
@@ -23,7 +24,7 @@ namespace MartenStudio.Tests.Marten;
 /// entry whose introducing version is itself wrong cannot pass by being consistently wrong.
 /// </para>
 /// <para>
-/// Run it at the latest with <c>-p:MartenStudioMartenVersion=9.50.2</c>, or Fallout's
+/// Run it at the latest with <c>-p:MartenStudioMartenVersion=9.51.0</c>, or Fallout's
 /// <c>--marten-version latest</c>.
 /// </para>
 /// <para>
@@ -130,13 +131,25 @@ public class MartenRuntimeProbeTests
         }
         else if (running == latest)
         {
-            latest.Should().Be(new Version(9, 50, 2), "the latest tested moved: re-read what the table says there, and pin it here");
+            latest.Should().Be(new Version(9, 51, 0), "the latest tested moved: re-read what the table says there, and pin it here");
 
-            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFx).Should().Be(new Version(2, 87, 1));
-            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFxEvents).Should().Be(new Version(2, 87, 1));
+            // Marten 9.51.0 brings JasperFx and JasperFx.Events 2.91.0 (its Directory.Packages.props at v9.51.0).
+            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFx).Should().Be(new Version(2, 91, 0));
+            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFxEvents).Should().Be(new Version(2, 91, 0));
             available.Should().Equal(
-                [.. RuntimeFeature.All.Select(static x => x.Name).Where(static x => x != nameof(RuntimeFeature.TransientFailureClassifier)).Order(StringComparer.Ordinal)],
-                "Marten 9.50.2 with JasperFx 2.87.1 has everything but JasperFx.Events 2.89.0's classifier");
+                [.. RuntimeFeature.All.Select(static x => x.Name).Order(StringComparer.Ordinal)],
+                "Marten 9.51.0 with JasperFx 2.91.0 has everything in the table");
+
+            // Named, so that a feature added to the table later cannot make this pass by being the one that moved.
+            available.Should().Contain(
+            [
+                nameof(RuntimeFeature.TransientFailureClassifier),
+                nameof(RuntimeFeature.OfflineSchemaEnumeration),
+                nameof(RuntimeFeature.TenantEventSkipping),
+                nameof(RuntimeFeature.TenantSubscriptionRewind),
+                nameof(RuntimeFeature.TaggedStreamCompaction),
+                nameof(RuntimeFeature.HighWaterProgressStall),
+            ]);
         }
         else
         {
@@ -156,7 +169,7 @@ public class MartenRuntimeProbeTests
         {
             if (feature.FirstMarten is { } marten)
             {
-                feature.Requirement.Should().Be("Marten " + marten.ToString(2) + "+");
+                feature.Requirement.Should().Be("Marten " + (marten.Build > 0 ? marten.ToString(3) : marten.ToString(2)) + "+");
 
                 if (MartenRuntime.Current.VersionOf(RuntimePackage.Marten) is { } running && running >= marten)
                 {
@@ -174,6 +187,50 @@ public class MartenRuntimeProbeTests
                 feature.Requirement.Should().Contain("in no Marten release yet");
             }
         }
+    }
+
+    /// <summary>
+    /// A requirement names the patch when the first release that has the feature is a patch: 9.50.0 to 9.50.2 have no
+    /// classifier and no offline enumeration, so "Marten 9.50+" would tell a host on 9.50.2 it has them.
+    /// </summary>
+    [Fact]
+    public void A_requirement_prints_the_patch_of_a_feature_a_patch_release_brings()
+    {
+        RuntimeFeature.TransientFailureClassifier.Requirement.Should().Be("Marten 9.50.3+");
+        RuntimeFeature.OfflineSchemaEnumeration.Requirement.Should().Be("Marten 9.50.3+");
+
+        RuntimeFeature.DynamicLinqQuery.Requirement.Should().Be("Marten 9.48+", "a .0 release is still printed in two parts");
+        RuntimeFeature.TenantEventSkipping.Requirement.Should().Be("Marten 9.51+");
+
+        RuntimeFeature.Short(new Version(2, 89, 0)).Should().Be("2.89");
+        RuntimeFeature.Short(new Version(9, 50, 3)).Should().Be("9.50.3");
+        RuntimeFeature.Short(new Version(9, 51)).Should().Be("9.51", "a version with no patch at all is not given one");
+    }
+
+    /// <summary>
+    /// A host on 9.50.2 is told it lacks the 9.50.3 features, and one on 9.50.3 that it has them - by a made-up runtime,
+    /// so the answer is the version comparison whatever this run resolved.
+    /// </summary>
+    [Fact]
+    public void A_patch_release_feature_is_absent_one_patch_below_and_present_at_it()
+    {
+        MartenRuntime below = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string>
+        {
+            [RuntimePackage.Marten] = "9.50.2",
+            [RuntimePackage.JasperFxEvents] = "2.87.1",
+        });
+
+        MartenRuntime at = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string>
+        {
+            [RuntimePackage.Marten] = "9.50.3",
+            [RuntimePackage.JasperFxEvents] = "2.90.1",
+        });
+
+        RuntimeFeature.OfflineSchemaEnumeration.IsAvailable(below).Should().BeFalse();
+        RuntimeFeature.OfflineSchemaEnumeration.IsAvailable(at).Should().BeTrue();
+        RuntimeFeature.TransientFailureClassifier.IsAvailable(below).Should().BeFalse();
+        RuntimeFeature.TransientFailureClassifier.IsAvailable(at).Should().BeTrue();
+        RuntimeFeature.TenantEventSkipping.IsAvailable(at).Should().BeFalse("9.50.3 has no tenant overload of MarkEventsAsSkipped");
     }
 
     private static string PackagesProperty(string name) =>

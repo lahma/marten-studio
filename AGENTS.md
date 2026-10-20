@@ -118,26 +118,31 @@ model, the phased delivery plan — lives in the approved plan at
     *apply migrations*: `IMartenDatabase.AllSchemaNames()` is
     `AllObjects().Select(x => x.Identifier.Schema).Distinct()`, `AllObjects()` is
     `BuildFeatureSchemas().SelectMany(x => x.Objects)`, and Marten's `BuildFeatureSchemas()` is
-    `StorageFeatures.AllActiveFeatures(this)` — which reaches `database.Sequences` whenever any document
-    type has a numeric or HiLo id. That property is a `Lazy<SequenceFactory>` whose factory calls
+    `StorageFeatures.AllActiveFeatures(this)` — which below Marten 9.50.3 reaches `database.Sequences`
+    whenever any document type has a numeric or HiLo id. That property is a `Lazy<SequenceFactory>` whose factory calls
     `generateOrUpdateFeature(...)` and blocks on it, so it runs `Migrator.ApplyAllAsync` under the
-    database's own `AutoCreate`, the default being `CreateOrUpdate`. **A single `AllSchemaNames()` call on
-    an empty schema creates `mt_hilo` and `mt_get_next_hi`** — proven live by the P7 review, 2026-09-14,
-    which is a studio that wrote DDL because somebody opened a tab. The last two are merely slow and
-    connection-hungry. **Nor does a read path run a Marten LINQ terminal** (`ToListAsync`, `CountAsync`,
+    database's own `AutoCreate`, the default being `CreateOrUpdate`. **Below 9.50.3 a single
+    `AllSchemaNames()` call on an empty schema creates `mt_hilo` and `mt_get_next_hi`** — proven live by
+    the P7 review, 2026-09-14, which is a studio that wrote DDL because somebody opened a tab. From
+    9.50.3 (#5665) `AllActiveFeatures` yields `database.SequenceFeature`, which is described and never
+    applied, so the enumeration is offline; the rule stands at every version because the floor has the
+    hazard, and `SchemaNoDdlLiveTests` pins it at the floor and its absence from 9.50.3
+    (`RuntimeFeature.OfflineSchemaEnumeration`). The last two are merely slow and connection-hungry, and
+    still connect. **Nor does a read path run a Marten LINQ terminal** (`ToListAsync`, `CountAsync`,
     `FirstOrDefaultAsync` and the rest), `ToCommand`, `ExplainAsync` or `ToPreviewCommand` - nor `LoadAsync`,
     `LoadManyAsync` or a `session.Events` read such as `FetchStreamAsync` or `AggregateStreamAsync` - because each
-    calls `EnsureStorageExistsAsync` for its type (read at 9.39.0 and 9.50.2), which under the database's own
-    `AutoCreate` creates or migrates that storage, and through `AllObjects()` `mt_hilo`, the first time the
+    calls `EnsureStorageExistsAsync` for its type (read at 9.39.0, 9.50.2 and 9.51.0), which under the database's
+    own `AutoCreate` creates or migrates that storage, and below 9.50.3 through `AllObjects()` `mt_hilo`, the first time the
     process asks; reads use the studio's own SQL, and `StorageEnsuringCallTests` allows the remaining calls only
     to the capability-gated writes and to F7's LINQ composition, which `MartenLinqCommand` builds into SQL
     without it. Schema names, declared indexes, managed tables and installed functions all come
     from `SchemaDeclarationReader`, which reads `IReadOnlyStoreOptions`, `IDocumentType` and the event
     store's own feature schema and touches no connection; `CheckAsync`, `PreviewAsync` and `DdlAsync` are
-    behind buttons and say on the button what they may create. Everything schema-related is **per
+    behind buttons and say on the button what they may create on the Marten the host runs. Everything schema-related is **per
     database, never per store**: the same four members exist on `IMartenDatabase` (through
     `Weasel.Core.Migrations.IDatabase`) and answer only for the database the visitor resolved, whereas
-    `store.Storage`'s apply reaches *every* database a `DynamicMultiple` store knows about.
+    `store.Storage`'s apply reaches *every* database a `DynamicMultiple` store knows about (and below 9.51
+    dropped its `AutoCreate` override, #5693).
     Enumerating a dynamic tenancy's databases is not read-only either — D27's known limit, whose call sites
     `TenancyEnumerationCallTests` fences.
     And the wording half of the rule, because it was got wrong once: **`AutoCreate.CreateOrUpdate` is not
@@ -150,7 +155,10 @@ model, the phased delivery plan — lives in the approved plan at
     something'." No screen, comment or doc may tell a person that an apply leaves their hand-made index
     alone. Apply runs under `CreateOrUpdate` and never `AutoCreate.All`, the preview is rendered under the
     same mode so what is read is what is run, `MigrationRisk` lists the destructive statements in the
-    dialog before the typed confirmation, and the typed string travels to the service rather than being
+    dialog before the typed confirmation - and, apart from them, notes that remove nothing: an index built
+    without `CONCURRENTLY` on an existing table, and Weasel 9.46's partition-index resume, whose
+    `DROP INDEX CONCURRENTLY IF EXISTS` of an unattached child, rebuilt and attached at once, is not
+    counted as a drop - and the typed string travels to the service rather than being
     re-supplied by the page. `Check`, `Preview` and `DDL` print the whole database — every tenant's
     partition by name, every document type's table — so they answer only a visitor the store policy
     allows for the database with `TenantId = null`, and, while any document type is hidden, one past the
@@ -474,13 +482,24 @@ rebuild, a high-water restart, a store-global agent, cancelling a rebuild, the d
 subscription", a schema apply — is authorized as `(store, database, null)` unless the database is
 exclusively the selected tenant's (never on a sharded tenancy, which pools tenants by design); the SQL
 console, the Mode A subquery lift and `EXPLAIN` are always asked with `TenantId = null`, because nothing
-narrows a typed statement to a tenant. A tenant's database is found without asking a dynamic tenancy for a
+narrows a typed statement to a tenant. The one exception is the dead-letter rewind on a store with
+`UseTenantPartitionedEvents`, from Marten 9.51 with JasperFx 2.91 (`RuntimeFeature.TenantSubscriptionRewind`):
+the daemon's per-tenant overload stops, rewinds and restarts only that tenant's agents, and Marten deletes
+only that tenant's dead letters of the shard (#5700, jasperfx#1025), so it is authorized as
+`(store, database, tenant)` - and made only for an agent the daemon in this process runs, with that agent's
+own names, because the overload starts the tenant's agents wherever it is asked. On such a store the
+store-global rewind is never made, and Skip event is the tenant overload of `MarkEventsAsSkipped` (#5698),
+asked about the tenant as before. Below either, both stay refused (SEC1-fix4). A tenant's database is found without asking a dynamic tenancy for a
 tenant it does not have (`DatabaseReach.FindTenantDatabaseAsync`). Enumerating a dynamic tenancy's
-databases is not read-only, at any Marten through 9.50.2: `AllDatabases()`, `Tenancy.DescribeDatabasesAsync()`
+databases is not read-only, at any Marten through 9.51.0: `AllDatabases()`, `Tenancy.DescribeDatabasesAsync()`
 and 9.50.1's `IEventStore.TryDescribeDatabasesAsync()` all run `Tenancy.BuildDatabases()`. Once per store
-instance, that applies a master-table or sharded tenancy's lookup table under the store's
-`AutoCreateSchemaObjects`. That includes `All`, which drops and recreates a table it cannot alter, and `None`
-is promoted to `CreateOrUpdate` when the tenancy's own `AutoCreate` is set to anything but `None`. It also
+instance, that applies a master-table or sharded tenancy's lookup table - gated, and from 9.51 (#5692) run,
+under the tenancy's own `AutoCreate` when it sets one and the store's `AutoCreateSchemaObjects` otherwise;
+below 9.51 always run under the store's (`maybeApplyChanges` at `V9.50.2` and `v9.51.0`). So a tenancy that
+sets none applies under the store's mode at every version, `All` included, which drops and recreates a table
+it cannot alter; and below 9.51 a store's `None` is promoted to `CreateOrUpdate` when the tenancy's own
+`AutoCreate` is set to anything but `None`, where from 9.51 the tenancy's own mode runs instead. 9.51's
+`ShardedTenancy.FindOrCreateDatabase` also builds a pooled database id on a cache miss (#5702). It also
 upserts the tenancy's seed rows. On a single-server tenancy it creates every configured database that does
 not exist yet, under no `AutoCreate` at all. The studio enumerates on the first navigation, so in a process that runs no daemon of its own it can be
 that first caller; a host whose daemon runs in-process, or that applies on startup, has always enumerated
@@ -540,7 +559,7 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 
 | Where | Package | Version | Why it is here |
 |---|---|---|---|
-| `src/MartenStudio` | `Marten` | `9.39.0` (latest tested `9.50.2`) | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. 9.39.0 is a **security** floor: it fixes GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5, and the code itself still needs nothing above 9.31.0 (bisected 2026-09-19; see *Package budget changes*, 2026-10-15). Both suites also run at a pinned latest-tested version, `MartenStudioMartenLatest`; the package is packed only at the floor. JasperFx / JasperFx.Events 2.74.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.33.0 and Npgsql 9.0.4 arrive transitively at the floor. The studio's own compilation drops the JasperFx source generator Marten bundles (`MartenStudio.csproj`). |
+| `src/MartenStudio` | `Marten` | `9.39.0` (latest tested `9.51.0`) | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. 9.39.0 is a **security** floor: it fixes GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5, and the code itself still needs nothing above 9.31.0 (bisected 2026-09-19; see *Package budget changes*, 2026-10-15). Both suites also run at a pinned latest-tested version, `MartenStudioMartenLatest`; the package is packed only at the floor. JasperFx / JasperFx.Events 2.74.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.33.0 and Npgsql 9.0.4 arrive transitively at the floor. The studio's own compilation drops the JasperFx source generator Marten bundles (`MartenStudio.csproj`). |
 | `src/MartenStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. |
 | `samples/`, `tests/…Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres, and the container the integration suite runs against. |
 | both test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
@@ -747,6 +766,92 @@ value, *or* when a published advisory makes restore at the floor fail (`NU1901`�
 `TreatWarningsAsErrors`) — and say here which. Bump `MartenStudioMartenLatest` when a newer stable 9.x
 ships, in its own pull request, with both suites green at it and every difference recorded.
 
+**2026-10-20 — the latest-tested Marten moves from `9.50.2` to `9.51.0`; the floor stays at `9.39.0`.** Marten 9.51.0
+was released 2026-10-19. Its tag is `v9.51.0`, with a lower-case `v` (every earlier tag is upper-case), and it contains
+all of 9.50.3 (2026-10-15). Nothing in the studio needs it, so the floor and its reasons are unchanged. It does bring
+what the studio refused without, and those light up at run time behind probes in `RuntimeFeature` (D28's pattern), each
+pinned at both ends by `MartenRuntimeProbeTests`: Skip event and Rewind subscription for one tenant under
+`UseTenantPartitionedEvents`, compaction of a stream whose events carry DCB tags, and the Schema screen's wording of
+what its buttons may create.
+
+The gates were run at both ends:
+
+- `dotnet restore marten-studio.slnx -p:MartenStudioMartenVersion=9.51.0` with `TreatWarningsAsErrors`: zero NU
+  warnings, so no `NU1901`–`NU1904` for anything in the graph.
+- `dotnet build marten-studio.slnx` at 9.39.0 and at 9.51.0: 0 warnings at both.
+- The fast suite at both: 5 987 tests; 5 873 passed with 114 version-gated skips at the floor (every one a LINQ-mode
+  test, which needs Marten 9.48), 5 986 passed with 1 skip at 9.51.0 (its mirror, the LINQ-mode test of a Marten older
+  than 9.48).
+- Every live class under `Events`, `Schema` and `Query`, with `DaemonHealthLiveTests`, `EventHealthSweepLiveTests` and
+  `EnumerationAppliesLiveTests`, at both, with `MARTENSTUDIO_PG_REUSE=false`.
+- `PublicApiTest` passes at both against an untouched baseline, and so does `JasperFxSourceGeneratorTests`. At 9.51.0
+  (JasperFx 2.91.0) the generator, when allowed to run, still writes only its marker for `MartenStudio.dll` (measured
+  with the removal target redefined empty and `EmitCompilerGeneratedFiles` on).
+
+The transitive graph at 9.51.0, compared with 9.50.2's in `project.assets.json`:
+
+- JasperFx / JasperFx.Events **2.91.0** (from 2.87.1); Weasel.Core / Weasel.Postgresql / Weasel.Storage **9.46.0**
+  (from 9.45.0).
+- Unchanged: Npgsql / Npgsql.NetTopologySuite 9.0.4, Patched.DistributedLock.Core 1.0.11 /
+  Patched.DistributedLock.Postgres 1.3.3, System.Linq.Dynamic.Core 1.7.4, Polly.Core 8.6.5, FastExpressionCompiler
+  5.4.1, ImTools 4.0.0, Spectre.Console / Spectre.Console.Ansi 0.55.0, Microsoft.Bcl.TimeProvider 10.0.0,
+  Microsoft.IO.RecyclableMemoryStream 3.0.1.
+- **No package is new**: the two resolved lists differ in those five version moves and nothing else.
+
+Behavioural differences between 9.50.2 and 9.51.0, read from the source at `V9.50.2`, `V9.50.3` and `v9.51.0`, JasperFx
+`V2.87.1` to `v2.91.0` and Weasel `9.46.0`, and what the studio does with each:
+
+- **`IMartenDatabase.MarkEventsAsSkipped(tenantId, sequences)`** (#5698) adds `and tenant_id = :tenant_id` on a
+  conjoined event store, and the tenant-less overload now refuses under `UseTenantPartitionedEvents`. The studio calls
+  the tenant overload there, by reflection because the floor has no such member, for the scope's tenant and after the
+  same tenant proof as before. `TenantEventSkipping` asks for Marten's implementation, not the throwing interface
+  default.
+- **Rewind per tenant** (#5700, jasperfx#1025). The daemon's per-tenant `RewindSubscriptionAsync` stops, rewinds and
+  restarts one tenant's agents; Marten rewrites only that tenant's shard rows, through `findTenantShard`, which 9.50
+  lacked, and deletes only that tenant's dead letters of the shard.
+  - The studio makes the call only for an agent the daemon in this process runs, because the overload starts the
+    tenant's agents wherever it is asked, so a cold node or a distributed host would run a second one.
+  - It passes that agent's own names, because JasperFx stops agents by an ordinal comparison.
+  - It authorizes the call as `(store, database, tenant)`, D27's one exception.
+  - The store-global rewind is never made on such a store; from 2.91 it rewinds each tenant this daemon runs and
+    refuses a floor above zero there.
+- **Compaction deletes the folded events' DCB tag rows** (#5694), and every tag table declares
+  `idx_mt_event_tag_<suffix>_seq_id`. A tagged stream now compacts (`TaggedStreamCompaction`, which probes #5694's
+  `TenantDataCleaner.deleteTagRowsAsync`). A store whose tag tables were built below 9.51 shows the index as drift: one
+  plain `CREATE INDEX` per tag table in Preview, which holds a SHARE lock while it builds so tagged appends wait, now a
+  `MigrationRisk` note.
+- **Empty stream ids** (#5695): the fetch reads only that stream and `CompactStreamAsync` refuses an empty id. The
+  studio's refusal stays at every version, and its reason names both ends.
+- **#5665 has been in a release since 9.50.3**, so the 2026-10-15 entry's "in no tag up to `V9.50.2`" is superseded.
+  `AllActiveFeatures` yields `SequenceFeature`, described and never applied, so `AllObjects()`, `AllSchemaNames()`,
+  `ToDatabaseScript()` and the ensure path's post-processing no longer create `mt_hilo`. Hard rule 14 stays, because
+  the floor has the hazard, and `OfflineSchemaEnumeration` words the Schema buttons. `SchemaNoDdlLiveTests`' and
+  `ReadPathNoDdlLiveTests`' anti-vacuity theories went red at 9.51.0, as they exist to, and now assert each end.
+- **The tenancy's own `AutoCreate` picks the apply mode** (#5692), and `ApplyAllConfiguredChangesToDatabaseAsync(@override)`
+  passes its override on (#5693); D27 is reworded, and enumeration is still not read-only.
+  `ShardedTenancy.FindOrCreateDatabase` resolves a pooled database id (#5702). `FindRebuildTenantsAsync` answers `[]`
+  before the first tenant (#5701), so Rebuild and Start stop failing on a partitioned store with no tenant yet.
+- **JasperFx:**
+  - jasperfx#1024 (2.91.0) reads offset-less date literals as UTC for `DateTime` members, so LINQ mode's correction
+    goes idle by itself, measured and pinned by `DynamicLinqAdapterTests`.
+  - #1019 (2.90.1) retries transient projection failures.
+  - #1016's `TransientFailures.IsTransient` (2.89.0) first ships in 9.50.3, which is why `RuntimeFeature.Requirement`
+    now prints a non-zero patch ("Marten 9.50.3+").
+  - #1027/#1028 (2.91.0) add `HighWaterProgressStallThreshold`, shown on the Configuration page.
+  - #1022 and #1026 are inert here.
+- **Weasel 9.46:** #718 resumes a stopped partitioned concurrent index build with `DROP INDEX CONCURRENTLY IF EXISTS
+  <child>` before each partition's build, no longer counted as "drops an index" when that exact build and attach
+  follow it. #719/#725 scope the advisory-lock holder read to the database, as the studio's own reads already were.
+- **Also in range, with no studio change:**
+  - #5675: archiving a tagged stream under archived partitioning moves its tag rows.
+  - #5672: long FK and index names are hashed, and a custom FK name survives the conjoined reorder, so such a store
+    shows drop/add drift, already a destructive `MigrationRisk` line.
+  - #5688: rollbacks run with `CancellationToken.None`, and a failed save's tombstones are written off its path.
+  - #5712: inline array literals in LINQ are compiled; LINQ mode keeps building its own array.
+  - #5681 and #5717.
+
+**Exit condition:** unchanged.
+
 **Held deliberately, and not stale.**
 
 - `xunit.v3` / `xunit.runner.visualstudio` stay at **3.2.2 / 3.1.5** because xunit.v3 4.0.0 drops
@@ -931,15 +1036,15 @@ build. `Directory.Build.props`'s `VersionPrefix` is only the fallback for a plai
 tests, an exact version) are defined there once; `Marten`'s `PackageVersion` reads
 `$(MartenStudioMartenVersion)`, which defaults to the floor. `build/Build.Marten.cs` resolves
 `--marten-version` (env `MARTEN_VERSION`) — `floor`, the default; `latest`; or an exact version such as
-`9.50.2`, never a range — in `OnBuildInitialized`, and passes the result as
+`9.51.0`, never a range — in `OnBuildInitialized`, and passes the result as
 `-p:MartenStudioMartenVersion=` to Restore, Compile and Test, the floor included, so an environment
 variable of that name cannot change what a run tests. Without Fallout, `dotnet test …
--p:MartenStudioMartenVersion=9.50.2` does the same. **`Pack` packs at the floor and refuses anything
+-p:MartenStudioMartenVersion=9.51.0` does the same. **`Pack` packs at the floor and refuses anything
 else**, twice: the Fallout target asserts it, and `MartenStudio.csproj` fails a bare `dotnet pack` before
 the nuspec is written unless both `MartenStudioMartenVersion` is the floor *and* `project.assets.json`
 holds the `"Marten/<floor>"` library — because NuGet writes the dependency range from the assets file,
-so `dotnet test … -p:MartenStudioMartenVersion=9.50.2` followed by `dotnet pack --no-restore` would
-otherwise pass a property check and still ship `Marten >= 9.50.2`. A missing assets file is a refusal,
+so `dotnet test … -p:MartenStudioMartenVersion=9.51.0` followed by `dotnet pack --no-restore` would
+otherwise pass a property check and still ship `Marten >= 9.51.0`. A missing assets file is a refusal,
 not a pass (a package packed at a newer Marten would raise every host's floor). To bump the
 latest-tested version: change `MartenStudioMartenLatest`, run both suites with `--marten-version latest`,
 and fix or record every difference in the same pull request. Raising the floor is a *Package budget
@@ -961,7 +1066,7 @@ fails with `Could not find commit information` on an empty repository.
 dotnet test tests\MartenStudio.Tests                       # the fast suite alone
 $env:MARTENSTUDIO_PG_REUSE='false'                         # a container of this run's own; see PostgresFixture
 dotnet test tests\MartenStudio.Integration.Tests           # needs Docker - run `docker info` first
-dotnet test tests\MartenStudio.Tests -p:MartenStudioMartenVersion=9.50.2   # one suite at another Marten
+dotnet test tests\MartenStudio.Tests -p:MartenStudioMartenVersion=9.51.0   # one suite at another Marten
 dotnet test tests\MartenStudio.Tests --filter "FullyQualifiedName~ApiSurface"
 ```
 

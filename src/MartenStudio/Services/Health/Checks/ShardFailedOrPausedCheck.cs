@@ -65,8 +65,8 @@ internal sealed record ShardFailedOrPausedFacts(
 /// <para>
 /// <b>Classified where JasperFx classifies.</b> A start the studio asked for and the daemon refused carries
 /// <c>ShardStartException.Reason</c> and whether it is transient (JasperFx 2.76+, F1); a live failure is classified as
-/// transient or permanent by <c>TransientFailures.IsTransient</c> where that exists (JasperFx 2.89, in no Marten release
-/// yet). A shard of one tenant names that tenant, so its finding is shown only through the activity gate and only to a
+/// transient or permanent by <c>TransientFailures.IsTransient</c> where that exists (JasperFx 2.89, first in Marten
+/// 9.50.3). A shard of one tenant names that tenant, so its finding is shown only through the activity gate and only to a
 /// visitor the store policy lets see the tenant.
 /// </para>
 /// </remarks>

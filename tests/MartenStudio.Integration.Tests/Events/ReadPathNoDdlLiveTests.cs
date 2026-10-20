@@ -42,7 +42,8 @@ namespace MartenStudio.Integration.Tests.Events;
 /// alone. One database rather than one per test, because dropping a database forces an immediate checkpoint (Postgres
 /// 15 and later), which is load every other class on the shared container pays for.
 /// <see cref="Martens_own_read_on_the_same_database_really_does_write_DDL" /> is the anti-vacuity theory: the very Marten
-/// call each read replaced, on the same setup, creates <c>mt_hilo</c>.
+/// call each read replaced, on the same setup, creates <c>mt_hilo</c> below Marten 9.50.3 - and from 9.50.3, where that
+/// setup's hazard is gone (#5665), creates its storage on the empty database.
 /// </para>
 /// </remarks>
 public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
@@ -224,41 +225,87 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
     /// The anti-vacuity theory: on exactly this setup, the Marten call each read replaced writes DDL. If a Marten release
     /// stops doing that, the tests above no longer prove anything and this is where it is noticed.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Version-aware (L5).</b> On the seeded setup - the schema applied by another store, the studio's store never having
+    /// read - the DDL Marten's read wrote was the HiLo feature's: the first ensure in the process runs <c>AllObjects()</c>,
+    /// which below Marten 9.50.3 applies it. From 9.50.3 (#5665) <c>AllObjects()</c> describes it and applies nothing, and
+    /// on that setup Marten's read writes no DDL at all - asserted, so the change is recorded rather than silent. The
+    /// seeded tests above then prove their point at the floor, which still has the hazard.
+    /// </para>
+    /// <para>
+    /// From 9.50.3 the theory's proof moves to the empty database the first test above reads: there Marten's read creates
+    /// the storage it ensures at every version, so that test is never an assertion that nothing happened where nothing
+    /// could have.
+    /// </para>
+    /// </remarks>
     [PostgresTheory]
     [InlineData("list")]
     [InlineData("replay")]
     [InlineData("state")]
     public async Task Martens_own_read_on_the_same_database_really_does_write_DDL(string read)
     {
-        await using Host host = await Host.StartAsync(fixture);
-        Guid stream = await host.SeedAsync(withDeadLetters: true);
+        bool offline = MartenStudio.Services.Configuration.RuntimeFeature.OfflineSchemaEnumeration.Probe() == true;
 
-        ServerSnapshot before = await host.SnapshotAsync();
-        (await host.ExistsAsync(DocumentSchema, "mt_hilo")).Should().BeFalse();
-
-        // The call each read replaced: the dead-letter list's LINQ query, the replay's AggregateStreamAsync, and the stream
-        // link's FetchStreamStateAsync.
-        await using (IQuerySession session = host.Store.QuerySession())
+        await using (Host host = await Host.StartAsync(fixture))
         {
-            switch (read)
+            Guid stream = await host.SeedAsync(withDeadLetters: true);
+
+            ServerSnapshot before = await host.SnapshotAsync();
+            (await host.ExistsAsync(DocumentSchema, "mt_hilo")).Should().BeFalse();
+
+            await MartensOwnReadAsync(host, read, stream);
+
+            if (!offline)
             {
-                case "list":
-                    _ = await session.Query<DeadLetterEvent>().ToListAsync(Token);
-                    break;
-                case "replay":
-                    _ = await session.Events.AggregateStreamAsync<LedgerSummary>(stream, token: Token);
-                    break;
-                default:
-                    _ = await session.Events.FetchStreamStateAsync(stream, Token);
-                    break;
+                (await host.ExistsAsync(DocumentSchema, "mt_hilo")).Should().BeTrue(
+                    "{0} ensures storage first, and below Marten 9.50.3 the first ensure in the process runs AllObjects(), which "
+                    + "applies the HiLo feature - if this no longer happens, the tests above prove nothing",
+                    read);
+                (await host.SnapshotAsync()).Objects.Should().NotEqual(before.Objects);
+                return;
             }
+
+            (await host.ExistsAsync(DocumentSchema, "mt_hilo")).Should().BeFalse(
+                "from Marten 9.50.3 AllObjects() describes the HiLo feature and applies nothing");
+            (await host.SnapshotAsync()).Objects.Should().Equal(before.Objects,
+                "on this setup the HiLo feature was the whole of the DDL Marten's {0} wrote, and from 9.50.3 it writes none", read);
         }
 
-        (await host.ExistsAsync(DocumentSchema, "mt_hilo")).Should().BeTrue(
-            "{0} ensures storage first, and the first ensure in the process runs AllObjects(), which applies the HiLo "
-            + "feature - if this no longer happens, the tests above prove nothing",
-            read);
-        (await host.SnapshotAsync()).Objects.Should().NotEqual(before.Objects);
+        // From 9.50.3: the empty database, where Marten's read still creates what it ensures.
+        await using (Host empty = await Host.StartAsync(fixture))
+        {
+            ServerSnapshot before = await empty.SnapshotAsync();
+
+            await MartensOwnReadAsync(empty, read, Guid.NewGuid());
+
+            (await empty.SnapshotAsync()).Objects.Should().NotEqual(before.Objects,
+                "{0} ensures storage first, and on an empty database that creates it at every Marten - if this no longer "
+                + "happens, the empty-database test above proves nothing",
+                read);
+        }
+    }
+
+    /// <summary>
+    /// The call each read replaced: the dead-letter list's LINQ query, the replay's AggregateStreamAsync, and the stream
+    /// link's FetchStreamStateAsync.
+    /// </summary>
+    private static async Task MartensOwnReadAsync(Host host, string read, Guid stream)
+    {
+        await using IQuerySession session = host.Store.QuerySession();
+
+        switch (read)
+        {
+            case "list":
+                _ = await session.Query<DeadLetterEvent>().ToListAsync(Token);
+                break;
+            case "replay":
+                _ = await session.Events.AggregateStreamAsync<LedgerSummary>(stream, token: Token);
+                break;
+            default:
+                _ = await session.Events.FetchStreamStateAsync(stream, Token);
+                break;
+        }
     }
 
     /// <summary>The three dead letters every list test reads, oldest first.</summary>
