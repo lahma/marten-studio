@@ -3,6 +3,7 @@ using Marten;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
+using MartenStudio.Services.Database;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Sources;
@@ -32,6 +33,43 @@ public class LockWaitClassifierTests
 
         FluentActions.Invoking(() => LockWaitCheck.Classifier(Context(scope.ServiceProvider, store))).Should().NotThrow();
         LockWaitCheck.Classifier(Context(scope.ServiceProvider, store)).Should().BeNull();
+    }
+
+    /// <summary>
+    /// Only the source's resolution is tolerated. A read that throws is a bug - <c>ReadUncached</c> fails closed on
+    /// everything it expects - and surfaces from the classifier rather than being taken for "no classification".
+    /// </summary>
+    [Fact]
+    public void A_declarations_read_that_throws_is_not_swallowed()
+    {
+        ServiceCollection services = new();
+        services.AddScoped<IDatabaseDeclarationsSource, UnreadableDeclarations>();
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+        using IServiceScope scope = provider.CreateScope();
+        using DocumentStore store = Store();
+
+        FluentActions.Invoking(() => LockWaitCheck.Classifier(Context(scope.ServiceProvider, store)))
+            .Should().Throw<InvalidOperationException>().WithMessage(UnreadableDeclarations.Message);
+    }
+
+    /// <summary>
+    /// ... and the sweep turns it into what 0.4 did: C06's row is "could not check", and event 9222 is logged.
+    /// </summary>
+    [Fact]
+    public async Task A_declarations_read_that_throws_is_C06s_could_not_check_and_event_9222()
+    {
+        await using HealthHarness harness = HealthHarness.Create(
+            checks: [typeof(LockWaitCheck)],
+            before: static services => services.AddScoped<IDatabaseDeclarationsSource, UnreadableDeclarations>());
+
+        HealthSweep sweep = await harness.SweepAsync();
+
+        HealthCheckResult c06 = sweep.Results.Should().ContainSingle().Subject;
+        c06.Check.Code.Should().Be("C06");
+        c06.Outcome.Should().Be(HealthCheckOutcome.Failed);
+        c06.Problem!.Reason.Should().Contain(nameof(InvalidOperationException));
+        harness.Logs.Entries.Should().Contain(static x => x.EventId.Id == 9222 && x.Message.Contains("C06", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -72,6 +110,24 @@ public class LockWaitClassifierTests
 
         LockWaitCheck.Classifier(Context(scope.ServiceProvider, store))
             .Should().NotBeNull("the declarations are read from the store's options, and need no policy");
+    }
+
+    /// <summary>A declarations source whose read is a bug.</summary>
+    private sealed class UnreadableDeclarations : IDatabaseDeclarationsSource
+    {
+        public const string Message = "A bug in the declarations read.";
+
+        public DatabaseDeclarations Read(ResolvedSource resolved) => throw new NotSupportedException();
+
+        public DatabaseDeclarations Read(IStudioSource source) => throw new NotSupportedException();
+
+        public DatabaseDeclarations ReadUncached(ResolvedSource resolved) => throw new InvalidOperationException(Message);
+
+        public Task<IReadOnlyDictionary<string, DatabaseStoreAccess>> OtherSourcesAsync(
+            ResolvedSource resolved,
+            DatabaseObjectClassifier classifier,
+            bool capabilityEnabled,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 
     private static DocumentStore Store() => DocumentStore.For(static options =>

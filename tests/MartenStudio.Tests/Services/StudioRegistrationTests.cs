@@ -1,6 +1,8 @@
 using System.Reflection;
 using System.Text;
 
+using Marten;
+
 using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
@@ -34,8 +36,9 @@ namespace MartenStudio.Tests.Services;
 /// studio's own registrations are listed - a descriptor whose service, implementation or factory result is a studio type,
 /// or a generic over one - because the framework's (<c>AddRazorComponents()</c>, <c>AddHttpContextAccessor()</c>) are
 /// the framework's to change. Types are named with <c>typeof</c>, so the namespace move and PS-2's type renames carry
-/// the list with them; a factory is described by the type its delegate returns, which moving the lambda to another class
-/// does not change.
+/// the list with them. A factory row says only that the service is a factory registration: the delegate's return type is
+/// the service type itself, so what a factory makes is pinned separately, by resolving it
+/// (<see cref="Every_factory_makes_what_it_made_before_and_the_console_is_one_instance_per_circuit" />).
 /// </remarks>
 public class StudioRegistrationTests
 {
@@ -148,7 +151,47 @@ public class StudioRegistrationTests
         string[] actual = Describe(services.Select(Read));
         string[] expected = Describe(Expected);
 
+        expected.Should().HaveCount(Expected.Length, "the studio filter keeps every row of the expected list, or the comparison skips some");
         actual.Should().Equal(expected, "the registrations a MartenStudio host gets are unchanged in effect:" + Environment.NewLine + Listing(services));
+    }
+
+    /// <summary>What each factory registration of the studio makes, by its concrete type.</summary>
+    private static readonly Dictionary<Type, Type> FactoryResults = new()
+    {
+        [typeof(IStudioSettings)] = typeof(MartenStudioSettings),
+        [typeof(StudioLogThrottle)] = typeof(StudioLogThrottle),
+        [typeof(IStudioRuntime)] = typeof(MartenStudioRuntime),
+        [typeof(ISqlConsoleService)] = typeof(SqlConsoleService),
+    };
+
+    /// <summary>
+    /// The factory rows above compare only that a factory is registered; this resolves each one. Every factory makes the
+    /// type it made before the move, and <see cref="ISqlConsoleService" /> is the circuit's one
+    /// <see cref="SqlConsoleService" />, not a second console.
+    /// </summary>
+    [Fact]
+    public async Task Every_factory_makes_what_it_made_before_and_the_console_is_one_instance_per_circuit()
+    {
+        ServiceCollection services = new();
+        services.AddLogging();
+        services.AddAuthorizationCore();
+        services.AddMarten(static options => options.Connection("Host=marten-studio-registration.invalid;Database=none;Username=none;Password=none"));
+        services.AddMartenStudio();
+
+        services.Where(static x => x.ImplementationFactory is not null && !x.IsKeyedService && IsStudio(x.ServiceType))
+            .Select(static x => x.ServiceType)
+            .Should().BeEquivalentTo(FactoryResults.Keys, "a new factory registration is pinned here by what it makes");
+
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        await using AsyncServiceScope circuit = provider.CreateAsyncScope();
+
+        foreach ((Type service, Type made) in FactoryResults)
+        {
+            circuit.ServiceProvider.GetRequiredService(service).Should().BeOfType(made, service.Name + "'s factory");
+        }
+
+        circuit.ServiceProvider.GetRequiredService<ISqlConsoleService>()
+            .Should().BeSameAs(circuit.ServiceProvider.GetRequiredService<SqlConsoleService>());
     }
 
     [Fact]

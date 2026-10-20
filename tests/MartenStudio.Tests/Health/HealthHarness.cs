@@ -246,6 +246,10 @@ internal sealed class HealthHarness : IAsyncDisposable
     /// The kinds of source each check runs against (<see langword="null" /> for every kind), or <see langword="null" /> to
     /// run every check against every kind.
     /// </param>
+    /// <param name="before">
+    /// Registrations a test makes before <c>AddMartenStudio()</c>, whose <c>TryAdd</c> then keeps them - a seam's
+    /// stand-in, say.
+    /// </param>
     public static HealthHarness Create(
         IEnumerable<Type>? checks = null,
         Action<MartenStudioOptions>? studio = null,
@@ -253,7 +257,8 @@ internal sealed class HealthHarness : IAsyncDisposable
         string? environment = "Development",
         bool policies = false,
         MartenStudio.Services.Configuration.MartenRuntime? runtime = null,
-        Func<Type, IReadOnlySet<StudioSourceKind>?>? sourceKinds = null)
+        Func<Type, IReadOnlySet<StudioSourceKind>?>? sourceKinds = null,
+        Action<IServiceCollection>? before = null)
     {
         FakeTimeProvider clock = new(new DateTimeOffset(2026, 10, 15, 9, 0, 0, TimeSpan.Zero));
         CapturingLoggerProvider logs = new();
@@ -293,6 +298,8 @@ internal sealed class HealthHarness : IAsyncDisposable
             options.DatabaseSchemaName = "health_unit";
             store?.Invoke(options);
         });
+
+        before?.Invoke(services);
 
         services.AddMartenStudio(options =>
         {

@@ -246,29 +246,38 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
     /// The classifier over every registered source's declarations - the one the database browser uses, read afresh
     /// for the sweep, which has no circuit (<see cref="IDatabaseDeclarationsSource.ReadUncached" />) - or
     /// <see langword="null" /> when they cannot all be read, the studio registers no declarations, or the declarations
-    /// source cannot even be built in the sweep's scope: a classifier names relations, and none at all is the closed
-    /// failure. The check itself never fails for want of one; it labels the locks it reads with what the catalog says.
+    /// source cannot be built in the sweep's scope: a classifier names relations, and none at all is the closed failure.
     /// </summary>
+    /// <remarks>
+    /// Only the source's <em>resolution</em> is tolerated, because only that is new: in 0.4 C06 read the store registry, a
+    /// singleton, and the declarations without a source between them, and a scoped source's graph is something a sweep's
+    /// scope with no circuit might not build. A failure of the read itself is not swallowed - <c>ReadUncached</c> fails
+    /// closed on everything it expects, so anything it throws is a bug, and it surfaces as 0.4's did: a "could not check"
+    /// row and event 9222.
+    /// </remarks>
     internal static DatabaseObjectClassifier? Classifier(HealthCheckContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        IDatabaseDeclarationsSource? declarations;
         try
         {
-            if (context.Services.GetService<IDatabaseDeclarationsSource>() is not { } declarations)
-            {
-                return null;
-            }
-
-            DatabaseDeclarations declared = declarations.ReadUncached(context.Source);
-            return declared.Succeeded ? declared.Classifier : null;
+            declarations = context.Services.GetService<IDatabaseDeclarationsSource>();
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // Fail closed, as 0.4's read of the store registry did: a source that will not resolve or read in a scope with
-            // no circuit costs C06 its relation names, not its row.
+            // Fail closed, as 0.4's read did: a source that will not resolve in a scope with no circuit costs C06 its
+            // relation names, not its row.
             return null;
         }
+
+        if (declarations is null)
+        {
+            return null;
+        }
+
+        DatabaseDeclarations declared = declarations.ReadUncached(context.Source);
+        return declared.Succeeded ? declared.Classifier : null;
     }
 
     private static (SessionVisibility Visibility, LockWaiter? Waiter, long Total) MapWaiter(NpgsqlDataReader reader, SessionLockLabels labels)
