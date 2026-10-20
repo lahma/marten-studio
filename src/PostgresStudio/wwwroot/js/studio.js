@@ -710,7 +710,7 @@
 
     // The edge cue on a table that scrolls sideways (UX-1).
     //
-    // The scrolling itself is `overflow-x: auto` in marten-studio.css and needs nothing from here. What
+    // The scrolling itself is `overflow-x: auto` in studio.css and needs nothing from here. What
     // does need a script is knowing *whether* a given region can still be scrolled, which is the only
     // thing CSS cannot answer today: `animation-timeline: scroll()` would, and it is Chromium-only. So
     // this writes `data-scroll-start` / `data-scroll-end` on each region and the stylesheet fades the

@@ -97,7 +97,7 @@ public class CoreFenceTests
         RegexTimeout);
 
     private static readonly Regex NamespaceDeclaration = new(
-        @"^\s*namespace\s+(?<name>[\w.]+)\s*[;{]",
+        @"^\s*@?namespace\s+(?<name>[\w.]+)\s*(?:[;{]|$)",
         RegexOptions.Multiline | RegexOptions.CultureInvariant,
         RegexTimeout);
 

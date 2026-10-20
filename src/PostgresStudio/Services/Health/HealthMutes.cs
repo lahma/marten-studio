@@ -15,7 +15,7 @@ namespace PostgresStudio.Services.Health;
 /// <remarks>
 /// <para>
 /// <b>Per visitor, and nowhere else.</b> A mute is one person's "I know about this one", so it lives in their
-/// browser (<c>martenStudio.health</c> in <c>js/marten-studio.js</c>) and the studio writes nothing to the
+/// browser (<c>martenStudio.health</c> in <c>js/studio.js</c>) and the studio writes nothing to the
 /// host's database or to any other visitor's view. A mute key is the store, the database and the finding's
 /// key, so muting a finding about one database leaves the same code on another alone.
 /// </para>

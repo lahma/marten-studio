@@ -2365,13 +2365,13 @@ body {
 /*
  * Marten Studio - JSON toolkit styles (packet W1).
  *
- * This file is folded into wwwroot/css/marten-studio.css by the orchestrator; it is kept separate only
+ * This file is folded into wwwroot/css/studio.css by the orchestrator; it is kept separate only
  * so that three packets can be written at once without three of them editing the same stylesheet. It
  * follows that file's conventions exactly: every colour is a --ms-* custom property, the dark palette is
  * declared three times (prefers-color-scheme for the system default, and .ms-studio[data-theme="light"]
  * / [data-theme="dark"] for an explicit choice), and nothing here is a third-party rule (hard rule 3).
  *
- * Indentation matches marten-studio.css (4 spaces) rather than .editorconfig's css setting, because this
+ * Indentation matches studio.css (4 spaces) rather than .editorconfig's css setting, because this
  * text ends up inside that file.
  */
 
@@ -6973,7 +6973,7 @@ a.ms-event-chip:focus-visible {
    The edge cue.
 
    `data-scroll-start` / `data-scroll-end` are written by `martenStudio.tableScroll` in
-   marten-studio.js, and only while there is content hidden on that side - so a table that fits its
+   studio.js, and only while there is content hidden on that side - so a table that fits its
    column shows nothing at all, and a table scrolled to its right-hand end shows the cue on the left
    instead. With no script the attributes never appear, the region still scrolls, and this is inert.
 
@@ -9496,7 +9496,7 @@ a.ms-row-ref-key:hover {
    focus as one whenever the page has had no pointer input yet, which is every
    page opened from the address bar, a bookmark or a reload, so every such page
    drew a box round its whole title row for a mouse user, the database pages
-   among them. marten-studio.js writes `data-ms-keyboard` on the document
+   among them. studio.js writes `data-ms-keyboard` on the document
    element while the visitor's last input was a key; without it there is no
    ring. A keyboard user who opens a link with Enter still gets one.
    -------------------------------------------------------------------------- */
@@ -9535,7 +9535,7 @@ a.ms-row-ref-key:hover {
         padding-bottom: var(--ms-space-sm);
     }
 
-    /* The tables' edge cue (UX-1), for the tabs past the edge: marten-studio.js stamps the same two
+    /* The tables' edge cue (UX-1), for the tabs past the edge: studio.js stamps the same two
        attributes on these rows. The row itself takes no focus - its tabs do - so it has no ring of its
        own for the mask to hide, and needs no focus exception. */
     .ms-db-kind-tabs[data-scroll-end="true"],

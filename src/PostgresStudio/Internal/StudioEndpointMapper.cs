@@ -72,7 +72,7 @@ internal static class StudioEndpointMapper
 
     private static readonly string AssetPackage = typeof(StudioEndpointMapper).Assembly.GetName().Name!;
 
-    /// <summary>The static web asset root this assembly's files are served under: <c>_content/MartenStudio</c>.</summary>
+    /// <summary>The static web asset root this assembly's files are served under: <c>_content/PostgresStudio</c>.</summary>
     internal static readonly string AssetRoot = "_content/" + AssetPackage;
 
     /// <summary>Where this package's copy of the framework script sits, as a static web asset of the shared assembly.</summary>

@@ -14,13 +14,13 @@
         than dropping the visitor into an unnamed box. `Label` is required for that reason.
       - `tabindex="0"`, because a region that only a mouse can scroll is content a keyboard cannot reach.
         Browsers do not make a scroll container focusable on their own.
-      - The edge affordance in `marten-studio.css`, driven by the `data-scroll-start` / `data-scroll-end`
+      - The edge affordance in `studio.css`, driven by the `data-scroll-start` / `data-scroll-end`
         attributes `martenStudio.tableScroll` writes. It appears only while there is something hidden on
         that side, so a table that fits shows nothing.
 
     The component itself calls no JavaScript. The scrolling is the browser's own `overflow-x: auto` and
     works with no script at all - the cue is the only part that needs one, and it is driven by a single
-    document-wide observer in marten-studio.js rather than by one interop registration per table. That
+    document-wide observer in studio.js rather than by one interop registration per table. That
     observer also adopts `.ms-table-wrap`, the documents list's own long-standing scroll container,
     which lives in a component this packet does not own; a per-component registration could never have
     reached it. Nothing here holds a `DotNetObjectReference`, so nothing here can leak one.
