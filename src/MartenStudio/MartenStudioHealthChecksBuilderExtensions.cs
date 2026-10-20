@@ -1,3 +1,7 @@
+using System.Runtime.CompilerServices;
+
+using MartenStudio.Internal;
+
 using PostgresStudio.Services.Health.Export;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -71,6 +75,10 @@ public static class MartenStudioHealthChecksBuilderExtensions
     /// <returns>The same builder, so calls can be chained.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="builder" /> or <paramref name="name" /> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="name" /> is empty or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The application was deployed without the PostgresStudio package this one was released with, or with
+    /// another version of it.
+    /// </exception>
     public static IHealthChecksBuilder AddMartenStudio(
         this IHealthChecksBuilder builder,
         string name = "marten-studio",
@@ -81,6 +89,24 @@ public static class MartenStudioHealthChecksBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
+        // The same guard, for the same reason, as services.AddMartenStudio(): a host may register its health checks
+        // first, and this body names no PostgresStudio type so the guard can explain a missing or mismatched
+        // PostgresStudio before the JIT meets one. The rest is in a NoInlining method; PostgresStudioVersionGuardTests
+        // scans this method's IL.
+        PostgresStudioVersionGuard.Ensure();
+
+        return AddMartenStudioHealthCheck(builder, name, failureStatus, tags, timeout);
+    }
+
+    /// <summary>The body of <see cref="AddMartenStudio" />, once the shared studio is known to be the right one.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static IHealthChecksBuilder AddMartenStudioHealthCheck(
+        IHealthChecksBuilder builder,
+        string name,
+        HealthStatus? failureStatus,
+        IEnumerable<string>? tags,
+        TimeSpan? timeout)
+    {
         // One runner per process however many registrations name it, so a liveness and a readiness check over
         // the same studio still cost one run per interval between them.
         builder.Services.TryAddSingleton<HealthExportRunner>();

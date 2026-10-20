@@ -4,6 +4,7 @@ using System.Reflection.Emit;
 using MartenStudio.Internal;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 using PostgresStudio.Services.Settings;
 
@@ -43,9 +44,12 @@ public class PostgresStudioVersionGuardTests
 
         marten.Should().NotBe("?", "both assemblies carry the version the build stamped");
         PostgresStudioVersionGuard.ReleaseVersion(Shared).Should().Be(marten);
+        PostgresStudioVersionGuard.InformationalVersion(Shared).Should().Be(PostgresStudioVersionGuard.InformationalVersion(Marten),
+            "one build stamps both, commit included");
 
         FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure()).Should().NotThrow();
         FluentActions.Invoking(() => new ServiceCollection().AddMartenStudio()).Should().NotThrow();
+        FluentActions.Invoking(() => new ServiceCollection().AddHealthChecks().AddMartenStudio()).Should().NotThrow();
     }
 
     [Fact]
@@ -70,19 +74,51 @@ public class PostgresStudioVersionGuardTests
     [Fact]
     public void Another_PostgresStudio_version_is_refused_and_named()
     {
-        // Any assembly that is not this build will do: CoreLib's informational version is the runtime's.
-        Assembly other = typeof(object).Assembly;
-        string found = PostgresStudioVersionGuard.ReleaseVersion(other);
-        string required = PostgresStudioVersionGuard.ReleaseVersion(Marten);
-
-        found.Should().NotBe(required);
-
-        FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure(Marten, () => other))
+        FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure(WithVersion("0.5.0"), () => WithVersion("0.5.1")))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should()
-            .Contain($"MartenStudio {required} needs PostgresStudio {required} exactly, and found PostgresStudio {found}.")
+            .Contain("MartenStudio 0.5.0 needs PostgresStudio 0.5.0 exactly, and found PostgresStudio 0.5.1.")
             .And.Contain("upgraded together")
-            .And.Contain("central PackageVersion");
+            .And.Contain("central PackageVersion or a PackageReference for PostgresStudio must say 0.5.0");
+    }
+
+    /// <summary>
+    /// The commit after the <c>+</c> is compared when, and only when, both sides carry one: the same version built from
+    /// two commits is refused, and a build with no git on either side still compares the release versions.
+    /// </summary>
+    [Theory]
+    [InlineData("0.5.0+5f1c2a9d", "0.5.0+5f1c2a9d", true)]
+    [InlineData("0.5.0+5f1c2a9d", "0.5.0+0b7e3c41", false)]
+    [InlineData("0.5.0+5f1c2a9d", "0.5.1+5f1c2a9d", false)]
+    [InlineData("0.5.0+5f1c2a9d", "0.5.0", true)]
+    [InlineData("0.5.0", "0.5.0+0b7e3c41", true)]
+    [InlineData("0.5.0+5f1c2a9d", "0.5.1", false)]
+    [InlineData("0.5.0", "0.5.0", true)]
+    [InlineData("0.5.0", "0.5.1", false)]
+    public void The_commit_is_compared_only_when_both_carry_one(string martenStudio, string postgresStudio, bool passes)
+    {
+        PostgresStudioVersionGuard.SameBuild(martenStudio, postgresStudio).Should().Be(passes);
+
+        Action ensure = () => PostgresStudioVersionGuard.Ensure(WithVersion(martenStudio), () => WithVersion(postgresStudio));
+
+        if (passes)
+        {
+            ensure.Should().NotThrow();
+        }
+        else
+        {
+            ensure.Should().Throw<InvalidOperationException>().Which.Message.Should().Contain("needs PostgresStudio");
+        }
+    }
+
+    [Fact]
+    public void Two_commits_of_one_version_are_named_in_full()
+    {
+        FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure(WithVersion("0.5.0+5f1c2a9d"), () => WithVersion("0.5.0+0b7e3c41")))
+            .Should().Throw<InvalidOperationException>()
+            .Which.Message.Should()
+            .Contain("MartenStudio 0.5.0+5f1c2a9d needs PostgresStudio 0.5.0+5f1c2a9d exactly, and found PostgresStudio 0.5.0+0b7e3c41.")
+            .And.Contain("must say 0.5.0,");
     }
 
     [Fact]
@@ -107,8 +143,9 @@ public class PostgresStudioVersionGuardTests
     }
 
     /// <summary>
-    /// The public <c>AddMartenStudio</c> and the guard name no PostgresStudio type or member - in a call, a field, a
-    /// token or a local - so the JIT can compile both, and the guard can explain, when PostgresStudio.dll is absent.
+    /// Both public <c>AddMartenStudio</c>s - on the service collection and on the health checks builder - and the guard
+    /// name no PostgresStudio type or member - in a call, a field, a token or a local - so the JIT can compile them, and
+    /// the guard can explain, when PostgresStudio.dll is absent.
     /// </summary>
     [Fact]
     public void Neither_AddMartenStudio_nor_the_guard_names_a_PostgresStudio_member()
@@ -116,10 +153,11 @@ public class PostgresStudioVersionGuardTests
         MethodBase[] methods =
         [
             AddMartenStudio,
+            AddMartenStudioHealthCheck,
             .. GuardMethods(),
         ];
 
-        methods.Should().HaveCountGreaterThan(3, "the public method, the guard's checks and its loader are all scanned");
+        methods.Should().HaveCountGreaterThan(4, "both public methods, the guard's checks and its loader are all scanned");
         methods.SelectMany(PostgresStudioMembersIn).Should().BeEmpty(
             "a PostgresStudio member here is resolved when the method is compiled - before the guard can run - and a " +
             "deployment without PostgresStudio then fails with a bare FileNotFoundException instead of the guard's reason");
@@ -130,19 +168,23 @@ public class PostgresStudioVersionGuardTests
     public void The_scan_finds_PostgresStudio_members_where_they_are_meant_to_be()
     {
         MethodInfo services = typeof(MartenStudioServiceCollectionExtensions).GetMethod("AddMartenStudioServices", Declared)!;
+        MethodInfo healthCheck = typeof(MartenStudioHealthChecksBuilderExtensions).GetMethod("AddMartenStudioHealthCheck", Declared)!;
 
         services.Should().NotBeNull();
+        healthCheck.Should().NotBeNull();
         PostgresStudioMembersIn(services).Should().Contain(static x => x.Contains(nameof(StudioCoreRegistration), StringComparison.Ordinal));
+        PostgresStudioMembersIn(healthCheck).Should().Contain(static x => x.Contains("HealthExportRunner", StringComparison.Ordinal));
     }
 
     [Fact]
     public void What_names_PostgresStudio_is_never_inlined_into_what_runs_before_the_guard()
     {
         MethodInfo services = typeof(MartenStudioServiceCollectionExtensions).GetMethod("AddMartenStudioServices", Declared)!;
+        MethodInfo healthCheck = typeof(MartenStudioHealthChecksBuilderExtensions).GetMethod("AddMartenStudioHealthCheck", Declared)!;
         MethodInfo ensure = typeof(PostgresStudioVersionGuard).GetMethod(nameof(PostgresStudioVersionGuard.Ensure), Type.EmptyTypes)!;
         MethodInfo load = typeof(PostgresStudioVersionGuard).GetMethod("LoadPostgresStudio", Declared)!;
 
-        foreach (MethodInfo method in new[] { services, ensure, load })
+        foreach (MethodInfo method in new[] { services, healthCheck, ensure, load })
         {
             method.Should().NotBeNull();
             method.MethodImplementationFlags.HasFlag(MethodImplAttributes.NoInlining).Should().BeTrue(
@@ -154,6 +196,21 @@ public class PostgresStudioVersionGuardTests
         typeof(MartenStudioServiceCollectionExtensions).GetMethod(
             nameof(MartenStudioServiceCollectionExtensions.AddMartenStudio),
             [typeof(IServiceCollection), typeof(Action<MartenStudioOptions>)])!;
+
+    private static MethodInfo AddMartenStudioHealthCheck =>
+        typeof(MartenStudioHealthChecksBuilderExtensions).GetMethod(
+            nameof(MartenStudioHealthChecksBuilderExtensions.AddMartenStudio),
+            [typeof(IHealthChecksBuilder), typeof(string), typeof(HealthStatus?), typeof(IEnumerable<string>), typeof(TimeSpan?)])!;
+
+    /// <summary>
+    /// A throwaway in-memory assembly carrying <paramref name="informationalVersion" />, so every pair of versions the
+    /// guard can meet goes through the real <c>Ensure</c> rather than a stand-in for it.
+    /// </summary>
+    private static AssemblyBuilder WithVersion(string informationalVersion) =>
+        AssemblyBuilder.DefineDynamicAssembly(
+            new AssemblyName("GuardProbe" + Guid.NewGuid().ToString("N")),
+            AssemblyBuilderAccess.Run,
+            [new CustomAttributeBuilder(typeof(AssemblyInformationalVersionAttribute).GetConstructor([typeof(string)])!, [informationalVersion])]);
 
     /// <summary>Every method of the guard, the compiler's nested helpers (a cached delegate's holder) included.</summary>
     private static IEnumerable<MethodBase> GuardMethods()
@@ -190,7 +247,8 @@ public class PostgresStudioVersionGuardTests
 
                 if (TypesOf(member).Any(IsPostgresStudio))
                 {
-                    yield return $"{method.Name}: {code.Name} {member.DeclaringType?.Name}.{member.Name}";
+                    // The member's own ToString carries generic arguments (TryAddSingleton[HealthExportRunner]).
+                    yield return $"{method.Name}: {code.Name} {member.DeclaringType?.Name}::{member}";
                 }
             }
 

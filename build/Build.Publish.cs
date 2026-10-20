@@ -64,9 +64,11 @@ partial class Build
     const string MartenStudioPackageId = "MartenStudio";
 
     /// <summary>
-    /// The two packages a release consists of, in the order they are packed and pushed: PostgresStudio first,
-    /// because MartenStudio depends on exactly it and a host restoring MartenStudio in the minutes between the two
-    /// pushes should find nothing missing.
+    /// The two packages a release consists of, in the order they are packed and pushed: PostgresStudio first, because
+    /// MartenStudio depends on exactly it. Pushing in this order means a failed PostgresStudio push stops the run before
+    /// any MartenStudio is uploaded. It does not make the two appear together: nuget.org validates and indexes each
+    /// package on its own, so for a few minutes MartenStudio can be listed while its PostgresStudio is not yet
+    /// restorable, and a host restoring in that window gets NU1102 until it is.
     /// </summary>
     AbsolutePath[] ReleasePackages =>
     [
@@ -88,18 +90,21 @@ partial class Build
             // two projects, and `dotnet pack` runs its own build anyway.
             PackagesDirectory.CreateOrCleanDirectory();
 
-            // One project at a time, PostgresStudio first: MartenStudio's pack builds PostgresStudio again through
-            // its ProjectReference, and two packs writing one obj/ folder at once is a race.
-            DotNetPack(_ => _
+            // One project at a time, PostgresStudio first, in a plain loop rather than the combinatorial overload
+            // (PLINQ, no order promised): MartenStudio's pack builds PostgresStudio again through its
+            // ProjectReference, and two packs writing one obj/ folder at once is a race.
+            foreach (var project in new[] { PostgresStudioProject, StudioProject })
+            {
+                DotNetPack(_ => _
+                    .SetProject(project)
                     .SetConfiguration(Configuration.Release)
                     .SetOutputDirectory(PackagesDirectory)
                     .SetProperty("Version", Version)
                     // Both said explicitly, so that MSBuild's environment-as-properties rule cannot pack at
                     // anything else either.
                     .SetProperty(MartenVersionProperty, MartenFloor)
-                    .SetProperty(NpgsqlVersionProperty, NpgsqlFloor)
-                    .CombineWith([PostgresStudioProject, StudioProject], (_, project) => _.SetProject(project)),
-                degreeOfParallelism: 1);
+                    .SetProperty(NpgsqlVersionProperty, NpgsqlFloor));
+            }
 
             AssertTheReleasePackagesAndNothingElse();
 
@@ -158,16 +163,29 @@ partial class Build
             // one OIDC token mints exactly one key - which pushes both packages, in ReleasePackages' order.
             var apiKey = GetTrustedPublishingApiKey();
 
-            DotNetNuGetPush(_ => _
+            // One push per package, in order, and the first failure ends the run: a single DotNetNuGetPush throws
+            // on a non-zero exit, so a PostgresStudio push that fails never reaches MartenStudio's - which would
+            // put on nuget.org a MartenStudio nobody can restore, because it depends on exactly that PostgresStudio.
+            // Deliberately not the combinatorial overload: it runs its items through PLINQ, which promises no order
+            // even at a degree of parallelism of 1, and with completeOnFailure it pushes the rest after a failure.
+            // --skip-duplicate keeps a re-run after a partial failure safe: the package that did land is skipped,
+            // the one that did not is pushed. ReleasePushOrderTests pins all of this.
+            var pushed = 0;
+
+            foreach (var package in packages)
+            {
+                DotNetNuGetPush(_ => _
                     .SetSource(NuGetSource)
                     .SetApiKey(apiKey)
                     .EnableSkipDuplicate()
-                    .CombineWith(packages, (_, v) => _.SetTargetPath(v)),
-                degreeOfParallelism: 1,
-                completeOnFailure: true);
+                    .SetTargetPath(package));
+
+                pushed++;
+                Log.Information("Pushed {Package} ({Pushed} of {Count})", package.Name, pushed, packages.Length);
+            }
 
             ReportSummary(_ => _
-                .AddPair("Pushed", packages.Length.ToString())
+                .AddPair("Pushed", pushed.ToString())
                 .AddPair("Version", Version));
         });
 

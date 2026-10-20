@@ -27,8 +27,10 @@ namespace MartenStudio.Internal;
 /// host PostgresStudio is present and a reference that crept in would break nothing there.
 /// </para>
 /// <para>
-/// <b>What it compares.</b> The informational versions, up to the <c>+</c> that SourceLink appends the commit
-/// to: the two packages are packed from one commit at one CHANGELOG version, and that version is the contract.
+/// <b>What it compares.</b> The informational versions. The two packages are packed from one commit at one CHANGELOG
+/// version, and SourceLink appends that commit after a <c>+</c>: when both assemblies carry one, the whole strings must
+/// match, so the same version built from two commits is refused too; when either lacks it (a build from a tree with no
+/// git), only the part before the <c>+</c> is compared.
 /// </para>
 /// </remarks>
 internal static class PostgresStudioVersionGuard
@@ -47,7 +49,8 @@ internal static class PostgresStudioVersionGuard
     /// <exception cref="InvalidOperationException">PostgresStudio is missing, or is another version.</exception>
     internal static void Ensure(Assembly martenStudio, Func<Assembly> loadPostgresStudio)
     {
-        string required = ReleaseVersion(martenStudio);
+        string? martenStudioVersion = InformationalVersion(martenStudio);
+        string required = ReleaseVersion(martenStudioVersion);
         Assembly postgresStudio;
 
         try
@@ -65,23 +68,50 @@ internal static class PostgresStudioVersionGuard
                 e);
         }
 
-        string found = ReleaseVersion(postgresStudio);
+        string? postgresStudioVersion = InformationalVersion(postgresStudio);
 
-        if (!string.Equals(required, found, StringComparison.Ordinal))
+        if (SameBuild(martenStudioVersion, postgresStudioVersion))
         {
-            throw new InvalidOperationException(
-                $"MartenStudio {required} needs PostgresStudio {required} exactly, and found PostgresStudio {found}. " +
-                "The two packages are released together and must be upgraded together: a central PackageVersion or a " +
-                $"PackageReference for PostgresStudio must say {required}, or be removed and let MartenStudio bring it.");
+            return;
         }
+
+        // Both carry a commit: name it, since the release version may well be the same on both sides.
+        bool commits = HasBuildMetadata(martenStudioVersion) && HasBuildMetadata(postgresStudioVersion);
+        string shownRequired = commits ? martenStudioVersion! : required;
+        string shownFound = commits ? postgresStudioVersion! : ReleaseVersion(postgresStudioVersion);
+
+        throw new InvalidOperationException(
+            $"MartenStudio {shownRequired} needs PostgresStudio {shownRequired} exactly, and found PostgresStudio " +
+            $"{shownFound}. The two packages are released together and must be upgraded together: a central " +
+            $"PackageVersion or a PackageReference for PostgresStudio must say {required}, or be removed and let " +
+            "MartenStudio bring it.");
     }
+
+    /// <summary>
+    /// Whether two informational versions name the same build. When both carry build metadata - the <c>+&lt;commit&gt;</c>
+    /// SourceLink appends - the whole strings must match, so two builds of one version from different commits are told
+    /// apart. When only one side carries it, or neither does, there is no commit to compare, and the release versions
+    /// (the part before the <c>+</c>) must match, as before.
+    /// </summary>
+    /// <param name="martenStudio">MartenStudio's informational version.</param>
+    /// <param name="postgresStudio">PostgresStudio's informational version.</param>
+    internal static bool SameBuild(string? martenStudio, string? postgresStudio) =>
+        HasBuildMetadata(martenStudio) && HasBuildMetadata(postgresStudio)
+            ? string.Equals(martenStudio, postgresStudio, StringComparison.Ordinal)
+            : string.Equals(ReleaseVersion(martenStudio), ReleaseVersion(postgresStudio), StringComparison.Ordinal);
 
     /// <summary>An assembly's informational version up to the <c>+</c>, or its assembly version without one.</summary>
     /// <param name="assembly">The assembly.</param>
-    internal static string ReleaseVersion(Assembly assembly) =>
-        ReleaseVersion(
-            assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? assembly.GetName().Version?.ToString());
+    internal static string ReleaseVersion(Assembly assembly) => ReleaseVersion(InformationalVersion(assembly));
+
+    /// <summary>An assembly's informational version as it carries it, or its assembly version when it has none.</summary>
+    /// <param name="assembly">The assembly.</param>
+    internal static string? InformationalVersion(Assembly assembly) =>
+        assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? assembly.GetName().Version?.ToString();
+
+    private static bool HasBuildMetadata(string? informationalVersion) =>
+        informationalVersion?.Contains('+', StringComparison.Ordinal) == true;
 
     /// <summary>The part of an informational version before the <c>+</c> build metadata, or <c>?</c> for none.</summary>
     /// <param name="informationalVersion">The version as the assembly carries it.</param>
