@@ -779,8 +779,8 @@ The gates were run at both ends:
 - `dotnet restore marten-studio.slnx -p:MartenStudioMartenVersion=9.51.0` with `TreatWarningsAsErrors`: zero NU
   warnings, so no `NU1901`–`NU1904` for anything in the graph.
 - `dotnet build marten-studio.slnx` at 9.39.0 and at 9.51.0: 0 warnings at both.
-- The fast suite at both: 5 986 tests; 5 872 passed with 114 version-gated skips at the floor (every one a LINQ-mode
-  test, which needs Marten 9.48), 5 985 passed with 1 skip at 9.51.0 (its mirror, the LINQ-mode test of a Marten older
+- The fast suite at both: 5 987 tests; 5 873 passed with 114 version-gated skips at the floor (every one a LINQ-mode
+  test, which needs Marten 9.48), 5 986 passed with 1 skip at 9.51.0 (its mirror, the LINQ-mode test of a Marten older
   than 9.48).
 - Every live class under `Events`, `Schema` and `Query`, with `DaemonHealthLiveTests`, `EventHealthSweepLiveTests` and
   `EnumerationAppliesLiveTests`, at both, with `MARTENSTUDIO_PG_REUSE=false`.

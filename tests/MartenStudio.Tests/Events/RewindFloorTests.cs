@@ -1,6 +1,9 @@
 using MartenStudio.Services.Events;
 using MartenStudio.Tests.Projections;
 
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace MartenStudio.Tests.Events;
 
 /// <summary>
@@ -51,7 +54,7 @@ public class RewindFloorTests
     {
         using var daemon = new FakeProjectionDaemon();
 
-        await EventDataService.RewindToFloorAsync(daemon, "OrderSummary", 41, Token);
+        await EventDataService.RewindToFloorAsync(daemon, "OrderSummary", 41, NullLogger.Instance, "default", "db1", Token);
 
         daemon.Rewinds.Should().ContainSingle().Which.Should().Be("OrderSummary/41");
         daemon.LastSequenceFloor.Should().Be(41);
@@ -64,7 +67,7 @@ public class RewindFloorTests
     [Fact]
     public async Task A_null_daemon_is_refused_rather_than_dereferenced()
     {
-        Func<Task> rewinding = () => EventDataService.RewindToFloorAsync(null!, "OrderSummary", 41, Token);
+        Func<Task> rewinding = () => EventDataService.RewindToFloorAsync(null!, "OrderSummary", 41, NullLogger.Instance, "default", "db1", Token);
 
         await rewinding.Should().ThrowAsync<ArgumentNullException>();
     }
@@ -83,7 +86,7 @@ public class RewindFloorTests
     {
         using var daemon = new FakeProjectionDaemon();
 
-        await EventDataService.RewindTenantToFloorAsync(daemon, "OrderSummary", "acme", 41, Token);
+        await EventDataService.RewindTenantToFloorAsync(daemon, "OrderSummary", "acme", 41, NullLogger.Instance, "default", "db1", Token);
 
         daemon.TenantRewinds.Should().ContainSingle().Which.Should().Be("OrderSummary/acme/41");
         daemon.Rewinds.Should().BeEmpty("the store-global overload is never the one asked for a tenant");
@@ -153,31 +156,86 @@ public class RewindFloorTests
     [InlineData(false)]
     public async Task An_unknown_subscription_refusal_never_carries_the_stores_subscription_list(bool perTenant)
     {
-        using var daemon = new FakeProjectionDaemon
-        {
-            RewindFailure = new ArgumentOutOfRangeException(
-                "Unknown subscription name 'OrderSummary:All:acme'. Available options are OrderSummary, SecretLedger, PayrollAudit",
-                innerException: null),
-        };
+        var listing = new ArgumentOutOfRangeException(
+            "Unknown subscription name 'OrderSummary:All:acme'. Available options are OrderSummary, SecretLedger, PayrollAudit",
+            innerException: null);
+
+        using var daemon = new FakeProjectionDaemon { RewindFailure = listing };
+        var log = new RecordingLogger();
 
         Func<Task> rewinding = perTenant
-            ? () => EventDataService.RewindTenantToFloorAsync(daemon, "OrderSummary", "acme", 41, Token)
-            : () => EventDataService.RewindToFloorAsync(daemon, "OrderSummary", 41, Token);
+            ? () => EventDataService.RewindTenantToFloorAsync(daemon, "OrderSummary", "acme", 41, log, "default", "db1", Token)
+            : () => EventDataService.RewindToFloorAsync(daemon, "OrderSummary", 41, log, "default", "db1", Token);
 
         InvalidOperationException refused = (await rewinding.Should().ThrowAsync<InvalidOperationException>()).Which;
 
         refused.Message.Should().Be(StreamCompactionRules.SubscriptionNotRecognised("OrderSummary", perTenant ? "acme" : null));
         refused.Message.Should().NotContain("SecretLedger").And.NotContain("PayrollAudit").And.NotContain("Available options");
         refused.InnerException.Should().BeNull("an inner exception's message is one ToString() away from a page");
+
+        // What Marten said is kept where only the host's own log sees it: event 9320, with Marten's exception whole.
+        (LogLevel Level, EventId EventId, Exception? Exception, string Message) line = log.Lines.Should().ContainSingle().Subject;
+        line.Level.Should().Be(LogLevel.Warning);
+        line.EventId.Id.Should().Be(9320);
+        line.Exception.Should().BeSameAs(listing);
+        line.Message.Should().Contain("OrderSummary").And.Contain(perTenant ? "tenant acme" : "tenant (all tenants)")
+            .And.Contain("store default").And.Contain("database db1");
+    }
+
+    /// <summary>
+    /// An <see cref="AggregateException" /> carries its inner exceptions' messages in its own, but not theirs in turn - so
+    /// a listing two levels down, under the second of its inner exceptions, is found only by walking each of them.
+    /// </summary>
+    [Fact]
+    public async Task A_subscription_listing_inside_an_aggregate_is_found_and_never_passed_on()
+    {
+        var aggregate = new AggregateException(
+            new TimeoutException("the shard did not stop in time"),
+            new InvalidOperationException(
+                "the rewind failed",
+                new ArgumentOutOfRangeException(
+                    "Unknown subscription name 'OrderSummary:All:acme'. Available options are OrderSummary, SecretLedger",
+                    innerException: null)));
+
+        aggregate.Message.Should().NotContain("Available options", "the premise: only the walk can find it");
+        aggregate.InnerException.Should().BeOfType<TimeoutException>("and the first inner exception is not it");
+
+        EventDataService.ListsSubscriptions(aggregate).Should().BeTrue();
+        EventDataService.ListsSubscriptions(new AggregateException(new TimeoutException("only this"))).Should().BeFalse();
+        EventDataService.ListsSubscriptions(null).Should().BeFalse();
+
+        using var daemon = new FakeProjectionDaemon { RewindFailure = aggregate };
+        var log = new RecordingLogger();
+
+        Func<Task> rewinding = () => EventDataService.RewindTenantToFloorAsync(daemon, "OrderSummary", "acme", 41, log, "default", "db1", Token);
+
+        (await rewinding.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().NotContain("SecretLedger");
+        log.Lines.Should().ContainSingle().Which.Exception.Should().BeSameAs(aggregate);
     }
 
     [Fact]
     public async Task Any_other_rewind_failure_keeps_its_own_words()
     {
         using var daemon = new FakeProjectionDaemon { RewindFailure = new TimeoutException("the shard did not stop in time") };
+        var log = new RecordingLogger();
 
-        await ((Func<Task>) (() => EventDataService.RewindTenantToFloorAsync(daemon, "OrderSummary", "acme", 41, Token)))
+        await ((Func<Task>) (() => EventDataService.RewindTenantToFloorAsync(daemon, "OrderSummary", "acme", 41, log, "default", "db1", Token)))
             .Should().ThrowAsync<TimeoutException>().WithMessage("the shard did not stop in time");
+
+        log.Lines.Should().BeEmpty("a failure that lists nothing is the audit's to record, as it is");
+    }
+
+    /// <summary>Every line logged, with its exception - which the shared capturing provider does not keep.</summary>
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<(LogLevel Level, EventId EventId, Exception? Exception, string Message)> Lines { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Lines.Add((logLevel, eventId, exception, formatter(state, exception)));
     }
 
     /// <summary>

@@ -66,11 +66,13 @@ tenant only when the database holds that tenant alone). One rewind is the except
 per-tenant one - it stops, rewinds and restarts only that tenant's agents and deletes only that tenant's dead
 letters - so it is asked about the dead letter's tenant, and it is offered only where the daemon in this process
 runs that tenant's agent. On such a store the database-wide rewind is never offered. One window remains, and
-the studio can only keep it short: the agent check is a snapshot of the daemon, taken immediately before the call
-(nothing awaits between them), and under HotCold the node can lose leadership in that instant. Its coordinator
-then stops every agent it runs while the rewind starts the tenant's agents again here, beside the ones the new
-leader starts. JasperFx's rewind takes no leadership lock, so this cannot be closed from the studio; the extra
-agents last until the node's next leadership poll stops them (at most one `LeadershipPollingTime`). A tenant id
+the studio can only keep it short. The agent check is a snapshot of the daemon, taken immediately before the call
+(nothing awaits between them), but the window is the whole daemon call: JasperFx stops the tenant's agents, has
+Marten rewrite their progression, polls the tenant's high-water mark, and only then restarts the agents. Under
+HotCold the node can lose leadership at any point in that, and its coordinator then stops every agent it runs, while
+the rewind - which takes no leadership lock - still restarts the tenant's agents here at its end, beside the ones the
+new leader starts. This cannot be closed from the studio; the extra agents last until the node's next leadership
+poll stops them (at most one `LeadershipPollingTime` after they started). A tenant id
 with a `:` in it is never rewound: its agents' identity does not read back as its own, and the daemon would stop
 them before Marten refused the rewind.
 

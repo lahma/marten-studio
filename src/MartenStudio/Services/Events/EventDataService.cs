@@ -1849,7 +1849,8 @@ internal sealed partial class EventDataService : IEventDataService
 
                 long floor = RewindFloor(eventSequence);
 
-                await RewindToFloorAsync(daemon, projectionName, floor, token).ConfigureAwait(false);
+                await RewindToFloorAsync(
+                    daemon, projectionName, floor, logger, resolved.Registration.Key, resolved.Database.Id.Identity, token).ConfigureAwait(false);
 
                 return floor == 0
                     ? "progression row removed, so the subscription replays from the first event"
@@ -1894,13 +1895,14 @@ internal sealed partial class EventDataService : IEventDataService
     /// </para>
     /// <para>
     /// <b>The window that remains.</b> The agent check is a snapshot of <c>CurrentAgents()</c>, and nothing awaits
-    /// between it and the call (the user is looked up before it). Under HotCold the node can still lose leadership in
-    /// that instant: its coordinator then stops every agent it runs, while the rewind - already past its own stop - starts
-    /// the tenant's agents again here, beside the agents the new leader starts. JasperFx's rewind takes no leadership
-    /// lock, so the studio cannot close the window, only keep it to the call itself; it is a known limit
-    /// (<c>docs/security.md</c>). The extra agents last until this node's next leadership poll, which stops every agent
-    /// a node without the lock is running (<c>ProjectionCoordinatorBase</c>, read at JasperFx <c>v2.91.0</c>) - at most
-    /// one <c>LeadershipPollingTime</c>.
+    /// between it and the call (the user is looked up before it). But the window is the whole daemon call, not that gap:
+    /// JasperFx stops the tenant's agents, has Marten rewrite their progression rows, polls the tenant's high-water mark
+    /// and only then restarts them. Under HotCold the node can lose leadership at any point in that: its coordinator
+    /// stops every agent it runs, and the rewind, which takes no leadership lock, still restarts the tenant's agents here
+    /// at its end - beside the agents the new leader starts. The studio cannot close that window, only keep it to the
+    /// call itself; it is a known limit (<c>docs/security.md</c>). The extra agents last until this node's next
+    /// leadership poll, which stops every agent a node without the lock is running (<c>ProjectionCoordinatorBase</c>,
+    /// read at JasperFx <c>v2.91.0</c>) - at most one <c>LeadershipPollingTime</c> after they started.
     /// </para>
     /// </remarks>
     private async Task<string> RewindTenantAsync(
@@ -1986,7 +1988,8 @@ internal sealed partial class EventDataService : IEventDataService
 
         long floor = RewindFloor(eventSequence);
 
-        await RewindTenantToFloorAsync(daemon, agent.Name, agent.TenantId!, floor, token).ConfigureAwait(false);
+        await RewindTenantToFloorAsync(
+            daemon, agent.Name, agent.TenantId!, floor, logger, resolved.Registration.Key, resolved.Database.Id.Identity, token).ConfigureAwait(false);
 
         string tenant = " in tenant " + agent.TenantId;
 
@@ -2065,16 +2068,21 @@ internal sealed partial class EventDataService : IEventDataService
     /// <c>RewindSubscriptionAsync(string subscriptionName, string? tenantId, CancellationToken token, long? sequenceFloor,
     /// DateTimeOffset? timestamp)</c> - the token <em>third</em>, between the tenant and the floor (declared on
     /// <c>IProjectionDaemon</c> since at least JasperFx 2.74.0, implemented from 2.91.0). A floor of zero is Marten's
-    /// "delete the progression row".
+    /// "delete the progression row". A refusal as an unknown subscription is logged whole (event 9320) and rethrown
+    /// without Marten's words (<see cref="ListsSubscriptions" />).
     /// </remarks>
     internal static async Task RewindTenantToFloorAsync(
         IProjectionDaemon daemon,
         string projectionName,
         string tenantId,
         long sequenceFloor,
+        ILogger logger,
+        string storeKey,
+        string databaseId,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(daemon);
+        ArgumentNullException.ThrowIfNull(logger);
 
         try
         {
@@ -2082,6 +2090,7 @@ internal sealed partial class EventDataService : IEventDataService
         }
         catch (Exception exception) when (ListsSubscriptions(exception))
         {
+            logger.SubscriptionRewindRefused(exception, projectionName, tenantId, storeKey, databaseId);
             throw new InvalidOperationException(StreamCompactionRules.SubscriptionNotRecognised(projectionName, tenantId));
         }
     }
@@ -2091,23 +2100,33 @@ internal sealed partial class EventDataService : IEventDataService
     /// Available options are A, B, C" - every shard the store has, joined into the message.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// That message would reach the audit ring and the page through the failure's own text, and tell whoever asked the
     /// store's whole projection set (D5). The studio refuses an unknown name before either is asked, so this is the belt to
     /// that: the two rewinds replace it with a sentence naming only what the caller supplied, and keep none of it - not
-    /// even as an inner exception.
+    /// even as an inner exception. Marten's words go to the host's own log instead (event 9320), with the exception.
+    /// </para>
+    /// <para>
+    /// Every wrapped exception is walked: an <see cref="AggregateException" />'s <see cref="AggregateException.InnerExceptions" />
+    /// each, not only its first, since its own message carries its inner exceptions' messages but not theirs in turn.
+    /// </para>
     /// </remarks>
-    internal static bool ListsSubscriptions(Exception exception)
+    internal static bool ListsSubscriptions(Exception? exception)
     {
-        for (Exception? current = exception; current is not null; current = current.InnerException)
+        if (exception is null)
         {
-            if (current.Message.Contains("Available options", StringComparison.OrdinalIgnoreCase)
-                || current.Message.Contains("Unknown subscription name", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
+            return false;
         }
 
-        return false;
+        if (exception.Message.Contains("Available options", StringComparison.OrdinalIgnoreCase)
+            || exception.Message.Contains("Unknown subscription name", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return exception is AggregateException aggregate
+            ? aggregate.InnerExceptions.Any(ListsSubscriptions)
+            : ListsSubscriptions(exception.InnerException);
     }
 
     /// <summary>
@@ -2204,9 +2223,13 @@ internal sealed partial class EventDataService : IEventDataService
         IProjectionDaemon daemon,
         string projectionName,
         long sequenceFloor,
+        ILogger logger,
+        string storeKey,
+        string databaseId,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(daemon);
+        ArgumentNullException.ThrowIfNull(logger);
 
         try
         {
@@ -2214,9 +2237,13 @@ internal sealed partial class EventDataService : IEventDataService
         }
         catch (Exception exception) when (ListsSubscriptions(exception))
         {
+            logger.SubscriptionRewindRefused(exception, projectionName, AllTenants, storeKey, databaseId);
             throw new InvalidOperationException(StreamCompactionRules.SubscriptionNotRecognised(projectionName, tenantId: null));
         }
     }
+
+    /// <summary>What event 9320 names as the tenant of a store-global rewind.</summary>
+    private const string AllTenants = "(all tenants)";
 
     /// <summary>
     /// The shape of every mutating call: capability, then scope with the write policy, then the

@@ -226,9 +226,11 @@ public class StudioActionLogTest
         // advice it could not give. 9270 is the opt-in health export's throttled failure (H8, 9270-9274). 9280 is
         // the statement checks' (H7, 9280-9284): a statement T02 could not plan, and a plan's prepared statement it
         // could not take back, both at Debug. 9290 is the server checks' platform detector (H10, 9290-9294), at Debug.
+        // 9320 is DEPS' (9320-9329): a dead-letter rewind Marten refused as an unknown subscription, kept with Marten's
+        // own words, which the page and the audit are not given.
         declared.Should().Equal(
             9200, 9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211,
             9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9221, 9222, 9230, 9235, 9236, 9237, 9245, 9246,
-            9260, 9261, 9262, 9263, 9264, 9270, 9280, 9281, 9290);
+            9260, 9261, 9262, 9263, 9264, 9270, 9280, 9281, 9290, 9320);
     }
 }
