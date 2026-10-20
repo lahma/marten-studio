@@ -20,8 +20,7 @@ internal static class MartenServiceBridges
     {
         /// <summary>
         /// <c>MartenStudioOptions.Capabilities.X</c>. Shared code asks <see cref="StudioCapabilityGuard.OptionFor" />,
-        /// which reads the studio's settings. Shared-bound callers left at PS-1a: <c>HealthService</c> (PS-1c) and
-        /// <c>QueryService</c> (PS-1d).
+        /// which reads the studio's settings. Shared-bound callers left at PS-1a: <c>HealthService</c> (PS-1c).
         /// </summary>
         /// <param name="capability">The capability.</param>
         public static string OptionName(StudioCapability capability) => MartenStudioSettings.CapabilityOption(capability);

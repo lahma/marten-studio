@@ -82,7 +82,7 @@ public class ProjectionsNoDdlLiveTests(PostgresFixture fixture)
         second.HasEventStore.Should().BeFalse();
 
         NavIndicators badges = await host.BadgesAsync();
-        badges.ProjectionsNeedAttention.Should().BeFalse();
+        badges.Badges.Should().NotContainKey(MartenStudioDescriptor.ProjectionsBadge);
 
         long? highest = await host.EventsAsync(x => x.GetHighestSequenceAsync(Scope));
         highest.Should().BeNull("the feed's follow tick has nothing to follow, and says so as a value");

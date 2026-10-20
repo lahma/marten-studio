@@ -1,11 +1,13 @@
-@using Microsoft.Extensions.Options
-@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Database
 @using MartenStudio.Services.Relationships
+@using MartenStudio.Services.Settings
 @using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph
 @implements IDisposable
 @inject IRelationshipDataService RelationshipData
 @inject StudioState State
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject IStudioLinks Links
+@inject StudioDescriptor Descriptor
 
 @*
     One object and its direct neighbours: every foreign key into and out of it, as a small diagram and the
@@ -131,7 +133,7 @@
             {
                 graph = GraphModel.None;
                 neighbourhood = RelationshipNeighbourhood.Refused(
-                    "This application registered no Marten store that you are authorized to see.");
+                    "This application registered no " + Descriptor.SourceNoun + " that you are authorized to see.");
                 return;
             }
 
@@ -219,10 +221,10 @@
     };
 
     private string CollectionHref(string alias) =>
-        DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias);
+        Links.ToCollection(State.ActiveScope, alias) ?? string.Empty;
 
     private string TableHref(string tableSchema, string name) =>
-        MartenStudio.Services.Database.DatabaseLinks.ToObject(Options.Value, State.ActiveScope, tableSchema, name, MartenStudio.Services.Database.DatabaseObjectTab.Relationships);
+        DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, tableSchema, name, DatabaseObjectTab.Relationships);
 
     private Task OnScopeChangedAsync() => InvokeAsync(async () =>
     {

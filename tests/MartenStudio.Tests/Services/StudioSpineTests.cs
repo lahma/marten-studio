@@ -169,7 +169,10 @@ public class StudioSpineTests
         scoped.GetRequiredService<IHealthRemedyProvider>().Should().BeOfType<MartenHealthRemedyProvider>();
         services.Where(static x => x.ServiceType == typeof(INavIndicatorContributor))
             .Should().ContainSingle().Which.ImplementationType.Should().Be<MartenNavIndicatorContributor>();
-        services.Should().Contain(static x => x.ServiceType == typeof(ISqlConsoleService) && x.ImplementationType == typeof(MartenSqlConsoleService));
+        services.Should().Contain(static x => x.ServiceType == typeof(MartenStudio.Services.Query.SqlConsoleService)
+            && x.ImplementationType == typeof(MartenStudio.Services.Query.SqlConsoleService));
+        services.Should().ContainSingle(static x => x.ServiceType == typeof(ISqlConsoleService))
+            .Which.ImplementationFactory.Should().NotBeNull("the interface forwards to the one scoped console the Query service also uses");
         services.Should().Contain(static x => x.ServiceType == typeof(IRelationshipNodeSource) && x.ImplementationType == typeof(MartenRelationshipNodeSource));
         services.Should().Contain(static x => x.ServiceType == typeof(IDatabaseDeclarationsSource) && x.ImplementationType == typeof(MartenDatabaseDeclarationsSource));
     }

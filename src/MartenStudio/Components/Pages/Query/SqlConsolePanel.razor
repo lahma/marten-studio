@@ -1,0 +1,478 @@
+@using System.Globalization
+@using MartenStudio.Internal.Sql
+@using MartenStudio.Services.Live
+@using MartenStudio.Services.Query
+@using MartenStudio.Services.Settings
+@using MartenStudio.Services.Sources
+@implements IAsyncDisposable
+@inject ISqlConsoleService SqlConsole
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
+@inject ToastService Toasts
+@inject IJSRuntime JsRuntime
+@inject IStudioSettings Settings
+
+@*
+    The SQL console: arbitrary SQL against the whole database, so it is gated on RunSql, resolved with write-policy
+    semantics against the database as a whole - never the tenant on screen, which nothing puts into a typed
+    statement (SqlConsoleService.SqlScope) - checked by the statement guard, run inside a read-only transaction
+    and audited statement by statement (D13). The README says it plainly: grant RunSql to people you would give
+    psql to.
+
+    Shared by every studio: MartenStudio's Query page renders it as its SQL tab, and a studio with no document
+    types renders it as its whole Query page. The page that hosts it keeps its state (SqlConsoleSession), so a tab
+    switch does not lose the statement or the last result, and hears about runs and saves through callbacks - its
+    deep link and its saved-query drawer are its own. The service refuses whatever this renders (hard rule 5);
+    hiding the editor is a convenience.
+*@
+
+<div class="ms-query-mode-panel ms-query-panel-sql">
+    @if (!SqlEnabled)
+    {
+        <CapabilityDisabled Capability="@nameof(StudioCapability.RunSql)" Action="Running SQL" />
+        <p class="ms-muted ms-query-sql-warning">@RunSqlWarning</p>
+    }
+    else if (!gateKnown)
+    {
+        <LoadingSpinner />
+    }
+    else
+    {
+        @* The panel's own question, asked of the same tenant-less scope the service resolves
+           (SqlConsoleService.SqlScope), so the console shown and the console run never disagree.
+           Said, not enforced: the service refuses regardless (hard rule 5). *@
+        <WriteRefusal Refused="@(!mayRunSql)" Capability="@nameof(StudioCapability.RunSql)" />
+
+        @if (State.ActiveScope?.TenantId is { Length: > 0 } sqlTenant)
+        {
+            <p class="ms-muted ms-query-note ms-query-sql-tenant">
+                The console is not limited to <code>@sqlTenant</code>: nothing adds a tenant to a
+                statement you type, so it reads every tenant's rows, and it is authorized for
+                this database as a whole.
+            </p>
+        }
+
+        <QueryEditor EditorId="ms-query-sql"
+                     Label="SQL statement"
+                     Placeholder="select count(*) from …"
+                     Rows="8"
+                     Value="@Current.Text"
+                     ValueChanged="OnTextChangedAsync"
+                     Running="running"
+                     ElapsedMilliseconds="elapsedMilliseconds"
+                     ErrorMessage="@Current.Error"
+                     ErrorPosition="Current.ErrorPosition"
+                     Status="@Current.Status"
+                     OnRun="RunAsync"
+                     OnCancel="CancelAsync"
+                     OnSave="SaveAsync" />
+
+        <p class="ms-muted ms-query-note">
+            One statement at a time, inside <code>BEGIN; SET TRANSACTION READ ONLY</code> with
+            a statement timeout, and the transaction is always rolled back. The row cap stops
+            the reader; no <code>limit</code> is ever appended to what you typed.
+        </p>
+
+        @if (Current.Result is { } result)
+        {
+            <QueryStats RowCount="result.Rows.Count"
+                        DurationMilliseconds="result.Duration.TotalMilliseconds"
+                        Truncated="result.Truncated"
+                        Sql="@Current.Text"
+                        PlanUnavailable="Run an EXPLAIN statement to see a plan here."
+                        Messages="@result.Notices" />
+
+            @if (result.Succeeded)
+            {
+                <div class="ms-query-toolbar ms-query-export">
+                    <button type="button" class="ms-btn ms-btn-sm" @onclick="ExportJsonAsync">Export JSON</button>
+                    <button type="button" class="ms-btn ms-btn-sm" @onclick="ExportCsvAsync">Export CSV</button>
+                </div>
+
+                <ResultGrid Columns="@GridColumns(result)"
+                            Rows="@GridRows(result)"
+                            Truncated="result.Truncated"
+                            RowLimit="result.RowLimit"
+                            EmptyTitle="Nothing to show"
+                            EmptyText="That statement returned no result set." />
+            }
+        }
+        else
+        {
+            <ExamplesPanel Title="Try one of these"
+                           Examples="@Examples"
+                           OnPick="OnExamplePickedAsync" />
+        }
+    }
+</div>
+
+@code {
+    /// <summary>What the README says about the SQL console, repeated where the capability is refused.</summary>
+    internal const string RunSqlWarning =
+        "The SQL console runs whatever it is given inside a read-only transaction with a statement " +
+        "timeout, and it can read every table the connection's role can reach. Grant it only to people " +
+        "you would give psql to.";
+
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly SqlConsoleSession ownSession = new();
+
+    private CancellationTokenSource? runCts;
+    private bool running;
+    private long elapsedMilliseconds;
+
+    /// <summary>
+    /// Whether the policies let <em>this</em> visitor run SQL against the database on screen. Asked when the panel
+    /// opens and whenever the scope moves, never memoised across scopes, and fail-open by default: the common case
+    /// is a host with no policy at all, and this is not the enforcement - the service resolves the same scope and
+    /// throws (AGENTS.md hard rule 5).
+    /// </summary>
+    private bool mayRunSql = true;
+
+    /// <summary>Whether <see cref="mayRunSql" /> has been asked yet, so the editor is never drawn ahead of its refusal.</summary>
+    private bool gateKnown;
+
+    /// <summary>
+    /// The host's <c>SqlConsoleSession</c> - the statement, the last result and the error - or <see langword="null" />
+    /// for a panel that keeps its own. <see cref="object" /> because the Razor SDK emits every component as public and
+    /// a public parameter cannot have an internal type.
+    /// </summary>
+    [Parameter]
+    public object? Session { get; set; }
+
+    /// <summary>The idle panel's examples: what each demonstrates, the text, and the alias it is about.</summary>
+    [Parameter]
+    public IReadOnlyList<(string Title, string Snippet, string? Alias)> Examples { get; set; } = [];
+
+    /// <summary>
+    /// Raised when the statement was put into the editor by an example, and just before a run starts - so the
+    /// host can put the statement into its deep link. Typing alone raises nothing.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    /// <summary>Raised with the statement when the editor asks to save it (Ctrl+S, or the Save button).</summary>
+    [Parameter]
+    public EventCallback<string> OnSave { get; set; }
+
+    /// <summary>Raised with the statement after it ran without an error, for a host's list of recent queries.</summary>
+    [Parameter]
+    public EventCallback<string> OnRan { get; set; }
+
+    /// <summary>Whether the SQL console is available at all in this process.</summary>
+    private bool SqlEnabled => Capabilities.IsEnabled(StudioCapability.RunSql);
+
+    private SqlConsoleSession Current => ComponentModel.Read(Session, ownSession);
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+
+        // Idempotent, and normally already done by the layout. Called here so the panel also works when it is the
+        // only thing rendered, which is what a component test and a studio whose whole Query page is this do.
+        await State.EnsureInitializedAsync(lifetime.Token);
+        await AskGateAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        // A statement in flight belongs to this panel: leaving it - for another tab of the page, or another page -
+        // cancels it through the token Npgsql was handed, as closing the page always did.
+        await lifetime.CancelAsync();
+        lifetime.Dispose();
+        runCts = null;
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        Current.ForgetResult();
+
+        await AskGateAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Asks <see cref="MayRunSqlAsync" /> for the active scope, and a failure as a refusal is never drawn.</summary>
+    private async Task AskGateAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        try
+        {
+            // First, before anything that can fail: a read that throws must not leave the console showing the
+            // previous scope's answer.
+            mayRunSql = scope is null || await MayRunSqlAsync(scope, lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The circuit is going away, or the scope moved under us.
+        }
+        catch (Exception exception)
+        {
+            // The policy itself threw. The service asks it again on every run and refuses what it refuses; the
+            // panel says what went wrong rather than drawing a refusal it did not get.
+            mayRunSql = true;
+            Current.Error = exception.Message;
+        }
+        finally
+        {
+            gateKnown = true;
+        }
+    }
+
+    /// <summary>
+    /// The console's gate, asked the way the service asks it: the scope policy, then the write policy with
+    /// <c>RunSql</c> on the resource, both against the scope's database as a whole.
+    /// </summary>
+    /// <remarks>
+    /// Nobody is asked about a capability the process does not have; <c>CapabilityDisabled</c> says that.
+    /// </remarks>
+    private async Task<bool> MayRunSqlAsync(StudioScope scope, CancellationToken token)
+    {
+        if (!SqlEnabled)
+        {
+            return true;
+        }
+
+        StudioScope sqlScope = SqlConsoleService.SqlScope(scope);
+
+        return await Authorization.IsAuthorizedAsync(sqlScope, null, token)
+            && await Authorization.IsAuthorizedAsync(sqlScope, StudioCapability.RunSql, token);
+    }
+
+    private Task OnTextChangedAsync(string value)
+    {
+        Current.Text = value;
+        return Task.CompletedTask;
+    }
+
+    private async Task OnExamplePickedAsync((string Snippet, string? Alias) example)
+    {
+        Current.Text = example.Snippet;
+
+        await OnChanged.InvokeAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SaveAsync(string text) => await OnSave.InvokeAsync(text);
+
+    private async Task CancelAsync()
+    {
+        if (runCts is null)
+        {
+            return;
+        }
+
+        // A real cancellation: the token is the one handed to Npgsql, so the command itself is cancelled rather than
+        // the panel merely forgetting about it.
+        try
+        {
+            await runCts.CancelAsync();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private async Task RunAsync(string text)
+    {
+        SqlConsoleSession session = Current;
+        session.Text = text;
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || string.IsNullOrWhiteSpace(session.Text) || running)
+        {
+            return;
+        }
+
+        session.Error = null;
+        session.ErrorPosition = -1;
+        session.Status = null;
+
+        await OnChanged.InvokeAsync();
+
+        using CancellationTokenSource cts = StartRun();
+
+        try
+        {
+            SqlConsoleResult result = await SqlConsole.RunSqlAsync(scope, new SqlConsoleRequest(session.Text), cts.Token);
+
+            session.Result = result;
+
+            if (result.Rejection is { } rejection)
+            {
+                session.Error = rejection.Message;
+                session.ErrorPosition = rejection.Position;
+            }
+            else if (result.Error is { } error)
+            {
+                session.Error = Describe(error);
+
+                // Postgres counts from one; the editor's caret convention is zero-based.
+                session.ErrorPosition = error.Position > 0 ? error.Position - 1 : -1;
+            }
+            else
+            {
+                session.Status = Summary(result.Rows.Count, result.Duration);
+
+                await OnRan.InvokeAsync(session.Text);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            session.Status = "Cancelled.";
+        }
+        catch (StudioCapabilityDeniedException exception)
+        {
+            // The service refuses whatever the panel rendered: a circuit is a long-lived object a client can drive,
+            // so hiding the editor is a convenience and this is the actual refusal.
+            session.Error = exception.Message;
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            session.Error = SqlConsoleService.SqlRefusedMessage;
+        }
+        catch (Exception exception)
+        {
+            session.Error = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            EndRun();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private CancellationTokenSource StartRun()
+    {
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+
+        runCts = cts;
+        running = true;
+        elapsedMilliseconds = 0;
+
+        _ = TickAsync(cts.Token);
+
+        return cts;
+    }
+
+    private void EndRun()
+    {
+        running = false;
+        runCts = null;
+    }
+
+    /// <summary>
+    /// Keeps the "Running… N ms" label moving while a statement is in flight.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="Task" /> that is deliberately not awaited, and never an <c>async void</c>: everything it can
+    /// throw is caught here, so nothing escapes to the synchronization context and kills the circuit (AGENTS.md
+    /// hard rule 6).
+    /// </remarks>
+    private async Task TickAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
+            System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            while (running && await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+            // The circuit went away while the timer was waiting.
+        }
+    }
+
+    private async Task ExportJsonAsync()
+    {
+        if (Current.Result is { } result)
+        {
+            await DownloadAsync("sql-console.json", "application/json", QueryExport.ToJson(result.Columns, result.Rows));
+        }
+    }
+
+    private async Task ExportCsvAsync()
+    {
+        if (Current.Result is { } result)
+        {
+            await DownloadAsync("sql-console.csv", "text/csv", QueryExport.ToCsv(result.Columns, result.Rows));
+        }
+    }
+
+    private async Task DownloadAsync(string fileName, string mime, string content)
+    {
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("martenStudio.download.text", fileName, mime, content);
+        }
+        catch (JSException)
+        {
+            // The browser answered and said no - the only one of these a person can do anything about, so it is the
+            // only one that is toasted. Listed first, so the filter below never sees it.
+            await Toasts.Error("This browser would not take the download.");
+        }
+        catch (Exception exception)
+            when (StudioLiveUpdates.IsInteropUnavailable(exception) && exception is not JSException)
+        {
+            // The circuit went away between the click and the call. There is nobody left to toast at, and
+            // JSDisconnectedException derives from Exception rather than from JSException, so it has to go through
+            // the shared predicate (AGENTS.md hard rule 15) or it escapes the handler and kills what is left of the
+            // circuit.
+        }
+    }
+
+    private static string Summary(int rows, TimeSpan duration) =>
+        rows.ToString(CultureInfo.InvariantCulture) + " rows in " +
+        duration.TotalMilliseconds.ToString("0.##", CultureInfo.InvariantCulture) + " ms";
+
+    private string Describe(SqlError error)
+    {
+        string? headline = QuerySqlErrors.Describe(error, Settings.QueryTimeout);
+
+        return headline is null
+            ? QuerySqlErrors.Summarize(error)
+            : headline + " (" + QuerySqlErrors.Summarize(error) + ")";
+    }
+
+    private static IReadOnlyList<(string Name, string Type)> GridColumns(SqlConsoleResult result)
+    {
+        List<(string Name, string Type)> columns = new(result.Columns.Count);
+
+        foreach (SqlResultColumn column in result.Columns)
+        {
+            columns.Add((column.Name, column.PostgresType));
+        }
+
+        return columns;
+    }
+
+    private static IReadOnlyList<IReadOnlyList<(string Text, string Kind)>> GridRows(SqlConsoleResult result)
+    {
+        List<IReadOnlyList<(string Text, string Kind)>> rows = new(result.Rows.Count);
+
+        foreach (IReadOnlyList<SqlCell> row in result.Rows)
+        {
+            List<(string Text, string Kind)> cells = new(row.Count);
+
+            foreach (SqlCell cell in row)
+            {
+                cells.Add((cell.Text, cell.Kind.ToString().ToLowerInvariant()));
+            }
+
+            rows.Add(cells);
+        }
+
+        return rows;
+    }
+}

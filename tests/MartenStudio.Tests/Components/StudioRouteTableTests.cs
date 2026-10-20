@@ -155,7 +155,18 @@ public class StudioRouteTableTests
     [InlineData("/ops/marten")]
     public void The_studio_root_matches_the_overview(string? path)
     {
-        Routes.Match("", Options(path))!.PageType.Should().Be<Overview>();
+        // The shared root page, whose body is the descriptor's overview (PS-1d); the overview itself has no @page.
+        Routes.Match("", Options(path))!.PageType.Should().Be<StudioHome>();
+        MartenSpine.Descriptor.OverviewComponent.Should().Be<Overview>();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("/ops/marten")]
+    public void The_query_route_matches_the_shared_query_page_whose_body_is_the_descriptors(string? path)
+    {
+        Routes.Match("query", Options(path))!.PageType.Should().Be<QueryPage>();
+        MartenSpine.Descriptor.QueryComponent.Should().Be<MartenStudio.Components.Pages.Query.Query>();
     }
 
     [Theory]

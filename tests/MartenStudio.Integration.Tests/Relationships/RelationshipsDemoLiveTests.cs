@@ -18,7 +18,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 using Npgsql;
 
@@ -559,16 +558,7 @@ public class RelationshipsDemoLiveTests(RelationshipsDemoFixture fixture) : ICla
     }
 
     private static RelationshipDataService Build(IServiceScope scope, StudioSnapshotCache cache) =>
-        new(
-            scope.ServiceProvider.GetRequiredService<IOptions<MartenStudioOptions>>(),
-            scope.ServiceProvider.GetRequiredService<StudioScopeResolver>(),
-            scope.ServiceProvider.GetRequiredService<ColumnCatalog>(),
-            cache,
-            scope.ServiceProvider.GetRequiredService<ILogger<RelationshipDataService>>(),
-            scope.ServiceProvider.GetRequiredService<DatabaseAccess>(),
-            scope.ServiceProvider.GetRequiredService<DatabaseCatalog>(),
-            scope.ServiceProvider.GetRequiredService<StudioCapabilityGuard>(),
-            TimeProvider.System);
+        RelationshipServiceBuilder.Build(scope.ServiceProvider, cache);
 
     private async Task ExecuteAsync(string sql)
     {

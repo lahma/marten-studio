@@ -90,7 +90,7 @@
     [Parameter]
     public bool Compact { get; set; }
 
-    private GraphModel Graph => DocumentComponentModel.Read(Model, GraphModel.None);
+    private GraphModel Graph => ComponentModel.Read(Model, GraphModel.None);
 
     private RenderFragment End(string key, bool isTable) => __builder =>
     {

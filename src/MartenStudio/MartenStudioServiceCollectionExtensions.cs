@@ -131,7 +131,8 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<IDatabaseDeclarationsSource, MartenDatabaseDeclarationsSource>();
         services.TryAddSingleton<IHealthTableSource, MartenHealthTableSource>();
         services.TryAddSingleton<IHealthRemedyProvider, MartenHealthRemedyProvider>();
-        services.TryAddScoped<ISqlConsoleService, MartenSqlConsoleService>();
+        services.TryAddScoped<SqlConsoleService>();
+        services.TryAddScoped<ISqlConsoleService>(static provider => provider.GetRequiredService<SqlConsoleService>());
         services.TryAddScoped<IRelationshipNodeSource, MartenRelationshipNodeSource>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<INavIndicatorContributor, MartenNavIndicatorContributor>());
 
@@ -154,6 +155,7 @@ public static partial class MartenStudioServiceCollectionExtensions
         // F7: LINQ mode. Scoped like every data service: it keeps one circuit's audit ledger, so a page turn
         // is not a second opening.
         services.TryAddScoped<ILinqQueryService, LinqQueryService>();
+        services.TryAddScoped<RelationshipReads>();
         services.TryAddScoped<IRelationshipDataService, RelationshipDataService>();
 
         // Projections and the async daemon. The three singletons are process-wide on purpose: one tracker

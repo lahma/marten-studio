@@ -1,10 +1,10 @@
 @*
     What the page shows before anything has been run.
 
-    The examples are built from *this* store's aliases, tables and duplicated fields (QueryExampleBuilder),
-    which is the whole reason a Marten UI beats pgAdmin: a person who has never seen this database gets
-    three clauses and three statements that already run against it. Generic examples would have to be
-    edited before they did anything, which is the same as no examples.
+    The examples are built by the studio from the source it is pointed at - MartenStudio builds them from the
+    store's aliases, tables and duplicated fields - which is the whole reason a studio beats pgAdmin: a person
+    who has never seen this database gets statements that already run against it. Generic examples would have
+    to be edited before they did anything, which is the same as no examples. This component only draws them.
 *@
 
 <div class="ms-query-examples">
@@ -14,7 +14,7 @@
     @if (Examples.Count == 0)
     {
         <p class="ms-muted ms-query-examples-empty">
-            This store has no document type to build an example from.
+            @EmptyText
         </p>
     }
     else
@@ -47,6 +47,10 @@
     /// <summary>One line saying where the examples came from.</summary>
     [Parameter]
     public string Intro { get; set; } = "Built from this store's own aliases and tables. Click one to load it.";
+
+    /// <summary>What the panel says when there is no example to offer.</summary>
+    [Parameter]
+    public string EmptyText { get; set; } = "This store has no document type to build an example from.";
 
     /// <summary>The examples: what each demonstrates, the text, and the alias it is about.</summary>
     [Parameter]

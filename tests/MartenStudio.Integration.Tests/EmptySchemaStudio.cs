@@ -142,6 +142,25 @@ internal sealed class EmptySchemaStudio : IAsyncDisposable
         return await badges.ReadAsync(TestContext.Current.CancellationToken);
     }
 
+    /// <summary>
+    /// The numbers MartenStudio's sidebar contributor draws its badges from, for the scope the layout settles - where
+    /// "zero" and "could not tell" are still different answers, which no badge is.
+    /// </summary>
+    public async Task<MartenNavReading> NavNumbersAsync()
+    {
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+
+        StudioState state = scope.ServiceProvider.GetRequiredService<StudioState>();
+        await state.EnsureInitializedAsync(TestContext.Current.CancellationToken);
+
+        MartenNavIndicatorContributor contributor = scope.ServiceProvider
+            .GetServices<MartenStudio.Services.Sources.INavIndicatorContributor>()
+            .OfType<MartenNavIndicatorContributor>()
+            .Single();
+
+        return await contributor.ReadNumbersAsync(state.ActiveScope!, TestContext.Current.CancellationToken);
+    }
+
     /// <summary>One call against the events service, in a scope of its own.</summary>
     public async Task<T> EventsAsync<T>(Func<IEventDataService, Task<T>> action)
     {

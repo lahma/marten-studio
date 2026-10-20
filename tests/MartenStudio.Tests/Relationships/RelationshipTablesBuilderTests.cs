@@ -508,6 +508,55 @@ public class RelationshipTablesBuilderTests
             "the tooltip always lists every column on both sides");
     }
 
+    /// <summary>
+    /// PS-1d: the graph is the shared builder's over a source's node set, and a source with none - a plain data
+    /// source - gets the tables and keys alone, with the <c>mt_</c> rule still failing closed: Marten's own tables are
+    /// never anybody else's, so a key into one is not drawn as a table edge.
+    /// </summary>
+    [Fact]
+    public void A_source_with_no_nodes_of_its_own_draws_tables_and_keys_only()
+    {
+        RelationshipGraph graph = RelationshipGraphBuilder.Build(
+            RelationshipNodeSet.None,
+            [],
+            [
+                Quartz("qrtz_triggers", ["sched_name", "job_name", "job_group"], "qrtz_job_details"),
+                Key("legacy", "customer_credit", ["customer_id"], Doc, CustomerTable, primaryKey: ["customer_id"], linkedPrimaryKey: ["id"]),
+            ],
+            ReadAt,
+            new RelationshipDatabaseView(Open("quartz", "legacy"), []));
+
+        graph.Nodes.Should().BeEmpty("a source with no node source has no document types to draw");
+
+        RelationshipEdge edge = graph.Edges.Should().ContainSingle("only the key between two plain tables is a table edge").Subject;
+        edge.FromAlias.Should().Be(RelationshipTableNode.KeyFor("quartz", "qrtz_triggers"));
+        edge.ToAlias.Should().Be(RelationshipTableNode.KeyFor("quartz", "qrtz_job_details"));
+        edge.Declared.Should().BeFalse();
+        edge.Member.Should().BeNull("only a source's own nodes have members behind their columns");
+
+        graph.Tables.Select(static x => x.QualifiedName).Should().NotContain(
+            DatabaseTestStores.DocumentSchema + "." + CustomerTable,
+            "a Marten document table seen without its store is still Marten's, never a plain table");
+    }
+
+    /// <summary>
+    /// The Marten half reproduces what the builder used to read from <c>StoreOptions</c> itself: the hidden type's
+    /// table is named only among the tables the source hides, and each drawn node carries its table.
+    /// </summary>
+    [Fact]
+    public void The_marten_node_set_hides_a_hidden_type_and_places_every_drawn_node_on_its_table()
+    {
+        RelationshipNodeSet nodes = MartenRelationshipGraph.Nodes(
+            DatabaseTestStores.DefaultStore(),
+            DatabaseTestStores.IsVisible,
+            new Dictionary<string, long>(StringComparer.Ordinal));
+
+        nodes.Nodes.Select(static x => x.Alias).Should().Contain("dbcustomer").And.NotContain("dbsecret");
+        nodes.Nodes.Should().OnlyContain(static x => x.Schema != null && x.Table != null);
+        nodes.HiddenTables.Should().Contain((Doc, SecretTable));
+        nodes.OwnSchemas.Should().Contain(Doc);
+    }
+
     // ----------------------------------------------------------------------------------------------
 
     private static RelationshipGraph Build(
@@ -515,7 +564,7 @@ public class RelationshipTablesBuilderTests
         DatabaseGate gate,
         IReadOnlyList<CatalogRelation>? relations = null,
         IReadOnlyStoreOptions? storeOptions = null) =>
-        RelationshipGraphBuilder.Build(
+        MartenRelationshipGraph.Build(
             storeOptions ?? DatabaseTestStores.DefaultStore(),
             DatabaseTestStores.IsVisible,
             keys,

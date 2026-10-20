@@ -64,7 +64,7 @@ public class NavMenuScopeRaceTests
         // that render is what A's read left behind.
         int renders = nav.RenderCount;
 
-        readForA.SetResult(new NavIndicators(42, false, null)
+        readForA.SetResult(new NavIndicators(MartenStudio.Services.MartenNavBadges.From(42, false, null))
         {
             Health = new HealthGlance(DateTimeOffset.UtcNow, 1, 0, [new HealthGlanceItem("default|db-a|D01", "A is broken")])
             {

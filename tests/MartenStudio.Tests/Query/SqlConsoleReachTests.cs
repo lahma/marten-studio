@@ -6,6 +6,7 @@ using Marten.Storage;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Query;
+using MartenStudio.Services.Sources;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authorization;
@@ -58,7 +59,7 @@ public class SqlConsoleReachTests
         await using Harness harness = await Harness.CreateAsync();
         harness.Policies.Allow(static resource => resource.TenantId == Acme);
 
-        Func<Task> running = () => harness.Queries.RunSqlAsync(harness.Scope(Acme), new SqlConsoleRequest("select 1"), Token);
+        Func<Task> running = () => harness.Console.RunSqlAsync(harness.Scope(Acme), new SqlConsoleRequest("select 1"), Token);
 
         StudioNotAuthorizedException refused = (await running.Should().ThrowAsync<StudioNotAuthorizedException>(
             "the console reads every tenant's rows, and the visitor may address only acme")).Which;
@@ -71,7 +72,7 @@ public class SqlConsoleReachTests
             "RunSql is never asked about a tenant: nothing narrows a statement to one");
 
         StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Subject;
-        entry.Action.Should().Be(QueryService.RunSqlAction);
+        entry.Action.Should().Be(SqlConsoleService.RunSqlAction);
         entry.Succeeded.Should().BeFalse();
         entry.TenantId.Should().BeNull("the audit records the scope that was refused - the database as a whole");
     }
@@ -86,7 +87,7 @@ public class SqlConsoleReachTests
     {
         await using Harness harness = await Harness.CreateAsync();
 
-        SqlConsoleResult result = await harness.Queries.RunSqlAsync(harness.Scope(Acme), new SqlConsoleRequest("select 1"), Token);
+        SqlConsoleResult result = await harness.Console.RunSqlAsync(harness.Scope(Acme), new SqlConsoleRequest("select 1"), Token);
 
         result.Error.Should().NotBeNull("nothing is listening at this connection string");
         result.Error!.SqlState.Should().Be("08006");
@@ -173,7 +174,7 @@ public class SqlConsoleReachTests
 
         plan.HasPlan.Should().BeFalse();
         plan.Error.Should().BeNull("nothing was sent");
-        plan.UnavailableReason.Should().Contain(QueryService.SqlRefusedMessage);
+        plan.UnavailableReason.Should().Contain(SqlConsoleService.SqlRefusedMessage);
 
         harness.Policies.Calls.Should().NotBeEmpty().And.OnlyContain(static x => x.Resource.TenantId == null,
             "the plan is the console's, asked about the database as a whole");
@@ -198,7 +199,7 @@ public class SqlConsoleReachTests
         ExplainResult plan = await harness.Explain(Acme);
 
         plan.HasPlan.Should().BeFalse();
-        plan.UnavailableReason.Should().Contain(QueryService.SqlRefusedMessage);
+        plan.UnavailableReason.Should().Contain(SqlConsoleService.SqlRefusedMessage);
 
         harness.Policies.Calls.Should().Contain(x =>
             x.Resource.DatabaseIdentifier == harness.Database
@@ -256,6 +257,8 @@ public class SqlConsoleReachTests
         public string Database { get; }
 
         public IQueryService Queries => scope.ServiceProvider.GetRequiredService<IQueryService>();
+
+        public ISqlConsoleService Console => scope.ServiceProvider.GetRequiredService<ISqlConsoleService>();
 
         public StudioActionLogService Ring => provider.GetRequiredService<StudioActionLogService>();
 

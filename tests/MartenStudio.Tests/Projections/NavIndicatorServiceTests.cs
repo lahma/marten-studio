@@ -1,6 +1,7 @@
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Live;
+using MartenStudio.Services.Settings;
 using MartenStudio.Tests.Events;
 using MartenStudio.Tests.Support;
 
@@ -17,7 +18,10 @@ namespace MartenStudio.Tests.Projections;
 /// The navigation is on every page, so this is the one service in the studio whose failure mode matters
 /// more than its answer: a badge that could throw would be a decoration taking navigation down with it.
 /// Everything here answers <see cref="NavIndicators.None" /> rather than raising, and the whole answer
-/// goes through the snapshot cache so that N circuits are one pair of reads per interval (plan D10).
+/// goes through the snapshot cache so that N circuits are one pair of reads per interval (plan D10). The badges are
+/// MartenStudio's contributor's (<see cref="MartenNavIndicatorContributor" />), read through the shared service, so
+/// these are the contributor's numbers and the service's caching and authorization at once; where "zero" and "could
+/// not tell" have to be told apart, which no badge does, the contributor's own reading is asked.
 /// </remarks>
 public class NavIndicatorServiceTests
 {
@@ -43,8 +47,7 @@ public class NavIndicatorServiceTests
 
         NavIndicators indicators = await harness.Service.ReadAsync(Token);
 
-        indicators.DeadLetters.Should().Be(7);
-        indicators.ShowDeadLetterCount.Should().BeTrue();
+        DeadLetterBadge(indicators).Should().Be("7");
     }
 
     [Fact]
@@ -55,8 +58,8 @@ public class NavIndicatorServiceTests
 
         NavIndicators indicators = await harness.Service.ReadAsync(Token);
 
-        indicators.DeadLetters.Should().BeNull();
-        indicators.ShowDeadLetterCount.Should().BeFalse();
+        DeadLetterBadge(indicators).Should().BeNull("nobody could tell draws no badge");
+        (await harness.ReadingAsync()).DeadLetters.Should().BeNull("could not tell is not zero");
     }
 
     [Fact]
@@ -68,8 +71,8 @@ public class NavIndicatorServiceTests
 
         NavIndicators indicators = await harness.Service.ReadAsync(Token);
 
-        indicators.ProjectionsNeedAttention.Should().BeTrue();
-        indicators.ProjectionsExplanation.Should().Contain("OrderSummary:All").And.Contain("50,000 events behind");
+        ProjectionsDot(indicators).Should().NotBeNull();
+        ProjectionsDot(indicators)!.Title.Should().Contain("OrderSummary:All").And.Contain("50,000 events behind");
     }
 
     [Fact]
@@ -80,8 +83,8 @@ public class NavIndicatorServiceTests
 
         NavIndicators indicators = await harness.Service.ReadAsync(Token);
 
-        indicators.ProjectionsNeedAttention.Should().BeTrue();
-        indicators.ProjectionsExplanation.Should().Contain("paused");
+        ProjectionsDot(indicators).Should().NotBeNull();
+        ProjectionsDot(indicators)!.Title.Should().Contain("paused");
     }
 
     /// <summary>
@@ -97,7 +100,7 @@ public class NavIndicatorServiceTests
 
         NavIndicators indicators = await harness.Service.ReadAsync(Token);
 
-        indicators.ProjectionsNeedAttention.Should().BeFalse();
+        ProjectionsDot(indicators).Should().BeNull();
     }
 
     [Fact]
@@ -110,8 +113,8 @@ public class NavIndicatorServiceTests
         NavIndicators indicators = await harness.Service.ReadAsync(Token);
 
         // GetSummaryAsync answers "cannot report" as a value, so the dead-letter count survives it.
-        indicators.ProjectionsNeedAttention.Should().BeFalse();
-        indicators.DeadLetters.Should().Be(4);
+        ProjectionsDot(indicators).Should().BeNull();
+        DeadLetterBadge(indicators).Should().Be("4");
     }
 
     /// <summary>
@@ -177,11 +180,15 @@ public class NavIndicatorServiceTests
 
         harness.Projections.Reads.Should().Be(0, "reading the progression would have created the event store");
 
+        indicators.Badges.Should().BeEmpty();
+
         // The dead-letter half still answers: its own read is an information_schema question and a
         // database with no dead-letter table is a real zero.
-        indicators.DeadLetters.Should().Be(0);
-        indicators.ProjectionsNeedAttention.Should().BeFalse();
-        indicators.ProjectionsExplanation.Should().BeNull();
+        MartenNavReading reading = await harness.ReadingAsync();
+        reading.DeadLetters.Should().Be(0);
+        reading.ProjectionsNeedAttention.Should().BeFalse();
+        reading.ProjectionsExplanation.Should().BeNull();
+        harness.Projections.Reads.Should().Be(0, "the contributor's own reading is gated the same way");
     }
 
     /// <summary>
@@ -201,7 +208,7 @@ public class NavIndicatorServiceTests
         NavIndicators indicators = await harness.Service.ReadAsync(Token);
 
         harness.Projections.Reads.Should().Be(0);
-        indicators.ProjectionsNeedAttention.Should().BeFalse();
+        ProjectionsDot(indicators).Should().BeNull();
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -248,7 +255,7 @@ public class NavIndicatorServiceTests
 
         NavIndicators indicators = await harness.Service.ReadAsync(Token);
 
-        indicators.DeadLetters.Should().Be(2);
+        DeadLetterBadge(indicators).Should().Be("2");
 
         harness.Authorization.Calls.Should().Contain(x =>
             x.Policy == Harness.PolicyName
@@ -277,7 +284,83 @@ public class NavIndicatorServiceTests
         harness.Authorization.Calls.Should().HaveCount(2, "the question is not");
     }
 
-    /// <summary>The service under test, with its scope, its two data services and a real cache.</summary>
+    // -----------------------------------------------------------------------------------------------
+    // PS-1d: the shared service draws what its contributors read, and nothing of its own beyond health.
+    // -----------------------------------------------------------------------------------------------
+
+    /// <summary>A studio with no contributor - a plain data source's - draws no badge beyond health, and asks nothing.</summary>
+    [Fact]
+    public async Task A_studio_with_no_contributor_draws_no_badge_and_reads_nothing()
+    {
+        Harness harness = await Harness.ReadyAsync();
+        harness.Events.DeadLetterCount = 7;
+
+        NavIndicators indicators = await harness.With().ReadAsync(Token);
+
+        indicators.Badges.Should().BeEmpty();
+        harness.Events.DeadLetterCountReads.Should().Be(0, "nothing but a contributor reads a badge's number");
+    }
+
+    /// <summary>Every contributor is asked, in registration order, and a key two of them answer is the first one's.</summary>
+    [Fact]
+    public async Task Every_contributor_is_asked_and_the_first_to_answer_a_key_wins()
+    {
+        Harness harness = await Harness.ReadyAsync();
+        var first = new StubContributor(("one", "first"));
+        var second = new StubContributor(("one", "second"), ("two", "second"));
+
+        NavIndicators indicators = await harness.With(first, second).ReadAsync(Token);
+
+        indicators.Badges["one"].Text.Should().Be("first");
+        indicators.Badges["two"].Text.Should().Be("second");
+        first.Reads.Should().Be(1);
+        second.Reads.Should().Be(1);
+    }
+
+    /// <summary>A contributor that throws takes the whole read's badges with it, and caches nothing.</summary>
+    [Fact]
+    public async Task A_contributor_that_throws_costs_every_badge_of_that_read_and_is_not_cached()
+    {
+        Harness harness = await Harness.ReadyAsync();
+        var fine = new StubContributor(("one", "fine"));
+        var broken = new StubContributor { Failure = new InvalidOperationException("gone") };
+
+        NavIndicators indicators = await harness.With(fine, broken).ReadAsync(Token);
+
+        indicators.Should().Be(NavIndicators.None);
+        harness.Cache.Count.Should().Be(0, "a failed read must not be what the next circuit is handed");
+    }
+
+    /// <summary>A contributor that answers what it is told to.</summary>
+    private sealed class StubContributor(params (string Key, string Text)[] badges) : MartenStudio.Services.Sources.INavIndicatorContributor
+    {
+        public Exception? Failure { get; init; }
+
+        public int Reads { get; private set; }
+
+        public Task<IReadOnlyDictionary<string, StudioNavBadge>> ReadAsync(StudioScope scope, CancellationToken cancellationToken = default)
+        {
+            Reads++;
+
+            if (Failure is not null)
+            {
+                return Task.FromException<IReadOnlyDictionary<string, StudioNavBadge>>(Failure);
+            }
+
+            return Task.FromResult<IReadOnlyDictionary<string, StudioNavBadge>>(
+                badges.ToDictionary(static x => x.Key, static x => new StudioNavBadge(x.Text, "ms-nav-badge", x.Text), StringComparer.Ordinal));
+        }
+    }
+
+    /// <summary>The dead-letter entry's badge text, or <see langword="null" /> for no badge.</summary>
+    private static string? DeadLetterBadge(NavIndicators indicators) =>
+        indicators.Badges.TryGetValue(MartenStudioDescriptor.DeadLettersBadge, out StudioNavBadge? badge) ? badge.Text : null;
+
+    /// <summary>The projections entry's dot, or <see langword="null" /> for none.</summary>
+    private static StudioNavBadge? ProjectionsDot(NavIndicators indicators) =>
+        indicators.Badges.TryGetValue(MartenStudioDescriptor.ProjectionsBadge, out StudioNavBadge? badge) ? badge : null;
+
+    /// <summary>The service under test, with its scope, MartenStudio's contributor over two fake data services, and a real cache.</summary>
     private sealed class Harness
     {
         /// <summary>The per-store policy name <see cref="WithPolicy" /> configures.</summary>
@@ -298,14 +381,19 @@ public class NavIndicatorServiceTests
 
             State = new StudioState(Catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
 
-            Service = new NavIndicatorService(
+            Contributor = new MartenNavIndicatorContributor(Events, Projections);
+
+            Service = With(Contributor);
+        }
+
+        /// <summary>The same service - same circuit, policy and cache - over other contributors.</summary>
+        public NavIndicatorService With(params MartenStudio.Services.Sources.INavIndicatorContributor[] contributors) =>
+            new(
                 State,
                 MartenSpine.Authorization(Options.Create(options), Authorization, AuthenticationState),
-                Events,
-                Projections,
+                contributors,
                 Cache,
                 NullLogger<NavIndicatorService>.Instance);
-        }
 
         public FakeStudioScopeCatalog Catalog { get; }
 
@@ -325,6 +413,13 @@ public class NavIndicatorServiceTests
         public StudioState State { get; }
 
         public NavIndicatorService Service { get; }
+
+        /// <summary>MartenStudio's contributor, which the service asks for the two badges.</summary>
+        public MartenNavIndicatorContributor Contributor { get; }
+
+        /// <summary>The contributor's own numbers for the active scope, straight from the fakes - no cache, no policy.</summary>
+        public Task<MartenNavReading> ReadingAsync() =>
+            Contributor.ReadNumbersAsync(State.ActiveScope!, TestContext.Current.CancellationToken);
 
         /// <summary>Turns the per-store policy on, the way a host configures one.</summary>
         public Harness WithPolicy()

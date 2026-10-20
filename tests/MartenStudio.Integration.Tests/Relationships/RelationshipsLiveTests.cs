@@ -2,7 +2,6 @@ using Marten;
 using Marten.Linq.SoftDeletes;
 using Marten.Schema;
 
-using MartenStudio.Internal.Sql;
 using MartenStudio.SampleDomain;
 using MartenStudio.SampleDomain.Documents;
 using MartenStudio.Services;
@@ -11,7 +10,6 @@ using MartenStudio.Services.Relationships;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 using Npgsql;
 
@@ -476,16 +474,7 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
     /// <param name="scope">A DI scope to take the resolver, catalog and options from.</param>
     /// <param name="timeToLive">How long this instance's cached graph is good for.</param>
     private static RelationshipDataService Build(IServiceScope scope, TimeSpan timeToLive) =>
-        new RelationshipDataService(
-            scope.ServiceProvider.GetRequiredService<IOptions<MartenStudioOptions>>(),
-            scope.ServiceProvider.GetRequiredService<StudioScopeResolver>(),
-            scope.ServiceProvider.GetRequiredService<ColumnCatalog>(),
-            new StudioSnapshotCache(TimeProvider.System, timeToLive),
-            scope.ServiceProvider.GetRequiredService<ILogger<RelationshipDataService>>(),
-            scope.ServiceProvider.GetRequiredService<MartenStudio.Services.Database.DatabaseAccess>(),
-            scope.ServiceProvider.GetRequiredService<MartenStudio.Services.Database.DatabaseCatalog>(),
-            scope.ServiceProvider.GetRequiredService<StudioCapabilityGuard>(),
-            TimeProvider.System);
+        RelationshipServiceBuilder.Build(scope.ServiceProvider, new StudioSnapshotCache(TimeProvider.System, timeToLive));
 
     /// <summary>
     /// SEC-fix F6: a document collection's count that runs out of time is that row's "not counted", logged at
@@ -507,16 +496,11 @@ public class RelationshipsLiveTests(RelationshipsLiveTests.Fixture fixture)
             builder.AddProvider(capture);
         });
 
-        var service = new RelationshipDataService(
-            Microsoft.Extensions.Options.Options.Create(new MartenStudioOptions { QueryTimeout = TimeSpan.FromSeconds(1) }),
-            scope.ServiceProvider.GetRequiredService<StudioScopeResolver>(),
-            scope.ServiceProvider.GetRequiredService<ColumnCatalog>(),
+        RelationshipDataService service = RelationshipServiceBuilder.Build(
+            scope.ServiceProvider,
             new StudioSnapshotCache(TimeProvider.System, TimeSpan.FromMinutes(5)),
-            loggers.CreateLogger<RelationshipDataService>(),
-            scope.ServiceProvider.GetRequiredService<MartenStudio.Services.Database.DatabaseAccess>(),
-            scope.ServiceProvider.GetRequiredService<MartenStudio.Services.Database.DatabaseCatalog>(),
-            scope.ServiceProvider.GetRequiredService<StudioCapabilityGuard>(),
-            TimeProvider.System);
+            MartenStudioSettings.Of(new MartenStudioOptions { QueryTimeout = TimeSpan.FromSeconds(1) }),
+            loggers.CreateLogger<RelationshipDataService>());
 
         await using NpgsqlConnection holder = await Postgres.OpenAsync(token);
         await using NpgsqlTransaction held = await holder.BeginTransactionAsync(token);

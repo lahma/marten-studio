@@ -1,4 +1,3 @@
-@page "/marten"
 @using System.Globalization
 @using MartenStudio.Services
 @using MartenStudio.Components.Pages.Health
@@ -20,6 +19,11 @@
 @inject StudioCapabilityGuard Capabilities
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IOptions<MartenStudioOptions> Options
+
+@*
+    MartenStudio's store overview: the body of the studio's shared root page (StudioHome renders the descriptor's
+    OverviewComponent), so it has no @page of its own.
+*@
 
 <PageTitle>Overview</PageTitle>
 

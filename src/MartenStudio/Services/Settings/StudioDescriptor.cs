@@ -59,12 +59,15 @@ internal sealed class StudioDescriptor
     public required IReadOnlyList<StudioNavSection> Navigation { get; init; }
 
     /// <summary>
-    /// The body the studio's root page renders - MartenStudio's store overview. Read by the shared root page once the
-    /// Overview and Query routes are shared (PS-1d); until then the type's own <c>@page</c> serves it.
+    /// The body the studio's shared root page (<c>StudioHome</c>) renders - MartenStudio's store overview. A component
+    /// with no <c>@page</c> of its own: the root route is the shared page's, so two studios' bodies never claim it twice.
     /// </summary>
     public required Type OverviewComponent { get; init; }
 
-    /// <summary>The body the studio's <c>query</c> page renders (PS-1d), as <see cref="OverviewComponent" />.</summary>
+    /// <summary>
+    /// The body the studio's shared <c>query</c> page (<c>QueryPage</c>) renders - MartenStudio's three-mode page, or
+    /// the shared SQL console panel alone - as <see cref="OverviewComponent" />.
+    /// </summary>
     public required Type QueryComponent { get; init; }
 
     /// <summary>The query-string name the source key travels under: <c>store</c>.</summary>

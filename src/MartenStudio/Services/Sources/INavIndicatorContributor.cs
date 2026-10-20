@@ -15,10 +15,11 @@ namespace MartenStudio.Services.Sources;
 /// <b>What an implementation must and must not do.</b> It is asked for the circuit's active scope, after the scope policy
 /// passed for it, from inside the shared snapshot cache's factory (D10: one read per scope per interval, however many
 /// circuits ask), so it must read only through the same data services the badge's page reads - which resolve the scope
-/// and apply the policies again - and never through a database connection of its own. It must never throw: a badge it
-/// could not read is a key it does not answer, because a decoration must never take navigation down. And it must start
-/// nothing: no daemon lookup that builds one, no storage-ensuring call (AGENTS.md hard rules 11 and 14) - the sidebar
-/// is on every route.
+/// and apply the policies again - and never through a database connection of its own. A number it could not read is
+/// a key it does not answer, and "zero" draws nothing either. If it throws, the indicator service draws no badge of
+/// that read at all - not this contributor's, not another's - logs it at Debug and caches nothing, because a decoration
+/// must never take navigation down. And it must start nothing: no daemon lookup that builds one, no storage-ensuring
+/// call (AGENTS.md hard rules 11 and 14) - the sidebar is on every route.
 /// </para>
 /// </remarks>
 internal interface INavIndicatorContributor

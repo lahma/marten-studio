@@ -1,4 +1,3 @@
-@using MartenStudio.Components.Pages.Documents
 @using MartenStudio.Services.Relationships
 
 @*
@@ -107,13 +106,13 @@
 @code {
     /// <summary>
     /// The picture, as a <c>GraphDiagramModel</c>. Typed <see cref="object" /> for the reason
-    /// <see cref="DocumentComponentModel" /> records: the Razor SDK emits every component as public, and a
+    /// <see cref="ComponentModel" /> records: the Razor SDK emits every component as public, and a
     /// public parameter may not expose an internal type.
     /// </summary>
     [Parameter]
     public object? Model { get; set; }
 
-    private GraphDiagramModel Diagram => DocumentComponentModel.Read(Model, GraphDiagramModel.Empty);
+    private GraphDiagramModel Diagram => ComponentModel.Read(Model, GraphDiagramModel.Empty);
 
     /// <summary>The scroll region's accessible name; the picture inside it carries the sentence that describes it.</summary>
     [Parameter]

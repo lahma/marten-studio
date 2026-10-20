@@ -1,20 +1,21 @@
 namespace MartenStudio.Services.Query;
 
 /// <summary>
-/// What the Query page reads and runs: the document types it can filter, a Marten <c>where</c> clause,
-/// and the read-only SQL console.
+/// What the Query page's Marten mode reads and runs: the document types it can filter, a Marten <c>where</c>
+/// clause, and the examples built from them.
 /// </summary>
 /// <remarks>
 /// <para>
-/// An interface so a component test can drive both modes - including every refusal - without a Postgres
+/// An interface so a component test can drive the mode - including every refusal - without a Postgres
 /// (plan D12). The implementation is the only thing that resolves a scope, and it resolves one on every
 /// call rather than trusting the caller (plan D5).
 /// </para>
 /// <para>
-/// The asymmetry between the two modes is the point. A <c>where</c> clause is a read against one document
-/// type the host registered and needs no capability; the SQL console is arbitrary SQL against the whole
-/// database and is gated on <see cref="MartenStudioCapabilities.RunSql" />, resolved with write-policy
-/// semantics and audited statement by statement (D13).
+/// The asymmetry between this mode and the SQL console is the point. A <c>where</c> clause is a read against one
+/// document type the host registered and needs no capability; the SQL console is arbitrary SQL against the whole
+/// database, gated on <see cref="MartenStudioCapabilities.RunSql" />, resolved with write-policy semantics and
+/// audited statement by statement (D13) - and it is the shared <see cref="Sources.ISqlConsoleService" />, not a
+/// member of this interface.
 /// </para>
 /// </remarks>
 internal interface IQueryService
@@ -42,20 +43,6 @@ internal interface IQueryService
     Task<MartenQueryResult> RunMartenQueryAsync(
         StudioScope scope,
         MartenQueryRequest request,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Runs one statement in the read-only SQL console.
-    /// </summary>
-    /// <exception cref="StudioCapabilityDeniedException">
-    /// <see cref="MartenStudioCapabilities.RunSql" /> is off, or the studio is read-only. Nothing is sent.
-    /// </exception>
-    /// <exception cref="StudioNotAuthorizedException">
-    /// The write policy refused this scope for <c>RunSql</c>. Nothing is sent.
-    /// </exception>
-    Task<SqlConsoleResult> RunSqlAsync(
-        StudioScope scope,
-        SqlConsoleRequest request,
         CancellationToken cancellationToken = default);
 
     /// <summary>The idle panel's examples, built from this store's own aliases and tables.</summary>

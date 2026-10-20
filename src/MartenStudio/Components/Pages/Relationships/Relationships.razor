@@ -1,13 +1,15 @@
 @page "/marten/relationships"
-@using Microsoft.Extensions.Options
 @using MartenStudio.Components.Pages.Documents
-@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Database
 @using MartenStudio.Services.Relationships
+@using MartenStudio.Services.Settings
 @using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph
 @implements IDisposable
 @inject IRelationshipDataService RelationshipData
 @inject StudioState State
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject IStudioLinks Links
+@inject StudioDescriptor Descriptor
 @inject NavigationManager Navigation
 
 @*
@@ -113,9 +115,9 @@
     else if (State.ActiveScope is null)
     {
         <div class="ms-empty">
-            <p class="ms-empty-title">No Marten store to show</p>
+            <p class="ms-empty-title">No @Descriptor.SourceNoun to show</p>
             <p class="ms-empty-description">
-                This application registered no Marten store that you are authorized to see.
+                This application registered no @Descriptor.SourceNoun that you are authorized to see.
             </p>
         </div>
     }
@@ -346,14 +348,14 @@
     {
         view = mode;
         Recompute();
-        Navigation.NavigateTo(MartenStudio.Services.Database.DatabaseLinks.ToRelationships(Options.Value, State.ActiveScope, view, schema));
+        Navigation.NavigateTo(DatabaseLinks.ToRelationships(Settings, Descriptor, State.ActiveScope, view, schema));
     }
 
     private void SelectSchema(string? chip)
     {
         schema = chip;
         Recompute();
-        Navigation.NavigateTo(MartenStudio.Services.Database.DatabaseLinks.ToRelationships(Options.Value, State.ActiveScope, view, schema));
+        Navigation.NavigateTo(DatabaseLinks.ToRelationships(Settings, Descriptor, State.ActiveScope, view, schema));
     }
 
     private RenderFragment ViewButton(RelationshipViewMode mode, string label, int count) => __builder =>
@@ -390,22 +392,22 @@
         {
             <p class="ms-graph-withheld" role="note">
                 The database holds more tables or keys than the studio reads at once, so this picture is partial.
-                Narrow MartenStudioOptions.BrowsableSchemas to see all of one part of it.
+                Narrow @Settings.OptionName("BrowsableSchemas") to see all of one part of it.
             </p>
         }
     };
 
     /// <summary>
-    /// The link to a collection's list, scope and all. Built through <c>DocumentLinks</c> rather than by
-    /// hand: the scope travels in the query string (D9), and a diagram whose nodes dropped it would send
-    /// every click to the default store.
+    /// The link to a node's own screen - in MartenStudio a collection's list - scope and all. Built through the
+    /// studio's links rather than by hand: the scope travels in the query string (D9), and a diagram whose nodes
+    /// dropped it would send every click to the default source.
     /// </summary>
     private string CollectionHref(string alias) =>
-        DocumentLinks.ToCollection(Options.Value, State.ActiveScope, alias);
+        Links.ToCollection(State.ActiveScope, alias) ?? string.Empty;
 
     /// <summary>The link to a table's object detail, scope and all.</summary>
     private string TableHref(string tableSchema, string name) =>
-        MartenStudio.Services.Database.DatabaseLinks.ToObject(Options.Value, State.ActiveScope, tableSchema, name);
+        DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, tableSchema, name);
 
     private async Task OnScopeChangedAsync() => await LoadAsync();
 

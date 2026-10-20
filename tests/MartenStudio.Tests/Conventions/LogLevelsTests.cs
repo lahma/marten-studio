@@ -178,7 +178,7 @@ public class LogLevelsTests
             "A pause, resume or store-wide correction the visitor pressed is refused because the store's databases cannot be enumerated."),
         ["src/MartenStudio/Services/Relationships/RelationshipDataService.cs : Marten Studio could not read the relationships of {StoreKey}"] = (Verdict.VisitorAction,
             "The relationships screen's load failed on a catalog read; not polled."),
-        ["src/MartenStudio/Services/Relationships/RelationshipDataService.cs : Marten Studio could not read what references '{Id}' of '{Alias}'"] = (Verdict.VisitorAction,
+        ["src/MartenStudio/Services/MartenRelationshipNodeSource.cs : Marten Studio could not read what references '{Id}' of '{Alias}'"] = (Verdict.VisitorAction,
             "A document detail's referenced-by panel failed as a whole; the per-edge counts inside it are Debug."),
         ["src/MartenStudio/Services/Schema/SchemaDataService.cs : Marten Studio could not create a schema migration for database {DatabaseId}"] = (Verdict.VisitorAction,
             "The drift check behind a button failed to build a migration."),

@@ -1,18 +1,15 @@
-@page "/marten/query"
 @using System.Globalization
-@using Microsoft.Extensions.Options
 @using MartenStudio.Internal.Sql
 @using MartenStudio.Services.Live
 @using MartenStudio.Services.Query
+@using MartenStudio.Services.Settings
 @implements IAsyncDisposable
 @inject IQueryService Queries
 @inject StudioState State
-@inject StudioCapabilityGuard Capabilities
-@inject StudioAuthorization Authorization
 @inject ToastService Toasts
 @inject NavigationManager Navigation
 @inject IJSRuntime JsRuntime
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
 
 @*
     Two modes, and the asymmetry between them is the design.
@@ -29,9 +26,13 @@
 
     The SQL console is arbitrary SQL against the whole database, so it is gated on RunSql, resolved with
     write-policy semantics against the database as a whole - never the tenant on screen, which nothing puts
-    into a typed statement (QueryService.SqlScope) - checked by the statement guard, run inside a read-only
+    into a typed statement (SqlConsoleService.SqlScope) - checked by the statement guard, run inside a read-only
     transaction and audited statement by statement (D13). The README says it plainly: grant RunSql to
-    people you would give psql to.
+    people you would give psql to. It is the shared SqlConsolePanel over the shared SqlConsoleService; this page
+    keeps its state (SqlConsoleSession) so a tab switch does not lose it, and owns its deep link and its drawer.
+
+    This component is the body of the studio's shared Query page (QueryPage renders the descriptor's
+    QueryComponent), so it has no @page of its own; its query parameters still come from the URL.
 
     LINQ mode (F7) is a third thing: a typed predicate evaluated in this process under an allow-list and
     translated by Marten's own Query<T>(), gated on RunLinqQueries. It is its own component with its own
@@ -243,81 +244,13 @@
             }
             else
             {
-                <div class="ms-query-mode-panel ms-query-panel-sql">
-                    @if (!SqlEnabled)
-                    {
-                        <CapabilityDisabled Capability="@nameof(StudioCapability.RunSql)" Action="Running SQL" />
-                        <p class="ms-muted ms-query-sql-warning">@RunSqlWarning</p>
-                    }
-                    else
-                    {
-                        @* The page's own question, asked of the same tenant-less scope the service resolves
-                           (QueryService.SqlScope), so the console shown and the console run never disagree.
-                           Said, not enforced: the service refuses regardless (hard rule 5). *@
-                        <WriteRefusal Refused="@(!mayRunSql)" Capability="@nameof(StudioCapability.RunSql)" />
-
-                        @if (State.ActiveScope?.TenantId is { Length: > 0 } sqlTenant)
-                        {
-                            <p class="ms-muted ms-query-note ms-query-sql-tenant">
-                                The console is not limited to <code>@sqlTenant</code>: nothing adds a tenant to a
-                                statement you type, so it reads every tenant's rows, and it is authorized for
-                                this database as a whole.
-                            </p>
-                        }
-
-                        <QueryEditor EditorId="ms-query-sql"
-                                     Label="SQL statement"
-                                     Placeholder="select count(*) from …"
-                                     Rows="8"
-                                     Value="@sqlText"
-                                     ValueChanged="OnSqlChangedAsync"
-                                     Running="running"
-                                     ElapsedMilliseconds="elapsedMilliseconds"
-                                     ErrorMessage="@sqlError"
-                                     ErrorPosition="sqlErrorPosition"
-                                     Status="@status"
-                                     OnRun="RunSqlAsync"
-                                     OnCancel="CancelAsync"
-                                     OnSave="BeginSaveAsync" />
-
-                        <p class="ms-muted ms-query-note">
-                            One statement at a time, inside <code>BEGIN; SET TRANSACTION READ ONLY</code> with
-                            a statement timeout, and the transaction is always rolled back. The row cap stops
-                            the reader; no <code>limit</code> is ever appended to what you typed.
-                        </p>
-
-                        @if (sqlResult is { } result)
-                        {
-                            <QueryStats RowCount="result.Rows.Count"
-                                        DurationMilliseconds="result.Duration.TotalMilliseconds"
-                                        Truncated="result.Truncated"
-                                        Sql="@sqlText"
-                                        PlanUnavailable="Run an EXPLAIN statement to see a plan here."
-                                        Messages="@result.Notices" />
-
-                            @if (result.Succeeded)
-                            {
-                                <div class="ms-query-toolbar ms-query-export">
-                                    <button type="button" class="ms-btn ms-btn-sm" @onclick="ExportSqlJsonAsync">Export JSON</button>
-                                    <button type="button" class="ms-btn ms-btn-sm" @onclick="ExportSqlCsvAsync">Export CSV</button>
-                                </div>
-
-                                <ResultGrid Columns="@GridColumns(result)"
-                                            Rows="@GridRows(result)"
-                                            Truncated="result.Truncated"
-                                            RowLimit="result.RowLimit"
-                                            EmptyTitle="Nothing to show"
-                                            EmptyText="That statement returned no result set." />
-                            }
-                        }
-                        else
-                        {
-                            <ExamplesPanel Title="Try one of these"
-                                           Examples="@ExampleTuples(examples.Sql)"
-                                           OnPick="OnExamplePickedAsync" />
-                        }
-                    }
-                </div>
+                @* The shared console: its gate, its editor, its grid. The page keeps what it shows and hears about
+                   runs and saves, for the deep link and the drawer. *@
+                <SqlConsolePanel Session="@sqlSession"
+                                 Examples="@ExampleTuples(examples.Sql)"
+                                 OnChanged="OnSqlChangedAsync"
+                                 OnSave="BeginSaveAsync"
+                                 OnRan="OnSqlRanAsync" />
             }
         </div>
 
@@ -337,12 +270,6 @@
     /// <summary>The longest query text that is put into the deep link; a longer one is simply omitted.</summary>
     internal const int MaxUrlQueryLength = 4 * 1024;
 
-    /// <summary>What the README says about the SQL console, repeated where the capability is refused.</summary>
-    internal const string RunSqlWarning =
-        "The SQL console runs whatever it is given inside a read-only transaction with a statement " +
-        "timeout, and it can read every table the connection's role can reach. Grant it only to people " +
-        "you would give psql to.";
-
     private static readonly int[] PageSizes = [25, 50, 100, 250, 500];
 
     private readonly CancellationTokenSource pageCts = new();
@@ -353,35 +280,24 @@
     private QueryMode mode = QueryMode.Marten;
     private string? alias;
     private string whereText = string.Empty;
-    private string sqlText = string.Empty;
     private int pageSize;
     private DeletedFilter deletedFilter = DeletedFilter.Exclude;
 
     private IReadOnlyList<QueryDocumentTypeInfo> documentTypes = [];
     private QueryExamples examples = QueryExamples.None;
     private MartenQueryResult? martenResult;
-    private SqlConsoleResult? sqlResult;
+
+    /// <summary>What the SQL tab shows - kept here, so leaving the tab and coming back finds it as it was.</summary>
+    private readonly SqlConsoleSession sqlSession = new();
 
     private string? pageError;
     private string? martenError;
     private int martenErrorPosition = -1;
-    private string? sqlError;
-    private int sqlErrorPosition = -1;
     private string? status;
 
     private bool running;
     private long elapsedMilliseconds;
     private bool loaded;
-
-    /// <summary>
-    /// Whether the policies let <em>this</em> visitor run SQL against the database on screen.
-    /// </summary>
-    /// <remarks>
-    /// Asked once per load, never memoised, and fail-open by default: the common case is a host with no
-    /// policy at all, and this is not the enforcement - <c>IQueryService.RunSqlAsync</c> resolves the same
-    /// scope and throws (AGENTS.md hard rule 5).
-    /// </remarks>
-    private bool mayRunSql = true;
 
     private string? appliedMode;
     private string? appliedType;
@@ -424,9 +340,6 @@
     [SupplyParameterFromQuery(Name = "orderby")]
     public string? OrderByParameter { get; set; }
 
-    /// <summary>Whether the SQL console is available at all in this process.</summary>
-    private bool SqlEnabled => Capabilities.IsEnabled(StudioCapability.RunSql);
-
     /// <summary>
     /// The picked document type, which is what says whether this collection is tenanted or soft-deleted.
     /// </summary>
@@ -448,7 +361,7 @@
 
     protected override void OnInitialized()
     {
-        pageSize = Options.Value.DefaultPageSize;
+        pageSize = Settings.DefaultPageSize;
         State.ScopeChanged += OnScopeChangedAsync;
     }
 
@@ -515,7 +428,7 @@
 
             if (SqlParameter is not null)
             {
-                sqlText = SqlParameter;
+                sqlSession.Text = SqlParameter;
             }
         }
     }
@@ -545,7 +458,7 @@
     private async Task OnScopeChangedAsync()
     {
         martenResult = null;
-        sqlResult = null;
+        sqlSession.ForgetResult();
 
         await LoadAsync();
         await InvokeAsync(StateHasChanged);
@@ -568,17 +481,12 @@
         {
             documentTypes = [];
             examples = QueryExamples.None;
-            mayRunSql = true;
             loaded = true;
             return;
         }
 
         try
         {
-            // First, before anything that can fail: a read that throws must not leave the console showing
-            // the previous scope's answer.
-            mayRunSql = await MayRunSqlAsync(scope, pageCts.Token);
-
             documentTypes = await Queries.ListDocumentTypesAsync(scope, pageCts.Token);
             examples = await Queries.BuildExamplesAsync(scope, pageCts.Token);
 
@@ -615,26 +523,6 @@
         }
     }
 
-    /// <summary>
-    /// The console's gate, asked the way the service asks it: the store policy, then the write policy
-    /// with <c>RunSql</c> on the resource, both against the scope's database as a whole.
-    /// </summary>
-    /// <remarks>
-    /// Nobody is asked about a capability the process does not have; <c>CapabilityDisabled</c> says that.
-    /// </remarks>
-    private async Task<bool> MayRunSqlAsync(StudioScope scope, CancellationToken token)
-    {
-        if (!SqlEnabled)
-        {
-            return true;
-        }
-
-        StudioScope sqlScope = QueryService.SqlScope(scope);
-
-        return await Authorization.IsAuthorizedAsync(sqlScope, null, token)
-            && await Authorization.IsAuthorizedAsync(sqlScope, StudioCapability.RunSql, token);
-    }
-
     private async Task SwitchModeAsync(QueryMode next)
     {
         if (mode == next)
@@ -644,6 +532,7 @@
 
         mode = next;
         status = null;
+        sqlSession.Status = null;
         PushUrl();
 
         await InvokeAsync(StateHasChanged);
@@ -691,10 +580,20 @@
         return Task.CompletedTask;
     }
 
-    private Task OnSqlChangedAsync(string value)
+    /// <summary>The console put a statement into its editor, or is about to run one: keep the deep link in step.</summary>
+    private Task OnSqlChangedAsync()
     {
-        sqlText = value;
+        PushUrl();
         return Task.CompletedTask;
+    }
+
+    /// <summary>A console statement ran without an error: it goes into the drawer's recent list.</summary>
+    private async Task OnSqlRanAsync(string text)
+    {
+        if (drawer is not null)
+        {
+            await drawer.RecordRunAsync(text, null);
+        }
     }
 
     private async Task OnExamplePickedAsync((string Snippet, string? Alias) example)
@@ -726,7 +625,7 @@
         }
         else
         {
-            sqlText = text;
+            sqlSession.Text = text;
         }
     }
 
@@ -824,77 +723,6 @@
         }
     }
 
-    private async Task RunSqlAsync(string text)
-    {
-        sqlText = text;
-        StudioScope? scope = State.ActiveScope;
-
-        if (scope is null || string.IsNullOrWhiteSpace(sqlText) || running)
-        {
-            return;
-        }
-
-        sqlError = null;
-        sqlErrorPosition = -1;
-        status = null;
-        PushUrl();
-
-        using CancellationTokenSource cts = StartRun();
-
-        try
-        {
-            SqlConsoleResult result = await Queries.RunSqlAsync(scope, new SqlConsoleRequest(sqlText), cts.Token);
-
-            sqlResult = result;
-
-            if (result.Rejection is { } rejection)
-            {
-                sqlError = rejection.Message;
-                sqlErrorPosition = rejection.Position;
-            }
-            else if (result.Error is { } error)
-            {
-                sqlError = Describe(error);
-
-                // Postgres counts from one; the editor's caret convention is zero-based.
-                sqlErrorPosition = error.Position > 0 ? error.Position - 1 : -1;
-            }
-            else
-            {
-                status = Summary(result.Rows.Count, result.Duration);
-
-                if (drawer is not null)
-                {
-                    await drawer.RecordRunAsync(sqlText, null);
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            status = "Cancelled.";
-        }
-        catch (StudioCapabilityDeniedException exception)
-        {
-            // The service refuses whatever the page rendered: a circuit is a long-lived object a client
-            // can drive, so hiding the tab is a convenience and this is the actual refusal.
-            sqlError = exception.Message;
-        }
-        catch (StudioNotAuthorizedException)
-        {
-            sqlError = QueryService.SqlRefusedMessage;
-        }
-        catch (Exception exception)
-        {
-            sqlError = exception.Message;
-            await Toasts.Error(exception.Message);
-        }
-        finally
-        {
-            EndRun();
-            await InvokeAsync(StateHasChanged);
-        }
-    }
-
     private CancellationTokenSource StartRun()
     {
         CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(pageCts.Token);
@@ -960,22 +788,6 @@
         }
     }
 
-    private async Task ExportSqlJsonAsync()
-    {
-        if (sqlResult is { } result)
-        {
-            await DownloadAsync("sql-console.json", "application/json", QueryExport.ToJson(result.Columns, result.Rows));
-        }
-    }
-
-    private async Task ExportSqlCsvAsync()
-    {
-        if (sqlResult is { } result)
-        {
-            await DownloadAsync("sql-console.csv", "text/csv", QueryExport.ToCsv(result.Columns, result.Rows));
-        }
-    }
-
     private async Task DownloadAsync(string fileName, string mime, string content)
     {
         try
@@ -1008,7 +820,7 @@
             _ => null,
         };
         string? whereValue = mode == QueryMode.Marten ? Capped(whereText) : null;
-        string? sqlValue = mode == QueryMode.Sql ? Capped(sqlText) : null;
+        string? sqlValue = mode == QueryMode.Sql ? Capped(sqlSession.Text) : null;
         string? predicateValue = mode == QueryMode.Linq ? Capped(linqWhere) : null;
         string? orderByValue = mode == QueryMode.Linq ? Capped(linqOrderBy) : null;
 
@@ -1061,7 +873,7 @@
 
     private string Describe(SqlError error)
     {
-        string? headline = QuerySqlErrors.Describe(error, Options.Value.QueryTimeout);
+        string? headline = QuerySqlErrors.Describe(error, Settings.QueryTimeout);
 
         return headline is null
             ? QuerySqlErrors.Summarize(error)
@@ -1108,7 +920,7 @@
     }
 
     private string DocumentLink(string documentAlias, string id) =>
-        StudioLink.To(Options.Value, "documents/" + Uri.EscapeDataString(documentAlias) + "/doc") +
+        StudioLink.To(Settings, "documents/" + Uri.EscapeDataString(documentAlias) + "/doc") +
         "?id=" + Uri.EscapeDataString(id);
 
     private static IReadOnlyList<(string Title, string Snippet, string? Alias)> ExampleTuples(
@@ -1122,37 +934,6 @@
         }
 
         return tuples;
-    }
-
-    private static IReadOnlyList<(string Name, string Type)> GridColumns(SqlConsoleResult result)
-    {
-        List<(string Name, string Type)> columns = new(result.Columns.Count);
-
-        foreach (SqlResultColumn column in result.Columns)
-        {
-            columns.Add((column.Name, column.PostgresType));
-        }
-
-        return columns;
-    }
-
-    private static IReadOnlyList<IReadOnlyList<(string Text, string Kind)>> GridRows(SqlConsoleResult result)
-    {
-        List<IReadOnlyList<(string Text, string Kind)>> rows = new(result.Rows.Count);
-
-        foreach (IReadOnlyList<SqlCell> row in result.Rows)
-        {
-            List<(string Text, string Kind)> cells = new(row.Count);
-
-            foreach (SqlCell cell in row)
-            {
-                cells.Add((cell.Text, cell.Kind.ToString().ToLowerInvariant()));
-            }
-
-            rows.Add(cells);
-        }
-
-        return rows;
     }
 
     /// <summary>

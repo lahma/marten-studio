@@ -54,24 +54,23 @@ internal sealed record PhysicalForeignKeyRead(IReadOnlyList<PhysicalForeignKey> 
 }
 
 /// <summary>
-/// The reads behind the Relationships screen: every foreign key Postgres has in the store's schemas (or
-/// touching any set of schemas), and the bounded "how many of these point at that one document" counts,
-/// for a collection and for a table the studio does not map.
+/// The reads behind the Relationships screen: every foreign key Postgres has in a set of schemas (or touching any
+/// set of schemas), and the cap every bounded "how many of these point at that one" count stops at.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Both are here rather than beside their service because this is the one place a Postgres identifier
-/// becomes SQL text (AGENTS.md hard rule 4). The catalog read interpolates nothing at all — the schema
-/// names travel as a single <c>text[]</c> parameter compared with <c>= any(@schemas)</c>, exactly as
-/// <see cref="SchemaStatsQueries"/> does — and the inbound count quotes its table and its two columns
-/// through <see cref="SqlIdentifier"/> and sends the id, the tenant and the cap as parameters.
+/// Here rather than beside their service because this is the one place a Postgres identifier becomes SQL text
+/// (AGENTS.md hard rule 4). The catalog read interpolates nothing at all - the schema names travel as a single
+/// <c>text[]</c> parameter compared with <c>= any(@schemas)</c>, exactly as the schema screen's statistics read does.
+/// The count of a table's rows that point at one row is the database browser's own statement
+/// (<see cref="TableRowQueryBuilder.BuildInboundCount" />); MartenStudio's count of one collection's documents is its
+/// own builder's, beside its document reads.
 /// </para>
 /// <para>
-/// Neither touches anything that builds schema. <c>IMartenDatabase.DocumentTables()</c>,
-/// <c>AllObjects()</c> and <c>AllSchemaNames()</c> all run <c>Migrator.ApplyAllAsync</c> under the
-/// database's own <c>AutoCreate</c> on the way to answering, which is how a read path creates
-/// <c>mt_hilo</c>; the schema names come from <c>SchemaDeclarationReader</c>, which reads
-/// <c>StoreOptions</c> and opens no connection.
+/// Nothing here touches anything that builds schema. Marten's <c>DocumentTables()</c>, <c>AllObjects()</c> and
+/// <c>AllSchemaNames()</c> all run <c>Migrator.ApplyAllAsync</c> under the database's own <c>AutoCreate</c> on the way
+/// to answering, which is how a read path creates <c>mt_hilo</c>; the schemas this reads are handed to it by a caller
+/// that read them from configuration and the catalog, opening no migration.
 /// </para>
 /// </remarks>
 internal static class RelationshipQueries
@@ -296,110 +295,6 @@ internal static class RelationshipQueries
         }
 
         return new PhysicalForeignKeyRead(keys, truncated);
-    }
-
-    /// <summary>
-    /// The bounded inbound count: how many rows of one collection point at one document.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <c>select count(*) from (select 1 … limit @cap) x</c> rather than a plain <c>count(*)</c>. The
-    /// number is exact where it matters — a person wants to know whether a customer has three orders or
-    /// three hundred before they delete it — but the studio must not pay for a sequential scan to say
-    /// "lots" about a table with ten million rows, and the foreign key's column is not necessarily
-    /// indexed. The cap is what bounds it; above the cap the screen says "1000+".
-    /// </para>
-    /// <para>
-    /// The predicates are the ones the source collection is actually read with elsewhere: the tenant when
-    /// the <em>source</em> is conjoined (its tenancy, not the target's — the target may well be a
-    /// single-tenanted type, and the rows being counted are the source's), and live rows only when the
-    /// source is soft-deleted, because a count that included deleted rows would contradict the list the
-    /// row links to.
-    /// </para>
-    /// </remarks>
-    /// <param name="table">The pointing collection, with its physical columns already settled.</param>
-    /// <param name="column">The foreign-key column on that collection.</param>
-    /// <param name="idDbType">The Postgres type of <paramref name="column"/>, for the parameter.</param>
-    /// <param name="id">The already-parsed id value, as <c>DocumentQueryBuilder.ParseId</c> produced it.</param>
-    /// <param name="tenantId">The tenant in scope, or <see langword="null"/>.</param>
-    /// <param name="cap">How many rows to look at before stopping.</param>
-    /// <param name="commandTimeoutSeconds">The command timeout.</param>
-    public static NpgsqlCommand BuildInboundCount(
-        DocumentTableInfo table,
-        string column,
-        NpgsqlDbType idDbType,
-        object id,
-        string? tenantId,
-        int cap,
-        int commandTimeoutSeconds)
-    {
-        ArgumentNullException.ThrowIfNull(table);
-        ArgumentException.ThrowIfNullOrWhiteSpace(column);
-        ArgumentNullException.ThrowIfNull(id);
-
-        var tenantColumn = TenantColumn(table, tenantId);
-        var command = DocumentQueryBuilder.NewCommand(commandTimeoutSeconds);
-
-        try
-        {
-            command.CommandText = InboundCountSql(table, column, tenantColumn);
-
-            command.Parameters.Add(new NpgsqlParameter("id", idDbType) { Value = id });
-            command.Parameters.Add(new NpgsqlParameter("cap", NpgsqlDbType.Integer) { Value = Math.Max(cap, 1) });
-
-            if (tenantColumn is not null)
-            {
-                command.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Varchar) { Value = tenantId! });
-            }
-
-            return command;
-        }
-        catch
-        {
-            command.Dispose();
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// The inbound count's text. Every identifier is quoted and comes from Marten's mapping or from
-    /// <c>information_schema</c>; the id, the tenant and the cap are parameters.
-    /// </summary>
-    /// <param name="table">The pointing collection.</param>
-    /// <param name="column">The foreign-key column.</param>
-    /// <param name="tenantColumn">The tenant column to filter on, or <see langword="null"/>.</param>
-    internal static string InboundCountSql(DocumentTableInfo table, string column, string? tenantColumn)
-    {
-        ArgumentNullException.ThrowIfNull(table);
-
-        var sql = new System.Text.StringBuilder("select count(*) from (select 1 from ")
-            .Append(table.QualifiedName)
-            .Append(" where ")
-            .Append(SqlIdentifier.Quote(column))
-            .Append(" = @id");
-
-        if (tenantColumn is not null)
-        {
-            sql.Append(" and ").Append(SqlIdentifier.Quote(tenantColumn)).Append(" = @tenant");
-        }
-
-        if (table.SoftDeleteEnabled &&
-            table.MetadataColumnName(DocumentMetadataColumn.IsSoftDeleted) is { } deletedColumn)
-        {
-            sql.Append(" and ").Append(SqlIdentifier.Quote(deletedColumn)).Append(" = false");
-        }
-
-        return sql.Append(" limit @cap) as bounded").ToString();
-    }
-
-    /// <summary>The tenant column to filter the inbound count by, or <see langword="null"/>.</summary>
-    internal static string? TenantColumn(DocumentTableInfo table, string? tenantId)
-    {
-        ArgumentNullException.ThrowIfNull(table);
-
-        return tenantId is not null && table.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined
-            ? table.MetadataColumnName(DocumentMetadataColumn.TenantId)
-            : null;
     }
 
     /// <summary>

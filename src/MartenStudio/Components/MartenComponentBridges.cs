@@ -14,8 +14,8 @@ internal static class MartenComponentBridges
     {
         /// <summary>
         /// <see cref="StudioLink.To(Services.Settings.IStudioSettings, string)" /> with MartenStudio's options. Shared-bound
-        /// callers left at PS-1b: <c>Query.razor</c> (PS-1d). (<c>DocumentLinks</c> is MartenStudio's: its shared half,
-        /// <c>WithScope</c>, is <see cref="StudioScopeQuery.Append(string, StudioScope?, string)" />.)
+        /// callers: none left (PS-1d moved <c>Query.razor</c> onto the settings). (<c>DocumentLinks</c> is MartenStudio's:
+        /// its shared half, <c>WithScope</c>, is <see cref="StudioScopeQuery.Append(string, StudioScope?, string)" />.)
         /// </summary>
         /// <param name="options">MartenStudio's options.</param>
         /// <param name="subPath">The path below the studio root, with no leading slash.</param>

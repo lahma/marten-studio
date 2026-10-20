@@ -1,6 +1,7 @@
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Query;
+using MartenStudio.Services.Sources;
 
 namespace MartenStudio.Tests.Query;
 
@@ -11,9 +12,11 @@ namespace MartenStudio.Tests.Query;
 /// Hand-written rather than a mocking framework (AGENTS.md package budget): the data seam is our own set
 /// of interfaces, and a fake that records what it was asked is smaller and far more readable than a
 /// call-matching DSL. It can also throw the two refusals the page has to render - a capability denial and
-/// a scope denial - which is the whole point of having a seam there.
+/// a scope denial - which is the whole point of having a seam there. It is the SQL console's fake as well
+/// (<see cref="ISqlConsoleService" />), because the Query page's SQL tab is the shared console panel over that seam
+/// and a page test drives both modes through one object.
 /// </remarks>
-internal sealed class FakeQueryService : IQueryService
+internal sealed class FakeQueryService : IQueryService, ISqlConsoleService
 {
     /// <summary>The document types the picker is offered.</summary>
     public List<QueryDocumentTypeInfo> DocumentTypes { get; } = [];

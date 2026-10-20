@@ -98,8 +98,8 @@ internal static class MartenDatabaseBridges
     {
         /// <summary>
         /// One relation's detail page, with MartenStudio's options and descriptor. Marten-only callers:
-        /// <c>Schema.razor</c>, <c>ReferencedBy.razor</c>; shared-bound callers left at PS-1b:
-        /// <c>Relationships.razor</c>, <c>NeighbourhoodGraph.razor</c> (PS-1d).
+        /// <c>Schema.razor</c>, <c>ReferencedBy.razor</c>; no shared-bound caller is left (PS-1d moved
+        /// <c>Relationships.razor</c> and <c>NeighbourhoodGraph.razor</c> onto the settings and the descriptor).
         /// </summary>
         /// <param name="options">MartenStudio's options.</param>
         /// <param name="scope">The scope to carry.</param>
@@ -128,8 +128,8 @@ internal static class MartenDatabaseBridges
             DatabaseLinks.ToRows(MartenStudioSettings.Of(options), MartenStudioDescriptor.Instance, scope, schema, name, filter);
 
         /// <summary>
-        /// The Relationships screen, with MartenStudio's options and descriptor. Shared-bound caller left at PS-1b:
-        /// <c>Relationships.razor</c> (PS-1d).
+        /// The Relationships screen, with MartenStudio's options and descriptor. No caller is left (PS-1d moved
+        /// <c>Relationships.razor</c> onto the settings and the descriptor); kept for Marten-only code.
         /// </summary>
         /// <param name="options">MartenStudio's options.</param>
         /// <param name="scope">The scope to carry.</param>

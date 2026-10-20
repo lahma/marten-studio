@@ -61,7 +61,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
     [PostgresFact]
     public async Task A_count_runs_and_comes_back_with_its_column_type_and_its_duration()
     {
-        SqlConsoleResult result = await harness.Queries.RunSqlAsync(
+        SqlConsoleResult result = await harness.Console.RunSqlAsync(
             harness.Scope, new SqlConsoleRequest($"select count(*) from {personTable}"), Token);
 
         result.Succeeded.Should().BeTrue();
@@ -76,7 +76,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
     [PostgresFact]
     public async Task A_jsonb_column_comes_back_as_a_json_cell_and_a_null_as_a_null_cell()
     {
-        SqlConsoleResult result = await harness.Queries.RunSqlAsync(
+        SqlConsoleResult result = await harness.Console.RunSqlAsync(
             harness.Scope,
             new SqlConsoleRequest($"select data, null::text as nothing from {personTable} order by id limit 1"),
             Token);
@@ -98,7 +98,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
         await using QueryHarness capped = await QueryHarness.CreateAsync(
             fixture, "sqlconsolelivecap", options => options.MaxSqlConsoleRows = 10);
 
-        SqlConsoleResult result = await capped.Queries.RunSqlAsync(
+        SqlConsoleResult result = await capped.Console.RunSqlAsync(
             capped.Scope, new SqlConsoleRequest("select generate_series(1, 100)"), Token);
 
         result.Succeeded.Should().BeTrue();
@@ -125,7 +125,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
         string statement = string.Format(CultureInfo.InvariantCulture, template, personTable);
         long before = await PersonCountAsync();
 
-        SqlConsoleResult result = await harness.Queries.RunSqlAsync(
+        SqlConsoleResult result = await harness.Console.RunSqlAsync(
             harness.Scope, new SqlConsoleRequest(statement), Token);
 
         result.Succeeded.Should().BeFalse();
@@ -151,7 +151,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
 
         ReadOnlySqlGuard.Check(statement).Allowed.Should().BeTrue("the parser sees only the leading WITH");
 
-        SqlConsoleResult result = await harness.Queries.RunSqlAsync(
+        SqlConsoleResult result = await harness.Console.RunSqlAsync(
             harness.Scope, new SqlConsoleRequest(statement), Token);
 
         result.Succeeded.Should().BeFalse();
@@ -167,7 +167,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
         await using QueryHarness impatient = await QueryHarness.CreateAsync(
             fixture, "sqlconsolelivetimeout", options => options.QueryTimeout = TimeSpan.FromSeconds(1));
 
-        SqlConsoleResult result = await impatient.Queries.RunSqlAsync(
+        SqlConsoleResult result = await impatient.Console.RunSqlAsync(
             impatient.Scope, new SqlConsoleRequest("select pg_sleep(10)"), Token);
 
         result.Succeeded.Should().BeFalse();
@@ -184,10 +184,10 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
     [PostgresFact]
     public async Task A_refused_statement_leaves_the_next_one_working()
     {
-        await harness.Queries.RunSqlAsync(
+        await harness.Console.RunSqlAsync(
             harness.Scope, new SqlConsoleRequest($"with x as (delete from {personTable} returning *) select * from x"), Token);
 
-        SqlConsoleResult after = await harness.Queries.RunSqlAsync(
+        SqlConsoleResult after = await harness.Console.RunSqlAsync(
             harness.Scope, new SqlConsoleRequest("select 1"), Token);
 
         after.Succeeded.Should().BeTrue();
@@ -210,7 +210,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
 
         long before = await PersonCountAsync();
 
-        (await denied.Queries
+        (await denied.Console
             .Invoking(x => x.RunSqlAsync(denied.Scope, new SqlConsoleRequest($"select count(*) from {personTable}"), Token))
             .Should().ThrowAsync<StudioCapabilityDeniedException>())
             .Which.Message.Should().Contain("MartenStudioOptions.Capabilities.RunSql");
@@ -227,7 +227,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
         await using QueryHarness readOnly = await QueryHarness.CreateAsync(
             fixture, "sqlconsoleliveread", options => options.ReadOnly = true);
 
-        (await readOnly.Queries
+        (await readOnly.Console
             .Invoking(x => x.RunSqlAsync(readOnly.Scope, new SqlConsoleRequest("select 1"), Token))
             .Should().ThrowAsync<StudioCapabilityDeniedException>())
             .Which.Message.Should().Contain("MartenStudioOptions.ReadOnly");
@@ -247,7 +247,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
 
         long before = await PersonCountAsync();
 
-        await policed.Queries
+        await policed.Console
             .Invoking(x => x.RunSqlAsync(policed.Scope, new SqlConsoleRequest("select 1"), Token))
             .Should().ThrowAsync<StudioNotAuthorizedException>();
 
@@ -266,7 +266,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
     {
         const string statement = "select 42 as answer";
 
-        await harness.Queries.RunSqlAsync(harness.Scope, new SqlConsoleRequest(statement), Token);
+        await harness.Console.RunSqlAsync(harness.Scope, new SqlConsoleRequest(statement), Token);
 
         StudioActionLogEntry entry = harness.Audit.GetLatest()[0];
 
@@ -284,7 +284,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
     {
         string statement = $"delete from {personTable}";
 
-        await harness.Queries.RunSqlAsync(harness.Scope, new SqlConsoleRequest(statement), Token);
+        await harness.Console.RunSqlAsync(harness.Scope, new SqlConsoleRequest(statement), Token);
 
         StudioActionLogEntry entry = harness.Audit.GetLatest()[0];
 
@@ -297,7 +297,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
     [PostgresFact]
     public async Task A_statement_postgres_refused_is_audited_with_its_sqlstate()
     {
-        await harness.Queries.RunSqlAsync(
+        await harness.Console.RunSqlAsync(
             harness.Scope,
             new SqlConsoleRequest($"with x as (delete from {personTable} returning *) select * from x"),
             Token);

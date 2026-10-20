@@ -132,6 +132,10 @@ internal sealed class QueryHarness : IAsyncDisposable
     /// <summary>The registered query service - the same object a host would resolve.</summary>
     public IQueryService Queries => scope.ServiceProvider.GetRequiredService<IQueryService>();
 
+    /// <summary>The registered SQL console - the shared seam the Query page's SQL tab runs through.</summary>
+    public MartenStudio.Services.Sources.ISqlConsoleService Console =>
+        scope.ServiceProvider.GetRequiredService<MartenStudio.Services.Sources.ISqlConsoleService>();
+
     /// <summary>The audit ring, for asserting what was recorded.</summary>
     public StudioActionLog Audit => scope.ServiceProvider.GetRequiredService<StudioActionLog>();
 

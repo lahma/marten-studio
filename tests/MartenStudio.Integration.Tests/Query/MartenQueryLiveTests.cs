@@ -457,7 +457,7 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
 
         foreach (QueryExample example in examples.Sql)
         {
-            SqlConsoleResult result = await harness.Queries.RunSqlAsync(
+            SqlConsoleResult result = await harness.Console.RunSqlAsync(
                 harness.Scope, new SqlConsoleRequest(example.Snippet), Token);
 
             result.Rejection.Should().BeNull(example.Snippet);

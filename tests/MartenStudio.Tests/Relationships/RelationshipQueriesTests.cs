@@ -67,7 +67,7 @@ public class RelationshipQueriesTests
             SqlTestStore.DocumentType<RelQueryNote>(static options =>
                 options.Schema.For<RelQueryNote>().Duplicate(x => x.CustomerId)));
 
-        string sql = RelationshipQueries.InboundCountSql(table, "customer_id", null);
+        string sql = DocumentInboundQueries.InboundCountSql(table, "customer_id", null);
 
         sql.Should().StartWith("select count(*) from (select 1 from ");
         sql.Should().Contain("\"studio_sql\".\"mt_doc_relquerynote\"");
@@ -83,11 +83,11 @@ public class RelationshipQueriesTests
             SqlTestStore.DocumentType<RelQueryNote>(static options =>
                 options.Schema.For<RelQueryNote>().MultiTenanted().Duplicate(x => x.CustomerId)));
 
-        string? tenantColumn = RelationshipQueries.TenantColumn(table, "acme");
+        string? tenantColumn = DocumentInboundQueries.TenantColumn(table, "acme");
 
         tenantColumn.Should().Be("tenant_id");
 
-        string sql = RelationshipQueries.InboundCountSql(table, "customer_id", tenantColumn);
+        string sql = DocumentInboundQueries.InboundCountSql(table, "customer_id", tenantColumn);
 
         sql.Should().Contain("\"tenant_id\" = @tenant");
     }
@@ -99,7 +99,7 @@ public class RelationshipQueriesTests
             SqlTestStore.DocumentType<RelQueryNote>(static options =>
                 options.Schema.For<RelQueryNote>().MultiTenanted().Duplicate(x => x.CustomerId)));
 
-        RelationshipQueries.TenantColumn(table, null).Should().BeNull(
+        DocumentInboundQueries.TenantColumn(table, null).Should().BeNull(
             "a scope with no tenant reads every tenant's rows, exactly as the list does");
     }
 
@@ -110,7 +110,7 @@ public class RelationshipQueriesTests
             SqlTestStore.DocumentType<RelQueryNote>(static options =>
                 options.Schema.For<RelQueryNote>().SoftDeleted().Duplicate(x => x.CustomerId)));
 
-        string sql = RelationshipQueries.InboundCountSql(table, "customer_id", null);
+        string sql = DocumentInboundQueries.InboundCountSql(table, "customer_id", null);
 
         sql.Should().Contain("\"mt_deleted\" = false",
             "the count has to count the same rows the list the row links to would show");
@@ -125,7 +125,7 @@ public class RelationshipQueriesTests
 
         Guid id = Guid.NewGuid();
 
-        using var command = RelationshipQueries.BuildInboundCount(
+        using var command = DocumentInboundQueries.BuildInboundCount(
             table, "customer_id", NpgsqlDbType.Uuid, id, "acme", 1001, 30);
 
         command.Parameters.Should().HaveCount(3);

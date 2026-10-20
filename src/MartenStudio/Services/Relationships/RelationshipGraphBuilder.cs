@@ -1,19 +1,10 @@
-using Marten;
-using Marten.Linq.Members;
-using Marten.Schema;
-
-using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Database;
-using MartenStudio.Services.Documents;
-using MartenStudio.Services.Schema;
-
-using Weasel.Postgresql.Tables;
 
 namespace MartenStudio.Services.Relationships;
 
 /// <summary>
-/// What one visitor may see of the database around the store: the database browser's gate, and the
+/// What one visitor may see of the database around the source: the database browser's gate, and the
 /// relations in the schemas it admits.
 /// </summary>
 /// <param name="Gate">
@@ -32,8 +23,8 @@ internal sealed record RelationshipDatabaseView(
     bool Truncated = false);
 
 /// <summary>
-/// Turns what <c>StoreOptions</c> declares and what <c>pg_constraint</c> holds into one graph, for one
-/// visitor.
+/// Turns what a source declares - its nodes and its configured keys (<see cref="RelationshipNodeSet" />,
+/// <see cref="RelationshipDeclaredKey" />) - and what <c>pg_constraint</c> holds into one graph, for one visitor.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -51,8 +42,9 @@ internal sealed record RelationshipDatabaseView(
 /// </para>
 /// <para>
 /// <b>Hidden types are dropped, unknown ones are listed, withheld ones are counted.</b> A key with an end
-/// belonging to a mapping the host hid with <c>IsDocumentTypeVisible</c> — or to Marten's own bookkeeping
-/// — disappears completely: not as an edge, not as a node, and not as an entry in
+/// belonging to a table the source hides (<see cref="RelationshipNodeSet.HiddenTables" />: in MartenStudio a mapping
+/// the host hid with <c>IsDocumentTypeVisible</c>) — or to Marten's own bookkeeping, by its <c>mt_</c> prefix, which
+/// fails closed in every studio — disappears completely: not as an edge, not as a node, and not as an entry in
 /// <see cref="RelationshipGraph.Unmatched"/>, because naming the hidden collection in a list of "keys that
 /// could not be drawn" would be the visibility gate leaking through the very relationship it was set to
 /// hide. A key with an end in a schema the visitor is not shown is a <see cref="WithheldForeignKey" />:
@@ -62,7 +54,7 @@ internal sealed record RelationshipDatabaseView(
 /// <para>
 /// <b>Tables are drawn only with a gate.</b> Without a <see cref="RelationshipDatabaseView" /> - the gate
 /// could not be read, which is the classifier failing closed (D27) - nothing is called somebody else's
-/// table, the picture is the document types alone as it always was, and only the store's own schemas
+/// table, the picture is the source's own nodes alone as it always was, and only the source's own schemas
 /// are treated as visible.
 /// </para>
 /// </remarks>
@@ -81,54 +73,35 @@ internal static class RelationshipGraphBuilder
     /// </remarks>
     private const char KeySeparator = (char) 0;
 
-    /// <summary>
-    /// Builds the document-only graph, with the store's own schemas as the only visible ones - what the
-    /// screen draws when the database browser's gate could not be read.
-    /// </summary>
-    /// <param name="storeOptions">The scoped store's read-only options.</param>
-    /// <param name="isVisible">
-    /// <c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> when the host set none.
-    /// </param>
-    /// <param name="physicalKeys">The foreign keys Postgres has around the store's schemas.</param>
-    /// <param name="estimates">
-    /// <c>reltuples</c> per table, keyed as <c>DocumentBrowseQueries.Key</c> spells it. Empty is a valid
-    /// argument — the referenced-by read builds the same graph and has no use for the counts.
-    /// </param>
-    /// <param name="readAt">When the reads happened.</param>
-    public static RelationshipGraph Build(
-        IReadOnlyStoreOptions storeOptions,
-        Func<Type, bool>? isVisible,
-        IReadOnlyList<PhysicalForeignKey> physicalKeys,
-        IReadOnlyDictionary<string, long> estimates,
-        DateTimeOffset readAt) =>
-        Build(storeOptions, isVisible, physicalKeys, estimates, readAt, database: null);
+    /// <summary>The prefix of a Marten document table, which the <c>mt_</c> bookkeeping rule leaves reportable.</summary>
+    private const string DocumentTablePrefix = "mt_doc_";
 
     /// <summary>Builds the graph one visitor sees.</summary>
-    /// <param name="storeOptions">The scoped store's read-only options.</param>
-    /// <param name="isVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" />.</param>
+    /// <param name="nodes">The source's nodes, the tables it hides and its own schemas.</param>
+    /// <param name="declared">The keys the source's configuration declares, in its own order.</param>
     /// <param name="physicalKeys">
     /// Every foreign key Postgres has with either end in the schemas any visitor might see - the shared,
     /// cached read. Filtered here.
     /// </param>
-    /// <param name="estimates"><c>reltuples</c> per document table; empty is valid.</param>
     /// <param name="readAt">When the reads happened.</param>
-    /// <param name="database">The visitor's gate and the relations it admits, or <see langword="null" /> for documents only.</param>
+    /// <param name="database">
+    /// The visitor's gate and the relations it admits, or <see langword="null" /> for the source's own nodes only.
+    /// </param>
     public static RelationshipGraph Build(
-        IReadOnlyStoreOptions storeOptions,
-        Func<Type, bool>? isVisible,
+        RelationshipNodeSet nodes,
+        IReadOnlyList<RelationshipDeclaredKey> declared,
         IReadOnlyList<PhysicalForeignKey> physicalKeys,
-        IReadOnlyDictionary<string, long> estimates,
         DateTimeOffset readAt,
-        RelationshipDatabaseView? database)
+        RelationshipDatabaseView? database = null)
     {
-        ArgumentNullException.ThrowIfNull(storeOptions);
+        ArgumentNullException.ThrowIfNull(nodes);
+        ArgumentNullException.ThrowIfNull(declared);
         ArgumentNullException.ThrowIfNull(physicalKeys);
-        ArgumentNullException.ThrowIfNull(estimates);
 
-        var builder = new Builder(storeOptions, isVisible, estimates, database);
+        var builder = new Builder(nodes, database);
 
         builder.RegisterTables(physicalKeys);
-        builder.AddDeclared();
+        builder.AddDeclared(declared);
         builder.AddPhysical(physicalKeys);
 
         return builder.Finish(readAt);
@@ -172,7 +145,7 @@ internal static class RelationshipGraphBuilder
     /// <param name="table">The unqualified table name.</param>
     internal static bool IsMartenBookkeeping(string table) =>
         table.StartsWith("mt_", StringComparison.OrdinalIgnoreCase) &&
-        !table.StartsWith(DocumentBrowseQueries.TablePrefix, StringComparison.OrdinalIgnoreCase);
+        !table.StartsWith(DocumentTablePrefix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The column the relationship is really about, for a key between two document types.
@@ -291,45 +264,18 @@ internal static class RelationshipGraphBuilder
         return key.Count == columns.Count && columns.All(key.Contains) && columns.Distinct(StringComparer.Ordinal).Count() == columns.Count;
     }
 
-    /// <summary>
-    /// The .NET member behind a column, when Marten duplicated one into it.
-    /// </summary>
-    /// <remarks>
-    /// This is not decoration: it is what the "referenced by" link filters on. The documents list's search
-    /// grammar takes a <em>member path</em> and resolves it to the duplicated column itself, so
-    /// <c>CustomerId = "…"</c> is an indexed read and <c>customer_id = "…"</c> would be a JSON-path
-    /// comparison against a property that does not exist.
-    /// </remarks>
-    internal static string? MemberFor(IDocumentType documentType, string column)
-    {
-        ArgumentNullException.ThrowIfNull(documentType);
-
-        // Physical only: a search-only duplicated field names a metadata column rather than one of its
-        // own, so matching against it would answer "Version" for mt_version and send the referenced-by
-        // link filtering on a member that is not a duplicated column at all. See MartenDuplicatedFields.
-        foreach (DuplicatedField field in MartenDuplicatedFields.Physical(documentType))
-        {
-            if (string.Equals(field.ColumnName, column, StringComparison.OrdinalIgnoreCase))
-            {
-                return field.MemberName;
-            }
-        }
-
-        return null;
-    }
-
     private static string Key(string schema, string table) => schema + "." + table;
 
     /// <summary>What a foreign-key end turned out to be.</summary>
     private enum EndKind
     {
-        /// <summary>A visible document type of this store.</summary>
+        /// <summary>One of the source's own nodes - in MartenStudio, a visible document type.</summary>
         Document,
 
         /// <summary>A table the graph draws: somebody else's, or Marten-managed relational data.</summary>
         Table,
 
-        /// <summary>A hidden document type's table. Everything about the key disappears.</summary>
+        /// <summary>A table the source hides. Everything about the key disappears.</summary>
         Hidden,
 
         /// <summary>Marten's own bookkeeping. Everything about the key disappears.</summary>
@@ -340,7 +286,7 @@ internal static class RelationshipGraphBuilder
     }
 
     /// <summary>One end of a key, resolved.</summary>
-    private readonly record struct End(EndKind Kind, string Schema, string Name, IDocumentType? Document, RelationshipTableNode? Table)
+    private readonly record struct End(EndKind Kind, string Schema, string Name, RelationshipNode? Document, RelationshipTableNode? Table)
     {
         /// <summary>
         /// The node key, when the end is a node - never for a table in a schema the visitor is not shown,
@@ -364,14 +310,13 @@ internal static class RelationshipGraphBuilder
     /// <summary>The state of one build.</summary>
     private sealed class Builder
     {
-        private readonly IReadOnlyDictionary<string, long> estimates;
+        private readonly RelationshipNodeSet nodes;
         private readonly RelationshipDatabaseView? database;
         private readonly Func<string, bool> canSee;
         private readonly IReadOnlyList<string> visibleSchemas;
 
-        private readonly List<IDocumentType> visible = [];
-        private readonly Dictionary<string, IDocumentType> byTable = new(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<Type, IDocumentType> byClrType = [];
+        private readonly Dictionary<string, RelationshipNode> byTable = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, RelationshipNode> byAlias = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> claimed = new(StringComparer.OrdinalIgnoreCase);
 
         private readonly Dictionary<string, RelationshipTableNode> tables = new(StringComparer.Ordinal);
@@ -381,22 +326,17 @@ internal static class RelationshipGraphBuilder
         private readonly List<UnmatchedForeignKey> unmatched = [];
         private readonly List<WithheldForeignKey> withheld = [];
 
-        public Builder(
-            IReadOnlyStoreOptions storeOptions,
-            Func<Type, bool>? isVisible,
-            IReadOnlyDictionary<string, long> estimates,
-            RelationshipDatabaseView? database)
+        public Builder(RelationshipNodeSet nodes, RelationshipDatabaseView? database)
         {
-            this.estimates = estimates;
+            this.nodes = nodes;
             this.database = database;
 
             if (database is null)
             {
-                string[] storeSchemas = SchemaDeclarationReader.SchemaNames(storeOptions);
-                HashSet<string> set = new(storeSchemas, StringComparer.Ordinal);
+                HashSet<string> set = new(nodes.OwnSchemas, StringComparer.Ordinal);
 
                 canSee = set.Contains;
-                visibleSchemas = storeSchemas;
+                visibleSchemas = nodes.OwnSchemas;
             }
             else
             {
@@ -404,29 +344,21 @@ internal static class RelationshipGraphBuilder
                 visibleSchemas = database.Gate.VisibleSchemas;
             }
 
-            foreach (IDocumentType documentType in storeOptions.AllKnownDocumentTypes())
+            // Every table the source claims, hidden ones included. This is what tells "a key into a table the host
+            // hid" apart from "a key into a table nothing in this source knows about" - the first is dropped and the
+            // second is reported.
+            foreach ((string schema, string table) in nodes.HiddenTables)
             {
-                // Every table a mapping claims, hidden ones included. This is what tells "a key into a table
-                // the host hid" apart from "a key into a table nothing in this store knows about" - the first
-                // is dropped and the second is reported.
-                claimed.Add(Key(documentType.TableName.Schema, documentType.TableName.Name));
+                claimed.Add(Key(schema, table));
+            }
 
-                if (CollectionAliases.IsMartenInfrastructure(documentType.DocumentType) ||
-                    (isVisible is not null && !isVisible(documentType.DocumentType)))
-                {
-                    continue;
-                }
+            foreach (RelationshipNode node in nodes.Nodes)
+            {
+                string table = Key(node.Schema ?? string.Empty, node.Table ?? string.Empty);
 
-                visible.Add(documentType);
-                byTable[Key(documentType.TableName.Schema, documentType.TableName.Name)] = documentType;
-                byClrType[documentType.DocumentType] = documentType;
-
-                // A subclass is not an IDocumentType of its own and has no table of its own: a key declared
-                // against one belongs to the root's table, so the root is what the CLR type resolves to.
-                foreach (SubClassMapping subclass in documentType.SubClasses)
-                {
-                    byClrType.TryAdd(subclass.DocumentType, documentType);
-                }
+                claimed.Add(table);
+                byTable[table] = node;
+                byAlias[node.Alias] = node;
             }
         }
 
@@ -466,125 +398,118 @@ internal static class RelationshipGraphBuilder
             }
         }
 
-        public void AddDeclared()
+        public void AddDeclared(IReadOnlyList<RelationshipDeclaredKey> declared)
         {
-            foreach (IDocumentType source in visible)
+            foreach (RelationshipDeclaredKey key in declared)
             {
-                foreach (ForeignKey key in source.ForeignKeys)
+                IReadOnlyList<string> columns = key.Columns;
+
+                if (columns.Count == 0 || !byAlias.TryGetValue(key.FromAlias, out RelationshipNode? source))
                 {
-                    var columns = key.ColumnNames ?? [];
+                    continue;
+                }
 
-                    if (columns.Length == 0)
-                    {
-                        continue;
-                    }
+                if (key.ToAlias is { } toAlias && byAlias.TryGetValue(toAlias, out RelationshipNode? target))
+                {
+                    var column = PrimaryColumn(columns);
 
-                    IDocumentType? target = ResolveDeclaredTarget(key);
-
-                    if (target is not null)
-                    {
-                        var column = PrimaryColumn(columns);
-
-                        edges[EdgeKey(source.TableName.Schema, source.TableName.Name, columns, target.TableName.Schema, target.TableName.Name)] =
-                            new RelationshipEdge(
-                                source.Alias,
-                                target.Alias,
-                                column,
-                                MemberFor(source, column),
-                                Declared: true,
-                                Physical: false,
-                                key.OnDelete.ToString(),
-                                key.Name)
-                            {
-                                Columns = string.Join(", ", columns),
-                                LinkedColumns = string.Join(", ", key.LinkedNames ?? []),
-                            };
-
-                        continue;
-                    }
-
-                    if (key.LinkedTable is not { } linked)
-                    {
-                        unmatched.Add(new UnmatchedForeignKey(
-                            key.Name,
+                    edges[EdgeKey(SchemaOf(source), TableOf(source), columns, SchemaOf(target), TableOf(target))] =
+                        new RelationshipEdge(
                             source.Alias,
-                            string.Join(", ", columns),
-                            "unknown",
+                            target.Alias,
+                            column,
+                            nodes.MemberFor(source.Alias, column),
                             Declared: true,
                             Physical: false,
-                            "The configuration declares this key without naming a table to link to.")
+                            key.OnDelete,
+                            key.Name)
                         {
-                            FromSchema = source.TableName.Schema,
-                            FromTable = source.TableName.Name,
-                        });
+                            Columns = string.Join(", ", columns),
+                            LinkedColumns = string.Join(", ", key.LinkedColumns),
+                        };
 
-                        continue;
-                    }
+                    continue;
+                }
 
-                    // An end that belongs to a mapping the visitor may not see is dropped rather than
-                    // listed: an "unmatched" row naming the hidden table would say the thing the gate is
-                    // there to stop the studio from saying.
-                    if (claimed.Contains(Key(linked.Schema, linked.Name)))
-                    {
-                        continue;
-                    }
-
-                    if (!canSee(linked.Schema))
-                    {
-                        withheld.Add(new WithheldForeignKey(source.Alias, VisibleEndIsTarget: false));
-                        continue;
-                    }
-
-                    // Classified without being registered: a key only the configuration declares says nothing
-                    // about whether its table exists, and a node for a table that is not there would be a
-                    // box on the picture for nothing.
-                    End end = Resolve(linked.Schema, linked.Name, register: false);
-
-                    if (end.Kind is EndKind.Hidden or EndKind.Bookkeeping)
-                    {
-                        continue;
-                    }
-
-                    if (end.Kind == EndKind.Table && FindExisting(linked.Schema, linked.Name) is { } table)
-                    {
-                        string[] linkedNames = key.LinkedNames ?? [];
-
-                        edges[EdgeKey(source.TableName.Schema, source.TableName.Name, columns, table.Schema, table.Name)] =
-                            new RelationshipEdge(
-                                source.Alias,
-                                table.Key,
-                                LabelFor(columns, linkedNames, null, null),
-                                MemberFor(source, PrimaryColumn(columns)),
-                                Declared: true,
-                                Physical: false,
-                                key.OnDelete.ToString(),
-                                key.Name)
-                            {
-                                Columns = string.Join(", ", columns),
-                                LinkedColumns = string.Join(", ", linkedNames),
-                                ToIsTable = true,
-                            };
-
-                        continue;
-                    }
-
+                if (key.LinkedSchema is not { } linkedSchema || key.LinkedTable is not { } linkedTable)
+                {
                     unmatched.Add(new UnmatchedForeignKey(
                         key.Name,
                         source.Alias,
                         string.Join(", ", columns),
-                        linked.QualifiedName,
+                        "unknown",
                         Declared: true,
                         Physical: false,
-                        end.Kind == EndKind.Table
-                            ? "It points at a table the studio does not find in the database."
-                            : "It points at a table no document type of this store maps.")
+                        "The configuration declares this key without naming a table to link to.")
                     {
-                        FromSchema = source.TableName.Schema,
-                        FromTable = source.TableName.Name,
-                        ToSchema = linked.Schema,
-                        ToTable = linked.Name,
+                        FromSchema = source.Schema,
+                        FromTable = source.Table,
                     });
+
+                    continue;
                 }
+
+                // An end that belongs to a mapping the visitor may not see is dropped rather than
+                // listed: an "unmatched" row naming the hidden table would say the thing the gate is
+                // there to stop the studio from saying.
+                if (claimed.Contains(Key(linkedSchema, linkedTable)))
+                {
+                    continue;
+                }
+
+                if (!canSee(linkedSchema))
+                {
+                    withheld.Add(new WithheldForeignKey(source.Alias, VisibleEndIsTarget: false));
+                    continue;
+                }
+
+                // Classified without being registered: a key only the configuration declares says nothing
+                // about whether its table exists, and a node for a table that is not there would be a
+                // box on the picture for nothing.
+                End end = Resolve(linkedSchema, linkedTable, register: false);
+
+                if (end.Kind is EndKind.Hidden or EndKind.Bookkeeping)
+                {
+                    continue;
+                }
+
+                if (end.Kind == EndKind.Table && FindExisting(linkedSchema, linkedTable) is { } table)
+                {
+                    edges[EdgeKey(SchemaOf(source), TableOf(source), columns, table.Schema, table.Name)] =
+                        new RelationshipEdge(
+                            source.Alias,
+                            table.Key,
+                            LabelFor(columns, key.LinkedColumns, null, null),
+                            nodes.MemberFor(source.Alias, PrimaryColumn(columns)),
+                            Declared: true,
+                            Physical: false,
+                            key.OnDelete,
+                            key.Name)
+                        {
+                            Columns = string.Join(", ", columns),
+                            LinkedColumns = string.Join(", ", key.LinkedColumns),
+                            ToIsTable = true,
+                        };
+
+                    continue;
+                }
+
+                unmatched.Add(new UnmatchedForeignKey(
+                    key.Name,
+                    source.Alias,
+                    string.Join(", ", columns),
+                    key.LinkedQualifiedName ?? Key(linkedSchema, linkedTable),
+                    Declared: true,
+                    Physical: false,
+                    end.Kind == EndKind.Table
+                        ? "It points at a table the studio does not find in the database."
+                        : "It points at a table no document type of this store maps.")
+                {
+                    FromSchema = source.Schema,
+                    FromTable = source.Table,
+                    ToSchema = linkedSchema,
+                    ToTable = linkedTable,
+                });
             }
         }
 
@@ -665,13 +590,8 @@ internal static class RelationshipGraphBuilder
 
         public RelationshipGraph Finish(DateTimeOffset readAt)
         {
-            List<RelationshipNode> nodes = [];
-            foreach (IDocumentType documentType in visible)
-            {
-                nodes.Add(Describe(documentType));
-            }
-
-            nodes.Sort(static (left, right) => string.CompareOrdinal(left.Alias, right.Alias));
+            List<RelationshipNode> drawn = [.. nodes.Nodes];
+            drawn.Sort(static (left, right) => string.CompareOrdinal(left.Alias, right.Alias));
 
             List<RelationshipTableNode> tableNodes = [.. tables.Values];
             tableNodes.Sort(static (left, right) =>
@@ -689,7 +609,7 @@ internal static class RelationshipGraphBuilder
                 return byFrom != 0 ? byFrom : string.CompareOrdinal(left.Name, right.Name);
             });
 
-            return new RelationshipGraph(nodes, ordered, unmatched, readAt)
+            return new RelationshipGraph(drawn, ordered, unmatched, readAt)
             {
                 Tables = tableNodes,
                 Withheld = withheld,
@@ -700,7 +620,7 @@ internal static class RelationshipGraphBuilder
 
         private void AddPhysicalOnDocument(PhysicalForeignKey key, End from, End to)
         {
-            IDocumentType source = from.Document!;
+            RelationshipNode source = from.Document!;
             string toKey = to.NodeKey!;
             bool toIsTable = to.Kind == EndKind.Table;
 
@@ -743,7 +663,7 @@ internal static class RelationshipGraphBuilder
                     source.Alias,
                     toKey,
                     label,
-                    MemberFor(source, primary),
+                    nodes.MemberFor(source.Alias, primary),
                     Declared: false,
                     Physical: true,
                     key.OnDelete,
@@ -786,7 +706,7 @@ internal static class RelationshipGraphBuilder
         {
             string key = Key(schema, name);
 
-            if (byTable.TryGetValue(key, out IDocumentType? document))
+            if (byTable.TryGetValue(key, out RelationshipNode? document))
             {
                 return new End(EndKind.Document, schema, name, document, null);
             }
@@ -826,7 +746,7 @@ internal static class RelationshipGraphBuilder
                 case DatabaseObjectOwner.MartenInfrastructure:
                     // An mt_doc_ table nobody registers is a discovered collection, reportable as it always
                     // was; everything else with Marten's prefix is its bookkeeping.
-                    return name.StartsWith(DocumentBrowseQueries.TablePrefix, StringComparison.OrdinalIgnoreCase)
+                    return name.StartsWith(DocumentTablePrefix, StringComparison.OrdinalIgnoreCase)
                         ? new End(EndKind.Unplaced, schema, name, null, null)
                         : new End(EndKind.Bookkeeping, schema, name, null, null);
             }
@@ -893,70 +813,9 @@ internal static class RelationshipGraphBuilder
             return found;
         }
 
-        /// <summary>
-        /// The document type a declared key points at, or <see langword="null" />.
-        /// </summary>
-        /// <remarks>
-        /// <c>DocumentForeignKey.ReferenceDocumentType</c> first, because it is the fact Marten actually has:
-        /// <c>LinkedTable</c> is nullable on the Weasel base class and a key added through Weasel directly may
-        /// carry no table at all. The table is the fallback, which is what resolves a key somebody built
-        /// without Marten's helper.
-        /// </remarks>
-        private IDocumentType? ResolveDeclaredTarget(ForeignKey key)
-        {
-            if (key is DocumentForeignKey documentKey &&
-                byClrType.TryGetValue(documentKey.ReferenceDocumentType, out IDocumentType? byType))
-            {
-                return byType;
-            }
+        private static string SchemaOf(RelationshipNode node) => node.Schema ?? string.Empty;
 
-            return key.LinkedTable is { } linked && byTable.TryGetValue(Key(linked.Schema, linked.Name), out IDocumentType? byName)
-                ? byName
-                : null;
-        }
-
-        private RelationshipNode Describe(IDocumentType documentType)
-        {
-            List<string> subclasses = [];
-            foreach (SubClassMapping subclass in documentType.SubClasses)
-            {
-                subclasses.Add(subclass.Alias);
-            }
-
-            subclasses.Sort(StringComparer.Ordinal);
-
-            return new RelationshipNode(
-                documentType.Alias,
-                documentType.DocumentType.Name,
-                CollectionColorizer.HueFor(documentType.Alias),
-                DocumentCountOf(documentType),
-                documentType.IsHierarchy(),
-                subclasses)
-            {
-                Schema = documentType.TableName.Schema,
-                Table = documentType.TableName.Name,
-            };
-        }
-
-        /// <summary>
-        /// A document node's row count, from the grouped <c>reltuples</c> read.
-        /// </summary>
-        /// <remarks>
-        /// <c>-1</c> is Postgres for "never analysed" rather than for "empty", so it becomes
-        /// <see cref="DocumentCount.Unknown"/> and the node draws no number at all - the alternative is a
-        /// diagram that says <c>~0</c> beside a collection that plainly has rows in it.
-        /// </remarks>
-        private DocumentCount DocumentCountOf(IDocumentType documentType)
-        {
-            if (!estimates.TryGetValue(
-                    DocumentBrowseQueries.Key(documentType.TableName.Schema, documentType.TableName.Name),
-                    out var rows))
-            {
-                return DocumentCount.Unavailable;
-            }
-
-            return rows < 0 ? DocumentCount.Unknown : DocumentCount.Estimate(rows);
-        }
+        private static string TableOf(RelationshipNode node) => node.Table ?? string.Empty;
 
         /// <summary>A table node's row count, from the gate's relation list; the catalog already turned "never analysed" into null.</summary>
         private DocumentCount Count(string tableKey) =>
