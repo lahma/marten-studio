@@ -170,7 +170,7 @@ public class LogLevelsTests
             "The opt-in health export failed in the studio itself and reports Degraded; an orchestrator probes the health endpoint every few seconds, and the run repeats every HealthInterval."),
 
         // ---- Visitor-started reads and writes, one line per action ------------------------------------
-        ["src/MartenStudio/Services/StudioLog.Deps.cs : 9320 SubscriptionRewindRefused"] = (Verdict.VisitorAction,
+        ["src/MartenStudio/Services/MartenLog.Deps.cs : 9320 SubscriptionRewindRefused"] = (Verdict.VisitorAction,
             "A rewind the visitor pressed was refused by Marten as an unknown subscription after the studio checked the name; the daemon may have stopped the agents first, and Marten's words, which list every subscription, are kept only here."),
         ["src/MartenStudio/Services/Configuration/ConfigurationService.cs : Marten Studio could not describe the databases of store {StoreKey}"] = (Verdict.VisitorAction,
             "The configuration screen's own load; not polled, and the page shows the failure."),
