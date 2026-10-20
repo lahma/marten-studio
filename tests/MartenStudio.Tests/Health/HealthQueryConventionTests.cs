@@ -30,20 +30,27 @@ namespace MartenStudio.Tests.Health;
 /// also refuses, everywhere outside the builders, a target-typed <c>new(</c> handed to the runner - which
 /// needs no identifier - and, in the health files, a <c>with { Sql = ... }</c>. That last one is a compile
 /// error anyway, because <c>HealthQuery</c>'s two properties are get-only, and a reflection fact pins that.</item>
-/// <item>The <b>compiled</b> fence reads the IL of every method in <c>MartenStudio.dll</c> and refuses a
-/// <c>newobj</c> of a <c>HealthQuery</c> constructor from any type outside <c>MartenStudio.Internal.Sql</c>. It
-/// cannot be spelled around: a conditional, a switch expression, a local function and a lambda all compile to
-/// the same instruction in a method whose outermost type is the check.</item>
+/// <item>The <b>compiled</b> fence reads the IL of every method in both studio assemblies and refuses a
+/// <c>newobj</c> of a <c>HealthQuery</c> constructor from any type outside that assembly's own builders' namespace -
+/// <c>PostgresStudio.Internal.Sql</c> in <c>PostgresStudio.dll</c>, <c>MartenStudio.Internal.Sql</c> in
+/// <c>MartenStudio.dll</c>. It cannot be spelled around: a conditional, a switch expression, a local function and a
+/// lambda all compile to the same instruction in a method whose outermost type is the check.</item>
 /// </list>
+/// <para>
+/// <b>Two builders' folders since the 0.5 move.</b> The shared studio's statements are built in
+/// <c>src/PostgresStudio/Internal/Sql/</c>, and the ones only a Marten store has (the daemon's and the event store's) in
+/// <c>src/MartenStudio/Internal/Sql/</c>, each in its folder's namespace. Each namespace is exempt in its own folder and
+/// nowhere else, so neither folder can lend the other its exemption.
+/// </para>
 /// <para>
 /// <b>And the namespace is the folder.</b> The source fence exempts the builders by folder and the compiled fence by
 /// namespace, so a file elsewhere that declared <c>namespace MartenStudio.Internal.Sql</c> passed the compiled fence with
 /// any construction it liked, and the source fence with one it could spell around (a conditional handed to the runner,
 /// <c>QueryAsync(ok ? new(...) : null!, ...)</c>), CL1 item 1. So a third fence, over source, refuses a declaration of
-/// that namespace, or of one nested inside it, in any <c>.cs</c> or <c>.razor</c> file under <c>src/</c> outside
-/// <c>Internal/Sql/</c>. It reads file-scoped and block declarations, a block nested in another, and Razor's
-/// <c>@namespace</c>, after comments and strings are blanked, and compares a name as C# compares identifiers: a leading
-/// <c>@</c> removed, <c>\u</c> and <c>\U</c> escapes decoded, formatting characters removed
+/// either builders' namespace, or of one nested inside it, in any <c>.cs</c> or <c>.razor</c> file under <c>src/</c>
+/// outside that namespace's own <c>Internal/Sql/</c>. It reads file-scoped and block declarations, a block nested in
+/// another, and Razor's <c>@namespace</c>, after comments and strings are blanked, and compares a name as C# compares
+/// identifiers: a leading <c>@</c> removed, <c>\u</c> and <c>\U</c> escapes decoded, formatting characters removed
 /// (<see cref="DeclaredNamespaces" />, <see cref="NormalizeName" />). What it does not see: a file compiled in from
 /// outside <c>src/</c>, and a namespace a source generator emits.
 /// </para>
@@ -54,18 +61,30 @@ namespace MartenStudio.Tests.Health;
 /// </remarks>
 public class HealthQueryConventionTests
 {
-    /// <summary>Where a health statement may be built.</summary>
-    private const string Builders = "src/MartenStudio/Internal/Sql/";
+    /// <summary>Where the shared studio's health statements are built.</summary>
+    private const string SharedBuilders = "src/PostgresStudio/Internal/Sql/";
+
+    /// <summary>Where MartenStudio's own health statements - the daemon's and the event store's - are built.</summary>
+    private const string MartenBuilders = "src/MartenStudio/Internal/Sql/";
+
+    private const string SharedBuildersNamespace = "PostgresStudio.Internal.Sql";
+
+    private const string MartenBuildersNamespace = "MartenStudio.Internal.Sql";
+
+    /// <summary>Each builders' folder with the one namespace it, and only it, may declare.</summary>
+    private static readonly (string Folder, string Namespace)[] Builders =
+    [
+        (SharedBuilders, SharedBuildersNamespace),
+        (MartenBuilders, MartenBuildersNamespace),
+    ];
 
     /// <summary>The runner: it takes a query, so it names the type, and it builds none.</summary>
     private const string Runner = "src/PostgresStudio/Services/Health/HealthCheckContext.cs";
 
-    private const string BuildersNamespace = "MartenStudio.Internal.Sql";
-
     private static readonly Regex Identifier = new(@"\bHealthQuery\b", RegexOptions.None, TimeSpan.FromSeconds(5));
 
-    /// <summary>Where the checks and the health framework live: the scope of the <c>with</c> rule.</summary>
-    private const string HealthServices = "src/MartenStudio/Services/Health/";
+    /// <summary>Where the checks and the health framework live, in either studio: the scope of the <c>with</c> rule.</summary>
+    private static readonly IReadOnlyList<string> HealthServices = StudioProjects.Prefixes("Services", "Health");
 
     /// <summary>
     /// A construction, in the runner as anywhere else: <c>new HealthQuery(</c>, a target-typed <c>new(</c> into
@@ -118,6 +137,13 @@ public class HealthQueryConventionTests
         files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
         files.Select(SourceScanner.Relative).Should().Contain(Runner, "the exemption must name a file that exists");
 
+        foreach (string prefix in HealthServices)
+        {
+            files.Select(SourceScanner.Relative).Should().Contain(
+                x => x.StartsWith(prefix, StringComparison.Ordinal),
+                "each studio's health files are scanned, {0} included, or the rule is about one studio", prefix);
+        }
+
         List<string> offenders =
         [
             .. files
@@ -156,12 +182,17 @@ public class HealthQueryConventionTests
     [InlineData("var builder = new HealthTableQueries();", false)]
     public void The_source_fence_catches_a_query_outside_the_builders_and_ignores_prose(string source, bool offends)
     {
+        // A check of either studio is held to the same rule.
         Offends("src/MartenStudio/Services/Health/Checks/SomeCheck.cs", source).Should().Be(offends);
+        Offends("src/PostgresStudio/Services/Health/Checks/SomeCheck.cs", source).Should().Be(offends);
     }
 
     /// <summary>The builders may do anything; the runner may name the type, and may not build one.</summary>
     [Theory]
-    [InlineData(Builders + "HealthTableQueries.cs", "public static HealthQuery Stats(string s) => new(\"select \" + s);", false)]
+    [InlineData(SharedBuilders + "HealthTableQueries.cs", "public static HealthQuery Stats(string s) => new(\"select \" + s);", false)]
+    [InlineData(MartenBuilders + "HealthDaemonQueries.cs", "public static HealthQuery HighWater(string s) => new(\"select \" + s);", false)]
+    [InlineData("src/MartenStudio/Services/Health/Checks/SomeCheck.cs", "var copy = query with { Sql = query.Sql + suffix };", true)]
+    [InlineData("src/PostgresStudio/Services/Health/Checks/SomeCheck.cs", "var copy = query with { Parameters = [] };", true)]
     [InlineData(Runner, "public Task<T?> ScalarAsync<T>(HealthQuery query, CancellationToken cancellationToken)", false)]
     [InlineData(Runner, "HealthQuery probe = new(\"select 1\");", true)]
     [InlineData(Runner, "var probe = new HealthQuery(\"select 1\");", true)]
@@ -193,24 +224,43 @@ public class HealthQueryConventionTests
     }
 
     [Fact]
-    public void No_type_outside_Internal_Sql_constructs_a_health_query_in_the_compiled_assembly()
+    public void No_type_outside_Internal_Sql_constructs_a_health_query_in_either_compiled_assembly()
     {
-        IReadOnlyList<MethodBase> sites = IlScan.Constructions(typeof(HealthQuery).Assembly, typeof(HealthQuery));
+        (Assembly Assembly, string Namespace)[] assemblies =
+        [
+            (typeof(HealthQuery).Assembly, SharedBuildersNamespace),
+            (StudioProjects.MartenAssembly, MartenBuildersNamespace),
+        ];
+
+        assemblies.Select(static x => x.Assembly).Should().OnlyHaveUniqueItems("the shared studio and MartenStudio are two assemblies since the move");
+
+        IReadOnlyList<MethodBase> shared = IlScan.Constructions(typeof(HealthQuery).Assembly, typeof(HealthQuery));
 
         // Not vacuous: the record's own Clone method constructs one, inside Internal/Sql - so the scan read this
         // assembly's bodies and recognised the instruction.
-        sites.Should().Contain(static x => x.DeclaringType == typeof(HealthQuery),
+        shared.Should().Contain(static x => x.DeclaringType == typeof(HealthQuery),
             "the scan must see the construction every record makes of itself, or it is reading nothing");
 
-        List<string> offenders =
-        [
-            .. sites
-                .Where(static x => IlScan.Outermost(x.DeclaringType!).Namespace != BuildersNamespace)
-                .Select(static x => x.DeclaringType!.FullName + "." + x.Name),
-        ];
+        List<string> offenders = [];
+
+        foreach ((Assembly assembly, string buildersNamespace) in assemblies)
+        {
+            IReadOnlyList<MethodBase> sites = IlScan.Constructions(assembly, typeof(HealthQuery));
+
+            // Not vacuous either way: each studio's own builders construct the query - in MartenStudio.dll a newobj of a
+            // constructor declared in another assembly, which is the resolution this scan has to get right there.
+            sites.Should().Contain(
+                x => IlScan.Outermost(x.DeclaringType!).Namespace == buildersNamespace,
+                "{0}'s builders construct health queries, so a scan of it that found none would be reading nothing", assembly.GetName().Name);
+
+            offenders.AddRange(
+                sites
+                    .Where(x => IlScan.Outermost(x.DeclaringType!).Namespace != buildersNamespace)
+                    .Select(static x => x.DeclaringType!.Assembly.GetName().Name + ": " + x.DeclaringType!.FullName + "." + x.Name));
+        }
 
         offenders.Should().BeEmpty(
-            "only a builder under Internal/Sql/ constructs a HealthQuery, however the construction is spelled: "
+            "only a builder under its own studio's Internal/Sql/ constructs a HealthQuery, however the construction is spelled: "
             + string.Join(", ", offenders));
     }
 
@@ -234,32 +284,38 @@ public class HealthQueryConventionTests
 
     /// <summary>
     /// CL1 item 1: the compiled fence's exemption is a namespace, so the namespace has to mean the folder. No shipped
-    /// file outside <c>Internal/Sql/</c> declares <c>MartenStudio.Internal.Sql</c> or a namespace nested inside it.
+    /// file declares <c>PostgresStudio.Internal.Sql</c> outside <c>src/PostgresStudio/Internal/Sql/</c>, or
+    /// <c>MartenStudio.Internal.Sql</c> outside <c>src/MartenStudio/Internal/Sql/</c>, or a namespace nested inside
+    /// either - one studio's builders' folder is not the other's.
     /// </summary>
     [Fact]
-    public void Only_the_builders_folder_declares_the_builders_namespace()
+    public void Only_each_builders_folder_declares_its_builders_namespace()
     {
         string[] files = SourceScanner.ShippedSourceFiles();
         files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
 
-        // Not vacuous: the walk finds the declarations the builders really make, so a rule it passes is one it applied.
-        files.Where(static x => SourceScanner.Relative(x).StartsWith(Builders, StringComparison.Ordinal))
-            .Should().NotBeEmpty()
-            .And.OnlyContain(
-                static x => DeclaredNamespaces(File.ReadAllText(x)).Contains(BuildersNamespace),
-                "every file in the folder is in the namespace, which is what the walk must be able to see");
+        // Not vacuous: the walk finds the declarations the builders really make, in both folders, so a rule it passes is
+        // one it applied.
+        foreach ((string folder, string ns) in Builders)
+        {
+            files.Where(x => SourceScanner.Relative(x).StartsWith(folder, StringComparison.Ordinal))
+                .Should().NotBeEmpty("{0} holds builders", folder)
+                .And.OnlyContain(
+                    x => DeclaredNamespaces(File.ReadAllText(x)).Contains(ns),
+                    "every file in {0} is in {1}, which is what the walk must be able to see", folder, ns);
+        }
 
         List<string> offenders =
         [
             .. files
                 .Select(static file => (Path: SourceScanner.Relative(file), Text: File.ReadAllText(file)))
-                .Where(static x => DeclaresBuildersNamespaceOutsideTheFolder(x.Path, x.Text))
+                .Where(static x => DeclaresABuildersNamespaceOutsideItsFolder(x.Path, x.Text))
                 .Select(static x => x.Path),
         ];
 
         offenders.Should().BeEmpty(
-            "the compiled fence exempts every type in MartenStudio.Internal.Sql, so that namespace is the builders' folder "
-            + "and nothing else (hard rule 4): " + string.Join(", ", offenders));
+            "the compiled fence exempts every type in a studio's builders' namespace, so each namespace is its own builders' "
+            + "folder and nothing else (hard rule 4): " + string.Join(", ", offenders));
     }
 
     /// <summary>The namespace fence's anti-vacuity: every spelling of the declaration is found, and prose is not.</summary>
@@ -298,11 +354,21 @@ public class HealthQueryConventionTests
     [InlineData("namespace MartenStudio.Internal { class A { } }\nnamespace Sql { class C { } }", false)]
     [InlineData("@* @namespace MartenStudio.Internal.Sql *@\n@namespace MartenStudio.Components\n<p>a component</p>", false)]
     [InlineData("namespace X;\nclass C { void M() { var x = PostgresStudio.Internal.Sql.SqlIdentifier.Quote(\"a\"); } }", false)]
+    // The shared studio's namespace is held the same way: its spellings, and what a file may write about it.
+    [InlineData("namespace PostgresStudio.Internal.Sql;\nclass C { }", true)]
+    [InlineData("namespace PostgresStudio.Internal.Sql.Health { class C { } }", true)]
+    [InlineData("namespace PostgresStudio { namespace Internal.%u0053ql { class C { } } }", true)]
+    [InlineData("@namespace PostgresStudio.Internal.Sql\n<p>a component</p>", true)]
+    [InlineData("using PostgresStudio.Internal.Sql;\nnamespace PostgresStudio.Services.Health;\nclass C { }", false)]
+    [InlineData("namespace PostgresStudio.Internal.SqlHelpers;\nclass C { }", false)]
     public void The_namespace_fence_finds_every_spelling_and_ignores_prose(string source, bool offends)
     {
         string code = Escaped(source);
 
-        DeclaresBuildersNamespaceOutsideTheFolder("src/MartenStudio/Services/Health/Checks/SomeCheck.cs", code)
+        // Outside both folders, in either studio.
+        DeclaresABuildersNamespaceOutsideItsFolder("src/MartenStudio/Services/Health/Checks/SomeCheck.cs", code)
+            .Should().Be(offends, code);
+        DeclaresABuildersNamespaceOutsideItsFolder("src/PostgresStudio/Services/Health/Checks/SomeCheck.cs", code)
             .Should().Be(offends, code);
     }
 
@@ -320,20 +386,30 @@ public class HealthQueryConventionTests
         string code = Escaped("namespace @MartenStudio.Internal.%u0053ql;\nclass C { }");
 
         code.Should().Contain(((char) 92) + "u0053", "the source holds the six characters of an escape, not an S");
-        DeclaredNamespaces(code).Should().Equal(BuildersNamespace);
+        DeclaredNamespaces(code).Should().Equal(MartenBuildersNamespace);
         NormalizeName(Escaped("S%u00ADq%U0000006C")).Should().Be("Sql", "a formatting character is removed, a long escape decoded");
     }
 
-    /// <summary>The folder itself is the one place the namespace may be declared, by its folder and not by its name.</summary>
+    /// <summary>
+    /// Each studio's folder is the one place its own builders' namespace may be declared - by its folder and not by its
+    /// name - and neither folder admits the other studio's namespace.
+    /// </summary>
     [Theory]
-    [InlineData(Builders + "HealthTableQueries.cs", false)]
-    [InlineData(Builders + "Nested/Deeper.cs", false)]
-    [InlineData("src/MartenStudio/Internal/SqlHelpers/Stray.cs", true)]
-    [InlineData("src/MartenStudio/Internal/Stray.cs", true)]
-    [InlineData("src/PostgresStudio/Services/Health/HealthCheckContext.cs", true)]
-    public void The_namespace_may_be_declared_under_the_folder_and_nowhere_else(string path, bool offends)
+    [InlineData(MartenBuilders + "HealthDaemonQueries.cs", MartenBuildersNamespace, false)]
+    [InlineData(MartenBuilders + "Nested/Deeper.cs", MartenBuildersNamespace, false)]
+    [InlineData(SharedBuilders + "HealthTableQueries.cs", SharedBuildersNamespace, false)]
+    [InlineData(SharedBuilders + "Nested/Deeper.cs", SharedBuildersNamespace, false)]
+    [InlineData("src/MartenStudio/Internal/SqlHelpers/Stray.cs", MartenBuildersNamespace, true)]
+    [InlineData("src/MartenStudio/Internal/Stray.cs", MartenBuildersNamespace, true)]
+    [InlineData("src/PostgresStudio/Internal/SqlHelpers/Stray.cs", SharedBuildersNamespace, true)]
+    [InlineData("src/PostgresStudio/Services/Health/HealthCheckContext.cs", SharedBuildersNamespace, true)]
+    [InlineData("src/PostgresStudio/Services/Health/HealthCheckContext.cs", MartenBuildersNamespace, true)]
+    // Across the line: one studio's folder is not the other's.
+    [InlineData(SharedBuilders + "Stray.cs", MartenBuildersNamespace, true)]
+    [InlineData(MartenBuilders + "Stray.cs", SharedBuildersNamespace, true)]
+    public void Each_namespace_may_be_declared_under_its_own_folder_and_nowhere_else(string path, string ns, bool offends)
     {
-        DeclaresBuildersNamespaceOutsideTheFolder(path, "namespace MartenStudio.Internal.Sql;\nclass C { }").Should().Be(offends);
+        DeclaresABuildersNamespaceOutsideItsFolder(path, "namespace " + ns + ";\nclass C { }").Should().Be(offends);
     }
 
     /// <summary>
@@ -422,15 +498,19 @@ public class HealthQueryConventionTests
         return normalized.ToString();
     }
 
-    private static bool DeclaresBuildersNamespaceOutsideTheFolder(string path, string source) =>
-        !path.StartsWith(Builders, StringComparison.Ordinal)
-        && DeclaredNamespaces(source).Any(static x =>
-            string.Equals(x, BuildersNamespace, StringComparison.Ordinal)
-            || x.StartsWith(BuildersNamespace + ".", StringComparison.Ordinal));
+    /// <summary>
+    /// Whether <paramref name="source" />, at <paramref name="path" />, declares either builders' namespace (or one inside
+    /// it) anywhere but under that namespace's own folder.
+    /// </summary>
+    private static bool DeclaresABuildersNamespaceOutsideItsFolder(string path, string source) =>
+        DeclaredNamespaces(source).Any(declared => Builders.Any(builders =>
+            !path.StartsWith(builders.Folder, StringComparison.Ordinal)
+            && (string.Equals(declared, builders.Namespace, StringComparison.Ordinal)
+                || declared.StartsWith(builders.Namespace + ".", StringComparison.Ordinal))));
 
     private static bool Offends(string path, string source)
     {
-        if (path.StartsWith(Builders, StringComparison.Ordinal))
+        if (Builders.Any(x => path.StartsWith(x.Folder, StringComparison.Ordinal)))
         {
             return false;
         }
@@ -438,7 +518,7 @@ public class HealthQueryConventionTests
         string code = SourceScanner.StripCommentsAndStrings(source);
 
         return Construction.IsMatch(code)
-            || (path.StartsWith(HealthServices, StringComparison.Ordinal) && Rewrite.IsMatch(code))
+            || (HealthServices.Any(x => path.StartsWith(x, StringComparison.Ordinal)) && Rewrite.IsMatch(code))
             || (!string.Equals(path, Runner, StringComparison.Ordinal) && Identifier.IsMatch(code));
     }
 

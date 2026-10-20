@@ -4,8 +4,8 @@ using System.Text.RegularExpressions;
 namespace MartenStudio.Tests.Conventions;
 
 /// <summary>
-/// There is one lexical scanner under <c>Internal/Sql/</c>, and no second opinion about where a Postgres
-/// line comment ends.
+/// There is one lexical scanner under the two <c>Internal/Sql/</c> folders - the shared studio's
+/// <c>SqlLexer.cs</c> - and no second opinion about where a Postgres line comment ends, in either studio.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,8 +33,11 @@ namespace MartenStudio.Tests.Conventions;
 /// </remarks>
 public class OneSqlScannerTests
 {
-    /// <summary>The file that owns the lexing. Everything else in the folder asks it.</summary>
-    private const string TheLexer = "SqlLexer.cs";
+    /// <summary>
+    /// The file that owns the lexing, repository-relative. Everything else in either studio's builders' folder asks it -
+    /// MartenStudio's composer through the shared assembly.
+    /// </summary>
+    private const string TheLexer = "src/PostgresStudio/Internal/Sql/SqlLexer.cs";
 
     /// <summary>A <c>'\n'</c> character literal, however it is spaced.</summary>
     private static readonly Regex LineFeedLiteral = new(@"'\\n'", RegexOptions.Compiled, TimeSpan.FromSeconds(5));
@@ -73,8 +76,20 @@ public class OneSqlScannerTests
         return offenders;
     }
 
-    private static string[] SqlSourceFiles() =>
-        [.. Directory.EnumerateFiles(RepositoryRoot.Combine("src", "MartenStudio", "Internal", "Sql"), "*.cs")];
+    /// <summary>Both studios' <c>Internal/Sql/</c> files, and each folder holds some: a scan of one would pass over the other.</summary>
+    private static string[] SqlSourceFiles()
+    {
+        string[] files = StudioProjects.Files("*.cs", SearchOption.TopDirectoryOnly, "Internal", "Sql");
+
+        foreach (string project in StudioProjects.Names)
+        {
+            files.Should().Contain(
+                x => StudioProjects.ProjectOf(SourceScanner.Relative(x)) == project,
+                "{0} keeps builders under Internal/Sql/, so a scan that found none there is reading one studio", project);
+        }
+
+        return files;
+    }
 
     [Fact]
     public void No_scan_in_Internal_Sql_ends_a_line_comment_at_a_line_feed_alone()
@@ -89,7 +104,7 @@ public class OneSqlScannerTests
         {
             foreach (int line in LineFeedOnlyTerminators(File.ReadAllText(file)))
             {
-                offenders.Add(Path.GetFileName(file) + ":" + line.ToString(CultureInfo.InvariantCulture));
+                offenders.Add(SourceScanner.Relative(file) + ":" + line.ToString(CultureInfo.InvariantCulture));
             }
         }
 
@@ -104,25 +119,23 @@ public class OneSqlScannerTests
     {
         string[] files = SqlSourceFiles();
 
-        files.Should().Contain(x => Path.GetFileName(x) == TheLexer, "the lexer is the file this rule is about");
+        files.Select(SourceScanner.Relative).Should().Contain(TheLexer, "the lexer is the file this rule is about");
 
         List<string> offenders =
         [
             .. files
-                .Where(x => Path.GetFileName(x) != TheLexer)
-                .Where(x => CarriageReturnLiteral.IsMatch(File.ReadAllText(x)))
-                .Select(Path.GetFileName)
-                .OfType<string>()
+                .Select(SourceScanner.Relative)
+                .Where(static x => x != TheLexer)
+                .Where(static x => CarriageReturnLiteral.IsMatch(File.ReadAllText(RepositoryRoot.Combine(x.Split('/')))))
                 .Order(StringComparer.Ordinal),
         ];
 
         offenders.Should().BeEmpty(
-            "where a comment, a string or a dollar body ends is SqlLexer's answer and there is one of it - " +
-            "a second copy is how the same defect came to be fixed twice. Offenders: " +
+            "where a comment, a string or a dollar body ends is SqlLexer's answer and there is one of it, in the shared " +
+            "studio - a second copy, in either studio, is how the same defect came to be fixed twice. Offenders: " +
             string.Join(", ", offenders));
 
-        CarriageReturnLiteral.IsMatch(File.ReadAllText(RepositoryRoot.Combine(
-                "src", "MartenStudio", "Internal", "Sql", TheLexer)))
+        CarriageReturnLiteral.IsMatch(File.ReadAllText(RepositoryRoot.Combine(TheLexer.Split('/'))))
             .Should().BeTrue("otherwise nobody knows about the carriage return at all, which is the defect");
     }
 
@@ -151,8 +164,7 @@ public class OneSqlScannerTests
     [Fact]
     public void The_lexers_own_terminator_names_both_spellings()
     {
-        string lexer = File.ReadAllText(
-            RepositoryRoot.Combine("src", "MartenStudio", "Internal", "Sql", TheLexer));
+        string lexer = File.ReadAllText(RepositoryRoot.Combine(TheLexer.Split('/')));
 
         LineFeedOnlyTerminators(lexer).Should().BeEmpty();
 

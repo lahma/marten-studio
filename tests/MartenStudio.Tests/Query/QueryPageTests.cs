@@ -822,11 +822,18 @@ public class QueryPageTests
     [Fact]
     public void QueryComponentsUseTheSharedInteropPredicate()
     {
-        var directory = RepositoryRoot.Combine("src", "MartenStudio", "Components", "Pages", "Query");
-
-        string[] files = [.. Directory.EnumerateFiles(directory, "*.razor", SearchOption.AllDirectories)];
+        // Both studios' Components/Pages/Query: the shared editor, grid and console panel moved to PostgresStudio, and
+        // Query.razor and LinqQueryPanel.razor stayed in MartenStudio.
+        string[] files = StudioProjects.Files("*.razor", SearchOption.AllDirectories, "Components", "Pages", "Query");
 
         files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
+
+        foreach (string project in StudioProjects.Names)
+        {
+            files.Should().Contain(
+                x => StudioProjects.ProjectOf(SourceScanner.Relative(x)) == project,
+                "{0} has Query components, so a scan that read none of them reads one studio", project);
+        }
 
         List<string> offenders = [];
         var callers = 0;

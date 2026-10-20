@@ -43,13 +43,19 @@ model, the phased delivery plan — lives in the approved plan at
    embeddable component that injects global styles or pins a component-library version is a component that
    breaks the host's own UI on upgrade; that is the failure Quartz.Dashboard documented and this project
    inherits the rule from.
-4. **No raw SQL outside `src/MartenStudio/Internal/Sql/`.** Identifiers are quoted through the builder,
-   values are always parameters. Marten only ever hands the studio a runtime `Type`, so the reads *are*
-   generated SQL — which means there is exactly one place where an interpolated identifier could become an
-   injection, and it is small enough to review. The compiled fence in `HealthQueryConventionTests` exempts
-   that folder's namespace, `MartenStudio.Internal.Sql`, by name, so the same test refuses a declaration of that
-   namespace, or of one inside it, in any `.cs` or `.razor` file under `src/` outside the folder, comparing
-   names as C# does (a leading `@` removed, Unicode escapes decoded, formatting characters removed).
+4. **No raw SQL outside the two builders' folders, `src/PostgresStudio/Internal/Sql/` and
+   `src/MartenStudio/Internal/Sql/`.** Identifiers are quoted through the builder, values are always
+   parameters. Marten only ever hands the studio a runtime `Type`, and the shared studio knows a relation only
+   by its catalog name, so the reads *are* generated SQL — which means there is exactly one place per assembly
+   where an interpolated identifier could become an injection, and each is small enough to review. The shared
+   studio's builders, `SqlIdentifier` and `SqlLexer` among them, live in the first; the statements only a Marten
+   store has (the document, event, daemon and projection reads) in the second, which calls the first's quoting.
+   The compiled fence in `HealthQueryConventionTests` exempts each folder's namespace by name —
+   `PostgresStudio.Internal.Sql` in `PostgresStudio.dll`, `MartenStudio.Internal.Sql` in `MartenStudio.dll` —
+   and each **only in its own folder**, so the same test refuses a declaration of either namespace, or of one
+   inside it, in any `.cs` or `.razor` file under `src/` outside that namespace's own folder, the other
+   studio's folder included, comparing names as C# does (a leading `@` removed, Unicode escapes decoded,
+   formatting characters removed).
 5. **Every mutating operation is capability-gated in the service layer, and audited.** Hiding a button is
    a UI convenience; the refusal has to live where the operation does, because a Blazor circuit is a
    long-lived object a client can drive. `StudioCapabilityGuard.Require(…)` → scope resolution (with
@@ -218,6 +224,9 @@ it and at a pinned latest-tested 9.x (`MartenStudioMartenFloor` / `MartenStudioM
 `Directory.Packages.props`, the `marten-latest` workflow); the package is only ever packed at the floor.
 The studio's own compilation runs without the JasperFx source generator Marten bundles, so the shipped
 assembly carries no JasperFx generator attribute and has the same public API whichever Marten built it.
+Since 0.5 the assets pack is PostgresStudio's, which MartenStudio references, and PostgresStudio - having no
+Marten to bring it - references `Npgsql` directly; "no direct `Npgsql`" is MartenStudio's rule alone
+(*Package budget changes* 2026-10-20; D30 in full when it is written).
 
 **D4 — Capabilities are a class of booleans, all defaulting to `false`.** A freshly mapped studio is a
 read-only browser; `o.Capabilities = MartenStudioCapabilities.All()` is the one-line, greppable opt-in, and
@@ -852,6 +861,39 @@ Behavioural differences between 9.50.2 and 9.51.0, read from the source at `V9.5
 
 **Exit condition:** unchanged.
 
+**2026-10-20 — `src/PostgresStudio` takes a direct `Npgsql` `PackageReference`, and
+`Microsoft.AspNetCore.App.Internal.Assets` moves to it from `src/MartenStudio`.** The 0.5 move (PS-2) split the
+shared studio out of MartenStudio into `src/PostgresStudio`, a Razor Class Library MartenStudio references through a
+`ProjectReference` and which references neither Marten nor MartenStudio. `PostgresStudioFenceTests` holds that line at
+the project file, at the restore graph (`obj/project.assets.json`) and at the built assembly's references, and
+`CoreFenceTests` at the text the compiler does not bind.
+
+- **`Npgsql`, direct, for PostgresStudio only.** The shared studio talks to Postgres through Npgsql and has no Marten to
+  bring it, so it references the package itself. The version is one central row in `Directory.Packages.props`,
+  `<PackageVersion Include="Npgsql" Version="9.0.4" Condition="'$(PostgresStudioPinsNpgsql)' == 'true'" />`, which only
+  a project that sets `PostgresStudioPinsNpgsql` sees - `PostgresStudio.csproj` alone today - so no other project gains
+  a direct reference or a row. 9.0.4 is what Marten's floor already resolves through Weasel.Postgresql 9.33.0, so the
+  move changes no resolved version anywhere; it is a placeholder, and PS-7 measures the lowest Npgsql the shared studio
+  passes at. D3's "no direct `Npgsql`" stands, for MartenStudio: its reason is that a second, direct reference would
+  let Npgsql and Weasel.Postgresql drift apart, and that is true only of a project that has Weasel. PostgresStudio has
+  none, so for it there is nothing to drift from. MartenStudio still declares no `Npgsql` of its own; it reaches Npgsql
+  through Marten and through PostgresStudio, and NuGet takes the higher of the two.
+- **The assets pack, moved with the shell.** The component that writes the `blazor.web.js` script tag
+  (`Components/StudioDocument.razor`) and the static web assets (`_content/PostgresStudio/css/studio.css`,
+  `_content/PostgresStudio/js/studio.js`) are PostgresStudio's now, so the `Microsoft.AspNetCore.App.Internal.Assets`
+  10.0.12 `PackageReference` moved with them; MartenStudio no longer references it. D22's mechanism is unchanged - the
+  pack's `buildTransitive` targets define `_framework/blazor.web.js` as the consuming executable's own static web asset -
+  but a MartenStudio host now reaches it through two hops (host, MartenStudio, PostgresStudio, the pack). PS-0 measured
+  that on 2026-10-20 with an API-only scratch host referencing only a MartenStudio nupkg (design Appendix E, E3):
+  `GET /_framework/blazor.web.js` and `GET {Path}/_framework/blazor.web.js` answer 200 with the real script, and
+  negotiate answers 200. PS-2f re-checked the sample host after the move.
+- **Restore** is still free of NU warnings at both Marten ends (`TreatWarningsAsErrors`), and the shared studio's
+  restore graph is exactly `Npgsql` 9.0.4 and `Microsoft.AspNetCore.App.Internal.Assets` 10.0.12.
+- The budget table above is rewritten with D30 (PS-8): the assets pack's row moves to `src/PostgresStudio`, and a
+  `src/PostgresStudio` | `Npgsql` row joins it.
+
+**Exit condition:** move the `Npgsql` row only on PS-7's measurement, in an entry of its own.
+
 **Held deliberately, and not stale.**
 
 - `xunit.v3` / `xunit.runner.visualstudio` stay at **3.2.2 / 3.1.5** because xunit.v3 4.0.0 drops
@@ -895,19 +937,28 @@ build/                                   The Fallout orchestrator. `build/` is a
   Build.Publish.cs                       Pack + the in-build nuget.org OIDC token exchange (D15)
   Build.Marten.cs                        --marten-version: the floor, the latest-tested Marten or an exact one (D3)
 build/Extensions/                        Vendored Cake helpers (StringExtensions) - do not edit
-src/                                     The shipped library, and nothing else
-src/MartenStudio/                        The Razor Class Library: public API, Internal/ (guard, SQL
-                                         builders), Components/, Services/, wwwroot/
-src/MartenStudio/Components/             route table, links, shell — pages come later
-src/MartenStudio/Components/Shared/      small building-block components: TableScroll (D25), CopyButton,
+src/                                     The shipped libraries, and nothing else: the shared studio and MartenStudio
+src/PostgresStudio/                      The shared studio's Razor Class Library (0.5, PS-2): shell, routes, scope,
+                                         authorization, audit, the database browser, Sessions, Health, the SQL
+                                         console, Relationships, the JSON toolkit and wwwroot/. References no Marten
+                                         and no MartenStudio (PostgresStudioFenceTests, CoreFenceTests)
+src/PostgresStudio/Components/           the shared document every root renders, route table, links, scope query
+src/PostgresStudio/Components/Shared/    small building-block components: TableScroll (D25), CopyButton,
                                          dialogs, chips, the empty and error states
-src/MartenStudio/Internal/               startup authorization guard, endpoint marker,
-                                         mapped-endpoint tracking; later SQL builders
-src/MartenStudio/Services/               toast service; scoped state and data services come later
-src/MartenStudio/wwwroot/                static web assets, packed under `_content/MartenStudio/`
-src/MartenStudio/wwwroot/css/            the one stylesheet
-src/MartenStudio/wwwroot/js/             the studio's browser helpers, loaded by the shell (never a
-                                         Blazor JS initializer - see MartenStudioApp.razor)
+src/PostgresStudio/Internal/             startup authorization guard, endpoint marker, mapped-endpoint
+                                         tracking and the endpoint mapper (D11)
+src/PostgresStudio/Services/             scope, state, authorization, the capability guard, the action log,
+                                         toasts and the shared log events
+src/PostgresStudio/wwwroot/              static web assets, packed under `_content/PostgresStudio/`
+src/PostgresStudio/wwwroot/css/          the one stylesheet, studio.css
+src/PostgresStudio/wwwroot/js/           the studio's browser helpers, studio.js, loaded by the shell (never a
+                                         Blazor JS initializer - see StudioDocument.razor)
+src/MartenStudio/                        The Marten Razor Class Library: public API, the store-facing services,
+                                         pages and checks, and Internal/; references PostgresStudio
+src/MartenStudio/Components/             MartenStudioApp (the root component) and the component bridges
+src/MartenStudio/Internal/               the duplicated-field enumeration, and the Marten SQL builders below
+src/MartenStudio/Services/               store registry, scope resolver, tenant discovery, the source provider,
+                                         descriptor, settings and links, and the bridges onto the shared seams
 samples/                                 Demo host and demo domain; never packed
 samples/MartenStudio.Sample/             The sample ASP.NET Core host (D18) - README snippet regions
 samples/MartenStudio.SampleDomain/       The demo domain, shared with the integration tests; deliberately
@@ -918,10 +969,14 @@ tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metad
 tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to leave to review
 tests/MartenStudio.Tests/Marten/         MartenApiSurfaceTest - the Marten 9.35 contract, pinned
 tests/MartenStudio.Integration.Tests/    Testcontainers Postgres + Playwright. Needs Docker
-src/MartenStudio/Internal/Sql/           The only place a Postgres identifier becomes SQL text (hard rule 4)
-src/MartenStudio/Components/Layout/      Shell chrome: layout, nav, scope selector, capability chip, the
+src/PostgresStudio/Internal/Sql/         The shared builders, SqlIdentifier and SqlLexer: one of the two places a
+                                         Postgres identifier becomes SQL text (hard rule 4)
+src/MartenStudio/Internal/Sql/           The Marten builders - documents, events, the daemon, projections: the
+                                         other (hard rule 4)
+src/PostgresStudio/Components/Layout/    Shell chrome: layout, nav, scope selector, capability chip, the
                                          preferences popover (theme and time zone, behind the gear)
-src/MartenStudio/Components/Pages/       The routed pages; each @page must be rooted at /marten
+src/PostgresStudio/Components/Pages/     The shared routed pages; each @page must be rooted at /postgres
+src/MartenStudio/Components/Pages/       The Marten routed pages; each @page must be rooted at /marten
 samples/MartenStudio.SampleDomain/Documents/  The demo document types
 samples/MartenStudio.Sample/Auth/        Cookie auth, the three demo users, the two policies
 samples/MartenStudio.Sample/Properties/  launchSettings.json, fixed at http://localhost:5210
@@ -930,10 +985,12 @@ tests/MartenStudio.Tests/Services/       Registry, scope resolver, audit log, te
 tests/MartenStudio.Tests/Components/     bUnit: StudioComponentContext, StudioMarkup and the page tests
 tests/MartenStudio.Tests/Support/        Test doubles shared by the tiers - never a mocking library
 tests/MartenStudio.Tests/Verify/         The approved API baseline; never hand-edited (hard rule 7)
-src/MartenStudio/Components/Json/        The JSON toolkit: viewer, raw view, editor, copy menu, diffs
-src/MartenStudio/Services/Json/          Flat model, path expressions, pretty printer, canonicalizer,
+src/PostgresStudio/Components/Json/      The JSON toolkit: viewer, raw view, editor, copy menu, diffs
+src/PostgresStudio/Services/Json/        Flat model, path expressions, pretty printer, canonicalizer,
                                          round-trip differ, C# record generator
-src/MartenStudio/Services/Query/         Search grammar, index advisor, the document list request
+src/MartenStudio/Services/Query/         Search grammar, index advisor, the document list request, LINQ mode
+src/PostgresStudio/Services/Query/       The SQL console service, export, saved queries, error text, index
+                                         verdicts and search chips
 tests/MartenStudio.Tests/Json/           Unit and bUnit tests for the JSON toolkit
 tests/MartenStudio.Tests/Sql/            SQL builders, guard theory, grammar, advisor - no database
 tests/MartenStudio.Integration.Tests/Sql/ Live Postgres: read-only session, builders, catalog, estimator
@@ -941,11 +998,12 @@ src/MartenStudio/Services/Documents/      Document read and write services and t
 tests/MartenStudio.Tests/Documents/       Document service unit tests - no database
 tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
 src/MartenStudio/Services/Projections/    Projection data service, daemon accessor, operation tracker
-src/MartenStudio/Services/Live/           Snapshot cache, tracker observer, the per-page polling helper (D10)
-src/MartenStudio/Services/Settings/       The shared studio's settings seam, descriptor, links, mount path, registration
-                                         marker and core registrations; moves whole to PostgresStudio (PS-1a)
-src/MartenStudio/Services/Sources/        The source seam - databases, the source provider, the shared resolver - and the
-                                         seams PS-1b-1d implement; moves whole to PostgresStudio (PS-1a)
+src/PostgresStudio/Services/Live/         Snapshot cache, the per-page polling helper (D10), the nav indicators
+src/MartenStudio/Services/Live/           The tracker observer: the in-process daemon's latest shard state (D10)
+src/PostgresStudio/Services/Settings/     The shared studio's settings seam, descriptor, links, mount path, registration
+                                         marker and core registrations (PS-1a; moved whole in PS-2)
+src/PostgresStudio/Services/Sources/      The source seam - databases, the source provider, the shared resolver - and the
+                                         seams MartenStudio implements (PS-1a-1d; moved whole in PS-2)
 src/MartenStudio/Components/Pages/Projections/  The projections screen and its parts
 samples/MartenStudio.SampleDomain/Events/ The demo events and the three projections
 tests/MartenStudio.Tests/Projections/     Daemon accessor, snapshot cache, live updates, operation tracker, page
@@ -955,7 +1013,8 @@ src/MartenStudio/Services/Events/         Event data service, aggregate invoker,
 src/MartenStudio/Components/Pages/Events/ Streams, stream detail, feed, event types, dead letters
 tests/MartenStudio.Tests/Events/          Event builder cases, links, and the five page tests - no database
 tests/MartenStudio.Integration.Tests/Events/  Live Postgres: the event reads and the dead-letter writes
-src/MartenStudio/Services/Schema/         Schema data service, index advice, the DDL tokenizer and its DTOs
+src/MartenStudio/Services/Schema/         Schema data service, index advice, migration risk and their DTOs
+src/PostgresStudio/Services/Schema/       The DDL tokenizer, schema declarations, storage parameters, index redundancy
 src/MartenStudio/Services/Configuration/  The read-only StoreOptions describer and its DTOs
 src/MartenStudio/Components/Pages/Schema/ The schema screen's five tabs and their parts
 src/MartenStudio/Components/Pages/Configuration/  The configuration dump screen
@@ -963,7 +1022,9 @@ tests/MartenStudio.Tests/Schema/          Index advice, the tokenizer, the schem
 tests/MartenStudio.Tests/Configuration/   The describer and the configuration page - no database
 tests/MartenStudio.Integration.Tests/Schema/  Live Postgres: drift, migration preview, catalog reads
 src/MartenStudio/Components/Pages/Documents/  The documents browser: collections rail, list, detail
-src/MartenStudio/Components/Pages/Query/  The query screen: mode switch, editor, result grid, saved queries
+src/MartenStudio/Components/Pages/Query/  The Marten query body: the mode switch and LINQ mode
+src/PostgresStudio/Components/Pages/Query/  The shared query parts: editor, result grid, stats, saved queries,
+                                         examples and the SQL console panel
 tests/MartenStudio.Tests/Query/            Composer, guard, export, saved queries, the page - no database
 tests/MartenStudio.Integration.Tests/Query/  Live Postgres: Marten where-clause mode and the SQL console
 samples/MartenStudio.SampleDomain/Generation/  The demo data generator: size presets, the generator,
@@ -977,25 +1038,29 @@ tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k
                                          unhealthy switches' gates, markup, checks and clean-up
 docs/                                    Long-form documentation linked from README.md; never packed
 docs/screenshots/                        The fourteen README screenshots (ScreenshotCaptureTests retakes them)
-src/MartenStudio/Services/Relationships/      The relationship graph service, its DTOs and the SVG layout
-src/MartenStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
+src/PostgresStudio/Services/Relationships/    The relationship graph service, its DTOs and the SVG layout
+src/MartenStudio/Services/Relationships/      The Marten half of the graph: what StoreOptions says of the document types
+src/PostgresStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
 tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, page and panel - no database
 tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both ways, visibility, bounded counts
 tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: thirteen scenarios, the D19 gate, the large-data passes
-src/MartenStudio/Services/Database/       The database browser: the per-visitor gate, the schema matcher, the
+src/PostgresStudio/Services/Database/     The database browser: the per-visitor gate, the schema matcher, the
                                          ownership classifier, the catalog cache and the object service
-src/MartenStudio/Components/Pages/Database/  The database browser's screens: the rail, the kind tabs and grids,
+src/PostgresStudio/Components/Pages/Database/  The database browser's screens: the rail, the kind tabs and grids,
                                          object detail and its tabs, the Rows and Relationships slots
 tests/MartenStudio.Tests/Database/        Gate, matcher, classifier, catalog SQL shape, options - no database
 tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, the gate and its audit, no DDL,
                                          and the relational demo schemas' idempotency and demo-data flows
-src/MartenStudio/Services/Health/         The health advisor: check model and registry, sweeper, sweep cache,
+src/PostgresStudio/Services/Health/       The health advisor: check model and registry, sweeper, sweep cache,
                                          history, per-visitor report and gates, mutes and toasts
-src/MartenStudio/Services/Health/Checks/  One file per health check (attribute, gatherer, pure evaluator); a
+src/PostgresStudio/Services/Health/Checks/  One file per shared health check (attribute, gatherer, pure evaluator); a
                                          check is added by adding its file here, nothing else
-src/MartenStudio/Services/Health/Export/  The opt-in ASP.NET Core health check: one run per interval over every
+src/MartenStudio/Services/Health/         What MartenStudio's checks read of the store (MartenHealthContext)
+src/MartenStudio/Services/Health/Checks/  One file per Marten-only health check - the store, the event store, the
+                                         daemon - run against Marten stores only; added the same way
+src/PostgresStudio/Services/Health/Export/  The opt-in ASP.NET Core health check: one run per interval over every
                                          store and database, summarised as codes and counts, never names
-src/MartenStudio/Components/Pages/Health/ The Health page and its presentation helpers
+src/PostgresStudio/Components/Pages/Health/ The Health page and its presentation helpers
 tests/MartenStudio.Tests/Health/          Evaluators, sweeper, cache, history, gates, page, badge, toast, the
                                          check and docs conventions - no database
 tests/MartenStudio.Integration.Tests/Health/  Live Postgres: each check fires and stays quiet, the no-DDL /

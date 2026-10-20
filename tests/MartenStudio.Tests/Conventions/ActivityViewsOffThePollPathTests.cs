@@ -94,7 +94,7 @@ public class ActivityViewsOffThePollPathTests
 
         callers.Should().NotBeEmpty("a scan that found no caller would pass for the wrong reason");
         callers.Should().OnlyContain(
-            static x => x.StartsWith("src/MartenStudio/Services/Health/Checks/", StringComparison.Ordinal),
+            static x => StudioProjects.IsUnder(x, "Services", "Health", "Checks"),
             "every other caller would be a new path to the process array and the lock table");
     }
 
@@ -121,8 +121,9 @@ public class ActivityViewsOffThePollPathTests
         ];
 
         callers.Should().NotBeEmpty();
+        callers.Should().Contain("src/PostgresStudio/Services/Database/SessionActivityReader.cs", "the Sessions reader is a caller, so the scan reads the shared studio");
         callers.Should().OnlyContain(
-            static x => x.StartsWith("src/MartenStudio/Services/Health/Checks/", StringComparison.Ordinal)
+            static x => StudioProjects.IsUnder(x, "Services", "Health", "Checks")
                 || x == "src/PostgresStudio/Services/Database/SessionActivityReader.cs"
                 || x == HorizonBuilder,
             "every other caller would be a new path to the process array and the lock table; the horizon builder takes only H3's session predicate");
@@ -142,7 +143,7 @@ public class ActivityViewsOffThePollPathTests
         users.Should().OnlyContain(
             static x => x == "src/PostgresStudio/Components/Pages/Database/Sessions.razor"
                 || x == "src/PostgresStudio/Services/Settings/StudioCoreRegistration.cs"
-                || x.StartsWith("src/MartenStudio/Services/Database/", StringComparison.Ordinal),
+                || StudioProjects.IsUnder(x, "Services", "Database"),
             "the sidebar, the Overview and every other page poll every RefreshInterval");
     }
 

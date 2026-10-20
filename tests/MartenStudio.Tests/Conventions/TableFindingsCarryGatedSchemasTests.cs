@@ -47,6 +47,15 @@ public class TableFindingsCarryGatedSchemasTests
         string[] checks = TablesCheckFiles();
         checks.Length.Should().BeGreaterThanOrEqualTo(15, "scanning too few check files would pass for the wrong reason");
 
+        // Both studios keep Tables-area checks since the move - the shared ones over any database, MartenStudio's over a
+        // store (T11's mt_hilo) - so a scan of either folder alone would judge part of the area.
+        foreach (string project in StudioProjects.Names)
+        {
+            checks.Should().Contain(
+                x => StudioProjects.ProjectOf(SourceScanner.Relative(x)) == project,
+                "{0} has Tables-area checks, and they are scanned too", project);
+        }
+
         int initializers = 0;
         List<string> offenders = [];
 
@@ -79,6 +88,7 @@ public class TableFindingsCarryGatedSchemasTests
     [Fact]
     public void Every_exemption_is_a_tables_check_file_that_builds_findings()
     {
+        // An exemption is keyed by file name, so a name is one file across both studios or the key exempts two.
         Dictionary<string, string> byName = TablesCheckFiles().ToDictionary(static x => Path.GetFileName(x), StringComparer.Ordinal);
 
         foreach ((string name, string reason) in Exempt)
@@ -107,11 +117,12 @@ public class TableFindingsCarryGatedSchemasTests
         found.Should().ContainSingle().Which.Should().Be(sets);
     }
 
-    /// <summary>Every check file in <c>Services/Health/Checks</c> whose <c>[HealthCheck]</c> is in the Tables area.</summary>
+    /// <summary>
+    /// Every check file in either studio's <c>Services/Health/Checks</c> whose <c>[HealthCheck]</c> is in the Tables area.
+    /// </summary>
     private static string[] TablesCheckFiles() =>
-        [.. Directory.EnumerateFiles(RepositoryRoot.Combine("src", "MartenStudio", "Services", "Health", "Checks"), "*.cs")
-            .Where(static x => TablesArea.IsMatch(SourceScanner.StripCommentsAndStrings(File.ReadAllText(x))))
-            .Order(StringComparer.Ordinal)];
+        [.. StudioProjects.Files("*.cs", SearchOption.TopDirectoryOnly, "Services", "Health", "Checks")
+            .Where(static x => TablesArea.IsMatch(SourceScanner.StripCommentsAndStrings(File.ReadAllText(x))))];
 
     /// <summary>For each <c>new HealthFinding { ... }</c> in stripped source, whether its own braces assign <c>GatedSchemas</c>.</summary>
     private static List<bool> Initializers(string stripped)

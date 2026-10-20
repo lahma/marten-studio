@@ -333,7 +333,9 @@ public class DaemonLookupOrderTests
             {
                 builder.ClearProviders();
                 builder.SetMinimumLevel(LogLevel.Trace);
-                builder.AddFilter((category, _) => category?.StartsWith("MartenStudio", StringComparison.Ordinal) == true);
+                builder.AddFilter((category, _) =>
+                    category?.StartsWith("MartenStudio", StringComparison.Ordinal) == true
+                    || category?.StartsWith("PostgresStudio", StringComparison.Ordinal) == true);
                 builder.AddProvider(logs);
             });
 

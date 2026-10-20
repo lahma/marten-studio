@@ -72,9 +72,10 @@ public partial class StylesheetTests
     public void Every_component_that_draws_a_refusal_draws_it_inside_the_container()
     {
         // The class as a whole token: "ms-query-error" followed by the attribute's end or another class, never the
-        // "-message" of the element inside it.
-        List<(string Name, string Markup)> drawing = [.. Directory
-            .EnumerateFiles(RepositoryRoot.Combine("src", "MartenStudio"), "*.razor", SearchOption.AllDirectories)
+        // "-message" of the element inside it. Both studios' components: the editor is the shared studio's since the move,
+        // LINQ mode MartenStudio's.
+        List<(string Name, string Markup)> drawing = [.. StudioProjects
+            .Files("*.razor", SearchOption.AllDirectories)
             .Select(static x => (Name: Path.GetFileName(x), Markup: File.ReadAllText(x)))
             .Where(static x => x.Markup.Contains("ms-query-error\"", StringComparison.Ordinal)
                 || x.Markup.Contains("ms-query-error ", StringComparison.Ordinal))];
