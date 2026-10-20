@@ -282,11 +282,19 @@
             return relativePath.Length == 0 ? "ms-nav-active" : string.Empty;
         }
 
-        bool isActive = relativePath.Equals(route, StringComparison.OrdinalIgnoreCase)
-            || relativePath.StartsWith(route + "/", StringComparison.OrdinalIgnoreCase);
+        // The most specific entry wins: under a studio whose sidebar has both "database" and "database/sessions", the
+        // Sessions page lights Sessions alone. A sidebar with no entry nested in another - MartenStudio's - is unchanged.
+        bool isActive = Covers(route, relativePath)
+            && !Descriptor.Navigation.Any(section => section.Items.Any(item =>
+                item.Route is { Length: > 0 } other && other.Length > route.Length && Covers(other, relativePath)));
 
         return isActive ? "ms-nav-active" : string.Empty;
     }
+
+    /// <summary>Whether <paramref name="route" /> is <paramref name="relativePath" /> or one of its ancestors.</summary>
+    private static bool Covers(string route, string relativePath) =>
+        relativePath.Equals(route, StringComparison.OrdinalIgnoreCase)
+        || relativePath.StartsWith(route + "/", StringComparison.OrdinalIgnoreCase);
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {

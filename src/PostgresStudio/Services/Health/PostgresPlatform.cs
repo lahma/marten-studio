@@ -10,31 +10,6 @@ using Npgsql;
 
 namespace PostgresStudio.Services.Health;
 
-/// <summary>Who runs the Postgres server a store database lives on, as far as the studio can tell.</summary>
-internal enum PostgresPlatformKind
-{
-    /// <summary>Nothing says otherwise: a server somebody runs themselves, or a provider the studio does not know.</summary>
-    SelfHosted,
-
-    /// <summary>Amazon RDS for PostgreSQL.</summary>
-    AmazonRds,
-
-    /// <summary>Amazon Aurora PostgreSQL-Compatible Edition.</summary>
-    AmazonAurora,
-
-    /// <summary>Azure Database for PostgreSQL (flexible server).</summary>
-    Azure,
-
-    /// <summary>Google Cloud SQL for PostgreSQL.</summary>
-    CloudSql,
-
-    /// <summary>Neon.</summary>
-    Neon,
-
-    /// <summary>Supabase.</summary>
-    Supabase,
-}
-
 /// <summary>What the platform read found on the server: one flag per provider marker.</summary>
 /// <param name="RdsSettings">An <c>rds.extensions</c> or <c>rds.allowed_extensions</c> setting exists.</param>
 /// <param name="AuroraVersionFunction">An <c>aurora_version()</c> function exists.</param>

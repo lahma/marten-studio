@@ -29,5 +29,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/MartenStudio.Tests/MartenStudio.Tests.csproj" />
     <Project Path="tests/MartenStudio.Integration.Tests/MartenStudio.Integration.Tests.csproj" />
+    <Project Path="tests/PostgresStudio.Tests/PostgresStudio.Tests.csproj" />
   </Folder>
 </Solution>

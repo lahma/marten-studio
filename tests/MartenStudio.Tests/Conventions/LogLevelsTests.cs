@@ -166,6 +166,8 @@ public class LogLevelsTests
             "A row read failed by connection or an unexpected SQLSTATE; a timeout, privilege, RLS or unrefreshed view is Debug, and page turns repeat it."),
         ["src/PostgresStudio/Services/StudioLog.Sessions.cs : 9246 SessionActivityReadFailed"] = (Verdict.Throttled,
             "A read of a database's sessions failed by connection or an unexpected SQLSTATE; privilege and timeouts are Debug, and the Sessions page re-reads every HealthInterval."),
+        ["src/PostgresStudio/Services/Postgres/PostgresLog.cs : 9301 DatabaseNamesSkipped"] = (Verdict.Throttled,
+            "A host's database source listed names PostgresStudio left out (invalid, duplicate, another source's, past the cap); the list is read again every minute in every circuit that looks."),
         ["src/PostgresStudio/Services/StudioLog.Export.cs : 9270 HealthExportFailed"] = (Verdict.Throttled,
             "The opt-in health export failed in the studio itself and reports Degraded; an orchestrator probes the health endpoint every few seconds, and the run repeats every HealthInterval."),
 

@@ -1,0 +1,101 @@
+namespace PostgresStudio
+{
+    public interface IPostgresCapacitySource
+    {
+        System.Threading.Tasks.ValueTask<PostgresStudio.PostgresComputeCapacity?> GetCapacityAsync(PostgresStudio.PostgresDatabaseRef database, PostgresStudio.PostgresServerInfo server, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface IPostgresDatabaseSource
+    {
+        System.Threading.Tasks.ValueTask<Npgsql.NpgsqlDataSource?> GetDataSourceAsync(string name, System.Threading.CancellationToken cancellationToken);
+        System.Collections.Generic.IAsyncEnumerable<string> ListAsync(System.Threading.CancellationToken cancellationToken);
+    }
+    public sealed record PostgresComputeCapacity : System.IEquatable<PostgresStudio.PostgresComputeCapacity>
+    {
+        public double Current { get; }
+        public bool? IoOptimized { get; init; }
+        public double Maximum { get; }
+        public System.DateTimeOffset MeasuredAt { get; }
+        public double Minimum { get; }
+        public string Unit { get; }
+        public static PostgresStudio.PostgresComputeCapacity AuroraServerlessV2(double currentAcu, double minimumAcu, double maximumAcu, System.DateTimeOffset measuredAt) { }
+        public static PostgresStudio.PostgresComputeCapacity Of(double current, double minimum, double maximum, string unit, System.DateTimeOffset measuredAt) { }
+    }
+    public sealed record PostgresDatabaseRef : System.IEquatable<PostgresStudio.PostgresDatabaseRef>
+    {
+        public PostgresDatabaseRef(string source, string database) { }
+        public string Database { get; }
+        public string Source { get; }
+    }
+    public enum PostgresPlatformKind
+    {
+        SelfHosted = 0,
+        AmazonRds = 1,
+        AmazonAurora = 2,
+        Azure = 3,
+        CloudSql = 4,
+        Neon = 5,
+        Supabase = 6,
+    }
+    public sealed record PostgresServerInfo : System.IEquatable<PostgresStudio.PostgresServerInfo>
+    {
+        public PostgresServerInfo() { }
+        public bool InRecovery { get; init; }
+        public string? Instance { get; init; }
+        public PostgresStudio.PostgresPlatformKind Platform { get; init; }
+        public System.DateTimeOffset? StartedAt { get; init; }
+        public string Version { get; init; }
+        public int VersionNumber { get; init; }
+    }
+    public sealed class PostgresStudioCapabilities
+    {
+        public PostgresStudioCapabilities() { }
+        public bool BrowseDatabase { get; set; }
+        public bool RunSql { get; set; }
+        public bool ViewDatabaseActivity { get; set; }
+        public static PostgresStudio.PostgresStudioCapabilities All() { }
+    }
+    public static class PostgresStudioEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapPostgresStudio(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder builder) { }
+        public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapPostgresStudio(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder builder, string pattern) { }
+    }
+    public static class PostgresStudioHealthChecksBuilderExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder AddPostgresStudio(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder builder, string name = "postgres-studio", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = default, System.Collections.Generic.IEnumerable<string>? tags = null, System.TimeSpan? timeout = default) { }
+    }
+    public sealed class PostgresStudioOptions
+    {
+        public PostgresStudioOptions() { }
+        public string? AuthorizationPolicy { get; set; }
+        public System.Collections.Generic.IList<string> BrowsableSchemas { get; }
+        public PostgresStudio.PostgresStudioCapabilities Capabilities { get; set; }
+        public int DefaultPageSize { get; set; }
+        public long ExactCountThreshold { get; set; }
+        public System.TimeSpan HealthInterval { get; set; }
+        public bool IncludeDefaultDataSource { get; set; }
+        public int MaxInlineValueBytes { get; set; }
+        public int MaxPageSize { get; set; }
+        public int MaxSqlConsoleRows { get; set; }
+        public string Path { get; set; }
+        public System.TimeSpan QueryTimeout { get; set; }
+        public bool ReadOnly { get; set; }
+        public System.TimeSpan RefreshInterval { get; set; }
+        public string? SourceAuthorizationPolicy { get; set; }
+        public string? SqlConsoleRole { get; set; }
+        public string Title { get; set; }
+        public string? WriteAuthorizationPolicy { get; set; }
+        public PostgresStudio.PostgresStudioOptions AddDataSource(string name, System.Func<System.IServiceProvider, Npgsql.NpgsqlDataSource> resolve) { }
+        public PostgresStudio.PostgresStudioOptions AddDatabaseSource(string name, System.Func<System.IServiceProvider, PostgresStudio.IPostgresDatabaseSource> resolve) { }
+    }
+    public sealed record PostgresStudioResource : System.IEquatable<PostgresStudio.PostgresStudioResource>
+    {
+        public PostgresStudioResource(string SourceName, string DatabaseIdentifier, string? Capability) { }
+        public string? Capability { get; init; }
+        public string DatabaseIdentifier { get; init; }
+        public string SourceName { get; init; }
+    }
+    public static class PostgresStudioServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPostgresStudio(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<PostgresStudio.PostgresStudioOptions>? configure = null) { }
+    }
+}

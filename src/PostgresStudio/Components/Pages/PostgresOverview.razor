@@ -1,0 +1,623 @@
+@using System.Globalization
+@using PostgresStudio.Components.Pages.Health
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Internal.Sql
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Postgres
+@using PostgresStudio.Services.Settings
+@implements IAsyncDisposable
+@inject IPostgresServerReader Server
+@inject IDatabaseObjectService DatabaseObjects
+@inject ISessionActivityService Sessions
+@inject IHealthService HealthData
+@inject HealthMutes HealthMutes
+@inject IJSRuntime JsRuntime
+@inject StudioState State
+@inject StudioActionLog ActionLog
+@inject StudioAuthorization Authorization
+@inject StudioCapabilityGuard Capabilities
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+
+@*
+    PostgresStudio's overview: the body of the shared root page (StudioHome renders the descriptor's OverviewComponent),
+    so it has no @page of its own.
+
+    Every number here comes through a service another screen already reads it with, under that screen's gate: the
+    server's version and platform through S01's own statement (the scope policy alone, D29's None gate), the schemas and
+    their objects through the database browser (structure is free for BrowsableSchemas, the rest counted and never
+    named, D27), the sizes from its estimates (reltuples and relpages: a list locks nothing it lists), the connections
+    from Sessions' summary (the database-wide gate, never anybody's statement, and like Sessions itself read at
+    HealthInterval and never on the five-second poll), the health glance from the advisor's
+    shared sweep, and the activity from the audit ring filtered as the Activity page filters it.
+
+    Nothing is read during the static prerender: the page reads once it is interactive, so a prerender never opens a
+    connection and the circuit behind it does not read everything twice.
+*@
+
+<PageTitle>Overview</PageTitle>
+
+<div class="ms-page ms-overview ms-pg-overview">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Overview</h1>
+        <button type="button" class="ms-button ms-overview-refresh" @onclick="RefreshAsync">Refresh</button>
+    </div>
+
+    @if (State.ActiveScope is not null)
+    {
+        <div class="ms-stat-grid ms-overview-tiles">
+            <StatCard Title="PostgreSQL" Value="@ServerValue" Color="@(server?.Facts is null ? "warning" : "info")" />
+
+            <StatCard Title="Databases" Value="@DatabaseCount" Color="info" />
+
+            <a class="ms-stat-link" href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">
+                <StatCard Title="Schemas" Value="@SchemaValue" Color="@(overview is { Refusal: DatabaseRefusal.None } ? "info" : "warning")" />
+            </a>
+
+            <a class="ms-stat-link" href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, kind: DatabaseObjectCategory.Tables)">
+                <StatCard Title="Tables" Value="@CountValue(static x => x.Tables)" Color="info" />
+            </a>
+
+            <a class="ms-stat-link" href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, kind: DatabaseObjectCategory.Tables)">
+                <StatCard Title="Estimated size" Value="@SizeValue" Color="info" />
+            </a>
+
+            <a class="ms-stat-link" href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope)">
+                <StatCard Title="Connections" Value="@ConnectionValue" Color="@(sessions is { Refusal: DatabaseRefusal.None } ? "info" : "warning")" />
+            </a>
+
+            <a class="ms-stat-link ms-overview-health-tile" href="@HealthLinks.ToPage(Settings, Descriptor.SourceQueryParameter, State.ActiveScope)">
+                <StatCard Title="Health" Value="@HealthValue" Color="@HealthColor" />
+            </a>
+        </div>
+
+        <section class="ms-section ms-overview-region ms-pg-overview-server">
+            <h2 class="ms-section-title">Server</h2>
+
+            @if (serverError is { Length: > 0 } problem)
+            {
+                <ErrorAlert Message="@problem" OnRetry="RefreshAsync" />
+            }
+            else if (server is null)
+            {
+                <p class="ms-muted">@(started ? "Reading..." : "Read once the page is interactive.")</p>
+            }
+            else if (server.Facts is { } facts)
+            {
+                <dl class="ms-kv ms-pg-overview-facts">
+                    <div class="ms-kv-row">
+                        <dt class="ms-kv-key">Version</dt>
+                        <dd class="ms-kv-value">PostgreSQL @facts.Version</dd>
+                    </div>
+                    <div class="ms-kv-row">
+                        <dt class="ms-kv-key">Platform</dt>
+                        <dd class="ms-kv-value">@facts.Platform.Name</dd>
+                    </div>
+                    <div class="ms-kv-row">
+                        <dt class="ms-kv-key">Database</dt>
+                        <dd class="ms-kv-value ms-mono">@State.ActiveScope.DatabaseId</dd>
+                    </div>
+                    @if (overview is { Refusal: DatabaseRefusal.None } read)
+                    {
+                        <div class="ms-kv-row">
+                            <dt class="ms-kv-key">Schemas</dt>
+                            <dd class="ms-kv-value">
+                                @Count(read.Schemas.Count, "schema") shown
+                                @if (read.Access.WithheldSchemaCount > 0)
+                                {
+                                    <text>; @Count(read.Access.WithheldSchemaCount, "other") not shown to you</text>
+                                }
+                            </dd>
+                        </div>
+                    }
+                </dl>
+            }
+            else
+            {
+                <p class="ms-muted">@server.Failure</p>
+            }
+        </section>
+
+        <section class="ms-section ms-overview-region ms-overview-health">
+            <h2 class="ms-section-title">Health</h2>
+
+            @if (healthError is { Length: > 0 } healthProblem)
+            {
+                <ErrorAlert Message="@healthProblem" OnRetry="RefreshAsync" />
+            }
+            else if (health is null)
+            {
+                <p class="ms-muted">@(started ? "Checking..." : "Checked once the page is interactive.")</p>
+            }
+            else if (health.Refusal != HealthRefusal.None)
+            {
+                <p class="ms-muted">@health.Reason</p>
+            }
+            else if (TopFindings.Count == 0)
+            {
+                <p class="ms-muted ms-overview-health-empty">
+                    @(health.WithheldCount > 0 ? HealthPresentation.Withheld(health.WithheldCount, health.WithheldReason) : "Nothing to report.")
+                    <a href="@HealthLinks.ToPage(Settings, Descriptor.SourceQueryParameter, State.ActiveScope)">See what was checked</a>
+                </p>
+            }
+            else
+            {
+                <ul class="ms-overview-list ms-overview-health-list">
+                    @foreach (HealthReportFinding finding in TopFindings)
+                    {
+                        <li class="ms-overview-list-item" @key="finding.MuteKey">
+                            <span class="@HealthPresentation.ChipClass(finding.Severity)">@HealthPresentation.Label(finding.Severity)</span>
+                            <a class="ms-overview-list-name" href="@HealthLinks.ToFinding(Settings, Descriptor.SourceQueryParameter, State.ActiveScope, finding)">@finding.Finding.Title</a>
+                        </li>
+                    }
+                </ul>
+
+                @if (health.WithheldCount > 0)
+                {
+                    <p class="ms-muted ms-overview-health-withheld">@HealthPresentation.Withheld(health.WithheldCount, health.WithheldReason)</p>
+                }
+            }
+        </section>
+
+        <section class="ms-section ms-overview-region ms-pg-overview-tables">
+            <h2 class="ms-section-title">Largest tables</h2>
+
+            @if (tablesError is { Length: > 0 } tablesProblem)
+            {
+                <ErrorAlert Message="@tablesProblem" OnRetry="RefreshAsync" />
+            }
+            else if (tables is null)
+            {
+                <p class="ms-muted">@(started ? "Reading..." : "Read once the page is interactive.")</p>
+            }
+            else if (tables.Refusal != DatabaseRefusal.None)
+            {
+                <p class="ms-muted">@tables.Reason</p>
+            }
+            else if (LargestTables.Count == 0)
+            {
+                <p class="ms-muted">No table in the schemas this studio shows you.</p>
+            }
+            else
+            {
+                <TableScroll Label="Largest tables">
+                    <table class="ms-table ms-pg-overview-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Table</th>
+                                <th scope="col" class="ms-num">Rows</th>
+                                <th scope="col" class="ms-num">Size</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (DatabaseRelationSummary table in LargestTables)
+                            {
+                                <tr @key="table.Schema + '.' + table.Name">
+                                    <td>
+                                        <a class="ms-mono" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, table.Schema, table.Name)">@DatabaseLinks.QualifiedName(table.Schema, table.Name)</a>
+                                    </td>
+                                    <td class="ms-num">@(table.EstimatedRows is { } rows ? "~" + rows.ToString("N0", CultureInfo.InvariantCulture) : "not analysed")</td>
+                                    <td class="ms-num">~@SqlCellFormat.Bytes(table.SizeBytes)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+
+                <p class="ms-muted ms-pg-overview-estimate">
+                    Postgres' own estimates (<code>reltuples</code>, <code>relpages</code>) as of the table's last
+                    vacuum or analyze: reading them takes no lock and scans nothing.
+                    @if (tables.Truncated)
+                    {
+                        <text>Only the first @Count(tables.Items.Count, "table") listed were weighed.</text>
+                    }
+                </p>
+            }
+        </section>
+
+        <section class="ms-section ms-overview-region ms-pg-overview-connections">
+            <h2 class="ms-section-title">Connections</h2>
+
+            @if (sessionsError is { Length: > 0 } sessionsProblem)
+            {
+                <ErrorAlert Message="@sessionsProblem" OnRetry="RefreshAsync" />
+            }
+            else if (sessions is null)
+            {
+                <p class="ms-muted">@(started ? "Reading..." : "Read once the page is interactive.")</p>
+            }
+            else if (sessions.Refusal != DatabaseRefusal.None)
+            {
+                <p class="ms-muted">@sessions.Reason</p>
+            }
+            else
+            {
+                <ul class="ms-overview-list">
+                    @foreach (KeyValuePair<string, int> state in sessions.ByState)
+                    {
+                        <li class="ms-overview-list-item" @key="state.Key">
+                            <span class="ms-overview-list-name">@state.Key</span>
+                            <span class="ms-muted">@Count(state.Value, "session")</span>
+                        </li>
+                    }
+                </ul>
+
+                <p class="ms-muted">
+                    @Count(sessions.Waiting, "session") waiting for a lock.
+                    <a href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope)">Open Sessions</a>
+                </p>
+            }
+        </section>
+
+        <section class="ms-section ms-overview-region ms-overview-activity">
+            <h2 class="ms-section-title">Recent studio activity</h2>
+
+            @if (activityError is { Length: > 0 } activityProblem)
+            {
+                <ErrorAlert Message="@activityProblem" OnRetry="RefreshAsync" />
+            }
+            else if (activity.Count == 0)
+            {
+                <p class="ms-muted">Nothing has been read through @Settings.ProductName that you may see, since this process started.</p>
+            }
+            else
+            {
+                <ul class="ms-overview-list">
+                    @foreach (StudioActionLogEntry entry in activity)
+                    {
+                        <li class="ms-overview-list-item" @key="entry.Sequence">
+                            <span class="ms-state-indicator">
+                                <span class="ms-state-dot @(entry.Succeeded ? "ms-state-success" : "ms-state-error")" aria-hidden="true"></span>
+                            </span>
+                            <span class="ms-overview-list-name">@entry.Action</span>
+                            <span class="ms-overview-list-stream ms-mono ms-truncate" title="@entry.Target">@entry.Target</span>
+                            <TimeAgo Timestamp="entry.Timestamp" />
+                        </li>
+                    }
+                </ul>
+
+                <p class="ms-muted">
+                    <a href="@HealthLinks.To(Settings, Descriptor.SourceQueryParameter, "activity", State.ActiveScope)">Open the activity log</a>
+                </p>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    /// <summary>How many health findings the list shows before it points at the Health page.</summary>
+    private const int TopFindingCount = 3;
+
+    /// <summary>How many tables the largest-tables list shows.</summary>
+    private const int LargestTableCount = 8;
+
+    /// <summary>How many audit entries the activity list shows.</summary>
+    private const int RecentCount = 10;
+
+    private readonly CancellationTokenSource pageCancellation = new();
+
+    private StudioLiveUpdates? live;
+    private bool started;
+    private bool disposed;
+    private DateTimeOffset slowReadAt = DateTimeOffset.MinValue;
+
+    private PostgresServerRead? server;
+    private string? serverError;
+    private DatabaseBrowserOverview? overview;
+    private DatabaseObjectList? tables;
+    private string? tablesError;
+    private SessionActivitySummary? sessions;
+    private string? sessionsError;
+    private HealthReport? health;
+    private string? healthError;
+    private List<StudioActionLogEntry> activity = [];
+    private string? activityError;
+
+    private List<HealthReportFinding> TopFindings =>
+        health is null || health.Refusal != HealthRefusal.None
+            ? []
+            : [.. health.Findings.Where(x => !HealthMutes.IsMuted(x.MuteKey)).Take(TopFindingCount)];
+
+    private List<DatabaseRelationSummary> LargestTables =>
+        tables is null
+            ? []
+            : [.. tables.Items.OfType<DatabaseRelationSummary>().OrderByDescending(static x => x.SizeBytes).ThenBy(static x => x.Name, StringComparer.Ordinal).Take(LargestTableCount)];
+
+    private string ServerValue => server?.Facts is { } facts ? facts.MajorName : started ? "unknown" : "...";
+
+    private string DatabaseCount => State.AvailableDatabases.Count.ToString("N0", CultureInfo.InvariantCulture);
+
+    private string SchemaValue => overview is { Refusal: DatabaseRefusal.None } read
+        ? read.Schemas.Count.ToString("N0", CultureInfo.InvariantCulture)
+        : overview is null ? "..." : "unknown";
+
+    private string CountValue(Func<DatabaseSchemaSummary, int> count) => overview is { Refusal: DatabaseRefusal.None } read
+        ? (overview.Truncated ? "≥ " : string.Empty) + read.Schemas.Sum(count).ToString("N0", CultureInfo.InvariantCulture)
+        : overview is null ? "..." : "unknown";
+
+    private string SizeValue
+    {
+        get
+        {
+            if (tables is not { Refusal: DatabaseRefusal.None } read)
+            {
+                return tables is null ? "..." : "unknown";
+            }
+
+            long total = read.Items.OfType<DatabaseRelationSummary>().Sum(static x => x.SizeBytes);
+            return (read.Truncated ? "≥ " : "~") + SqlCellFormat.Bytes(total);
+        }
+    }
+
+    private string ConnectionValue => sessions is { Refusal: DatabaseRefusal.None } read
+        ? read.SessionCount.ToString("N0", CultureInfo.InvariantCulture)
+        : sessions is null ? "..." : "unknown";
+
+    private string HealthValue
+    {
+        get
+        {
+            if (healthError is not null || health is null || health.Refusal != HealthRefusal.None)
+            {
+                return healthError is not null ? "could not check" : health is null ? "..." : "not shown";
+            }
+
+            List<HealthReportFinding> unmuted = [.. health.Findings.Where(x => !HealthMutes.IsMuted(x.MuteKey))];
+            int critical = unmuted.Count(static x => x.Severity == HealthSeverity.Critical);
+            int warning = unmuted.Count(static x => x.Severity == HealthSeverity.Warning);
+
+            if (critical > 0)
+            {
+                return HealthPresentation.Count(critical, "critical");
+            }
+
+            if (warning > 0)
+            {
+                return HealthPresentation.Count(warning, "warning");
+            }
+
+            if (unmuted.Count == 0 && health.WithheldCount > 0)
+            {
+                return HealthPresentation.Count(health.WithheldCount, "finding") + " not shown";
+            }
+
+            return unmuted.Count > 0 ? HealthPresentation.Count(unmuted.Count, "suggestion") : "nothing to report";
+        }
+    }
+
+    private string HealthColor
+    {
+        get
+        {
+            if (healthError is not null || health is null || health.Refusal != HealthRefusal.None)
+            {
+                return "warning";
+            }
+
+            HealthSeverity? worst = health.Findings.Where(x => !HealthMutes.IsMuted(x.MuteKey)).Select(static x => (HealthSeverity?) x.Severity).Min();
+            return worst is null && health.WithheldCount > 0 ? "info" : HealthPresentation.TileColor(worst);
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        HealthMutes.Changed += OnHealthMutesChangedAsync;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || started || disposed)
+        {
+            return;
+        }
+
+        started = true;
+
+        try
+        {
+            await HealthMutes.LoadAsync(JsRuntime, pageCancellation.Token);
+            await LoadEverythingAsync();
+            await InvokeAsync(StateHasChanged);
+
+            live = LiveFactory.Create();
+            await live.StartAsync(Settings.RefreshInterval, TickAsync, pageCancellation.Token);
+        }
+        catch (OperationCanceledException) when (pageCancellation.IsCancellationRequested)
+        {
+            // The page went away while it was starting.
+        }
+    }
+
+    /// <summary>
+    /// One poll. Every <c>RefreshInterval</c> only the audit ring, which is memory; the rest once <c>HealthInterval</c>
+    /// has passed - the health sweep would not have changed any sooner, the catalog is cached for longer, and the
+    /// connections are read from the process array, which no five-second poll reads (ActivityViewsOffThePollPathTests).
+    /// </summary>
+    private async Task TickAsync(CancellationToken _)
+    {
+        await LoadActivityAsync();
+
+        if (DateTimeOffset.UtcNow - slowReadAt >= Settings.EffectiveHealthInterval)
+        {
+            await LoadAtHealthIntervalAsync();
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (!started)
+        {
+            return;
+        }
+
+        await LoadEverythingAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        server = null;
+        overview = null;
+        tables = null;
+        sessions = null;
+        health = null;
+        activity = [];
+
+        if (started)
+        {
+            await LoadEverythingAsync();
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnHealthMutesChangedAsync() => await InvokeAsync(StateHasChanged);
+
+    private async Task LoadEverythingAsync()
+    {
+        await LoadActivityAsync();
+        await LoadAtHealthIntervalAsync();
+    }
+
+    /// <summary>The audit ring, filtered as the Activity page filters it, as far as the rows this list draws.</summary>
+    private async Task LoadActivityAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || disposed)
+        {
+            return;
+        }
+
+        CancellationToken token = pageCancellation.Token;
+
+        (List<StudioActionLogEntry>? readActivity, activityError) = await ReadAsync(
+            async () => await ActionLog.GetVisibleAsync(Authorization, Capabilities, RecentCount, token),
+            activity,
+            activityError);
+
+        if (!HasMovedOn(scope))
+        {
+            activity = readActivity ?? [];
+        }
+    }
+
+    /// <summary>
+    /// Every region but the activity, each keeping its own failure as a value, so one unreadable answer never blanks the
+    /// others - and none of them landing once the selector has moved on to another scope. Asked on the first
+    /// interactive render, on Refresh, on a scope change, and otherwise at <c>HealthInterval</c>, never more often.
+    /// </summary>
+    private async Task LoadAtHealthIntervalAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || disposed)
+        {
+            return;
+        }
+
+        slowReadAt = DateTimeOffset.UtcNow;
+        CancellationToken token = pageCancellation.Token;
+
+        (PostgresServerRead? readServer, serverError) = await ReadAsync(() => Server.ReadAsync(scope, token), server, serverError);
+        if (HasMovedOn(scope))
+        {
+            return;
+        }
+
+        server = readServer;
+
+        (DatabaseBrowserOverview? readOverview, string? overviewError) = await ReadAsync(() => DatabaseObjects.GetOverviewAsync(scope, token), overview, null);
+        if (HasMovedOn(scope))
+        {
+            return;
+        }
+
+        overview = readOverview ?? (overviewError is null ? null : DatabaseBrowserOverview.Unavailable(overviewError));
+
+        (DatabaseObjectList? readTables, tablesError) = await ReadAsync(
+            () => DatabaseObjects.ListAsync(scope, new DatabaseObjectQuery(DatabaseObjectCategory.Tables, Limit: DatabaseCatalog.ListCap), token),
+            tables,
+            tablesError);
+        if (HasMovedOn(scope))
+        {
+            return;
+        }
+
+        tables = readTables;
+
+        (SessionActivitySummary? readSessions, sessionsError) = await ReadAsync(() => Sessions.GetSummaryAsync(scope, token), sessions, sessionsError);
+        if (HasMovedOn(scope))
+        {
+            return;
+        }
+
+        sessions = readSessions;
+
+        (HealthReport? readHealth, healthError) = await ReadAsync(() => HealthData.GetReportAsync(scope, HealthReportRequest.Regular, token), health, healthError);
+        if (!HasMovedOn(scope))
+        {
+            health = readHealth;
+        }
+    }
+
+    /// <summary>
+    /// One region's read: what it answered, or what was on screen before with the failure beside it - so a failed poll
+    /// leaves the last number anybody actually got rather than blanking it.
+    /// </summary>
+    private async Task<(T? Value, string? Error)> ReadAsync<T>(Func<Task<T>> read, T? current, string? currentError)
+        where T : class
+    {
+        try
+        {
+            return (await read(), null);
+        }
+        catch (OperationCanceledException) when (pageCancellation.IsCancellationRequested)
+        {
+            return (current, currentError);
+        }
+        catch (Exception exception)
+        {
+            // On the page rather than in the log only: a failure the visitor cannot see is a page that silently shows
+            // nothing. The services have already logged what deserves logging, throttled.
+            return (current, exception.Message);
+        }
+    }
+
+    /// <summary>Whether the selector has moved away from <paramref name="scope" /> since this read started.</summary>
+    private bool HasMovedOn(StudioScope scope) => State.ActiveScope != scope;
+
+    private static string Count(int count, string noun) => HealthPresentation.Count(count, noun);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        State.ScopeChanged -= OnScopeChangedAsync;
+        HealthMutes.Changed -= OnHealthMutesChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            await pageCancellation.CancelAsync();
+            pageCancellation.Dispose();
+        }
+    }
+}

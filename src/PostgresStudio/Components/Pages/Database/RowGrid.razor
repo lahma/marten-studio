@@ -685,7 +685,7 @@
                     Cut = value.Truncated,
                     Note = value.Truncated
                         ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
-                          " (" + Settings.OptionName("MaxInlineDocumentBytes") + "), so it is not offered for copying; the SQL console reads the rest."
+                          " (" + Settings.OptionName(Settings.MaxInlineValueBytesMember) + "), so it is not offered for copying; the SQL console reads the rest."
                         : null,
                 },
                 _ when isText => new CellPanel(title, column.Name)
@@ -693,7 +693,7 @@
                     Text = value.Text ?? (value.Bytes is { } read ? SqlCellFormat.DecodeText(read, value.Truncated) ?? Encoding.UTF8.GetString(read) : string.Empty),
                     Note = value.Truncated
                         ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
-                          " (" + Settings.OptionName("MaxInlineDocumentBytes") + "); the SQL console reads the rest."
+                          " (" + Settings.OptionName(Settings.MaxInlineValueBytesMember) + "); the SQL console reads the rest."
                         : null,
                 },
                 _ => new CellPanel(title, column.Name)
@@ -701,7 +701,7 @@
                     Json = value.Text ?? (value.Bytes is { } bytes ? Encoding.UTF8.GetString(bytes) : string.Empty),
                     Note = value.Truncated
                         ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
-                          " (" + Settings.OptionName("MaxInlineDocumentBytes") + "), so the viewer may not be able to read it as JSON."
+                          " (" + Settings.OptionName(Settings.MaxInlineValueBytesMember) + "), so the viewer may not be able to read it as JSON."
                         : null,
                 },
             };

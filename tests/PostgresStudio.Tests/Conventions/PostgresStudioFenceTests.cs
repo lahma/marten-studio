@@ -2,13 +2,14 @@ using System.Reflection;
 using System.Text.Json;
 using System.Xml.Linq;
 
-using PostgresStudio.Services.Settings;
+using MartenStudio.Tests.Conventions;
 
-namespace MartenStudio.Tests.Conventions;
+namespace PostgresStudio.Tests.Conventions;
 
 /// <summary>
 /// The compiled half of the fence around the shared studio: <c>PostgresStudio.dll</c> references no Marten, JasperFx or
-/// Weasel assembly, and its project brings in no such package - directly, through a project, or transitively.
+/// Weasel assembly, its project brings in no such package - directly, through a project, or transitively - and neither
+/// does this test project, whose output folder is the proof that nothing drags them in (design §7.2).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -16,18 +17,26 @@ namespace MartenStudio.Tests.Conventions;
 /// project that cannot see it. It says nothing when the project is given sight of it: a <c>PackageReference</c> to
 /// Marten, a <c>ProjectReference</c> to MartenStudio, or a package of our own that happens to depend on Weasel would make
 /// every lean compile again, and the shared studio would be a Marten studio with a different name - one that drags
-/// Marten, JasperFx and Weasel into every host that installs it for a plain Postgres database. So the project file, the
-/// restore's own record of what it resolved, and the built assembly's references are each checked, and each check has a
-/// synthetic theory proving it can fail.
+/// Marten, JasperFx and Weasel into every host that installs it for a plain Postgres database. So the project files, the
+/// restores' own records of what they resolved, the built assemblies' references and this project's output folder are
+/// each checked, and each check has a synthetic theory proving it can fail.
 /// </para>
 /// <para>
-/// The text half - Razor markup, attribute values and crefs - is <see cref="CoreFenceTests" />. These tests move to
-/// <c>tests/PostgresStudio.Tests</c> when that project exists (design §7.2), where the test's own output directory can be
-/// checked too.
+/// <b>A missing restore record fails; it never skips.</b> This project cannot have been built without restoring both
+/// projects, so an absent <c>project.assets.json</c> is a moved file or a broken build, and a check that skipped quietly
+/// would pass a CI run that checked nothing (D19's rule).
+/// </para>
+/// <para>
+/// The text half - Razor markup, attribute values and crefs - is MartenStudio.Tests' <c>CoreFenceTests</c>, and the fact
+/// that MartenStudio references this assembly is its <c>SharedStudioReferenceTests</c>.
 /// </para>
 /// </remarks>
 public class PostgresStudioFenceTests
 {
+    private const string Shared = "PostgresStudio";
+
+    private const string TestProject = "PostgresStudio.Tests";
+
     /// <summary>The prefixes of the Marten family: Marten itself and every package it brings, and MartenStudio.</summary>
     private static readonly string[] MartenFamily = ["Marten", "JasperFx", "Weasel"];
 
@@ -35,29 +44,17 @@ public class PostgresStudioFenceTests
     internal static bool IsMartenFamily(string name) =>
         MartenFamily.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
 
-    private static string ProjectFile => RepositoryRoot.Combine("src", StudioProjects.Shared, StudioProjects.Shared + ".csproj");
-
-    private static string AssetsFile => RepositoryRoot.Combine("src", StudioProjects.Shared, "obj", "project.assets.json");
-
-    /// <summary>
-    /// The shared studio is an assembly of its own, and the reference runs one way: MartenStudio references it, never the
-    /// reverse. Everything else in this class, and every scan that reads "both assemblies", stands on that.
-    /// </summary>
-    [Fact]
-    public void The_shared_studio_is_an_assembly_of_its_own_that_MartenStudio_references()
+    /// <summary>The two projects fenced: the shared studio, and this test project.</summary>
+    public static TheoryData<string, string> Projects => new()
     {
-        StudioProjects.SharedAssembly.Should().NotBeSameAs(StudioProjects.MartenAssembly);
-        StudioProjects.SharedAssembly.GetName().Name.Should().Be(StudioProjects.Shared);
-        StudioProjects.MartenAssembly.GetName().Name.Should().Be(StudioProjects.Marten);
-
-        StudioProjects.MartenAssembly.GetReferencedAssemblies().Select(static x => x.Name)
-            .Should().Contain(StudioProjects.Shared, "MartenStudio is built on the shared studio");
-    }
+        { "src", Shared },
+        { "tests", TestProject },
+    };
 
     [Fact]
     public void The_shared_assembly_references_no_Marten_JasperFx_or_Weasel_assembly()
     {
-        string[] references = [.. typeof(StudioCoreRegistration).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
+        string[] references = [.. typeof(PostgresStudioOptions).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
 
         // Not vacuous: the list is the real one - the shared framework and Npgsql are on it.
         references.Should().Contain("Npgsql", "the shared studio talks to Postgres through Npgsql alone")
@@ -66,6 +63,33 @@ public class PostgresStudioFenceTests
         references.Where(IsMartenFamily).Should().BeEmpty(
             "PostgresStudio.dll must run in a host with no Marten at all, so it may reference no Marten, JasperFx or Weasel "
             + "assembly, MartenStudio's included");
+    }
+
+    [Fact]
+    public void This_test_assembly_references_no_Marten_JasperFx_or_Weasel_assembly()
+    {
+        string[] references = [.. typeof(PostgresStudioFenceTests).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
+
+        references.Should().Contain(Shared, "the suite tests the shared studio");
+
+        references.Where(IsMartenFamily).Should().BeEmpty(
+            "PostgresStudio.Tests stands for a host with only Npgsql: it may reference no Marten-family assembly");
+    }
+
+    /// <summary>
+    /// What this project's build copied next to it - every assembly of its closure - holds no Marten-family file. A
+    /// reference list says what the compiler bound; the output folder says what anything dragged in at run time.
+    /// </summary>
+    [Fact]
+    public void The_test_output_folder_holds_no_Marten_JasperFx_or_Weasel_assembly()
+    {
+        string[] assemblies = [.. Directory.EnumerateFiles(AppContext.BaseDirectory, "*.dll").Select(Path.GetFileNameWithoutExtension).OfType<string>()];
+
+        // Not vacuous: the folder is the real one - the studio and Npgsql are in it.
+        assemblies.Should().Contain(Shared).And.Contain("Npgsql");
+
+        assemblies.Where(IsMartenFamily).Should().BeEmpty(
+            "nothing this suite references may bring Marten, JasperFx or Weasel with it: " + string.Join(", ", assemblies.Where(IsMartenFamily)));
     }
 
     /// <summary>The family test, on synthetic assembly and package names: the family is found, and its neighbours are not.</summary>
@@ -88,7 +112,7 @@ public class PostgresStudioFenceTests
         IsMartenFamily(name).Should().Be(family);
     }
 
-    /// <summary>The assembly half, on a synthetic reference list, as the fact above reads it.</summary>
+    /// <summary>The assembly half, on a synthetic reference list, as the facts above read it.</summary>
     [Theory]
     [InlineData("System.Runtime,Npgsql,Microsoft.AspNetCore.Components", "")]
     [InlineData("System.Runtime,Npgsql,Marten", "Marten")]
@@ -102,19 +126,20 @@ public class PostgresStudioFenceTests
             expected.Length == 0 ? Array.Empty<string>() : expected.Split(','));
     }
 
-    [Fact]
-    public void The_shared_project_references_no_Marten_family_package_and_not_MartenStudio()
+    [Theory]
+    [MemberData(nameof(Projects))]
+    public void The_project_references_no_Marten_family_package_and_not_MartenStudio(string root, string project)
     {
-        XDocument project = XDocument.Load(ProjectFile);
+        XDocument document = XDocument.Load(RepositoryRoot.Combine(root, project, project + ".csproj"));
 
-        string[] packages = [.. References(project, "PackageReference")];
-        string[] projects = [.. References(project, "ProjectReference")];
+        string[] packages = [.. References(document, "PackageReference")];
+        string[] projects = [.. References(document, "ProjectReference")];
 
         // Not vacuous: the reader sees the project's real references.
-        packages.Should().Contain("Npgsql").And.Contain("Microsoft.AspNetCore.App.Internal.Assets");
+        (packages.Length + projects.Length).Should().BePositive("the project file is read");
 
-        Offending(project).Should().BeEmpty(
-            "the shared studio's own project names no Marten-family package and no project of MartenStudio's: "
+        Offending(document).Should().BeEmpty(
+            "the project names no Marten-family package and no project of MartenStudio's: "
             + string.Join(", ", packages.Concat(projects)));
     }
 
@@ -133,25 +158,28 @@ public class PostgresStudioFenceTests
     }
 
     /// <summary>
-    /// What the restore resolved for the shared studio - every library of its transitive closure - holds no
-    /// Marten-family library and no MartenStudio project. The project file can be clean while something it references
-    /// is not; the assets file is NuGet's own record of the whole graph. Read when the project has been restored, which
-    /// any build of this test project has done first.
+    /// What the restore resolved for the project - every library of its transitive closure - holds no Marten-family
+    /// library and no MartenStudio project. The project file can be clean while something it references is not; the
+    /// assets file is NuGet's own record of the whole graph.
     /// </summary>
-    [Fact]
-    public void What_the_shared_project_restores_holds_no_Marten_family_library()
+    [Theory]
+    [MemberData(nameof(Projects))]
+    public void What_the_project_restores_holds_no_Marten_family_library(string root, string project)
     {
-        // A checkout that has never restored the project skips, by name, rather than passing over nothing; the
-        // project-file fact above still holds the line.
-        Assert.SkipUnless(File.Exists(AssetsFile), "src/PostgresStudio has not been restored, so there is no project.assets.json to read");
+        string assets = RepositoryRoot.Combine(root, project, "obj", "project.assets.json");
 
-        string[] libraries = [.. Libraries(File.ReadAllText(AssetsFile))];
+        // Fails, never skips: this assembly exists only because both projects were restored, so a missing record is a
+        // moved file or a broken build - and a fence that skipped would be a green run that fenced nothing.
+        File.Exists(assets).Should().BeTrue(
+            $"{root}/{project} has been restored to build this suite, so {assets} must exist; if the restore output moved, move this check with it");
+
+        string[] libraries = [.. Libraries(File.ReadAllText(assets))];
 
         // Not vacuous: the graph is read, and Npgsql is in it.
-        libraries.Should().Contain(static x => x.StartsWith("Npgsql/", StringComparison.OrdinalIgnoreCase), "the shared studio restores Npgsql");
+        libraries.Should().Contain(static x => x.StartsWith("Npgsql/", StringComparison.OrdinalIgnoreCase), "the project restores Npgsql");
 
         libraries.Where(static x => IsMartenFamily(x.Split('/')[0])).Should().BeEmpty(
-            "the shared studio's restore graph must not reach Marten, JasperFx or Weasel, or MartenStudio: " + string.Join(", ", libraries));
+            "the restore graph must not reach Marten, JasperFx or Weasel, or MartenStudio: " + string.Join(", ", libraries));
     }
 
     /// <summary>The assets half, on a synthetic assets file shaped as NuGet writes one.</summary>

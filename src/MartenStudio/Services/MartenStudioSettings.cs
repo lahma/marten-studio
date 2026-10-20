@@ -88,6 +88,9 @@ internal sealed class MartenStudioSettings : IStudioSettings
     public int MaxInlineValueBytes => Value.MaxInlineDocumentBytes;
 
     /// <inheritdoc />
+    public string MaxInlineValueBytesMember => nameof(MartenStudioOptions.MaxInlineDocumentBytes);
+
+    /// <inheritdoc />
     public TimeSpan QueryTimeout => Value.QueryTimeout;
 
     /// <inheritdoc />

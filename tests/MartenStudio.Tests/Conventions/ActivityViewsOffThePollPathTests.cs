@@ -142,9 +142,38 @@ public class ActivityViewsOffThePollPathTests
         users.Should().Contain("src/PostgresStudio/Components/Pages/Database/Sessions.razor");
         users.Should().OnlyContain(
             static x => x == "src/PostgresStudio/Components/Pages/Database/Sessions.razor"
+                || x == PostgresOverview
                 || x == "src/PostgresStudio/Services/Settings/StudioCoreRegistration.cs"
                 || StudioProjects.IsUnder(x, "Services", "Database"),
-            "the sidebar, the Overview and every other page poll every RefreshInterval");
+            "the sidebar, MartenStudio's Overview and every other page poll every RefreshInterval; PostgresStudio's Overview "
+            + "reads the summary at HealthInterval only (the fact below)");
+    }
+
+    /// <summary>PostgresStudio's Overview, the one page besides Sessions that reads the sessions summary (PS-3a).</summary>
+    private const string PostgresOverview = "src/PostgresStudio/Components/Pages/PostgresOverview.razor";
+
+    /// <summary>
+    /// PostgresStudio's Overview shows the connection counts, and reads them as Sessions does: the summary is asked in
+    /// one method, <c>LoadAtHealthIntervalAsync</c>, which the five-second tick calls only once <c>EffectiveHealthInterval</c>
+    /// has passed - so the process array is never read on the poll, and the shared ten-second snapshot floor still holds.
+    /// </summary>
+    [Fact]
+    public void PostgresStudios_overview_reads_the_sessions_summary_at_the_health_interval_only()
+    {
+        string page = SourceScanner.StripCommentsAndStrings(File.ReadAllText(RepositoryRoot.Combine(PostgresOverview.Split('/'))));
+
+        Regex.Matches(page, @"\.GetSummaryAsync\(").Should().ContainSingle("the summary is asked in one place");
+
+        int method = page.IndexOf("private async Task LoadAtHealthIntervalAsync()", StringComparison.Ordinal);
+        method.Should().BePositive();
+        int next = page.IndexOf("private ", method + 1, StringComparison.Ordinal);
+        page[method..next].Should().Contain(".GetSummaryAsync(", "that place is the health-interval load");
+
+        int tick = page.IndexOf("private async Task TickAsync(", StringComparison.Ordinal);
+        tick.Should().BePositive();
+        string tickBody = page[tick..page.IndexOf("private ", tick + 1, StringComparison.Ordinal)];
+        tickBody.IndexOf("EffectiveHealthInterval", StringComparison.Ordinal).Should().BePositive()
+            .And.BeLessThan(tickBody.IndexOf("LoadAtHealthIntervalAsync()", StringComparison.Ordinal), "the tick asks only once the interval has passed");
     }
 
     [Fact]

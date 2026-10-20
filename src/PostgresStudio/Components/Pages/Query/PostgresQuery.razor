@@ -1,0 +1,113 @@
+@using PostgresStudio.Internal.Sql
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Query
+@inject NavigationManager Navigation
+@inject StudioState State
+
+@*
+    PostgresStudio's Query page: the body of the shared QueryPage (the descriptor's QueryComponent), so no @page of its
+    own. It is the shared SQL console and nothing else - gated on RunSql, resolved against the database as a whole, run
+    in a read-only transaction and audited, all of it the console's (D13) - plus what a page owns around it: the title,
+    the deep link (?sql=, so a pasted link reopens the same statement, D9) and the saved and recent queries.
+
+    A link from the database browser says ?mode=sql&sql=...; the mode is MartenStudio's and is simply ignored here.
+*@
+
+<PageTitle>Query</PageTitle>
+
+<div class="ms-page ms-query-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Query</h1>
+    </div>
+
+    <div class="ms-query-layout">
+        <div class="ms-query-main">
+            <SqlConsolePanel Session="@session"
+                             Examples="@ConsoleExamples.All"
+                             OnChanged="OnChangedAsync"
+                             OnSave="BeginSaveAsync"
+                             OnRan="OnRanAsync" />
+        </div>
+
+        <aside class="ms-query-side" aria-label="Saved and recent queries">
+            <SavedQueryDrawer @ref="drawer"
+                              StoreKey="@State.ActiveScope?.StoreKey"
+                              Mode="Sql"
+                              OnPick="OnPickedAsync" />
+        </aside>
+    </div>
+</div>
+
+@code {
+    /// <summary>The longest statement that is put into the deep link; a longer one is simply left out of it.</summary>
+    internal const int MaxUrlQueryLength = 4 * 1024;
+
+    /// <summary>What the console shows, kept here so the deep link and the drawer can write into it.</summary>
+    private readonly SqlConsoleSession session = new();
+
+    private SavedQueryDrawer? drawer;
+
+    /// <summary>The statement the last navigation put into the editor, so a URL the page wrote itself is not applied twice.</summary>
+    private string? appliedSql;
+
+    /// <summary>The statement in the address, when there is one.</summary>
+    [SupplyParameterFromQuery(Name = "sql")]
+    public string? SqlParameter { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (!string.Equals(SqlParameter, appliedSql, StringComparison.Ordinal))
+        {
+            appliedSql = SqlParameter;
+
+            if (SqlParameter is not null)
+            {
+                session.Text = SqlParameter;
+            }
+        }
+    }
+
+    /// <summary>An example went into the editor, or a run is about to start: keep the deep link in step.</summary>
+    private Task OnChangedAsync()
+    {
+        PushUrl();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>A statement ran without an error: it goes into the drawer's recent list.</summary>
+    private async Task OnRanAsync(string text)
+    {
+        if (drawer is not null)
+        {
+            await drawer.RecordRunAsync(text, null);
+        }
+    }
+
+    private async Task BeginSaveAsync(string text)
+    {
+        if (drawer is not null)
+        {
+            await drawer.BeginSaveAsync(text, null);
+        }
+    }
+
+    private async Task OnPickedAsync((string Text, string? Alias) picked)
+    {
+        session.Text = picked.Text;
+        session.ForgetResult();
+
+        PushUrl();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void PushUrl()
+    {
+        string? sql = string.IsNullOrWhiteSpace(session.Text) || session.Text.Length > MaxUrlQueryLength ? null : session.Text;
+
+        // Recorded before navigating, so OnParametersSet sees its own value arrive and leaves the editor alone -
+        // including when the text was too long to travel and the parameter is absent.
+        appliedSql = sql;
+
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("sql", sql), replace: true);
+    }
+}

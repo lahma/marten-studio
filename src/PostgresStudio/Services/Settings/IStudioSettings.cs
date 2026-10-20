@@ -93,6 +93,13 @@ internal interface IStudioSettings
     /// <summary>The largest value rendered inline before it is offered on demand (MartenStudio's <c>MaxInlineDocumentBytes</c>).</summary>
     int MaxInlineValueBytes { get; }
 
+    /// <summary>
+    /// The options member <see cref="MaxInlineValueBytes" /> is read from, as a sentence names it through
+    /// <see cref="OptionName" />: <c>MaxInlineDocumentBytes</c> in MartenStudio, <c>MaxInlineValueBytes</c> in
+    /// PostgresStudio - the one option the two studios spell differently.
+    /// </summary>
+    string MaxInlineValueBytesMember { get; }
+
     /// <summary>The <c>statement_timeout</c> every studio statement runs under.</summary>
     TimeSpan QueryTimeout { get; }
 
