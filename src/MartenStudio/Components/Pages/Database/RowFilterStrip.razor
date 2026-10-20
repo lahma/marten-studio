@@ -112,7 +112,7 @@
 </div>
 
 @code {
-    /// <summary>The verdict, as a <c>RowFilterVerdict</c>; typed <see cref="object" /> for the reason <c>DocumentComponentModel</c> gives.</summary>
+    /// <summary>The verdict, as a <c>RowFilterVerdict</c>; typed <see cref="object" /> for the reason <c>ComponentModel</c> gives.</summary>
     [Parameter]
     public object? Model { get; set; }
 
@@ -148,7 +148,7 @@
     [Parameter]
     public EventCallback OnRunAnyway { get; set; }
 
-    private RowFilterVerdict Verdict => DocumentComponentModel.Read(Model, RowFilterVerdict.Empty);
+    private RowFilterVerdict Verdict => ComponentModel.Read(Model, RowFilterVerdict.Empty);
 
     /// <summary>The term chips, in the order typed - the same order as <c>RowFilterVerdict.Terms</c>.</summary>
     private static IReadOnlyList<SearchChip> Predicates(RowFilterVerdict verdict) =>

@@ -1,41 +1,45 @@
 using System.Security.Claims;
 
+using MartenStudio.Services.Settings;
+
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
-using Microsoft.Extensions.Options;
 
 namespace MartenStudio.Services;
 
 /// <summary>
-/// Holds <see cref="MartenStudioOptions.StoreAuthorizationPolicy" /> and
-/// <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> against one
-/// <see cref="MartenStoreResource" />.
+/// Holds the scope policy (<see cref="IStudioSettings.ScopePolicy" />) and the write policy
+/// (<see cref="IStudioSettings.WritePolicy" />) against the resource the studio's descriptor builds for a scope
+/// (<see cref="StudioDescriptor.CreateResource" /> - MartenStudio's public <c>MartenStoreResource</c>).
 /// </summary>
 /// <remarks>
 /// <para>
 /// The visitor comes from <see cref="AuthenticationStateProvider" /> and not from an
 /// <c>HttpContext</c>: a rendered studio is a circuit, and its request is long gone by the time a page
-/// asks for anything. The endpoint policy (<see cref="MartenStudioOptions.AuthorizationPolicy" />) has
-/// already decided who gets in; this decides which store, database and tenant, and it is asked on
+/// asks for anything. The endpoint policy (<see cref="IStudioSettings.AuthorizationPolicy" />) has
+/// already decided who gets in; this decides which source, database and tenant, and it is asked on
 /// <em>every</em> data call rather than only at the selector (plan D5).
 /// </para>
 /// <para>
-/// With no store policy configured nothing is asked and everything passes, which is what keeps an
+/// With no scope policy configured nothing is asked and everything passes, which is what keeps an
 /// application that never set the option exactly as it was.
 /// </para>
 /// </remarks>
 internal sealed class StudioAuthorization
 {
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
+    private readonly StudioDescriptor descriptor;
     private readonly IAuthorizationService authorizationService;
     private readonly AuthenticationStateProvider authenticationStateProvider;
 
     public StudioAuthorization(
-        IOptions<MartenStudioOptions> options,
+        IStudioSettings settings,
+        StudioDescriptor descriptor,
         IAuthorizationService authorizationService,
         AuthenticationStateProvider authenticationStateProvider)
     {
-        this.options = options;
+        this.settings = settings;
+        this.descriptor = descriptor;
         this.authorizationService = authorizationService;
         this.authenticationStateProvider = authenticationStateProvider;
     }
@@ -44,7 +48,7 @@ internal sealed class StudioAuthorization
     /// Whether a per-store policy is configured at all. A component reads it to know whether it has
     /// anything to wait for before it renders.
     /// </summary>
-    public bool IsEnabled => !string.IsNullOrWhiteSpace(options.Value.StoreAuthorizationPolicy);
+    public bool IsEnabled => !string.IsNullOrWhiteSpace(settings.ScopePolicy);
 
     /// <summary>
     /// Whether the visitor may exercise <paramref name="capability" /> on <paramref name="scope" />.
@@ -52,7 +56,7 @@ internal sealed class StudioAuthorization
     /// <param name="scope">The store, database and tenant being reached.</param>
     /// <param name="capability">
     /// The capability name for a mutating call, or <see langword="null" /> for a read. A non-null value
-    /// selects <see cref="MartenStudioOptions.WriteAuthorizationPolicy" />, falling back to the store
+    /// selects the write policy (<see cref="IStudioSettings.WritePolicy" />), falling back to the scope
     /// policy when the host configured only one.
     /// </param>
     /// <param name="cancellationToken">Cancels the evaluation.</param>
@@ -81,7 +85,7 @@ internal sealed class StudioAuthorization
     /// <remarks>
     /// <para>
     /// The overload a screen calls. It asks exactly the question
-    /// <see cref="StudioScopeResolver.ResolveAsync" /> asks on the visitor's behalf a moment later —
+    /// <see cref="Sources.StudioSourceResolver.ResolveAsync" /> asks on the visitor's behalf a moment later —
     /// same policy, same resource, same capability name, spelled by
     /// <c>StudioCapability.ToString()</c> the way the write service spells it — so a control this
     /// answers <see langword="false" /> for is a control whose service call would have thrown.
@@ -90,7 +94,7 @@ internal sealed class StudioAuthorization
     /// It is not the enforcement and must never be mistaken for it (AGENTS.md hard rule 5): a circuit is
     /// a long-lived object a client can drive, so the refusal lives in the service. This is the part a
     /// person reads, and it exists because capabilities are process-wide while a policy is per visitor —
-    /// without it, everyone the <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> refuses sees
+    /// without it, everyone the write policy (<see cref="IStudioSettings.WritePolicy" />) refuses sees
     /// live buttons and finds out only after pressing one.
     /// </para>
     /// <para>
@@ -125,7 +129,7 @@ internal sealed class StudioAuthorization
         cancellationToken.ThrowIfCancellationRequested();
 
         AuthorizationResult result = await authorizationService
-            .AuthorizeAsync(user, scope.ToResource(capability), policyName)
+            .AuthorizeAsync(user, descriptor.CreateResource(scope, capability), policyName)
             .ConfigureAwait(false);
 
         return result.Succeeded;
@@ -212,14 +216,13 @@ internal sealed class StudioAuthorization
     /// </summary>
     internal string? PolicyFor(string? capability)
     {
-        MartenStudioOptions value = options.Value;
+        string? scopePolicy = settings.ScopePolicy;
         if (capability is null)
         {
-            return value.StoreAuthorizationPolicy;
+            return scopePolicy;
         }
 
-        return string.IsNullOrWhiteSpace(value.WriteAuthorizationPolicy)
-            ? value.StoreAuthorizationPolicy
-            : value.WriteAuthorizationPolicy;
+        string? writePolicy = settings.WritePolicy;
+        return string.IsNullOrWhiteSpace(writePolicy) ? scopePolicy : writePolicy;
     }
 }

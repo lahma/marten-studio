@@ -1,8 +1,8 @@
 using System.Globalization;
 
 using MartenStudio.Components;
-using MartenStudio.Services.Documents;
 using MartenStudio.Services.Health;
+using MartenStudio.Services.Settings;
 
 namespace MartenStudio.Services.Database;
 
@@ -12,11 +12,15 @@ internal static class SessionLinks
     /// <summary>The page's route under the studio's path.</summary>
     public const string Route = "database/sessions";
 
-    /// <summary>The page, with the scope carried (D9).</summary>
-    public static string ToSessions(MartenStudioOptions options, StudioScope? scope)
+    /// <summary>The page, with the scope carried (D9) under the studio's own source parameter.</summary>
+    /// <param name="settings">The studio's settings.</param>
+    /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
+    /// <param name="scope">The scope to carry, or <see langword="null" />.</param>
+    public static string ToSessions(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope)
     {
-        ArgumentNullException.ThrowIfNull(options);
-        return DocumentLinks.WithScope(StudioLink.To(options, Route), scope);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(descriptor);
+        return StudioScopeQuery.Append(StudioLink.To(settings, Route), scope, descriptor.SourceQueryParameter);
     }
 }
 
@@ -176,6 +180,16 @@ internal sealed record PreparedRow(string Gid, string Owner, DateTimeOffset Prep
 /// database for a few seconds, and never shown as it is: what a visitor sees of it is
 /// <see cref="SessionActivitySummary" /> or, past the activity gate, <see cref="SessionActivityDetails" />.
 /// </summary>
+/// <remarks>
+/// <b>Where per-application totals belong (issue #8, G9).</b> <see cref="Sessions" /> is capped and ordered by
+/// transaction age, so grouping it by <c>application_name</c> would undercount exactly the busy applications such a
+/// view is for. Connections by application - total, active, idle, idle in transaction, waiting, oldest transaction -
+/// are an aggregate of their own over every session the role may see, read in this same snapshot as one more
+/// statement and carried as one more member here: the snapshot stays the one read every visitor shares, the summary
+/// still names no application, and the details gate (<c>ViewDatabaseActivity</c>) is what would show them, because an
+/// application name is a detail. The reader takes a <c>ResolvedSource</c>, so the same read serves any source's
+/// database - which is what a diagnostics API over it (G10) needs.
+/// </remarks>
 /// <param name="ReadAt">When it was read, by the studio's clock.</param>
 /// <param name="Visibility">How much of it the role could see.</param>
 /// <param name="TotalSessions">How many client sessions the database has, beyond <see cref="Sessions" /> when that was capped.</param>

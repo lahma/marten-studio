@@ -1,17 +1,18 @@
-using Marten;
-
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Schema;
-
-using Microsoft.Extensions.Options;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 using Npgsql;
 
 namespace MartenStudio.Services.Database;
 
-/// <summary>The declarations of every registered store, or why they could not all be read.</summary>
-/// <param name="Classifier">The classifier over every store, when every store could be read.</param>
-/// <param name="StoreSchemas">The resolved store's own schemas.</param>
+/// <summary>The declarations of every registered source, or why they could not all be read.</summary>
+/// <remarks>
+/// Read through the studio's <see cref="IDatabaseDeclarationsSource" />: MartenStudio's reads every registered
+/// store's options; a source with no declarations of its own answers an empty classifier.
+/// </remarks>
+/// <param name="Classifier">The classifier over every source, when every source could be read.</param>
+/// <param name="StoreSchemas">The resolved source's own schemas.</param>
 /// <param name="Failure">
 /// Why the classification is unavailable - fail closed - in words any visitor of the resolved store may read:
 /// the resolved store is named, because the visitor's own scope names it, and another store is "a registered
@@ -41,25 +42,25 @@ internal sealed record DatabaseDeclarations(
 }
 
 /// <summary>
-/// The store a visitor's scope names, found without resolving the scope - so without asking which
+/// The source a visitor's scope names, found without resolving the scope - so without asking which
 /// database or tenant - or the resolver's own sentence for why not.
 /// </summary>
 /// <param name="Registration">The registration.</param>
-/// <param name="Store">The built store.</param>
-/// <param name="Declarations">Every registered store's declarations, read with this one as the resolved store.</param>
+/// <param name="Source">The built source.</param>
+/// <param name="Declarations">Every registered source's declarations, read with this one as the resolved source.</param>
 /// <param name="Refused">
-/// Why there is none: the same sentence <see cref="StudioScopeResolver.ResolveAsync" /> would have thrown,
-/// which says the same thing for a store that is refused and one that does not exist.
+/// Why there is none: the same sentence <see cref="StudioSourceResolver.ResolveAsync" /> would have thrown,
+/// which says the same thing for a source that is refused and one that does not exist.
 /// </param>
 internal sealed record DatabaseStoreLookup(
-    MartenStoreRegistration? Registration,
-    IDocumentStore? Store,
+    StudioSourceRegistration? Registration,
+    IStudioSource? Source,
     DatabaseDeclarations? Declarations,
     string? Refused)
 {
-    /// <summary>Whether the store was found.</summary>
-    [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(Registration), nameof(Store), nameof(Declarations))]
-    public bool Found => Refused is null && Registration is not null && Store is not null && Declarations is not null;
+    /// <summary>Whether the source was found.</summary>
+    [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(Registration), nameof(Source), nameof(Declarations))]
+    public bool Found => Refused is null && Registration is not null && Source is not null && Declarations is not null;
 }
 
 /// <summary>What the page's question about the policies answers.</summary>
@@ -86,7 +87,7 @@ internal sealed record DatabaseGateRead(DatabaseGate? Gate, DatabaseRefusal Refu
 /// <param name="Resolved">The scope, resolved with no tenant and the capability named, when allowed.</param>
 /// <param name="Refusal">Which gate refused.</param>
 /// <param name="Reason">The sentence naming it.</param>
-internal sealed record DatabaseBrowseGrant(ResolvedScope? Resolved, DatabaseRefusal Refusal, string? Reason)
+internal sealed record DatabaseBrowseGrant(ResolvedSource? Resolved, DatabaseRefusal Refusal, string? Reason)
 {
     /// <summary>Whether the capability and the policy both said yes.</summary>
     [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(Resolved))]
@@ -108,7 +109,7 @@ internal sealed record DatabaseBrowseGrant(ResolvedScope? Resolved, DatabaseRefu
 /// (<see cref="PostgresErrorText" />), so nothing a page shows names a schema the visitor may not see.
 /// </param>
 internal sealed record DatabaseRowGrant(
-    ResolvedScope Resolved,
+    ResolvedSource Resolved,
     CatalogRelationDetail Relation,
     DatabaseObjectOwnership Ownership,
     IReadOnlyList<DatabaseColumnInfo> Columns,
@@ -142,7 +143,7 @@ internal sealed record DatabaseRowAccessResult(DatabaseRowGrant? Grant, Database
 /// <see cref="RequireRowAccessAsync" /> are the enforcement, in <c>QueryService</c>'s order for
 /// <c>RunSql</c> (AGENTS.md hard rule 5): <see cref="StudioCapabilityGuard.Require" /> first, then the store
 /// policy and the write policy - asked one at a time, so the refusal and event 9203 name the one that said
-/// no - then <see cref="StudioScopeResolver.ResolveAsync" /> with no tenant and the capability named, and
+/// no - then <see cref="StudioSourceResolver.ResolveAsync" /> with no tenant and the capability named, and
 /// only then anything about the database. Every refusal is audited.
 /// </para>
 /// <para>
@@ -172,56 +173,42 @@ internal sealed class DatabaseAccess
     /// <summary>What the audit ring calls reading a relation's rows.</summary>
     internal const string RowsAction = "Browse database rows";
 
-    /// <summary>
-    /// What a sentence about another registered store calls it, for a visitor that store's store policy does
-    /// not pass: its key is not theirs to learn (AGENTS.md D27).
-    /// </summary>
-    internal const string UnnamedStore = "A registered Marten store";
-
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
+    private readonly StudioDescriptor descriptor;
     private readonly StudioCapabilityGuard capabilities;
     private readonly StudioAuthorization authorization;
-    private readonly StudioScopeResolver resolver;
+    private readonly StudioSourceResolver resolver;
     private readonly StudioActionLog audit;
-    private readonly MartenStoreRegistry registry;
+    private readonly IStudioSourceProvider sources;
     private readonly DatabaseCatalog catalog;
-    private readonly IServiceProvider provider;
-
-    /// <summary>
-    /// Successful declaration reads, per store key, for the life of the circuit - each with the fingerprint
-    /// it was read at, and used only while the fingerprint still matches. Concurrent: two components of one
-    /// page can ask at once, and their continuations do not share a thread.
-    /// </summary>
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Fingerprint, DatabaseDeclarations Declarations)> declarations =
-        new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Another store's own identity for a database, per store and database, for the life of the circuit.</summary>
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> otherDatabaseIds =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly IDatabaseDeclarationsSource declarations;
 
     public DatabaseAccess(
-        IOptions<MartenStudioOptions> options,
+        IStudioSettings settings,
+        StudioDescriptor descriptor,
         StudioCapabilityGuard capabilities,
         StudioAuthorization authorization,
-        StudioScopeResolver resolver,
+        StudioSourceResolver resolver,
         StudioActionLog audit,
-        MartenStoreRegistry registry,
+        IStudioSourceProvider sources,
         DatabaseCatalog catalog,
-        IServiceProvider provider)
+        IDatabaseDeclarationsSource declarations)
     {
-        this.options = options;
+        this.settings = settings;
+        this.descriptor = descriptor;
         this.capabilities = capabilities;
         this.authorization = authorization;
         this.resolver = resolver;
         this.audit = audit;
-        this.registry = registry;
+        this.sources = sources;
         this.catalog = catalog;
-        this.provider = provider;
+        this.declarations = declarations;
     }
 
     /// <summary>
-    /// Every registered store's declarations, and the resolved store's own schemas - or the reason the
-    /// studio cannot tell Marten's objects from anybody else's.
+    /// Every registered source's declarations, and the resolved source's own schemas - or the reason the
+    /// studio cannot tell Marten's objects from anybody else's - from the studio's
+    /// <see cref="IDatabaseDeclarationsSource" />.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -231,9 +218,8 @@ internal sealed class DatabaseAccess
     /// policy passes (<see cref="DescribeFailureAsync" />), because another store's key is not everybody's.
     /// </para>
     /// <para>
-    /// Every registration, ancillary stores included whatever
-    /// <see cref="MartenStudioOptions.IncludeAncillaryStores" /> says: a store the studio does not show is
-    /// still a store whose tables are Marten's. Only options are read; no store's databases are
+    /// Every registration, ancillary stores included whatever the studio shows: a store the studio does not
+    /// show is still a store whose tables are Marten's. Only options are read; no store's databases are
     /// enumerated. A failure is asked again next time.
     /// </para>
     /// <para>
@@ -245,203 +231,11 @@ internal sealed class DatabaseAccess
     /// remembered read is checked against on every call, and a store that has learned a type is read again.
     /// </para>
     /// </remarks>
-    public DatabaseDeclarations ReadDeclarations(ResolvedScope resolved)
+    public DatabaseDeclarations ReadDeclarations(ResolvedSource resolved)
     {
         ArgumentNullException.ThrowIfNull(resolved);
 
-        return ReadDeclarations(resolved.Registration, resolved.Store);
-    }
-
-    /// <summary>
-    /// Every registered store's declarations, with <paramref name="registration" /> as the resolved store -
-    /// for a caller that has the store but has not resolved a scope for it.
-    /// </summary>
-    /// <param name="registration">The resolved store's registration.</param>
-    /// <param name="resolvedStore">The resolved store.</param>
-    internal DatabaseDeclarations ReadDeclarations(MartenStoreRegistration registration, IDocumentStore resolvedStore)
-    {
-        ArgumentNullException.ThrowIfNull(registration);
-        ArgumentNullException.ThrowIfNull(resolvedStore);
-
-        if (CollectStores(registry, provider, registration, resolvedStore, out List<(string Key, IDocumentStore Store)> stores) is { } unbuilt)
-        {
-            return unbuilt;
-        }
-
-        Func<Type, bool>? isVisible = options.Value.IsDocumentTypeVisible;
-
-        if (Fingerprint(stores) is not { } fingerprint)
-        {
-            // A type Marten cannot map is a configuration that cannot be read: fail closed, as below.
-            return Declare(stores, registration.Key, resolvedStore, isVisible);
-        }
-
-        if (declarations.TryGetValue(registration.Key, out var cached) && cached.Fingerprint == fingerprint)
-        {
-            return cached.Declarations;
-        }
-
-        DatabaseDeclarations result = Declare(stores, registration.Key, resolvedStore, isVisible);
-
-        if (result.Succeeded)
-        {
-            declarations[registration.Key] = (fingerprint, result);
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// Every registered store's declarations, with <paramref name="registration" /> as the resolved store, read
-    /// afresh and remembered nowhere - the classification <see cref="ReadDeclarations(ResolvedScope)" /> caches per
-    /// circuit, for a caller that has no circuit: a health check labelling the locks it reads (C06). Fails closed in
-    /// the same way, and touches no connection.
-    /// </summary>
-    /// <param name="registry">The store registry.</param>
-    /// <param name="provider">What the other stores are resolved from.</param>
-    /// <param name="registration">The resolved store's registration.</param>
-    /// <param name="resolvedStore">The resolved store.</param>
-    /// <param name="isDocumentTypeVisible"><see cref="MartenStudioOptions.IsDocumentTypeVisible" />.</param>
-    internal static DatabaseDeclarations DeclareEveryStore(
-        MartenStoreRegistry registry,
-        IServiceProvider provider,
-        MartenStoreRegistration registration,
-        IDocumentStore resolvedStore,
-        Func<Type, bool>? isDocumentTypeVisible)
-    {
-        ArgumentNullException.ThrowIfNull(registry);
-        ArgumentNullException.ThrowIfNull(provider);
-        ArgumentNullException.ThrowIfNull(registration);
-        ArgumentNullException.ThrowIfNull(resolvedStore);
-
-        return CollectStores(registry, provider, registration, resolvedStore, out List<(string Key, IDocumentStore Store)> stores) is { } unbuilt
-            ? unbuilt
-            : Declare(stores, registration.Key, resolvedStore, isDocumentTypeVisible);
-    }
-
-    /// <summary>
-    /// Every registered store, ancillary ones included and <paramref name="resolvedStore" /> first-class among them -
-    /// or the failure that a store which will not build is.
-    /// </summary>
-    private static DatabaseDeclarations? CollectStores(
-        MartenStoreRegistry registry,
-        IServiceProvider provider,
-        MartenStoreRegistration registration,
-        IDocumentStore resolvedStore,
-        out List<(string Key, IDocumentStore Store)> stores)
-    {
-        stores = [];
-
-        foreach (MartenStoreRegistration each in registry.Registrations(includeAncillaryStores: true))
-        {
-            if (string.Equals(each.Key, registration.Key, StringComparison.OrdinalIgnoreCase))
-            {
-                stores.Add((each.Key, resolvedStore));
-                continue;
-            }
-
-            StoreAvailability availability = registry.TryResolve(each, provider, out IDocumentStore? store);
-
-            if (!availability.IsAvailable || store is null)
-            {
-                const string consequence =
-                    ", so the studio cannot tell its tables from anybody else's and shows no classification until it builds.";
-
-                // Another store: its key - and the reason it gave, which can say anything about it - only for a
-                // visitor that store's store policy passes (DescribeFailureAsync).
-                return new DatabaseDeclarations(null, [], UnnamedStore + " could not be built" + consequence)
-                {
-                    FailedStoreKey = each.Key,
-                    NamedFailure = "Marten store '" + each.Key + "' could not be built (" +
-                                   (availability.Message ?? "unknown reason") + ")" + consequence,
-                };
-            }
-
-            stores.Add((each.Key, store));
-        }
-
-        if (!stores.Any(x => string.Equals(x.Key, registration.Key, StringComparison.OrdinalIgnoreCase)))
-        {
-            // The resolved store is always registered - the resolver found it there - but a registry that
-            // stopped listing it would otherwise leave this store's own tables unclassified.
-            stores.Insert(0, (registration.Key, resolvedStore));
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// What the remembered classification is checked against: every store's key and its count of known
-    /// document types, which only grows - or <see langword="null" /> when a store's types cannot be listed.
-    /// </summary>
-    private static string? Fingerprint(List<(string Key, IDocumentStore Store)> stores)
-    {
-        System.Text.StringBuilder fingerprint = new();
-
-        try
-        {
-            foreach ((string key, IDocumentStore store) in stores)
-            {
-                fingerprint.Append(key).Append(':')
-                    .Append(store.Options.AllKnownDocumentTypes().Count.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                    .Append(';');
-            }
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return null;
-        }
-
-        return fingerprint.ToString();
-    }
-
-    private static DatabaseDeclarations Declare(
-        List<(string Key, IDocumentStore Store)> stores,
-        string resolvedKey,
-        IDocumentStore resolvedStore,
-        Func<Type, bool>? isVisible)
-    {
-        List<StoreDeclarations> declared = [];
-        IReadOnlyList<string> storeSchemas = [];
-
-        foreach ((string key, IDocumentStore store) in stores)
-        {
-            SchemaDeclarationRead read = SchemaDeclarationReader.ReadForClassification(store.Options, isVisible);
-
-            if (!read.Succeeded)
-            {
-                string named = "The configuration of Marten store '" + key + "' could not be read, so the " +
-                               "studio cannot tell its tables from anybody else's: " + read.Failure;
-
-                if (string.Equals(key, resolvedKey, StringComparison.OrdinalIgnoreCase))
-                {
-                    // The visitor's own store: its key is in their own scope already.
-                    return new DatabaseDeclarations(null, [], named);
-                }
-
-                return new DatabaseDeclarations(
-                    null,
-                    [],
-                    "The configuration of a registered Marten store could not be read, so the studio cannot tell " +
-                    "its tables from anybody else's.")
-                {
-                    FailedStoreKey = key,
-                    NamedFailure = named,
-                };
-            }
-
-            if (ReferenceEquals(store, resolvedStore) && string.Equals(key, resolvedKey, StringComparison.OrdinalIgnoreCase))
-            {
-                storeSchemas = read.Declarations.Schemas;
-            }
-
-            declared.Add(new StoreDeclarations(key, read.Declarations));
-        }
-
-        return new DatabaseDeclarations(
-            new DatabaseObjectClassifier(declared, hidesDocumentTypes: isVisible is not null),
-            storeSchemas,
-            null);
+        return declarations.Read(resolved);
     }
 
     /// <summary>
@@ -480,13 +274,13 @@ internal sealed class DatabaseAccess
     }
 
     /// <summary>
-    /// The store <paramref name="scope" /> names, and every store's declarations - found the way the
+    /// The source <paramref name="scope" /> names, and every source's declarations - found the way the
     /// resolver finds it, but without resolving the database or the tenant, so nothing is asked of the
     /// database before the caller knows whether the read is one the capability must allow first.
     /// </summary>
     /// <remarks>
     /// The store policy is asked about the visitor's own scope before anything is looked up, exactly as
-    /// <see cref="StudioScopeResolver.ResolveAsync" /> asks it, so a store the visitor may not see and one
+    /// <see cref="StudioSourceResolver.ResolveAsync" /> asks it, so a store the visitor may not see and one
     /// that does not exist answer with the same sentence. That is an in-process question; tenant discovery,
     /// which can query the database, is never run here.
     /// </remarks>
@@ -521,28 +315,30 @@ internal sealed class DatabaseAccess
         {
             if (action is not null)
             {
-                audit.RecordScopeDenied(scope, StorePolicyName(options.Value), action, target ?? string.Empty, StudioCapability.BrowseDatabase);
+                audit.RecordScopeDenied(scope, StorePolicyName(settings), action, target ?? string.Empty, StudioCapability.BrowseDatabase);
             }
 
             return new DatabaseStoreLookup(null, null, null, new StudioNotAuthorizedException(scope).Message);
         }
 
-        MartenStoreRegistration? registration = registry.Find(scope.StoreKey, options);
+        StudioSourceRegistration? registration = sources.Find(scope.StoreKey);
 
         if (registration is null)
         {
-            return new DatabaseStoreLookup(null, null, null, $"No Marten store is registered under '{scope.StoreKey}'.");
+            return new DatabaseStoreLookup(null, null, null, $"No {descriptor.SourceNoun} is registered under '{scope.StoreKey}'.");
         }
 
-        StoreAvailability availability = registry.TryResolve(registration, provider, out IDocumentStore? store);
+        StoreAvailability availability = sources.TryResolve(registration, out IStudioSource? source);
 
-        if (!availability.IsAvailable || store is null)
+        if (!availability.IsAvailable || source is null)
         {
             return new DatabaseStoreLookup(
-                null, null, null, new StudioStoreUnavailableException(registration.Key, availability.Message ?? "unknown reason").Message);
+                null, null, null, new StudioStoreUnavailableException(registration.Key, availability.Message ?? "unknown reason", descriptor.SourceNoun).Message);
         }
 
-        return new DatabaseStoreLookup(registration, store, ReadDeclarations(registration, store), null);
+        // The declarations of the source as found, not of a database of it: nothing about its databases or tenants
+        // is asked before the caller knows whether the capability must allow the read first.
+        return new DatabaseStoreLookup(registration, source, declarations.Read(source), null);
     }
 
     /// <summary>
@@ -550,7 +346,7 @@ internal sealed class DatabaseAccess
     /// refusal when not. Not audited: it is the page's question, asked on every render.
     /// </summary>
     /// <remarks>
-    /// The policy is asked twice, exactly as <see cref="StudioScopeResolver.ResolveAsync" /> will ask it:
+    /// The policy is asked twice, exactly as <see cref="StudioSourceResolver.ResolveAsync" /> will ask it:
     /// the store policy for the tenant-less scope, then the write policy with the capability named. Asking
     /// only the second would draw an enabled control for a visitor whose store policy refuses a tenant-less
     /// resource, and the service would then refuse them.
@@ -594,12 +390,12 @@ internal sealed class DatabaseAccess
 
     /// <summary>
     /// The whole gate for a resolved scope: declarations (fail closed), capability, policy, every other
-    /// registered store's policies, and the database's live schema list, which <c>"*"</c> and the withheld
-    /// count need.
+    /// registered source's policies (<see cref="IDatabaseDeclarationsSource.OtherSourcesAsync" />), and the
+    /// database's live schema list, which <c>"*"</c> and the withheld count need.
     /// </summary>
     public async Task<DatabaseGateRead> GateAsync(
         StudioScope scope,
-        ResolvedScope resolved,
+        ResolvedSource resolved,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
@@ -612,191 +408,33 @@ internal sealed class DatabaseAccess
             return new DatabaseGateRead(
                 null,
                 DatabaseRefusal.Unavailable,
-                await DescribeFailureAsync(declared, resolved.Database.Id.Identity, cancellationToken).ConfigureAwait(false));
+                await DescribeFailureAsync(declared, resolved.Target.Identity, cancellationToken).ConfigureAwait(false));
         }
 
         DatabasePolicyAnswer answer = await EvaluatePoliciesAsync(scope, cancellationToken).ConfigureAwait(false);
 
-        IReadOnlyDictionary<string, DatabaseStoreAccess> others = await OtherStoresAsync(
-                resolved, declared.Classifier, answer.CapabilityEnabled, cancellationToken)
+        IReadOnlyDictionary<string, DatabaseStoreAccess> others = await declarations
+            .OtherSourcesAsync(resolved, declared.Classifier, answer.CapabilityEnabled, cancellationToken)
             .ConfigureAwait(false);
 
-        IReadOnlyList<CatalogSchema> live = await catalog.SchemasAsync(resolved.Database, cancellationToken)
+        IReadOnlyList<CatalogSchema> live = await catalog.SchemasAsync(resolved.Target, cancellationToken)
             .ConfigureAwait(false);
-
-        MartenStudioOptions value = options.Value;
 
         return new DatabaseGateRead(
             new DatabaseGate(
                 declared.StoreSchemas,
                 live,
-                [.. value.BrowsableSchemas],
+                [.. settings.BrowsableSchemas],
                 answer.CapabilityEnabled,
                 capabilities.ReadOnly,
                 answer.Authorized,
                 declared.Classifier,
-                value.SqlConsoleRole,
+                settings.SqlConsoleRole,
                 answer.Refusal == DatabaseRefusal.StorePolicy ? DatabaseRefusal.StorePolicy : DatabaseRefusal.WritePolicy,
-                resolved.Registration.Key,
+                resolved.Source.Key,
                 others),
             DatabaseRefusal.None,
             null);
-    }
-
-    /// <summary>
-    /// What this visitor may know and read of every other registered store's objects in this database:
-    /// that store's store policy for <c>(store, database, no tenant)</c> decides whether its identity is
-    /// shown, and - only while the capability is on - its write policy with <c>BrowseDatabase</c> named
-    /// decides whether the rows of its Marten-managed tables may be read.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// This store's own grant says nothing about another store: a visitor the resolver would refuse store B
-    /// must not learn B's key from an ownership badge, nor read B's projection rows because they happen to
-    /// sit in a schema of this store's database.
-    /// </para>
-    /// <para>
-    /// <b>Asked about this database, as that store names it.</b> The visitor's own <c>DatabaseId</c> is this
-    /// store's spelling - often empty, which means "this store's default" - and handed to store B it would
-    /// mean B's default, which need not be this database at all. So B's policy is asked with the identity
-    /// of B's own database that is this one (<see cref="OtherStoreDatabaseIdAsync" />).
-    /// </para>
-    /// <para>
-    /// <b>And only when somebody will be asked, and only from memory.</b> Finding B's identity for this
-    /// database means <c>AllDatabases()</c> on B. The identity is only ever the resource a policy is shown, so
-    /// with no store policy - and, while the capability is on, no write policy either - nothing is enumerated,
-    /// on this page or on any document open that reads the gate. And a B whose enumeration is not an in-memory
-    /// walk is never enumerated at all, because the walk could only ever change the identity's case
-    /// (<see cref="OtherStoreDatabaseIdAsync" />).
-    /// </para>
-    /// </remarks>
-    private async Task<IReadOnlyDictionary<string, DatabaseStoreAccess>> OtherStoresAsync(
-        ResolvedScope resolved,
-        DatabaseObjectClassifier classifier,
-        bool capabilityEnabled,
-        CancellationToken cancellationToken)
-    {
-        Dictionary<string, DatabaseStoreAccess> others = new(StringComparer.OrdinalIgnoreCase);
-        string resolvedKey = resolved.Registration.Key;
-
-        // The same two questions the loop asks, and the policies that would answer them: the store policy for
-        // B's identity, and - only while the capability is on - the write policy for B's rows.
-        bool anyPolicyAsked = !string.IsNullOrWhiteSpace(authorization.PolicyFor(null))
-            || (capabilityEnabled && !string.IsNullOrWhiteSpace(authorization.PolicyFor(nameof(StudioCapability.BrowseDatabase))));
-
-        foreach (StoreDeclarations store in classifier.Stores)
-        {
-            if (string.Equals(store.StoreKey, resolvedKey, StringComparison.OrdinalIgnoreCase) || others.ContainsKey(store.StoreKey))
-            {
-                continue;
-            }
-
-            string databaseId = anyPolicyAsked
-                ? await OtherStoreDatabaseIdAsync(store.StoreKey, resolved.Database, cancellationToken).ConfigureAwait(false)
-                : resolved.Database.Id.Identity;
-
-            StudioScope other = new(store.StoreKey, databaseId, null);
-
-            if (!await authorization.IsAuthorizedAsync(other, capability: null, cancellationToken).ConfigureAwait(false))
-            {
-                others[store.StoreKey] = new DatabaseStoreAccess(
-                    false, DatabaseRowAccess.Refused(DatabaseRefusal.StorePolicy, DatabaseGate.OtherStorePolicyDenial));
-                continue;
-            }
-
-            if (!capabilityEnabled)
-            {
-                // The rows are refused by the capability anyway, and nobody is asked about a capability the
-                // process does not have.
-                others[store.StoreKey] = new DatabaseStoreAccess(
-                    true, DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, DatabaseGate.CapabilityDenial));
-                continue;
-            }
-
-            others[store.StoreKey] = await authorization.IsAuthorizedAsync(other, StudioCapability.BrowseDatabase, cancellationToken).ConfigureAwait(false)
-                ? DatabaseStoreAccess.Open
-                : new DatabaseStoreAccess(
-                    true, DatabaseRowAccess.Refused(DatabaseRefusal.WritePolicy, DatabaseGate.OtherStoreWritePolicyDenial));
-        }
-
-        return others;
-    }
-
-    /// <summary>
-    /// Another store's own identity for <paramref name="database" />: the identity of the database of
-    /// <paramref name="storeKey" /> that is this one - matched by <c>Id.Identity</c>, which is what that
-    /// store's scope selector and its policy see - or, when it has none (or cannot say), this database's own
-    /// identity, which at least names this database rather than that store's default. Remembered for the
-    /// circuit.
-    /// </summary>
-    /// <remarks>
-    /// The answer is always this database's own identity: the walk below matches by <c>Id.Identity</c>,
-    /// ignoring case, and returns the match, so all it can change is the case that store spells it in. That
-    /// is worth an in-memory walk and nothing more. A <c>Single</c> or <c>StaticMultiple</c> store's
-    /// <c>AllDatabases()</c> answers from memory. A <c>DynamicMultiple</c> one runs
-    /// <c>Tenancy.BuildDatabases()</c>, which reads its master or pool table every time - and the first time per
-    /// store instance applies that table and upserts its seed rows, or on a single-server tenancy creates every
-    /// configured database that does not exist yet (AGENTS.md D27). So a dynamic store, and one whose
-    /// cardinality cannot be read, is never enumerated here: the identity is used as given.
-    /// </remarks>
-    private async Task<string> OtherStoreDatabaseIdAsync(string storeKey, Marten.Storage.IMartenDatabase database, CancellationToken cancellationToken)
-    {
-        string identity = database.Id.Identity;
-        string key = storeKey + "\u001f" + identity;
-
-        if (otherDatabaseIds.TryGetValue(key, out string? known))
-        {
-            return known;
-        }
-
-        string answer = identity;
-        MartenStoreRegistration? registration = registry.Find(storeKey, options);
-
-        if (registration is not null
-            && registry.TryResolve(registration, provider, out IDocumentStore? store).IsAvailable
-            && store is not null
-            && EnumeratesFromMemory(store))
-        {
-            try
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                foreach (Marten.Storage.IMartenDatabase candidate in await store.Storage.AllDatabases().ConfigureAwait(false))
-                {
-                    if (string.Equals(candidate.Id.Identity, identity, StringComparison.OrdinalIgnoreCase))
-                    {
-                        answer = candidate.Id.Identity;
-                        break;
-                    }
-                }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                // That store cannot list its databases just now: this database's own identity it is.
-            }
-        }
-
-        otherDatabaseIds[key] = answer;
-        return answer;
-    }
-
-    /// <summary>
-    /// Whether <paramref name="store" />'s <c>AllDatabases()</c> is a walk of what it already holds: a
-    /// <c>Single</c> or <c>StaticMultiple</c> tenancy. A <c>DynamicMultiple</c> one is not, and neither is a
-    /// tenancy whose cardinality cannot be read - the stricter answer.
-    /// </summary>
-    private static bool EnumeratesFromMemory(IDocumentStore store)
-    {
-        try
-        {
-            return store.Options.Tenancy.Cardinality
-                is JasperFx.Descriptors.DatabaseCardinality.Single
-                or JasperFx.Descriptors.DatabaseCardinality.StaticMultiple;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return false;
-        }
     }
 
     /// <summary>
@@ -834,13 +472,12 @@ internal sealed class DatabaseAccess
         //    time, as the page's EvaluatePoliciesAsync asks them, so that a refusal names the policy that
         //    actually said no: the store policy, or the write policy with the capability named.
         StudioScope tenantless = scope with { TenantId = null };
-        MartenStudioOptions value = options.Value;
 
         if (!await authorization.IsAuthorizedAsync(tenantless, capability: null, cancellationToken).ConfigureAwait(false))
         {
             // Named BrowseDatabase in the ring, as the write policy's refusal below is: the store policy saying
             // no is no reason to show the name somebody asked the browser for to everybody it says yes to.
-            audit.RecordScopeDenied(tenantless, StorePolicyName(value), action, target, StudioCapability.BrowseDatabase);
+            audit.RecordScopeDenied(tenantless, StorePolicyName(settings), action, target, StudioCapability.BrowseDatabase);
             return new DatabaseBrowseGrant(null, DatabaseRefusal.StorePolicy, DatabaseGate.StorePolicyDenial);
         }
 
@@ -848,7 +485,7 @@ internal sealed class DatabaseAccess
         {
             // Named BrowseDatabase in the ring, so the Activity screen shows the refusal - and the name it was
             // aimed at - only to a visitor who may browse too (StudioActionLog.GetVisibleAsync).
-            audit.RecordScopeDenied(tenantless, WritePolicyName(value), action, target, StudioCapability.BrowseDatabase);
+            audit.RecordScopeDenied(tenantless, WritePolicyName(settings), action, target, StudioCapability.BrowseDatabase);
             return new DatabaseBrowseGrant(null, DatabaseRefusal.WritePolicy, DatabaseGate.WritePolicyDenial);
         }
 
@@ -857,7 +494,7 @@ internal sealed class DatabaseAccess
         //    them); a policy that changes its mind between the two asks is refused as the write policy.
         try
         {
-            ResolvedScope resolved = await resolver
+            ResolvedSource resolved = await resolver
                 .ResolveAsync(tenantless, nameof(StudioCapability.BrowseDatabase), cancellationToken)
                 .ConfigureAwait(false);
 
@@ -865,7 +502,7 @@ internal sealed class DatabaseAccess
         }
         catch (StudioNotAuthorizedException)
         {
-            audit.RecordScopeDenied(tenantless, WritePolicyName(value), action, target, StudioCapability.BrowseDatabase);
+            audit.RecordScopeDenied(tenantless, WritePolicyName(settings), action, target, StudioCapability.BrowseDatabase);
             return new DatabaseBrowseGrant(null, DatabaseRefusal.WritePolicy, DatabaseGate.WritePolicyDenial);
         }
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
@@ -877,7 +514,7 @@ internal sealed class DatabaseAccess
 
     /// <summary>
     /// The row gate, for a reader of one relation's rows: the capability, the tenant-less scope with the
-    /// capability named, the schema against <see cref="MartenStudioOptions.BrowsableSchemas" />, then the
+    /// capability named, the schema against the studio's <c>BrowsableSchemas</c> option, then the
     /// relation looked up in the catalog and judged - whose it is, what it is, what it reads, whether the
     /// role may select from it. Every refusal is audited under <paramref name="action" /> unless
     /// <paramref name="record" /> says otherwise; a grant is not, because the caller knows what it then read
@@ -944,7 +581,7 @@ internal sealed class DatabaseAccess
 
         // 3. The schema, settled from the options alone where it can be: an entry list that cannot admit it
         //    is refused before the database is asked anything.
-        IReadOnlyList<string> entries = [.. options.Value.BrowsableSchemas];
+        IReadOnlyList<string> entries = [.. settings.BrowsableSchemas];
 
         if (!BrowsableSchemaMatcher.MightMatch(entries, schema))
         {
@@ -973,7 +610,7 @@ internal sealed class DatabaseAccess
 
             // 4. The catalog. From here on the names are the catalog's, not the caller's.
             CatalogRelationDetail? relation = await catalog
-                .RelationAsync(grant.Resolved.Database, schema, name, cancellationToken)
+                .RelationAsync(grant.Resolved.Target, schema, name, cancellationToken)
                 .ConfigureAwait(false);
 
             if (relation is null)
@@ -1037,9 +674,16 @@ internal sealed class DatabaseAccess
     }
 
     /// <summary>The policy a write-policy refusal names in event 9203.</summary>
-    internal static string WritePolicyName(MartenStudioOptions value) =>
-        value.WriteAuthorizationPolicy ?? value.StoreAuthorizationPolicy ?? "(none)";
+    internal static string WritePolicyName(IStudioSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return settings.WritePolicy ?? settings.ScopePolicy ?? "(none)";
+    }
 
     /// <summary>The policy a store-policy refusal names in event 9203.</summary>
-    internal static string StorePolicyName(MartenStudioOptions value) => value.StoreAuthorizationPolicy ?? "(none)";
+    internal static string StorePolicyName(IStudioSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return settings.ScopePolicy ?? "(none)";
+    }
 }

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 
-using Microsoft.Extensions.Options;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 namespace MartenStudio.Services.Health;
 
@@ -41,20 +42,20 @@ internal sealed class HealthSweepCache
     public static readonly TimeSpan DeeperTimeToLive = TimeSpan.FromMinutes(5);
 
     private readonly HealthSweeper sweeper;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
     private readonly TimeProvider timeProvider;
     private readonly Dictionary<string, Slot> slots = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> aliases = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock gate = new();
     private int sweepCount;
 
-    public HealthSweepCache(HealthSweeper sweeper, IOptions<MartenStudioOptions> options, TimeProvider? timeProvider = null)
+    public HealthSweepCache(HealthSweeper sweeper, IStudioSettings settings, TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(sweeper);
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
 
         this.sweeper = sweeper;
-        this.options = options;
+        this.settings = settings;
         this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -66,7 +67,7 @@ internal sealed class HealthSweepCache
 
     /// <summary>How long a finished sweep of <paramref name="kind" /> is reused for.</summary>
     public TimeSpan TimeToLive(HealthSweepKind kind) =>
-        kind == HealthSweepKind.Regular ? options.Value.EffectiveHealthInterval : DeeperTimeToLive;
+        kind == HealthSweepKind.Regular ? settings.EffectiveHealthInterval : DeeperTimeToLive;
 
     /// <summary>
     /// The sweep of <paramref name="kind" /> for the resolved database: the running one if there is one, the
@@ -80,15 +81,15 @@ internal sealed class HealthSweepCache
     /// </param>
     /// <param name="cancellationToken">Cancels this caller's wait, never the shared sweep.</param>
     public async Task<HealthSweep> GetAsync(
-        ResolvedScope resolved,
+        ResolvedSource resolved,
         HealthSweepKind kind,
         string? requestedDatabaseId,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(resolved);
 
-        string storeKey = resolved.Registration.Key;
-        string databaseId = resolved.Database.Id.Identity;
+        string storeKey = resolved.Source.Key;
+        string databaseId = resolved.Target.Identity;
         string key = Key(storeKey, databaseId, kind);
 
         if (requestedDatabaseId is not null && !string.Equals(requestedDatabaseId, databaseId, StringComparison.OrdinalIgnoreCase))
@@ -158,7 +159,7 @@ internal sealed class HealthSweepCache
         }
     }
 
-    private async Task<HealthSweep> RunAsync(ResolvedScope resolved, HealthSweepKind kind, Slot slot, Lazy<Task<HealthSweep>> self)
+    private async Task<HealthSweep> RunAsync(ResolvedSource resolved, HealthSweepKind kind, Slot slot, Lazy<Task<HealthSweep>> self)
     {
         Interlocked.Increment(ref sweepCount);
 

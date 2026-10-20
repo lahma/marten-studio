@@ -1,8 +1,8 @@
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Live;
-
-using Microsoft.Extensions.Options;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 using Npgsql;
 
@@ -15,7 +15,7 @@ internal interface ISessionActivityReader
     /// <summary>Reads the snapshot. Throws what the database throws.</summary>
     /// <param name="resolved">The database, resolved by a visitor the store policy passed for it as a whole.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
-    Task<SessionSnapshot> ReadAsync(ResolvedScope resolved, CancellationToken cancellationToken);
+    Task<SessionSnapshot> ReadAsync(ResolvedSource resolved, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -32,25 +32,24 @@ internal interface ISessionActivityReader
 /// </remarks>
 internal sealed class SessionActivityReader : ISessionActivityReader
 {
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
     private readonly TimeProvider timeProvider;
 
-    public SessionActivityReader(IOptions<MartenStudioOptions> options, TimeProvider? timeProvider = null)
+    public SessionActivityReader(IStudioSettings settings, TimeProvider? timeProvider = null)
     {
-        this.options = options;
+        this.settings = settings;
         this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
-    public async Task<SessionSnapshot> ReadAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    public async Task<SessionSnapshot> ReadAsync(ResolvedSource resolved, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(resolved);
 
-        MartenStudioOptions value = options.Value;
-        TimeSpan timeout = value.QueryTimeout < HealthSweeper.MaxStatementTimeout ? value.QueryTimeout : HealthSweeper.MaxStatementTimeout;
+        TimeSpan timeout = settings.QueryTimeout < HealthSweeper.MaxStatementTimeout ? settings.QueryTimeout : HealthSweeper.MaxStatementTimeout;
 
-        await using HealthConnection connection = new(resolved.Database);
-        HealthSqlRunner sql = new(connection, new ReadOnlySqlOptions { StatementTimeout = timeout, Role = value.SqlConsoleRole }, observer: null);
+        await using HealthConnection connection = new(resolved.Target);
+        HealthSqlRunner sql = new(connection, new ReadOnlySqlOptions { StatementTimeout = timeout, Role = settings.SqlConsoleRole }, observer: null);
 
         DateTimeOffset readAt = timeProvider.GetUtcNow();
 
@@ -174,16 +173,16 @@ internal sealed class SessionActivitySnapshots
     internal int ReadCount => Volatile.Read(ref reads);
 
     /// <summary>The database's snapshot: a recent one, or a new one shared with everybody who asks while it runs.</summary>
-    public Task<SessionSnapshot> GetAsync(ResolvedScope resolved, CancellationToken cancellationToken = default)
+    public Task<SessionSnapshot> GetAsync(ResolvedSource resolved, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(resolved);
 
-        string key = resolved.Registration.Key + "|" + resolved.Database.Id.Identity;
+        string key = resolved.Source.Key + "|" + resolved.Target.Identity;
 
         return cache.GetAsync(key, token => ReadAsync(resolved, token), cancellationToken);
     }
 
-    private Task<SessionSnapshot> ReadAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    private Task<SessionSnapshot> ReadAsync(ResolvedSource resolved, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref reads);
         return reader.ReadAsync(resolved, cancellationToken);

@@ -19,7 +19,7 @@ public class HealthReportLiveTests(PostgresFixture postgres)
         first.Refusal.Should().Be(HealthRefusal.None, first.Reason);
 
         // Tiers 0 and 1 only: a deeper check is in a report only once "Run deeper checks" has run it.
-        first.Checks.Select(static x => x.Code).Should().Contain(new HealthCheckRegistry().All
+        first.Checks.Select(static x => x.Code).Should().Contain(StudioHealthChecks.Registry.All
             .Where(static x => x.Info.Tier is HealthCostTier.InProcess or HealthCostTier.Catalog)
             .Select(static x => x.Info.Code));
         first.Checks.Should().OnlyContain(static x => x.Outcome != HealthCheckOutcome.Failed, "nothing fails on the healthy sample store");

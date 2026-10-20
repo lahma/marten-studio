@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Database;
+using MartenStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -15,12 +16,12 @@ namespace MartenStudio.Services.Health.Checks;
 /// <param name="Counters">What <c>pg_stat_statements</c> counts for it.</param>
 /// <param name="Text">Its normalised text, or <see langword="null" /> when the text read did not return it.</param>
 /// <param name="TextTruncated">Whether the read cut the text.</param>
-/// <param name="Tables">The visible tables of this store it names - never a hidden document type's.</param>
+/// <param name="Tables">The judged tables of this source it names - never a hidden document type's.</param>
 internal sealed record ObservedStatement(
     StatementCounterRow Counters,
     string? Text,
     bool TextTruncated,
-    IReadOnlyList<MartenTable> Tables)
+    IReadOnlyList<StudioTable> Tables)
 {
     /// <summary>Its <c>queryid</c>.</summary>
     public long QueryId => Counters.QueryId;
@@ -32,8 +33,7 @@ internal sealed record ObservedStatement(
     public bool NamesStoreTable => Tables.Count > 0;
 
     /// <summary>The document types of the document tables it names.</summary>
-    public IReadOnlyList<Type> DocumentTypes =>
-        [.. Tables.Where(static x => x.DocumentType is not null).Select(static x => x.DocumentType!.DocumentType).Distinct()];
+    public IReadOnlyList<Type> DocumentTypes => [.. Tables.SelectMany(static x => x.DocumentTypes).Distinct()];
 
     /// <summary>The schemas outside the store's own of the tables it names (<see cref="HealthFinding.GatedSchemas" />).</summary>
     public IReadOnlyList<string> GatedSchemas => [.. Tables.SelectMany(static x => x.GatedSchemas).Distinct(StringComparer.Ordinal)];
@@ -129,7 +129,7 @@ internal sealed record StatementRead(
 /// <b>A table is matched by name, against this store's visible tables only.</b> The text is the extension's
 /// normalised form, in which a plannable statement's constants are <c>$n</c> and every identifier is as Marten wrote
 /// it - qualified, <c>studio_sample.mt_doc_order</c> - so a table it names is found by its qualified name, or by its bare name when
-/// the text does not qualify it. A hidden document type is not in the set (<see cref="MartenTables" />), so it is never
+/// the text does not qualify it. A hidden document type is not in the set (<see cref="HealthTables" />), so it is never
 /// a statement's table here; a statement that names one as well is shown with its text withheld by the visitor's
 /// screen.
 /// </para>
@@ -138,6 +138,13 @@ internal static partial class StatementReads
 {
     /// <summary>The memo key of the shared read.</summary>
     internal const string Key = "statements.read";
+
+    /// <summary>
+    /// The fewest guarded calls in the window a guarded write's conflict rate is judged on - the optimistic-concurrency
+    /// check's own floor (T22's <c>MinCalls</c>, a check of MartenStudio's own, which a test holds equal to this), so that
+    /// the read keeps the guarded writes that check will judge and no others.
+    /// </summary>
+    internal const int GuardedCallsFloor = 1000;
 
     /// <summary>
     /// What the counters read keeps: each check's top few, by its own ranking - shares that sum to
@@ -149,7 +156,7 @@ internal static partial class StatementReads
         TopByMean: 4,
         MeanCalls: ExpensiveStatementsCheck.SlowMeanCalls,
         TopGuarded: 3,
-        GuardedCalls: ConcurrencyConflictCheck.MinCalls,
+        GuardedCalls: GuardedCallsFloor,
         TopJit: 3,
         JitCalls: JitShareCheck.MinCalls,
         Max: HealthStatementQueries.MaxTexts);
@@ -219,7 +226,7 @@ internal static partial class StatementReads
             throw new HealthCheckUnavailableException(NothingRecorded);
         }
 
-        MartenTableSet set = await MartenTables.SetAsync(context).ConfigureAwait(false);
+        IStudioTableSet set = await HealthTables.SetAsync(context).ConfigureAwait(false);
 
         // The texts the process already holds, and a call for the rest only: every text call costs the extension its
         // whole text file, however few ids it names.
@@ -267,17 +274,17 @@ internal static partial class StatementReads
     }
 
     /// <summary>The tables of <paramref name="set" /> that <paramref name="text" /> names, in the order it names them.</summary>
-    internal static IReadOnlyList<MartenTable> Named(string text, MartenTableSet set)
+    internal static IReadOnlyList<StudioTable> Named(string text, IStudioTableSet set)
     {
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(set);
 
-        List<MartenTable> named = [];
+        List<StudioTable> named = [];
 
         foreach (Match match in Name().Matches(text))
         {
             string first = Part(match, "q1", "u1");
-            MartenTable? table = match.Groups["u2"].Success || match.Groups["q2"].Success
+            StudioTable? table = match.Groups["u2"].Success || match.Groups["q2"].Success
                 ? set.Find(first, Part(match, "q2", "u2"))
                 : null;
 
@@ -285,7 +292,7 @@ internal static partial class StatementReads
             // tables has that name.
             if (table is null && !(match.Groups["u2"].Success || match.Groups["q2"].Success))
             {
-                List<MartenTable> bare = [.. set.Tables.Where(x => string.Equals(x.Table, first, StringComparison.OrdinalIgnoreCase))];
+                List<StudioTable> bare = [.. set.Tables.Where(x => string.Equals(x.Table, first, StringComparison.OrdinalIgnoreCase))];
                 table = bare.Count == 1 ? bare[0] : null;
             }
 
@@ -299,12 +306,12 @@ internal static partial class StatementReads
     }
 
     /// <summary>The target table of a write - <c>insert into x</c>, <c>update x</c> - among <paramref name="set" />'s.</summary>
-    internal static MartenTable? Target(string name, MartenTableSet set)
+    internal static StudioTable? Target(string name, IStudioTableSet set)
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(set);
 
-        IReadOnlyList<MartenTable> named = Named(name, set);
+        IReadOnlyList<StudioTable> named = Named(name, set);
         return named.Count == 1 ? named[0] : null;
     }
 
@@ -581,13 +588,15 @@ internal static class StatementWindows
     {
         ArgumentNullException.ThrowIfNull(statement);
 
-        MartenTable first = statement.Tables[0];
+        StudioTable first = statement.Tables[0];
         string named = first.Kind switch
         {
-            MartenTableKind.Document => "the " + first.TypeName + " collection",
-            MartenTableKind.EventStore => "the event store's " + first.Table,
-            MartenTableKind.Managed => "the Marten-managed table " + first.Table,
-            _ => "Marten's " + first.Table,
+            StudioTableKind.DocumentTable when first.TypeName is { } type => "the " + type + " collection",
+            StudioTableKind.DocumentTable => "the document table " + first.Table,
+            StudioTableKind.EventTable => "the event store's " + first.Table,
+            StudioTableKind.Projection => "the Marten-managed table " + first.Table,
+            StudioTableKind.Relational => "the table " + first.Table,
+            _ => (first.Library ?? "Marten") + "'s " + first.Table,
         };
 
         return statement.Tables.Count == 1

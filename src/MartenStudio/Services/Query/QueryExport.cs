@@ -33,8 +33,12 @@ namespace MartenStudio.Services.Query;
 /// </remarks>
 internal static class QueryExport
 {
-    /// <summary>The Marten mode's rows as a JSON array of <c>{ id, document }</c>.</summary>
-    public static string ToJson(IReadOnlyList<MartenQueryRow> rows)
+    /// <summary>
+    /// Documents - an id and the JSON a store wrote - as a JSON array of <c>{ id, document }</c>: MartenStudio's where
+    /// clause results (<c>MartenQueryExportBridges</c>).
+    /// </summary>
+    /// <param name="rows">Each row's id and its JSON, exactly as the database holds it.</param>
+    public static string ToJson(IReadOnlyList<(string Id, string Json)> rows)
     {
         ArgumentNullException.ThrowIfNull(rows);
 
@@ -44,14 +48,14 @@ internal static class QueryExport
         {
             writer.WriteStartArray();
 
-            foreach (MartenQueryRow row in rows)
+            foreach ((string Id, string Json) row in rows)
             {
                 writer.WriteStartObject();
                 writer.WriteString("id", row.Id);
                 writer.WritePropertyName("document");
 
-                // The document is already JSON, written by Marten's own serializer; re-serializing it
-                // would be a second opinion about a document Marten has already had the last word on.
+                // The document is already JSON, written by the store's own serializer; re-serializing it
+                // would be a second opinion about a document the store has already had the last word on.
                 WriteRawOrString(writer, row.Json);
 
                 writer.WriteEndObject();
@@ -63,14 +67,15 @@ internal static class QueryExport
         return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
-    /// <summary>The Marten mode's rows as two CSV columns.</summary>
-    public static string ToCsv(IReadOnlyList<MartenQueryRow> rows)
+    /// <summary>Documents - an id and the JSON a store wrote - as two CSV columns.</summary>
+    /// <param name="rows">Each row's id and its JSON, exactly as the database holds it.</param>
+    public static string ToCsv(IReadOnlyList<(string Id, string Json)> rows)
     {
         ArgumentNullException.ThrowIfNull(rows);
 
         var text = new StringBuilder("id,document\r\n");
 
-        foreach (MartenQueryRow row in rows)
+        foreach ((string Id, string Json) row in rows)
         {
             text.Append(Escape(row.Id)).Append(',').Append(Escape(row.Json)).Append("\r\n");
         }

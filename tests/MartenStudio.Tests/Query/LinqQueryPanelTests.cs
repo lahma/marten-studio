@@ -195,7 +195,7 @@ public class LinqQueryPanelTests
     public void A_refusal_the_service_throws_is_rendered_and_names_the_capability()
     {
         var linq = new FakeLinqQueryService().WithType("order");
-        linq.Failure = new StudioCapabilityDeniedException(StudioCapability.RunLinqQueries, CapabilityDenialReason.Disabled);
+        linq.Failure = Support.MartenSpine.Denied(StudioCapability.RunLinqQueries, CapabilityDenialReason.Disabled);
 
         using StudioComponentContext context = CreateContext(linq);
 

@@ -1,6 +1,8 @@
+using MartenStudio.Services.Sources;
+
 namespace MartenStudio.Services.Health.Checks;
 
-/// <summary>What T01 reads: every declared table's scan counters.</summary>
+/// <summary>What T01 reads: every judged table's scan counters.</summary>
 /// <param name="ReadAt">When the counters were read.</param>
 /// <param name="Tables">The declared tables that exist, with the catalog's row for each.</param>
 /// <param name="Database">The database-wide facts: when the counters began, how parallel a scan may be.</param>
@@ -55,7 +57,7 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
     /// <inheritdoc />
     public override async Task<SequentialScanFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        IReadOnlyList<TableFacts> tables = await MartenTables.TablesAsync(context).ConfigureAwait(false);
+        IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
 
         return new SequentialScanFacts(context.Now, tables, DatabaseStatistics.Of(tables));
     }
@@ -67,6 +69,13 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
     /// </summary>
     internal static bool IsLarge(TableFacts table) =>
         (table.Row.IsPartitioned ? table.Row.LargestLeafRows ?? 0 : table.Rows) >= LargeTableRows;
+
+    /// <summary>
+    /// Whether T01 judges a table at all: a large one whose index design is its owner's. A library's table
+    /// (<see cref="StudioTable.ExemptFromIndexDesign" />) is scanned however the library designed it, and the index it may
+    /// lack is not the host's to add (issue #8, G1).
+    /// </summary>
+    internal static bool IsJudged(TableFacts table) => !table.Table.ExemptFromIndexDesign && IsLarge(table);
 
     /// <summary>
     /// The rows one whole scan reads: the table's for an ordinary table, and for a partitioned one its
@@ -82,7 +91,7 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
     {
         foreach (TableFacts table in facts.Tables)
         {
-            if (IsLarge(table) && table.Row is { SequentialScans: { } scans, SequentialRowsRead: { } read })
+            if (IsJudged(table) && table.Row is { SequentialScans: { } scans, SequentialRowsRead: { } read })
             {
                 yield return new HealthSamplePart(ScansSeries + table.Key, scans);
                 yield return new HealthSamplePart(RowsReadSeries + table.Key, read);
@@ -99,7 +108,7 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
 
         foreach (TableFacts table in facts.Tables)
         {
-            if (!IsLarge(table))
+            if (!IsJudged(table))
             {
                 continue;
             }
@@ -154,7 +163,7 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
         SequentialScanFacts facts,
         HealthEvaluation evaluation)
     {
-        MartenTable declared = table.Table;
+        StudioTable declared = table.Table;
         TimeSpan window = read.Span;
         string times = Math.Floor(wholeTableReads).ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
 
@@ -188,17 +197,8 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
                 TableText.CountersSince(facts.Database.StatsReset, evaluation.Now)
                 + " A parallel scan counts once per worker. The studio's own exact counts, pg_dump and a one-off report are "
                 + "sequential scans too; which statement it was is T02's to say.",
-            Remedy = declared is { Kind: MartenTableKind.Document, TypeName: { } type }
-                ? new HealthRemedy(
-                    "// The member the slow query filters, sorts or joins on:\n"
-                    + "opts.Schema.For<" + type + ">().Index(x => x.FilteredMember);\n"
-                    + "// or, where it is also sorted on or compared as a column:\n"
-                    + "opts.Schema.For<" + type + ">().Duplicate(x => x.FilteredMember);",
-                    "Query in Marten mode, on the " + declared.Alias + " collection, judges a where clause: its index advice says "
-                    + "whether an index serves it and names the member. Every write maintains every index, so add the one the slow "
-                    + "query needs and no other.")
-                : null,
-            Link = declared is { Kind: MartenTableKind.Document, Alias: { } alias }
+            Remedy = evaluation.TableRemedies?.IndexTheFilteredMember(declared),
+            Link = declared is { Kind: StudioTableKind.DocumentTable, Alias: { } alias }
                 ? new HealthLink(
                     "Open the index advisor in Query",
                     "query",

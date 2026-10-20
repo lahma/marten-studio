@@ -182,7 +182,7 @@ internal sealed class ColumnCatalog
     /// A sequence has no columns, so it is invisible to <c>information_schema.columns</c> and to
     /// <c>information_schema.tables</c> alike. The studio has exactly one question of this shape -
     /// does <c>mt_events_sequence</c> exist, which is what the high-water read needs to know before it
-    /// runs (<see cref="ProjectionProgressQueries"/>) - and it is the same database, the same catalog and
+    /// runs (<c>ProjectionProgressQueries</c>) - and it is the same database, the same catalog and
     /// the same reason for expiring, so it shares this class rather than becoming a service of its own.
     /// </remarks>
     internal const string SequenceSql =

@@ -1,4 +1,6 @@
 @using MartenStudio.Services.Database
+@using MartenStudio.Services.Settings
+@inject IStudioSettings Settings
 
 @*
     What a relation is, beyond "a table": each badge is a fact that changes what reading it means, and its
@@ -24,7 +26,7 @@
                 else
                 {
                     <span class="ms-db-badge"
-                          title="Partitioned. How many partitions it has is shown only with MartenStudioOptions.Capabilities.BrowseDatabase: per-tenant partitions would count the tenants.">
+                          title="@("Partitioned. How many partitions it has is shown only with " + Settings.CapabilityOption(StudioCapability.BrowseDatabase) + ": per-tenant partitions would count the tenants.")">
                         partitioned
                     </span>
                 }
@@ -90,7 +92,7 @@
 }
 
 @code {
-    /// <summary>The relation, as a <c>DatabaseRelationSummary</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    /// <summary>The relation, as a <c>DatabaseRelationSummary</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
     [Parameter]
     public object? Model { get; set; }
 

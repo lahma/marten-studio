@@ -2,6 +2,7 @@ using MartenStudio.Components.Pages.Documents;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Database;
+using MartenStudio.Services.Settings;
 
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Primitives;
@@ -16,6 +17,12 @@ public class RowLinksTests
 {
     private static readonly MartenStudioOptions Options = new();
 
+    private static readonly IStudioSettings Settings = MartenStudioSettings.Of(Options);
+
+    private static readonly StudioDescriptor Descriptor = MartenStudioDescriptor.Instance;
+
+    private static readonly IStudioLinks Links = new MartenStudioLinks(Microsoft.Extensions.Options.Options.Create(Options));
+
     private static readonly StudioScope Scope = new("default", "localhost.marten", "acme");
 
     // ----------------------------------------------------------------------------------------------
@@ -25,13 +32,13 @@ public class RowLinksTests
     [Fact]
     public void The_rows_link_opens_the_rows_tab_with_the_filter_and_the_scope()
     {
-        string url = DatabaseLinks.ToRows(Options, Scope, "quartz", "qrtz_triggers", "trigger_state = WAITING");
+        string url = DatabaseLinks.ToRows(Settings, Descriptor, Scope, "quartz", "qrtz_triggers", "trigger_state = WAITING");
 
         url.Should().StartWith("database/object?schema=quartz&name=qrtz_triggers&tab=rows&q=");
         Query(url, "q").Should().Be("trigger_state = WAITING");
         Query(url, "store").Should().Be("default");
 
-        DatabaseLinks.ToRows(Options, Scope, "quartz", "qrtz_triggers").Should().NotContain("q=", "no filter is every row");
+        DatabaseLinks.ToRows(Settings, Descriptor, Scope, "quartz", "qrtz_triggers").Should().NotContain("q=", "no filter is every row");
     }
 
     [Theory]
@@ -48,7 +55,7 @@ public class RowLinksTests
     public void Another_stores_document_table_links_to_that_store_with_no_database_or_tenant()
     {
         string? href = DatabaseLinks.ToWhereItLives(
-            Options,
+            Links,
             Scope,
             new DatabaseObjectOwnership(DatabaseObjectOwner.MartenDocument, "billing", "invoice"));
 
@@ -57,11 +64,11 @@ public class RowLinksTests
         Query(href!, "db").Should().BeNull("the database is this store's; the page it lands on settles its own");
         Query(href!, "tenant").Should().BeNull();
 
-        string? streams = DatabaseLinks.ToWhereItLives(Options, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenEventStore, "billing"));
+        string? streams = DatabaseLinks.ToWhereItLives(Links, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenEventStore, "billing"));
         Query(streams!, "store").Should().Be("billing");
         Query(streams!, "db").Should().BeNull();
 
-        string? own = DatabaseLinks.ToWhereItLives(Options, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenDocument, "DEFAULT", "customer"));
+        string? own = DatabaseLinks.ToWhereItLives(Links, Scope, new DatabaseObjectOwnership(DatabaseObjectOwner.MartenDocument, "DEFAULT", "customer"));
         Query(own!, "db").Should().Be("localhost.marten", "this store's own object keeps the whole scope, whatever the key's case");
         Query(own!, "tenant").Should().Be("acme");
     }
@@ -69,13 +76,13 @@ public class RowLinksTests
     [Fact]
     public void A_return_link_into_the_object_page_is_kept_and_one_anywhere_else_is_not()
     {
-        SafeReturnLink.Sanitize("database/object?schema=quartz&name=qrtz_triggers&tab=rows", Options, DatabaseLinks.ObjectRoute)
+        SafeReturnLink.Sanitize("database/object?schema=quartz&name=qrtz_triggers&tab=rows", Settings, DatabaseLinks.ObjectRoute)
             .Should().Be("database/object?schema=quartz&name=qrtz_triggers&tab=rows");
-        SafeReturnLink.Sanitize("marten/database/object?schema=quartz", Options, DatabaseLinks.ObjectRoute).Should().NotBeNull();
+        SafeReturnLink.Sanitize("marten/database/object?schema=quartz", Settings, DatabaseLinks.ObjectRoute).Should().NotBeNull();
 
-        SafeReturnLink.Sanitize("documents/customer", Options, DatabaseLinks.ObjectRoute).Should().BeNull();
-        SafeReturnLink.Sanitize("javascript:alert(1)", Options, DatabaseLinks.ObjectRoute).Should().BeNull();
-        SafeReturnLink.Sanitize("//evil.example/database/object", Options, DatabaseLinks.ObjectRoute).Should().BeNull();
+        SafeReturnLink.Sanitize("documents/customer", Settings, DatabaseLinks.ObjectRoute).Should().BeNull();
+        SafeReturnLink.Sanitize("javascript:alert(1)", Settings, DatabaseLinks.ObjectRoute).Should().BeNull();
+        SafeReturnLink.Sanitize("//evil.example/database/object", Settings, DatabaseLinks.ObjectRoute).Should().BeNull();
 
         SafeReturnLink.Sanitize("documents/customer", Options).Should().Be("documents/customer", "the documents list's rule is unchanged");
     }

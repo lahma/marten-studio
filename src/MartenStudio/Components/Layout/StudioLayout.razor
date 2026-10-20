@@ -1,18 +1,18 @@
 @inherits LayoutComponentBase
 @implements IDisposable
-@using Microsoft.Extensions.Options
 @using MartenStudio.Internal
 @using MartenStudio.Services
 @using MartenStudio.Services.Live
+@using MartenStudio.Services.Settings
 @inject StudioState State
 @inject StudioAuthorization Authorization
-@inject IOptions<MartenStudioOptions> Options
+@inject StudioDescriptor Descriptor
 @inject IJSRuntime JsRuntime
 @inject NavigationManager Navigation
 @inject PersistentComponentState PersistentState
 @inject MartenStudioMappedEndpoints MappedEndpoints
 
-@* The stylesheet is not linked from here. It is static markup in MartenStudioApp's own <head>: a
+@* The stylesheet is not linked from here. It is static markup in StudioDocument's own <head>: a
    <HeadContent> put it inside the <HeadOutlet> marker, and the interactive outlet's first render - which
    happens before this layout has registered any section content - removed it from the live DOM. *@
 
@@ -24,13 +24,13 @@
         <div class="ms-anonymous-banner" role="alert">
             <strong>This studio is served to anyone (AllowAnonymous)</strong>
             <span>
-                Its pages carry no authorization, so every document, event stream and schema in this
-                process is readable by anyone who can reach this URL.
+                Its pages carry no authorization, so @Descriptor.ExposedContent is readable by anyone who can
+                reach this URL.
             </span>
         </div>
     }
     <div class="ms-layout">
-        <aside class="ms-sidebar" role="navigation" aria-label="Marten Studio navigation">
+        <aside class="ms-sidebar" role="navigation" aria-label="@($"{Descriptor.ProductName} navigation")">
             <NavMenu />
         </aside>
 
@@ -133,7 +133,7 @@
 
         // The scope travels in the query string so a pasted link reopens the same thing (plan D9).
         // Anything the listings do not carry is ignored by StudioState rather than reported.
-        (string? storeKey, string? databaseId, string? tenantId) = StudioScopeQuery.Read(Navigation.Uri);
+        (string? storeKey, string? databaseId, string? tenantId) = StudioScopeQuery.Read(Navigation.Uri, Descriptor.SourceQueryParameter);
         if (storeKey is not null || databaseId is not null || tenantId is not null)
         {
             await State.SetScopeAsync(storeKey, databaseId, tenantId);
@@ -199,7 +199,7 @@
             return;
         }
 
-        string target = StudioScopeQuery.WithScope(Navigation, State.ActiveScope);
+        string target = StudioScopeQuery.WithScope(Navigation, State.ActiveScope, Descriptor.SourceQueryParameter);
         if (!string.Equals(target, Navigation.Uri, StringComparison.Ordinal))
         {
             Navigation.NavigateTo(target, forceLoad: false, replace: true);

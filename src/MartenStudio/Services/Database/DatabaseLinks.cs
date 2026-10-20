@@ -2,9 +2,8 @@ using System.Text;
 
 using MartenStudio.Components;
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Documents;
-using MartenStudio.Services.Events;
 using MartenStudio.Services.Relationships;
+using MartenStudio.Services.Settings;
 
 using Microsoft.AspNetCore.WebUtilities;
 
@@ -57,8 +56,15 @@ internal sealed record DatabaseRowLink(string? Schema, string? Name, IReadOnlyLi
 /// called <c>key.x</c> travels as <c>key.key.x</c> and comes back as <c>key.x</c>.
 /// </para>
 /// <para>
-/// The page parameters come first and the scope last, which is the order <see cref="EventLinks" /> writes
-/// them in: the part a person reads is at the front of the address bar.
+/// The page parameters come first and the scope last, which is the order the event screens' links write
+/// them in: the part a person reads is at the front of the address bar. The scope's source travels under the
+/// studio's own parameter (<see cref="StudioDescriptor.SourceQueryParameter" />), which is why every link here takes
+/// the descriptor beside the settings.
+/// </para>
+/// <para>
+/// <b>Links out of the browser</b> - a Marten document table to its collection, the event store to Streams - are the
+/// studio's own screens and go through <see cref="IStudioLinks" />, which answers <see langword="null" /> where a
+/// studio has no such screen (<see cref="ToWhereItLives" />).
 /// </para>
 /// </remarks>
 internal static class DatabaseLinks
@@ -124,23 +130,26 @@ internal static class DatabaseLinks
     public const int ConsoleRowLimit = SqlLiteralText.ConsoleRowLimit;
 
     /// <summary>The browser, on one kind tab, optionally narrowed to one schema, an owner and a name.</summary>
-    /// <param name="options">The studio's options.</param>
+    /// <param name="settings">The studio's settings.</param>
+    /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry, or <see langword="null" /> for none.</param>
     /// <param name="schema">One schema, or <see langword="null" /> for every schema this visitor may see.</param>
     /// <param name="kind">The kind tab, or <see langword="null" /> for the default (tables).</param>
     /// <param name="owner">The owner filter; <see cref="DatabaseOwnerFilter.All" /> is the default and is left out.</param>
     /// <param name="nameFilter">A case-insensitive substring of the name, or <see langword="null" />.</param>
     public static string ToBrowser(
-        MartenStudioOptions options,
+        IStudioSettings settings,
+        StudioDescriptor descriptor,
         StudioScope? scope,
         string? schema = null,
         DatabaseObjectCategory? kind = null,
         DatabaseOwnerFilter owner = DatabaseOwnerFilter.All,
         string? nameFilter = null)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(descriptor);
 
-        LinkBuilder link = new(StudioLink.To(options, BrowserRoute));
+        LinkBuilder link = new(StudioLink.To(settings, BrowserRoute), descriptor.SourceQueryParameter);
 
         link.Add(SchemaParameter, schema);
         link.Add(KindParameter, kind is { } category ? KindToken(category) : null);
@@ -152,7 +161,8 @@ internal static class DatabaseLinks
     }
 
     /// <summary>One relation's detail page.</summary>
-    /// <param name="options">The studio's options.</param>
+    /// <param name="settings">The studio's settings.</param>
+    /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="schema">The relation's schema.</param>
     /// <param name="name">The relation's name.</param>
@@ -162,18 +172,20 @@ internal static class DatabaseLinks
     /// value is left out.
     /// </param>
     public static string ToObject(
-        MartenStudioOptions options,
+        IStudioSettings settings,
+        StudioDescriptor descriptor,
         StudioScope? scope,
         string schema,
         string name,
         DatabaseObjectTab? tab = null,
         IReadOnlyList<KeyValuePair<string, string?>>? extra = null)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(name);
 
-        LinkBuilder link = new(StudioLink.To(options, ObjectRoute));
+        LinkBuilder link = new(StudioLink.To(settings, ObjectRoute), descriptor.SourceQueryParameter);
 
         link.AddAlways(SchemaParameter, schema);
         link.AddAlways(NameParameter, name);
@@ -193,14 +205,22 @@ internal static class DatabaseLinks
     /// A relation's Rows tab, optionally filtered - where "filter by this value", a reference's parent and
     /// child rows, and "referenced by" all land.
     /// </summary>
-    /// <param name="options">The studio's options.</param>
+    /// <param name="settings">The studio's settings.</param>
+    /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="schema">The relation's schema.</param>
     /// <param name="name">The relation's name.</param>
     /// <param name="filter">A filter in <see cref="RowFilterGrammar" />'s syntax, or <see langword="null" /> for every row.</param>
-    public static string ToRows(MartenStudioOptions options, StudioScope? scope, string schema, string name, string? filter = null) =>
+    public static string ToRows(
+        IStudioSettings settings,
+        StudioDescriptor descriptor,
+        StudioScope? scope,
+        string schema,
+        string name,
+        string? filter = null) =>
         ToObject(
-            options,
+            settings,
+            descriptor,
             scope,
             schema,
             name,
@@ -212,19 +232,22 @@ internal static class DatabaseLinks
     /// Folded in from DB-6's own link builder unchanged, the scope first and the view and schema after it, so
     /// that no href the screen already drew moves.
     /// </remarks>
-    /// <param name="options">The studio's options.</param>
+    /// <param name="settings">The studio's settings.</param>
+    /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="view">Documents, tables or both.</param>
     /// <param name="schema">One schema chip, or <see langword="null" /> for all of them.</param>
     public static string ToRelationships(
-        MartenStudioOptions options,
+        IStudioSettings settings,
+        StudioDescriptor descriptor,
         StudioScope? scope,
         RelationshipViewMode view,
         string? schema)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(descriptor);
 
-        string url = DocumentLinks.WithScope(StudioLink.To(options, RelationshipsRoute), scope);
+        string url = StudioScopeQuery.Append(StudioLink.To(settings, RelationshipsRoute), scope, descriptor.SourceQueryParameter);
 
         if (RelationshipViews.Token(view) is { } token)
         {
@@ -291,7 +314,8 @@ internal static class DatabaseLinks
     }
 
     /// <summary>One row's detail page, with one readable parameter per key column.</summary>
-    /// <param name="options">The studio's options.</param>
+    /// <param name="settings">The studio's settings.</param>
+    /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="schema">The relation's schema.</param>
     /// <param name="name">The relation's name.</param>
@@ -301,19 +325,21 @@ internal static class DatabaseLinks
     /// </param>
     /// <param name="extra">Further parameters to carry, in order; a blank value is left out.</param>
     public static string ToRow(
-        MartenStudioOptions options,
+        IStudioSettings settings,
+        StudioDescriptor descriptor,
         StudioScope? scope,
         string schema,
         string name,
         IReadOnlyList<KeyValuePair<string, string>> key,
         IReadOnlyList<KeyValuePair<string, string?>>? extra = null)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(key);
 
-        LinkBuilder link = new(StudioLink.To(options, RowRoute));
+        LinkBuilder link = new(StudioLink.To(settings, RowRoute), descriptor.SourceQueryParameter);
 
         link.AddAlways(SchemaParameter, schema);
         link.AddAlways(NameParameter, name);
@@ -467,9 +493,12 @@ internal static class DatabaseLinks
     /// lands on settles its own and authorizes the visitor for it again.
     /// </para>
     /// </remarks>
-    public static string? ToWhereItLives(MartenStudioOptions options, StudioScope? scope, DatabaseObjectOwnership ownership)
+    /// <param name="links">The studio's links into its own screens; a <see langword="null" /> answer is plain text.</param>
+    /// <param name="scope">The scope to carry.</param>
+    /// <param name="ownership">Whose the object is.</param>
+    public static string? ToWhereItLives(IStudioLinks links, StudioScope? scope, DatabaseObjectOwnership ownership)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(links);
         ArgumentNullException.ThrowIfNull(ownership);
 
         if (ownership.StoreKey is { Length: > 0 } owner
@@ -481,29 +510,13 @@ internal static class DatabaseLinks
         return ownership.Owner switch
         {
             DatabaseObjectOwner.MartenDocument => ownership.Alias is { Length: > 0 } alias
-                ? DocumentLinks.ToCollection(options, scope, alias)
-                : DocumentLinks.ToIndex(options, scope),
-            DatabaseObjectOwner.MartenEventStore => ToStreams(options, scope),
-            DatabaseObjectOwner.MartenInfrastructure => ToSchema(options, scope),
+                ? links.ToCollection(scope, alias)
+                : links.ToDocuments(scope),
+            DatabaseObjectOwner.MartenEventStore => links.ToStreams(scope),
+            DatabaseObjectOwner.MartenInfrastructure => links.ToSchema(scope),
             _ => null,
         };
     }
-
-    /// <summary>The event streams list.</summary>
-    public static string ToStreams(MartenStudioOptions options, StudioScope? scope) =>
-        EventLinks.To(options, EventLinks.StreamsRoute, scope);
-
-    /// <summary>The event feed.</summary>
-    public static string ToFeed(MartenStudioOptions options, StudioScope? scope) =>
-        EventLinks.To(options, EventLinks.FeedRoute, scope);
-
-    /// <summary>The projections screen.</summary>
-    public static string ToProjections(MartenStudioOptions options, StudioScope? scope) =>
-        EventLinks.To(options, "projections", scope);
-
-    /// <summary>One tab of the Schema screen - by default its tables, which is where Marten's own are described.</summary>
-    public static string ToSchema(MartenStudioOptions options, StudioScope? scope, string tab = "tables") =>
-        EventLinks.To(options, "schema", scope, [new KeyValuePair<string, string?>(TabParameter, tab)]);
 
     /// <summary>
     /// The SQL console, with a <c>SELECT</c> of this relation written into it - or <see langword="null" />
@@ -513,9 +526,15 @@ internal static class DatabaseLinks
     /// This link only fills the editor. The statement runs when the visitor presses Run, through the console's
     /// own gate: <c>RunSql</c>, the write policy, the statement guard and the read-only transaction (D13).
     /// </remarks>
-    public static string? ToQueryConsole(MartenStudioOptions options, StudioScope? scope, string schema, string name)
+    /// <param name="settings">The studio's settings.</param>
+    /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
+    /// <param name="scope">The scope to carry.</param>
+    /// <param name="schema">The relation's schema.</param>
+    /// <param name="name">The relation's name.</param>
+    public static string? ToQueryConsole(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope, string schema, string name)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(descriptor);
 
         // The statement itself is written in Internal/Sql (AGENTS.md hard rule 4): text that reaches an
         // editor is text somebody may press Run on.
@@ -524,7 +543,7 @@ internal static class DatabaseLinks
             return null;
         }
 
-        LinkBuilder link = new(StudioLink.To(options, "query"));
+        LinkBuilder link = new(StudioLink.To(settings, "query"), descriptor.SourceQueryParameter);
 
         link.AddAlways("mode", "sql");
         link.AddAlways("sql", statement);
@@ -537,15 +556,17 @@ internal static class DatabaseLinks
     /// The SQL console with a statement of the studio's own composing written into it - never run until the
     /// visitor presses Run, through the console's own gate (D13).
     /// </summary>
-    /// <param name="options">The studio's options.</param>
+    /// <param name="settings">The studio's settings.</param>
+    /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry.</param>
     /// <param name="statement">The text for the editor, from <see cref="SqlLiteralText" />.</param>
-    public static string ToQueryConsole(MartenStudioOptions options, StudioScope? scope, string statement)
+    public static string ToQueryConsole(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope, string statement)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(statement);
 
-        LinkBuilder link = new(StudioLink.To(options, "query"));
+        LinkBuilder link = new(StudioLink.To(settings, "query"), descriptor.SourceQueryParameter);
 
         link.AddAlways("mode", "sql");
         link.AddAlways("sql", statement);
@@ -588,9 +609,14 @@ internal static class DatabaseLinks
     private sealed class LinkBuilder
     {
         private readonly StringBuilder builder;
+        private readonly string sourceParameter;
         private bool first = true;
 
-        public LinkBuilder(string path) => builder = new StringBuilder(path);
+        public LinkBuilder(string path, string sourceParameter)
+        {
+            builder = new StringBuilder(path);
+            this.sourceParameter = sourceParameter;
+        }
 
         /// <summary>Adds a parameter unless its value is null or blank.</summary>
         public void Add(string key, string? value)
@@ -612,7 +638,7 @@ internal static class DatabaseLinks
             first = false;
         }
 
-        /// <summary>Adds <c>store</c>, <c>db</c> and <c>tenant</c>, each only when it is set.</summary>
+        /// <summary>Adds the studio's source parameter, <c>db</c> and <c>tenant</c>, each only when it is set.</summary>
         public void AddScope(StudioScope? scope)
         {
             if (scope is null)
@@ -620,7 +646,7 @@ internal static class DatabaseLinks
                 return;
             }
 
-            Add(StudioScopeQuery.StoreKeyParameter, scope.StoreKey);
+            Add(sourceParameter, scope.StoreKey);
             Add(StudioScopeQuery.DatabaseIdParameter, scope.DatabaseId);
             Add(StudioScopeQuery.TenantIdParameter, scope.TenantId);
         }

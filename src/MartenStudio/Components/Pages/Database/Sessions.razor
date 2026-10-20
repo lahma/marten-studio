@@ -2,13 +2,14 @@
 @using MartenStudio.Services.Database
 @using MartenStudio.Services.Health
 @using MartenStudio.Services.Live
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @implements IAsyncDisposable
 @inject ISessionActivityService SessionData
 @inject SessionPoolObserver Pools
 @inject StudioState State
 @inject StudioLiveUpdatesFactory LiveFactory
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 
 @*
     Database › Sessions: who is connected to this database, what they wait for, what is locked, and which
@@ -369,7 +370,7 @@
     /// <summary>Whether the details are on screen: the gate open and the service's answer a grant.</summary>
     private bool ShowDetails => summary?.Details.IsOpen == true && details is { Refusal: DatabaseRefusal.None };
 
-    private string DatabaseHref => DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope);
+    private string DatabaseHref => DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope);
 
     protected override void OnInitialized()
     {
@@ -405,7 +406,7 @@
         }
 
         live = LiveFactory.Create();
-        await live.StartAsync(Options.Value.EffectiveHealthInterval, TickAsync, lifetime.Token);
+        await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, lifetime.Token);
     }
 
     /// <summary>

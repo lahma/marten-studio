@@ -135,15 +135,15 @@ public class TableHealthHelpersTests
     {
         var plain = SqlTestStore.DocumentType<HealthOrderDoc>();
 
-        StorageParameters.Declared(plain, Floor).Should().BeNull("Marten 9.39 has no DocumentMapping.StorageParameters");
+        DeclaredStorageParameters.Of(plain, Floor).Should().BeNull("Marten 9.39 has no DocumentMapping.StorageParameters");
 
         if (RuntimeFeature.DeclaredStorageParameters.IsAvailable(MartenRuntime.Current))
         {
-            StorageParameters.Declared(plain, MartenRuntime.Current).Should().BeEmpty("nothing declared is nothing, on a Marten that can declare");
+            DeclaredStorageParameters.Of(plain, MartenRuntime.Current).Should().BeEmpty("nothing declared is nothing, on a Marten that can declare");
         }
         else
         {
-            StorageParameters.Declared(plain, MartenRuntime.Current).Should().BeNull();
+            DeclaredStorageParameters.Of(plain, MartenRuntime.Current).Should().BeNull();
         }
     }
 
@@ -151,7 +151,7 @@ public class TableHealthHelpersTests
     // IndexRedundancy
     // -----------------------------------------------------------------------------------------------
 
-    private static readonly MartenTable Orders = new("s", "t", MartenTableKind.Managed, OutsideStoreSchemas: false);
+    private static readonly MartenTable Orders = MartenTables.Table("s", "t", MartenTableKind.Managed, outsideStoreSchemas: false);
 
     [Theory]
     [InlineData("CREATE INDEX i ON s.t USING btree (a) WHERE (b = 1)", "(b = 1)")]
@@ -298,10 +298,10 @@ public class TableHealthHelpersTests
                 new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
                 store,
                 store.Storage.Database),
-            new MartenStudioOptions { IsDocumentTypeVisible = static type => type != typeof(HealthIntDoc) },
-            MartenRuntime.Current,
+            MartenStudioSettings.Of(new MartenStudioOptions { IsDocumentTypeVisible = static type => type != typeof(HealthIntDoc) }),
+            MartenStudioRuntime.Current,
             services,
-            new HealthSqlRunner(new HealthConnection(store.Storage.Database), new ReadOnlySqlOptions(), null),
+            new HealthSqlRunner(new HealthConnection(MartenStudioDatabase.Of(store.Storage.Database)), new ReadOnlySqlOptions(), null),
             Now,
             new HealthSweepMemo(),
             CancellationToken.None);
@@ -348,10 +348,10 @@ public class TableHealthHelpersTests
         extended.Schema.Should().Be("xso_own");
         extended.Kind.Should().Be(MartenTableKind.Managed);
         extended.DocumentTypes.Should().BeEmpty("a finding about it names no document type");
-        extended.OutsideStoreSchemas.Should().BeTrue();
+        extended.OutsideOwnSchemas.Should().BeTrue();
         extended.GatedSchemas.Should().Equal(["xso_own"], "a finding about it is shown only past the database browser's gate for that schema (D27)");
         extended.NoteName.Should().NotContain("xso", "a status row's note names neither the table nor its schema");
-        set.Tables.Where(static x => x.Table != "xso_things" && x.Table != "y").Should().OnlyContain(static x => !x.OutsideStoreSchemas && x.GatedSchemas.Count == 0,
+        set.Tables.Where(static x => x.Table != "xso_things" && x.Table != "y").Should().OnlyContain(static x => x.GatedSchemas.Count == 0,
             "every other table is in the store's own schemas, and its findings read no gate they did not read before");
         set.Targets.Should().Contain(new HealthTableTarget("xso_own", "xso_things"), "the statements bind its own schema, as a parameter");
         set.Find("xso_own", "xso_things").Should().BeSameAs(extended, "a row the catalog returns for it is matched back to it");
@@ -370,10 +370,10 @@ public class TableHealthHelpersTests
                 new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
                 store,
                 store.Storage.Database),
-            new MartenStudioOptions(),
-            MartenRuntime.Current,
+            MartenStudioSettings.Of(new MartenStudioOptions()),
+            MartenStudioRuntime.Current,
             services,
-            new HealthSqlRunner(new HealthConnection(store.Storage.Database), new ReadOnlySqlOptions(), null),
+            new HealthSqlRunner(new HealthConnection(MartenStudioDatabase.Of(store.Storage.Database)), new ReadOnlySqlOptions(), null),
             Now,
             new HealthSweepMemo(),
             CancellationToken.None);
@@ -382,15 +382,15 @@ public class TableHealthHelpersTests
     [Fact]
     public void The_studio_ships_T01_to_T12_and_the_statement_checks_T22_and_T23()
     {
-        new HealthCheckRegistry().All.Select(static x => x.Info.Code)
+        StudioHealthChecks.Registry.All.Select(static x => x.Info.Code)
             .Should().Contain(["T01", "T03", "T04", "T05", "T06", "T07", "T08", "T09", "T10", "T11", "T12"]);
 
-        new HealthCheckRegistry().Find("T09")!.Info.Tier.Should().Be(HealthCostTier.BoundedData);
+        StudioHealthChecks.Registry.Find("T09")!.Info.Tier.Should().Be(HealthCostTier.BoundedData);
 
         // H7's statement checks: tier 3, behind the activity gate, as the registry requires of a statement check.
         foreach (string code in (string[]) ["T02", "T22", "T23"])
         {
-            HealthCheckInfo info = new HealthCheckRegistry().Find(code)!.Info;
+            HealthCheckInfo info = StudioHealthChecks.Registry.Find(code)!.Info;
             info.Tier.Should().Be(HealthCostTier.Statements, code);
             info.Gate.Should().Be(HealthGate.Activity, code);
         }

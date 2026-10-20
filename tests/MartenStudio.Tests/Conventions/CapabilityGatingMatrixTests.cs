@@ -12,6 +12,7 @@ using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
 using MartenStudio.Services.Relationships;
 using MartenStudio.Services.Schema;
+using MartenStudio.Services.Sources;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authorization;
@@ -104,7 +105,7 @@ public class CapabilityGatingMatrixTests
 
         new(typeof(ISchemaDataService), nameof(ISchemaDataService.ApplyAsync), StudioCapability.ApplySchemaChanges),
 
-        new(typeof(IQueryService), nameof(IQueryService.RunSqlAsync), StudioCapability.RunSql),
+        new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.RunSqlAsync), StudioCapability.RunSql),
 
         // F7: a read gated like a write that refuses by throwing, exactly as the console does - so it sits
         // here, beside RunSqlAsync, and gets the same three refusals.
@@ -193,6 +194,9 @@ public class CapabilityGatingMatrixTests
             "PreviewAsync", "TablesAsync",
         ],
         [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync"],
+
+        // PS-1d: the console is the shared seam now, and its one member is gated (Mutating).
+        [typeof(ISqlConsoleService)] = [],
         [typeof(ILinqQueryService)] = ["DescribeAsync"],
         [typeof(IDatabaseObjectService)] =
         [

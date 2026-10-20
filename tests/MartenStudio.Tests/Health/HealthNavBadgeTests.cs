@@ -161,9 +161,8 @@ public class HealthNavBadgeTests
 
             NavIndicatorService service = new(
                 state,
-                new StudioAuthorization(Options.Create(new MartenStudioOptions()), new TestStoreAuthorizationService(), users),
-                events,
-                projections,
+                MartenSpine.Authorization(Options.Create(new MartenStudioOptions()), new TestStoreAuthorizationService(), users),
+                [new MartenNavIndicatorContributor(events, projections)],
                 new StudioSnapshotCache(),
                 NullLogger<NavIndicatorService>.Instance,
                 harness.Health);

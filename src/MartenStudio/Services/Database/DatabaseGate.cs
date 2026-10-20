@@ -19,7 +19,7 @@ namespace MartenStudio.Services.Database;
 /// </description></item>
 /// <item><description>
 /// <b>Other schemas</b> are visible only with the capability, the policy's yes, and a schema
-/// <see cref="MartenStudioOptions.BrowsableSchemas" /> admits. Withheld ones are counted, never named.
+/// <c>BrowsableSchemas</c> admits. Withheld ones are counted, never named.
 /// </description></item>
 /// <item><description>
 /// <b>Definitions</b> of objects Marten does not own, and <b>rows</b> of any relation, need the same three
@@ -67,9 +67,9 @@ internal sealed class DatabaseGate
     /// <summary>Builds the gate from what the service has established.</summary>
     /// <param name="storeSchemas">The store's own schemas, declaration order.</param>
     /// <param name="liveSchemas">The database's schemas, as the reading role sees them.</param>
-    /// <param name="configuredEntries"><see cref="MartenStudioOptions.BrowsableSchemas" />.</param>
+    /// <param name="configuredEntries"><c>BrowsableSchemas</c>.</param>
     /// <param name="capabilityEnabled">Whether <c>BrowseDatabase</c> is on and <c>ReadOnly</c> is off.</param>
-    /// <param name="readOnly"><see cref="MartenStudioOptions.ReadOnly" />.</param>
+    /// <param name="readOnly"><c>ReadOnly</c>.</param>
     /// <param name="authorized">The policies' answer; <see langword="null" /> when not asked.</param>
     /// <param name="classifier">Whose each object is.</param>
     /// <param name="sqlConsoleRole">The role reads run as, for the privilege sentence.</param>
@@ -163,7 +163,7 @@ internal sealed class DatabaseGate
             stateDenial);
     }
 
-    /// <summary>What <see cref="MartenStudioOptions.ReadOnly" /> says.</summary>
+    /// <summary>What <c>ReadOnly</c> says.</summary>
     public const string ReadOnlyDenial =
         "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.BrowseDatabase off " +
         "with every other capability.";
@@ -252,7 +252,7 @@ internal sealed class DatabaseGate
         "or StoreAuthorizationPolicy when no write policy is set) refused BrowseDatabase for that store, with " +
         "no tenant selected.";
 
-    /// <summary>What an empty <see cref="MartenStudioOptions.BrowsableSchemas" /> says.</summary>
+    /// <summary>What an empty <c>BrowsableSchemas</c> says.</summary>
     public const string EmptyListDenial =
         "MartenStudioOptions.BrowsableSchemas is empty, so no schema's non-Marten rows or definitions are " +
         "browsable. List the schema names, or \"*\".";
@@ -265,7 +265,7 @@ internal sealed class DatabaseGate
 
     /// <summary>
     /// The schemas whose structure this visitor may see: the store's own that exist, then the ones
-    /// <see cref="MartenStudioOptions.BrowsableSchemas" /> admits while the gate is open. Every catalog read
+    /// <c>BrowsableSchemas</c> admits while the gate is open. Every catalog read
     /// is filtered to exactly these.
     /// </summary>
     public IReadOnlyList<string> VisibleSchemas { get; }
@@ -749,7 +749,7 @@ internal sealed class DatabaseGate
         return null;
     }
 
-    /// <summary>What a schema outside <see cref="MartenStudioOptions.BrowsableSchemas" /> says.</summary>
+    /// <summary>What a schema outside <c>BrowsableSchemas</c> says.</summary>
     /// <remarks>
     /// Said the same way whether or not the schema exists, so the sentence tells nobody what is there.
     /// </remarks>

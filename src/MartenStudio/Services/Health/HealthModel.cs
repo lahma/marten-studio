@@ -25,7 +25,7 @@ internal enum HealthSeverity
 /// <para>
 /// <see cref="Replication" /> and <see cref="Server" /> were added in 0.4 (R1, decision 1): what a replication
 /// slot holds and what the server is configured to risk are neither the store's tables nor its sessions, and
-/// <see cref="Configuration" /> stays the store's own, read with no I/O.
+/// <see cref="HealthArea.Configuration" /> stays the store's own, read with no I/O.
 /// </para>
 /// </remarks>
 internal enum HealthArea

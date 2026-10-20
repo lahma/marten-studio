@@ -2,6 +2,7 @@ using Marten;
 
 using MartenStudio.Services;
 using MartenStudio.Services.Health;
+using MartenStudio.Services.Sources;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Authorization;
@@ -241,13 +242,23 @@ internal sealed class HealthHarness : IAsyncDisposable
     /// The Marten the sweeper and the health service believe this host runs - a made-up one, so a light-up check's
     /// applicability is the same at every Marten the suite runs at - or <see langword="null" /> for this process's own.
     /// </param>
+    /// <param name="sourceKinds">
+    /// The kinds of source each check runs against (<see langword="null" /> for every kind), or <see langword="null" /> to
+    /// run every check against every kind.
+    /// </param>
+    /// <param name="before">
+    /// Registrations a test makes before <c>AddMartenStudio()</c>, whose <c>TryAdd</c> then keeps them - a seam's
+    /// stand-in, say.
+    /// </param>
     public static HealthHarness Create(
         IEnumerable<Type>? checks = null,
         Action<MartenStudioOptions>? studio = null,
         Action<StoreOptions>? store = null,
         string? environment = "Development",
         bool policies = false,
-        MartenStudio.Services.Configuration.MartenRuntime? runtime = null)
+        MartenStudio.Services.Configuration.MartenRuntime? runtime = null,
+        Func<Type, IReadOnlySet<StudioSourceKind>?>? sourceKinds = null,
+        Action<IServiceCollection>? before = null)
     {
         FakeTimeProvider clock = new(new DateTimeOffset(2026, 10, 15, 9, 0, 0, TimeSpan.Zero));
         CapturingLoggerProvider logs = new();
@@ -270,7 +281,9 @@ internal sealed class HealthHarness : IAsyncDisposable
             // HealthSweeper and HealthService take an optional MartenRuntime; registered, it is the one they ask.
             services.AddSingleton(runtime);
         }
-        services.AddSingleton(HealthCheckRegistry.ForTypes(checks ?? ScriptedChecks));
+        services.AddSingleton(HealthCheckRegistry.ForTypes(
+            (checks ?? ScriptedChecks).Select(type => (type, sourceKinds?.Invoke(type))),
+            MartenStudio.Services.Configuration.MartenStudioRuntime.Current));
 
         if (environment is not null)
         {
@@ -285,6 +298,8 @@ internal sealed class HealthHarness : IAsyncDisposable
             options.DatabaseSchemaName = "health_unit";
             store?.Invoke(options);
         });
+
+        before?.Invoke(services);
 
         services.AddMartenStudio(options =>
         {

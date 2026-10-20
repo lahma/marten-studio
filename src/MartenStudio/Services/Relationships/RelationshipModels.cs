@@ -33,6 +33,91 @@ internal sealed record RelationshipNode(
 }
 
 /// <summary>
+/// What a source contributes to the Relationships graph beyond the catalog: its own nodes over its own tables, the
+/// tables its configuration claims but hides, and its own schemas - answered by an
+/// <see cref="Sources.IRelationshipNodeSource" />, and empty for a source that has none.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>A hidden table is named here so that it can be dropped everywhere.</b> A key with an end in a table the source
+/// hides - a document type the host hid, or the source's own bookkeeping - disappears from the graph completely: not
+/// as an edge, not as a node, and not as an "unmatched" row, which would name the very thing the source hides. So the
+/// builder has to know those tables, and only the source can say which they are.
+/// </para>
+/// <para>
+/// Nothing in it is about a visitor beyond what the source's own visibility rule removed: the per-visitor filter is
+/// the database browser's gate, applied by the builder.
+/// </para>
+/// </remarks>
+/// <param name="Nodes">The source's nodes, each carrying the schema and table it lives in, in the source's own order.</param>
+/// <param name="HiddenTables">Every table the source claims and does not draw, as (schema, table).</param>
+/// <param name="OwnSchemas">
+/// The source's own schemas: always part of the shared foreign-key read, and the only visible ones when the
+/// database browser's gate could not be read.
+/// </param>
+internal sealed record RelationshipNodeSet(
+    IReadOnlyList<RelationshipNode> Nodes,
+    IReadOnlyList<(string Schema, string Table)> HiddenTables,
+    IReadOnlyList<string> OwnSchemas)
+{
+    private static readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> NoMembers =
+        new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>No nodes, no hidden tables and no schemas of its own - a plain source's answer.</summary>
+    public static RelationshipNodeSet None { get; } = new([], [], []);
+
+    /// <summary>
+    /// Per node key, the member behind each of its columns that has one - MartenStudio's duplicated fields - which is
+    /// what an edge's "member" names and what the referenced-by link filters on. Columns compare ignoring case.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Members { get; init; } = NoMembers;
+
+    /// <summary>The member behind <paramref name="column" /> of node <paramref name="alias" />, or <see langword="null" />.</summary>
+    /// <param name="alias">The node's key.</param>
+    /// <param name="column">The column.</param>
+    public string? MemberFor(string alias, string column) =>
+        Members.TryGetValue(alias, out IReadOnlyDictionary<string, string>? columns)
+        && columns.TryGetValue(column, out string? member)
+            ? member
+            : null;
+}
+
+/// <summary>
+/// A foreign key a source's configuration declares - MartenStudio's <c>ForeignKey&lt;T&gt;()</c> - with its target
+/// resolved by the source as far as its configuration can say.
+/// </summary>
+/// <remarks>
+/// The builder holds each one up against what Postgres has: declared and there, declared and missing (drift), or a
+/// constraint the configuration does not declare. The target is resolved by the source because only it knows its own
+/// type model - a key declared against a subclass belongs to the root's table - and a key into a table it does not
+/// map carries the table as the configuration names it, for the builder to place.
+/// </remarks>
+/// <param name="FromAlias">The node the key is on.</param>
+/// <param name="Name">The constraint name the configuration gives it.</param>
+/// <param name="Columns">The pointing columns, in the configuration's order.</param>
+/// <param name="LinkedColumns">The referenced columns, in the configuration's order.</param>
+/// <param name="OnDelete">The delete action, as <c>CascadeAction</c> spells it.</param>
+internal sealed record RelationshipDeclaredKey(
+    string FromAlias,
+    string Name,
+    IReadOnlyList<string> Columns,
+    IReadOnlyList<string> LinkedColumns,
+    string OnDelete)
+{
+    /// <summary>The node the key points at, when the configuration resolves it to one of the source's own.</summary>
+    public string? ToAlias { get; init; }
+
+    /// <summary>The schema of the table the key points at, when it is not one of the nodes; <see langword="null" /> for none named.</summary>
+    public string? LinkedSchema { get; init; }
+
+    /// <summary>The table the key points at, when it is not one of the nodes.</summary>
+    public string? LinkedTable { get; init; }
+
+    /// <summary>The table the key points at, as the configuration prints its name.</summary>
+    public string? LinkedQualifiedName { get; init; }
+}
+
+/// <summary>
 /// One table the studio does not map as a document type - somebody else's, or a relational table Marten
 /// manages for a projection - as the relationships graph draws it.
 /// </summary>

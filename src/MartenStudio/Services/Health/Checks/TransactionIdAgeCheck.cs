@@ -69,7 +69,7 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
     /// <inheritdoc />
     public override async Task<TransactionIdAgeFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        IReadOnlyList<TableFacts> tables = await MartenTables.TablesAsync(context).ConfigureAwait(false);
+        IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
         WraparoundFacts wraparound = await Wraparound.SharedAsync(context).ConfigureAwait(false);
 
         return new TransactionIdAgeFacts(tables, wraparound);
@@ -181,11 +181,11 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
             DocumentTypes = [.. past.SelectMany(static x => x.Table.DocumentTypes).Distinct()],
 
             // No GatedSchemas: a database-wide wraparound warning must not vanish because the oldest table is one in a
-            // schema the browser withholds, so such a table is named generically (MartenTable.NoteName) throughout.
+            // schema the browser withholds, so such a table is named generically (StudioTableText.NoteName) throughout.
             Title = forecastOnly
                 ? Capitalised(forecast!.AtTheRate) + ", Postgres would stop accepting writes in " + HorizonForecast.Span(toRefusal!.Value)
                   + ": " + Whose(origin, oldest) + " is past autovacuum_freeze_max_age and has not been frozen"
-                : (origin == Origin.StoreTable && !oldest!.Table.OutsideStoreSchemas ? oldest.Key : Capitalised(Whose(origin, oldest))) + " is " + Wraparound.Count(age)
+                : (origin == Origin.StoreTable && !oldest!.Table.OutsideOwnSchemas ? oldest.Key : Capitalised(Whose(origin, oldest))) + " is " + Wraparound.Count(age)
                   + " transactions from its last freeze; Postgres stops accepting writes at about 2.1 billion",
             WhyItMatters = WhyItMatters(origin, freezeMaxAge, database),
             Evidence = Evidence(oldest, tableAge, database, freezeMaxAge, warning, critical, past, forecast, toForced, toRefusal),

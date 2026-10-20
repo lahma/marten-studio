@@ -234,7 +234,7 @@ public class SchemaPageTests
     {
         using var context = NewContext(out FakeSchemaDataService schema, capabilities: true);
         schema.Preview = new MigrationPreview("create index x on y (z);", 1, [], "Update", null);
-        schema.ApplyFailure = new StudioCapabilityDeniedException(
+        schema.ApplyFailure = MartenSpine.Denied(
             StudioCapability.ApplySchemaChanges,
             CapabilityDenialReason.Disabled);
 

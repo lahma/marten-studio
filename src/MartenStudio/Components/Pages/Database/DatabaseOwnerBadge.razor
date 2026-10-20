@@ -1,7 +1,7 @@
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Services.Database
 @using MartenStudio.Components.Pages.Documents
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioLinks Links
 @inject StudioState State
 
 @*
@@ -18,11 +18,14 @@
 @if (Ownership is { } owner)
 {
     string title = DatabasePresentation.OwnerTitle(owner);
-    string? href = DatabaseLinks.ToWhereItLives(Options.Value, State.ActiveScope, owner);
+    string? href = DatabaseLinks.ToWhereItLives(Links, State.ActiveScope, owner);
 
+    // Where the studio has no screen to send a Marten object to (IStudioLinks answers null), the badge is the
+    // same label as plain text: the classification still holds - its rows are never read here - but there is
+    // nowhere to open them.
     switch (owner.Owner)
     {
-        case DatabaseObjectOwner.MartenDocument:
+        case DatabaseObjectOwner.MartenDocument when href is not null:
             <a class="ms-db-owner ms-db-owner-link ms-db-owner-document" href="@href" title="@title">
                 <CollectionChip Alias="@(owner.Alias ?? "documents")"
                                 Hue="@CollectionColorizer.HueFor(owner.Alias)"
@@ -32,12 +35,29 @@
             </a>
             break;
 
-        case DatabaseObjectOwner.MartenEventStore:
+        case DatabaseObjectOwner.MartenDocument:
+            <span class="ms-db-owner ms-db-owner-document" title="@title">
+                <CollectionChip Alias="@(owner.Alias ?? "documents")"
+                                Hue="@CollectionColorizer.HueFor(owner.Alias)"
+                                Title="@title"
+                                Small="true" />
+            </span>
+            break;
+
+        case DatabaseObjectOwner.MartenEventStore when href is not null:
             <a class="ms-db-owner ms-db-owner-link ms-db-owner-events" href="@href" title="@title">event store</a>
             break;
 
-        case DatabaseObjectOwner.MartenInfrastructure:
+        case DatabaseObjectOwner.MartenEventStore:
+            <span class="ms-db-owner ms-db-owner-events" title="@title">event store</span>
+            break;
+
+        case DatabaseObjectOwner.MartenInfrastructure when href is not null:
             <a class="ms-db-owner ms-db-owner-link ms-db-owner-internal" href="@href" title="@title">Marten internal</a>
+            break;
+
+        case DatabaseObjectOwner.MartenInfrastructure:
+            <span class="ms-db-owner ms-db-owner-internal" title="@title">Marten internal</span>
             break;
 
         case DatabaseObjectOwner.MartenProjectionOrExtended:
@@ -58,7 +78,7 @@
 }
 
 @code {
-    /// <summary>The object's <c>DatabaseObjectOwnership</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    /// <summary>The object's <c>DatabaseObjectOwnership</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
     [Parameter]
     public object? Model { get; set; }
 

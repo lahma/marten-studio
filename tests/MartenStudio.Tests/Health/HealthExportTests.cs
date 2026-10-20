@@ -131,7 +131,8 @@ public class HealthExportTests
     [Fact]
     public void The_advisors_registry_does_not_take_the_export_for_one_of_its_checks()
     {
-        HealthCheckRegistry.Discover(typeof(HealthCheckRegistry).Assembly).Should().NotContain(typeof(MartenStudioHealthCheck));
+        MartenStudio.Services.MartenStudioDescriptor.Instance.HealthCheckAssemblies.Select(static x => x.Assembly).Distinct()
+            .SelectMany(HealthCheckRegistry.Discover).Should().NotContain(typeof(MartenStudioHealthCheck));
         typeof(MartenStudioHealthCheck).Should().Implement<AspNetCoreHealthCheck>()
             .And.NotImplement<MartenStudio.Services.Health.IHealthCheck>();
     }
@@ -153,6 +154,28 @@ public class HealthExportTests
 
         harness.Script.Runs.Should().ContainKeys("K90", "K91", "T90", "C90")
             .And.NotContainKey("E90", "a probe runs tiers 0 and 1, never the deeper reads");
+        harness.StudioWarnings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// PS-1c: the run reads the studio's sources through <c>IStudioSourceProvider</c>, a circuit's service, and has no
+    /// circuit - so it resolves the provider from a scope of its own run. A Development host validates scopes, and would
+    /// refuse a scoped provider resolved from the root container: the probe would be Degraded with the exception's type.
+    /// </summary>
+    [Fact]
+    public async Task A_host_that_validates_scopes_builds_and_runs_one_export()
+    {
+        await using HealthExportHarness harness = HealthExportHarness.Create(validateScopes: true);
+
+        Action fromRoot = () => harness.Services.GetService<MartenStudio.Services.Sources.IStudioSourceProvider>();
+        fromRoot.Should().Throw<InvalidOperationException>("the container validates scopes, so this test can tell a root resolution");
+
+        HealthReportEntry entry = await harness.ProbeAsync();
+
+        entry.Status.Should().Be(HealthStatus.Healthy, entry.Description);
+        entry.Data["databases"].Should().Be(1);
+        harness.Runner.RunCount.Should().Be(1);
+        harness.Script.Runs.Should().ContainKeys("K90", "T90");
         harness.StudioWarnings.Should().BeEmpty();
     }
 

@@ -1,5 +1,7 @@
 using System.Globalization;
 
+using MartenStudio.Services.Sources;
+
 namespace MartenStudio.Services.Health.Checks;
 
 /// <summary>What T07 reads: every declared table's dead rows and vacuum times.</summary>
@@ -55,7 +57,7 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
     /// <inheritdoc />
     public override async Task<VacuumFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        return new VacuumFacts(context.Now, await MartenTables.TablesAsync(context).ConfigureAwait(false));
+        return new VacuumFacts(context.Now, await HealthTables.TablesAsync(context).ConfigureAwait(false));
     }
 
     /// <inheritdoc />
@@ -101,7 +103,7 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
                 continue;
             }
 
-            findings.Add(Finding(table, held, facts.ReadAt));
+            findings.Add(Finding(table, held, facts.ReadAt, evaluation.TableRemedies));
         }
 
         if (findings.Count > 0)
@@ -116,12 +118,13 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
               + ", because autovacuum usually catches up within a minute of a batch delete.");
     }
 
-    private static HealthFinding Finding(TableFacts table, TimeSpan held, DateTimeOffset now)
+    private static HealthFinding Finding(TableFacts table, TimeSpan held, DateTimeOffset now, IHealthTableRemedies? remedies)
     {
-        MartenTable declared = table.Table;
+        StudioTable declared = table.Table;
         string scale = SuggestedScaleFactor.ToString(CultureInfo.InvariantCulture);
 
         HealthRemedy? remedy = Autovacuum.Remedy(
+            remedies,
             table,
             "autovacuum_vacuum_scale_factor",
             scale,

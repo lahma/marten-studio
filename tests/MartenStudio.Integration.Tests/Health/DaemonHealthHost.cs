@@ -23,7 +23,6 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 using Npgsql;
 
@@ -143,10 +142,11 @@ internal sealed class DaemonHealthHost : IAsyncDisposable
             services.GetRequiredService<HealthCheckRegistry>(),
             services.GetRequiredService<HealthHistory>(),
             services.GetRequiredService<IServiceScopeFactory>(),
-            services.GetRequiredService<IOptions<MartenStudioOptions>>(),
+            services.GetRequiredService<MartenStudio.Services.Settings.IStudioSettings>(),
             services.GetRequiredService<StudioLogThrottle>(),
             services.GetRequiredService<ILogger<HealthSweeper>>(),
             clock,
+            runtime: services.GetRequiredService<IStudioRuntime>(),
             observer: observer);
     }
 

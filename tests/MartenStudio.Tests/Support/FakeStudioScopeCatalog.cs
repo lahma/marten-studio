@@ -42,7 +42,7 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
     {
         Stores.Add(new StoreListing(key, displayName, StoreAvailability.Available));
         Databases[key] = [.. databaseIdentities.Select(x => new DatabaseListing(x, x, "localhost"))];
-        Facts[key] = new StoreScopeFacts(cardinality, ShowTenantSelector: false, TenantList.Unavailable, null);
+        Facts[key] = new StoreScopeFacts(MartenStudioSource.Map(cardinality), ShowTenantSelector: false, TenantList.Unavailable, null);
         return this;
     }
 

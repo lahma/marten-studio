@@ -39,14 +39,13 @@ public class StudioActionLogTest
         var provider = services.BuildServiceProvider();
 
         var users = new TestAuthenticationStateProvider();
-        var authorization = new StudioAuthorization(options, new TestStoreAuthorizationService(), users);
-        var catalog = new StudioScopeCatalog(
+        var authorization = MartenSpine.Authorization(options, new TestStoreAuthorizationService(), users);
+        var (_, catalog, _) = MartenSpine.Scope(
             options,
             new MartenStoreRegistry(services),
             authorization,
             new TenantDiscovery(options, NullLogger<TenantDiscovery>.Instance),
-            provider,
-            NullLogger<StudioScopeCatalog>.Instance);
+            provider);
         var state = new StudioState(catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
 
         var ring = new StudioActionLogService();
@@ -110,7 +109,7 @@ public class StudioActionLogTest
         using var harness = CreateHarness();
         harness.Users.SignIn("viewer");
 
-        var denial = new StudioCapabilityDeniedException(StudioCapability.EditDocuments, CapabilityDenialReason.Disabled);
+        var denial = MartenSpine.Denied(StudioCapability.EditDocuments, CapabilityDenialReason.Disabled);
         harness.Log.RecordCapabilityDenied(denial, "EditDocument", "customer/42");
 
         harness.Ring.GetLatest().Should().ContainSingle().Which.Succeeded.Should().BeFalse();
@@ -206,11 +205,16 @@ public class StudioActionLogTest
     /// reserved rather than assigned in the order features happen to land. 9212-9220 are the operational
     /// anomalies DB-0 added, each logged at the level <c>StudioLogThrottle</c> chose.
     /// </summary>
+    /// <remarks>
+    /// One id space, two declaring classes since 0.5's split (PS-1a): the shared <c>StudioLog</c> and MartenStudio's
+    /// <c>MartenLog</c>. The ids are checked across both, so an event moved from one to the other keeps its number and a
+    /// number is never declared twice.
+    /// </remarks>
     [Fact]
     public void Every_reserved_event_id_exists_exactly_once()
     {
-        var declared = typeof(StudioLog)
-            .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+        var declared = new[] { typeof(StudioLog), typeof(MartenLog) }
+            .SelectMany(static type => type.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
             .Select(x => x.GetCustomAttributes(typeof(LoggerMessageAttribute), inherit: false).FirstOrDefault())
             .OfType<LoggerMessageAttribute>()
             .Select(x => x.EventId)
@@ -232,5 +236,30 @@ public class StudioActionLogTest
             9200, 9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211,
             9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9221, 9222, 9230, 9235, 9236, 9237, 9245, 9246,
             9260, 9261, 9262, 9263, 9264, 9270, 9280, 9281, 9290, 9320);
+    }
+
+    /// <summary>
+    /// The split itself: the shared class declares only the events every studio logs, and MartenStudio's the ones only it
+    /// logs - so no later packet needs to add a method to the shared class to log a Marten fact, or the reverse.
+    /// </summary>
+    [Fact]
+    public void The_shared_and_the_Marten_events_are_split_by_who_logs_them()
+    {
+        static int[] Ids(Type type) =>
+        [
+            .. type
+                .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+                .Select(static x => x.GetCustomAttributes(typeof(LoggerMessageAttribute), inherit: false).FirstOrDefault())
+                .OfType<LoggerMessageAttribute>()
+                .Select(static x => x.EventId)
+                .Order(),
+        ];
+
+        Ids(typeof(StudioLog)).Should().Equal(
+            9200, 9201, 9202, 9203, 9204, 9205, 9210, 9213, 9214, 9219, 9220, 9221, 9222, 9230, 9235, 9236, 9237,
+            9245, 9246, 9270, 9280, 9281, 9290);
+
+        Ids(typeof(MartenLog)).Should().Equal(
+            9206, 9207, 9208, 9209, 9211, 9212, 9215, 9216, 9217, 9218, 9260, 9261, 9262, 9263, 9264, 9320);
     }
 }

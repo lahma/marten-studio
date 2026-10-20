@@ -1,7 +1,8 @@
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Services.Database
 @inject StudioState State
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 @inject IDatabaseObjectService Data
 
 @*
@@ -54,7 +55,7 @@
                         @if (sequence is { OwnerSchema: { } ownerSchema, OwnerTable: { } ownerTable, OwnerColumn: { } ownerColumn })
                         {
                             <a class="ms-db-name"
-                               href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, ownerSchema, ownerTable, DatabaseObjectTab.Columns)"
+                               href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, ownerSchema, ownerTable, DatabaseObjectTab.Columns)"
                                title="The column this sequence belongs to: dropping the column drops the sequence">@(DatabaseLinks.QualifiedName(ownerSchema, ownerTable)).@ownerColumn</a>
                         }
                         else if (sequence.OwnedOutsideView)
@@ -116,7 +117,7 @@
     private string sortKey = "default";
     private bool descending;
 
-    /// <summary>The list, as a <c>DatabaseObjectList</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    /// <summary>The list, as a <c>DatabaseObjectList</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
     [Parameter]
     public object? Model { get; set; }
 

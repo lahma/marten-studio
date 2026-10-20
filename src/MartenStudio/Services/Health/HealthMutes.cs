@@ -3,8 +3,8 @@ using System.Text;
 using System.Text.Json;
 
 using MartenStudio.Services.Live;
+using MartenStudio.Services.Settings;
 
-using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 
 namespace MartenStudio.Services.Health;
@@ -290,7 +290,7 @@ internal sealed class HealthAlerts
     internal const int CoolDownIntervals = 3;
 
     private readonly ToastService toasts;
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
     private readonly Lock gate = new();
 
     /// <summary>When each Critical this circuit has seen was last in a glance, by mute key: the sweep's time.</summary>
@@ -299,13 +299,13 @@ internal sealed class HealthAlerts
     private string? watching;
     private HashSet<string> present = new(StringComparer.Ordinal);
 
-    public HealthAlerts(ToastService toasts, IOptions<MartenStudioOptions> options)
+    public HealthAlerts(ToastService toasts, IStudioSettings settings)
     {
         ArgumentNullException.ThrowIfNull(toasts);
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
 
         this.toasts = toasts;
-        this.options = options;
+        this.settings = settings;
     }
 
     /// <summary>
@@ -321,7 +321,7 @@ internal sealed class HealthAlerts
     {
         get
         {
-            TimeSpan intervals = options.Value.EffectiveHealthInterval * CoolDownIntervals;
+            TimeSpan intervals = settings.EffectiveHealthInterval * CoolDownIntervals;
             return intervals > MinimumCoolDown ? intervals : MinimumCoolDown;
         }
     }

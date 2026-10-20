@@ -2,6 +2,9 @@ using System.Globalization;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Database;
+using MartenStudio.Services.Sources;
+
+using Microsoft.Extensions.DependencyInjection;
 
 namespace MartenStudio.Services.Health.Checks;
 
@@ -350,8 +353,8 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        // Only the daemon's advisory keys are wanted, so no relation classifier is built.
-        SessionLockLabels labels = SessionLockLabels.For(context.Store, context.StoreKey, classifier: null);
+        // Only the source's own advisory keys are wanted, so no relation classifier is built.
+        SessionLockLabels labels = context.Services.GetRequiredService<ISessionLockLabeler>().For(context.Source, classifier: null);
 
         IReadOnlyList<(bool CanReadAllStats, long HiddenSessions, HealthHorizonHolderRow? Holder)> rows = await context.Sql
             .QueryAsync(HealthHorizonQueries.Holders(labels.DaemonLockIds), HealthHorizonQueries.ReadHolder, cancellationToken)
@@ -359,7 +362,11 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
 
         ReplicationSlotSnapshot slots = await ReplicationSlotSnapshot.SharedAsync(context).ConfigureAwait(false);
         WraparoundFacts wraparound = await Wraparound.SharedAsync(context).ConfigureAwait(false);
-        IReadOnlyList<TableFacts> tables = await MartenTables.TablesAsync(context).ConfigureAwait(false);
+        IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
+
+        // What the source's own machinery means here - a daemon whose progress a writer pins, a leader that holds its lock
+        // in a transaction - from its configuration; a source with no daemon has none.
+        HorizonSourceFacts source = context.Services.GetService<IHorizonContributor>()?.Describe(context) ?? HorizonSourceFacts.None;
 
         List<HorizonHolder> holders = [.. rows.Where(static x => x.Holder is not null).Select(static x => HorizonHolder.From(x.Holder!))];
         holders.AddRange(slots.Slots.SelectMany(static (slot, ordinal) => HorizonHolder.From(slot, ordinal)));
@@ -370,8 +377,8 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
             holders,
             wraparound.Database,
             tables,
-            DaemonCheckConfiguration.AsyncShardsOf(context.Store).Count > 0,
-            context.StoreOptions.Events.UseAdvisoryLockTransaction);
+            source.HasAsyncShards,
+            source.LeaderLockInTransaction);
     }
 
     /// <summary>

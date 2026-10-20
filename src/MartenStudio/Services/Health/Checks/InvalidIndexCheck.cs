@@ -1,5 +1,7 @@
 using System.Globalization;
 
+using MartenStudio.Services.Sources;
+
 namespace MartenStudio.Services.Health.Checks;
 
 /// <summary>What T03 reads: every index on the declared tables, and each table's count of invalid partition indexes.</summary>
@@ -49,20 +51,6 @@ internal sealed record InvalidIndexFacts(IReadOnlyList<IndexFacts> Indexes, IRea
 [HealthCheck("T03", HealthArea.Tables, HealthCostTier.Catalog, "Invalid index")]
 internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 {
-    /// <summary>What the re-apply remedy says, for an invalid index on an ordinary table.</summary>
-    internal const string ReapplyCode =
-        "// Re-apply the configuration: Weasel reads an invalid index as drift, drops it and builds it again\n"
-        + "// (and drops one nobody declares).\n"
-        + "await store.Storage.Database.ApplyAllConfiguredChangesToDatabaseAsync();\n"
-        + "// or, with app.RunJasperFxCommands(args): dotnet run -- db-patch (review it), then dotnet run -- db-apply";
-
-    /// <summary>What the apply also does, said beside it - hard rule 14's wording half.</summary>
-    internal const string ReapplyExplanation =
-        "The apply is the whole configuration's, under AutoCreate.CreateOrUpdate, which is not additive: it also drops every "
-        + "index on a Marten table that nothing declares, drops extra columns and alters changed ones - read db-patch's script "
-        + "(or the Schema screen's preview) first. A unique index whose build failed on duplicate values fails again until the "
-        + "duplicates are resolved. Building an index takes a lock that blocks writes to the table for as long as the build runs.";
-
     /// <summary>What a partitioned table's invalid index needs instead of a re-apply.</summary>
     internal const string PartitionedInWords =
         " On a partitioned table a re-apply cannot resume the build: Weasel reads only the partitioned table's own indexes, "
@@ -73,8 +61,8 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
     /// <inheritdoc />
     public override async Task<InvalidIndexFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        IReadOnlyList<IndexFacts> indexes = await MartenTables.IndexesAsync(context).ConfigureAwait(false);
-        IReadOnlyList<TableFacts> tables = await MartenTables.TablesAsync(context).ConfigureAwait(false);
+        IReadOnlyList<IndexFacts> indexes = await HealthTables.IndexesAsync(context).ConfigureAwait(false);
+        IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
 
         return new InvalidIndexFacts(indexes, tables);
     }
@@ -98,11 +86,11 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             if (index.Row.BuildPhase is { } phase)
             {
                 // A status row's note is shown at the check's gate alone, so it names no table outside the store's own schemas.
-                building.Add((index.Table.OutsideStoreSchemas ? "an index on " + index.Table.NoteName : index.Row.Name) + " (" + phase + ")");
+                building.Add((index.Table.OutsideOwnSchemas ? "an index on " + index.Table.NoteName : index.Row.Name) + " (" + phase + ")");
                 continue;
             }
 
-            findings.Add(OnTable(index, partitioned.Contains(index.Table.Key)));
+            findings.Add(OnTable(index, partitioned.Contains(index.Table.Key), evaluation.TableRemedies));
         }
 
         foreach (TableFacts table in facts.Tables)
@@ -168,14 +156,17 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             + "pg_stat_progress_create_index as a role that can, before acting." + meanwhile);
     }
 
-    private static HealthFinding OnTable(IndexFacts index, bool onPartitionedTable)
+    private static HealthFinding OnTable(IndexFacts index, bool onPartitionedTable, IHealthTableRemedies? remedies)
     {
-        MartenTable table = index.Table;
+        StudioTable table = index.Table;
         (HealthSeverity severity, string builds, string caveat) = Certainty(
             index.Row.UnseenIndexBuilds, index.Row.TableBuildPhase, "pg_index.indisvalid");
 
         string whose = index.Origin switch
         {
+            IndexOrigin.Host =>
+                " It is the host's own index, which nothing the studio knows of reconciles: whoever owns the schema rebuilds it "
+                + "(REINDEX INDEX CONCURRENTLY) or drops it, in the host's own migrations.",
             IndexOrigin.Ignored =>
                 " The configuration tells Marten's migration to skip it (IgnoreIndex), so an apply neither rebuilds nor drops it - "
                 + "short of one that rebuilds the whole table, as a changed partition scheme does: it stays invalid until a DBA "
@@ -210,7 +201,9 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
                 new HealthEvidence("Declared", OriginText(index)),
             ],
             Caveat = caveat,
-            Remedy = index.Origin == IndexOrigin.Ignored || onPartitionedTable ? null : new HealthRemedy(ReapplyCode, ReapplyExplanation),
+            // An ignored index is one no apply touches, and a partitioned table's is one no apply can resume: both are said in
+            // words above. Anything else is the studio's to word - a re-apply in MartenStudio.
+            Remedy = index.Origin == IndexOrigin.Ignored || onPartitionedTable ? null : remedies?.RebuildInvalidIndex(table, index.Row, index.Origin),
         };
     }
 
@@ -258,6 +251,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
         IndexOrigin.EventStore => "by the event store's configuration",
         IndexOrigin.Managed => "by the Marten-managed table's own definition",
         IndexOrigin.Ignored => "no - the configuration ignores it (IgnoreIndex)",
+        IndexOrigin.Host => "by the host's own schema",
         _ => "no - nothing in the configuration declares it",
     };
 }

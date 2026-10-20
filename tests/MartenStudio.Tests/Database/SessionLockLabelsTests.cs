@@ -32,7 +32,7 @@ public class SessionLockLabelsTests
 
     /// <summary>The labels with the classifier over both test stores, the default one first and <c>DbSecret</c> hidden.</summary>
     private static SessionLockLabels Labels(IDocumentStore store) =>
-        SessionLockLabels.For(store, "default", DatabaseTestStores.Classifier());
+        MartenStudio.Services.MartenSessionLockLabeler.For(store, "default", DatabaseTestStores.Classifier());
 
     private static SessionLockLabels Labels() => Labels(Store());
 
@@ -71,7 +71,7 @@ public class SessionLockLabelsTests
     [Fact]
     public void The_advisory_keys_need_no_classifier()
     {
-        SessionLockLabels labels = SessionLockLabels.For(Store(), "default", classifier: null);
+        SessionLockLabels labels = MartenStudio.Services.MartenSessionLockLabeler.For(Store(), "default", classifier: null);
 
         labels.DaemonLockIds.Should().NotBeEmpty("C04 builds the labels for the daemon's keys alone");
         labels.Describe("relation", Owner(DatabaseTestStores.DocumentSchema, Customers)).Kind.Should().Be(

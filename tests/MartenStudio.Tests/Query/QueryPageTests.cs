@@ -36,15 +36,21 @@ public class QueryPageTests
         // A fallback provider rather than a registration: StudioComponentContext resolves services in its
         // own constructor, which seals bUnit's collection, and that context is shared with every other
         // page suite so this packet does not reach into it.
-        context.Services.AddFallbackServiceProvider(new SingleService(typeof(IQueryService), service));
+        context.Services.AddFallbackServiceProvider(new QueryServices(service));
 
         return context;
     }
 
-    /// <summary>One service, for bUnit's fallback provider.</summary>
-    private sealed class SingleService(Type serviceType, object instance) : IServiceProvider
+    /// <summary>
+    /// The fake, for bUnit's fallback provider: as the Query service, and as the SQL console the page's SQL tab runs
+    /// through (the shared panel injects the console seam).
+    /// </summary>
+    private sealed class QueryServices(FakeQueryService instance) : IServiceProvider
     {
-        public object? GetService(Type requested) => requested == serviceType ? instance : null;
+        public object? GetService(Type requested) =>
+            requested == typeof(IQueryService) || requested == typeof(MartenStudio.Services.Sources.ISqlConsoleService)
+                ? instance
+                : null;
     }
 
     private static FakeQueryService WithPerson() => new FakeQueryService().WithType("person");
@@ -373,7 +379,7 @@ public class QueryPageTests
     public void A_capability_refusal_from_the_service_is_shown_rather_than_killing_the_circuit()
     {
         FakeQueryService service = WithPerson();
-        service.SqlFailure = new StudioCapabilityDeniedException(
+        service.SqlFailure = Support.MartenSpine.Denied(
             StudioCapability.RunSql, CapabilityDenialReason.Disabled);
 
         using StudioComponentContext context = CreateContext(service, runSql: true);

@@ -1,4 +1,4 @@
-using Marten.Storage;
+using MartenStudio.Services.Sources;
 
 using Npgsql;
 
@@ -67,8 +67,8 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
     /// <inheritdoc />
     public override async Task<UnusedIndexFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        IReadOnlyList<IndexFacts> indexes = await MartenTables.IndexesAsync(context).ConfigureAwait(false);
-        IReadOnlyList<TableFacts> tables = await MartenTables.TablesAsync(context).ConfigureAwait(false);
+        IReadOnlyList<IndexFacts> indexes = await HealthTables.IndexesAsync(context).ConfigureAwait(false);
+        IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
 
         return new UnusedIndexFacts(context.Now, indexes, tables, DatabaseStatistics.Of(tables), IsMultiHost(context));
     }
@@ -81,7 +81,7 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
     {
         try
         {
-            using NpgsqlConnection unopened = context.Database.CreateConnection(ConnectionUsage.ReadWrite);
+            using NpgsqlConnection unopened = context.Target.CreateConnection(StudioConnectionUsage.ReadWrite);
             return IsMultiHost(unopened.ConnectionString);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or NotSupportedException)
@@ -97,11 +97,15 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
         && new NpgsqlConnectionStringBuilder(connectionString).Host is { } host
         && host.Contains(',', StringComparison.Ordinal);
 
-    /// <summary>Whether an index is a candidate at all: valid, enforcing nothing, removable, and never scanned.</summary>
+    /// <summary>
+    /// Whether an index is a candidate at all: valid, enforcing nothing, removable, never scanned, and on a table whose index
+    /// design is its owner's - a library's table is exempt from the index-design rules (issue #8, G1).
+    /// </summary>
     private static bool IsUnscanned(IndexFacts index) =>
         index.Row is { IsValid: true, IsUnique: false, IsPrimaryKey: false, IsExclusion: false, Scans: 0 }
         && index.Row.Bytes >= MinIndexBytes
-        && index.Removable;
+        && index.Removable
+        && !index.Table.ExemptFromIndexDesign;
 
     /// <inheritdoc />
     public override IEnumerable<HealthSamplePart> Sample(UnusedIndexFacts facts)
@@ -215,21 +219,7 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
                         : " " + unproven + " So this is Info until the advisor's own samples have seen the index unscanned for a day.")
                 + " An index used by a monthly job, a failover's replica or a query that has not run yet looks unused too: "
                 + "check before removing it.",
-            Remedy = index.Origin switch
-            {
-                IndexOrigin.Declared when index.Table.TypeName is { } type => new HealthRemedy(
-                    "// opts.Schema.For<" + type + ">() declares " + index.Row.Name + ", and nothing has scanned it:\n"
-                    + "// remove the .Index(...), .Duplicate(...) or GIN/full-text index that declares it from the registration.",
-                    "The next apply drops it. Removing a Duplicate(...) removes its column along with its index."),
-                IndexOrigin.Managed => new HealthRemedy(
-                    "// Remove " + index.Row.Name + " from the Weasel table's Indexes where the Marten-managed table is defined.",
-                    "The next apply then drops it."),
-                IndexOrigin.Ignored when index.Table.TypeName is { } type => new HealthRemedy(
-                    "// Stop ignoring it, and the next apply drops it:\n"
-                    + "// remove opts.Schema.For<" + type + ">().IgnoreIndex(\"" + index.Row.Name + "\") from the registration.",
-                    "AutoCreate.CreateOrUpdate drops every index on a Marten table that the configuration does not declare."),
-                _ => null,
-            },
+            Remedy = evaluation.TableRemedies?.RemoveUnusedIndex(index.Table, index.Row, index.Origin),
         };
     }
 }

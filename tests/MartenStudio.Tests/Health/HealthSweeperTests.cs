@@ -621,7 +621,7 @@ public class HealthSweeperTests
     [Fact]
     public async Task A_sweep_of_the_configuration_checks_opens_no_connection_and_logs_no_warning()
     {
-        await using HealthHarness harness = HealthHarness.Create(checks: new HealthCheckRegistry().All
+        await using HealthHarness harness = HealthHarness.Create(checks: StudioHealthChecks.Registry.All
             .Where(static x => x.Info.Tier == HealthCostTier.InProcess)
             .Select(static x => x.Info.CheckType));
 

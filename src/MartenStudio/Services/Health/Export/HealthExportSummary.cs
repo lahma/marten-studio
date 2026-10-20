@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text;
 
+using MartenStudio.Services.Sources;
+
 namespace MartenStudio.Services.Health.Export;
 
 /// <summary>How bad an export run's result is, before the caller's <c>failureStatus</c> names it.</summary>
@@ -83,7 +85,8 @@ internal sealed record HealthExportSummary
 
     /// <summary>
     /// Databases a sharded tenancy holds under an id its <c>TenantIdStyle</c> would correct, so that looking it up
-    /// would miss the tenancy's cache and read its master table; the run leaves them out (<see cref="HeldDatabases" />).
+    /// would miss the tenancy's cache and read its master table; the run leaves them out (the source's
+    /// <see cref="StudioSweepTargetOutcome.Unnamed" /> step).
     /// Counted with <see cref="DatabasesSkipped" /> in the data, and said apart in the description.
     /// </summary>
     public int DatabasesUnnamed { get; init; }

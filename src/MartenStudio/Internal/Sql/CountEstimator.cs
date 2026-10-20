@@ -1,7 +1,3 @@
-using System.Text;
-
-using MartenStudio.Services.Query;
-
 using Npgsql;
 
 using NpgsqlTypes;
@@ -27,7 +23,7 @@ namespace MartenStudio.Internal.Sql;
 /// </para>
 /// <para>
 /// <see cref="IsExactRefused"/> is the fourth answer, and it is the one
-/// <see cref="MartenStudioOptions.ExactCountThreshold"/> produces: the collection is too big for the
+/// studio's <c>ExactCountThreshold</c> option produces: the collection is too big for the
 /// studio to pay for <c>count(*)</c>, so the estimate stands and says so. It is a <em>value</em> and not
 /// an error — the number beside it is still true, it is simply the cheap one.
 /// </para>
@@ -55,7 +51,7 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
 
     /// <summary>
     /// Whether an exact <c>count(*)</c> was wanted here and was declined because the collection is bigger
-    /// than <see cref="MartenStudioOptions.ExactCountThreshold"/>.
+    /// than the studio's <c>ExactCountThreshold</c> option.
     /// </summary>
     /// <remarks>
     /// Not a failure and not a refusal to answer: the estimate beside it is the answer, and this says why
@@ -136,6 +132,10 @@ internal readonly record struct DocumentCount(long Value, bool IsEstimate, bool 
 /// by the table. That probe is what keeps a rail full of freshly bulk-loaded collections from being
 /// twenty-five sequential scans.
 /// </para>
+/// <para>
+/// Not partial: the count a Marten document list narrows by tenant and soft delete is MartenStudio's, written as
+/// extension members (<c>DocumentCountEstimator</c>) because a partial type cannot span the two assemblies.
+/// </para>
 /// </remarks>
 internal sealed class CountEstimator
 {
@@ -213,8 +213,8 @@ internal sealed class CountEstimator
         "select 1 from " + SqlIdentifier.Qualify(schema, table) + " offset @threshold limit 1";
 
     /// <summary>
-    /// Rows above which an exact count is declined. Wired from
-    /// <see cref="MartenStudioOptions.ExactCountThreshold"/> by every caller in the studio.
+    /// Rows above which an exact count is declined. Wired from the studio's <c>ExactCountThreshold</c> option
+    /// by every caller in the studio.
     /// </summary>
     public long ExactCountThreshold { get; init; } = 10_000;
 
@@ -355,11 +355,11 @@ internal sealed class CountEstimator
     /// </summary>
     /// <remarks>
     /// <para>
-    /// For a table the studio has no <see cref="DocumentTableInfo"/> for — the event store's own
-    /// <c>mt_events</c> and <c>mt_streams</c> — where "whole table" is the only question there is. A
-    /// caller that has a scope to narrow by wants <see cref="CountExactAsync(NpgsqlConnection,DocumentTableInfo,string?,DeletedFilter,TimeSpan?,CancellationToken)"/>
-    /// instead, because a count under a list that shows fewer rows than it is a count of a different
-    /// question.
+    /// For a table the studio has no document description for — the event store's own
+    /// <c>mt_events</c> and <c>mt_streams</c>, or a relation in the database browser — where "whole table" is the
+    /// only question there is. A caller that has a scope to narrow by wants the scoped <c>CountExactAsync</c>
+    /// overload MartenStudio adds for a document table instead, because a count under a list that shows fewer
+    /// rows than it is a count of a different question.
     /// </para>
     /// <para>
     /// An estimate is the answer whenever there is one (D8). Only a table Postgres has never analysed is
@@ -400,7 +400,7 @@ internal sealed class CountEstimator
     /// <remarks>
     /// The event store's tables are the only ones that reach this: they carry no <c>tenant_id</c> and no
     /// <c>mt_deleted</c>, so there is nothing for the scoped overload to add and no
-    /// <see cref="DocumentTableInfo"/> to describe them with.
+    /// document description to describe them with.
     /// </remarks>
     /// <param name="connection">An open connection.</param>
     /// <param name="schema">The table's schema.</param>
@@ -426,92 +426,5 @@ internal sealed class CountEstimator
         return result is null or DBNull
             ? DocumentCount.Unavailable
             : DocumentCount.Exact(Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture));
-    }
-
-    /// <summary>
-    /// An exact <c>count(*)</c> that counts the same rows the list is showing: this tenant's, and the
-    /// soft-delete tri-state the page is on.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The three-argument overloads count the whole table, which is right for a rail whose estimate is a
-    /// whole-table <c>reltuples</c> and wrong everywhere a scope narrows what is on screen. A number under
-    /// a list of three invoices that says six is not a rounding error — it is the studio answering a
-    /// different question from the one the page asked.
-    /// </para>
-    /// <para>
-    /// It takes a <see cref="DocumentTableInfo"/> rather than a schema and table name because that is the
-    /// only way to know whether <c>tenant_id</c> and <c>mt_deleted</c> exist and what they are called: on a
-    /// single-tenant collection there is nothing to filter by, and a table with
-    /// <c>DisableInformationalFields()</c> has no soft-delete column at all.
-    /// </para>
-    /// </remarks>
-    /// <param name="connection">An open connection.</param>
-    /// <param name="table">The collection, with its physical columns already settled.</param>
-    /// <param name="tenantId">The tenant in scope, or <see langword="null"/> for all of them.</param>
-    /// <param name="deleted">The soft-delete tri-state; ignored on a collection that is not soft-deleted.</param>
-    /// <param name="commandTimeout">A bound on the scan, overriding <see cref="CommandTimeoutSeconds"/>.</param>
-    /// <param name="cancellationToken">The usual.</param>
-    public async Task<DocumentCount> CountExactAsync(
-        NpgsqlConnection connection,
-        DocumentTableInfo table,
-        string? tenantId,
-        DeletedFilter deleted,
-        TimeSpan? commandTimeout = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(connection);
-        ArgumentNullException.ThrowIfNull(table);
-
-        var tenantColumn = tenantId is not null && table.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined
-            ? table.MetadataColumnName(DocumentMetadataColumn.TenantId)
-            : null;
-
-        await using var command = new NpgsqlCommand(ExactSql(table, tenantColumn, deleted), connection)
-        {
-            CommandTimeout = commandTimeout is { } timeout
-                ? Math.Max((int)Math.Ceiling(timeout.TotalSeconds), 1)
-                : CommandTimeoutSeconds,
-        };
-
-        if (tenantColumn is not null)
-        {
-            command.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Varchar) { Value = tenantId! });
-        }
-
-        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-
-        return result is null or DBNull
-            ? DocumentCount.Unavailable
-            : DocumentCount.Exact(Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture));
-    }
-
-    /// <summary>
-    /// The scoped exact-count query. Identifiers are quoted and come from the table's own column set; the
-    /// tenant is the only value, and it is a parameter.
-    /// </summary>
-    internal static string ExactSql(DocumentTableInfo table, string? tenantColumn, DeletedFilter deleted)
-    {
-        ArgumentNullException.ThrowIfNull(table);
-
-        var sql = new StringBuilder("select count(*) from ").Append(table.QualifiedName);
-        var clauses = 0;
-
-        if (tenantColumn is not null)
-        {
-            sql.Append(" where ").Append(SqlIdentifier.Quote(tenantColumn)).Append(" = @tenant");
-            clauses++;
-        }
-
-        if (table.SoftDeleteEnabled &&
-            deleted != DeletedFilter.Include &&
-            table.MetadataColumnName(DocumentMetadataColumn.IsSoftDeleted) is { } deletedColumn)
-        {
-            sql.Append(clauses == 0 ? " where " : " and ")
-                .Append(SqlIdentifier.Quote(deletedColumn))
-                .Append(deleted == DeletedFilter.Only ? " = true" : " = false");
-        }
-
-        return sql.ToString();
     }
 }

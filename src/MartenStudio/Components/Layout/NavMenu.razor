@@ -1,10 +1,11 @@
 @using MartenStudio.Services
 @using MartenStudio.Services.Health
 @using MartenStudio.Services.Live
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @implements IAsyncDisposable
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 @inject StudioState State
 @inject INavIndicatorService Indicators
 @inject StudioLiveUpdatesFactory LiveFactory
@@ -18,16 +19,16 @@
         <path d="M4 7v14c0 2.2 4.5 4 10 4s10-1.8 10-4V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         <path d="M4 14c0 2.2 4.5 4 10 4s10-1.8 10-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
     </svg>
-    <span class="ms-sidebar-brand-text">@Options.Value.Title</span>
+    <span class="ms-sidebar-brand-text">@Settings.Title</span>
 </div>
 
 <nav>
     <ul class="ms-sidebar-nav">
-        @foreach (NavSection section in Sections)
+        @foreach (StudioNavSection section in Descriptor.Navigation)
         {
             <li class="ms-sidebar-section" @key="section.Title">@section.Title</li>
 
-            @foreach (NavItem item in section.Items.Where(Shown))
+            @foreach (StudioNavItem item in section.Items.Where(Shown))
             {
                 <li class="ms-nav-item" @key="item.Label">
                     @if (item.Route is null)
@@ -50,7 +51,7 @@
                         <a class="ms-nav-link @NavClass(item.Route)" href="@Link(item.Route)" title="@(item.Title ?? item.Label)">
                             @Icon(item.Icon)
                             <span class="ms-nav-link-text">@item.Label</span>
-                            @if (BadgeFor(item.Badge) is { } badge)
+                            @if (BadgeFor(item.BadgeKey) is { } badge)
                             {
                                 @* A sibling of the label, never part of it: the link's text is what a
                                    screen reader announces and what every navigation test matches on, and
@@ -71,95 +72,12 @@
 {
     private const string ComingSoon = "Coming in a later release";
 
-    /// <summary>Which indicator, if any, an entry carries.</summary>
-    private enum NavBadgeKind
-    {
-        /// <summary>No badge, ever.</summary>
-        None,
-
-        /// <summary>A red count when this database has dead letters.</summary>
-        DeadLetters,
-
-        /// <summary>An amber dot when a shard is lagging, paused or failed.</summary>
-        Projections,
-
-        /// <summary>
-        /// A count of the last health sweep's unmuted Critical and Warning findings this visitor may see, red
-        /// when one is Critical - read from the sweep cache, never by sweeping.
-        /// </summary>
-        Health
-    }
-
-    /// <summary>One entry.</summary>
-    /// <param name="Label">What the link says, and its accessible name.</param>
-    /// <param name="Route">The page below the studio root, or <see langword="null" /> for one not built yet.</param>
-    /// <param name="Icon">The hand-drawn icon's name.</param>
-    /// <param name="Badge">Which indicator it carries.</param>
-    /// <param name="Title">The tooltip, when the label alone undersells the page; the label otherwise.</param>
-    private sealed record NavItem(
-        string Label,
-        string? Route,
-        string Icon,
-        NavBadgeKind Badge = NavBadgeKind.None,
-        string? Title = null);
-
-    private sealed record NavSection(string Title, NavItem[] Items);
-
-    /// <summary>What a badge renders as, once there is something to render.</summary>
-    private readonly record struct NavBadge(string Text, string CssClass, string Title);
-
-    private static readonly NavSection[] Sections =
-    [
-        new("Data",
-        [
-            new("Overview", "", "grid"),
-            new("Documents", "documents", "doc"),
-            new("Query", "query", "query")
-        ]),
-
-        // What else lives in the store's database, beside what Marten declares (D27). Relationships moved
-        // here from Data with its route unchanged: foreign keys are a database fact, and the diagram draws
-        // plain tables as well as document types. The Tables entry's active state covers
-        // /marten/database/* through NavClass's prefix match, so object detail keeps it lit.
-        new("Database",
-        [
-            new("Tables", "database", "table", Title: "Tables, views, functions, triggers, sequences and types"),
-            new("Relationships", "relationships", "graph")
-        ]),
-        new("Events",
-        [
-            new("Streams", "events/streams", "stream"),
-            new("Feed", "events/feed", "feed"),
-            new("Event types", "events/types", "tag"),
-            new("Dead letters", "events/dead-letters", "alert", NavBadgeKind.DeadLetters)
-        ]),
-        new("Operations",
-        [
-            // Health is first in its section: it is where a person starts when something is wrong, and its
-            // badge reads the last sweep a Health page or the Overview ran - it never starts one.
-            new("Health", HealthLinks.Route, "pulse", NavBadgeKind.Health),
-            new("Projections", "projections", "projection", NavBadgeKind.Projections),
-
-            // Schema deliberately carries no badge. Finding drift costs a CreateMigrationAsync, which is
-            // a schema-building call that hard rule 14 keeps off every navigation path - so drift stays
-            // behind the button on the schema screen that says what it may create.
-            new("Schema", "schema", "schema")
-        ]),
-        new("System",
-        [
-            new("Configuration", "config", "cog"),
-            new("Activity", "activity", "list")
-        ])
-    ];
-
     /// <summary>
-    /// Whether an entry is drawn: every one, except Dead letters while the host hides <c>DeadLetterEvent</c>
-    /// (<see cref="MartenStudio.Services.Events.DeadLetterVisibility" />, failing closed) - a hidden document type is
-    /// absent (D27), as the Overview's tile is, and the page it would link to says why if it is reached by its address.
+    /// Whether an entry is drawn: every one whose descriptor has no condition, and otherwise what the condition says -
+    /// MartenStudio's Dead letters entry is absent while the host hides <c>DeadLetterEvent</c>, failing closed, as a
+    /// hidden document type is absent (D27) and the page it would link to says why if it is reached by its address.
     /// </summary>
-    private bool Shown(NavItem item) =>
-        item.Badge != NavBadgeKind.DeadLetters
-        || MartenStudio.Services.Events.DeadLetterVisibility.IsVisible(Options.Value.IsDocumentTypeVisible, out _);
+    private bool Shown(StudioNavItem item) => item.IsShown is null || item.IsShown(Settings);
 
     private readonly CancellationTokenSource cancellation = new();
 
@@ -211,7 +129,7 @@
 
         // No Failed handler: a badge that could not be read is a badge that is not drawn, and the
         // sidebar is the last place in the studio that should put an error on the screen.
-        await live.StartAsync(Options.Value.RefreshInterval, TickAsync, cancellation.Token);
+        await live.StartAsync(Settings.RefreshInterval, TickAsync, cancellation.Token);
     }
 
     // The poll runs on the thread pool and a scope change on the renderer, and both write `indicators`. So each hands the
@@ -291,31 +209,26 @@
         return read;
     }
 
-    /// <summary>The badge an entry wears right now, or <see langword="null" /> for none.</summary>
-    private NavBadge? BadgeFor(NavBadgeKind kind) => kind switch
+    /// <summary>
+    /// The badge an entry wears right now, or <see langword="null" /> for none: the health glance, drawn here, or the
+    /// badge the indicator service read for the entry's key.
+    /// </summary>
+    private StudioNavBadge? BadgeFor(string? key) => key switch
     {
-        NavBadgeKind.DeadLetters when indicators.ShowDeadLetterCount => new NavBadge(
-            indicators.DeadLetters!.Value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture),
-            "ms-nav-badge-danger",
-            indicators.DeadLetters == 1
-                ? "One event the async daemon could not apply"
-                : $"{indicators.DeadLetters:N0} events the async daemon could not apply"),
-
-        NavBadgeKind.Projections when indicators.ProjectionsNeedAttention => new NavBadge(
-            string.Empty,
-            "ms-nav-badge-dot ms-nav-badge-warning",
-            indicators.ProjectionsExplanation ?? "A projection needs attention"),
+        null => null,
 
         // A count of what this visitor may see, coloured by the worst of it. Findings they are not shown are said in
         // the tooltip and never counted or drawn on their own: their severity is the gate's to withhold, and a badge
         // that cannot say how bad would sit on every page of a host whose visitors are short of a gate. An absent badge
         // is no claim that all is well; the Health page and the Overview say what is withheld.
-        NavBadgeKind.Health when indicators.Health is { Worst: not null } health => new NavBadge(
-            (health.Critical + health.Warning).ToString("N0", System.Globalization.CultureInfo.InvariantCulture),
-            health.Critical > 0 ? "ms-nav-badge-danger" : "ms-nav-badge-warning",
-            HealthBadgeTitle(health)),
+        StudioNavBadgeKeys.Health => indicators.Health is { Worst: not null } health
+            ? new StudioNavBadge(
+                (health.Critical + health.Warning).ToString("N0", System.Globalization.CultureInfo.InvariantCulture),
+                health.Critical > 0 ? "ms-nav-badge-danger" : "ms-nav-badge-warning",
+                HealthBadgeTitle(health))
+            : null,
 
-        _ => null,
+        _ => indicators.Badges.TryGetValue(key, out StudioNavBadge? badge) ? badge : null,
     };
 
     /// <summary>The health badge's tooltip and accessible name: what it counts, what it leaves out, and as of when.</summary>
@@ -343,7 +256,7 @@
         return string.Join(" and ", parts) + withheld + ", as of " + State.FormatInSelectedTimeZone(health.MeasuredAt, "HH:mm");
     }
 
-    private string Link(string subPath) => StudioLink.To(Options.Value, subPath);
+    private string Link(string subPath) => StudioLink.To(Settings, subPath);
 
     private void UpdateCurrentRelativePath(string uri)
     {
@@ -351,8 +264,8 @@
         // ToDashboardRelativePath handles both the prerender and the interactive base URI shapes, and
         // ResolveLeaf applies the same prefix-strip retry as route matching so highlighting is correct
         // even when the application path base ends with the custom studio path.
-        string? relative = StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Options.Value);
-        currentRelativePath = relative is null ? null : StudioRouteTable.ResolveLeaf(relative, Options.Value);
+        string? relative = StudioLink.ToDashboardRelativePath(uri, Navigation.BaseUri, Settings);
+        currentRelativePath = relative is null ? null : Descriptor.Routes.ResolveLeaf(relative, Settings);
     }
 
     private string NavClass(string route)

@@ -1,11 +1,12 @@
 @page "/marten/database"
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Services.Database
 @implements IAsyncDisposable
 @inject IDatabaseObjectService Data
 @inject StudioState State
 @inject NavigationManager Navigation
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 
 @*
     The database browser: everything in the store's Postgres database this visitor may see, and whose it
@@ -69,7 +70,7 @@
                         int count = CountOf(category);
 
                         <a class="@TabClass(category, count)"
-                           href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, Schema, category, Owner, Filter)"
+                           href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, Schema, category, Owner, Filter)"
                            aria-current="@(category == Category ? "page" : null)"
                            title="@(count == 0 ? EmptyTabTitle : null)"
                            @key="category">
@@ -116,7 +117,7 @@
                             <p class="ms-empty-description ms-db-still-shown">@stillShown</p>
                         }
                         <p class="ms-empty-description">
-                            <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, null, Category)">Show every schema you can see</a>
+                            <a class="ms-db-back-link" href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, null, Category)">Show every schema you can see</a>
                         </p>
                     </div>
                 }
@@ -199,7 +200,7 @@
     private string? Schema => string.IsNullOrWhiteSpace(SchemaParameter) ? null : SchemaParameter;
 
     /// <summary>
-    /// The schema the title, the heading and the rail are about: <see cref="Schema" />, but only once the
+    /// The schema the title, the heading and the rail are about: the <c>Schema</c> parameter, but only once the
     /// overview has listed it. A <c>?schema=</c> is whatever somebody typed into a link, and one the overview
     /// did not return - absent, or withheld from this visitor - must not be repeated back as if it were a
     /// schema they may browse; the list below says, in the service's own words, that there is no such
@@ -472,13 +473,13 @@
 
     private Task OwnerChangedAsync(DatabaseOwnerFilter owner)
     {
-        Navigation.NavigateTo(DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, Schema, Category, owner, Filter));
+        Navigation.NavigateTo(DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, Schema, Category, owner, Filter));
         return Task.CompletedTask;
     }
 
     private Task FilterChangedAsync(string value)
     {
-        Navigation.NavigateTo(DatabaseLinks.ToBrowser(Options.Value, State.ActiveScope, Schema, Category, Owner, value));
+        Navigation.NavigateTo(DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope, Schema, Category, Owner, value));
         return Task.CompletedTask;
     }
 

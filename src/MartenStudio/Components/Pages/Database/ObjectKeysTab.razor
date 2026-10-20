@@ -1,7 +1,8 @@
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Services.Database
 @using MartenStudio.Components.Pages.Schema
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 @inject StudioState State
 
 @*
@@ -158,7 +159,7 @@
                                 <td class="ms-db-cell-name">
                                     @if (key is { LinkedVisible: true, LinkedSchema: { } schema, LinkedTable: { } table })
                                     {
-                                        <a class="ms-db-name" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, table)">@DatabaseLinks.QualifiedName(schema, table)</a>
+                                        <a class="ms-db-name" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, table)">@DatabaseLinks.QualifiedName(schema, table)</a>
                                         <span class="ms-db-fk-columns">(@string.Join(", ", key.LinkedColumns))</span>
                                         @if (key.OtherEndOwnership is { IsMarten: true } owner)
                                         {
@@ -204,7 +205,7 @@
                         {
                             <tr @key="key.Schema + '\u001f' + key.Table + '\u001f' + key.Name">
                                 <td class="ms-db-cell-name">
-                                    <a class="ms-db-name" href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, key.Schema, key.Table)" title="@key.Name">@DatabaseLinks.QualifiedName(key.Schema, key.Table)</a>
+                                    <a class="ms-db-name" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, key.Schema, key.Table)" title="@key.Name">@DatabaseLinks.QualifiedName(key.Schema, key.Table)</a>
                                     @if (!key.Validated)
                                     {
                                         <span class="ms-db-badge ms-db-badge-warning" title="NOT VALID: rows that were there when it was added were never checked">NOT VALID</span>
@@ -224,7 +225,7 @@
 }
 
 @code {
-    /// <summary>The relation's <c>DatabaseObjectDetail</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    /// <summary>The relation's <c>DatabaseObjectDetail</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
     [Parameter]
     public object? Detail { get; set; }
 

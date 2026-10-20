@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Globalization;
-using System.Net.Sockets;
 using System.Reflection;
 
 using Marten.Schema;
@@ -17,7 +16,8 @@ using Npgsql;
 namespace MartenStudio.Services.Query;
 
 /// <summary>
-/// The Query page's two modes, with the gate in front of the dangerous one.
+/// The Query page's Marten mode - a <c>where</c> clause against one document type - and the plan for it, which it
+/// fetches through the shared SQL console's gate.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -48,18 +48,14 @@ namespace MartenStudio.Services.Query;
 /// by Postgres with a 57014 the page can render rather than by breaking the connection.
 /// </para>
 /// <para>
-/// <b>Mode B - the SQL console - is the one that is gated</b>, in this order, and the order is the
-/// security property: <see cref="StudioCapabilityGuard.Require" /> for
-/// <see cref="StudioCapability.RunSql" />, then <see cref="StudioScopeResolver.ResolveAsync" /> with the
-/// capability named so <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> is the policy asked -
-/// against the scope's database as a whole, never its tenant (<see cref="SqlScope" />), because nothing
-/// narrows a typed statement to a tenant - then <see cref="ReadOnlySqlGuard" /> for a nicer message, and
-/// only then the statement - inside <see cref="ReadOnlySqlSession" />'s read-only transaction, which is
-/// what actually makes it safe (D13). Every outcome is audited, failures included (hard rule 5).
+/// <b>Mode B - the SQL console - is not here.</b> It is the shared <see cref="SqlConsoleService" />, which every
+/// studio's console runs through and which holds the gate - the capability, the write policy asked about the
+/// database as a whole (<see cref="SqlScope" />), the statement guard and the read-only transaction (D13). The
+/// Query page's SQL tab is the shared <c>SqlConsolePanel</c> over it.
 /// </para>
 /// <para>
 /// The plan for a Mode A clause is Mode B work: fetching it means sending a statement to Postgres, so it
-/// goes through the very same gate and is refused - as a value, not an exception - when the console
+/// goes through the very same gate (<see cref="SqlConsoleService.ExecuteAsync" />) and is refused - as a value, not an exception - when the console
 /// capability is off. That is why a studio without <c>RunSql</c> shows the composed SQL and says there is
 /// no plan, rather than quietly running an <c>EXPLAIN</c> nobody granted.
 /// </para>
@@ -68,9 +64,6 @@ internal sealed class QueryService : IQueryService
 {
     /// <summary>What the audit ring calls a Mode A plan fetch.</summary>
     internal const string ExplainAction = "ExplainQuery";
-
-    /// <summary>What the audit ring calls a SQL console run.</summary>
-    internal const string RunSqlAction = "RunSql";
 
     /// <summary>What the audit ring calls a Marten where clause.</summary>
     /// <remarks>
@@ -81,20 +74,8 @@ internal sealed class QueryService : IQueryService
     /// </remarks>
     internal const string MartenQueryAction = "MartenQuery";
 
-    /// <summary>How much of a statement goes into the audit ring's target column.</summary>
-    internal const int AuditTargetLength = 200;
-
-    /// <summary>
-    /// What a visitor the policies refuse the console is told - by the plan panel here and by the Query
-    /// page's console tab alike.
-    /// </summary>
-    /// <remarks>
-    /// It names the database rather than the store or the tenant, because that is the question that was
-    /// asked (<see cref="SqlScope" />): a visitor allowed one tenant is refused because the console is not
-    /// limited to one, and "this store" would send them to ask for the wrong thing.
-    /// </remarks>
-    internal const string SqlRefusedMessage =
-        "Your account may not run SQL against this database as a whole, and the SQL console is not limited to one tenant.";
+    /// <summary>How much of a statement goes into the audit ring's target column (<see cref="SqlConsoleService.AuditTargetLength" />).</summary>
+    internal const int AuditTargetLength = SqlConsoleService.AuditTargetLength;
 
     private const string Unknown = "(unknown)";
 
@@ -103,6 +84,7 @@ internal sealed class QueryService : IQueryService
     private readonly StudioCapabilityGuard capabilities;
     private readonly StudioActionLog audit;
     private readonly ColumnCatalog columnCatalog;
+    private readonly SqlConsoleService console;
     private readonly IOptions<MartenStudioOptions> options;
     private readonly ILogger<QueryService> logger;
     private readonly AuthenticationStateProvider authenticationStateProvider;
@@ -113,6 +95,7 @@ internal sealed class QueryService : IQueryService
         StudioCapabilityGuard capabilities,
         StudioActionLog audit,
         ColumnCatalog columnCatalog,
+        SqlConsoleService console,
         IOptions<MartenStudioOptions> options,
         ILogger<QueryService> logger,
         AuthenticationStateProvider authenticationStateProvider)
@@ -122,6 +105,7 @@ internal sealed class QueryService : IQueryService
         this.capabilities = capabilities;
         this.audit = audit;
         this.columnCatalog = columnCatalog;
+        this.console = console;
         this.options = options;
         this.logger = logger;
         this.authenticationStateProvider = authenticationStateProvider;
@@ -394,22 +378,7 @@ internal sealed class QueryService : IQueryService
     private static MartenQueryScope ScopeOf(ComposedQuery composed, DocumentTableInfo table) =>
         new(composed.TenantId, composed.CrossTenant, composed.Deleted, table.SoftDeleteEnabled);
 
-    private static string Outcome(int rows, TimeSpan duration) =>
-        rows.ToString(CultureInfo.InvariantCulture) + " rows in " +
-        ((long) duration.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + " ms";
-
-    /// <inheritdoc />
-    public async Task<SqlConsoleResult> RunSqlAsync(
-        StudioScope scope,
-        SqlConsoleRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(scope);
-        ArgumentNullException.ThrowIfNull(request);
-
-        return await ExecuteStatementAsync(scope, request.Statement, RunSqlAction, cancellationToken)
-            .ConfigureAwait(false);
-    }
+    private static string Outcome(int rows, TimeSpan duration) => SqlConsoleService.Outcome(rows, duration);
 
     /// <inheritdoc />
     public async Task<QueryExamples> BuildExamplesAsync(
@@ -439,40 +408,11 @@ internal sealed class QueryService : IQueryService
     }
 
     /// <summary>
-    /// The scope <c>RunSql</c> is authorized against: <paramref name="scope" /> with no tenant - the
-    /// database as a whole.
+    /// The scope <c>RunSql</c> is authorized against - the database as a whole (<see cref="SqlConsoleService.SqlScope" />):
+    /// the console run, the plan for a Mode A clause, and the nested-read rules <see cref="MayRunSqlAsync" /> lifts are
+    /// all asked about this one scope.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>A tenant does not narrow the SQL console, so it does not narrow what the console is authorized
-    /// for.</b> A statement somebody typed is sent as it is: nothing puts a <c>tenant_id</c> predicate
-    /// into it, and <c>select * from mt_doc_order</c> from a scope on <c>acme</c> returns every tenant's
-    /// orders. Authorizing <c>(store, database, acme)</c> for that let a host whose policy grants one
-    /// tenant hand the whole database to anyone it granted a tenant - the same shape as the rewind and the
-    /// progression corrections (<see cref="DatabaseReach" />), and the rule D27 already applies to the
-    /// database browser: a read nothing filters by tenant is asked with <c>TenantId = null</c>.
-    /// </para>
-    /// <para>
-    /// There is no "exclusively this tenant's database" exception here, as there is for a daemon
-    /// operation. A console statement is bounded by the connection's role and not by the tenants a
-    /// database lists - it reads every schema and table that role can, the store's own and everything
-    /// else, and <c>SqlConsoleRole</c> is the boundary for that (D13) - so the question is about what the
-    /// console is, not about which tenants the database happens to hold.
-    /// </para>
-    /// <para>
-    /// Every <c>RunSql</c> question is asked against this one scope: the console run, the <c>EXPLAIN</c>
-    /// fetch for a Mode A clause, and <see cref="MayRunSqlAsync" />, which lifts the clause guard's
-    /// nested-read rules and so also reads beyond the tenant - a subquery against another table carries
-    /// no tenant predicate either. The Query page asks the same two questions of the same scope, so the
-    /// console it shows and the console the service runs never disagree.
-    /// </para>
-    /// </remarks>
-    internal static StudioScope SqlScope(StudioScope scope)
-    {
-        ArgumentNullException.ThrowIfNull(scope);
-
-        return scope.TenantId is null ? scope : scope with { TenantId = null };
-    }
+    internal static StudioScope SqlScope(StudioScope scope) => SqlConsoleService.SqlScope(scope);
 
     /// <summary>
     /// Whether this visitor may run SQL against this scope's database, which is what lifts the clause
@@ -483,8 +423,7 @@ internal sealed class QueryService : IQueryService
     /// The same three questions the console's own gate asks, in the same order, against the same
     /// tenant-less scope (<see cref="SqlScope" />): the process-wide capability (D4), then the store
     /// policy and the write policy with <c>RunSql</c> on the resource - which is exactly what
-    /// <see cref="StudioScopeResolver.ResolveAsync" /> asks when <see cref="ExecuteStatementAsync" />
-    /// resolves it. Asking only the capability would hand subqueries to somebody the
+    /// the shared resolver asks when <see cref="SqlConsoleService.ExecuteAsync" /> resolves it. Asking only the capability would hand subqueries to somebody the
     /// <see cref="MartenStudioOptions.WriteAuthorizationPolicy" /> refuses the console to; asking only the
     /// write policy would hand them to somebody the store policy allows one tenant of the database and not
     /// the database - and a subquery reads beyond the tenant exactly as the console does.
@@ -536,17 +475,17 @@ internal sealed class QueryService : IQueryService
                 capabilities.ReadOnly
                     ? "No plan: MartenStudioOptions.ReadOnly is true, and a plan has to be fetched from Postgres."
                     : "No plan: fetching one runs EXPLAIN, which needs " +
-                      StudioCapabilityGuard.OptionName(StudioCapability.RunSql) + ".");
+                      capabilities.OptionFor(StudioCapability.RunSql) + ".");
         }
 
         try
         {
-            SqlConsoleResult result = await ExecuteStatementAsync(
+            SqlConsoleResult result = await console.ExecuteAsync(
                     scope,
                     QuerySqlComposer.Explain(composed.Statement, json: true),
                     ExplainAction,
-                    cancellationToken,
-                    composed.Bind)
+                    composed.Bind,
+                    cancellationToken)
                 .ConfigureAwait(false);
 
             if (result.Rejection is { } rejection)
@@ -572,178 +511,7 @@ internal sealed class QueryService : IQueryService
             // The plan is fetched through the console's gate, which asks about the database as a whole
             // (SqlScope): a visitor allowed one tenant and not the database gets the clause's rows and no
             // plan, which is the same answer the console tab would give them.
-            return ExplainResult.Unavailable("No plan: fetching one runs EXPLAIN through the SQL console. " + SqlRefusedMessage);
-        }
-    }
-
-    /// <summary>
-    /// The gate, and then the statement. Everything that reaches Postgres through the console path goes
-    /// through here.
-    /// </summary>
-    /// <param name="scope">The scope the statement runs in.</param>
-    /// <param name="statement">The statement, exactly as it will be sent.</param>
-    /// <param name="action">What the audit ring calls it.</param>
-    /// <param name="cancellationToken">The token.</param>
-    /// <param name="bind">
-    /// Binds the statement's parameters, when it has any. The console itself never does - what somebody
-    /// typed is sent verbatim - but a Mode A <c>EXPLAIN</c> has to bind the very same values the query
-    /// bound, or it would be planning a different statement.
-    /// </param>
-    private async Task<SqlConsoleResult> ExecuteStatementAsync(
-        StudioScope scope,
-        string statement,
-        string action,
-        CancellationToken cancellationToken,
-        Action<NpgsqlCommand>? bind = null)
-    {
-        MartenStudioOptions value = options.Value;
-        string target = Target(statement);
-        string user = UserName();
-
-        // 1. The capability. Refused before anything is resolved, and recorded either way.
-        try
-        {
-            capabilities.Require(StudioCapability.RunSql);
-        }
-        catch (StudioCapabilityDeniedException denied)
-        {
-            audit.RecordCapabilityDenied(denied, action, target);
-            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, denied.Message, statement);
-            throw;
-        }
-
-        // 2. The scope, with the capability named so the write policy is the one asked. It is a read, but
-        //    it is the dangerous read, and D13 is explicit that it is treated as a write. And it is asked
-        //    without the tenant: nothing narrows a statement to one, so the database as a whole is what
-        //    it reads and what it is authorized for (SqlScope). The audit and the log name that scope too,
-        //    success and refusal alike, because it is what was asked and what ran.
-        StudioScope sqlScope = SqlScope(scope);
-        ResolvedScope resolved;
-        try
-        {
-            resolved = await resolver
-                .ResolveAsync(sqlScope, nameof(StudioCapability.RunSql), cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (StudioNotAuthorizedException denied)
-        {
-            audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), action, target, StudioCapability.RunSql);
-            logger.SqlRejected(
-                user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", statement);
-            throw;
-        }
-
-        // 3. The advisory guard. Not the security boundary - the transaction below is - but it is what
-        //    turns "delete from …" into a sentence instead of a SQLSTATE.
-        SqlGuardResult guard = ReadOnlySqlGuard.Check(statement);
-        if (!guard.Allowed)
-        {
-            SqlRejection rejection = SqlRejection.FromGuard(guard);
-
-            audit.Record(action, target, succeeded: false, rejection.Message, StudioCapability.RunSql, sqlScope);
-            logger.SqlRejected(user, sqlScope.StoreKey, sqlScope.DatabaseId, rejection.Reason, statement);
-
-            return SqlConsoleResult.Refused(rejection, value.MaxSqlConsoleRows);
-        }
-
-        return await RunAsync(resolved, sqlScope, statement, action, value, user, bind, cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    private async Task<SqlConsoleResult> RunAsync(
-        ResolvedScope resolved,
-        StudioScope scope,
-        string statement,
-        string action,
-        MartenStudioOptions value,
-        string user,
-        Action<NpgsqlCommand>? bind,
-        CancellationToken cancellationToken)
-    {
-        List<string> notices = [];
-        string target = Target(statement);
-
-        void OnNotice(object? sender, NpgsqlNoticeEventArgs args)
-        {
-            // Synchronous by construction: an `async` handler on an event is an async void with different
-            // spelling, and AGENTS.md hard rule 6 forbids it in every shape.
-            if (notices.Count < 50)
-            {
-                notices.Add(args.Notice.Severity + ": " + args.Notice.MessageText);
-            }
-        }
-
-        var session = new ReadOnlySqlSession(new ReadOnlySqlOptions
-        {
-            StatementTimeout = value.QueryTimeout,
-            MaxRows = value.MaxSqlConsoleRows,
-            Role = value.SqlConsoleRole,
-        });
-
-        await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
-        connection.Notice += OnNotice;
-
-        try
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-            SqlResultSet result = await session
-                .ExecuteAsync(connection, statement, bind, cancellationToken)
-                .ConfigureAwait(false);
-
-            long elapsed = (long) result.Duration.TotalMilliseconds;
-
-            if (result.Error is { } error)
-            {
-                string reason = QuerySqlErrors.Summarize(error);
-
-                audit.Record(action, target, succeeded: false, reason, StudioCapability.RunSql, scope);
-                logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, reason, statement);
-            }
-            else
-            {
-                string outcome = Outcome(result.Rows.Count, result.Duration);
-
-                audit.Record(action, target, succeeded: true, outcome, StudioCapability.RunSql, scope);
-                logger.SqlExecuted(user, scope.StoreKey, scope.DatabaseId, elapsed, result.Rows.Count, statement);
-            }
-
-            return new SqlConsoleResult(
-                result.Columns,
-                result.Rows,
-                result.Truncated,
-                value.MaxSqlConsoleRows,
-                result.Duration,
-                notices,
-                result.Error,
-                null);
-        }
-        catch (Exception exception) when (exception is (NpgsqlException and not PostgresException) or SocketException)
-        {
-            // The connection itself, rather than the statement: nothing ran, and the page says so with the
-            // same shape it uses for a SQLSTATE. A host name that does not resolve reaches here as the
-            // SocketException itself - Npgsql 9.0.4 does not wrap it - and used to escape unaudited.
-            audit.Record(action, target, succeeded: false, exception.Message, StudioCapability.RunSql, scope);
-            logger.SqlRejected(user, scope.StoreKey, scope.DatabaseId, exception.Message, statement);
-
-            return new SqlConsoleResult(
-                [],
-                [],
-                false,
-                value.MaxSqlConsoleRows,
-                TimeSpan.Zero,
-                notices,
-                new SqlError("08006", exception.Message, 0, null, null),
-                null);
-        }
-        catch (OperationCanceledException)
-        {
-            audit.Record(action, target, succeeded: false, "cancelled", StudioCapability.RunSql, scope);
-            throw;
-        }
-        finally
-        {
-            connection.Notice -= OnNotice;
+            return ExplainResult.Unavailable("No plan: fetching one runs EXPLAIN through the SQL console. " + SqlConsoleService.SqlRefusedMessage);
         }
     }
 
@@ -878,9 +646,6 @@ internal sealed class QueryService : IQueryService
     private static SqlError ToSqlError(PostgresException exception) =>
         new(exception.SqlState, exception.MessageText, exception.Position, exception.Detail, exception.Hint);
 
-    private static string WritePolicyName(MartenStudioOptions value) =>
-        value.WriteAuthorizationPolicy ?? value.StoreAuthorizationPolicy ?? "(none)";
-
     /// <summary>
     /// The policy a Mode A refusal names. A <c>where</c> clause is resolved with no capability, so the
     /// policy that answered is the store policy - naming the write policy in the log would send whoever
@@ -890,17 +655,10 @@ internal sealed class QueryService : IQueryService
         value.StoreAuthorizationPolicy ?? "(none)";
 
     /// <summary>
-    /// The statement as the audit ring's target: enough to recognise it, on one line. The <em>whole</em>
-    /// statement goes to the application's own log (event 9204 or 9205), which is the record that survives
-    /// a restart.
+    /// The statement as the audit ring's target: enough to recognise it, on one line
+    /// (<see cref="SqlConsoleService.Target" />). The <em>whole</em> statement goes to the application's own log.
     /// </summary>
-    internal static string Target(string? statement)
-    {
-        string collapsed = string.Join(' ', (statement ?? string.Empty).Split(
-            ['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-
-        return collapsed.Length <= AuditTargetLength ? collapsed : collapsed[..AuditTargetLength] + "…";
-    }
+    internal static string Target(string? statement) => SqlConsoleService.Target(statement);
 
     private string UserName()
     {

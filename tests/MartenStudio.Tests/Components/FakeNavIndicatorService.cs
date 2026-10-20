@@ -1,3 +1,4 @@
+using MartenStudio.Services;
 using MartenStudio.Services.Live;
 
 namespace MartenStudio.Tests.Components;
@@ -6,9 +7,10 @@ namespace MartenStudio.Tests.Components;
 /// What the sidebar's badges are told, said outright by a test.
 /// </summary>
 /// <remarks>
-/// The real <c>NavIndicatorService</c> reads through the events and projections services, which every
-/// layout test would then have to provide with a Postgres behind them - for two small numbers that no
-/// test about navigation is about. It answers nothing by default, which is also what it answers in a
+/// The real <c>NavIndicatorService</c> reads through MartenStudio's contributor, which reads through the events and
+/// projections services, which every layout test would then have to provide with a Postgres behind them - for two
+/// small numbers that no test about navigation is about. The numbers below are worded by the contributor's own
+/// <c>MartenNavBadges</c>, so the badges drawn are the ones the real contributor would draw. It answers nothing by default, which is also what it answers in a
 /// process where the counts could not be read: no badge.
 /// </remarks>
 internal sealed class FakeNavIndicatorService : INavIndicatorService
@@ -69,9 +71,10 @@ internal sealed class FakeNavIndicatorService : INavIndicatorService
         }
 
         return Task.FromResult(new NavIndicators(
-            DeadLetters,
-            ProjectionsNeedAttention,
-            ProjectionsNeedAttention ? ProjectionsExplanation : null)
+            MartenNavBadges.From(
+                DeadLetters,
+                ProjectionsNeedAttention,
+                ProjectionsNeedAttention ? ProjectionsExplanation : null))
         {
             Health = Health,
         });

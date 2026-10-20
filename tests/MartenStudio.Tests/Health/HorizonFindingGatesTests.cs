@@ -31,7 +31,7 @@ public class HorizonFindingGatesTests
     [Fact]
     public void The_horizon_checks_are_at_the_database_wide_gate()
     {
-        new HealthCheckRegistry().All.Where(static x => x.Info.Code is "T12" or "T13" or "T14")
+        StudioHealthChecks.Registry.All.Where(static x => x.Info.Code is "T12" or "T13" or "T14")
             .Should().HaveCount(3).And.OnlyContain(static x => x.Info.Gate == HealthGate.Database);
     }
 

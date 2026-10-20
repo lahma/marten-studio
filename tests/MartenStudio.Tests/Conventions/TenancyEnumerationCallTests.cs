@@ -53,13 +53,16 @@ public class TenancyEnumerationCallTests
     /// <summary>
     /// A call to one of the members, as a member access. <c>TryDescribeDatabasesAsync</c> and
     /// <c>DescribeDatabasesAsync</c> are told apart by the dot, which a <c>Try</c> prefix would sit between.
+    /// <c>DatabasesAsync</c> is the shared source seam's (<c>IStudioSource.DatabasesAsync</c>): on a Marten source it
+    /// <em>is</em> <c>Storage.AllDatabases()</c>, so a caller of the seam is a caller of the enumeration, and is counted
+    /// where it calls rather than once inside the implementation.
     /// <c>ListDatabasesAsync</c> is the second alternative: a call whose argument list holds no top-level comma -
     /// the pool's <c>ListDatabasesAsync(token)</c> - and never the studio catalog's two-argument one.
     /// </summary>
     private static readonly Regex TenancyCall = new(
         @"\.\s*(?:(?<member>AllDatabases|BuildDatabases|TryDescribeDatabasesAsync|DescribeDatabasesAsync"
         + @"|FindOrCreateDatabase|GetTenantAsync|GetTenant|TryFindDatabase|FindDatabaseForTenantAsync|FindDatabase"
-        + @"|AllDisabledTenantsAsync|AllDisabledAsync|AllDaemonsAsync)\s*\("
+        + @"|AllDisabledTenantsAsync|AllDisabledAsync|AllDaemonsAsync|DatabasesAsync)\s*\("
         + @"|(?<member>ListDatabasesAsync)\s*\((?=[^,()]*(?:\([^()]*\)[^,()]*)*\)))",
         RegexOptions.Compiled,
         TimeSpan.FromSeconds(5));
@@ -74,16 +77,22 @@ public class TenancyEnumerationCallTests
     /// </remarks>
     private static readonly AllowedSite[] AllowedSites =
     [
-        new("src/MartenStudio/Services/StudioScopeResolver.cs", "AllDatabases", 1,
-            "the instance: every resolution matches the URL's database by identity against what the store lists, "
+        // PS-1a: the resolver's and the scope catalog's three enumerations are one call now, the Marten source's
+        // DatabasesAsync, which the shared resolver and catalog ask exactly where they used to ask the store.
+        new("src/MartenStudio/Services/MartenStudioSourceProvider.cs", "AllDatabases", 1,
+            "the implementation of IStudioSource.DatabasesAsync for a Marten store, and nothing else: every caller of "
+            + "the seam is counted at its own call below"),
+        new("src/MartenStudio/Services/Sources/StudioSourceResolver.cs", "DatabasesAsync", 1,
+            "the instance: every resolution matches the URL's database by identity against what the source lists, "
             + "never FindOrCreateDatabase, which would create the database a URL named"),
-        new("src/MartenStudio/Services/StudioScopeCatalog.cs", "AllDatabases", 2,
+        new("src/MartenStudio/Services/StudioScopeCatalog.cs", "DatabasesAsync", 2,
             "names, for the database picker; and the instance tenant discovery reads, for the header"),
         new("src/MartenStudio/Services/StoreInfoService.cs", "AllDatabases", 1,
             "names, for the Overview's cards - one enumeration per store per load (F8-D3 C3)"),
         new("src/MartenStudio/Services/TenantDiscovery.cs", "DescribeDatabasesAsync", 1,
             "tenant ids, for every tenancy but master-table and sharded, which are read from the instance (F8-D3 C4)"),
-        new("src/MartenStudio/Services/Database/DatabaseAccess.cs", "AllDatabases", 1,
+        // PS-1b: moved with the code, from DatabaseAccess.cs to MartenStudio's IDatabaseDeclarationsSource.
+        new("src/MartenStudio/Services/MartenDatabaseDeclarationsSource.cs", "AllDatabases", 1,
             "names: another store's spelling of this database's identity, walked only when a policy will be asked "
             + "and only on a Single or StaticMultiple store (F8-D3 C1)"),
         new("src/MartenStudio/Services/Configuration/ConfigurationService.cs", "DescribeDatabasesAsync", 1,
@@ -188,6 +197,9 @@ public class TenancyEnumerationCallTests
     [InlineData("IReadOnlyList<DatabaseOverview>? databases = await ListDatabasesAsync(storeKey, store, cancellationToken);", null)]
     [InlineData("IReadOnlyList<DatabaseListing> databases = await ListDatabasesAsync(registration.Key, store, cancellationToken);", null)]
     [InlineData("var daemons = await coordinator.AllDaemonsAsync();", "AllDaemonsAsync")]
+    [InlineData("IReadOnlyList<IStudioDatabase> databases = await source.DatabasesAsync(token);", "DatabasesAsync")]
+    [InlineData("foreach (IStudioDatabase database in await source\n    .DatabasesAsync(cancellationToken).ConfigureAwait(false))", "DatabasesAsync")]
+    [InlineData("public async ValueTask<IReadOnlyList<IStudioDatabase>> DatabasesAsync(CancellationToken cancellationToken)", null)]
     [InlineData("StoreDatabases listed = await StoreDatabases.ListAsync(store);", null)]
     [InlineData("/// <c>Storage.AllDatabases()</c> is a query on a master-table tenancy.", null)]
     [InlineData("// tenancy.GetTenantAsync(id) provisions a sharded tenant", null)]

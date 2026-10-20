@@ -272,7 +272,7 @@ public class ProjectionsPageTests
         await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
         context.ProjectionData.ActionFailure =
-            new StudioCapabilityDeniedException(StudioCapability.ControlDaemon, CapabilityDenialReason.Disabled);
+            Support.MartenSpine.Denied(StudioCapability.ControlDaemon, CapabilityDenialReason.Disabled);
         await context.ReadyAsync();
 
         var page = context.Render<Page>();

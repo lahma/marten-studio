@@ -64,7 +64,7 @@ public class SqlConsoleReachLiveTests(PostgresFixture fixture) : IAsyncLifetime
     {
         QueryDocumentTypeInfo ticket = await TicketAsync();
 
-        Func<Task> running = () => harness.Queries.RunSqlAsync(
+        Func<Task> running = () => harness.Console.RunSqlAsync(
             AcmeScope, new SqlConsoleRequest($"select tenant_id from {ticket.QualifiedTableName}"), Token);
 
         StudioNotAuthorizedException refused = (await running.Should().ThrowAsync<StudioNotAuthorizedException>(
@@ -73,7 +73,7 @@ public class SqlConsoleReachLiveTests(PostgresFixture fixture) : IAsyncLifetime
         refused.Scope.TenantId.Should().BeNull();
 
         StudioActionLogEntry entry = harness.Audit.GetLatest()
-            .First(static x => x.Action == QueryService.RunSqlAction);
+            .First(static x => x.Action == SqlConsoleService.RunSqlAction);
 
         entry.Succeeded.Should().BeFalse();
         entry.TenantId.Should().BeNull("the audit names the question that was refused");

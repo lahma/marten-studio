@@ -2,16 +2,6 @@ using MartenStudio.Internal.Sql;
 
 namespace MartenStudio.Services.Query;
 
-/// <summary>Which way a document list is ordered.</summary>
-internal enum SortDirection
-{
-    /// <summary>Ascending, nulls last.</summary>
-    Ascending,
-
-    /// <summary>Descending, nulls last.</summary>
-    Descending,
-}
-
 /// <summary>The tri-state the documents page offers for soft-deleted rows.</summary>
 internal enum DeletedFilter
 {

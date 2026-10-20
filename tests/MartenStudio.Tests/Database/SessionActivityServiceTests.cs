@@ -3,6 +3,7 @@ using Marten;
 using MartenStudio.Services;
 using MartenStudio.Services.Database;
 using MartenStudio.Services.Health;
+using MartenStudio.Services.Sources;
 using MartenStudio.Tests.Health;
 using MartenStudio.Tests.Support;
 
@@ -475,7 +476,7 @@ internal sealed class FakeSessionActivityReader : ISessionActivityReader
         [new HealthStatement("select 1", [])]);
 
     /// <inheritdoc />
-    public Task<SessionSnapshot> ReadAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    public Task<SessionSnapshot> ReadAsync(ResolvedSource resolved, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref reads);
 

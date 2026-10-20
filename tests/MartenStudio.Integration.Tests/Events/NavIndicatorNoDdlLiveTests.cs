@@ -66,11 +66,16 @@ public class NavIndicatorNoDdlLiveTests(PostgresFixture fixture)
         NavIndicators first = await host.BadgesAsync();
         NavIndicators second = await host.BadgesAsync();
 
-        // Answered, rather than failing in a way that would make the counts trivially unchanged.
-        first.DeadLetters.Should().Be(0, "no dead-letter table is a real zero, not a failure");
-        first.ProjectionsNeedAttention.Should().BeFalse();
-        first.ProjectionsExplanation.Should().BeNull();
-        second.Should().Be(first);
+        first.Badges.Should().BeEmpty("no dead letters and no event store draw nothing");
+        second.Badges.Should().BeEquivalentTo(first.Badges);
+        second.Health.Should().Be(first.Health);
+
+        // Answered, rather than failing in a way that would make the counts trivially unchanged: the contributor's own
+        // numbers, which tell a real zero from "could not tell". Read on the same path, so it is under the same check.
+        MartenNavReading numbers = await host.NavNumbersAsync();
+        numbers.DeadLetters.Should().Be(0, "no dead-letter table is a real zero, not a failure");
+        numbers.ProjectionsNeedAttention.Should().BeFalse();
+        numbers.ProjectionsExplanation.Should().BeNull();
 
         SchemaObjects after = await host.ReadObjectsAsync();
 

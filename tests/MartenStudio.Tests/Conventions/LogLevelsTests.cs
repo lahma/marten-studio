@@ -132,7 +132,7 @@ public class LogLevelsTests
             "A capability refusal reaches the service only when a client drives a control the page disabled or hid."),
         ["src/MartenStudio/Services/StudioLog.cs : 9203 ScopeAuthorizationDenied"] = (Verdict.Refusal,
             "A policy refusal on a write, a query run or a database-browser read (by name, of a store the store policy refuses), including an offered pause or correction that reaches a database the visitor may not; listings are filtered (FilterAsync logs nothing)."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9211 DocumentWriteRoundTripDropped"] = (Verdict.DataLoss,
+        ["src/MartenStudio/Services/MartenLog.cs : 9211 DocumentWriteRoundTripDropped"] = (Verdict.DataLoss,
             "A save the visitor confirmed dropped properties the CLR type does not have; the only durable record of the loss."),
         ["src/MartenStudio/Services/StudioLog.cs : 9230 DatabaseBrowserOpenToEverySchemaWithoutRole"] = (Verdict.Configuration,
             "BrowsableSchemas contains \"*\" and SqlConsoleRole is unset: every table the store's role can read is browsable. Once per host start."),
@@ -140,19 +140,19 @@ public class LogLevelsTests
         // ---- StudioLog: the throttled anomalies (level is a parameter) --------------------------------
         ["src/MartenStudio/Services/StudioLog.cs : 9210 StoreUnavailable"] = (Verdict.Throttled,
             "A registered store will not build; the registry's ten-second cache expires under every polling page."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9212 DaemonUnreachable"] = (Verdict.Throttled,
+        ["src/MartenStudio/Services/MartenLog.cs : 9212 DaemonUnreachable"] = (Verdict.Throttled,
             "A registered coordinator answered with neither a daemon nor NotSupported, or would not build other than by Wolverine's unknown-store shape; polled."),
         ["src/MartenStudio/Services/StudioLog.cs : 9213 StoreDatabasesUnreadable"] = (Verdict.Throttled,
             "A store's databases could not be listed; asked by every Overview load and every scope listing in every circuit."),
         ["src/MartenStudio/Services/StudioLog.cs : 9214 PostgresVersionUnreadable"] = (Verdict.Throttled,
             "The server version of a store with a default database could not be read; asked once per circuit per store, and every circuit asks. A tenancy with no default database (master-table, sharded, static without AsDefault) is Debug."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9215 ShardTrackerUnobservable"] = (Verdict.Throttled,
+        ["src/MartenStudio/Services/MartenLog.cs : 9215 ShardTrackerUnobservable"] = (Verdict.Throttled,
             "The in-process tracker refused an observer; asked again by every visit to the projections page."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9216 ProjectionSummaryUnreadable"] = (Verdict.Throttled,
+        ["src/MartenStudio/Services/MartenLog.cs : 9216 ProjectionSummaryUnreadable"] = (Verdict.Throttled,
             "The projection summary failed for a reason that is not a refusal or a stale link; polled by the Overview and nav."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9217 EventReadFailed"] = (Verdict.Throttled,
+        ["src/MartenStudio/Services/MartenLog.cs : 9217 EventReadFailed"] = (Verdict.Throttled,
             "An event-store read failed other than by a statement timeout (a missing table is here: every read asks the catalog first); polled."),
-        ["src/MartenStudio/Services/StudioLog.cs : 9218 StreamTimestampMissing"] = (Verdict.Throttled,
+        ["src/MartenStudio/Services/MartenLog.cs : 9218 StreamTimestampMissing"] = (Verdict.Throttled,
             "A hand-migrated mt_streams no Marten schema can have; once is enough, not once per page of streams."),
         ["src/MartenStudio/Services/StudioLog.cs : 9219 TenantDiscoveryFailed"] = (Verdict.Throttled,
             "Tenant discovery failed; the header asks on every scope change in every circuit."),
@@ -170,7 +170,7 @@ public class LogLevelsTests
             "The opt-in health export failed in the studio itself and reports Degraded; an orchestrator probes the health endpoint every few seconds, and the run repeats every HealthInterval."),
 
         // ---- Visitor-started reads and writes, one line per action ------------------------------------
-        ["src/MartenStudio/Services/StudioLog.Deps.cs : 9320 SubscriptionRewindRefused"] = (Verdict.VisitorAction,
+        ["src/MartenStudio/Services/MartenLog.Deps.cs : 9320 SubscriptionRewindRefused"] = (Verdict.VisitorAction,
             "A rewind the visitor pressed was refused by Marten as an unknown subscription after the studio checked the name; the daemon may have stopped the agents first, and Marten's words, which list every subscription, are kept only here."),
         ["src/MartenStudio/Services/Configuration/ConfigurationService.cs : Marten Studio could not describe the databases of store {StoreKey}"] = (Verdict.VisitorAction,
             "The configuration screen's own load; not polled, and the page shows the failure."),
@@ -178,7 +178,7 @@ public class LogLevelsTests
             "A pause, resume or store-wide correction the visitor pressed is refused because the store's databases cannot be enumerated."),
         ["src/MartenStudio/Services/Relationships/RelationshipDataService.cs : Marten Studio could not read the relationships of {StoreKey}"] = (Verdict.VisitorAction,
             "The relationships screen's load failed on a catalog read; not polled."),
-        ["src/MartenStudio/Services/Relationships/RelationshipDataService.cs : Marten Studio could not read what references '{Id}' of '{Alias}'"] = (Verdict.VisitorAction,
+        ["src/MartenStudio/Services/MartenRelationshipNodeSource.cs : Marten Studio could not read what references '{Id}' of '{Alias}'"] = (Verdict.VisitorAction,
             "A document detail's referenced-by panel failed as a whole; the per-edge counts inside it are Debug."),
         ["src/MartenStudio/Services/Schema/SchemaDataService.cs : Marten Studio could not create a schema migration for database {DatabaseId}"] = (Verdict.VisitorAction,
             "The drift check behind a button failed to build a migration."),
@@ -364,13 +364,14 @@ public class LogLevelsTests
 
     /// <summary>
     /// The events the rule is about are exactly the ones the roster files as throttled in
-    /// <c>StudioLog.cs</c> - 9210, 9212-9222 and 9237 - so neither list can drift from the other.
+    /// <c>StudioLog.cs</c> and <c>MartenLog.cs</c> - 9210, 9212-9222 and 9237 - so neither list can drift from the other.
     /// </summary>
     [Fact]
     public void The_throttled_events_are_the_ones_the_roster_files_as_throttled()
     {
         IEnumerable<string> fromRoster = Roster
-            .Where(static x => x.Value.Verdict == Verdict.Throttled && x.Key.StartsWith(StudioLogFile + " : ", StringComparison.Ordinal))
+            .Where(static x => x.Value.Verdict == Verdict.Throttled
+                && EventFiles.Any(file => x.Key.StartsWith(file + " : ", StringComparison.Ordinal)))
             .Select(static x => x.Key[(x.Key.LastIndexOf(' ') + 1)..]);
 
         ThrottledEventMethods().Should().BeEquivalentTo(fromRoster);
@@ -479,14 +480,23 @@ public class LogLevelsTests
     /// <param name="Problem">What is wrong, or <see langword="null" /> when the level is the throttle's.</param>
     public sealed record ThrottledCall(string Location, string Method, string? Problem);
 
-    private const string StudioLogFile = "src/MartenStudio/Services/StudioLog.cs";
+    /// <summary>
+    /// The files that declare the studio's main event blocks: the shared <c>StudioLog.cs</c> and, since 0.5's split
+    /// (PS-1a), MartenStudio's own <c>MartenLog.cs</c> - one id space, two declaring classes.
+    /// </summary>
+    private static readonly string[] EventFiles =
+    [
+        "src/MartenStudio/Services/StudioLog.cs",
+        "src/MartenStudio/Services/MartenLog.cs",
+    ];
 
     /// <summary>
-    /// The <c>StudioLog</c> methods whose level is a parameter - read out of <c>StudioLog.cs</c> by the
+    /// The event methods whose level is a parameter - read out of <see cref="EventFiles" /> by the
     /// same scanner the roster uses, so a new throttled event is covered the moment it is declared.
     /// </summary>
     private static HashSet<string> ThrottledEventMethods() =>
-        Sites(StudioLogFile, File.ReadAllText(RepositoryRoot.Combine(StudioLogFile)))
+        EventFiles
+            .SelectMany(static file => Sites(file, File.ReadAllText(RepositoryRoot.Combine(file))))
             .Where(static x => x.Level == SiteLevel.Dynamic)
             .Select(static x => x.Key[(x.Key.LastIndexOf(' ') + 1)..])
             .ToHashSet(StringComparer.Ordinal);

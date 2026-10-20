@@ -1,6 +1,6 @@
-using MartenStudio.Services.Events;
 using MartenStudio.Services.Health;
-using MartenStudio.Services.Projections;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 using Microsoft.Extensions.Logging;
 
@@ -11,35 +11,26 @@ namespace MartenStudio.Services.Live;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Three values and nothing else, because a badge is a decoration and a decoration must not be able to
-/// break navigation. Every field is nullable or false-by-default, and the service answers
-/// <see cref="None" /> rather than throwing whenever anything it asked could not be read: a database that
-/// is down takes the counts away, never the links.
+/// Badges and nothing else, because a badge is a decoration and a decoration must not be able to break navigation.
+/// The service answers <see cref="None" /> rather than throwing whenever anything it asked could not be read: a
+/// database that is down takes the badges away, never the links.
 /// </para>
 /// <para>
-/// There is deliberately no schema-drift indicator. Finding drift costs a <c>CreateMigrationAsync</c>,
-/// which is a schema-building call that hard rule 14 keeps off every read and navigation path, so drift
-/// stays behind the button on the schema screen that says what it may create.
+/// There is deliberately no schema-drift indicator. Finding drift costs a <c>CreateMigrationAsync</c>, which is a
+/// schema-building call that hard rule 14 keeps off every read and navigation path, so drift stays behind the button
+/// on the schema screen that says what it may create.
 /// </para>
 /// </remarks>
-/// <param name="DeadLetters">
-/// How many dead letters this database holds, or <see langword="null" /> when nobody could tell. Zero and
-/// "could not tell" are different answers and neither draws a badge.
+/// <param name="Badges">
+/// The badges beyond the health glance, keyed as the descriptor's sidebar entries name them
+/// (<see cref="StudioNavItem.BadgeKey" />) - what each registered <see cref="INavIndicatorContributor" /> read: in
+/// MartenStudio, the dead-letter count and the projections dot. A key with no badge is absent; "zero" and "could not
+/// tell" are both absent, because neither draws anything.
 /// </param>
-/// <param name="ProjectionsNeedAttention">
-/// Whether a shard is lagging past the amber threshold, paused, or failed.
-/// </param>
-/// <param name="ProjectionsExplanation">What to put in the dot's tooltip, when there is a dot.</param>
-internal sealed record NavIndicators(
-    long? DeadLetters,
-    bool ProjectionsNeedAttention,
-    string? ProjectionsExplanation)
+internal sealed record NavIndicators(IReadOnlyDictionary<string, StudioNavBadge> Badges)
 {
     /// <summary>Nothing known, and therefore nothing drawn.</summary>
-    public static NavIndicators None { get; } = new(null, false, null);
-
-    /// <summary>Whether the dead-letter entry carries a count.</summary>
-    public bool ShowDeadLetterCount => DeadLetters is > 0;
+    public static NavIndicators None { get; } = new(new Dictionary<string, StudioNavBadge>(StringComparer.Ordinal));
 
     /// <summary>
     /// What the last health sweep of this database said, for this visitor and unmuted, or
@@ -55,9 +46,8 @@ internal sealed record NavIndicators(
 /// What <c>NavMenu</c> reads for its badges.
 /// </summary>
 /// <remarks>
-/// An interface so the layout can be rendered in a component test without an events service, a
-/// projections service or a Postgres behind either of them - none of which a test about navigation is
-/// about.
+/// An interface so the layout can be rendered in a component test without a contributor or a Postgres behind it -
+/// none of which a test about navigation is about.
 /// </remarks>
 internal interface INavIndicatorService
 {
@@ -69,88 +59,66 @@ internal interface INavIndicatorService
 }
 
 /// <summary>
-/// Reads the navigation's badges through the same services the pages behind them use.
+/// Reads the navigation's badges: the health glance itself, and every other badge from the studio's
+/// <see cref="INavIndicatorContributor" />s.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Scoped, because the scope it reads for is the circuit's. It asks
-/// <see cref="IEventDataService.CountDeadLettersAsync" /> and
-/// <see cref="IProjectionDataService.GetSummaryAsync" /> - the services, never the database - so the
-/// store, database and tenant policies are applied to a badge exactly as they are to the page it points
-/// at, and a visitor who may not see a database does not learn its dead-letter count from the sidebar.
+/// Scoped, because the scope it reads for is the circuit's. A contributor reads through the same services the
+/// pages behind its badges use - never the database - so the source, database and tenant policies are applied to a
+/// badge exactly as they are to the page it points at, and a visitor who may not see a database does not learn its
+/// numbers from the sidebar.
 /// </para>
 /// <para>
-/// <b>The projection half is gated on the event tables existing</b> (hard rule 14).
-/// <see cref="IProjectionDataService.GetSummaryAsync" /> used to reach
-/// <c>IMartenDatabase.FetchHighestEventSequenceNumber</c> and <c>AllProjectionProgress</c>, both of which
-/// open with <c>EnsureStorageExistsAsync(typeof(IEvent))</c> - a Weasel migration of the event store
-/// under the database's own <c>AutoCreate</c>. The sidebar is on <em>every</em> route, so an ungated
-/// badge meant that a host whose database had no event tables got them created by opening
-/// <c>/marten/documents</c>. That service now reads the progression table and the event sequence with the
-/// studio's own SQL and answers "no event store here" as a value, so this gate is no longer what stands
-/// between the sidebar and a migration - it is kept because it is still the cheaper answer:
-/// <see cref="IEventDataService.DescribeAsync" /> is one <c>information_schema</c> read through the
-/// shared, expiring column catalog, and it spares a database with no event store the two queries that
-/// would each return nothing.
+/// <b>Authorization comes before the cache, not inside it.</b> <see cref="StudioSnapshotCache" /> is a process-wide
+/// singleton keyed on the scope alone - its own contract says so, and says why: callers are expected to have passed
+/// the scope policy for that scope before they reach it. A cache hit returns without running the factory, so asking
+/// inside would mean the second circuit to want a badge for a database got one without the policy being consulted
+/// (D5). The refusal is <see cref="NavIndicators.None" />, which is the same thing the sidebar draws for a database
+/// nobody could read: a visitor who may not see a database learns nothing from the difference.
 /// </para>
 /// <para>
-/// <b>Authorization comes before the cache, not inside it.</b>
-/// <see cref="StudioSnapshotCache" /> is a process-wide singleton keyed on the scope alone - its own
-/// contract says so, and says why: callers are expected to have passed
-/// <see cref="MartenStudioOptions.StoreAuthorizationPolicy" /> for that scope before they reach it. A
-/// cache hit returns without running the factory, so asking inside would mean the second circuit to want
-/// a badge for a database got one without the policy being consulted (D5). The refusal is
-/// <see cref="NavIndicators.None" />, which is the same thing the sidebar draws for a database nobody
-/// could read: a visitor who may not see a database learns nothing from the difference.
+/// The contributors' answer goes through <see cref="StudioSnapshotCache" /> under one key (plan D10): the navigation
+/// is on every page, so without it a studio open in five tabs would run each contributor's reads once per tab per
+/// interval. The cache's time-to-live is about a second, well under the polling interval, so a badge is never more
+/// than one tick stale. A contributor that throws takes every badge of that read with it - logged at Debug, and
+/// <see cref="NavIndicators.None" /> drawn - and nothing is cached for it.
 /// </para>
 /// <para>
-/// The whole answer goes through <see cref="StudioSnapshotCache" /> under one key (plan D10): the
-/// navigation is on every page, so without it a studio open in five tabs would run two extra queries per
-/// tab per interval for two small numbers. The cache's time-to-live is about a second, which is well
-/// under the polling interval, so a badge is never more than one tick stale.
-/// </para>
-/// <para>
-/// Nothing here throws. A badge that could break the sidebar would be a decoration that takes navigation
-/// down with it, and the studio's answer to an unreadable region is always a value (plan §4.8).
-/// </para>
-/// <para>
-/// <b>The health badge starts no sweep.</b> It is <see cref="IHealthService.GlanceAsync" />: the last sweep a
-/// Health page or the Overview ran for this database, read from the sweep cache and shown through this
-/// visitor's gates, and never a sweep of its own. For a scope with no tenant that is policy questions and no
-/// connection. For a scope with a tenant it is also the resolver's own check that the tenant is one of the swept
-/// database's - the check every page of that scope runs, whose tenant list is cached for a minute, and which on a
-/// master-table or sharded tenancy reads the tenancy's lookup table as that page's resolution does. With no recent
-/// sweep the entry carries no badge. It is read outside the snapshot cache, because what a visitor is shown of a
-/// sweep is that visitor's.
+/// <b>The health badge starts no sweep.</b> It is <see cref="IHealthService.GlanceAsync" />: the last sweep a Health
+/// page or the overview ran for this database, read from the sweep cache and shown through this visitor's gates, and
+/// never a sweep of its own. For a scope with no tenant that is policy questions and no connection. For a scope with
+/// a tenant it is also the resolver's own check that the tenant is one of the swept database's - the check every page
+/// of that scope runs. With no recent sweep the entry carries no badge. It is read outside the snapshot cache,
+/// because what a visitor is shown of a sweep is that visitor's.
 /// </para>
 /// </remarks>
 internal sealed class NavIndicatorService : INavIndicatorService
 {
     private readonly StudioState state;
     private readonly StudioAuthorization authorization;
-    private readonly IEventDataService events;
-    private readonly IProjectionDataService projections;
+    private readonly IReadOnlyList<INavIndicatorContributor> contributors;
     private readonly StudioSnapshotCache cache;
     private readonly ILogger<NavIndicatorService> logger;
     private readonly IHealthService? health;
 
     /// <remarks>
-    /// <paramref name="health" /> is optional so that a test of the dead-letter and projection badges can
-    /// build this by hand; the container always supplies one.
+    /// <paramref name="health" /> is optional so that a test of the contributed badges can build this by hand; the
+    /// container always supplies one.
     /// </remarks>
     public NavIndicatorService(
         StudioState state,
         StudioAuthorization authorization,
-        IEventDataService events,
-        IProjectionDataService projections,
+        IEnumerable<INavIndicatorContributor> contributors,
         StudioSnapshotCache cache,
         ILogger<NavIndicatorService> logger,
         IHealthService? health = null)
     {
+        ArgumentNullException.ThrowIfNull(contributors);
+
         this.state = state;
         this.authorization = authorization;
-        this.events = events;
-        this.projections = projections;
+        this.contributors = [.. contributors];
         this.cache = cache;
         this.logger = logger;
         this.health = health;
@@ -167,8 +135,8 @@ internal sealed class NavIndicatorService : INavIndicatorService
 
         try
         {
-            // Before the cache, never inside it: a hit skips the factory, and the factory is where the
-            // data services would have resolved the scope and applied the store policy.
+            // Before the cache, never inside it: a hit skips the factory, and the factory is where the contributors'
+            // services would have resolved the scope and applied the policies.
             if (!await authorization.IsAuthorizedAsync(scope, capability: null, cancellationToken).ConfigureAwait(false))
             {
                 return NavIndicators.None;
@@ -207,62 +175,29 @@ internal sealed class NavIndicatorService : INavIndicatorService
         }
     }
 
+    /// <summary>
+    /// Every contributor's badges, in registration order; a key two contributors answer is the first one's.
+    /// </summary>
     private async Task<NavIndicators> ReadUncachedAsync(StudioScope scope, CancellationToken cancellationToken)
     {
-        // Both already answer "could not read" as a value rather than by throwing, so there is no
-        // per-call try here: what this method must not do is let one of them decide the other's fate.
-        // CountDeadLettersAsync is already safe on a database with no event store - it asks the column
-        // catalog whether mt_doc_deadletterevent exists and answers a real zero when it does not.
-        long? deadLetters = await events.CountDeadLettersAsync(scope, cancellationToken).ConfigureAwait(false);
-
-        // Hard rule 14. DescribeAsync is the cheapest honest answer to "does this database have an event
-        // store": one information_schema read through the shared, expiring ColumnCatalog, and no Marten
-        // call of any kind. A shape that could not be read leaves EventTablesExist false, so an
-        // unreachable database is treated exactly as one with no event tables - the conservative way
-        // round, because the only thing on the other side of this branch is a migration.
-        EventStoreShape shape = await events.DescribeAsync(scope, cancellationToken).ConfigureAwait(false);
-
-        if (!shape.EventTablesExist)
+        if (contributors.Count == 0)
         {
-            return new NavIndicators(deadLetters, false, null);
+            return NavIndicators.None;
         }
 
-        ProjectionSummary summary = await projections.GetSummaryAsync(scope, cancellationToken).ConfigureAwait(false);
+        Dictionary<string, StudioNavBadge> badges = new(StringComparer.Ordinal);
 
-        return new NavIndicators(
-            deadLetters,
-            summary.Error is null && summary.NeedsAttention,
-            Explain(summary));
-    }
-
-    private static string? Explain(ProjectionSummary summary)
-    {
-        if (summary.Error is not null || !summary.NeedsAttention)
+        foreach (INavIndicatorContributor contributor in contributors)
         {
-            return null;
+            IReadOnlyDictionary<string, StudioNavBadge> read = await contributor.ReadAsync(scope, cancellationToken).ConfigureAwait(false);
+
+            foreach (KeyValuePair<string, StudioNavBadge> badge in read)
+            {
+                badges.TryAdd(badge.Key, badge.Value);
+            }
         }
 
-        List<string> reasons = [];
-
-        if (summary.MaxLag > ProjectionLagThresholds.Amber)
-        {
-            reasons.Add(
-                summary.WorstShardName is { Length: > 0 } worst
-                    ? $"{worst} is {summary.MaxLag:N0} events behind"
-                    : $"a shard is {summary.MaxLag:N0} events behind");
-        }
-
-        if (summary.PausedCount > 0)
-        {
-            reasons.Add(summary.PausedCount == 1 ? "one shard is paused" : $"{summary.PausedCount} shards are paused");
-        }
-
-        if (summary.FailedCount > 0)
-        {
-            reasons.Add(summary.FailedCount == 1 ? "one shard has failed" : $"{summary.FailedCount} shards have failed");
-        }
-
-        return string.Join("; ", reasons);
+        return new NavIndicators(badges);
     }
 
     /// <summary>

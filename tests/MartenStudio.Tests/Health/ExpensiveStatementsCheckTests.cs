@@ -314,7 +314,7 @@ public class ExpensiveStatementsCheckTests
     [InlineData("(id = $1)", null, false)]
     public void The_filter_reader_names_a_member_only_when_the_plan_does(string filter, string? member, bool unnamed)
     {
-        StatementPlanAdvice.Filter read = StatementPlanAdvice.FilterOf(filter, DocumentTableInfo.FromDocumentType(Doc.DocumentType!));
+        MartenStatementPlanAdvisor.Filter read = MartenStatementPlanAdvisor.FilterOf(filter, DocumentTableInfo.FromDocumentType(Doc.DocumentType!));
 
         read.UnnamedMember.Should().Be(unnamed);
 
@@ -333,9 +333,9 @@ public class ExpensiveStatementsCheckTests
     {
         DocumentTableInfo info = DocumentTableInfo.FromDocumentType(Doc.DocumentType!);
 
-        StatementPlanAdvice.FilterOf("((data ->> 'Number'::text) ~~ $1)", info).Members.Single().Predicate
+        MartenStatementPlanAdvisor.FilterOf("((data ->> 'Number'::text) ~~ $1)", info).Members.Single().Predicate
             .Should().BeOfType<DocumentPredicate.FieldLike>();
-        StatementPlanAdvice.FilterOf("((data ->> 'color'::text) = $1)", info).Members
+        MartenStatementPlanAdvisor.FilterOf("((data ->> 'color'::text) = $1)", info).Members
             .Should().ContainSingle().Which.Subject.Should().Be("color", "a key in a literal is a JSON member, not the column");
     }
 }

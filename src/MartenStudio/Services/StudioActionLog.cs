@@ -97,7 +97,7 @@ internal sealed class StudioActionLog
         ArgumentNullException.ThrowIfNull(denial);
 
         Record(action, target, succeeded: false, denial.Message, denial.Capability);
-        logger.CapabilityDenied(UserName(), denial.Capability.ToString(), StudioCapabilityGuard.OptionName(denial.Capability));
+        logger.CapabilityDenied(UserName(), denial.Capability.ToString(), denial.CapabilityOption);
     }
 
     /// <summary>

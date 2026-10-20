@@ -242,7 +242,7 @@ public class RelationshipGraphBuilderTests
     [Fact]
     public void A_graph_with_no_keys_at_all_is_empty_rather_than_failed()
     {
-        RelationshipGraph graph = RelationshipGraphBuilder.Build(
+        RelationshipGraph graph = MartenRelationshipGraph.Build(
             Options(static options => options.Schema.For<RelCustomer>()),
             null,
             [],
@@ -273,7 +273,7 @@ public class RelationshipGraphBuilderTests
         IReadOnlyList<PhysicalForeignKey> physical,
         Func<Type, bool>? visible = null,
         IReadOnlyDictionary<string, long>? estimates = null) =>
-        RelationshipGraphBuilder.Build(
+        MartenRelationshipGraph.Build(
             Options(),
             visible,
             physical,

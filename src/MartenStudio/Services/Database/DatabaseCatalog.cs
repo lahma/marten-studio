@@ -1,8 +1,6 @@
-using Marten.Storage;
-
 using MartenStudio.Internal.Sql;
-
-using Microsoft.Extensions.Options;
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
 
 using Npgsql;
 
@@ -85,9 +83,9 @@ internal sealed record CatalogSnapshot(
 /// <para>
 /// <b>Every read is a read-only transaction</b> through <see cref="ReadOnlySqlSession.InTransactionAsync{T}" />:
 /// <c>SET TRANSACTION READ ONLY</c>, <c>statement_timeout</c> from
-/// <see cref="MartenStudioOptions.QueryTimeout" />, a three-second <c>lock_timeout</c> - so a catalog read
+/// the studio's <c>QueryTimeout</c>, a three-second <c>lock_timeout</c> - so a catalog read
 /// queued behind somebody's migration gives up rather than joining the queue - and
-/// <c>SET LOCAL ROLE</c> to <see cref="MartenStudioOptions.SqlConsoleRole" /> when one is set, which is what
+/// <c>SET LOCAL ROLE</c> to the studio's <c>SqlConsoleRole</c> when one is set, which is what
 /// makes <c>has_*_privilege</c> answer for that role. The browser therefore sees exactly as far as the
 /// console does, and a table the role cannot select from is listed as not readable rather than read.
 /// </para>
@@ -106,7 +104,7 @@ internal sealed record CatalogSnapshot(
 /// </para>
 /// <para>
 /// <b>Nothing here migrates.</b> The connection comes from
-/// <c>IMartenDatabase.CreateConnection(ConnectionUsage.Read)</c>, and nothing touches <c>AllObjects()</c>,
+/// <see cref="IStudioDatabase.CreateConnection" /> for a read, and nothing touches <c>AllObjects()</c>,
 /// <c>AllSchemaNames()</c> or any Weasel migration (AGENTS.md hard rule 14);
 /// <c>DatabaseNoDdlLiveTests</c> holds every service method to that, live.
 /// </para>
@@ -121,7 +119,7 @@ internal sealed class DatabaseCatalog
 
     private const char Separator = '\u001f';
 
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
 
     private readonly CatalogCache<IReadOnlyList<CatalogSchema>> schemas = new();
     private readonly CatalogCache<CatalogList<CatalogRelation>> relations = new();
@@ -135,9 +133,9 @@ internal sealed class DatabaseCatalog
     private readonly CatalogCache<IReadOnlyList<CatalogObjectCount>> counts = new();
     private readonly CatalogCache<CatalogRelationDetail?> details = new();
 
-    public DatabaseCatalog(IOptions<MartenStudioOptions> options)
+    public DatabaseCatalog(IStudioSettings settings)
     {
-        this.options = options;
+        this.settings = settings;
     }
 
     /// <summary>
@@ -155,7 +153,7 @@ internal sealed class DatabaseCatalog
 
     /// <summary>Every schema of the database, as the reading role sees them.</summary>
     public async Task<IReadOnlyList<CatalogSchema>> SchemasAsync(
-        IMartenDatabase database,
+        IStudioDatabase database,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(database);
@@ -189,7 +187,7 @@ internal sealed class DatabaseCatalog
     /// <param name="filter">A case-insensitive name substring for the listing parts, or <see langword="null" />.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public async Task<CatalogSnapshot> SnapshotAsync(
-        IMartenDatabase database,
+        IStudioDatabase database,
         IReadOnlyList<string> schemaSet,
         CatalogParts parts,
         string? filter,
@@ -308,7 +306,7 @@ internal sealed class DatabaseCatalog
     /// <param name="hiddenTables">The hidden document types' tables, as <c>schema.table</c>.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     public async Task<IReadOnlyList<CatalogObjectCount>> CountsAsync(
-        IMartenDatabase database,
+        IStudioDatabase database,
         IReadOnlyList<string> schemaSet,
         IReadOnlyCollection<string> hiddenTables,
         CancellationToken cancellationToken = default)
@@ -349,7 +347,7 @@ internal sealed class DatabaseCatalog
     /// <see langword="null" /> when <paramref name="schema" /> has no such sequence. Not cached.
     /// </summary>
     public async Task<CatalogSequence?> SequenceAsync(
-        IMartenDatabase database,
+        IStudioDatabase database,
         string schema,
         string name,
         CancellationToken cancellationToken = default)
@@ -374,7 +372,7 @@ internal sealed class DatabaseCatalog
     /// cached: it is asked for one sequence at a time, on purpose.
     /// </summary>
     public Task<CatalogSequenceValue?> SequenceValueAsync(
-        IMartenDatabase database,
+        IStudioDatabase database,
         string schema,
         string name,
         CancellationToken cancellationToken = default) =>
@@ -389,7 +387,7 @@ internal sealed class DatabaseCatalog
     /// relation (partitions, extension members and indexes included - none of them is a relation here).
     /// </summary>
     public async Task<CatalogRelationDetail?> RelationAsync(
-        IMartenDatabase database,
+        IStudioDatabase database,
         string schema,
         string name,
         CancellationToken cancellationToken = default)
@@ -419,7 +417,7 @@ internal sealed class DatabaseCatalog
 
     /// <summary>A view's query. Not cached: it is asked for one object at a time, on purpose.</summary>
     public Task<CatalogDefinition?> ViewDefinitionAsync(
-        IMartenDatabase database,
+        IStudioDatabase database,
         string schema,
         string name,
         CancellationToken cancellationToken = default) =>
@@ -431,7 +429,7 @@ internal sealed class DatabaseCatalog
 
     /// <summary>One routine overload's definition. Not cached.</summary>
     public Task<CatalogDefinition?> RoutineDefinitionAsync(
-        IMartenDatabase database,
+        IStudioDatabase database,
         string schema,
         string name,
         string identityArguments,
@@ -445,7 +443,7 @@ internal sealed class DatabaseCatalog
 
     /// <summary>One trigger's definition. Not cached.</summary>
     public Task<CatalogDefinition?> TriggerDefinitionAsync(
-        IMartenDatabase database,
+        IStudioDatabase database,
         string schema,
         string table,
         string name,
@@ -473,23 +471,21 @@ internal sealed class DatabaseCatalog
     }
 
     private async Task<T> RunAsync<T>(
-        IMartenDatabase database,
+        IStudioDatabase database,
         Func<NpgsqlConnection, NpgsqlTransaction, int, CancellationToken, Task<T>> read,
         CancellationToken cancellationToken)
     {
-        MartenStudioOptions value = options.Value;
-
         var session = new ReadOnlySqlSession(new ReadOnlySqlOptions
         {
-            StatementTimeout = value.QueryTimeout,
-            Role = value.SqlConsoleRole,
+            StatementTimeout = settings.QueryTimeout,
+            Role = settings.SqlConsoleRole,
         });
 
         // A little past the server-side statement_timeout, which is what should fire: it produces 57014
         // with a message, where a client-side timeout only breaks the connection.
-        int commandTimeout = (int) Math.Ceiling(value.QueryTimeout.TotalSeconds) + 5;
+        int commandTimeout = (int) Math.Ceiling(settings.QueryTimeout.TotalSeconds) + 5;
 
-        await using NpgsqlConnection connection = database.CreateConnection(ConnectionUsage.Read);
+        await using NpgsqlConnection connection = database.CreateConnection(StudioConnectionUsage.Read);
         await PostgresFailure.OpenAsync(connection, cancellationToken).ConfigureAwait(false);
 
         return await session
@@ -511,8 +507,8 @@ internal sealed class DatabaseCatalog
     /// A cache key: the database's identity (server and database - never a connection string, which holds
     /// a password), the role the read ran as, and whatever else distinguishes the read.
     /// </summary>
-    private string Key(IMartenDatabase database, params string[] parts) =>
-        database.Id.Identity + Separator + (options.Value.SqlConsoleRole ?? string.Empty) + Separator
+    private string Key(IStudioDatabase database, params string[] parts) =>
+        database.Identity + Separator + (settings.SqlConsoleRole ?? string.Empty) + Separator
         + string.Join(Separator, parts);
 
     private static string Cap(int cap) => cap.ToString(System.Globalization.CultureInfo.InvariantCulture);

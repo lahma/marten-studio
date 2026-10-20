@@ -1,4 +1,3 @@
-@using MartenStudio.Components.Pages.Documents
 @using MartenStudio.Services.Relationships
 @using GraphModel = MartenStudio.Services.Relationships.RelationshipGraph
 
@@ -18,7 +17,7 @@
 @code {
     /// <summary>
     /// The graph, as a <c>RelationshipGraph</c> - already cut down to what is drawn. Typed
-    /// <see cref="object" /> for the reason <see cref="DocumentComponentModel" /> records.
+    /// <see cref="object" /> for the reason <see cref="ComponentModel" /> records.
     /// </summary>
     [Parameter]
     public object? Model { get; set; }
@@ -39,7 +38,7 @@
 
     protected override void OnParametersSet()
     {
-        GraphModel graph = DocumentComponentModel.Read(Model, GraphModel.None);
+        GraphModel graph = ComponentModel.Read(Model, GraphModel.None);
 
         diagram = RelationshipDiagram.From(graph, HrefFor, TableHrefFor, Centre);
     }

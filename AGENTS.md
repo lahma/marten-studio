@@ -942,6 +942,10 @@ tests/MartenStudio.Tests/Documents/       Document service unit tests - no datab
 tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
 src/MartenStudio/Services/Projections/    Projection data service, daemon accessor, operation tracker
 src/MartenStudio/Services/Live/           Snapshot cache, tracker observer, the per-page polling helper (D10)
+src/MartenStudio/Services/Settings/       The shared studio's settings seam, descriptor, links, mount path, registration
+                                         marker and core registrations; moves whole to PostgresStudio (PS-1a)
+src/MartenStudio/Services/Sources/        The source seam - databases, the source provider, the shared resolver - and the
+                                         seams PS-1b-1d implement; moves whole to PostgresStudio (PS-1a)
 src/MartenStudio/Components/Pages/Projections/  The projections screen and its parts
 samples/MartenStudio.SampleDomain/Events/ The demo events and the three projections
 tests/MartenStudio.Tests/Projections/     Daemon accessor, snapshot cache, live updates, operation tracker, page

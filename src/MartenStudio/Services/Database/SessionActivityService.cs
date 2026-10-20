@@ -1,5 +1,7 @@
+using MartenStudio.Services.Settings;
+using MartenStudio.Services.Sources;
+
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 using Npgsql;
 
@@ -44,9 +46,10 @@ namespace MartenStudio.Services.Database;
 /// </para>
 /// <para>
 /// <b>Labelled over every store.</b> Locks are labelled with the database browser's classifier over every
-/// registered store's declarations (<see cref="DatabaseAccess.ReadDeclarations(ResolvedScope)" />), so another
+/// registered store's declarations (<see cref="DatabaseAccess.ReadDeclarations(ResolvedSource)" />), so another
 /// store's table is Marten's and named to nobody, and by their owners - the lock reads never return an index's,
-/// a partition's or a TOAST table's own name (<see cref="SessionLockLabels" />).
+/// a partition's or a TOAST table's own name (<see cref="SessionLockLabels" />). Which advisory keys are the source's
+/// own is its <see cref="ISessionLockLabeler" />'s to say.
 /// </para>
 /// <para>
 /// Scoped: the ledger is this circuit's. The snapshot is the process's (<see cref="SessionActivitySnapshots" />).
@@ -88,31 +91,33 @@ internal sealed class SessionActivityService : ISessionActivityService
     private const string LedgerKind = "details";
     private const string Signature = "details";
 
-    private readonly IOptions<MartenStudioOptions> options;
+    private readonly IStudioSettings settings;
     private readonly StudioCapabilityGuard capabilities;
     private readonly StudioAuthorization authorization;
-    private readonly StudioScopeResolver resolver;
+    private readonly StudioSourceResolver resolver;
     private readonly StudioActionLog audit;
     private readonly SessionActivitySnapshots snapshots;
     private readonly SessionPoolObserver pools;
     private readonly DatabaseAccess access;
+    private readonly ISessionLockLabeler labeler;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<SessionActivityService> logger;
     private readonly TableRowAuditLedger ledger = new();
 
     public SessionActivityService(
-        IOptions<MartenStudioOptions> options,
+        IStudioSettings settings,
         StudioCapabilityGuard capabilities,
         StudioAuthorization authorization,
-        StudioScopeResolver resolver,
+        StudioSourceResolver resolver,
         StudioActionLog audit,
         SessionActivitySnapshots snapshots,
         SessionPoolObserver pools,
         DatabaseAccess access,
+        ISessionLockLabeler labeler,
         StudioLogThrottle throttle,
         ILogger<SessionActivityService> logger)
     {
-        this.options = options;
+        this.settings = settings;
         this.capabilities = capabilities;
         this.authorization = authorization;
         this.resolver = resolver;
@@ -120,6 +125,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         this.snapshots = snapshots;
         this.pools = pools;
         this.access = access;
+        this.labeler = labeler;
         this.throttle = throttle;
         this.logger = logger;
     }
@@ -133,7 +139,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         ArgumentNullException.ThrowIfNull(scope);
 
         StudioScope asked = scope with { TenantId = null };
-        ResolvedScope resolved;
+        ResolvedSource resolved;
 
         try
         {
@@ -169,7 +175,7 @@ internal sealed class SessionActivityService : ISessionActivityService
             return SessionActivitySummary.Refused(DatabaseRefusal.Unavailable, Failure(exception, resolved)) with { Details = details };
         }
 
-        SessionLockLabels labels = SessionLockLabels.For(resolved.Store, resolved.Registration.Key, Classifier(resolved));
+        SessionLockLabels labels = labeler.For(resolved, Classifier(resolved));
 
         List<string> caveats = [];
 
@@ -235,7 +241,6 @@ internal sealed class SessionActivityService : ISessionActivityService
         ArgumentNullException.ThrowIfNull(scope);
 
         StudioScope asked = scope with { TenantId = null };
-        MartenStudioOptions value = options.Value;
 
         // 1. The capability, before anybody is asked who is asking.
         try
@@ -253,7 +258,7 @@ internal sealed class SessionActivityService : ISessionActivityService
 
         // 2. The scope, resolved with no tenant: the store policy, which the resolver asks before it looks anything up -
         //    with the visitor's spelling of the database, because nothing has been resolved to ask about yet.
-        ResolvedScope resolved;
+        ResolvedSource resolved;
 
         try
         {
@@ -261,7 +266,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         }
         catch (StudioNotAuthorizedException)
         {
-            audit.RecordScopeDenied(asked, DatabaseAccess.StorePolicyName(value), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
+            audit.RecordScopeDenied(asked, DatabaseAccess.StorePolicyName(settings), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
             return SessionActivityDetails.Refused(DatabaseRefusal.StorePolicy, StorePolicyDenial);
         }
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
@@ -276,13 +281,13 @@ internal sealed class SessionActivityService : ISessionActivityService
 
         if (!await StorePolicyPassesAsync(asked, whole, cancellationToken).ConfigureAwait(false))
         {
-            audit.RecordScopeDenied(whole, DatabaseAccess.StorePolicyName(value), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
+            audit.RecordScopeDenied(whole, DatabaseAccess.StorePolicyName(settings), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
             return SessionActivityDetails.Refused(DatabaseRefusal.StorePolicy, StorePolicyDenial);
         }
 
         if (!await authorization.IsAuthorizedAsync(whole, StudioCapability.ViewDatabaseActivity, cancellationToken).ConfigureAwait(false))
         {
-            audit.RecordScopeDenied(whole, DatabaseAccess.WritePolicyName(value), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
+            audit.RecordScopeDenied(whole, DatabaseAccess.WritePolicyName(settings), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
             return SessionActivityDetails.Refused(DatabaseRefusal.WritePolicy, WritePolicyDenial);
         }
 
@@ -298,9 +303,9 @@ internal sealed class SessionActivityService : ISessionActivityService
             return SessionActivityDetails.Refused(DatabaseRefusal.Unavailable, Failure(exception, resolved));
         }
 
-        StatementScreen screen = await ScreenAsync(whole, resolved, value.IsDocumentTypeVisible is not null, cancellationToken).ConfigureAwait(false);
+        StatementScreen screen = await ScreenAsync(whole, resolved, settings.IsDocumentTypeVisible is not null, cancellationToken).ConfigureAwait(false);
         IReadOnlySet<string>? withheld = screen.Withheld;
-        SessionLockLabels labels = SessionLockLabels.For(resolved.Store, resolved.Registration.Key, Classifier(resolved));
+        SessionLockLabels labels = labeler.For(resolved, Classifier(resolved));
 
         SessionActivityDetails details = new()
         {
@@ -347,8 +352,8 @@ internal sealed class SessionActivityService : ISessionActivityService
     /// The database a resolved scope names, as a whole: the store's registered key - a scope's key matches in any case -
     /// the database's own identity, and no tenant.
     /// </summary>
-    private static StudioScope WholeDatabase(ResolvedScope resolved) =>
-        new(resolved.Registration.Key, resolved.Database.Id.Identity, null);
+    private static StudioScope WholeDatabase(ResolvedSource resolved) =>
+        new(resolved.Source.Key, resolved.Target.Identity, null);
 
     /// <summary>
     /// The store policy for the resolved store and database. The resolver has asked it already when the visitor spelt
@@ -384,7 +389,7 @@ internal sealed class SessionActivityService : ISessionActivityService
     /// may not see, the classifier over every store, and the tables of every store whose policy refuses them - or
     /// <see cref="StatementScreen.Unchecked" /> when the gate cannot be read, which withholds every statement.
     /// </summary>
-    private async Task<StatementScreen> ScreenAsync(StudioScope whole, ResolvedScope resolved, bool hidesDocumentTypes, CancellationToken cancellationToken)
+    private async Task<StatementScreen> ScreenAsync(StudioScope whole, ResolvedSource resolved, bool hidesDocumentTypes, CancellationToken cancellationToken)
     {
         try
         {
@@ -395,7 +400,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Database.Id.Identity);
+                logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
             }
 
             return StatementScreen.Unchecked(hidesDocumentTypes);
@@ -407,7 +412,7 @@ internal sealed class SessionActivityService : ISessionActivityService
     /// or <see langword="null" /> when they cannot all be read, which names no relation and, while document types
     /// may be hidden, shows no statement (fail closed).
     /// </summary>
-    private DatabaseObjectClassifier? Classifier(ResolvedScope resolved)
+    private DatabaseObjectClassifier? Classifier(ResolvedSource resolved)
     {
         try
         {
@@ -418,7 +423,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio could not classify the relations of {DatabaseId}", resolved.Database.Id.Identity);
+                logger.LogDebug(exception, "Marten Studio could not classify the relations of {DatabaseId}", resolved.Target.Identity);
             }
 
             return null;
@@ -443,10 +448,10 @@ internal sealed class SessionActivityService : ISessionActivityService
     }
 
     /// <summary>One ring entry and one event 9245 for the first details read of this database in this circuit.</summary>
-    private async Task RecordFirstReadAsync(ResolvedScope resolved, StudioScope whole, SessionActivityDetails details)
+    private async Task RecordFirstReadAsync(ResolvedSource resolved, StudioScope whole, SessionActivityDetails details)
     {
-        string storeKey = resolved.Registration.Key;
-        string databaseId = resolved.Database.Id.Identity;
+        string storeKey = resolved.Source.Key;
+        string databaseId = resolved.Target.Identity;
 
         if (!ledger.TryRecord(TableRowAuditLedger.Key(storeKey, databaseId, LedgerSchema, LedgerRelation, LedgerKind), Signature, out _))
         {
@@ -475,18 +480,18 @@ internal sealed class SessionActivityService : ISessionActivityService
     }
 
     /// <summary>The database's pool in this process, while somebody holds a lease on the observer.</summary>
-    private SessionPoolSummary? PoolOf(ResolvedScope resolved)
+    private SessionPoolSummary? PoolOf(ResolvedSource resolved)
     {
-        DatabasePoolSettings? settings = DatabasePoolSettings.Of(resolved.Database);
+        DatabasePoolSettings? pool = DatabasePoolSettings.Of(resolved.Target);
 
-        if (settings is null)
+        if (pool is null)
         {
             return null;
         }
 
-        if (!settings.Pooling)
+        if (!pool.Pooling)
         {
-            return new SessionPoolSummary(false, null, null, settings.MaxPoolSize, false);
+            return new SessionPoolSummary(false, null, null, pool.MaxPoolSize, false);
         }
 
         if (!pools.IsListening)
@@ -496,13 +501,13 @@ internal sealed class SessionActivityService : ISessionActivityService
 
         try
         {
-            NpgsqlPoolReading? reading = pools.Read().FirstOrDefault(x => DatabasePoolSettings.IsPoolOf(resolved.Database, x.PoolName));
+            NpgsqlPoolReading? reading = pools.Read().FirstOrDefault(x => DatabasePoolSettings.IsPoolOf(resolved.Target, x.PoolName));
 
             return reading switch
             {
-                null => new SessionPoolSummary(false, null, null, settings.MaxPoolSize, true),
-                { IsAmbiguous: true } => new SessionPoolSummary(false, null, null, settings.MaxPoolSize, true, Ambiguous: true),
-                _ => new SessionPoolSummary(true, reading.Used, reading.Idle, reading.Max ?? settings.MaxPoolSize, true),
+                null => new SessionPoolSummary(false, null, null, pool.MaxPoolSize, true),
+                { IsAmbiguous: true } => new SessionPoolSummary(false, null, null, pool.MaxPoolSize, true, Ambiguous: true),
+                _ => new SessionPoolSummary(true, reading.Used, reading.Idle, reading.Max ?? pool.MaxPoolSize, true),
             };
         }
         catch (InvalidOperationException)
@@ -517,10 +522,10 @@ internal sealed class SessionActivityService : ISessionActivityService
     /// name a schema this visitor may not see - and the log line: Debug for an expected state, a throttled Warning
     /// for anything else.
     /// </summary>
-    private string Failure(Exception exception, ResolvedScope resolved)
+    private string Failure(Exception exception, ResolvedSource resolved)
     {
-        string storeKey = resolved.Registration.Key;
-        string databaseId = resolved.Database.Id.Identity;
+        string storeKey = resolved.Source.Key;
+        string databaseId = resolved.Target.Identity;
         PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
 
         string? expected = postgres?.SqlState switch

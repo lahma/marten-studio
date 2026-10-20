@@ -1,3 +1,5 @@
+global using MartenTable = MartenStudio.Services.Sources.StudioTable;
+
 using Marten;
 
 using MartenStudio.Internal.Sql;
@@ -56,11 +58,12 @@ internal static class TableCheckBuilders
     public static MartenTable Document<T>(Action<StoreOptions>? configure = null)
     {
         var documentType = SqlTestStore.DocumentType<T>(configure);
-        return new MartenTable(SqlTestStore.Schema, documentType.TableName.Name, MartenTableKind.Document, OutsideStoreSchemas: false, documentType);
+        return MartenTables.Table(SqlTestStore.Schema, documentType.TableName.Name, MartenTableKind.Document, outsideStoreSchemas: false, documentType);
     }
 
     /// <summary>One of the event store's tables.</summary>
-    public static MartenTable EventTable(string table = "mt_events") => new("studio_sql_events", table, MartenTableKind.EventStore, OutsideStoreSchemas: false);
+    public static MartenTable EventTable(string table = "mt_events") =>
+        MartenTables.Table("studio_sql_events", table, MartenTableKind.EventStore, outsideStoreSchemas: false);
 
     /// <summary>A catalog row for <paramref name="table" />: analysed, empty, autovacuum on.</summary>
     public static HealthTableRow Row(MartenTable table) => new()
@@ -108,7 +111,7 @@ internal static class TableCheckBuilders
 
     /// <summary>An index's facts.</summary>
     public static IndexFacts Index(MartenTable table, HealthIndexRow row, IndexOrigin origin = IndexOrigin.Declared) =>
-        new(table, row, origin, null);
+        new(table, row, origin);
 
     /// <summary>A history of samples, each so long before <see cref="Now" />, oldest first.</summary>
     public static HealthHistoryView History(params (TimeSpan Ago, (string Series, double Value)[] Values)[] samples) =>

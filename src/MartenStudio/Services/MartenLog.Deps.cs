@@ -3,8 +3,8 @@ using Microsoft.Extensions.Logging;
 namespace MartenStudio.Services;
 
 // DEPS' events, 9320-9329: the Marten 9.51 light-ups. In a file of their own so that no other packet's event block meets
-// them in one file; the class's own documentation is StudioLog.cs's.
-internal static partial class StudioLog
+// them in one file; the class's own documentation is MartenLog.cs's.
+internal static partial class MartenLog
 {
     /// <remarks>
     /// <para>

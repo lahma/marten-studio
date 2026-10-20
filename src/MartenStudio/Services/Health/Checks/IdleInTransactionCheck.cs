@@ -1,5 +1,8 @@
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Database;
+using MartenStudio.Services.Sources;
+
+using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 
@@ -114,8 +117,8 @@ internal sealed class IdleInTransactionCheck : HealthCheck<IdleInTransactionFact
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        // Only the daemon's advisory keys are wanted here, so no relation classifier is built.
-        SessionLockLabels labels = SessionLockLabels.For(context.Store, context.StoreKey, classifier: null);
+        // Only the source's own advisory keys are wanted here, so no relation classifier is built.
+        SessionLockLabels labels = context.Services.GetRequiredService<ISessionLockLabeler>().For(context.Source, classifier: null);
 
         IReadOnlyList<(SessionVisibility Visibility, IdleSession? Session, long Total)> rows = await context.Sql
             .QueryAsync(HealthConnectionQueries.IdleInTransaction(floor, labels.DaemonLockIds), Map, cancellationToken)

@@ -2,6 +2,9 @@ using System.Globalization;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Database;
+using MartenStudio.Services.Sources;
+
+using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 
@@ -87,7 +90,7 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        SessionLockLabels labels = SessionLockLabels.For(context.Store, context.StoreKey, Classifier(context));
+        SessionLockLabels labels = context.Services.GetRequiredService<ISessionLockLabeler>().For(context.Source, Classifier(context));
 
         IReadOnlyList<(SessionVisibility Visibility, LockWaiter? Waiter, long Total)> rows = await context.Sql
             .QueryAsync(HealthConnectionQueries.LockWaits(ConnectionThresholds.CandidateFloor), reader => MapWaiter(reader, labels), cancellationToken)
@@ -240,20 +243,40 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
     }
 
     /// <summary>
-    /// The classifier over every registered store's declarations - the one the database browser uses, read afresh
-    /// for the sweep, which has no circuit - or <see langword="null" /> when they cannot all be read, which names no
-    /// relation at all (fail closed).
+    /// The classifier over every registered source's declarations - the one the database browser uses, read afresh
+    /// for the sweep, which has no circuit (<see cref="IDatabaseDeclarationsSource.ReadUncached" />) - or
+    /// <see langword="null" /> when they cannot all be read, the studio registers no declarations, or the declarations
+    /// source cannot be built in the sweep's scope: a classifier names relations, and none at all is the closed failure.
     /// </summary>
-    private static DatabaseObjectClassifier? Classifier(HealthCheckContext context)
+    /// <remarks>
+    /// Only the source's <em>resolution</em> is tolerated, because only that is new: in 0.4 C06 read the store registry, a
+    /// singleton, and the declarations without a source between them, and a scoped source's graph is something a sweep's
+    /// scope with no circuit might not build. A failure of the read itself is not swallowed - <c>ReadUncached</c> fails
+    /// closed on everything it expects, so anything it throws is a bug, and it surfaces as 0.4's did: a "could not check"
+    /// row and event 9222.
+    /// </remarks>
+    internal static DatabaseObjectClassifier? Classifier(HealthCheckContext context)
     {
-        if (context.Services.GetService(typeof(MartenStoreRegistry)) is not MartenStoreRegistry registry)
+        ArgumentNullException.ThrowIfNull(context);
+
+        IDatabaseDeclarationsSource? declarations;
+        try
+        {
+            declarations = context.Services.GetService<IDatabaseDeclarationsSource>();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Fail closed, as 0.4's read did: a source that will not resolve in a scope with no circuit costs C06 its
+            // relation names, not its row.
+            return null;
+        }
+
+        if (declarations is null)
         {
             return null;
         }
 
-        DatabaseDeclarations declared = DatabaseAccess.DeclareEveryStore(
-            registry, context.Services, context.Scope.Registration, context.Store, context.StudioOptions.IsDocumentTypeVisible);
-
+        DatabaseDeclarations declared = declarations.ReadUncached(context.Source);
         return declared.Succeeded ? declared.Classifier : null;
     }
 

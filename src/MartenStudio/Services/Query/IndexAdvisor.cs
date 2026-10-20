@@ -10,25 +10,6 @@ namespace MartenStudio.Services.Query;
 /// <param name="Definition">The full <c>CREATE INDEX</c> statement from <c>pg_indexes.indexdef</c>.</param>
 internal sealed record PostgresIndex(string Name, string Definition);
 
-/// <summary>How well the database can answer a filter.</summary>
-internal enum IndexVerdictLevel
-{
-    /// <summary>An index serves this filter.</summary>
-    Green,
-
-    /// <summary>An index touches the column but may not be used for this filter.</summary>
-    Amber,
-
-    /// <summary>Nothing serves it: every row in the collection is read.</summary>
-    Red,
-}
-
-/// <summary>A verdict on one filter, with the <c>StoreOptions</c> line that would improve it.</summary>
-/// <param name="Level">Green, amber or red.</param>
-/// <param name="Reason">Why, in one sentence a user can act on.</param>
-/// <param name="Suggestion">The configuration line that would fix it, or <see langword="null"/>.</param>
-internal sealed record IndexVerdict(IndexVerdictLevel Level, string Reason, string? Suggestion);
-
 /// <summary>A predicate and what the advisor thinks of it.</summary>
 /// <param name="Predicate">The filter term.</param>
 /// <param name="Verdict">The verdict.</param>

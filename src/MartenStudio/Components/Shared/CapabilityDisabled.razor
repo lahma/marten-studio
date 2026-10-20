@@ -1,5 +1,7 @@
 @using MartenStudio.Services
+@using MartenStudio.Services.Settings
 @inject StudioCapabilityGuard Capabilities
+@inject IStudioSettings Settings
 
 @* What a page renders where a mutating control would be when the capability behind it is off. It names
    the exact property a host would set, because "not permitted" with nothing to act on is the failure
@@ -11,17 +13,15 @@
         @if (Capabilities.ReadOnly)
         {
             <p class="ms-muted">
-                <code>MartenStudioOptions.ReadOnly</code> is <code>true</code>, which turns every capability
-                off: the mutating operations, and the reads authorized like writes (<code>RunSql</code>,
-                <code>BrowseDatabase</code>, <code>ViewDatabaseActivity</code> and
-                <code>RunLinqQueries</code>).
+                <code>@Settings.ReadOnlyOption()</code> is <code>true</code>, which turns every capability
+                off: the mutating operations, and the reads authorized like writes (@ReadsAuthorizedLikeWrites()).
             </p>
         }
         else
         {
             <p class="ms-muted">
-                Set <code>MartenStudioOptions.Capabilities.@Capability</code> to <code>true</code>, or
-                <code>MartenStudioOptions.Capabilities = MartenStudioCapabilities.All()</code> to enable
+                Set <code>@Settings.OptionName("Capabilities." + Capability)</code> to <code>true</code>, or
+                <code>@Settings.OptionName("Capabilities") = @Settings.AllCapabilities()</code> to enable
                 all of them.
             </p>
         }
@@ -47,4 +47,22 @@
     /// </summary>
     [Parameter]
     public string? Action { get; set; }
+
+    /// <summary>
+    /// The offered reads authorized like writes, each as code, listed the way a sentence lists them:
+    /// <c>RunSql</c>, <c>BrowseDatabase</c>, <c>ViewDatabaseActivity</c> and <c>RunLinqQueries</c>.
+    /// </summary>
+    private RenderFragment ReadsAuthorizedLikeWrites() => __builder =>
+    {
+        IReadOnlyList<StudioCapability> reads = Capabilities.OfferedReads;
+        for (int i = 0; i < reads.Count; i++)
+        {
+            if (i > 0)
+            {
+                <text>@(i == reads.Count - 1 ? " and " : ", ")</text>
+            }
+
+            <code>@reads[i]</code>
+        }
+    };
 }

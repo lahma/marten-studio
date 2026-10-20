@@ -22,23 +22,6 @@ namespace MartenStudio.Services;
 internal sealed record MartenStoreRegistration(string Key, string DisplayName, Type ServiceType);
 
 /// <summary>
-/// Whether a registered store could be built, and if not, why.
-/// </summary>
-/// <remarks>
-/// A value rather than an exception, because "cannot report" is a state the UI has to draw differently
-/// from "nothing there" (plan section 4.8): a store whose connection string is wrong is still a store the
-/// application registered, and leaving it out of the picker makes it look as though it never was.
-/// </remarks>
-internal sealed record StoreAvailability(bool IsAvailable, string? Message, DateTimeOffset? At)
-{
-    /// <summary>The store resolved.</summary>
-    public static StoreAvailability Available { get; } = new(true, null, null);
-
-    /// <summary>The store did not resolve, and this is what it said.</summary>
-    public static StoreAvailability Unavailable(string message, DateTimeOffset at) => new(false, message, at);
-}
-
-/// <summary>
 /// The Marten stores this application registered, discovered from the service collection.
 /// </summary>
 /// <remarks>

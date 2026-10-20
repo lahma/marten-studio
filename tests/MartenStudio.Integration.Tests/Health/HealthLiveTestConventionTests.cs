@@ -1,7 +1,5 @@
 using System.Reflection;
 
-using MartenStudio.Services.Health;
-
 namespace MartenStudio.Integration.Tests.Health;
 
 /// <summary>
@@ -24,7 +22,7 @@ public class HealthLiveTestConventionTests
     [Fact]
     public void Every_check_has_a_live_test_that_fires_it_and_one_that_proves_it_quiet()
     {
-        IReadOnlyList<string> codes = [.. new HealthCheckRegistry().All.Select(static x => x.Info.Code)];
+        IReadOnlyList<string> codes = [.. StudioHealthChecks.Registry.All.Select(static x => x.Info.Code)];
         codes.Should().NotBeEmpty();
 
         // Concrete classes only: the made-up ones below are abstract, and are the theory's, not the rule's.

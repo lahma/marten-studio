@@ -1,3 +1,5 @@
+using MartenStudio.Services.Settings;
+
 namespace MartenStudio.Components.Pages.Documents;
 
 /// <summary>
@@ -18,32 +20,23 @@ namespace MartenStudio.Components.Pages.Documents;
 /// complete is how this bug comes back: <c>data:</c>, <c>vbscript:</c>, a protocol-relative <c>//evil</c>,
 /// the <c>/\evil</c> that some browsers normalise to <c>//evil</c>, a percent-encoded or whitespace-split
 /// scheme. What is accepted instead is exactly one shape — a relative path, below the studio's own base,
-/// inside the documents area — and everything else falls back to the collection link, which is where
-/// "back" was going anyway.
+/// inside the one area the caller names (the documents list's <c>documents</c>, the database browser's
+/// <c>database/object</c>) — and everything else falls back to the page's own link, which is where "back" was
+/// going anyway.
 /// </para>
 /// </remarks>
 internal static class SafeReturnLink
 {
-    /// <summary>The one area a return link may point into.</summary>
-    private const string DocumentsRoot = "documents";
-
     /// <summary>
-    /// The value if it is a return link the page may render, or <see langword="null" />.
+    /// The value if it is a return link into <paramref name="root" />, or <see langword="null" />: the database
+    /// browser's row detail returns to <c>database/object</c>, a document to its collection under <c>documents</c>.
     /// </summary>
     /// <param name="from">The <c>?from=</c> value, as the query string delivered it.</param>
-    /// <param name="options">The studio's options, for the mount path.</param>
-    public static string? Sanitize(string? from, MartenStudioOptions options) => Sanitize(from, options, DocumentsRoot);
-
-    /// <summary>
-    /// The value if it is a return link into <paramref name="root" /> - the same allow-list, for another
-    /// area: the database browser's row detail returns to <c>database/object</c>.
-    /// </summary>
-    /// <param name="from">The <c>?from=</c> value, as the query string delivered it.</param>
-    /// <param name="options">The studio's options, for the mount path.</param>
+    /// <param name="settings">The studio's settings, for the mount path.</param>
     /// <param name="root">The one studio-relative area the link may point into, with no leading or trailing slash.</param>
-    public static string? Sanitize(string? from, MartenStudioOptions options, string root)
+    public static string? Sanitize(string? from, IStudioSettings settings, string root)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(settings);
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
         if (string.IsNullOrWhiteSpace(from))
@@ -90,8 +83,8 @@ internal static class SafeReturnLink
 
         // Both base shapes the studio renders under: on the interactive circuit the base URI is the
         // studio root, so the path is already studio-relative; under static rendering it still carries
-        // the mount prefix. Either is fine, as long as what is left is the documents area.
-        if (StudioLink.TryStripDashboardPrefix(path, options, out string stripped))
+        // the mount prefix. Either is fine, as long as what is left is the area asked for.
+        if (StudioLink.TryStripDashboardPrefix(path, settings, out string stripped))
         {
             path = stripped;
         }

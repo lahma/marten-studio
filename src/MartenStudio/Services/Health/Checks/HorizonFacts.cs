@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Sources;
 
 namespace MartenStudio.Services.Health.Checks;
 
@@ -22,8 +23,8 @@ internal sealed record WraparoundFacts(HealthWraparoundDatabase Database, IReadO
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Read once per sweep</b> (<see cref="HealthCheckContext.Shared{T}" />) under <see cref="Key" />, with the store's
-/// tables from <see cref="MartenTables.SetAsync" /> - the configuration's, never <c>AllObjects()</c>.
+/// <b>Read once per sweep</b> (<see cref="HealthCheckContext.Shared{T}" />) under <see cref="Key" />, with the judged
+/// tables from <see cref="HealthTables.SetAsync" /> - the source's, never <c>AllObjects()</c>.
 /// </para>
 /// <para>
 /// <b>The lines are Postgres' own.</b> Transaction ids and multixact ids are both 32-bit and compared modulo 2^31, so
@@ -129,14 +130,14 @@ internal static class Wraparound
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        MartenTableSet set = await MartenTables.SetAsync(context).ConfigureAwait(false);
+        IStudioTableSet set = await HealthTables.SetAsync(context).ConfigureAwait(false);
         return await context.Shared(Key, token => ReadAsync(context, set, token)).ConfigureAwait(false);
     }
 
-    private static async Task<WraparoundFacts> ReadAsync(HealthCheckContext context, MartenTableSet set, CancellationToken cancellationToken)
+    private static async Task<WraparoundFacts> ReadAsync(HealthCheckContext context, IStudioTableSet set, CancellationToken cancellationToken)
     {
         IReadOnlyList<(HealthWraparoundDatabase Database, HealthWraparoundTable? Table)> rows = await context.Sql
-            .QueryAsync(HealthHorizonQueries.Wraparound(set.Targets), HealthHorizonQueries.ReadWraparound, cancellationToken)
+            .QueryAsync(HealthHorizonQueries.Wraparound(HealthTables.Targets(set)), HealthHorizonQueries.ReadWraparound, cancellationToken)
             .ConfigureAwait(false);
 
         if (rows.Count == 0)
@@ -148,7 +149,7 @@ internal static class Wraparound
         return new WraparoundFacts(
             rows[0].Database,
             [.. rows.Where(static x => x.Table is not null).Select(static x => x.Table!)],
-            context.StudioOptions.EffectiveHealthInterval);
+            context.Settings.EffectiveHealthInterval);
     }
 
     /// <summary>"1.2 billion", "340 million", "12,345".</summary>

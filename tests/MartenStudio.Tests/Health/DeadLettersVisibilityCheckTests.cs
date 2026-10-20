@@ -117,7 +117,7 @@ public class DeadLettersVisibilityCheckTests
                 configure?.Invoke(options);
             });
 
-            HealthConnection connection = new(store.Storage.Database);
+            HealthConnection connection = new(MartenStudioDatabase.Of(store.Storage.Database));
 
             HealthCheckContext context = new(
                 new ResolvedScope(
@@ -125,8 +125,8 @@ public class DeadLettersVisibilityCheckTests
                     new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
                     store,
                     store.Storage.Database),
-                new MartenStudioOptions { IsDocumentTypeVisible = isVisible },
-                MartenRuntime.Current,
+                MartenStudioSettings.Of(new MartenStudioOptions { IsDocumentTypeVisible = isVisible }),
+                MartenStudioRuntime.Current,
                 services,
                 new HealthSqlRunner(connection, new ReadOnlySqlOptions(), null),
                 Now,

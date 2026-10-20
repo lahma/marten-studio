@@ -1,6 +1,7 @@
-@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Settings
 @using MartenStudio.Services.Database
-@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 @inject StudioState State
 
 @*
@@ -90,7 +91,7 @@
                                 @if (foreignKey is { LinkedVisible: true, LinkedSchema: { } schema, LinkedTable: { } table })
                                 {
                                     <a class="ms-db-fk-link"
-                                       href="@DatabaseLinks.ToObject(Options.Value, State.ActiveScope, schema, table)"
+                                       href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, table)"
                                        title="@($"Foreign key {foreignKey.Name}: references {DatabaseLinks.QualifiedName(schema, table)} ({string.Join(", ", foreignKey.LinkedColumns)})")">→ @table</a>
                                 }
                                 else
@@ -113,7 +114,7 @@
 }
 
 @code {
-    /// <summary>The relation's <c>DatabaseObjectDetail</c>. Typed <see cref="object" /> - see <c>DocumentComponentModel</c>.</summary>
+    /// <summary>The relation's <c>DatabaseObjectDetail</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
     [Parameter]
     public object? Detail { get; set; }
 

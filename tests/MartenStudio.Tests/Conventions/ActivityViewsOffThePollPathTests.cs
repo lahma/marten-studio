@@ -103,7 +103,7 @@ public class ActivityViewsOffThePollPathTests
     {
         IReadOnlySet<HealthCostTier> regular = HealthSweeper.TiersOf(HealthSweepKind.Regular);
 
-        HealthCheckDescriptor[] checks = [.. new HealthCheckRegistry().All.Where(static x => x.Info.Code is "T12" or "T13" or "T14")];
+        HealthCheckDescriptor[] checks = [.. Health.StudioHealthChecks.Registry.All.Where(static x => x.Info.Code is "T12" or "T13" or "T14")];
 
         checks.Should().HaveCount(3);
         checks.Should().OnlyContain(x => regular.Contains(x.Info.Tier), "a regular sweep is cached for HealthInterval, never RefreshInterval");
@@ -141,7 +141,7 @@ public class ActivityViewsOffThePollPathTests
         users.Should().Contain("src/MartenStudio/Components/Pages/Database/Sessions.razor");
         users.Should().OnlyContain(
             static x => x == "src/MartenStudio/Components/Pages/Database/Sessions.razor"
-                || x == "src/MartenStudio/MartenStudioServiceCollectionExtensions.cs"
+                || x == "src/MartenStudio/Services/Settings/StudioCoreRegistration.cs"
                 || x.StartsWith("src/MartenStudio/Services/Database/", StringComparison.Ordinal),
             "the sidebar, the Overview and every other page poll every RefreshInterval");
     }
@@ -161,7 +161,7 @@ public class ActivityViewsOffThePollPathTests
     {
         IReadOnlySet<HealthCostTier> regular = HealthSweeper.TiersOf(HealthSweepKind.Regular);
 
-        HealthCheckDescriptor[] checks = [.. new HealthCheckRegistry().All.Where(static x => x.Info.Area == HealthArea.Connections)];
+        HealthCheckDescriptor[] checks = [.. Health.StudioHealthChecks.Registry.All.Where(static x => x.Info.Area == HealthArea.Connections)];
 
         // C10 (H10) reads no activity view - only pg_backend_pid(), twice - and runs in the same regular sweep.
         checks.Select(static x => x.Info.Code).Should().Equal("C01", "C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09", "C10");

@@ -87,6 +87,10 @@ internal sealed class HealthExportHarness : IAsyncDisposable
     /// <param name="healthChecks">The host's health check registrations; one default <c>AddMartenStudio()</c> unless given.</param>
     /// <param name="lifetime">The host's lifetime, for a test that stops the application.</param>
     /// <param name="hostServices">Anything else the host registers - a projection coordinator, say.</param>
+    /// <param name="validateScopes">
+    /// Whether the container refuses a scoped service resolved from the root, as a Development host's does
+    /// (<c>ServiceProviderOptions.ValidateScopes</c>).
+    /// </param>
     public static HealthExportHarness Create(
         IEnumerable<Type>? checks = null,
         Action<MartenStudioOptions>? studio = null,
@@ -95,7 +99,8 @@ internal sealed class HealthExportHarness : IAsyncDisposable
         HealthExportLimits? limits = null,
         Action<IHealthChecksBuilder>? healthChecks = null,
         IHostApplicationLifetime? lifetime = null,
-        Action<IServiceCollection>? hostServices = null)
+        Action<IServiceCollection>? hostServices = null,
+        bool validateScopes = false)
     {
         FakeTimeProvider clock = new(new DateTimeOffset(2026, 10, 15, 9, 0, 0, TimeSpan.Zero));
         CapturingLoggerProvider logs = new();
@@ -154,7 +159,10 @@ internal sealed class HealthExportHarness : IAsyncDisposable
 
         hostServices?.Invoke(services);
 
-        return new HealthExportHarness(services.BuildServiceProvider(), clock, logs);
+        return new HealthExportHarness(
+            services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = validateScopes }),
+            clock,
+            logs);
     }
 
     /// <summary>One probe of every registration, as a health endpoint makes it; the entry named <paramref name="name" />.</summary>
