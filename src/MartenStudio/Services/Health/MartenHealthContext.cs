@@ -2,7 +2,6 @@ using Marten;
 using Marten.Storage;
 
 using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Database;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Settings;
 using MartenStudio.Services.Sources;
@@ -122,39 +121,5 @@ internal static class MartenHealthBridges
         /// <see cref="HealthService.WithheldSchemaReasonFor" /> in MartenStudio's words, for a test that looks for it.
         /// </summary>
         internal static string WithheldSchemaReason => HealthService.WithheldSchemaReasonFor(MartenStudioSettings.Of(new MartenStudioOptions()));
-    }
-
-    extension(DatabaseAccess access)
-    {
-        /// <summary>
-        /// <see cref="DatabaseAccess.GateAsync(StudioScope, ResolvedScope, CancellationToken)" /> for the shared health
-        /// service, which holds the resolver's record as a <see cref="ResolvedSource" />. Shared-bound caller left:
-        /// <c>HealthService</c>, until the database packet (PS-1b) takes the shared record itself.
-        /// </summary>
-        /// <param name="scope">The visitor's scope.</param>
-        /// <param name="resolved">The resolver's record - a <see cref="ResolvedScope" /> in MartenStudio.</param>
-        /// <param name="cancellationToken">Cancels the policy questions and the catalog read.</param>
-        internal Task<DatabaseGateRead> GateAsync(StudioScope scope, ResolvedSource resolved, CancellationToken cancellationToken = default) =>
-            access.GateAsync(scope, (ResolvedScope) resolved, cancellationToken);
-    }
-
-    extension(DatabasePoolSettings)
-    {
-        /// <summary>
-        /// <see cref="DatabasePoolSettings.Of(IMartenDatabase)" /> for a shared database. Shared-bound caller left:
-        /// <c>PoolSaturationCheck</c> (C01), until the database packet (PS-1b) reads <see cref="IStudioDatabase.DataSource" /> itself.
-        /// </summary>
-        /// <param name="database">The database.</param>
-        internal static DatabasePoolSettings? Of(IStudioDatabase database) =>
-            DatabasePoolSettings.Of(MartenStudioDatabase.Unwrap(database));
-
-        /// <summary>
-        /// <see cref="DatabasePoolSettings.IsPoolOf(IMartenDatabase, string)" /> for a shared database. Shared-bound caller
-        /// left: <c>PoolSaturationCheck</c> (C01), as <see cref="Of(IStudioDatabase)" />.
-        /// </summary>
-        /// <param name="database">The database.</param>
-        /// <param name="poolName">The pool's name, as Npgsql reports it.</param>
-        internal static bool IsPoolOf(IStudioDatabase database, string poolName) =>
-            DatabasePoolSettings.IsPoolOf(MartenStudioDatabase.Unwrap(database), poolName);
     }
 }
