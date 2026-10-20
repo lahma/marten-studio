@@ -28,7 +28,7 @@
     record every difference in the same pull request.
 
     MartenStudioMartenVersion is what is actually restored. Leave it empty and it is the floor; set it
-    with -p:MartenStudioMartenVersion=9.50.2, or through the Fallout parameter, which resolves `floor`
+    with -p:MartenStudioMartenVersion=9.51.0, or through the Fallout parameter, which resolves `floor`
     and `latest` from the two properties above. Pack always packs at the floor and refuses anything
     else - the build's Pack target and a guard in src/MartenStudio/MartenStudio.csproj both say so -
     because a package packed at a newer Marten would silently raise every host's floor.

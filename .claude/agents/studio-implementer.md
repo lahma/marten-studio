@@ -35,7 +35,7 @@ committed change.
 10. **Marten 9 has no synchronous LINQ terminals.** Async only. Serialize and deserialize through
     `store.Options.Serializer()`, never your own `JsonSerializer`. Never call
     `store.BuildProjectionDaemonAsync()` — only the DI-registered coordinator.
-11. **Check every Marten API you use against the real package at the floor `Directory.Packages.props` pins (`MartenStudioMartenFloor`, 9.39.0 today; CI also runs at `MartenStudioMartenLatest`, 9.50.2) before you call it** (decompile with
+11. **Check every Marten API you use against the real package at the floor `Directory.Packages.props` pins (`MartenStudioMartenFloor`, 9.39.0 today; CI also runs at `MartenStudioMartenLatest`, 9.51.0) before you call it** (decompile with
     `dotnet-skills:ilspy-decompile` or read `D:\Work\wolverine` as a current consumer). The packet may name
     an API that does not exist under that name; several are flagged unverified.
 12. Source files are UTF-8 without BOM and LF. Never `sed -i` a tracked file on this Windows tree; use the
