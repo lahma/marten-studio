@@ -6,6 +6,9 @@ using MartenStudio.Services.Query;
 using MartenStudio.Services.Sources;
 using MartenStudio.Tests.Components;
 
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
+
 using MartenQueryBody = MartenStudio.Components.Pages.Query.Query;
 
 namespace MartenStudio.Tests.Query;
@@ -69,8 +72,14 @@ public class SqlConsolePanelTests
     /// The page keeps the console's state, so leaving the SQL tab for the where clause and coming back finds the
     /// statement and its result where they were - as it did when the console was part of the page.
     /// </summary>
+    /// <remarks>
+    /// Every click after the run is awaited and every assertion after one waits for its render: a click that lands
+    /// while the renderer is busy is queued rather than run, and <c>Click()</c> returns before it has run (the remarks on
+    /// <see cref="QueryPageTests.The_stats_panel_has_a_tab_for_the_sql_the_plan_and_the_messages" />). The console's
+    /// ticker no longer renders after a run has ended, which is what used to make the renderer busy here.
+    /// </remarks>
     [Fact]
-    public void The_query_page_keeps_the_console_result_across_a_tab_switch()
+    public async Task The_query_page_keeps_the_console_result_across_a_tab_switch()
     {
         FakeQueryService service = new FakeQueryService().WithType("person");
         service.SqlResult = FakeQueryService.OneRow();
@@ -78,19 +87,74 @@ public class SqlConsolePanelTests
         using StudioComponentContext context = CreateContext(service);
 
         var page = context.Render<MartenQueryBody>();
-        page.Find("#ms-query-mode-sql").Click();
-        page.Find("#ms-query-sql").Change("select 1");
-        page.Find(".ms-query-run").Click();
-        page.FindAll("table.ms-query-grid").Should().ContainSingle();
+        await page.Find("#ms-query-mode-sql").ClickAsync(new MouseEventArgs());
+        page.WaitForElement("#ms-query-sql");
+        await page.Find("#ms-query-sql").ChangeAsync(new ChangeEventArgs { Value = "select 1" });
+        await page.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll("table.ms-query-grid").Should().ContainSingle());
 
-        page.Find("#ms-query-mode-marten").Click();
-        page.FindAll("table.ms-query-grid").Should().BeEmpty("the where clause tab is on screen");
+        await page.Find("#ms-query-mode-marten").ClickAsync(new MouseEventArgs());
+        page.WaitForAssertion(() => page.FindAll("table.ms-query-grid").Should().BeEmpty("the where clause tab is on screen"));
 
-        page.Find("#ms-query-mode-sql").Click();
+        await page.Find("#ms-query-mode-sql").ClickAsync(new MouseEventArgs());
 
-        page.FindAll("table.ms-query-grid").Should().ContainSingle("the result survived the tab switch");
+        page.WaitForAssertion(() => page.FindAll("table.ms-query-grid").Should().ContainSingle("the result survived the tab switch"));
         page.Find("#ms-query-sql").GetAttribute("value").Should().Be("select 1");
         service.Statements.Should().ContainSingle("coming back does not run anything again");
+    }
+
+    /// <summary>
+    /// The deviation PS-1d declared, held to: leaving the SQL tab while a statement runs cancels it through the token
+    /// the service was handed - the console belongs to the tab, as it belonged to the page - and coming back says so.
+    /// </summary>
+    [Fact]
+    public async Task Leaving_the_sql_tab_cancels_a_running_statement_and_coming_back_says_so()
+    {
+        FakeQueryService service = new FakeQueryService().WithType("person");
+        service.Gate = new TaskCompletionSource();
+
+        using StudioComponentContext context = CreateContext(service);
+
+        var page = context.Render<MartenQueryBody>();
+        await page.Find("#ms-query-mode-sql").ClickAsync(new MouseEventArgs());
+        page.WaitForElement("#ms-query-sql");
+
+        var editor = page.FindComponent<QueryEditor>();
+        Task running = page.InvokeAsync(() => editor.Instance.RunAsync("select pg_sleep(60)"));
+        page.WaitForAssertion(() => page.Find(".ms-query-running").Should().NotBeNull());
+
+        await page.Find("#ms-query-mode-marten").ClickAsync(new MouseEventArgs());
+        await running;
+
+        service.Cancelled.Should().BeTrue("leaving the tab cancels the token the console handed the service");
+        service.Statements.Should().ContainSingle();
+
+        await page.Find("#ms-query-mode-sql").ClickAsync(new MouseEventArgs());
+
+        page.WaitForAssertion(() => page.Find(".ms-query-editor-ok").TextContent.Should().Contain("Cancelled."));
+        page.FindAll(".ms-query-running").Should().BeEmpty("nothing is running any more");
+        page.Find("#ms-query-sql").GetAttribute("value").Should().Be("select pg_sleep(60)");
+    }
+
+    /// <summary>Esc cancels a running statement through the token the service was handed, as it does a where clause.</summary>
+    [Fact]
+    public async Task Esc_cancels_a_running_statement_through_a_real_cancellation_token()
+    {
+        FakeQueryService service = new() { Gate = new TaskCompletionSource() };
+        using StudioComponentContext context = CreateContext(service);
+
+        var panel = context.Render<SqlConsolePanel>();
+        var editor = panel.FindComponent<QueryEditor>();
+
+        Task running = panel.InvokeAsync(() => editor.Instance.RunAsync("select pg_sleep(60)"));
+        panel.WaitForAssertion(() => panel.Find(".ms-query-running").Should().NotBeNull());
+
+        await panel.InvokeAsync(() => editor.Instance.CancelAsync());
+        await running;
+
+        service.Cancelled.Should().BeTrue("the token the service was handed is the one Esc cancels");
+        panel.WaitForAssertion(() => panel.Find(".ms-query-editor-ok").TextContent.Should().Contain("Cancelled."));
+        panel.FindAll(".ms-query-running").Should().BeEmpty();
     }
 
     /// <summary>The shared query route renders the descriptor's body - MartenStudio's three-mode page.</summary>

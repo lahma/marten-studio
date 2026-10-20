@@ -118,6 +118,7 @@
     private readonly SqlConsoleSession ownSession = new();
 
     private CancellationTokenSource? runCts;
+    private CancellationTokenSource? tickCts;
     private bool running;
     private long elapsedMilliseconds;
 
@@ -183,6 +184,7 @@
         await lifetime.CancelAsync();
         lifetime.Dispose();
         runCts = null;
+        StopTicker();
     }
 
     private async Task OnScopeChangedAsync()
@@ -353,24 +355,53 @@
         running = true;
         elapsedMilliseconds = 0;
 
-        _ = TickAsync(cts.Token);
+        // The ticker has a token of its own, cancelled the moment the run ends: the run's token is the one the
+        // service was handed, and cancelling it after the statement finished would say something it did not mean.
+        StopTicker();
+        tickCts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        _ = TickAsync(tickCts.Token);
 
         return cts;
     }
 
+    /// <summary>
+    /// Ends the run on the renderer: the ticker is stopped before the run's last render, so nothing it does can
+    /// render the panel again afterwards.
+    /// </summary>
     private void EndRun()
     {
         running = false;
         runCts = null;
+        StopTicker();
+    }
+
+    private void StopTicker()
+    {
+        if (tickCts is { } ticking)
+        {
+            tickCts = null;
+            ticking.Cancel();
+            ticking.Dispose();
+        }
     }
 
     /// <summary>
     /// Keeps the "Running… N ms" label moving while a statement is in flight.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A <see cref="Task" /> that is deliberately not awaited, and never an <c>async void</c>: everything it can
     /// throw is caught here, so nothing escapes to the synchronization context and kills the circuit (AGENTS.md
     /// hard rule 6).
+    /// </para>
+    /// <para>
+    /// <b>It never renders after the run has ended.</b> The wait is off the renderer (<c>ConfigureAwait(false)</c>), so
+    /// a tick - or the cancellation <see cref="EndRun" /> sends - does not take the renderer's dispatcher just to find
+    /// out it is finished; and the render is asked on the renderer only while the run is still in flight, checked on
+    /// the same thread <see cref="EndRun" /> runs on, so a tick that was already waiting when the run ended does
+    /// nothing. A render after the result is on screen was one nobody asked for, and a click that landed inside it
+    /// was queued behind it rather than run.
+    /// </para>
     /// </remarks>
     private async Task TickAsync(CancellationToken cancellationToken)
     {
@@ -379,10 +410,18 @@
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
             System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-            while (running && await timer.WaitForNextTickAsync(cancellationToken))
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
-                await InvokeAsync(StateHasChanged);
+                await InvokeAsync(() =>
+                {
+                    if (!running || cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+                    StateHasChanged();
+                }).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)

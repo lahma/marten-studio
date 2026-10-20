@@ -276,6 +276,7 @@
 
     private SavedQueryDrawer? drawer;
     private CancellationTokenSource? runCts;
+    private CancellationTokenSource? tickCts;
 
     private QueryMode mode = QueryMode.Marten;
     private string? alias;
@@ -453,6 +454,8 @@
 
             runCts = null;
         }
+
+        StopTicker();
     }
 
     private async Task OnScopeChangedAsync()
@@ -531,8 +534,10 @@
         }
 
         mode = next;
+
+        // The where clause's status line is the page's; the console keeps its own with its result, so coming back to
+        // the SQL tab finds what its last run said - "Cancelled." for a statement leaving the tab stopped.
         status = null;
-        sqlSession.Status = null;
         PushUrl();
 
         await InvokeAsync(StateHasChanged);
@@ -731,24 +736,45 @@
         running = true;
         elapsedMilliseconds = 0;
 
-        _ = TickAsync(cts.Token);
+        // The ticker has a token of its own, cancelled the moment the run ends (as the SQL console's is).
+        StopTicker();
+        tickCts = CancellationTokenSource.CreateLinkedTokenSource(pageCts.Token);
+        _ = TickAsync(tickCts.Token);
 
         return cts;
     }
 
+    /// <summary>Ends the run on the renderer, stopping the ticker before the run's last render.</summary>
     private void EndRun()
     {
         running = false;
         runCts = null;
+        StopTicker();
+    }
+
+    private void StopTicker()
+    {
+        if (tickCts is { } ticking)
+        {
+            tickCts = null;
+            ticking.Cancel();
+            ticking.Dispose();
+        }
     }
 
     /// <summary>
     /// Keeps the "Running… N ms" label moving while a query is in flight.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A <see cref="Task" /> that is deliberately not awaited, and never an <c>async void</c>: everything
     /// it can throw is caught here, so nothing escapes to the synchronization context and kills the
     /// circuit (AGENTS.md hard rule 6).
+    /// </para>
+    /// <para>
+    /// It never renders after the run has ended: the wait is off the renderer, and the render is asked on the
+    /// renderer only while the run is still in flight - the same rule as <c>SqlConsolePanel</c>'s ticker.
+    /// </para>
     /// </remarks>
     private async Task TickAsync(CancellationToken cancellationToken)
     {
@@ -757,10 +783,18 @@
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
             System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-            while (running && await timer.WaitForNextTickAsync(cancellationToken))
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
-                await InvokeAsync(StateHasChanged);
+                await InvokeAsync(() =>
+                {
+                    if (!running || cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+                    StateHasChanged();
+                }).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
