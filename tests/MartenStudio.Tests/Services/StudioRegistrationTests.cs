@@ -144,6 +144,7 @@ public class StudioRegistrationTests
         (typeof(IServerSettingsFactsReader), ServiceLifetime.Singleton, How.Type, typeof(ServerSettingsFactsReader)),
         (typeof(ServerSettingsFactsCache), ServiceLifetime.Singleton, How.Type, typeof(ServerSettingsFactsCache)),
         (typeof(IServerPageService), ServiceLifetime.Scoped, How.Type, typeof(ServerPageService)),
+        (typeof(ExtensionUpdatePaths), ServiceLifetime.Singleton, How.Type, typeof(ExtensionUpdatePaths)),
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),

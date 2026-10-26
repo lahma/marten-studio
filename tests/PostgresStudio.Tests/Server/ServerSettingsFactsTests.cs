@@ -172,11 +172,20 @@ public class ServerSettingsFactsTests
     [InlineData("30000", "user", "'30s'", "user")]
     [InlineData("60000", "database user", "1min", "database user")]
     [InlineData("30000", "database", "30000", "database")]
-    [InlineData("5000", "database", "30s", "client")]
     [InlineData("30000", "database", "thirty", null)]
     public void A_role_or_database_entry_is_the_source_only_while_its_value_is_the_value(string resetVal, string entrySource, string entryValue, string? expected)
     {
         ServerSettingSource.Resolve(StudioSet(resetVal, entrySource), entryValue, new HashSet<string>()).Should().Be(expected);
+    }
+
+    [Fact]
+    public void An_entry_whose_value_is_not_the_value_with_no_startup_option_parsed_is_not_known_rather_than_client()
+    {
+        ServerSettingSource.Resolve(StudioSet("5000", "database"), "30s", new HashSet<string>()).Should().BeNull(
+            "PGOPTIONS, a pooler's startup parameters or an entry altered since the session began read the same, "
+            + "and none of them is a client the read saw");
+        ServerSettingSource.Resolve(StudioSet("5000", "database"), "30s", new HashSet<string> { "statement_timeout" }).Should().BeNull(
+            "an option for another setting says nothing of this one");
     }
 
     [Fact]

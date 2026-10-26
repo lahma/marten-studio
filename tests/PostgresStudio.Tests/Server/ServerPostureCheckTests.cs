@@ -239,6 +239,53 @@ public class ServerPostureCheckTests
             .Note.Should().Be("Every extension installed in this database is at the version the server offers.");
     }
 
+    [Fact]
+    public async Task S07_asks_the_server_about_an_update_path_once_per_database_extension_and_both_versions()
+    {
+        ExtensionUpdatePaths memo = new();
+        List<string> asked = [];
+        Task<IReadOnlyList<(string Name, bool Updatable)>> Read(IReadOnlyList<(string Name, string Installed, string Target)> misses, CancellationToken _)
+        {
+            asked.AddRange(misses.Select(static x => x.Name + " " + x.Installed + ">" + x.Target));
+            return Task.FromResult<IReadOnlyList<(string Name, bool Updatable)>>([.. misses.Select(static x => (x.Name, x.Name != "timescaledb"))]);
+        }
+
+        (string, string, string)[] candidates = [("pg_stat_statements", "1.9", "1.10"), ("timescaledb", "2.17.0", "2.16.1")];
+        CancellationToken token = TestContext.Current.CancellationToken;
+
+        IReadOnlyDictionary<string, bool> first = await memo.GetAsync("default", "db1", candidates, Read, token);
+        IReadOnlyDictionary<string, bool> again = await memo.GetAsync("default", "db1", candidates, Read, token);
+
+        first.Should().BeEquivalentTo(new Dictionary<string, bool> { ["pg_stat_statements"] = true, ["timescaledb"] = false });
+        again.Should().BeEquivalentTo(first, "the second sweep is answered from the memo");
+        memo.ReadCount.Should().Be(1);
+
+        await memo.GetAsync("default", "db1", [("pg_stat_statements", "1.10", "1.11"), ("timescaledb", "2.17.0", "2.16.1")], Read, token);
+        await memo.GetAsync("default", "db2", [("timescaledb", "2.17.0", "2.16.1")], Read, token);
+        await memo.GetAsync("other", "db1", [("timescaledb", "2.17.0", "2.16.1")], Read, token);
+
+        asked.Should().Equal(
+            "pg_stat_statements 1.9>1.10", "timescaledb 2.17.0>2.16.1",
+            "pg_stat_statements 1.10>1.11",
+            "timescaledb 2.17.0>2.16.1",
+            "timescaledb 2.17.0>2.16.1");
+        memo.ReadCount.Should().Be(4, "a new version, another database or another source is a question of its own; nothing else is");
+    }
+
+    [Fact]
+    public async Task S07_remembers_nothing_for_an_extension_the_read_did_not_answer()
+    {
+        ExtensionUpdatePaths memo = new();
+        CancellationToken token = TestContext.Current.CancellationToken;
+        static Task<IReadOnlyList<(string Name, bool Updatable)>> Nothing(IReadOnlyList<(string Name, string Installed, string Target)> misses, CancellationToken _) =>
+            Task.FromResult<IReadOnlyList<(string Name, bool Updatable)>>([]);
+
+        (await memo.GetAsync("default", "db1", [("dropped", "1.0", "1.1")], Nothing, token)).Should().BeEmpty();
+        await memo.GetAsync("default", "db1", [("dropped", "1.0", "1.1")], Nothing, token);
+
+        memo.ReadCount.Should().Be(2, "an unanswered extension is asked about again");
+    }
+
     // ---- S08 ----------------------------------------------------------------------------------------------------------
 
     [Theory]
