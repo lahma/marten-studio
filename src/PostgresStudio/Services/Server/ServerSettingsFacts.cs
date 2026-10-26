@@ -881,6 +881,17 @@ internal sealed class ServerSettingsFactsCache
         return cache.GetAsync(resolved.Source.Key + "|" + resolved.Target.Identity, token => ReadAsync(resolved, token), cancellationToken);
     }
 
+    /// <summary>
+    /// Whether <see cref="GetAsync" /> would be answered without a new read: a recent read in hand, or one running (the
+    /// diagnostics API's question before it spends a fresh read, API design §3.4).
+    /// </summary>
+    /// <param name="resolved">The database.</param>
+    public bool IsCached(ResolvedSource resolved)
+    {
+        ArgumentNullException.ThrowIfNull(resolved);
+        return cache.Holds(resolved.Source.Key + "|" + resolved.Target.Identity);
+    }
+
     private Task<ServerSettingsFacts> ReadAsync(ResolvedSource resolved, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref reads);

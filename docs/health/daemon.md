@@ -112,6 +112,10 @@ HotCold node just restarted holds no lock and has written nothing yet, and is st
 sharing this database with the same `DaemonLockId` would count as a holder; Marten asks for a lock id unique to
 each application on a database.
 
+Variants: `no-daemon` (the Critical) and `lock-held-idle` (the Warning). Neither has a subject: each is about the store's
+daemon in this database as a whole. Until 0.5 the kind was the finding's subject; its key (`D02|no-daemon`) is the same
+either way. Marten Studio only.
+
 ```csharp
 builder.Services.AddMarten(opts => { /* ... */ })
     .AddAsyncDaemon(DaemonMode.HotCold);

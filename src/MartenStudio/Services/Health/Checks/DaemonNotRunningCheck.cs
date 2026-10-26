@@ -94,10 +94,21 @@ internal sealed record DaemonNotRunningFacts(
 /// coordinator pause is recorded for the store, nor in the first quiet window after the process hosting a daemon
 /// started: a HotCold node just restarted holds no lock and has written nothing yet, and is not a dead daemon.
 /// </para>
+/// <para>
+/// <b>Two kinds of finding, each a variant</b> (API design §1.10): <see cref="NoDaemonVariant" /> and
+/// <see cref="LockHeldIdleVariant" />, about the store's daemon in this database as a whole - so neither has a subject.
+/// </para>
 /// </remarks>
-[HealthCheck("D02", HealthArea.Daemon, HealthCostTier.Catalog, "Async projections behind, and nothing runs the daemon")]
+[HealthCheck("D02", HealthArea.Daemon, HealthCostTier.Catalog, "Async projections behind, and nothing runs the daemon",
+    Variants = [NoDaemonVariant, LockHeldIdleVariant])]
 internal sealed class DaemonNotRunningCheck : HealthCheck<DaemonNotRunningFacts>
 {
+    /// <summary>The variant of the Critical finding: work waits, and nothing appears to run the daemon.</summary>
+    internal const string NoDaemonVariant = "no-daemon";
+
+    /// <summary>The variant of the Warning: a session holds the leadership lock, and nothing is written.</summary>
+    internal const string LockHeldIdleVariant = "lock-held-idle";
+
     /// <inheritdoc />
     public override async Task<DaemonNotRunningFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
@@ -254,7 +265,7 @@ internal sealed class DaemonNotRunningCheck : HealthCheck<DaemonNotRunningFacts>
             {
                 Code = "D02",
                 Severity = HealthSeverity.Critical,
-                Subject = "no-daemon",
+                Variant = NoDaemonVariant,
                 Title = "Async projections are " + DaemonCheckConfiguration.Number(lag) + " events behind and nothing appears to be running the daemon",
                 WhyItMatters =
                     "Every async projection and subscription in this database waits for a daemon, and the evidence says none is "
@@ -298,7 +309,7 @@ internal sealed class DaemonNotRunningCheck : HealthCheck<DaemonNotRunningFacts>
         {
             Code = "D02",
             Severity = HealthSeverity.Warning,
-            Subject = "lock-held-idle",
+            Variant = LockHeldIdleVariant,
             Title = "A session holds the daemon's leadership lock, but nothing has "
                 + (quietFor is null ? "ever been written" : "been written for " + quietFor),
             WhyItMatters =

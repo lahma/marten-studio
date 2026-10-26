@@ -33,10 +33,11 @@ namespace PostgresStudio.Services.Health;
 /// <b>The last sweep is kept for the navigation badge and the inline banners.</b> The sidebar polls every
 /// <c>RefreshInterval</c> on every page, and a badge must cost nothing there - so it reads
 /// <see cref="Latest" />, which is a dictionary lookup, and never starts a sweep. One slot per store,
-/// database and kind ever swept, which is bounded by what visitors actually opened.
+/// database and kind ever swept, for the databases used most recently: the process's
+/// <see cref="HealthDatabaseBound" /> forgets the least recently used past 64 (API design §3.5).
 /// </para>
 /// </remarks>
-internal sealed class HealthSweepCache
+internal sealed class HealthSweepCache : IPerDatabaseState
 {
     /// <summary>How long a deeper or statement sweep is reused for.</summary>
     public static readonly TimeSpan DeeperTimeToLive = TimeSpan.FromMinutes(5);
@@ -44,12 +45,20 @@ internal sealed class HealthSweepCache
     private readonly HealthSweeper sweeper;
     private readonly IStudioSettings settings;
     private readonly TimeProvider timeProvider;
+    private readonly HealthDatabaseBound? bound;
     private readonly Dictionary<string, Slot> slots = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, string> aliases = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock gate = new();
     private int sweepCount;
 
-    public HealthSweepCache(HealthSweeper sweeper, IStudioSettings settings, TimeProvider? timeProvider = null)
+    /// <param name="sweeper">The sweeper.</param>
+    /// <param name="settings">The studio's settings.</param>
+    /// <param name="timeProvider">The clock freshness is judged by.</param>
+    /// <param name="bound">
+    /// The process's bound on databases with state (API design §3.5): every read here touches its database, and a database
+    /// the bound forgets loses its finished slots; <see langword="null" /> for no bound, in a test.
+    /// </param>
+    public HealthSweepCache(HealthSweeper sweeper, IStudioSettings settings, TimeProvider? timeProvider = null, HealthDatabaseBound? bound = null)
     {
         ArgumentNullException.ThrowIfNull(sweeper);
         ArgumentNullException.ThrowIfNull(settings);
@@ -57,6 +66,49 @@ internal sealed class HealthSweepCache
         this.sweeper = sweeper;
         this.settings = settings;
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.bound = bound;
+        bound?.Register(this);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Every finished slot of the database, of every kind, and the aliases that name them. A slot whose sweep is running
+    /// stays, so that a second sweep is never started beside it; its database is the most recently touched one in any case.
+    /// </remarks>
+    public void Forget(string storeKey, string databaseId)
+    {
+        ArgumentNullException.ThrowIfNull(storeKey);
+        ArgumentNullException.ThrowIfNull(databaseId);
+
+        lock (gate)
+        {
+            foreach (HealthSweepKind kind in Enum.GetValues<HealthSweepKind>())
+            {
+                string key = Key(storeKey, databaseId, kind);
+
+                if (slots.TryGetValue(key, out Slot? slot) && slot.Running is null)
+                {
+                    slots.Remove(key);
+                }
+
+                foreach (KeyValuePair<string, string> alias in aliases.Where(x => string.Equals(x.Value, key, StringComparison.OrdinalIgnoreCase)).ToList())
+                {
+                    aliases.TryRemove(alias.Key, out _);
+                }
+            }
+        }
+    }
+
+    /// <summary>How many slots are held, for a test.</summary>
+    internal int SlotCount
+    {
+        get
+        {
+            lock (gate)
+            {
+                return slots.Count;
+            }
+        }
     }
 
     /// <summary>How many sweeps have actually started, for a test and for nothing else.</summary>
@@ -91,6 +143,9 @@ internal sealed class HealthSweepCache
         string storeKey = resolved.Source.Key;
         string databaseId = resolved.Target.Identity;
         string key = Key(storeKey, databaseId, kind);
+
+        // Used, so kept: a page that reads its database every interval keeps it whatever else is swept (API design §3.5).
+        bound?.Touch(storeKey, databaseId);
 
         if (requestedDatabaseId is not null && !string.Equals(requestedDatabaseId, databaseId, StringComparison.OrdinalIgnoreCase))
         {
@@ -130,6 +185,26 @@ internal sealed class HealthSweepCache
         }
 
         return await work.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether <see cref="GetAsync" /> for this database and kind would be answered without starting a sweep: one running,
+    /// or one finished and still fresh. A lookup that starts nothing - what the diagnostics API asks before it spends one of
+    /// its two fresh reads (API design §3.4).
+    /// </summary>
+    /// <param name="storeKey">The source's key.</param>
+    /// <param name="databaseId">The database's identity.</param>
+    /// <param name="kind">Which kind.</param>
+    public bool IsFresh(string storeKey, string databaseId, HealthSweepKind kind)
+    {
+        ArgumentNullException.ThrowIfNull(storeKey);
+        ArgumentNullException.ThrowIfNull(databaseId);
+
+        lock (gate)
+        {
+            return slots.TryGetValue(Key(storeKey, databaseId, kind), out Slot? slot)
+                && (slot.Running is not null || (slot.Completed is not null && Now - slot.CompletedAt < TimeToLive(kind)));
+        }
     }
 
     /// <summary>

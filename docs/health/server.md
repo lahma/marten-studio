@@ -118,6 +118,10 @@ the server's memory cries wolf (R1 §D). The eight settings above - `track_count
 `fsync`, `full_page_writes`, `zero_damaged_pages`, `ignore_checksum_failure` and `synchronous_commit` - and the
 settings waiting for a restart are the whole of what S02 judges.
 
+Variants: `setting`, one finding per watched setting at a dangerous value, whose subject is the setting's name (key
+`S02|setting|fsync`); and `pending-restart`, one finding for every setting that waits for a restart, with no subject (key
+`S02|pending-restart`, as before 0.5, when the kind was its subject). Both studios run it.
+
 The values are read on a connection from the store's own data source, so a value set for its role, its database,
 or in its connection string's startup options (`Options=-c …`) is the value the store's sessions run with.
 `pg_settings.source` says which, and the remedy points there: the connection string for a startup option, the

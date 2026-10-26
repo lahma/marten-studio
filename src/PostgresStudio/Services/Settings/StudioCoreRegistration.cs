@@ -139,6 +139,10 @@ internal static class StudioCoreRegistration
         // Health page or the Overview asks. What a visitor is shown, what they muted and which Critical they
         // have already been toasted about are that circuit's, so scoped.
         services.TryAddSingleton<HealthCheckRegistry>();
+
+        // W5-API: one process-wide bound on the databases the advisor keeps state for (API design §3.5) - the history, the
+        // sweep cache and the statement texts each register with it and forget a database together.
+        services.TryAddSingleton<HealthDatabaseBound>();
         services.TryAddSingleton<HealthHistory>();
         services.TryAddSingleton<HealthSweeper>();
         services.TryAddSingleton<HealthSweepCache>();
@@ -212,5 +216,9 @@ internal static class StudioCoreRegistration
         // visitor is shown of them, and which first read this circuit has audited, are the circuit's.
         services.TryAddSingleton<IStatementFacts, StatementFactsReader>();
         services.TryAddScoped<IStatementsService, StatementsService>();
+
+        // W5-API: the Health page's Snapshot menu. The circuit's, because it asks each page's service as this visitor; it never
+        // reaches the diagnostics API, which each Add*Studio registers for host code alone.
+        services.TryAddScoped<Diagnostics.VisitorSnapshotBuilder>();
     }
 }

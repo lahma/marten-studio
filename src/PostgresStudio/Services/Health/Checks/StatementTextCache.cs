@@ -19,23 +19,55 @@ namespace PostgresStudio.Services.Health.Checks;
 /// the sweep remembering did not keep, and keeps the ones it did. The bound is above what one sweep keeps
 /// (<see cref="HealthStatementQueries.MaxTexts" />, the checks' twenty and the Statements page's hundred, two hundred on
 /// Aurora - W5-Q1), so the next sweep, whose statements are mostly this one's, finds them still held rather than paying for
-/// a whole text file again. The bound is per database and not across them: a process holds up to
-/// 256 × 4,096 characters (about 2 MB as UTF-16) for every database whose statement checks or Statements page have run, for
-/// its whole life - which grows with the deployment exactly as <see cref="HealthHistory" />'s rings do, and is said beside
-/// them. It holds only texts the checks already read for a visitor through the activity gate, in memory, for the life of
+/// a whole text file again. A process holds up to 256 × 4,096 characters (about 2 MB as UTF-16) for every database whose
+/// statement checks or Statements page have run, and - since 0.5 - for no more databases than the process's
+/// <see cref="HealthDatabaseBound" /> keeps state for (64, the least recently used forgotten first, with its history). It holds only texts the checks already read for a visitor through the activity gate, in memory, for the life of
 /// the process, and every one is still masked for whoever it is shown to - holding a text changes nobody's view of it.
 /// </para>
 /// <para>
 /// Singleton, like <see cref="HealthHistory" />: the sweep is the database's, so its memory is too.
 /// </para>
 /// </remarks>
-internal sealed class StatementTextCache
+internal sealed class StatementTextCache : IPerDatabaseState
 {
     /// <summary>The most texts one database's cache holds: above the most one sweep keeps (<see cref="HealthStatementQueries.MaxTexts" />).</summary>
     public const int MaxPerDatabase = 256;
 
     private readonly Dictionary<string, Dictionary<long, StatementTextRow>> byDatabase = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock gate = new();
+
+    /// <param name="bound">
+    /// The process's bound on databases with state (API design §3.5), which forgets a database's texts with its history once it
+    /// is the least recently used past the bound; <see langword="null" /> for no bound, in a test.
+    /// </param>
+    public StatementTextCache(HealthDatabaseBound? bound = null)
+    {
+        bound?.Register(this);
+    }
+
+    /// <inheritdoc />
+    public void Forget(string storeKey, string databaseId)
+    {
+        ArgumentNullException.ThrowIfNull(storeKey);
+        ArgumentNullException.ThrowIfNull(databaseId);
+
+        lock (gate)
+        {
+            byDatabase.Remove(KeyOf(storeKey, databaseId));
+        }
+    }
+
+    /// <summary>How many databases hold texts, for a test.</summary>
+    internal int DatabaseCount
+    {
+        get
+        {
+            lock (gate)
+            {
+                return byDatabase.Count;
+            }
+        }
+    }
 
     /// <summary>The text of <paramref name="queryId" /> in this database, when it has been read.</summary>
     public bool TryGet(string storeKey, string databaseId, long queryId, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out StatementTextRow? text)

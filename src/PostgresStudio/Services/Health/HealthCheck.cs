@@ -72,9 +72,14 @@ internal sealed class HealthCheckAttribute(string code, HealthArea area, HealthC
     /// </para>
     /// <para>
     /// <b>Not the subject.</b> <see cref="HealthFinding.Subject" /> names the object a finding is about - a table, an
-    /// index, a setting, a slot - and never the kind of finding; a check with fixed kinds lists them here instead. The
-    /// five existing checks whose subject still carries a kind (C08, R01, S02, D02, T03) are split by the API packet, with
-    /// wave 6's mute-key change, and list nothing here until then.
+    /// index, a setting, a slot - and never the kind of finding; a check with fixed kinds lists them here instead. The five
+    /// checks whose subject carried a kind until 0.5 (C08, R01, S02, D02, T03) were split by the API packet, in the release
+    /// whose HMAC mute keys reset every mute once.
+    /// </para>
+    /// <para>
+    /// <b>All or nothing.</b> A check that lists variants names one on every finding it makes
+    /// (<see cref="HealthCheckRegistry.FindingProblems" />), so a finding's variant is <see langword="null" /> exactly when
+    /// its check has one kind of finding.
     /// </para>
     /// </remarks>
     public string[] Variants { get; set; } = [];

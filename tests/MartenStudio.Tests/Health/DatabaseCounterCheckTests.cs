@@ -55,7 +55,7 @@ public class DatabaseCounterCheckTests
         HealthVerdict verdict = Evaluate((0, new Counters(1_000, 10, Deadlocks: 4)), (5, new Counters(1_200, 12, Deadlocks: 5)));
 
         HealthFinding finding = verdict.Findings.Should().ContainSingle().Subject;
-        finding.Subject.Should().Be("deadlocks");
+        finding.Variant.Should().Be("deadlocks");
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Title.Should().Be("1 deadlock in the last 5 min");
         finding.Caveat.Should().Contain("2026-10-01 00:00:00Z");
@@ -68,7 +68,9 @@ public class DatabaseCounterCheckTests
         HealthVerdict verdict = Evaluate((0, new Counters(10_000, 1_000, Studio: 500)), (5, new Counters(12_000, 1_400, Studio: 560)));
 
         HealthFinding finding = verdict.Findings.Should().ContainSingle().Subject;
-        finding.Subject.Should().Be("rollbacks");
+        finding.Variant.Should().Be("rollbacks");
+        finding.Subject.Should().BeNull("a rollback share is about the database as a whole");
+        finding.Key.Should().Be("C08|rollbacks", "the variant split moved the kind out of the subject and kept the key");
         finding.Evidence.Should().Contain(new HealthEvidence("Rolled back", "340 of 2,340"));
         finding.Evidence.Should().Contain(new HealthEvidence("The studio's own, subtracted", "60"));
         finding.Title.Should().StartWith("15% of this database's transactions rolled back");
@@ -100,7 +102,7 @@ public class DatabaseCounterCheckTests
         HealthFinding finding = Evaluate((0, new Counters(100, 0, TempFiles: 2, TempBytes: 10)), (5, new Counters(120, 0, TempFiles: 5, TempBytes: 3 * 1024 * 1024 + 10)))
             .Findings.Should().ContainSingle().Subject;
 
-        finding.Subject.Should().Be("temp-files");
+        finding.Variant.Should().Be("temp-files");
         finding.Severity.Should().Be(HealthSeverity.Info);
         finding.Evidence.Should().Contain(new HealthEvidence("Written", "3.0 MiB"));
     }
@@ -169,7 +171,7 @@ public class DatabaseCounterCheckTests
         HealthFinding finding = EvaluatePerDay(TimeSpan.FromDays(2), looksReset: false, (0, new Counters(100, 0, TempFiles: 40, TempBytes: 2 * GiB)))
             .Findings.Should().ContainSingle().Subject;
 
-        finding.Subject.Should().Be("temp-files", "the variant name is kept exactly");
+        finding.Variant.Should().Be("temp-files", "the variant name is kept exactly");
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Title.Should().Be("Statements write 1.0 GiB of temporary files a day since 2026-10-13 09:00 UTC");
         finding.Evidence.Should().Contain(new HealthEvidence("Written a day", "1.0 GiB"));
@@ -187,7 +189,7 @@ public class DatabaseCounterCheckTests
             (5, new Counters(120, 0, TempFiles: 3, TempBytes: 2 * GiB - 2)));
 
         HealthFinding finding = verdict.Findings.Should().ContainSingle().Subject;
-        finding.Subject.Should().Be("temp-files");
+        finding.Variant.Should().Be("temp-files");
         finding.Severity.Should().Be(HealthSeverity.Info, "under 1 GiB a day the hour's rule stands");
         finding.Evidence.Select(static x => x.Label).Should().Contain("Written a day since 2026-10-13 09:05 UTC");
     }
@@ -219,7 +221,7 @@ public class DatabaseCounterCheckTests
                 (5, new Counters(1_200, 12, Deadlocks: 7)))
             .Findings.Should().ContainSingle().Subject;
 
-        finding.Subject.Should().Be("deadlocks");
+        finding.Variant.Should().Be("deadlocks");
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Evidence.Should().Contain(new HealthEvidence("Deadlocks per day since 2026-10-11 09:05 UTC", "1.75"));
     }
@@ -234,7 +236,7 @@ public class DatabaseCounterCheckTests
             (5, new Counters(12_000, 1_400, Deadlocks: 2, TempFiles: 1, TempBytes: 2 * GiB)));
 
         verdict.Findings.Select(static x => x.Key).Should().Equal("C08|deadlocks", "C08|rollbacks", "C08|temp-files");
-        verdict.Findings.Single(static x => x.Subject == "temp-files").Severity.Should().Be(HealthSeverity.Warning);
+        verdict.Findings.Single(static x => x.Variant == "temp-files").Severity.Should().Be(HealthSeverity.Warning);
     }
 
     [Fact]
@@ -288,7 +290,7 @@ public class DatabaseCounterCheckTests
     {
         HealthVerdict verdict = EvaluateUnwindowed((0, new Counters(1_000, 10, Deadlocks: 4)), (5, new Counters(1_200, 12, Deadlocks: 5)));
 
-        verdict.Findings.Should().ContainSingle().Which.Subject.Should().Be("deadlocks", "the hour's rules read nothing of the window");
+        verdict.Findings.Should().ContainSingle().Which.Variant.Should().Be("deadlocks", "the hour's rules read nothing of the window");
         verdict.Note.Should().Be("The rates per day were not checked: " + NotRead + ".");
     }
 

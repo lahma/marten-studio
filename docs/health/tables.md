@@ -165,6 +165,11 @@ partition is still there. The finding says, in words, that a DBA drops that left
 next apply then builds the index again. It offers no code and names no partition, because Marten names a
 tenant's partition after the tenant.
 
+Variants: `index`, whose subject is the invalid index (`T03|index|public.mt_doc_order.mt_doc_order_idx_status`), and
+`partitions`, whose subject is the table whose partitions carry invalid indexes (`T03|partitions|public.mt_doc_order`).
+Until 0.5 the second was the subject `public.mt_doc_order#partitions`, a kind and an object at once, so both keys moved
+once. Both studios run it.
+
 ## T04 Redundant index
 
 **Warning.** An index whose job another valid index on the same table already does: the same access method,

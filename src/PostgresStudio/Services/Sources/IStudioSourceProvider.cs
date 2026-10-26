@@ -68,8 +68,8 @@ internal interface IStudioSource
     /// </para>
     /// <para>
     /// A host-supplied provider that enumerates many databases (issue #8, G11) answers the whole list here; the picker
-    /// filters it by policy. Sweeps over many databases go through <see cref="IStudioSourceProvider.SweepTargetsAsync" />,
-    /// which streams and is budgeted by its caller.
+    /// filters it by policy. A reader with no visitor goes through <see cref="IStudioSourceProvider.ListUnattendedAsync" />,
+    /// which streams names, and resolves only the databases it reaches.
     /// </para>
     /// </remarks>
     /// <param name="cancellationToken">Cancels the enumeration.</param>
@@ -105,10 +105,10 @@ internal interface IStudioSource
         CancellationToken cancellationToken);
 }
 
-/// <summary>What one step of a sweep over every source's databases found: a database to sweep, or why there is none.</summary>
+/// <summary>What one step of a listing of every source's databases found: a database, or why there is none.</summary>
 internal enum StudioSweepTargetOutcome
 {
-    /// <summary><see cref="StudioSweepTarget.Resolved" /> is a database to sweep.</summary>
+    /// <summary><see cref="StudioListedDatabase.DatabaseId" /> names a database.</summary>
     Database,
 
     /// <summary>The source did not resolve, or its databases could not be listed (already logged by the provider).</summary>
@@ -117,22 +117,68 @@ internal enum StudioSweepTargetOutcome
     /// <summary>The source holds no database it can name without building one - an expected state, not a failure.</summary>
     SourceNotEnumerated,
 
-    /// <summary><see cref="StudioSweepTarget.Count" /> databases are held under ids the source cannot look up.</summary>
+    /// <summary><see cref="StudioListedDatabase.Count" /> databases are held under ids the source cannot look up.</summary>
     Unnamed,
 }
 
-/// <summary>One step of <see cref="IStudioSourceProvider.SweepTargetsAsync" />.</summary>
+/// <summary>
+/// One step of <see cref="IStudioSourceProvider.ListUnattendedAsync" />: a database's name, and nothing opened - or why a
+/// source has none to name.
+/// </summary>
 /// <param name="Source">The source this step is about.</param>
 /// <param name="Outcome">What was found.</param>
-/// <param name="Resolved">For <see cref="StudioSweepTargetOutcome.Database" />: the database, resolved with no tenant and no visitor.</param>
+/// <param name="DatabaseId">
+/// For <see cref="StudioSweepTargetOutcome.Database" />: the database's identity, which
+/// <see cref="IStudioSourceProvider.ResolveUnattendedAsync" /> takes.
+/// </param>
 /// <param name="Count">How many databases the step stands for (1, or the unnamed count).</param>
 /// <param name="Detail">A Debug-log detail - the tenancy's shape for a source left out - never shown to anyone.</param>
-internal sealed record StudioSweepTarget(
+internal sealed record StudioListedDatabase(
     StudioSourceRegistration Source,
     StudioSweepTargetOutcome Outcome,
-    ResolvedSource? Resolved = null,
+    string? DatabaseId = null,
     int Count = 1,
-    string? Detail = null);
+    string? Detail = null)
+{
+    /// <summary>
+    /// Whether the source is one database by its nature - a data source, a store whose tenancy is one database - rather than a
+    /// set a host or a tenancy lists, which may grow: the health export sweeps every one-database source in every run, and
+    /// rotates through the others (API design §3.4).
+    /// </summary>
+    public bool SingleDatabaseSource { get; init; }
+}
+
+/// <summary>How <see cref="IStudioSourceProvider.ResolveUnattendedAsync" /> ended.</summary>
+internal enum StudioUnattendedOutcome
+{
+    /// <summary><see cref="StudioUnattendedResolution.Resolved" /> is the database.</summary>
+    Resolved,
+
+    /// <summary>No such source, or no such database in what it lists or holds.</summary>
+    NotFound,
+
+    /// <summary>The source would not build, or the database could not be opened (already logged by the provider).</summary>
+    NotReached,
+}
+
+/// <summary>One database resolved with no visitor, or why not - a value, never an exception.</summary>
+/// <param name="Outcome">How it ended.</param>
+/// <param name="Resolved">For <see cref="StudioUnattendedOutcome.Resolved" />: the database, resolved with no tenant.</param>
+/// <param name="Reason">
+/// Otherwise, the studio's own sentence - naming the source and the database as they were asked for, and an exception's
+/// type, never its words, which may be a host's or a driver's and carry anything.
+/// </param>
+internal sealed record StudioUnattendedResolution(StudioUnattendedOutcome Outcome, ResolvedSource? Resolved = null, string? Reason = null)
+{
+    /// <summary>The database, resolved.</summary>
+    public static StudioUnattendedResolution Of(ResolvedSource resolved) => new(StudioUnattendedOutcome.Resolved, resolved);
+
+    /// <summary>No such source or database.</summary>
+    public static StudioUnattendedResolution NotFound(string reason) => new(StudioUnattendedOutcome.NotFound, null, reason);
+
+    /// <summary>A source or database that could not be reached.</summary>
+    public static StudioUnattendedResolution NotReached(string reason) => new(StudioUnattendedOutcome.NotReached, null, reason);
+}
 
 /// <summary>
 /// The sources a studio offers: which exist, how each resolves, and every database a sweep with no visitor may cover.
@@ -163,8 +209,8 @@ internal sealed record StudioSweepTarget(
 /// name, and an asynchronous enumeration of databases each with a stable name and a data source - adapts onto this as one
 /// <see cref="StudioSourceRegistration" /> of kind <see cref="StudioSourceKind.HostProvider" /> whose
 /// <see cref="IStudioSource.DatabasesAsync" /> materializes the enumeration and whose databases carry the name the host
-/// lists in <see cref="IStudioDatabase.Identity" />; <see cref="SweepTargetsAsync" /> streams the same enumeration so a
-/// sweep never materializes a thousand tenants to cover twenty-five.
+/// lists in <see cref="IStudioDatabase.Identity" />; <see cref="ListUnattendedAsync" /> streams the same names and opens
+/// nothing, so a sweep with no visitor resolves only the databases it reaches (<see cref="ResolveUnattendedAsync" />).
 /// </para>
 /// </remarks>
 internal interface IStudioSourceProvider
@@ -194,15 +240,40 @@ internal interface IStudioSourceProvider
     long Generation { get; }
 
     /// <summary>
-    /// Every database of every source, for a sweep that runs with no visitor and no policy (the opt-in health check, D29's
-    /// second exception) - streamed, in order, with the sources and databases that could not be swept said as values.
+    /// Every database of every source, by name, for a reader with no visitor and no policy - the opt-in health check (D29's
+    /// second exception) and the diagnostics API (D31) - streamed, in registration order, with the sources that could not
+    /// be listed said as values.
     /// </summary>
     /// <remarks>
-    /// The budget is the caller's: it stops sweeping after its limit and goes on reading only to count what it skipped,
-    /// so an implementation must enumerate lazily and cheaply - names, never connections. A database is yielded resolved
-    /// with no tenant, and must be named by an identity the source can look up again, never one it would have to build.
+    /// <para>
+    /// <b>Names, never connections</b> (API design S1). Nothing is opened, no data source is built and no tenancy that
+    /// builds is enumerated: a Marten store's databases are the ones its tenancy already holds (<c>HeldDatabases</c>, D27),
+    /// a data source is its one database by its key, and a host's database source is the names it lists (its own
+    /// minute-long cache). A database is named by an identity <see cref="ResolveUnattendedAsync" /> looks up again.
+    /// </para>
+    /// <para>
     /// The caller has no circuit, so it resolves this provider from an <c>AsyncServiceScope</c> of its own run.
+    /// </para>
     /// </remarks>
     /// <param name="cancellationToken">Cancels the enumeration.</param>
-    IAsyncEnumerable<StudioSweepTarget> SweepTargetsAsync(CancellationToken cancellationToken);
+    IAsyncEnumerable<StudioListedDatabase> ListUnattendedAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// One database, resolved with no tenant and no visitor (API design S4): every step of <see cref="StudioSourceResolver" />
+    /// after authorization - the registration, the source, the database, opened through the host only for this operation -
+    /// and only a database <see cref="ListUnattendedAsync" /> would name. Never throws but for cancellation.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>No policy is asked</b>, so this is for the two readers whose output needs none - the health export's codes and
+    /// counts, and host code through the diagnostics API - and never for a visitor.
+    /// </para>
+    /// <para>
+    /// An empty <paramref name="databaseId" /> is the source's first database, as the visitor's resolver treats it.
+    /// </para>
+    /// </remarks>
+    /// <param name="sourceKey">The source's key, compared ignoring case.</param>
+    /// <param name="databaseId">The database's identity, compared ignoring case; empty for the source's first.</param>
+    /// <param name="cancellationToken">Cancels the resolution.</param>
+    ValueTask<StudioUnattendedResolution> ResolveUnattendedAsync(string sourceKey, string databaseId, CancellationToken cancellationToken);
 }

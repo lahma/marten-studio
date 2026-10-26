@@ -208,7 +208,71 @@ internal sealed record SessionSnapshot(
     IReadOnlyList<LockRow> Locks,
     int MaxPreparedTransactions,
     IReadOnlyList<PreparedRow> Prepared,
-    IReadOnlyList<HealthStatement> Statements);
+    IReadOnlyList<HealthStatement> Statements)
+{
+    /// <summary>
+    /// Connections by application (issue #8 G9, W5-API) and the server's connection budget, read in the same snapshot - or
+    /// <see langword="null" /> from a reader that did not read them (a test's).
+    /// </summary>
+    public SessionConnections? Connections { get; init; }
+}
+
+/// <summary>
+/// One application's client sessions of the database, by state - or, with no <see cref="Application" />, the database's own
+/// total. Every role sees every session's application; a state the role may not read is counted in <see cref="StateUnknown" />.
+/// </summary>
+/// <param name="Application">The <c>application_name</c>, <c>""</c> for sessions that set none; <see langword="null" /> for the total.</param>
+/// <param name="Total">Every session.</param>
+/// <param name="Active">Running a statement.</param>
+/// <param name="Idle">Idle, outside a transaction.</param>
+/// <param name="IdleInTransaction">Idle in a transaction, aborted ones included.</param>
+/// <param name="Waiting">Waiting on a lock.</param>
+/// <param name="StateUnknown">Another role's, whose state this role may not read (no <c>pg_read_all_stats</c>).</param>
+/// <param name="OldestTransaction">The longest open transaction it may see, or <see langword="null" />.</param>
+internal sealed record SessionApplicationCounts(
+    string? Application,
+    long Total,
+    long Active,
+    long Idle,
+    long IdleInTransaction,
+    long Waiting,
+    long StateUnknown,
+    TimeSpan? OldestTransaction);
+
+/// <summary>
+/// What <see cref="PostgresStudio.Internal.Sql.ConnectionsByApplicationQueries.Read" /> read: the database's sessions as a
+/// whole and by application, and the server's connection budget. Shown at two gates: the totals and the budget at
+/// <c>Database</c>, the applications - their names - at <c>Activity</c>.
+/// </summary>
+/// <param name="CanReadAllStats">Whether the role reads every session's state (<c>pg_read_all_stats</c>).</param>
+/// <param name="MaxConnections"><c>max_connections</c>.</param>
+/// <param name="Reserved"><c>superuser_reserved_connections</c>, plus <c>reserved_connections</c> from PostgreSQL 16.</param>
+/// <param name="ServerConnections">Client sessions on the whole server.</param>
+/// <param name="Database">This database's total.</param>
+/// <param name="Applications">The applications, the most sessions first, at most <c>MaxApplications</c>.</param>
+/// <param name="ApplicationCount">How many applications there are, past the cap included.</param>
+internal sealed record SessionConnections(
+    bool CanReadAllStats,
+    int MaxConnections,
+    int Reserved,
+    long ServerConnections,
+    SessionApplicationCounts Database,
+    IReadOnlyList<SessionApplicationCounts> Applications,
+    long ApplicationCount)
+{
+    /// <summary>Whether every session's state was read: the role reads every state, or no other role's session was connected.</summary>
+    public bool AllSessionsVisible => CanReadAllStats || Database.StateUnknown == 0;
+
+    /// <summary>The budget alone, which names no application: what the database-wide gate shows.</summary>
+    public SessionConnectionBudget ToBudget() => new(MaxConnections, Reserved, ServerConnections, AllSessionsVisible);
+}
+
+/// <summary>The server's connection budget and how much of it is spent: database-wide numbers, naming nothing.</summary>
+/// <param name="MaxConnections"><c>max_connections</c>.</param>
+/// <param name="Reserved"><c>superuser_reserved_connections</c>, plus <c>reserved_connections</c> from PostgreSQL 16.</param>
+/// <param name="ServerConnections">Client sessions on the whole server.</param>
+/// <param name="AllSessionsVisible">Whether every session's state was read.</param>
+internal sealed record SessionConnectionBudget(int MaxConnections, int Reserved, long ServerConnections, bool AllSessionsVisible);
 
 // -------------------------------------------------------------------------------------------------------
 // What a visitor is shown
@@ -313,6 +377,18 @@ internal sealed record SessionActivitySummary
     /// <summary>The database's pool in this process, while the page holds a lease on the observer.</summary>
     public SessionPoolSummary? Pool { get; init; }
 
+    /// <summary>
+    /// The database's client sessions by state, as one total row, and the server's connection budget (issue #8 G9) - numbers
+    /// about the database as a whole, with no application named - or <see langword="null" /> when they were not read.
+    /// </summary>
+    public SessionApplicationCounts? Connections { get; init; }
+
+    /// <summary>The server's connection budget beside <see cref="Connections" />, or <see langword="null" />.</summary>
+    public SessionConnectionBudget? Budget { get; init; }
+
+    /// <summary>How many applications are connected: a count, which names none.</summary>
+    public long ApplicationCount { get; init; }
+
     /// <summary>How sure: the role's visibility, the caps.</summary>
     public IReadOnlyList<string> Caveats { get; init; } = [];
 
@@ -397,6 +473,15 @@ internal sealed record SessionActivityDetails
 
     /// <summary>The prepared transactions.</summary>
     public IReadOnlyList<PreparedDetailRow> Prepared { get; init; } = [];
+
+    /// <summary>
+    /// This database's sessions by <c>application_name</c>, the most first (issue #8 G9): an application's name is another
+    /// program's, so it is a detail.
+    /// </summary>
+    public IReadOnlyList<SessionApplicationCounts> Applications { get; init; } = [];
+
+    /// <summary>How many applications there are, past the read's cap included.</summary>
+    public long ApplicationCount { get; init; }
 
     /// <summary>
     /// Whether the statements are withheld outright, because the visitor's withheld schemas could not be read.

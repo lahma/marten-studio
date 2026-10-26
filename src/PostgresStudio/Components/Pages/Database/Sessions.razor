@@ -132,6 +132,79 @@
             </div>
         }
 
+        @if (summary.Connections is { } database)
+        {
+            @* Issue #8 G9: one aggregate over every session the role may see, never the capped list below. The database's
+               row and the server's budget are database-wide; an application's name is another program's, so the named rows
+               are the details' and are drawn only past the ViewDatabaseActivity gate. *@
+            <section class="ms-sessions-section ms-sessions-apps" aria-labelledby="ms-sessions-apps">
+                <h2 class="ms-sessions-heading" id="ms-sessions-apps">By application</h2>
+
+                @if (summary.Budget is { } budget)
+                {
+                    <p class="ms-sessions-budget">
+                        @SessionText.Count(budget.ServerConnections, "client session") on the whole server, of
+                        <code>max_connections</code> @SessionText.Number(budget.MaxConnections), @SessionText.Number(budget.Reserved) of
+                        them reserved (<code>superuser_reserved_connections</code>, and <code>reserved_connections</code> from
+                        PostgreSQL 16).
+                    </p>
+                }
+
+                <TableScroll Label="This database's sessions by application">
+                    <table class="ms-table ms-sessions-table ms-sessions-apps-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Application</th>
+                                <th scope="col">Sessions</th>
+                                <th scope="col">Active</th>
+                                <th scope="col">Idle</th>
+                                <th scope="col">Idle in transaction</th>
+                                <th scope="col">Waiting on a lock</th>
+                                <th scope="col">State not visible</th>
+                                <th scope="col">Oldest transaction</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (ShowDetails)
+                            {
+                                @foreach (SessionApplicationCounts application in details!.Applications)
+                                {
+                                    <tr @key="@("app:" + application.Application)">
+                                        <td>@(string.IsNullOrEmpty(application.Application) ? "(none set)" : application.Application)</td>
+                                        @ApplicationCells(application)
+                                    </tr>
+                                }
+                            }
+                            <tr @key="@("total")" class="ms-sessions-apps-total">
+                                <th scope="row">This database</th>
+                                @ApplicationCells(database)
+                            </tr>
+                        </tbody>
+                    </table>
+                </TableScroll>
+
+                @if (!ShowDetails && summary.ApplicationCount > 0)
+                {
+                    <p class="ms-muted ms-sessions-apps-note">
+                        @SessionText.Count(summary.ApplicationCount, "application") connected. Their names are details, shown with
+                        session details.
+                    </p>
+                }
+                else if (ShowDetails && details!.ApplicationCount > details.Applications.Count)
+                {
+                    <p class="ms-sessions-caveat"><strong>How sure:</strong> Only the @SessionText.Number(details.Applications.Count) applications with the most sessions, of @SessionText.Number(details.ApplicationCount), are listed; the total counts them all.</p>
+                }
+
+                @if (summary.Budget is { AllSessionsVisible: false })
+                {
+                    <p class="ms-sessions-caveat">
+                        <strong>How sure:</strong> the studio's Postgres role is not a member of pg_read_all_stats, so other roles'
+                        sessions are counted in "State not visible" and in no state; the totals count every session.
+                    </p>
+                }
+            </section>
+        }
+
         <section class="ms-sessions-section" aria-labelledby="ms-sessions-list">
             <h2 class="ms-sessions-heading" id="ms-sessions-list">Sessions</h2>
 
@@ -512,6 +585,18 @@
                 </div>
             </div>
         }
+    };
+
+    /// <summary>One by-application row's counts, after its first cell.</summary>
+    private static RenderFragment ApplicationCells(SessionApplicationCounts counts) => __builder =>
+    {
+        <td>@SessionText.Number(counts.Total)</td>
+        <td>@SessionText.Number(counts.Active)</td>
+        <td>@SessionText.Number(counts.Idle)</td>
+        <td class="@(counts.IdleInTransaction > 0 ? "ms-sessions-stat-alert" : null)">@SessionText.Number(counts.IdleInTransaction)</td>
+        <td class="@(counts.Waiting > 0 ? "ms-sessions-stat-alert" : null)">@SessionText.Number(counts.Waiting)</td>
+        <td>@SessionText.Number(counts.StateUnknown)</td>
+        <td>@Age(counts.OldestTransaction)</td>
     };
 
     private static string Age(TimeSpan? value) => value is { } age ? SessionText.Duration(age) : "–";

@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
+using PostgresStudio.Services.Diagnostics;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Postgres;
 using PostgresStudio.Services.Settings;
@@ -113,6 +114,11 @@ public static class PostgresStudioServiceCollectionExtensions
 
         // The Overview's server read: scoped, because what it remembers is the circuit's.
         services.TryAddScoped<IPostgresServerReader, PostgresServerReader>();
+
+        // W5-API: the diagnostics API for the host's own code (D31) - a singleton over the studio's own caches, and the
+        // process's limit of two fresh reads at a time for it. Inert until host code calls it: no endpoint, no hosted service.
+        services.TryAddSingleton<FreshReadLimiter>();
+        services.TryAddSingleton<IPostgresDiagnostics, PostgresDiagnosticsService>();
 
         return services;
     }

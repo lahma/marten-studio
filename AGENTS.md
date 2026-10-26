@@ -1319,6 +1319,18 @@ tests/PostgresStudio.Integration.Tests/Statements/  Live pg_stat_statements on a
                                          matrix, and the Aurora shim's storage reads in the 15/16 and 17 shapes
 tests/PostgresStudio.Tests/Tables/        T15, T19, T20, T25 and T26 at their edges, the usage guards, foreign-key coverage,
                                          sequence headroom and the lint statements' D27 shape - no database
+src/PostgresStudio/Diagnostics/          The public diagnostics read model (D31): IPostgresDiagnostics, its request, snapshot,
+                                         findings, checks and sections - namespace PostgresStudio, like the registration types
+src/PostgresStudio/Services/Diagnostics/  The API's service, host gate, mapper, snapshot builders, read limiter and JSON
+                                         writer, and the Health page's visitor download builder (W5-API)
+tests/PostgresStudio.Tests/Diagnostics/   The mapper over every enum member, the host gate's sentinels, the JSON baselines, the
+                                         limiter, the sections from hand-built facts, the visitor download and the Snapshot
+                                         menu - no database
+tests/PostgresStudio.Integration.Tests/Diagnostics/  Live: G9 by application as app and probe, a full snapshot that
+                                         creates nothing, three databases behind a database source, an API-only host, and
+                                         the statements section on a pg_stat_statements server
+tests/MartenStudio.Integration.Tests/Diagnostics/  Live: the API over a conjoined store (a tenant's finding needs
+                                         IncludeActivity) and a master-table tenancy that lists nothing
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

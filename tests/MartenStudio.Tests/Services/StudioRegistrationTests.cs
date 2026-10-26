@@ -88,6 +88,9 @@ public class StudioRegistrationTests
         (typeof(ITableRowService), ServiceLifetime.Scoped, How.Type, typeof(TableRowService)),
         (typeof(DatabaseBrowserState), ServiceLifetime.Scoped, How.Type, typeof(DatabaseBrowserState)),
         (typeof(HealthCheckRegistry), ServiceLifetime.Singleton, How.Type, typeof(HealthCheckRegistry)),
+
+        // W5-API: the bound on databases with state (API design §3.5).
+        (typeof(HealthDatabaseBound), ServiceLifetime.Singleton, How.Type, typeof(HealthDatabaseBound)),
         (typeof(HealthHistory), ServiceLifetime.Singleton, How.Type, typeof(HealthHistory)),
         (typeof(HealthSweeper), ServiceLifetime.Singleton, How.Type, typeof(HealthSweeper)),
         (typeof(HealthSweepCache), ServiceLifetime.Singleton, How.Type, typeof(HealthSweepCache)),
@@ -177,11 +180,18 @@ public class StudioRegistrationTests
         // W5-Q1: Statements - the facts are the statement sweep's, the view the circuit's.
         (typeof(PostgresStudio.Services.Statements.IStatementFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Statements.StatementFactsReader)),
         (typeof(PostgresStudio.Services.Statements.IStatementsService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Statements.StatementsService)),
+
+        // W5-API: the Health page's Snapshot menu, the circuit's - built from the page services as the visitor.
+        (typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder)),
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),
         (typeof(DaemonAccessor), ServiceLifetime.Scoped, How.Type, typeof(DaemonAccessor)),
         (typeof(IProjectionDataService), ServiceLifetime.Scoped, How.Type, typeof(ProjectionDataService)),
+
+        // W5-API: the diagnostics API for the host's own code (D31) - added in 0.5, inert until host code calls it.
+        (typeof(PostgresStudio.Services.Diagnostics.FreshReadLimiter), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Diagnostics.FreshReadLimiter)),
+        (typeof(PostgresStudio.IPostgresDiagnostics), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Diagnostics.PostgresDiagnosticsService)),
     ];
 
     [Fact]

@@ -23,6 +23,8 @@ public class IndexChecksTests
         finding.Code.Should().Be("T03");
         finding.Severity.Should().Be(HealthSeverity.Critical);
         finding.Subject.Should().Be(orders.Key + ".mt_doc_healthorderdoc_idx_status", "the Indexes tab finds its row by this key");
+        finding.Variant.Should().Be("index");
+        finding.Key.Should().Be("T03|index|" + orders.Key + ".mt_doc_healthorderdoc_idx_status");
         finding.WhyItMatters.Should().Contain("declares it, so a re-apply drops it and builds it again");
         finding.Remedy!.Code.Should().Contain("ApplyAllConfiguredChangesToDatabaseAsync()");
         finding.Remedy.Explanation.Should().Contain("not additive");
@@ -54,7 +56,9 @@ public class IndexChecksTests
 
         HealthFinding finding = new InvalidIndexCheck().Evaluate(new InvalidIndexFacts([], [table]), Evaluation()).Findings.Should().ContainSingle().Subject;
 
-        finding.Subject.Should().Be(orders.Key + "#partitions", "a subject distinct from every index's");
+        finding.Variant.Should().Be("partitions", "the kind is the variant, and the subject only the table (API design §1.10)");
+        finding.Subject.Should().Be(orders.Key);
+        finding.Key.Should().Be("T03|partitions|" + orders.Key, "a key distinct from every index finding's, whose variant is index");
         finding.Title.Should().StartWith("2 indexes on the partitions of " + orders.Key);
         finding.WhyItMatters.Should().Contain("after the tenant");
         finding.WhyItMatters.Should().Contain("A DBA drops that leftover partition index first", "a re-apply cannot resume a partition's build");

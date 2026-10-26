@@ -224,7 +224,8 @@ internal sealed partial class HealthCheckRegistry
     /// <summary>
     /// What is wrong with one finding of a check, one sentence each - empty when it is fine: a variant the check does not
     /// list (<see cref="HealthCheckAttribute.Variants" />), which a host keying its wording on the code and the variant
-    /// would have no row for.
+    /// would have no row for; or no variant from a check that lists some, so that a variant is <see langword="null" />
+    /// exactly for a check with one kind of finding (API design §1.10, the public <c>PostgresFinding.Variant</c>).
     /// </summary>
     /// <remarks>
     /// The sweep refuses a verdict that has one - that check's "could not check" row, like any broken verdict - and an
@@ -240,7 +241,9 @@ internal sealed partial class HealthCheckRegistry
 
         if (finding.Variant is not { } variant)
         {
-            return [];
+            return info.Variants.Count == 0
+                ? []
+                : [info.Code + " made a finding with no variant, but lists its kinds of finding (" + string.Join(", ", info.Variants) + "); every finding of such a check names its kind."];
         }
 
         if (info.Variants.Count == 0)
