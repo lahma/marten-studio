@@ -32,7 +32,10 @@ internal enum HealthCheckOutcome
     /// <summary>It ran, and its evaluator judged what it read - with or without findings.</summary>
     Checked,
 
-    /// <summary>The host's Marten lacks a feature the check needs, so it was never run.</summary>
+    /// <summary>
+    /// The host's runtime lacks a feature the check needs, or the server's platform does what it judges (Aurora's storage
+    /// layer checkpoints - <see cref="HealthCheckNotApplicableException" />), so it was never run.
+    /// </summary>
     NotApplicable,
 
     /// <summary>
@@ -482,6 +485,11 @@ internal sealed class HealthSweeper
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
+            }
+            catch (HealthCheckNotApplicableException notApplicable)
+            {
+                // The platform's design, not a state the host chose: listed, with the reason, and nothing logged.
+                return Gathered.Without(descriptor, HealthCheckOutcome.NotApplicable, notApplicable.Message, null, sql.Statements, checkStarted);
             }
             catch (Exception exception)
             {

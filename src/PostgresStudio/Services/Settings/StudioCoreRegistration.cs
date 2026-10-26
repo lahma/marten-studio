@@ -7,6 +7,7 @@ using PostgresStudio.Services.Live;
 using PostgresStudio.Services.Maintenance;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
+using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Sources;
 using PostgresStudio.Services.Storage;
 
@@ -176,5 +177,11 @@ internal static class StudioCoreRegistration
         // for every circuit - and what a visitor is shown of them is the circuit's.
         services.TryAddSingleton<IStorageFacts, StorageFactsReader>();
         services.TryAddScoped<IStorageService, StorageService>();
+
+        // W5-R2: the Replication page. The facts are the database's, read once per HealthInterval for every circuit; what a
+        // visitor is shown of them, which names it has audited and its one tablespace measurement at a time are the circuit's.
+        services.TryAddSingleton<IReplicationFactsReader, ReplicationFactsReader>();
+        services.TryAddSingleton<ReplicationFactsCache>();
+        services.TryAddScoped<IReplicationService, ReplicationService>();
     }
 }

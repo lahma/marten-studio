@@ -64,7 +64,7 @@ internal static class PostgresStudioDescriptor
             """,
     };
 
-    /// <summary>The sidebar: Overview and Query, the database section, Health and Activity.</summary>
+    /// <summary>The sidebar: Overview and Query, the database section, Health, Replication and Activity.</summary>
     private static IReadOnlyList<StudioNavSection> Navigation() =>
     [
         new("Data",
@@ -85,6 +85,9 @@ internal static class PostgresStudioDescriptor
 
             // W5-CAP: the database's size, growth and largest tables, after Maintenance.
             new("Storage", "storage", "storage", Title: "Database size, growth and the largest tables"),
+
+            // W5-R2: after Storage (W5-index §4).
+            new("Replication", "replication", "replication", Title: "Slots, standbys, the archiver, WAL, checkpoints and I/O"),
         ]),
         new("System",
         [

@@ -273,3 +273,35 @@ internal sealed class HealthCheckUnavailableException : Exception
     {
     }
 }
+
+/// <summary>
+/// What a gatherer throws when what it judges does not exist on this server's platform: the check is listed as not
+/// applicable, with the reason, and never run (issue #8 A2).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Not "not checked".</b> <see cref="HealthCheckUnavailableException" /> is a state the host chose and could change - a
+/// grant, an extension; this one is the platform's design - Aurora's storage layer checkpoints and archives, and its readers
+/// do not stream - so the row says "not applicable" (<see cref="HealthCheckOutcome.NotApplicable" />), as it does for a
+/// feature the host's runtime lacks, and the health export counts it with the checks that ran clean.
+/// </para>
+/// <para>
+/// <b>Thrown before the check's own reads.</b> A gatherer asks the sweep's shared platform read
+/// (<c>PostgresServerFacts.SharedAsync</c>) and nothing else first, so a not-applicable check runs no statement of its own.
+/// The message names the platform and why, written for the status row, and is the platform's to give (R2's
+/// <c>ReplicationPlatform</c>), so two checks never word one platform two ways.
+/// </para>
+/// </remarks>
+internal sealed class HealthCheckNotApplicableException : Exception
+{
+    /// <param name="reason">Why, for the status row.</param>
+    public HealthCheckNotApplicableException(string reason) : base(reason)
+    {
+    }
+
+    /// <param name="reason">Why, for the status row.</param>
+    /// <param name="innerException">What said so.</param>
+    public HealthCheckNotApplicableException(string reason, Exception innerException) : base(reason, innerException)
+    {
+    }
+}

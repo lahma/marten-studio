@@ -252,6 +252,16 @@ public class LogLevelsTests
         ["src/PostgresStudio/Services/PostgresStudioLog.Maintenance.cs : 9420 PostgresStudioBloatMeasureFailed"] = (Verdict.VisitorAction,
             "9420 in Postgres Studio's words: a bloat measure the visitor pressed failed after its gates passed; one line per press."),
 
+        // ---- W5-R2 -----------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.Replication.cs : 9430 ReplicationReadFailed"] = (Verdict.Throttled,
+            "A section of the Replication page's facts failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the page re-reads every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Replication.cs : 9430 PostgresStudioReplicationReadFailed"] = (Verdict.Throttled,
+            "9430 in Postgres Studio's words: a section of the Replication page's facts failed, re-read every HealthInterval."),
+        ["src/PostgresStudio/Services/StudioLog.Replication.cs : 9431 TablespaceSizeFailed"] = (Verdict.VisitorAction,
+            "A tablespace size the visitor pressed Measure for failed other than by a privilege or a timeout (both Debug); one line per click."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Replication.cs : 9431 PostgresStudioTablespaceSizeFailed"] = (Verdict.VisitorAction,
+            "9431 in Postgres Studio's words: a tablespace size the visitor asked for failed; one line per click."),
+
         // ---- Faults ---------------------------------------------------------------------------------
         ["src/PostgresStudio/Services/StudioState.cs : A Marten Studio page failed to handle a scope change"] = (Verdict.Fault,
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),

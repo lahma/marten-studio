@@ -116,6 +116,9 @@ internal static class MartenStudioDescriptor
 
             // W5-CAP: the database's size, growth and largest tables, after Maintenance.
             new("Storage", "storage", "storage", Title: "Database size, growth and the largest tables"),
+
+            // W5-R2: the shared Replication page, after Storage (W5-index §4).
+            new("Replication", "replication", "replication", Title: "Slots, standbys, the archiver, WAL, checkpoints and I/O"),
             new("Projections", "projections", "projection", ProjectionsBadge),
 
             // Schema deliberately carries no badge. Finding drift costs a CreateMigrationAsync, which is

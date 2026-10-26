@@ -7,19 +7,20 @@ in the studio's read-only transaction, and lock nothing they read. Back to the [
 
 ## Managed platforms
 
-A small detector says who runs the server, from markers each provider documents. It decides **only wording and
-mutes**: S01's wording, R01's remedy (where a setting is changed), and S02 standing down for a setting a
-provider documents as its own design. It never raises a finding and never sets a severity. A server it does not
+A small detector says who runs the server, from markers each provider documents. It decides **only wording,
+mutes and what does not apply**: S01's wording, R01's remedy (where a setting is changed), S02 standing down for a
+setting a provider documents as its own design, and which of R02-R04 and the Replication page's sections are not
+applicable there (issue #8 A2, [Replication](replication.md)). It never raises a finding and never sets a severity. A server it does not
 recognise is self-hosted, which is also the right wording for a provider it has never heard of: the setting is
 somebody's to change.
 
 | Platform | Marker | Documented in |
 |---|---|---|
-| Amazon Aurora | an `aurora_version()` function (looked up in `pg_proc`, never called) | Aurora User Guide, *aurora_version* |
-| Amazon RDS | an `rds.extensions` or `rds.allowed_extensions` setting | RDS User Guide, *Supported PostgreSQL extension versions*; Aurora User Guide, *Working with extensions* |
-| Azure Database for PostgreSQL | an `azure.extensions` setting | Microsoft Learn, *PostgreSQL extensions in Azure Database for PostgreSQL* |
-| Google Cloud SQL | a `cloudsql.*` setting (a database flag) | Cloud SQL for PostgreSQL, *Configure database flags* |
-| Neon | a `neon_superuser` role, or a host under `.neon.tech` | Neon, *Postgres compatibility* and *Connection pooling* |
+| Amazon Aurora | an `aurora_version()` function in `pg_catalog` (looked up in `pg_proc`, never called) | Aurora User Guide, *aurora_version* |
+| Amazon RDS | an `rds.extensions` or `rds.allowed_extensions` setting from the server's configuration | RDS User Guide, *Supported PostgreSQL extension versions*; Aurora User Guide, *Working with extensions* |
+| Azure Database for PostgreSQL | an `azure.extensions` setting from the server's configuration | Microsoft Learn, *PostgreSQL extensions in Azure Database for PostgreSQL* |
+| Google Cloud SQL | a `cloudsql.*` setting (a database flag) from the server's configuration | Cloud SQL for PostgreSQL, *Configure database flags* |
+| Neon | a `neon_superuser` role that is `NOLOGIN`, `REPLICATION` and `BYPASSRLS`, or a host under `.neon.tech` | Neon, *Postgres compatibility* and *Connection pooling* |
 | Supabase | a host under `.supabase.co` or `.supabase.com` | Supabase, *Connect to your database* |
 
 The markers are read in that order, and the first that matches wins. Aurora comes first because an Aurora
@@ -30,6 +31,14 @@ string, without a query. Supabase has no server-side marker here: the `supautils
 publishes and other distributions also install, and no Supabase page documents a setting only its servers have.
 So a Supabase server reached through a proxy of your own is taken to be self-hosted. Debug event 9290 says
 which platform was detected and why.
+
+**No marker can be planted by a role short of a superuser.** A platform silences findings (S02's stand-down, R02-R04
+on Aurora), so each server marker is fenced to where only a superuser or the provider can put it. A setting counts only
+when it comes from the server's own configuration: a placeholder of the same name from a session's `SET`, a database
+owner's `ALTER DATABASE ... SET`, a role's `ALTER ROLE ... SET` or a client's startup options does not. The Aurora
+function counts only in `pg_catalog`, where only a superuser may create one - a `public.aurora_version()` does not.
+Neon's role counts only with `REPLICATION` and `BYPASSRLS`, which only a superuser may grant before PostgreSQL 16,
+and from 16 only a `CREATEROLE` role holding both.
 
 ## S01 PostgreSQL version end of life
 

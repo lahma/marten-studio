@@ -318,8 +318,8 @@ public class StudioLayoutTests
         // information architecture is legible from the first version. This list grows one packet at a
         // time - Projections joined it in P5, the four Events screens in P4, Schema and Configuration
         // in P7, Documents in P2, Query in P6, and the database browser's Tables in DB-4, which also
-        // moved Relationships out of Data and under it. Health heads Operations from H1 (0.4), and Storage follows it
-        // from W5-CAP (0.5).
+        // moved Relationships out of Data and under it. Health heads Operations from H1 (0.4), and Maintenance, Storage
+        // and Replication follow it from W5-V1, W5-CAP and W5-R2 (0.5).
         layout.TextOfAll(".ms-nav-link:not(.ms-nav-link-disabled) .ms-nav-link-text")
             .Should().Equal(
                 "Overview",
@@ -334,6 +334,7 @@ public class StudioLayoutTests
                 "Health",
                 "Maintenance",
                 "Storage",
+                "Replication",
                 "Projections",
                 "Schema",
                 "Configuration",
@@ -366,6 +367,7 @@ public class StudioLayoutTests
             "health",
             "maintenance",
             "storage",
+            "replication",
             "projections",
             "schema",
             "config",
@@ -396,6 +398,7 @@ public class StudioLayoutTests
             "health",
             "maintenance",
             "storage",
+            "replication",
             "projections",
             "schema",
             "config",
@@ -557,7 +560,7 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.FindAll(".ms-nav-badge").Should().BeEmpty();
-        layout.FindAll("a.ms-nav-link").Should().HaveCount(16, "every entry, Health (0.4), Maintenance and Storage (0.5) included");
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(17, "every entry, Health (0.4), Maintenance, Storage and Replication (0.5) included");
         layout.Markup.Should().Contain(BodyMarker);
     }
 

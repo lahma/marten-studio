@@ -68,6 +68,14 @@ public class ActivityViewsOffThePollPathTests
     /// </summary>
     private const string MaintenanceBuilder = "src/PostgresStudio/Internal/Sql/MaintenanceQueries.cs";
 
+    /// <summary>
+    /// The replication builder (W5-R2-fix B1): its standby read joins <c>pg_stat_activity</c> on the WAL senders' pids for
+    /// one thing only - whether a sender is physical, or a logical one of this database or another - so that another
+    /// database's logical sender is never named. It runs in R03's regular sweep and in the Replication page's facts read,
+    /// which the page polls at <c>HealthInterval</c> through a cache of that time to live (the nets below).
+    /// </summary>
+    private const string ReplicationBuilder = "src/PostgresStudio/Internal/Sql/ReplicationQueries.cs";
+
     /// <summary>SQL that reads one of the views: from or join it, or call <c>pg_blocking_pids</c>.</summary>
     internal static readonly Regex ReadsAnActivityView = new(
         @"\b(from|join)\s+(pg_catalog\.)?pg_(stat_activity|locks|prepared_xacts)\b(?!\.)|\bpg_blocking_pids\s*\(",
@@ -83,7 +91,7 @@ public class ActivityViewsOffThePollPathTests
         List<string> offenders =
         [
             .. files
-                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or TableBuilder or MaintenanceBuilder))
+                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or TableBuilder or MaintenanceBuilder or ReplicationBuilder))
                 .Where(static file => ReadsAnActivityView.IsMatch(File.ReadAllText(file)))
                 .Select(SourceScanner.Relative),
         ];
@@ -98,6 +106,38 @@ public class ActivityViewsOffThePollPathTests
             .Should().BeTrue("the horizon builder reads pg_stat_activity and pg_prepared_xacts for T14, so its exemption is not an exemption for nothing");
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(TableBuilder.Split('/'))))
             .Should().BeTrue("the table builder reads pg_locks for its index read, so its exemption is not an exemption for nothing");
+        ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(ReplicationBuilder.Split('/'))))
+            .Should().BeTrue("the replication builder joins pg_stat_activity for the senders' databases, so its exemption is not an exemption for nothing");
+    }
+
+    [Fact]
+    public void The_replication_builders_standby_read_is_called_only_by_the_standby_facts()
+    {
+        List<string> callers =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(static file => SourceScanner.Relative(file) != ReplicationBuilder)
+                .Where(static file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains("ReplicationQueries.Standbys(", StringComparison.Ordinal))
+                .Select(SourceScanner.Relative),
+        ];
+
+        callers.Should().Equal(["src/PostgresStudio/Services/Replication/ReplicationFacts.cs"],
+            "the standby read is StandbySnapshot's, which R03's regular sweep and the page's cached facts read share");
+    }
+
+    [Fact]
+    public void The_replication_page_polls_at_the_health_interval_through_a_cache_of_that_time_to_live()
+    {
+        string page = SourceScanner.StripCommentsAndStrings(
+            File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Components", "Pages", "Replication", "Replication.razor")));
+        string cache = SourceScanner.StripCommentsAndStrings(
+            File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Services", "Replication", "ReplicationFactsReader.cs")));
+
+        page.Should().Contain("EffectiveHealthInterval").And.NotContain("RefreshInterval");
+        cache.Should().Contain("new StudioSnapshotCache(timeProvider ?? TimeProvider.System, settings.EffectiveHealthInterval)");
+
+        HealthCheckDescriptor r03 = Health.StudioHealthChecks.Registry.Find("R03")!;
+        HealthSweeper.TiersOf(HealthSweepKind.Regular).Should().Contain(r03.Info.Tier, "R03 runs in the regular sweep, cached for HealthInterval");
     }
 
     /// <summary>

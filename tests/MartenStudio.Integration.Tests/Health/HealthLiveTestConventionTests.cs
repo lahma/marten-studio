@@ -19,16 +19,45 @@ namespace MartenStudio.Integration.Tests.Health;
 /// </remarks>
 public class HealthLiveTestConventionTests
 {
+    /// <summary>
+    /// The shared checks whose live proof is <c>tests/PostgresStudio.Integration.Tests</c>' - from W5, a live test that uses no
+    /// Marten type goes there - and where: that suite's own convention (its <c>ProvenHere</c>) holds each to a fires and a
+    /// quiet test, so here each is only named, never proven twice.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, string> ProvenInPostgresStudioSuite = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["R02"] = "archive commands that fail, hang and succeed - Replication/ArchiverAndCheckpointLiveTests",
+        ["R03"] = "a primary and standby pair on 17 and 18 - Replication/StandbyLagLiveTests",
+        ["R04"] = "a tiny max_wal_size under bulk writes on 17 and 18 - Replication/ArchiverAndCheckpointLiveTests",
+    };
+
     [Fact]
     public void Every_check_has_a_live_test_that_fires_it_and_one_that_proves_it_quiet()
     {
-        IReadOnlyList<string> codes = [.. StudioHealthChecks.Registry.All.Select(static x => x.Info.Code)];
+        IReadOnlyList<string> codes =
+        [
+            .. StudioHealthChecks.Registry.All.Select(static x => x.Info.Code).Where(static x => !ProvenInPostgresStudioSuite.ContainsKey(x)),
+        ];
         codes.Should().NotBeEmpty();
 
         // Concrete classes only: the made-up ones below are abstract, and are the theory's, not the rule's.
         IReadOnlyList<string> problems = Problems(codes, typeof(HealthLiveTestConventionTests).Assembly.GetTypes().Where(static x => !x.IsAbstract));
 
         problems.Should().BeEmpty(string.Join(Environment.NewLine, problems));
+    }
+
+    /// <summary>A check proven in the other suite is a shared one this studio ships - never one of MartenStudio's own.</summary>
+    [Fact]
+    public void Every_check_proven_in_the_PostgresStudio_suite_is_a_shipped_shared_check()
+    {
+        foreach (string code in ProvenInPostgresStudioSuite.Keys)
+        {
+            PostgresStudio.Services.Health.HealthCheckDescriptor? check = StudioHealthChecks.Registry.Find(code);
+
+            check.Should().NotBeNull(code + " is listed but is not a check MartenStudio ships");
+            check!.Info.CheckType.Assembly.Should().BeSameAs(typeof(PostgresStudio.Services.Health.HealthCheckRegistry).Assembly,
+                code + " is MartenStudio's own, whose live proof needs a Marten store and belongs here");
+        }
     }
 
     /// <summary>The anti-vacuity half.</summary>

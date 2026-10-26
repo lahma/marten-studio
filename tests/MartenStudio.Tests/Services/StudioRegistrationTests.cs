@@ -28,6 +28,7 @@ using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Live;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
+using PostgresStudio.Services.Replication;
 
 namespace MartenStudio.Tests.Services;
 
@@ -147,6 +148,11 @@ public class StudioRegistrationTests
         // W5-CAP: Storage - added in 0.5, not moved; the facts are the database's, the view the circuit's.
         (typeof(PostgresStudio.Services.Storage.IStorageFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Storage.StorageFactsReader)),
         (typeof(PostgresStudio.Services.Storage.IStorageService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Storage.StorageService)),
+
+        // W5-R2: Replication.
+        (typeof(IReplicationFactsReader), ServiceLifetime.Singleton, How.Type, typeof(ReplicationFactsReader)),
+        (typeof(ReplicationFactsCache), ServiceLifetime.Singleton, How.Type, typeof(ReplicationFactsCache)),
+        (typeof(IReplicationService), ServiceLifetime.Scoped, How.Type, typeof(ReplicationService)),
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),

@@ -1285,6 +1285,15 @@ tests/PostgresStudio.Tests/Storage/       The statistics window over hand-built 
 tests/MartenStudio.Tests/Storage/         bUnit: the Storage page and its per-visitor view in MartenStudio's words
 tests/PostgresStudio.Integration.Tests/Storage/  Live Postgres on 14-18: the Storage facts, behind a held lock, no DDL,
                                          and the statistics window across a real crash
+src/PostgresStudio/Services/Replication/  The Replication page's facts (recovery, standbys, slot statistics, the archiver,
+                                         WAL, checkpoints, pg_stat_io, tablespaces), A2's not-applicable rules, the
+                                         advisor's counter windows, and the per-visitor service
+src/PostgresStudio/Components/Pages/Replication/  Operations › Replication: slots, standbys, the archiver, WAL,
+                                         checkpoints, I/O by backend type and tablespaces
+tests/PostgresStudio.Tests/Replication/   R02-R04's evaluators at every edge, WAL file names, the facts' version shapes,
+                                         the per-visitor view and the page
+tests/PostgresStudio.Integration.Tests/Replication/  Live primary and standby pairs (17 and 18): R02-R04 fire and stay
+                                         quiet, the page's facts, and Aurora's not-applicable sections
 src/PostgresStudio/wwwroot/css/parts/     A W5 packet's stylesheet section until the orchestrator folds it into studio.css
                                          (W5-index §4); never reaches main
 ```
