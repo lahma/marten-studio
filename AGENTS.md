@@ -462,8 +462,10 @@ read goes through `has_sequence_privilege` first, which on 18 is what keeps the 
 Nor does a list call a deparse function that opens what it describes: `pg_get_indexdef` in every form,
 `pg_get_expr` with a relation (a default's `adbin`, a partition's `relpartbound`), `pg_get_viewdef` and
 `pg_get_constraintdef` of a table's CHECK each take a transient `AccessShareLock` and queue behind a migration's
-`ACCESS EXCLUSIVE` on 14 to 18 (measured 2026-10-26); `pg_get_partkeydef`, a key's or foreign key's
-`pg_get_constraintdef` and a trigger without WHEN do not. A list that must deparse reads `pg_locks` once and
+`ACCESS EXCLUSIVE` on 14 to 18 (measured 2026-10-26); a key's or foreign key's `pg_get_constraintdef` and a
+trigger without WHEN do not. `pg_get_partkeydef` and `pg_get_expr(relpartbound, <relid>)` open the relation and
+queue too, while `pg_get_expr(relpartbound, 0)` - no relation - does not, and is how a list reads partition bounds
+(14.24 and 18.6, measured 2026-10-26; `LintMatrixLiveTests`). A list that must deparse reads `pg_locks` once and
 leaves a locked table's text out (`HealthTableQueries.IndexesSql`); a by-oid detail read may wait for its one
 relation, under `lock_timeout`.
 Another store's key and alias are shown only to a visitor that

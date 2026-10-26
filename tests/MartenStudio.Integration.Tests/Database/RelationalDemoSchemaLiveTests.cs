@@ -349,11 +349,14 @@ public class RelationalDemoSchemaLiveTests(RelationalDemoSchemaFixture fixture) 
             group by 1
             """);
 
+        // W5-B1-rest: the two 2026 halves, and every half from 2027 through next year and one beyond.
+        long laterHalves = (2 * (DateTime.UtcNow.Year + 2 - 2027)) + 1;
+
         relations.Should().BeEquivalentTo(new Dictionary<string, long>
         {
             ["r"] = 10,           // ordinary tables
             ["p"] = 1,            // the partitioned table ...
-            ["r/partition"] = 2,  // ... and its two partitions
+            ["r/partition"] = 2 + laterHalves,  // ... and its partitions
             ["v"] = 1,            // a plain view
             ["m"] = 2,            // two materialized views
             ["S"] = 3,            // three sequences
