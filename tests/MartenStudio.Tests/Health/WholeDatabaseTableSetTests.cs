@@ -301,6 +301,90 @@ public class WholeDatabaseTableSetTests
             .Parameters.Single(static x => x.ParameterName == "skip_documents").Value.Should().Be(true);
     }
 
+    /// <summary>
+    /// The real fail-closed path: another registration that will not build makes every store's declarations a failure
+    /// (<c>Succeeded: false</c>), and the source - through the real <see cref="MartenDatabaseDeclarationsSource" /> - judges
+    /// the declared tables alone, reads no catalog, and names no store.
+    /// </summary>
+    [Fact]
+    public async Task Another_registration_that_will_not_build_leaves_the_declared_tables_alone_judged()
+    {
+        using DocumentStore store = Store();
+        MartenStudioOptions options = Options();
+
+        ServiceCollection collection = new();
+        collection.AddSingleton<IDocumentStore>(store);
+        collection.AddSingleton<MartenStudio.Tests.Services.MartenStoreRegistryTest.IBrokenStore>(
+            static _ => throw new InvalidOperationException("no connection string was configured"));
+        MartenStoreRegistry registry = new(collection);
+        collection.AddSingleton<IDatabaseDeclarationsSource>(provider =>
+            new MartenDatabaseDeclarationsSource(registry, provider, Microsoft.Extensions.Options.Options.Create(options)));
+
+        await using ServiceProvider services = collection.BuildServiceProvider();
+        HealthCheckContext context = Context(store, options, services);
+
+        services.GetRequiredService<IDatabaseDeclarationsSource>().ReadUncached(context.Source).Succeeded
+            .Should().BeFalse("the precondition: a registered store that will not build fails the classification closed");
+
+        IStudioTableSet set = await new MartenHealthTableSource().TablesAsync(context);
+
+        set.Coverage.Should().Be(MartenDatabaseTables.UnclassifiedCoverage);
+        set.Coverage.Should().NotContain(nameof(MartenStudio.Tests.Services.MartenStoreRegistryTest.IBrokenStore));
+        set.Tables.Select(static x => x.IsDeclaredByStore).Should().AllBeEquivalentTo(true);
+        context.Sql.Statements.Should().BeEmpty("no catalog is read for a set that cannot be classified");
+    }
+
+    /// <summary>A declarations source that throws - one that will not even resolve in a scope with no circuit - fails closed too.</summary>
+    [Fact]
+    public async Task A_declarations_source_that_throws_leaves_the_declared_tables_alone_judged()
+    {
+        using DocumentStore store = Store();
+        await using ServiceProvider services = new ServiceCollection()
+            .AddSingleton<IDatabaseDeclarationsSource, ThrowingDeclarations>()
+            .BuildServiceProvider();
+        HealthCheckContext context = Context(store, Options(), services);
+
+        IStudioTableSet set = await new MartenHealthTableSource().TablesAsync(context);
+
+        set.Coverage.Should().Be(MartenDatabaseTables.UnclassifiedCoverage);
+        set.Tables.Select(static x => x.IsDeclaredByStore).Should().AllBeEquivalentTo(true);
+        context.Sql.Statements.Should().BeEmpty();
+    }
+
+    /// <summary>The catalog's names are distinct as Postgres keeps them; a declared name is matched as Marten matches it.</summary>
+    [Fact]
+    public void Two_undeclared_tables_that_differ_only_in_case_are_both_judged_and_a_declared_name_ignores_case()
+    {
+        (MartenDatabaseTableSet set, _) = Build(
+            Options(),
+            [Row(StoreSchema, "Orders"), Row(StoreSchema, "orders"), Row(StoreSchema, "MT_DOC_HEALTHORDERDOC")]);
+
+        StudioTable upper = set.Find(StoreSchema, "Orders")!;
+        StudioTable lower = set.Find(StoreSchema, "orders")!;
+
+        upper.Should().NotBeSameAs(lower, "two tables, each judged and counted");
+        upper.Table.Should().Be("Orders");
+        lower.Table.Should().Be("orders");
+        set.Tables.Count(static x => !x.IsDeclaredByStore).Should().Be(2,
+            "a name that differs from a declared one only in case is the declared table, which the statement leaves out too");
+        StudioTable declared = set.Find(StoreSchema, "MT_DOC_HEALTHORDERDOC")!;
+        declared.Should().BeSameAs(set.Find(StoreSchema, "mt_doc_healthorderdoc"));
+        declared.IsDeclaredByStore.Should().BeTrue();
+    }
+
+    private sealed class ThrowingDeclarations : IDatabaseDeclarationsSource
+    {
+        public DatabaseDeclarations Read(ResolvedSource resolved) => throw new InvalidOperationException("will not read");
+
+        public DatabaseDeclarations Read(IStudioSource source) => throw new InvalidOperationException("will not read");
+
+        public DatabaseDeclarations ReadUncached(ResolvedSource resolved) => throw new InvalidOperationException("will not read");
+
+        public Task<IReadOnlyDictionary<string, DatabaseStoreAccess>> OtherSourcesAsync(
+            ResolvedSource resolved, DatabaseObjectClassifier classifier, bool capabilityEnabled, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("will not read");
+    }
+
     [Fact]
     public async Task A_source_that_cannot_read_every_stores_declarations_judges_the_declared_tables_alone()
     {

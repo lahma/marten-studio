@@ -76,8 +76,14 @@ public class ProgressionAheadOfSequenceLiveTests(PostgresFixture postgres)
 
         clock.Advance(TimeSpan.FromMinutes(2));
         HealthReport corrected = await ReportAsync(host);
-        Of(corrected, "D09").Should().Contain(x => x.Finding.Subject == "HighWaterMark"
-            && x.Finding.Title.StartsWith("The high-water mark (1) is ahead of the event sequence, which hands out 1 next", StringComparison.Ordinal));
+        HealthReportFinding exhausted = Of(corrected, "D09").Should().ContainSingle(x => x.Finding.Variant == "mark-ahead").Subject;
+        exhausted.Finding.Title.Should().StartWith("The high-water mark (1) is ahead of the event sequence, which hands out 1 next");
+
+        // The correction has done all it can, and running it again changes nothing - so it is not offered again.
+        exhausted.Finding.Remedy!.Code.Should().NotContain("TryCorrectProgressInDatabaseAsync").And.Contain("setval it to 1");
+        exhausted.Finding.Remedy.Explanation.Should().StartWith("Correct progression has done what it can");
+        await host.Store.Advanced.TryCorrectProgressInDatabaseAsync(Token);
+        (await ProgressionAsync(events, "HighWaterMark")).Should().Be(1, "Marten corrects only while the mark is above last_value");
 
         // The appends really fail, as the finding says: the next number is one mt_events holds.
         Func<Task> append = () => AppendAsync(host.Store, 1);

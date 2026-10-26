@@ -97,6 +97,8 @@ public class HealthDaemonQueriesTests
         query.Sql.Should().Contain(
             "(select case when s.is_called then s.last_value else s.last_value - 1 end from \"studio_events\".\"mt_events_sequence\" s) as allocated_high");
         query.Sql.Should().Contain("(select pg_catalog.max(e.seq_id) from \"studio_events\".\"mt_events\" e) as highest_committed");
+        query.Sql.Should().Contain("(select s.last_value from \"studio_events\".\"mt_events_sequence\" s) as sequence_last_value",
+            "Marten's correction compares the mark with the raw last_value, and D09 says when it has nothing left to do");
         query.Sql.Should().Contain("pg_catalog.transaction_timestamp() as server_now", "every age is server time");
         query.Sql.Should().NotContain("HighWaterStuckGap", "the bookkeeping row names are values");
 

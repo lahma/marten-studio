@@ -449,6 +449,12 @@ internal sealed record HighWaterReading(
     public long? HighestCommitted { get; init; }
 
     /// <summary>
+    /// The sequence's raw <c>last_value</c> - Marten's <c>HighestSequence</c>, which <c>TryCorrectProgressInDatabaseAsync</c>
+    /// compares the mark with and moves progression to - or <see langword="null" /> for a reading that predates it. D09's.
+    /// </summary>
+    public long? SequenceLastValue { get; init; }
+
+    /// <summary>
     /// Whether the stuck-gap row describes the mark as it is now. Marten upserts it only when the mark differs and
     /// never deletes it (V9.39.0, V9.50.2), so a row whose mark is behind the mark's own row is an old pin, long gone.
     /// </summary>
@@ -522,6 +528,7 @@ internal sealed record HighWaterReading(
                     {
                         AllocatedHigh = NullableLong(reader, 10),
                         HighestCommitted = NullableLong(reader, 11),
+                        SequenceLastValue = NullableLong(reader, 12),
                     },
                     token)
                 .ConfigureAwait(false);

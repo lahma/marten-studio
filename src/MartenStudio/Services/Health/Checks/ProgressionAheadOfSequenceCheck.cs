@@ -38,7 +38,7 @@ internal sealed record ProgressionAheadFacts(
 /// </list>
 /// <para>
 /// <b>The sequence is read as Marten reads it.</b> "Handed out" is Marten's own <c>AllocatedSequenceHigh</c> (#5091,
-/// <c>HighWaterStatisticsDetector</c> at V9.39.0 and v9.51.0): <c>last_value</c> once called, <c>last_value - 1</c> before.
+/// <c>HighWaterStatisticsDetector</c> at V9.39.0, v9.51.0 and V9.54.1): <c>last_value</c> once called, <c>last_value - 1</c> before.
 /// The projections screen's <c>highest_sequence</c> reads a never-called sequence as 0, which after
 /// <c>RESTART WITH n</c> would call every mark above zero ahead; this one reads <c>n - 1</c>. The sequence is not
 /// transactional, so an append that drew a number at the instant of the read counts as handed out - which only ever
@@ -49,13 +49,18 @@ internal sealed record ProgressionAheadFacts(
 /// <b>The remedies are Marten's own.</b> <c>store.Advanced.TryCorrectProgressInDatabaseAsync</c> - the projections screen's
 /// Correct progression - sets every progression row but the allocation fence and the stuck-gap clock to the sequence's
 /// <c>last_value</c>, and only while the <c>HighWaterMark</c> row is above it (<c>HighWaterDetector</c> and
-/// <c>AdvancedOperations</c>, identical at V9.39.0 and v9.51.0): so it is the remedy for a mark ahead, and does nothing for a
-/// shard ahead of a mark that is not, which a rebuild resets instead. A sequence behind the events is a DBA's
-/// <c>setval</c>, said in words.
+/// <c>AdvancedOperations</c>, identical at V9.39.0, v9.51.0 and V9.54.1): so it is the remedy for a mark ahead, and does
+/// nothing for a shard ahead of a mark that is not, which a rebuild resets instead (emptying the projection's tables first)
+/// or a rewind to the highest number handed out (JasperFx replays from the number after the floor it is given). Right after
+/// a <c>RESTART</c> the mark can sit exactly at <c>last_value</c>, the number handed out next: the correction has done all
+/// it can, so it is not offered again, and the remedy moves the sequence on by that one number instead. A sequence behind
+/// the events is a DBA's <c>setval</c>, said in words.
 /// </para>
 /// <para>
-/// <b>Not for a store that partitions its events by tenant</b>, as D01-D04: every tenant draws from a sequence of its own
-/// there, and the store-global rows are not the ones that count.
+/// <b>Progression only for a store with async work</b>, as D02, D03, D05, D07 and D08 judge it: with no async projection
+/// or subscription registered, mark-ahead and shard-ahead are not judged, and sequence-behind - an append that fails - still
+/// is. <b>Not for a store that partitions its events by tenant</b>, as D01-D04: every tenant draws from a sequence of its
+/// own there, and the store-global rows are not the ones that count.
 /// </para>
 /// </remarks>
 [HealthCheck(
@@ -127,9 +132,19 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
         string sequence = SchemaKey.For(configuration.EventSchema, HealthDaemonQueries.EventsSequence);
         List<HealthFinding> findings = [];
 
+        // Any store with events: an append fails whether or not anything projects them.
         if (reading.HighestCommitted is { } highest && highest >= next)
         {
             findings.Add(Behind(configuration, reading, sequence, next, highest));
+        }
+
+        // Progression only counts for a store with async work, as D02, D03, D05, D07 and D08 judge it: with no async
+        // projection or subscription registered, a high-water row is nothing a reader waits on.
+        if (configuration.AsyncShards.Count == 0)
+        {
+            return findings.Count > 0
+                ? new HealthVerdict(findings)
+                : HealthVerdict.Quiet("The store registers no async projection or subscription, so only the sequence and the events are compared.");
         }
 
         // Only the registered shards a visitor may be told of: a projection of a hidden document type is never named.
@@ -141,7 +156,11 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
 
         if (reading.Mark is { } mark && mark > allocated)
         {
-            findings.Add(MarkIsAhead(configuration, reading, sequence, next, mark, ahead));
+            // Marten's correction acts only while the mark is above the sequence's last_value; right after a RESTART, before
+            // anything is appended, the mark can sit exactly at it - one past what was handed out - and then it has done
+            // all it can (HighWaterDetector.TryCorrectProgressInDatabaseAsync, V9.39.0, v9.51.0 and V9.54.1).
+            bool corrects = reading.SequenceLastValue is not { } lastValue || mark > lastValue;
+            findings.Add(MarkIsAhead(configuration, reading, sequence, next, mark, ahead, corrects ? Correction : CorrectionDone(sequence, mark)));
         }
         else
         {
@@ -201,7 +220,8 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
         string sequence,
         long next,
         long mark,
-        List<DaemonShardRow> ahead)
+        List<DaemonShardRow> ahead,
+        HealthRemedy remedy)
     {
         List<HealthEvidence> evidence = Common(reading, sequence, next);
 
@@ -229,7 +249,7 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
             Evidence = evidence,
             Caveat = SnapshotCaveat,
             Link = new HealthLink("Open the projections screen", "projections"),
-            Remedy = Correction,
+            Remedy = remedy,
         };
     }
 
@@ -261,10 +281,13 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
             Link = new HealthLink("Open the projections screen", "projections"),
             Remedy = new HealthRemedy(
                 "// Rebuild this projection on the projections screen (Capabilities.RebuildProjections),\n"
-                + "// or rewind the subscription to the number the sequence hands out next.",
+                + "// or rewind the subscription to " + DaemonCheckConfiguration.Number(next - 1)
+                + ", the highest number the sequence has handed out.",
                 "Correct progression does nothing here: Marten corrects progression only while the high-water mark itself is "
-                + "ahead of the sequence (TryCorrectProgressInDatabaseAsync), and the mark is not. A rebuild replays the "
-                + "projection from the first event to the mark, which leaves the shard where the events are."),
+                + "ahead of the sequence (TryCorrectProgressInDatabaseAsync), and the mark is not. A rebuild empties the "
+                + "projection's tables and then replays it from the first event to the mark, which leaves the shard where the "
+                + "events are. A rewind replays from the number after the one it is given, so rewinding to the highest number "
+                + "handed out loses none of the events still to come."),
         };
     }
 
@@ -275,9 +298,26 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
         "Marten sets the high-water mark and every shard's progression back to the sequence's last_value - its own "
         + "bookkeeping rows aside - and does so only while the mark is above it. Every event appended since the reset at a "
         + "number at or below that value is then treated as processed: rebuild the async projections that should hold "
-        + "them. Right after a RESTART, before anything is appended, last_value is the number the sequence hands out next, "
-        + "so the mark ends one past what it has handed out and the first event appended after it is treated as processed "
-        + "too. If D09 also reports the sequence behind the events, fix that first, or the correction moves progression back "
-        + "to a number the events have long passed and the daemon processes them all again. On a store with a database per "
-        + "tenant, TryCorrectProgressInDatabaseAsync(tenantId, cancellationToken) reaches only that tenant's database.");
+        + "them - a rebuild empties the projection's tables before it replays. Right after a RESTART, before anything is "
+        + "appended, last_value is the number the sequence hands out next, so the correction leaves the mark one past what has "
+        + "been handed out, and D09 then says what is left to do. If D09 also reports the sequence behind the events, fix that "
+        + "first, or the correction moves progression back to a number the events have long passed and the daemon processes "
+        + "them all again. On a store with a database per tenant, TryCorrectProgressInDatabaseAsync(tenantId, "
+        + "cancellationToken) reaches only that tenant's database.");
+
+    /// <summary>
+    /// What is left when Marten's correction can do no more: the mark sits at the sequence's <c>last_value</c>, which a
+    /// sequence that has not been called since a <c>RESTART</c> hands out next.
+    /// </summary>
+    /// <param name="sequence">The sequence, <c>schema.mt_events_sequence</c>.</param>
+    /// <param name="mark">The high-water mark, equal to the number handed out next.</param>
+    private static HealthRemedy CorrectionDone(string sequence, long mark) => new(
+        "// A DBA's repair, not a StoreOptions line, with appends stopped:\n"
+        + "// move " + sequence + " on by one number - setval it to " + DaemonCheckConfiguration.Number(mark)
+        + " - so the next append takes " + DaemonCheckConfiguration.Number(mark + 1) + ".",
+        "Correct progression has done what it can: Marten moves progression only while the mark is above the sequence's "
+        + "last_value, and the mark is at it - the number the sequence hands out next, because nothing has drawn from it since "
+        + "it was reset. Left as it is, the next event appended takes " + DaemonCheckConfiguration.Number(mark)
+        + ", which the daemon treats as already processed: no async projection or subscription sees it, and nothing reports it "
+        + "lost. Moving the sequence on by that one number keeps every event to come above the mark.");
 }
