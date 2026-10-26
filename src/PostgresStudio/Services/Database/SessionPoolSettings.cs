@@ -18,6 +18,12 @@ namespace PostgresStudio.Services.Database;
 internal sealed record DatabasePoolSettings(bool Pooling, int MaxPoolSize, string ServerKey, string? DatabaseName)
 {
     /// <summary>
+    /// The role its connection string logs in as (<c>Username</c>), or <see langword="null" /> when it names none - Npgsql then
+    /// takes it from <c>PGUSER</c> or the operating system's user at connect time, one answer for the whole process.
+    /// </summary>
+    public string? Username { get; init; }
+
+    /// <summary>
     /// The pool settings of <paramref name="database" />, or <see langword="null" /> when its data source is not
     /// one the studio can read (a source that exposes no <see cref="IStudioDatabase.DataSource" />, or a
     /// connection string Npgsql will not parse).
@@ -47,7 +53,10 @@ internal sealed record DatabasePoolSettings(bool Pooling, int MaxPoolSize, strin
                 settings.MaxPoolSize,
                 ((settings.Host ?? string.Empty) + ":" + settings.Port.ToString(System.Globalization.CultureInfo.InvariantCulture))
                     .ToLowerInvariant(),
-                settings.Database);
+                settings.Database)
+            {
+                Username = string.IsNullOrEmpty(settings.Username) ? null : settings.Username,
+            };
         }
         catch (ArgumentException)
         {

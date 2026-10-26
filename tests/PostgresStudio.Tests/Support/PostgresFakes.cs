@@ -150,6 +150,24 @@ internal sealed class FakeServerReader : IPostgresServerReader
     }
 }
 
+/// <summary>The Server page's Aurora section: a server that is not Aurora, with no capacity source, unless a test says otherwise.</summary>
+internal sealed class FakeAurora : PostgresStudio.Services.Aurora.IAuroraService
+{
+    public List<StudioScope> Requests { get; } = [];
+
+    /// <summary>What the section is handed.</summary>
+    public PostgresStudio.Services.Aurora.AuroraView View { get; set; } = new();
+
+    /// <summary>When set, answers in place of <see cref="View" /> - to hold a read, or to fail it.</summary>
+    public Func<StudioScope, Task<PostgresStudio.Services.Aurora.AuroraView>>? Answer { get; set; }
+
+    public Task<PostgresStudio.Services.Aurora.AuroraView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        Requests.Add(scope);
+        return Answer is { } answer ? answer(scope) : Task.FromResult(View);
+    }
+}
+
 /// <summary>The sidebar's badges: none.</summary>
 internal sealed class FakeNavIndicators : INavIndicatorService
 {

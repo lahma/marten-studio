@@ -1300,6 +1300,13 @@ tests/PostgresStudio.Integration.Tests/Server/  Live S04-S10 and K05-K07: each f
                                          14-18 as app and probe, and their no-lock, no-DDL reads
 src/PostgresStudio/wwwroot/css/parts/     A W5 packet's stylesheet section until the orchestrator folds it into studio.css
                                          (W5-index §4); never reaches main
+src/PostgresStudio/Services/Aurora/       Aurora (W5-AUR, issue #8 A1-A8): its own reads by name, the replica status, the wait
+                                         profile and its samples, the parameter reference, the host's capacity reader, and
+                                         the Server page section's facts and per-visitor view
+tests/PostgresStudio.Tests/Aurora/        By-name mapping of Aurora's functions, the wait windows, commit latency, the capacity
+                                         reader, the parameter wording and R03's aurora-reader view - no database
+tests/PostgresStudio.Integration.Tests/Aurora/  Live on VERS's Aurora shim: the instance, R03 aurora-reader, the wait section, a
+                                         failover, the not-applicable checks, C03's remedy and the spoof-proof markers
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

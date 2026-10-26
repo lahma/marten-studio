@@ -194,5 +194,11 @@ internal static class StudioCoreRegistration
 
         // S07's update paths, remembered by database, extension and both versions across sweeps.
         services.TryAddSingleton<ExtensionUpdatePaths>();
+        // W5-AUR: the host's capacity source, asked once per database and instance per HealthInterval for the whole process
+        // (issue #8 A8); and the Server page's Aurora section, whose facts are the database's and whose view is the circuit's.
+        services.TryAddSingleton<Aurora.CapacityReader>();
+        services.TryAddSingleton<Aurora.IAuroraFactsReader, Aurora.AuroraFactsReader>();
+        services.TryAddSingleton<Aurora.AuroraFactsCache>();
+        services.TryAddScoped<Aurora.IAuroraService, Aurora.AuroraService>();
     }
 }

@@ -39,6 +39,12 @@ internal sealed record DatabaseCounterFacts(
 
     /// <summary>Why <see cref="Statistics" /> is missing - the studio's words and a SQLSTATE - or <see langword="null" />.</summary>
     public string? StatisticsNotRead { get; init; }
+
+    /// <summary>
+    /// Who runs the server, for where temporary files go (Aurora's local storage, issue #8 A6) - or <see langword="null" /> when
+    /// the sweep's server read failed, which words them as on any other server.
+    /// </summary>
+    public PostgresPlatform? Platform { get; init; }
 }
 
 /// <summary>C08: deadlocks, a high share of rollbacks, and sorts spilling to disk, over the advisor's history.</summary>
@@ -130,12 +136,25 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
             notRead = StatisticsWindow.NotRead(exception);
         }
 
+        // The platform, shared with S01, for where a spill lands: a failure there words the temp files as anywhere else.
+        PostgresPlatform? platform = null;
+
+        try
+        {
+            platform = (await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false)).Platform;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            platform = null;
+        }
+
         // Read after the statement, so its own rollback is counted on both samples alike.
         return new DatabaseCounterFacts(
             context.Now, commits, rollbacks, deadlocks, tempFiles, tempBytes, reset, StudioDatabaseTime.Shared.RollbacksEver(meterKey))
         {
             Statistics = statistics,
             StatisticsNotRead = notRead,
+            Platform = platform,
         };
     }
 
@@ -173,7 +192,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
 
         if (perDay is { TempBytes: >= TempBytesPerDayWarning } spilling)
         {
-            findings.Add(TempWarning(spilling, run, evaluation, since));
+            findings.Add(TempWarning(spilling, run, evaluation, since, facts.Platform));
         }
 
         if (run.Count < 2)
@@ -280,7 +299,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
                 WhyItMatters =
                     "A sort or a hash that does not fit in work_mem spills to temporary files on disk, which is slower by orders of "
                     + "magnitude. " + evaluation.Text.TempSpillCause + "; an index for the sort removes the spill, and a larger work_mem "
-                    + "is the DBA's lever.",
+                    + "is the DBA's lever." + AuroraTemp(facts.Platform),
                 Evidence = evidence,
                 Caveat = measured,
             });
@@ -308,8 +327,9 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
     /// window - on its own, so a database that spills this much is told so whether or not it spilled in the last hour, with the
     /// hour's figure beside it when there are two samples to take it from.
     /// </summary>
-    private static HealthFinding TempWarning(PerDay day, List<HealthSample> run, HealthEvaluation evaluation, string since)
+    private static HealthFinding TempWarning(PerDay day, List<HealthSample> run, HealthEvaluation evaluation, string since, PostgresPlatform? platform)
     {
+        bool aurora = platform?.Kind == PostgresPlatformKind.AmazonAurora;
         List<HealthEvidence> evidence =
         [
             new("Written a day", Bytes((long) day.TempBytes)),
@@ -332,13 +352,30 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
             Title = "Statements write " + Bytes((long) day.TempBytes) + " of temporary files a day " + day.Window.SinceText,
             WhyItMatters =
                 "A sort or a hash that does not fit in work_mem spills to temporary files on disk, which is slower by orders of "
-                + "magnitude - and at a gigabyte a day or more it is a steady load on the disk the database itself writes to. "
-                + evaluation.Text.TempSpillCause + "; an index for the sort removes the spill, and a larger work_mem is the DBA's lever.",
+                + "magnitude - and at a gigabyte a day or more it is a steady load on "
+                + (aurora ? "the instance's local storage, which the temporary files share with its logs. " : "the disk the database itself writes to. ")
+                + evaluation.Text.TempSpillCause + "; an index for the sort removes the spill, and a larger work_mem is the DBA's lever."
+                + AuroraTemp(platform),
             Evidence = evidence,
             Caveat = "Measured in pg_stat_database's temp_bytes over the statistics window, which began " + day.Window.ReasonText
                 + " - counted " + since + ".",
         };
     }
+
+    /// <summary>
+    /// Where temporary files go on Aurora (issue #8 A6), as the last sentence of a temp finding's "why" - nothing on any other
+    /// platform. "In Aurora PostgreSQL, these files share local storage with other log files. You can monitor your Aurora
+    /// PostgreSQL DB cluster's local storage space by watching the Amazon CloudWatch metric for <c>FreeLocalStorage</c>"
+    /// (<i>Managing temporary files with PostgreSQL</i>, Aurora User Guide), and "The local storage size depends on the instance
+    /// class that you use" (<i>Amazon Aurora storage</i>, Aurora User Guide) - both read 2026-10-26.
+    /// </summary>
+    internal static string AuroraTemp(PostgresPlatform? platform) =>
+        platform?.Kind == PostgresPlatformKind.AmazonAurora
+            ? " On Aurora, temporary files use the instance's local storage, not the cluster volume - shared with its logs and "
+              + "sized by its instance class (Managing temporary files with PostgreSQL; Amazon Aurora storage, Aurora User Guide) - so "
+              + "CloudWatch's FreeLocalStorage is where a spill that fills it shows, and temp_file_limit in the DB cluster parameter "
+              + "group is what stops one statement from doing so."
+            : string.Empty;
 
     /// <summary>What the window adds to a note: the rates per day, or how long it has to go.</summary>
     private static string PerDayNote(StatisticsWindow? window, PerDay? perDay, string? notRead)

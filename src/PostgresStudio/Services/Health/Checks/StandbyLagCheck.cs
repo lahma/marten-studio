@@ -2,6 +2,7 @@ using System.Globalization;
 
 using Microsoft.Extensions.DependencyInjection;
 
+using PostgresStudio.Services.Aurora;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Server;
@@ -27,7 +28,14 @@ internal sealed record StandbyLagFacts(
     StandbySnapshot? Standbys,
     PostgresGrants Grants,
     TimeSpan? ApplyDelay = null,
-    StandbyLagCheck.ReplayStall? Stall = null);
+    StandbyLagCheck.ReplayStall? Stall = null)
+{
+    /// <summary>
+    /// On Aurora, every instance as <c>aurora_replica_status()</c> reports it (issue #8 A3, W5-AUR) - the <c>aurora-reader</c>
+    /// view - and <see langword="null" /> on every other platform.
+    /// </summary>
+    public AuroraReplicaStatus? Aurora { get; init; }
+}
 
 /// <summary>
 /// One replica's lag, as R03 judges it: how many bytes and how long it is behind. The evaluator's whole input, so another
@@ -82,11 +90,14 @@ internal sealed record StandbyLagReading(string Replica, long? BehindBytes, Time
 /// a standby's application name and client address - are evidence behind <see cref="HealthGate.Activity" />.
 /// </para>
 /// <para>
-/// <b>Not applicable on Aurora</b>, whose readers do not stream: AUR reads their lag from <c>aurora_replica_status()</c> and
-/// feeds <see cref="Finding" /> with readings of its own.
+/// <b>On Aurora</b> - <c>aurora-reader</c> (issue #8 A3, W5-AUR) - readers do not stream WAL, so neither view applies: each
+/// reader's <c>replica_lag_in_msec</c> from <c>aurora_replica_status()</c>, "Time that reader instance lags behind writer
+/// instance, in milliseconds" (<i>aurora_replica_status</i>, Aurora User Guide, read 2026-10-26), is judged on G8's time
+/// thresholds. There is no byte figure. An instance's identifier is the cluster's own name for one of its instances - not a
+/// session's, a role's or a client's - so it is database-wide information (D29) and its line needs no activity gate.
 /// </para>
 /// </remarks>
-[HealthCheck("R03", HealthArea.Replication, HealthCostTier.Catalog, "Standby lag", Variants = ["primary-view", "standby-view", "paused"])]
+[HealthCheck("R03", HealthArea.Replication, HealthCostTier.Catalog, "Standby lag", Variants = ["primary-view", "standby-view", "paused", "aurora-reader"])]
 internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
 {
     /// <summary>This many bytes behind is a Warning: 1 GiB.</summary>
@@ -132,6 +143,18 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
         ArgumentNullException.ThrowIfNull(context);
 
         PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
+
+        if (server.Platform.Kind == PostgresPlatformKind.AmazonAurora)
+        {
+            // Aurora's readers do not stream: their lag is Aurora's own function's, never pg_stat_replication's (A3).
+            AuroraReplicaStatus status = await AuroraReplicaStatus.SharedAsync(context).ConfigureAwait(false);
+            PostgresGrants auroraGrants = await PostgresGrants.SharedAsync(context).ConfigureAwait(false);
+
+            return new StandbyLagFacts(server, new ReplicationRole(server.InRecovery, null, null, null, null, null, null, context.Now), null, auroraGrants)
+            {
+                Aurora = status,
+            };
+        }
 
         if (ReplicationPlatform.StandbyLagNotApplicable(server.Platform) is { } why)
         {
@@ -193,8 +216,89 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
         ArgumentNullException.ThrowIfNull(facts);
         ArgumentNullException.ThrowIfNull(evaluation);
 
+        if (facts.Aurora is { } aurora)
+        {
+            return AuroraView(facts, aurora);
+        }
+
         return facts.Role.InRecovery ? StandbyView(facts, evaluation) : PrimaryView(facts);
     }
+
+    /// <summary>The variant of a finding about Aurora's readers (A3).</summary>
+    public const string AuroraVariant = "aurora-reader";
+
+    /// <summary>
+    /// The <c>aurora-reader</c> view: each reader's <c>replica_lag_in_msec</c> on G8's time thresholds, the writer left out (its
+    /// lag is null - it is what the readers are behind).
+    /// </summary>
+    private static HealthVerdict AuroraView(StandbyLagFacts facts, AuroraReplicaStatus status)
+    {
+        IReadOnlyList<AuroraReplica> readers = status.Readers;
+
+        if (readers.Count == 0)
+        {
+            return HealthVerdict.Quiet(
+                "This Aurora cluster has no reader instance: aurora_replica_status() lists "
+                + (status.WriterInstance is { } writer ? "only its writer, " + writer.Instance : "no instance at all") + ".");
+        }
+
+        List<StandbyLagReading> readings = [.. readers.Select(static x => new StandbyLagReading(x.Instance, null, x.Lag, AuroraDetail(x)))];
+        int unmeasured = readers.Count(static x => x.Lag is null);
+
+        HealthFinding? finding = Finding(
+            AuroraVariant,
+            readings,
+            readers.Count,
+            "An Aurora reader that is behind serves reads that are behind: \"Replica lag is the time in milliseconds that the page cache "
+            + "of a reader instance is behind that of the writer instance\" (aurora_replica_status, Aurora User Guide). Whatever "
+            + "reads from it - the reader endpoint, a reporting job - sees older data by that much. The usual causes are a reader "
+            + "too small for the writer's write rate (a Serverless v2 reader in promotion tier 2 to 15 scales on its own, and a low "
+            + "minimum capacity there \"can result in excessive replication lag\" - Performance and scaling for Aurora serverless), or "
+            + "long queries on the reader that conflict with recovery (pg_stat_database_conflicts says which).",
+            "Read in aurora_replica_status() at " + status.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+            + ": replica_lag_in_msec for each reader, which CloudWatch keeps as AuroraReplicaLag. Aurora replicates through its "
+            + "storage rather than a WAL stream, so there is no byte figure. An instance is named by the cluster's own identifier for "
+            + "it, shown to anyone the database-wide gate admits." + (unmeasured > 0
+                ? " " + SessionText.Count(unmeasured, "reader") + (unmeasured == 1 ? " reports" : " report") + " no lag, and " + (unmeasured == 1 ? "is" : "are") + " not judged."
+                : string.Empty),
+            [new HealthEvidence("Measured on", "aurora_replica_status(), Aurora's replica status manager"), new HealthEvidence("Platform", facts.Server.Platform.Name)],
+            replicaGate: HealthGate.Database,
+            one: "An Aurora reader is ",
+            many: " Aurora readers are ",
+            measuresBytes: false);
+
+        if (finding is not null)
+        {
+            return HealthVerdict.Of(finding);
+        }
+
+        AuroraReplica? furthest = readers.Where(static x => x.Lag is not null).OrderByDescending(static x => x.Lag).FirstOrDefault();
+
+        return HealthVerdict.Quiet(
+            SessionText.Count(readers.Count, "Aurora reader") + ", none behind"
+            + (furthest is { Lag: { } lag } ? ": the furthest, " + furthest.Instance + ", is " + Milliseconds(lag) + " behind the writer" : string.Empty)
+            + " (aurora_replica_status())."
+            + (unmeasured > 0 ? " " + SessionText.Count(unmeasured, "reader") + (unmeasured == 1 ? " reports" : " report") + " no lag." : string.Empty));
+    }
+
+    /// <summary>A reader's line beyond its lag: its replay latency, its feedback and its status's age.</summary>
+    private static string? AuroraDetail(AuroraReplica reader)
+    {
+        string detail = string.Join(", ", new[]
+        {
+            reader.ReplayLatency is { } replay ? "replay expected to take " + Milliseconds(replay) : null,
+            reader.FeedbackXmin is { Length: > 0 } xmin ? "feedback xmin " + xmin : null,
+            reader.LastUpdate is { } updated ? "status updated " + updated.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) : null,
+        }.Where(static x => x is not null));
+
+        return detail.Length == 0 ? null : detail;
+    }
+
+    /// <summary>A short lag as Aurora reports it: "13 ms", and anything a second or more as a duration.</summary>
+    internal static string Milliseconds(TimeSpan lag) =>
+        lag < TimeSpan.FromSeconds(1)
+            ? lag.TotalMilliseconds.ToString("0.#", CultureInfo.InvariantCulture) + " ms"
+            : SessionText.Duration(lag);
 
     /// <summary>The severity of one reading, or <see langword="null" /> when it is not behind enough to say anything.</summary>
     public static HealthSeverity? Judge(StandbyLagReading reading)
@@ -219,13 +323,25 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
     /// <param name="whyItMatters">The finding's explanation for this source of readings.</param>
     /// <param name="caveat">How the readings were taken.</param>
     /// <param name="context">Database-wide evidence to add after the numbers (where it was measured, the platform).</param>
+    /// <param name="replicaGate">
+    /// The gate each replica's own line is shown at: <see cref="HealthGate.Activity" /> for a standby, whose application name
+    /// and client address are a session's; <see cref="HealthGate.Database" /> for an Aurora instance, whose identifier is the
+    /// cluster's own name for it (D29).
+    /// </param>
+    /// <param name="one">How the title begins for one replica behind.</param>
+    /// <param name="many">How the title goes on after the count for several.</param>
+    /// <param name="measuresBytes">Whether the source measures bytes behind at all - Aurora's does not.</param>
     public static HealthFinding? Finding(
         string variant,
         IReadOnlyList<StandbyLagReading> readings,
         int judged,
         string whyItMatters,
         string caveat,
-        IReadOnlyList<HealthEvidence> context)
+        IReadOnlyList<HealthEvidence> context,
+        HealthGate replicaGate = HealthGate.Activity,
+        string one = "A standby is ",
+        string many = " standbys are ",
+        bool measuresBytes = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(variant);
         ArgumentNullException.ThrowIfNull(readings);
@@ -255,8 +371,10 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
         [
             new("Behind", SessionText.Number(behind.Count) + " of " + SessionText.Count(judged, "replica") + " judged"),
             new("Furthest behind in time", mostTime is { } time ? SessionText.Duration(time) : "not measured"),
-            new("Furthest behind in WAL", mostBytes is { } bytes ? WalText.Bytes(bytes) : "not measured"),
-            new("Thresholds", "Warning at " + SessionText.Duration(WarningTime) + " or " + WalText.Bytes(WarningBytes) + "; Critical at " + SessionText.Duration(CriticalTime)),
+            new("Furthest behind in WAL", mostBytes is { } bytes ? WalText.Bytes(bytes) : measuresBytes ? "not measured" : "not measured: this source reports time only"),
+            new("Thresholds", measuresBytes
+                ? "Warning at " + SessionText.Duration(WarningTime) + " or " + WalText.Bytes(WarningBytes) + "; Critical at " + SessionText.Duration(CriticalTime)
+                : "Warning at " + SessionText.Duration(WarningTime) + "; Critical at " + SessionText.Duration(CriticalTime)),
         ];
 
         evidence.AddRange(context);
@@ -264,7 +382,7 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
         int index = 0;
         foreach ((StandbyLagReading reading, HealthSeverity _) in behind.Take(ReplicasNamed))
         {
-            evidence.Add(new HealthEvidence(SessionEvidence.Label("Replica", index, "furthest behind"), Describe(reading), HealthGate.Activity));
+            evidence.Add(new HealthEvidence(SessionEvidence.Label("Replica", index, "furthest behind"), Describe(reading), replicaGate));
             index++;
         }
 
@@ -273,7 +391,7 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
             Code = "R03",
             Variant = variant,
             Severity = severity,
-            Title = (behind.Count == 1 ? "A standby is " : SessionText.Number(behind.Count) + " standbys are ")
+            Title = (behind.Count == 1 ? one : SessionText.Number(behind.Count) + many)
                 + (mostTime is { } furthest && furthest >= WarningTime ? SessionText.Duration(furthest) : WalText.Bytes(mostBytes ?? 0))
                 + " behind" + (behind.Count == 1 ? string.Empty : " at most"),
             WhyItMatters = whyItMatters,

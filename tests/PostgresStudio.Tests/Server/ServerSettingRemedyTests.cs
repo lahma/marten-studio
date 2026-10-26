@@ -32,7 +32,9 @@ public class ServerSettingRemedyTests
 
         remedy.Code.Should().Be("# A server setting:\nmax_connections = 400");
         remedy.Explanation.Should().Be(
-            "Leaves room for the pools. Set it in the cluster's DB cluster parameter group (Aurora). It takes effect only when the server restarts.");
+            "Leaves room for the pools. Set it in the cluster's DB cluster parameter group, or one instance's DB parameter group to set "
+            + "it for that instance alone (Aurora); on Aurora Serverless v2 it follows the cluster's maximum capacity (ACU) instead, "
+            + "held while the instance scales. It takes effect only when the server restarts.");
     }
 
     [Fact]
@@ -58,19 +60,40 @@ public class ServerSettingRemedyTests
         remedy.Explanation.Should().Be("Cap it, in the instance's database flags (Cloud SQL), above the longest outage.");
     }
 
+    /// <summary>W5-AUR refines Aurora alone: every other platform's place stays its own, byte for byte, for every setting.</summary>
     [Theory]
     [InlineData(PostgresPlatformKind.SelfHosted)]
     [InlineData(PostgresPlatformKind.AmazonRds)]
-    [InlineData(PostgresPlatformKind.AmazonAurora)]
     [InlineData(PostgresPlatformKind.Azure)]
     [InlineData(PostgresPlatformKind.CloudSql)]
     [InlineData(PostgresPlatformKind.Neon)]
     [InlineData(PostgresPlatformKind.Supabase)]
-    public void Every_setting_changes_where_the_platform_says_until_AUR_refines_a_pair(PostgresPlatformKind kind)
+    public void Every_setting_changes_where_the_platform_says_off_Aurora(PostgresPlatformKind kind)
     {
         PostgresPlatform platform = new(kind, null);
 
-        ServerSettingRemedy.WhereToSet(platform, "max_connections").Should().Be(platform.WhereSettingsChange);
+        foreach (string setting in new[] { "max_connections", "work_mem", "autovacuum_max_workers", "enable_seqscan", "max_wal_size", "track_io_timing" })
+        {
+            ServerSettingRemedy.WhereToSet(platform, setting).Should().Be(platform.WhereSettingsChange, setting);
+        }
+    }
+
+    /// <summary>
+    /// On Aurora each setting changes where the Aurora User Guide's parameter reference lists it (issue #8 A6): the DB cluster
+    /// parameter group, an instance's DB parameter group as well, or - for a setting neither table lists - said so.
+    /// </summary>
+    [Theory]
+    [InlineData("autovacuum_naptime", "the cluster's DB cluster parameter group (Aurora)")]
+    [InlineData("synchronous_commit", "the cluster's DB cluster parameter group (Aurora)")]
+    [InlineData("work_mem", "the cluster's DB cluster parameter group, or one instance's DB parameter group to set it for that instance alone (Aurora)")]
+    [InlineData("enable_seqscan", "the cluster's DB cluster parameter group, or one instance's DB parameter group to set it for that instance alone (Aurora)")]
+    [InlineData("track_io_timing", "the cluster's DB cluster parameter group, or one instance's DB parameter group to set it for that instance alone (Aurora)")]
+    [InlineData("max_wal_size", "the cluster's DB cluster parameter group (Aurora), where Aurora allows it - the Aurora User Guide's parameter reference does not list max_wal_size")]
+    [InlineData("autovacuum_max_workers", "the cluster's DB cluster parameter group (Aurora); on Aurora Serverless v2 its default follows the cluster's maximum capacity (ACU)")]
+    [InlineData("shared_buffers", "the cluster's DB cluster parameter group, or one instance's DB parameter group to set it for that instance alone (Aurora); on Aurora Serverless v2 Aurora sizes it as the instance scales and does not use a value set there")]
+    public void On_Aurora_each_setting_changes_where_the_parameter_reference_lists_it(string setting, string where)
+    {
+        ServerSettingRemedy.WhereToSet(new PostgresPlatform(PostgresPlatformKind.AmazonAurora, null), setting).Should().Be(where);
     }
 
     [Theory]

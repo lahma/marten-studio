@@ -671,13 +671,14 @@ internal sealed record StatisticsWindow
     }
 
     /// <summary>
-    /// The instance that answered, from the server facts - <see langword="null" /> until W5-AUR reads Aurora's
-    /// <c>aurora_db_instance_identifier()</c> there (A1). The one place the window takes it from.
+    /// The instance that answered, from the server facts: Aurora's <c>aurora_db_instance_identifier()</c> (A1, W5-AUR), and
+    /// <see langword="null" /> on every other platform and on an Aurora release without the function - never compared then.
+    /// The one place the window takes it from.
     /// </summary>
     internal static string? InstanceOf(PostgresServerFacts server)
     {
         ArgumentNullException.ThrowIfNull(server);
-        return null;
+        return server.Platform.Kind == PostgresPlatformKind.AmazonAurora && server.Instance is { Length: > 0 } instance ? instance : null;
     }
 
     /// <summary>Maps the one row of <see cref="StatisticsWindowQueries.Read" />.</summary>
@@ -837,7 +838,8 @@ internal sealed record StatisticsWindow
         // 1. Another instance answered (A1, W5-AUR): compared only where both reads named one.
         if (current.Instance is { Length: > 0 } instance && was.TryGetValue(InstanceSeries, out double wasInstance) && wasInstance != Hash(instance))
         {
-            return (StatisticsResetReason.OtherInstance, "a different instance answered than at the last check");
+            // Its counters are its own, so the window starts where that instance's own reset times say (RawSince).
+            return (StatisticsResetReason.OtherInstance, "another instance answered; its counters started at " + When(RawSince(current).Since));
         }
 
         // 2. Another cluster: its system identifier, or its major version - pg_upgrade, a dump restored into a new one. A system
@@ -956,8 +958,11 @@ internal sealed record StatisticsWindow
     private static DateTimeOffset? Timestamp(NpgsqlDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : reader.GetFieldValue<DateTimeOffset>(ordinal);
 
-    /// <summary>FNV-1a over the identity's UTF-8, cut to the 52 bits a double holds - equal for equal names, for comparison only.</summary>
-    private static double Hash(string value)
+    /// <summary>
+    /// FNV-1a over the identity's UTF-8, cut to the 52 bits a double holds - equal for equal names, for comparison only. Also
+    /// what Aurora's wait samples carry, so a window of them never spans two instances (<c>AuroraWaitProfile</c>).
+    /// </summary>
+    internal static double Hash(string value)
     {
         ulong hash = 14695981039346656037UL;
 

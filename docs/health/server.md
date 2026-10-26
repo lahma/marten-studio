@@ -168,6 +168,11 @@ repaired, and the finding says since when it counts. A damaged page that is neve
 `initdb --data-checksums` was used, and turning them on takes a stopped server and `pg_checksums --enable`. That
 is a DBA's decision, not something the studio can weigh.
 
+**Not applicable on Amazon Aurora** (issue #8 A2): the cluster volume is Aurora's storage layer - copies across three
+Availability Zones (*Amazon Aurora storage*), "distributed, fault-tolerant, and self-healing" (*Amazon Aurora FAQ*) - so
+whether Postgres' own page checksums are on is not the host's to choose, and nobody runs `initdb` or `pg_checksums` for
+an Aurora cluster. S03 is listed with that reason and never run. See [Aurora](../aurora.md).
+
 ## S04 Connecting as a superuser
 
 **Warning in Production, Info anywhere else.** Both studios. The role the data source logs in as - `session_user` on a

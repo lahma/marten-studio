@@ -118,6 +118,27 @@ internal sealed record ServerConnectionLimits(
     int Reserved,
     int ServerVersion)
 {
+    /// <summary>The role the data source logs in as (<c>session_user</c>) - database-wide information (D29) - or <see langword="null" />.</summary>
+    public string? LoginRole { get; init; }
+
+    /// <summary>The login role's <c>CONNECTION LIMIT</c> (<c>pg_roles.rolconnlimit</c>); <c>-1</c>, the default, is none.</summary>
+    public int RoleLimit { get; init; } = -1;
+
+    /// <summary>Whether the login role is a superuser, against whom neither connection limit is enforced.</summary>
+    public bool RoleSuperuser { get; init; }
+
+    /// <summary>The login role's client sessions on the whole server, every database included.</summary>
+    public long RoleSessions { get; init; }
+
+    /// <summary>This database's <c>CONNECTION LIMIT</c> (<c>pg_database.datconnlimit</c>); <c>-1</c>, the default, is none.</summary>
+    public int DatabaseLimit { get; init; } = -1;
+
+    /// <summary>Whether the login role's limit applies: one is set, and the role is not a superuser.</summary>
+    public bool RoleLimited => RoleLimit >= 0 && !RoleSuperuser;
+
+    /// <summary>Whether this database's limit applies: one is set, and the login role is not a superuser.</summary>
+    public bool DatabaseLimited => DatabaseLimit >= 0 && !RoleSuperuser;
+
     /// <summary>What an ordinary role may open: <c>max_connections</c> less both reservations, never below one.</summary>
     public int Available => Math.Max(1, MaxConnections - SuperuserReserved - Reserved);
 
@@ -158,7 +179,14 @@ internal sealed record ServerConnectionLimits(
         reader.GetInt32(2),
         reader.GetInt32(3),
         reader.GetInt32(4),
-        reader.GetInt32(5));
+        reader.GetInt32(5))
+    {
+        LoginRole = reader.IsDBNull(6) ? null : reader.GetString(6),
+        RoleLimit = reader.IsDBNull(7) ? -1 : reader.GetInt32(7),
+        RoleSuperuser = !reader.IsDBNull(8) && reader.GetBoolean(8),
+        RoleSessions = reader.IsDBNull(9) ? 0 : reader.GetInt64(9),
+        DatabaseLimit = reader.IsDBNull(10) ? -1 : reader.GetInt32(10),
+    };
 }
 
 /// <summary>Evidence about named sessions, worded once for every connection check.</summary>

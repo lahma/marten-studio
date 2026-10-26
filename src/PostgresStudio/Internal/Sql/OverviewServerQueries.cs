@@ -10,6 +10,8 @@ namespace PostgresStudio.Internal.Sql;
 /// <param name="AzureExtensions">An <c>azure.extensions</c> setting exists.</param>
 /// <param name="CloudSqlSettings">A <c>cloudsql.*</c> setting exists.</param>
 /// <param name="NeonSuperuserRole">A <c>neon_superuser</c> role exists.</param>
+/// <param name="InRecovery"><c>pg_is_in_recovery()</c>.</param>
+/// <param name="StartedAt"><c>pg_postmaster_start_time()</c>.</param>
 internal sealed record ServerPlatformRow(
     int VersionNumber,
     string Version,
@@ -17,7 +19,9 @@ internal sealed record ServerPlatformRow(
     bool AuroraVersionFunction,
     bool AzureExtensions,
     bool CloudSqlSettings,
-    bool NeonSuperuserRole);
+    bool NeonSuperuserRole,
+    bool InRecovery = false,
+    DateTimeOffset? StartedAt = null);
 
 /// <summary>
 /// PostgresStudio's Overview reads the server's version and platform outside a health sweep, with S01's own statement:
@@ -57,6 +61,8 @@ internal static class OverviewServerQueries
             reader.GetBoolean(3),
             reader.GetBoolean(4),
             reader.GetBoolean(5),
-            reader.GetBoolean(6));
+            reader.GetBoolean(6),
+            reader.GetBoolean(7),
+            reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8));
     }
 }

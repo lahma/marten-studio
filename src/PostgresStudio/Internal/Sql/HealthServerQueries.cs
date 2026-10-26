@@ -81,7 +81,10 @@ internal static class HealthServerQueries
         "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_version' and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace) as aurora,\n" +
         "       exists (select 1 from pg_catalog.pg_settings s where s.name = 'azure.extensions' and " + ServerConfigured + ") as azure,\n" +
         "       exists (select 1 from pg_catalog.pg_settings s where s.name like 'cloudsql.%' and " + ServerConfigured + ") as cloud_sql,\n" +
-        "       exists (select 1 from pg_catalog.pg_roles r where r.rolname = 'neon_superuser' and r.rolreplication and r.rolbypassrls and not r.rolcanlogin) as neon");
+        "       exists (select 1 from pg_catalog.pg_roles r where r.rolname = 'neon_superuser' and r.rolreplication and r.rolbypassrls and not r.rolcanlogin) as neon,\n" +
+        "       pg_catalog.pg_is_in_recovery() as in_recovery,\n" +
+        "       pg_catalog.pg_postmaster_start_time() as started_at,\n" +
+        "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_db_instance_identifier' and p.pronargs = 0 and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace) as aurora_instance");
 
     private static readonly HealthQuery ChecksumsQuery = new(
         "select pg_catalog.current_setting('data_checksums') = 'on' as enabled,\n" +
@@ -126,6 +129,15 @@ internal static class HealthServerQueries
     /// and from 16 only a <c>CREATEROLE</c> role that holds both itself.</item>
     /// <item>A host (<c>*.neon.tech</c>, <c>*.supabase.co</c>) is the data source's own connection string, the host's.</item>
     /// </list>
+    /// <para>
+    /// <b>And which server answered</b> (issue #8 A1, W5-AUR): <c>pg_is_in_recovery()</c>, <c>pg_postmaster_start_time()</c>,
+    /// and whether Aurora's <c>aurora_db_instance_identifier()</c> exists - fenced to <c>pg_catalog</c> exactly as
+    /// <c>aurora_version()</c> is, because the instance it names decides whether the statistics window looks reset, and a
+    /// window that looks reset holds back every verdict that needs a long one. Neither Aurora function is called here: an
+    /// Aurora server's instance is read by <see cref="AuroraQueries.Instance" />, only once this read has said Aurora, and a
+    /// release before 13.7, 12.11, 11.16 or 10.21 has no identifier function (<i>aurora_db_instance_identifier</i>, Aurora
+    /// User Guide, read 2026-10-26), so its instance is unknown rather than a failure.
+    /// </para>
     /// </remarks>
     public static HealthQuery Platform() => PlatformQuery;
 
@@ -149,13 +161,24 @@ internal static class HealthServerQueries
     /// application's - and a visitor admitted to this database is never shown them (H10 review, B1). They are still
     /// read, because a row is a row, and the check withholds them.
     /// </para>
+    /// <para>
+    /// <b>On Aurora, a WAL position only with logical WAL</b> (W5-AUR-fix F2). Aurora's own storage layer replicates and its
+    /// readers do not stream, so an Aurora instance below <c>wal_level = logical</c> refuses <c>pg_current_wal_lsn()</c>
+    /// (<c>55000</c>), and the WAL functions of a standby mean nothing on a reader. There the position is read only where
+    /// <c>wal_level</c> is <c>logical</c> - the one setting under which Aurora has a slot to measure (a logical one) - and is
+    /// null otherwise; <c>position_read</c> says which, and a slot's retention is then not measured, never an error.
+    /// </para>
     /// </remarks>
-    public static HealthQuery ReplicationSlots() => new(
+    /// <param name="aurora">Whether the platform read called the server Aurora.</param>
+    public static HealthQuery ReplicationSlots(bool aurora = false) => new(
         "with server as (\n" +
         "  select pg_catalog.current_setting('server_version_num')::int4 as server_version,\n" +
         "         pg_catalog.pg_is_in_recovery() as in_recovery,\n" +
-        "         case when pg_catalog.pg_is_in_recovery() then pg_catalog.pg_last_wal_replay_lsn()\n" +
-        "              else pg_catalog.pg_current_wal_lsn() end as current_lsn,\n" +
+        (aurora
+            ? "         case when not pg_catalog.pg_is_in_recovery() and pg_catalog.current_setting('wal_level') = 'logical'\n" +
+              "              then pg_catalog.pg_current_wal_lsn() end as current_lsn,\n"
+            : "         case when pg_catalog.pg_is_in_recovery() then pg_catalog.pg_last_wal_replay_lsn()\n" +
+              "              else pg_catalog.pg_current_wal_lsn() end as current_lsn,\n") +
         "         " + SizeSetting("max_slot_wal_keep_size") + " as max_slot_wal_keep_bytes,\n" +
         "         " + SizeSetting("wal_keep_size") + " as wal_keep_bytes\n" +
         "),\n" +
@@ -183,7 +206,8 @@ internal static class HealthServerQueries
         "select v.server_version, v.in_recovery, v.max_slot_wal_keep_bytes, v.wal_keep_bytes,\n" +
         "       r.slot_name, r.slot_type, r.plugin, r.database, r.temporary, r.active, r.retained_bytes,\n" +
         "       r.wal_status, r.safe_wal_size, r.xmin_age, r.catalog_xmin_age, r.inactive_seconds,\n" +
-        "       r.invalidation_reason, r.conflicting, r.total, r.this_database, r.xmin, r.catalog_xmin\n" +
+        "       r.invalidation_reason, r.conflicting, r.total, r.this_database, r.xmin, r.catalog_xmin,\n" +
+        "       v.current_lsn is not null as position_read\n" +
         "  from server v left join slots r on true",
         [Integer("limit", MaxSlots)]);
 

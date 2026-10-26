@@ -195,6 +195,37 @@ public class HealthGateTests
     }
 
     /// <summary>
+    /// W5-AUR: which server answered and the capacity the host's source reported are database-wide information (D29) - an
+    /// instance id is the cluster's own name for one of its instances - so the report's line is withheld like the cost.
+    /// </summary>
+    [Fact]
+    public async Task The_server_line_is_withheld_from_a_visitor_short_of_the_database_gate()
+    {
+        await using HealthHarness harness = Scripted(static options => options.KnownTenantIds.Add("acme"));
+        harness.Script.Gather["K90"] = static async (context, _) =>
+        {
+            DateTimeOffset at = context.Now;
+            await context.Shared("server.platform", _ => Task.FromResult(new PostgresServerFacts(at, 170004, "17.4", PostgresPlatform.SelfHosted)));
+            await context.Shared(PostgresStudio.Services.Aurora.CapacityReading.Key, _ => Task.FromResult(
+                new PostgresStudio.Services.Aurora.CapacityReading(PostgresStudio.PostgresComputeCapacity.Of(2, 1, 4, "vCPU", at), at, null, true)));
+            return new ScriptedFacts("K90", [], null);
+        };
+        harness.Policies.Allow(static resource => resource.Capability is null && resource.TenantId == "acme");
+
+        HealthReport tenant = await harness.Health.GetReportAsync(harness.Scope with { TenantId = "acme" }, HealthReportRequest.Regular, Token);
+
+        tenant.Server.Should().BeNull();
+        tenant.StatisticsReset.Should().BeNull();
+
+        harness.Policies.Allow(static _ => true);
+        HealthReport whole = await harness.Health.GetReportAsync(harness.Scope, HealthReportRequest.Regular, Token);
+
+        whole.Server.Should().NotBeNull();
+        whole.Server!.AnsweredBy.Should().BeNull("a self-hosted server names no instance");
+        whole.Server.Capacity.Should().StartWith("2 vCPU (min 1, max 4), measured ");
+    }
+
+    /// <summary>
     /// Review item 11: the banners' read - the findings with these codes from the last regular sweep, through
     /// the page's gates, and never a sweep of its own.
     /// </summary>

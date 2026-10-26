@@ -161,6 +161,12 @@ public class StudioRegistrationTests
         (typeof(ServerSettingsFactsCache), ServiceLifetime.Singleton, How.Type, typeof(ServerSettingsFactsCache)),
         (typeof(IServerPageService), ServiceLifetime.Scoped, How.Type, typeof(ServerPageService)),
         (typeof(ExtensionUpdatePaths), ServiceLifetime.Singleton, How.Type, typeof(ExtensionUpdatePaths)),
+
+        // W5-AUR: the host's capacity source, and the Server page's Aurora section.
+        (typeof(PostgresStudio.Services.Aurora.CapacityReader), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Aurora.CapacityReader)),
+        (typeof(PostgresStudio.Services.Aurora.IAuroraFactsReader), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Aurora.AuroraFactsReader)),
+        (typeof(PostgresStudio.Services.Aurora.AuroraFactsCache), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Aurora.AuroraFactsCache)),
+        (typeof(PostgresStudio.Services.Aurora.IAuroraService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Aurora.AuroraService)),
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),

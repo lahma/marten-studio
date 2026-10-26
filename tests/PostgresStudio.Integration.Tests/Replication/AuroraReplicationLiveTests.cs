@@ -8,16 +8,17 @@ using PostgresStudio.Services.Replication;
 namespace PostgresStudio.Integration.Tests.Replication;
 
 /// <summary>
-/// Issue #8 A2 on VERS's Aurora shim: on a server the platform detector calls Aurora, R02, R03 and R04 are listed as not
-/// applicable - never run - and the Replication page's checkpoint, WAL, archiver, tablespace and standby sections say so,
-/// while the slots and <c>pg_stat_io</c> are read.
+/// Issue #8 A2 on VERS's Aurora shim: on a server the platform detector calls Aurora, R02 and R04 are listed as not
+/// applicable - never run - and R03 reads Aurora's own replica status (A3, W5-AUR) rather than <c>pg_stat_replication</c>;
+/// the Replication page's checkpoint, WAL, archiver, tablespace and standby sections say so, its "Aurora replicas" are read,
+/// and the slots and <c>pg_stat_io</c> are read.
 /// </summary>
 public class AuroraReplicationLiveTests(PostgresVersionMatrix matrix)
 {
     private const string Database = "aurora_r2";
 
     [PostgresFact]
-    public async Task On_Aurora_R02_R03_and_R04_are_not_applicable_and_never_run()
+    public async Task On_Aurora_R02_and_R04_are_not_applicable_and_never_run_and_R03_reads_Auroras_replica_status()
     {
         MatrixServer server = await matrix.ServerAsync(17);
         server.SkipIfUnavailable();
@@ -27,7 +28,11 @@ public class AuroraReplicationLiveTests(PostgresVersionMatrix matrix)
 
         HealthSweep sweep = await host.SweepAsync(HealthSweepKind.Regular);
 
-        foreach (string code in new[] { "R02", "R03", "R04" })
+        HealthCheckResult r03 = sweep.Results.Single(static x => x.Check.Code == "R03");
+        r03.Outcome.Should().Be(HealthCheckOutcome.Checked, "on Aurora R03 is the aurora-reader view (W5-AUR, A3)");
+        r03.Statements.Should().NotContain(static x => x.Sql.Contains("pg_stat_replication", StringComparison.Ordinal), "Aurora's readers do not stream");
+
+        foreach (string code in new[] { "R02", "R04" })
         {
             HealthCheckResult result = sweep.Results.Single(x => x.Check.Code == code);
 
@@ -74,5 +79,10 @@ public class AuroraReplicationLiveTests(PostgresVersionMatrix matrix)
         view.Refusal.Should().Be(ReplicationRefusal.None);
         view.Archiver.Note.Should().Be(ReplicationPlatform.Aurora);
         view.Standbys.Note.Should().Be(ReplicationPlatform.Aurora);
+
+        // The standbys' place on Aurora (W5-AUR, A3): the cluster's instances, as aurora_replica_status() reports them.
+        facts.AuroraReplicas!.Outcome.Should().Be(ReplicationReadOutcome.Read);
+        view.AuroraReplicas!.Value!.Instances.Select(static x => (x.Instance, x.Writer))
+            .Should().Equal(("studio-test-instance-1", true), ("studio-test-instance-2", false));
     }
 }

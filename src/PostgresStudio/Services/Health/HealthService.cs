@@ -289,6 +289,11 @@ internal sealed class HealthService : IHealthService
             History = history.Read(storeKey, databaseId).Describe(cache.Now),
             Cost = database ? meter.Total(CostKey(resolved.Target)) : null,
             CostWithheld = database ? null : gate.WhyNot(HealthGate.Database),
+            Server = database ? HealthServerLine.Of(regular) : null,
+            StatisticsReset = database && regular.Statistics is { LooksReset: true } window
+                ? "The statistics look reset since the last check: " + (window.Signal ?? window.ReasonText) + ". Rates and verdicts that "
+                  + "need a long window are judged again once the counters have counted long enough."
+                : null,
             DeeperChecksExist = deeperExist,
             DeeperChecksAllowed = deeperAllowed,
             DeeperChecksRefused = deeperExist && !deeperAllowed ? gate.WhyNot(HealthGate.Database) : null,

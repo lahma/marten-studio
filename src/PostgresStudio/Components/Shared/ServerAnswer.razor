@@ -1,0 +1,37 @@
+@using PostgresStudio.Services.Health
+@inject StudioState State
+
+@*
+    Which server answered the advisor's last sweep, and the compute capacity the host's source reported for it (issue #8 A1,
+    A8, W5-AUR): one line on the Health page, both Overviews and the Server page, drawn from the visitor's Health report -
+    whose Server is set only for a visitor through the database-wide gate (D29: an instance id is the cluster's own name for
+    one of its instances). Nothing at all where there is nothing to say: a self-hosted server with no capacity source.
+*@
+
+@if (Line is { } line)
+{
+    <p class="ms-aur-answer" aria-label="Server that answered">
+        @if (line.AnsweredBy is { Length: > 0 } answeredBy)
+        {
+            <span class="ms-aur-answer-instance">Answered by @answeredBy@(line.StartedAt is { } started ? ", up since " + State.FormatInSelectedTimeZone(started) : string.Empty).</span>
+        }
+        @if (line.Capacity is { Length: > 0 } capacity)
+        {
+            <span class="ms-aur-answer-capacity">Capacity @capacity.</span>
+        }
+        else if (line.CapacityUnknown is { Length: > 0 } unknown)
+        {
+            <span class="ms-aur-answer-capacity ms-aur-answer-unknown">@Capitalised(unknown).</span>
+        }
+    </p>
+}
+
+@code {
+    /// <summary>The report's line, as a <c>HealthServerLine</c>, or <see langword="null" /> to draw nothing. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    private HealthServerLine? Line => Model as HealthServerLine;
+
+    private static string Capitalised(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
+}

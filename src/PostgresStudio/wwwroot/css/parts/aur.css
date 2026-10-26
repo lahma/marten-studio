@@ -1,0 +1,106 @@
+/* ==========================================================================
+   W5-AUR - Aurora: which instance answered (the Health page, both
+   Overviews, the Server page), the Server page's Aurora section and the
+   Replication page's Aurora replicas.
+   Folded into studio.css by the orchestrator in D26 order (W5-index §4);
+   tokens only, every rule ms-aur-.
+   ========================================================================== */
+
+/* "Answered by instance x (a reader), Aurora 16.4.1. Capacity 4.5 ACU ..." - one quiet line under a page's summary. */
+.ms-aur-answer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-aur-answer-instance,
+.ms-aur-answer-capacity {
+    overflow-wrap: anywhere;
+}
+
+.ms-aur-answer-unknown {
+    color: var(--ms-color-text-muted);
+}
+
+/* The Health page's "the statistics look reset" line sits with the summary, not between the findings. */
+.ms-aur-reset {
+    margin: 0 0 var(--ms-space-md);
+}
+
+/* The section's two facts: answered by, and capacity - a row that wraps, one per line on a phone. */
+.ms-aur-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-aur-fact {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-aur-fact dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-aur-fact dd {
+    margin: 0;
+    font-weight: var(--ms-font-weight-semibold);
+    overflow-wrap: anywhere;
+}
+
+.ms-aur-fact-note {
+    display: block;
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-aur-subtitle {
+    margin: var(--ms-space-md) 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-aur-note,
+.ms-aur-replicas-note {
+    max-width: 80ch;
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-aur-unavailable,
+.ms-aur-withheld {
+    color: var(--ms-color-text-muted);
+}
+
+/* Numbers line up at the right, in tabular figures. */
+.ms-aur-number {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ms-aur-instances,
+.ms-aur-waits,
+.ms-aur-dml,
+.ms-aur-sessions,
+.ms-aur-replicas {
+    width: 100%;
+}
+
+@media (max-width: 640px) {
+    .ms-aur-facts,
+    .ms-aur-answer {
+        grid-template-columns: minmax(0, 1fr);
+        flex-direction: column;
+    }
+}

@@ -296,7 +296,26 @@ internal sealed record PostgresGrants(string ReadsAs, bool Superuser, IReadOnlyL
                 _ => "On a self-hosted server a superuser can run " + create + "; it is not a trusted extension, so a database owner cannot.",
             };
 
-        return "Not checked: this needs the " + name + " extension, which this database does not have. " + who;
+        return "Not checked: this needs the " + name + " extension, which this database does not have. " + who + Preloaded(name, platform);
+    }
+
+    /// <summary>What Aurora preloads for <c>pg_stat_statements</c> (issue #8 A7), as AWS states it.</summary>
+    /// <remarks>
+    /// "Typically, the default DB cluster parameter group loads only the <c>pg_stat_statements</c>" (<i>Working with extensions
+    /// and foreign data wrappers</i>, Aurora User Guide, read 2026-10-26). B0 could not verify a cluster's default, so the
+    /// sentence says what to do when the library is not loaded rather than that it always is.
+    /// </remarks>
+    internal static string Preloaded(string name, PostgresPlatform platform)
+    {
+        ArgumentNullException.ThrowIfNull(platform);
+
+        return platform.Kind == PostgresPlatformKind.AmazonAurora && string.Equals(name, "pg_stat_statements", StringComparison.Ordinal)
+            ? " On Aurora pg_stat_statements is preloaded by Aurora's default DB cluster parameter group (\"Typically, the default DB "
+              + "cluster parameter group loads only the pg_stat_statements\" - Working with extensions and foreign data wrappers, "
+              + "Aurora User Guide, read 2026-10-26), so CREATE EXTENSION pg_stat_statements is usually all it takes; if it then "
+              + "reports that the library is not loaded, add it to shared_preload_libraries in the DB cluster parameter group and "
+              + "reboot the instances."
+            : string.Empty;
     }
 
     /// <summary>Who can grant <paramref name="grant" /> on <paramref name="platform" />, as a sentence.</summary>

@@ -254,7 +254,7 @@ public class ConnectionServerLiveTests(ConnectionsServerFixture server) : IClass
                 async () =>
                 {
                     whole = await LiveWait.ScalarAsync<long>(server.ConnectionString, "select count(*) from pg_stat_activity where backend_type = 'client backend'");
-                    narrowed = await host.GatherAsync(new ServerConnectionHeadroomCheck());
+                    narrowed = (await host.GatherAsync(new ServerConnectionHeadroomCheck())).Limits;
                     return narrowed.ClientBackends == whole;
                 },
                 TimeSpan.FromSeconds(20),

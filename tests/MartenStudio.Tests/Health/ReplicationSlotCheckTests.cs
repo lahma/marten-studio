@@ -53,6 +53,28 @@ public class ReplicationSlotCheckTests
         verdict.Note.Should().Be("This server has no replication slots.");
     }
 
+    /// <summary>W5-AUR-fix F2: Aurora below logical WAL gives no position, which is a sentence and never a failure.</summary>
+    [Fact]
+    public void Without_a_WAL_position_R01_says_why_and_measures_nothing()
+    {
+        ReplicationSlotFacts none = Facts(Start, -1);
+        HealthVerdict quiet = Evaluate(none with { Slots = none.Slots with { PositionRead = false } });
+
+        quiet.Findings.Should().BeEmpty();
+        quiet.Note.Should().Be(
+            "This server has no replication slots. Aurora gives no WAL position below wal_level = logical (rds.logical_replication off), "
+            + "so no slot's retention is measured.");
+
+        ReplicationSlotFacts one = Facts(Start, -1, Slot("cdc", retained: null));
+        HealthVerdict unmeasured = Evaluate(one with { Slots = one.Slots with { PositionRead = false } });
+
+        unmeasured.Findings.Should().BeEmpty();
+        unmeasured.Note.Should().StartWith("1 replication slot on this server. Aurora gives no WAL position");
+
+        HealthVerdict reader = Evaluate(none with { Slots = none.Slots with { PositionRead = false, InRecovery = true } });
+        reader.Note.Should().Be("This server has no replication slots. An Aurora reader has no WAL position of its own, so no slot's retention is measured here.");
+    }
+
     [Fact]
     public void Slots_holding_little_are_quiet_and_the_note_says_how_much_the_most_is()
     {

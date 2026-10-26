@@ -116,6 +116,9 @@
                         </div>
                     }
                 </dl>
+
+                @* Which instance answered and its capacity (issue #8 A1, A8): the Health report's, through the database-wide gate. *@
+                <ServerAnswer Model="health?.Server" />
             }
             else
             {
