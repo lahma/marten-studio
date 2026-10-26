@@ -396,17 +396,43 @@ What to do, read at `V9.39.0`, `v9.51.0` and `V9.54.1`:
     correction leaves the mark exactly there, one past what has been handed out, and has done all it can. D09 then no
     longer offers it, and says that the next event appended takes the mark's own number and is treated as already
     processed.
-  - The remedy then is a DBA's: with appends stopped, move the sequence on by that one number (`setval` it to the mark),
-    so the next append takes the number after it.
+  - The remedy then is a DBA's, with appends stopped, and only while `mt_events_sequence` still reads
+    `is_called = false`: `setval` it to the greater of the mark and `max(seq_id)` of `mt_events`. The statement D09
+    shows (below) reads both when it runs, not when the sweep did, and does nothing once anything has drawn from the
+    sequence. By then the event at the mark's number has been taken, and the projections that should hold it need a
+    rebuild.
+  - Where the events already reach the mark, D09 reports `sequence-behind` too, and that repair moves the sequence past
+    the events and past the mark alike: one repair, not two.
+  - A shard past the mark itself keeps its own remedy, the rebuild or rewind of `shard-ahead`.
 - **`shard-ahead`**: Correct progression does nothing here, because the mark is not ahead. Either fix leaves the shard
   where the events are:
   - rebuild the projection, which empties its tables and replays from the first event to the mark;
-  - or rewind the subscription to the highest number the sequence has handed out (one less than the number it hands out
-    next). JasperFx replays from the number after the floor it is given, so a rewind to the number handed out next would
-    lose that event.
-- **`sequence-behind`**: a DBA's repair, with appends stopped: `setval` the sequence to `max(seq_id)` of `mt_events`.
-  When both this and a progression finding are reported, do this first. The correction moves progression to the
-  sequence's position, and that position has to be past the events, or the daemon processes them all again.
+  - or rewind the subscription to the lower of the mark and the highest number the sequence has handed out (that
+    number alone when there is no mark). No shard is rightly past the mark. JasperFx replays from the number after the
+    floor it is given, so events appended since the reset at or below the floor are not replayed by a rewind; a rebuild
+    is the way to those.
+- **`sequence-behind`**: a DBA's repair, with appends stopped: `setval` the sequence to the greater of `max(seq_id)` of
+  `mt_events` and the mark. The statement reads both when it runs and never moves the sequence back, so pasting it after
+  more events have committed is as safe as running it at once.
+  - Because it moves the sequence past the mark as well, a `mark-ahead` reported beside it needs no correction.
+  - Run the correction first instead, and it moves progression back to a number the events have long passed, and the
+    daemon processes them all again.
+
+The statement D09 shows, for an event store in `public`. The last line is there only for the repair after a `RESTART`:
+
+```sql
+select pg_catalog.setval('"public"."mt_events_sequence"', t.target)
+from "public"."mt_events_sequence" q
+cross join lateral (
+    select greatest(
+        coalesce((select h.last_seq_id from "public"."mt_event_progression" h where h.name = 'HighWaterMark'), 0),
+        coalesce((select pg_catalog.max(e.seq_id) from "public"."mt_events" e), 0)) as target) t
+where t.target > (case when q.is_called then q.last_value else q.last_value - 1 end)
+  and not q.is_called;
+```
+
+An event store whose schema name holds a quote or a backslash, or a character a pasted line could not show as it is,
+gets the same repair in words instead.
 
 `mark-ahead` and `shard-ahead` are judged only for a store that registers an async projection or subscription, as D02,
 D03, D05, D07 and D08 are: without one, nothing waits on a progression row. `sequence-behind` is judged for any store

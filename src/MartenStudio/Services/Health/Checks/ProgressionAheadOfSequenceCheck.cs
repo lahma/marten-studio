@@ -51,10 +51,18 @@ internal sealed record ProgressionAheadFacts(
 /// <c>last_value</c>, and only while the <c>HighWaterMark</c> row is above it (<c>HighWaterDetector</c> and
 /// <c>AdvancedOperations</c>, identical at V9.39.0, v9.51.0 and V9.54.1): so it is the remedy for a mark ahead, and does
 /// nothing for a shard ahead of a mark that is not, which a rebuild resets instead (emptying the projection's tables first)
-/// or a rewind to the highest number handed out (JasperFx replays from the number after the floor it is given). Right after
-/// a <c>RESTART</c> the mark can sit exactly at <c>last_value</c>, the number handed out next: the correction has done all
-/// it can, so it is not offered again, and the remedy moves the sequence on by that one number instead. A sequence behind
-/// the events is a DBA's <c>setval</c>, said in words.
+/// or a rewind to the lower of the mark and the highest number handed out (<see cref="Floor" />; JasperFx replays from the
+/// number after the floor it is given).
+/// </para>
+/// <para>
+/// <b>The sequence repair is computed when it runs.</b> A sequence behind the events is a DBA's <c>setval</c>, shown as the
+/// statement <see cref="HealthDaemonQueries.SequenceRepair" /> builds: the greater of the mark and <c>max(seq_id)</c>, both
+/// read by the statement itself and only ever forward, so pasting it after more events have committed is as safe as
+/// running it at once, and it moves the sequence past the mark as well as the events. Right after a <c>RESTART</c> the mark
+/// can sit exactly at <c>last_value</c>, the number handed out next: the correction has done all it can, so it is not
+/// offered again. Then the same statement is the remedy - guarded to do nothing once anything has drawn from the sequence
+/// - or, where the events already reach the mark, the sequence-behind repair alone, which does both; shards past the mark
+/// keep their rebuild or rewind.
 /// </para>
 /// <para>
 /// <b>Progression only for a store with async work</b>, as D02, D03, D05, D07 and D08 judge it: with no async projection
@@ -160,15 +168,40 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
             // anything is appended, the mark can sit exactly at it - one past what was handed out - and then it has done
             // all it can (HighWaterDetector.TryCorrectProgressInDatabaseAsync, V9.39.0, v9.51.0 and V9.54.1).
             bool corrects = reading.SequenceLastValue is not { } lastValue || mark > lastValue;
-            findings.Add(MarkIsAhead(configuration, reading, sequence, next, mark, ahead, corrects ? Correction : CorrectionDone(sequence, mark)));
+            bool behind = reading.HighestCommitted is { } committed && committed >= next;
+
+            HealthRemedy remedy = corrects
+                ? Correction
+                : CorrectionDone(configuration, mark, reading.HighestCommitted, behind, [.. ahead.Where(x => x.Sequence > mark)], Floor(mark, next));
+
+            findings.Add(MarkIsAhead(configuration, reading, sequence, next, mark, ahead, remedy));
         }
         else
         {
-            findings.AddRange(ahead.Select(x => ShardIsAhead(configuration, reading, sequence, next, x)));
+            findings.AddRange(ahead.Select(x => ShardIsAhead(configuration, reading, sequence, next, x, Floor(reading.Mark, next))));
         }
 
         return findings.Count > 0 ? new HealthVerdict(findings) : HealthVerdict.Quiet();
     }
+
+    /// <summary>
+    /// Where a shard ahead of the sequence is rewound to: the lower of the high-water mark - no shard is rightly past it -
+    /// and the highest number the sequence has handed out, or that number alone when there is no mark. JasperFx replays
+    /// from the number after the floor it is given.
+    /// </summary>
+    /// <param name="mark">The high-water mark, or <see langword="null" />.</param>
+    /// <param name="next">The number the sequence hands out next.</param>
+    internal static long Floor(long? mark, long next) => mark is { } m ? Math.Min(m, next - 1) : next - 1;
+
+    /// <summary>
+    /// What a rewind to <paramref name="floor" /> leaves behind: it replays from the number after it, so an event appended
+    /// since the reset at or below it is replayed only by a rebuild.
+    /// </summary>
+    private static string RewindExplanation(long floor) =>
+        "A rebuild empties the projection's tables and then replays it from the first event to the mark, which leaves the shard "
+        + "where the events are. A rewind replays from the number after the one it is given - from "
+        + DaemonCheckConfiguration.Number(floor + 1) + " - so events appended since the reset at or below "
+        + DaemonCheckConfiguration.Number(floor) + " are not replayed by it; a rebuild is the way to those.";
 
     private static List<HealthEvidence> Common(HighWaterReading reading, string sequence, long next) =>
     [
@@ -185,11 +218,8 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
         + "sequence is not transactional, so an append that drew a number at that instant counts as handed out - which can only "
         + "make the sequence look further ahead, never behind.";
 
-    private static HealthFinding Behind(DaemonCheckConfiguration configuration, HighWaterReading reading, string sequence, long next, long highest)
-    {
-        string events = SchemaKey.For(configuration.EventSchema, EventTableInfo.EventsTable);
-
-        return new HealthFinding
+    private static HealthFinding Behind(DaemonCheckConfiguration configuration, HighWaterReading reading, string sequence, long next, long highest) =>
+        new()
         {
             Code = "D09",
             Variant = SequenceBehind,
@@ -205,14 +235,26 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
             Evidence = Common(reading, sequence, next),
             Caveat = SnapshotCaveat,
             Remedy = new HealthRemedy(
-                "// A DBA's repair, not a StoreOptions line, with appends stopped:\n"
-                + "// move " + sequence + " past the highest seq_id in " + events + " - setval it to that maximum.",
+                "-- A DBA's repair, not a StoreOptions line, with appends stopped: move mt_events_sequence past the highest\n"
+                + "-- seq_id in mt_events, and past the high-water mark where that is further on - both read when this runs.\n"
+                + "-- It never moves the sequence back.\n"
+                + Repair(configuration, onlyWhileNeverCalled: false),
                 "The next append then takes the number after the highest event. Stop appends first: one that commits between "
-                + "reading the maximum and moving the sequence would be overtaken. If D09 also reports progression ahead of the "
-                + "sequence, this comes first: the correction moves progression to the sequence's position, and that has to be "
-                + "past the events."),
+                + "reading the maximum and moving the sequence would be overtaken. The statement reads the maximum and the mark "
+                + "when it runs, not this sweep's numbers, so running it later is as safe as running it now. Because it also "
+                + "moves the sequence past the high-water mark where that is further on, a mark-ahead finding D09 reports beside "
+                + "this one needs no second repair for the mark; a shard still past the mark keeps the rebuild or rewind D09 "
+                + "gives it."),
         };
-    }
+
+    /// <summary>
+    /// The repair statement (<see cref="HealthDaemonQueries.SequenceRepair" />), or - for a schema whose name it will not
+    /// print - the same repair in words.
+    /// </summary>
+    private static string Repair(DaemonCheckConfiguration configuration, bool onlyWhileNeverCalled) =>
+        HealthDaemonQueries.SequenceRepair(configuration.EventSchema, onlyWhileNeverCalled)
+        ?? "-- setval the sequence to the greater of the high-water mark and max(seq_id) of mt_events, both read at that moment"
+           + (onlyWhileNeverCalled ? ",\n-- and only while it still reads is_called = false." : ".");
 
     private static HealthFinding MarkIsAhead(
         DaemonCheckConfiguration configuration,
@@ -258,7 +300,8 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
         HighWaterReading reading,
         string sequence,
         long next,
-        DaemonShardRow shard)
+        DaemonShardRow shard,
+        long floor)
     {
         List<HealthEvidence> evidence = Common(reading, sequence, next);
         evidence.Add(new HealthEvidence("Shard position", DaemonCheckConfiguration.Number(shard.Sequence)));
@@ -281,13 +324,11 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
             Link = new HealthLink("Open the projections screen", "projections"),
             Remedy = new HealthRemedy(
                 "// Rebuild this projection on the projections screen (Capabilities.RebuildProjections),\n"
-                + "// or rewind the subscription to " + DaemonCheckConfiguration.Number(next - 1)
-                + ", the highest number the sequence has handed out.",
+                + "// or rewind the subscription to " + DaemonCheckConfiguration.Number(floor) + ".",
                 "Correct progression does nothing here: Marten corrects progression only while the high-water mark itself is "
-                + "ahead of the sequence (TryCorrectProgressInDatabaseAsync), and the mark is not. A rebuild empties the "
-                + "projection's tables and then replays it from the first event to the mark, which leaves the shard where the "
-                + "events are. A rewind replays from the number after the one it is given, so rewinding to the highest number "
-                + "handed out loses none of the events still to come."),
+                + "ahead of the sequence (TryCorrectProgressInDatabaseAsync), and the mark is not. The rewind's floor is the "
+                + "high-water mark - no shard is rightly past it - or the highest number the sequence has handed out, where that "
+                + "is lower or there is no mark. " + RewindExplanation(floor)),
         };
     }
 
@@ -300,24 +341,72 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
         + "number at or below that value is then treated as processed: rebuild the async projections that should hold "
         + "them - a rebuild empties the projection's tables before it replays. Right after a RESTART, before anything is "
         + "appended, last_value is the number the sequence hands out next, so the correction leaves the mark one past what has "
-        + "been handed out, and D09 then says what is left to do. If D09 also reports the sequence behind the events, fix that "
-        + "first, or the correction moves progression back to a number the events have long passed and the daemon processes "
-        + "them all again. On a store with a database per tenant, TryCorrectProgressInDatabaseAsync(tenantId, "
-        + "cancellationToken) reaches only that tenant's database.");
+        + "been handed out, and D09 then says what is left to do. If D09 also reports the sequence behind the events, run that "
+        + "repair instead: it moves the sequence past the events and past the mark alike, so the mark needs no correction - "
+        + "and run before it, the correction would move progression back to a number the events have long passed and the "
+        + "daemon would process them all again. A shard still past the mark after that repair is D09's shard-ahead finding, "
+        + "with a rebuild or a rewind as its remedy. On a store with a database per tenant, "
+        + "TryCorrectProgressInDatabaseAsync(tenantId, cancellationToken) reaches only that tenant's database.");
 
     /// <summary>
     /// What is left when Marten's correction can do no more: the mark sits at the sequence's <c>last_value</c>, which a
-    /// sequence that has not been called since a <c>RESTART</c> hands out next.
+    /// sequence that has not been called since a <c>RESTART</c> hands out next. The repair moves the sequence to the
+    /// greater of the mark and the highest committed event, both read when it runs; where the events already reach the mark,
+    /// that is the sequence-behind repair, and one statement does both. Shards above the mark keep their own advice.
     /// </summary>
-    /// <param name="sequence">The sequence, <c>schema.mt_events_sequence</c>.</param>
+    /// <param name="configuration">The store's daemon settings.</param>
     /// <param name="mark">The high-water mark, equal to the number handed out next.</param>
-    private static HealthRemedy CorrectionDone(string sequence, long mark) => new(
-        "// A DBA's repair, not a StoreOptions line, with appends stopped:\n"
-        + "// move " + sequence + " on by one number - setval it to " + DaemonCheckConfiguration.Number(mark)
-        + " - so the next append takes " + DaemonCheckConfiguration.Number(mark + 1) + ".",
-        "Correct progression has done what it can: Marten moves progression only while the mark is above the sequence's "
-        + "last_value, and the mark is at it - the number the sequence hands out next, because nothing has drawn from it since "
-        + "it was reset. Left as it is, the next event appended takes " + DaemonCheckConfiguration.Number(mark)
-        + ", which the daemon treats as already processed: no async projection or subscription sees it, and nothing reports it "
-        + "lost. Moving the sequence on by that one number keeps every event to come above the mark.");
+    /// <param name="highest">The highest committed <c>seq_id</c>, or <see langword="null" />.</param>
+    /// <param name="behind">Whether D09 reports the sequence behind the events too.</param>
+    /// <param name="aboveMark">The shards ahead of the mark itself, which the sequence repair does not bring back.</param>
+    /// <param name="floor">Where such a shard is rewound to.</param>
+    private static HealthRemedy CorrectionDone(
+        DaemonCheckConfiguration configuration,
+        long mark,
+        long? highest,
+        bool behind,
+        List<DaemonShardRow> aboveMark,
+        long floor)
+    {
+        string markText = DaemonCheckConfiguration.Number(mark);
+
+        string code = behind
+            ? "-- One repair for both of D09's findings, with appends stopped: the sequence-behind repair moves\n"
+              + "-- mt_events_sequence past the highest seq_id and past the high-water mark alike, both read when this runs.\n"
+              + "-- It never moves the sequence back.\n"
+              + Repair(configuration, onlyWhileNeverCalled: false)
+            : "-- A DBA's repair, with appends stopped, and only while mt_events_sequence still reads is_called = false:\n"
+              + "-- setval it to the greater of the high-water mark and max(seq_id) of mt_events, both read when this runs.\n"
+              + Repair(configuration, onlyWhileNeverCalled: true);
+
+        string explanation =
+            "Correct progression has done what it can: Marten moves progression only while the mark is above the sequence's "
+            + "last_value, and the mark is at it - the number the sequence hands out next, because nothing has drawn from it since "
+            + "it was reset. Left as it is, the next event appended takes " + markText + ", which the daemon treats as already "
+            + "processed: no async projection or subscription sees it, and nothing reports it lost. "
+            + (behind
+                ? "The events already reach " + DaemonCheckConfiguration.Number(highest ?? mark) + ", at or past the mark, so moving "
+                  + "the sequence past them - the repair D09's sequence-behind finding offers - also moves it past the mark: one "
+                  + "repair, not two. "
+                : "The statement moves the sequence so the next append takes a number above the mark and above every committed "
+                  + "event. It does nothing once anything has drawn from the sequence: by then the event at " + markText + " has "
+                  + "been taken, and the projections that should hold it need a rebuild - which empties their tables before it "
+                  + "replays. ")
+            + "It reads the mark and max(seq_id) when it runs, so running it later than this sweep is as safe as running it now, "
+            + "and it never moves the sequence back.";
+
+        if (aboveMark.Count > 0)
+        {
+            bool one = aboveMark.Count == 1;
+
+            code += "\n-- Then, for the " + (one ? "shard" : "shards") + " past the mark, which no sequence repair brings back: rebuild "
+                + (one ? "its projection" : "their projections") + "\n-- on the projections screen (Capabilities.RebuildProjections), or rewind "
+                + (one ? "the subscription" : "each subscription") + " to " + DaemonCheckConfiguration.Number(floor) + ".";
+
+            explanation += " Past the mark itself: " + string.Join(", ", aboveMark.Select(static x =>
+                x.Name + " at " + DaemonCheckConfiguration.Number(x.Sequence))) + ". " + RewindExplanation(floor);
+        }
+
+        return new HealthRemedy(code, explanation);
+    }
 }

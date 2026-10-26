@@ -127,10 +127,12 @@ internal static class HealthDaemonQueries
         string sequence = SqlIdentifier.Qualify(eventSchema, EventsSequence);
         string events = SqlIdentifier.Qualify(eventSchema, EventTableInfo.EventsTable);
 
+        // The sequence is read once, as one row: highest_sequence, allocated_high and sequence_last_value are all derived from
+        // the same last_value and is_called, so they cannot disagree with one another.
         string sql =
             "select\n"
             + "  pg_catalog.transaction_timestamp() as server_now,\n"
-            + "  (select case when s.is_called then s.last_value else 0 end from " + sequence + " s) as highest_sequence,\n"
+            + "  case when s.is_called then s.last_value else 0 end as highest_sequence,\n"
             + "  h.last_seq_id as mark,\n"
             + "  h.last_updated as mark_updated,\n"
             + "  g.last_seq_id as stuck_mark,\n"
@@ -139,10 +141,11 @@ internal static class HealthDaemonQueries
             + "  f.last_updated as fence_updated,\n"
             + "  (select pg_catalog.max(p.last_updated) from " + progression + " p) as latest_write,\n"
             + "  (select pg_catalog.min(e.seq_id) from " + events + " e where e.seq_id > h.last_seq_id) as next_committed,\n"
-            + "  (select case when s.is_called then s.last_value else s.last_value - 1 end from " + sequence + " s) as allocated_high,\n"
+            + "  case when s.is_called then s.last_value else s.last_value - 1 end as allocated_high,\n"
             + "  (select pg_catalog.max(e.seq_id) from " + events + " e) as highest_committed,\n"
-            + "  (select s.last_value from " + sequence + " s) as sequence_last_value\n"
+            + "  s.last_value as sequence_last_value\n"
             + "from (values (1)) as one(x)\n"
+            + "cross join (select q.last_value, q.is_called from " + sequence + " q) as s\n"
             + "left join " + progression + " h on h.name = @mark_row\n"
             + "left join " + progression + " g on g.name = @stuck_row\n"
             + "left join " + progression + " f on f.name = @fence_row";
@@ -153,6 +156,54 @@ internal static class HealthDaemonQueries
             Text("stuck_row", StuckGapRow),
             Text("fence_row", AllocationFenceRow),
         ]);
+    }
+
+    /// <summary>
+    /// D09's repair of the event sequence, as text for a DBA to run - never run by the studio: move
+    /// <c>mt_events_sequence</c> to the greater of the <c>HighWaterMark</c> row and <c>max(seq_id)</c>, both read when it
+    /// runs, and only forward - so the next append takes a number above every committed event and above the mark. Or
+    /// <see langword="null" /> for a schema whose name it will not print.
+    /// </summary>
+    /// <param name="eventSchema">The event store's schema.</param>
+    /// <param name="onlyWhileNeverCalled">
+    /// Whether it also does nothing once anything has drawn from the sequence (<c>is_called</c>): for the repair after a
+    /// <c>RESTART</c>, whose point is the one number nothing has taken yet.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <b>Computed when it runs, not when the sweep read.</b> A number from the snapshot pasted later would wind the
+    /// sequence back below events committed in between; the statement reads the mark and the highest event itself, and
+    /// <c>t.target &gt; position</c> keeps it from ever moving the sequence back.
+    /// </para>
+    /// <para>
+    /// <b>Names as everywhere here.</b> Each goes through <see cref="SqlIdentifier" />; the sequence is also handed to
+    /// <c>setval</c> as a string literal, so a schema whose name holds a single quote or a backslash - which a literal reads
+    /// differently under <c>standard_conforming_strings = off</c> - gets no statement, and the remedy says it in words.
+    /// </para>
+    /// </remarks>
+    public static string? SequenceRepair(string eventSchema, bool onlyWhileNeverCalled)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventSchema);
+
+        if (!MigrationSqlText.IsPrintableName(eventSchema)
+            || eventSchema.Contains('\'', StringComparison.Ordinal)
+            || eventSchema.Contains('\\', StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string sequence = SqlIdentifier.Qualify(eventSchema, EventsSequence);
+
+        return "select pg_catalog.setval('" + sequence + "', t.target)\n"
+            + "from " + sequence + " q\n"
+            + "cross join lateral (\n"
+            + "    select greatest(\n"
+            + "        coalesce((select h.last_seq_id from " + SqlIdentifier.Qualify(eventSchema, ProgressionTable)
+            + " h where h.name = '" + HighWaterMarkRow + "'), 0),\n"
+            + "        coalesce((select pg_catalog.max(e.seq_id) from " + SqlIdentifier.Qualify(eventSchema, EventTableInfo.EventsTable)
+            + " e), 0)) as target) t\n"
+            + "where t.target > (case when q.is_called then q.last_value else q.last_value - 1 end)"
+            + (onlyWhileNeverCalled ? "\n  and not q.is_called;" : ";");
     }
 
     /// <summary>
