@@ -552,18 +552,16 @@ internal sealed class SampleHost : IAsyncDisposable
     }
 }
 
-/// <summary>One of the repository's two sample hosts, as <see cref="SampleHost" /> starts it.</summary>
+/// <summary>A sample host, as <see cref="SampleHost" /> starts it.</summary>
 /// <param name="Project">The project's folder and assembly name under <c>samples/</c>.</param>
 /// <param name="ConnectionStringName">The <c>ConnectionStrings:</c> key it reads its database from.</param>
 /// <param name="DefaultStudioPath">Where it mounts its studio when no path is given.</param>
+/// <remarks>
+/// The Postgres Studio sample is <c>tests/PostgresStudio.Integration.Tests</c>' to start, with a copy of this class of its
+/// own: this suite no longer builds it.
+/// </remarks>
 internal sealed record SampleApp(string Project, string ConnectionStringName, string DefaultStudioPath)
 {
     /// <summary>The Marten sample: <c>samples/MartenStudio.Sample</c>.</summary>
     public static SampleApp Marten { get; } = new("MartenStudio.Sample", "Marten", "/marten");
-
-    /// <summary>
-    /// The Postgres Studio sample: <c>samples/PostgresStudio.Sample</c>, built through a project reference that
-    /// references no assembly of it.
-    /// </summary>
-    public static SampleApp Postgres { get; } = new("PostgresStudio.Sample", "Postgres", "/postgres");
 }

@@ -1,5 +1,3 @@
-using MartenStudio.Integration.Tests.Browser;
-
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
@@ -7,7 +5,7 @@ using Npgsql;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.SampleData;
 
-namespace MartenStudio.Integration.Tests.Database;
+namespace PostgresStudio.Integration.Tests.Database;
 
 /// <summary>
 /// The Postgres Studio sample's demo data, applied the way its host applies it on a server with no Marten: the tenant
@@ -17,15 +15,15 @@ namespace MartenStudio.Integration.Tests.Database;
 /// <remarks>
 /// <para>
 /// The tenant databases have fixed names (<see cref="TenantDemo.TenantNames" />) because the sample's do, so every test
-/// here drops them first and the class's tests run one after another, as xunit runs a class. Nothing else in this suite
-/// uses those names. The admin database is each test's own.
+/// here drops them first and the class's tests run one after another, as xunit runs a class. The one other user of those
+/// names in this suite is the browser suite's sample host, which creates them beside its own admin database - so both
+/// are in collections xunit runs apart from everything else and one after the other (<see cref="TenantDatabases" />).
+/// The admin database is each test's own.
 /// </para>
-/// <para>
-/// These belong in <c>tests/PostgresStudio.Integration.Tests</c> once PS-5 creates it; this suite reaches
-/// <c>PostgresStudio.SampleData</c> through <c>MartenStudio.SampleDomain</c>'s reference to it.
-/// </para>
+/// <para>Moved here from <c>tests/MartenStudio.Integration.Tests</c> (PS-5).</para>
 /// </remarks>
 /// <param name="postgres">The assembly's Postgres.</param>
+[Collection(TenantDatabases.Name)]
 public class TenantDemoLiveTests(PostgresFixture postgres)
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -158,12 +156,9 @@ public class TenantDemoLiveTests(PostgresFixture postgres)
     /// <summary>Drops the tenant databases and returns a fresh admin database of the test's own.</summary>
     private async Task<string> ResetAsync(string adminDatabase)
     {
-        foreach (string tenant in TenantDemo.TenantNames)
-        {
-            await ExecuteAsync(postgres.ConnectionString, "drop database if exists " + SqlIdentifier.Quote(tenant) + " with (force)");
-        }
+        await TenantDatabases.DropAsync(postgres, Token);
 
-        return await BrowserSuiteFixture.CreateDatabaseAsync(postgres, adminDatabase);
+        return await postgres.CreateDatabaseAsync(adminDatabase, Token);
     }
 
     private static string TenantConnection(string admin, string tenant) =>
@@ -215,5 +210,71 @@ public class TenantDemoLiveTests(PostgresFixture postgres)
         await connection.OpenAsync(Token);
         await using var command = new NpgsqlCommand(sql, connection);
         await command.ExecuteNonQueryAsync(Token);
+    }
+}
+
+/// <summary>
+/// The collection of every class that uses the sample's fixed tenant database names (<see cref="TenantDemo.TenantNames" />)
+/// on the shared container, and the one helper they share.
+/// </summary>
+/// <remarks>
+/// Kept out of the parallel run (<c>DisableParallelization</c>), as the browser suite is: xunit runs such collections after
+/// every parallel one, one after the other, so a class here that drops <c>tenant_b</c> never does it under the browser
+/// suite's running sample - whose own tenant databases have the same three names.
+/// </remarks>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class TenantDatabases
+{
+    /// <summary>The collection name.</summary>
+    public const string Name = "tenant-databases";
+
+    /// <summary>Drops the three tenant databases, ending whatever is attached to them.</summary>
+    internal static async Task DropAsync(PostgresFixture postgres, CancellationToken cancellationToken)
+    {
+        foreach (string tenant in TenantDemo.TenantNames)
+        {
+            await postgres.DropDatabaseAsync(tenant, cancellationToken);
+        }
+    }
+}
+
+/// <summary>One line a <see cref="ListLogger{T}" /> was given.</summary>
+/// <param name="Level">The level it was written at.</param>
+/// <param name="Message">The rendered message.</param>
+internal sealed record LoggedLine(LogLevel Level, string Message);
+
+/// <summary>
+/// A logger that keeps what it is given, for the tests that have to see what the sample's seeder says. Hand-written: the
+/// package budget has no mocking library (AGENTS.md hard rule 1).
+/// </summary>
+/// <typeparam name="T">The category.</typeparam>
+internal sealed class ListLogger<T> : ILogger<T>
+{
+    private readonly List<LoggedLine> entries = [];
+    private readonly Lock gate = new();
+
+    /// <summary>Everything logged so far, in order.</summary>
+    public IReadOnlyList<LoggedLine> Entries
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. entries];
+            }
+        }
+    }
+
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        lock (gate)
+        {
+            entries.Add(new LoggedLine(logLevel, formatter(state, exception)));
+        }
     }
 }

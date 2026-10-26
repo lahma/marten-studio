@@ -19,13 +19,7 @@ internal static class EphemeralPostgres
     /// <exception cref="InvalidOperationException">Docker is not available.</exception>
     public static async Task<string> StartAsync(CancellationToken cancellationToken = default)
     {
-        // The image goes to the constructor: Testcontainers 4.15 has obsoleted the parameterless one.
-        PostgreSqlContainer container = new PostgreSqlBuilder("postgres:17-alpine")
-            // Reuse so that stopping and starting the sample does not cost a fresh container and a fresh
-            // seed every time. Honoured only when the machine has testcontainers.reuse.enable=true in
-            // ~/.testcontainers.properties; without it this is simply a new container each run.
-            .WithReuse(ReuseRequested())
-            .Build();
+        PostgreSqlContainer container = CreateContainer(ReuseRequested());
 
         try
         {
@@ -68,6 +62,35 @@ internal static class EphemeralPostgres
         Started = connectionString;
         return connectionString;
     }
+
+    /// <summary>The label that keeps a reused container of this sample's apart from every other one: its key.</summary>
+    internal const string ReuseLabel = "marten-studio.sample";
+
+    /// <summary>The label's value.</summary>
+    internal const string ReuseLabelValue = "marten-studio";
+
+    /// <summary>
+    /// The container <see cref="StartAsync" /> starts, built and not started.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A reuse identity of its own.</b> Testcontainers attaches a reusing start to whichever running container's
+    /// configuration hashes alike, and a bare <c>postgres:17-alpine</c> hashes exactly like the integration suite's
+    /// <c>PostgresFixture</c>, which is built from the same defaults. So a <c>dotnet run</c> on a machine that had run the
+    /// suite opened the suite's reused container - month-old test schemas and all - as its demo database. The label puts
+    /// this sample's name into the hash; <c>EphemeralPostgresReuseTests</c> proves the two now differ.
+    /// </para>
+    /// </remarks>
+    /// <param name="reuse">Whether to ask for reuse; the reuse hash does not depend on it.</param>
+    internal static PostgreSqlContainer CreateContainer(bool reuse) =>
+        // The image goes to the constructor: Testcontainers 4.15 has obsoleted the parameterless one.
+        new PostgreSqlBuilder("postgres:17-alpine")
+            .WithLabel(ReuseLabel, ReuseLabelValue)
+            // Reuse so that stopping and starting the sample does not cost a fresh container and a fresh
+            // seed every time. Honoured only when the machine has testcontainers.reuse.enable=true in
+            // ~/.testcontainers.properties; without it this is simply a new container each run.
+            .WithReuse(reuse)
+            .Build();
 
     /// <summary>The connection string of the container this process started, or <see langword="null" /> when it started none.</summary>
     private static string? Started { get; set; }

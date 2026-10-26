@@ -5,7 +5,8 @@
       "src\\PostgresStudio\\PostgresStudio.csproj",
       "samples\\PostgresStudio.SampleData\\PostgresStudio.SampleData.csproj",
       "samples\\PostgresStudio.Sample\\PostgresStudio.Sample.csproj",
-      "tests\\PostgresStudio.Tests\\PostgresStudio.Tests.csproj"
+      "tests\\PostgresStudio.Tests\\PostgresStudio.Tests.csproj",
+      "tests\\PostgresStudio.Integration.Tests\\PostgresStudio.Integration.Tests.csproj"
     ]
   }
 }

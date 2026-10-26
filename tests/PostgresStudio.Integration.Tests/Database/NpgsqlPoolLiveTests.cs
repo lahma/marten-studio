@@ -8,9 +8,8 @@ using Npgsql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
-using PostgresStudio.Tests.Support;
 
-namespace PostgresStudio.Tests;
+namespace PostgresStudio.Integration.Tests.Database;
 
 /// <summary>
 /// NPG10, live: Database › Sessions' pool panel and C01 read a real pool of a real data source, through
@@ -21,23 +20,25 @@ namespace PostgresStudio.Tests;
 /// <remarks>
 /// At Npgsql 10, reading the older instrument names alone, both came back empty and nothing said why: the panel's pool
 /// "not matched to this database", and C01 unavailable because the pool "is not among the pools Npgsql reports in this
-/// process". The container is this class's own (<see cref="DockerPostgres" />), so its <c>postgres</c> database has no
-/// other application's sessions in it.
+/// process". Moved here from <c>tests/PostgresStudio.Tests</c> (PS-5), so the fast suite needs no Docker again; the
+/// database is this class's own, so no other test's sessions are in it.
 /// </remarks>
-public sealed class NpgsqlPoolLiveTests(DockerPostgres postgres) : IClassFixture<DockerPostgres>
+public sealed class NpgsqlPoolLiveTests(PostgresFixture postgres)
 {
     private static readonly StudioScope Scope = new("default", "default", null);
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    [DockerFact]
+    [PostgresFact]
     public async Task The_Sessions_pool_panel_and_C01_read_a_real_pool()
     {
         string npgsql = typeof(NpgsqlDataSource).Assembly.GetName().Version!.ToString(3);
         TestContext.Current.TestOutputHelper?.WriteLine("Npgsql " + npgsql);
 
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, ["ps_npg10_pool"], Token);
+
         await using NpgsqlDataSource source = NpgsqlDataSource.Create(
-            new NpgsqlConnectionStringBuilder(postgres.ConnectionString)
+            new NpgsqlConnectionStringBuilder(owned[0])
             {
                 MaxPoolSize = 5,
                 ApplicationName = "PostgresStudio.Tests.npg10",

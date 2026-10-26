@@ -36,15 +36,7 @@ internal static class EphemeralPostgres
     public static async Task<string> StartAsync(CancellationToken cancellationToken = default)
     {
         bool reuse = ReuseRequested();
-
-        // The image goes to the constructor: Testcontainers 4.15 has obsoleted the parameterless one.
-        PostgreSqlContainer container = new PostgreSqlBuilder("postgres:17-alpine")
-            .WithDatabase(AdminDatabase)
-            .WithLabel(ReuseLabel, "postgres-studio")
-            // Honoured only when the machine has testcontainers.reuse.enable=true in ~/.testcontainers.properties as
-            // well; without it this is simply a new container each run.
-            .WithReuse(reuse)
-            .Build();
+        PostgreSqlContainer container = CreateContainer(reuse);
 
         try
         {
@@ -89,6 +81,21 @@ internal static class EphemeralPostgres
 
         return connectionString;
     }
+
+    /// <summary>
+    /// The container <see cref="StartAsync" /> starts, built and not started: PostgresStudio.Integration.Tests reads its
+    /// reuse identity, which must never be the suite's own.
+    /// </summary>
+    /// <param name="reuse">Whether to ask for reuse; Testcontainers' reuse hash does not depend on it.</param>
+    internal static PostgreSqlContainer CreateContainer(bool reuse) =>
+        // The image goes to the constructor: Testcontainers 4.15 has obsoleted the parameterless one.
+        new PostgreSqlBuilder("postgres:17-alpine")
+            .WithDatabase(AdminDatabase)
+            .WithLabel(ReuseLabel, "postgres-studio")
+            // Honoured only when the machine has testcontainers.reuse.enable=true in ~/.testcontainers.properties as
+            // well; without it this is simply a new container each run.
+            .WithReuse(reuse)
+            .Build();
 
     /// <summary>The environment variable that asks for a reused container.</summary>
     /// <remarks>

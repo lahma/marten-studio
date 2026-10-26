@@ -1,10 +1,9 @@
 using System.Net;
 using System.Text.RegularExpressions;
 
-using MartenStudio.Integration.Tests.Browser;
-using MartenStudio.Sample.Auth;
+using PostgresStudio.Sample.Auth;
 
-namespace MartenStudio.Integration.Tests;
+namespace PostgresStudio.Integration.Tests.Browser;
 
 /// <summary>
 /// The Postgres Studio sample, started exactly as <c>dotnet run</c> starts it - nothing configured - on real Kestrel:
@@ -23,14 +22,11 @@ namespace MartenStudio.Integration.Tests;
 /// static render, so the default source, the tenants source and - with <c>?store=tenants</c> - the three tenant
 /// databases are in the HTML a plain GET returns, listed through the sample's own <c>IPostgresDatabaseSource</c>.
 /// </para>
-/// <para>
-/// It lives here until <c>tests/PostgresStudio.Integration.Tests</c> exists (PS-5), which is its natural home: this
-/// suite builds the sample through a project reference that references none of its assembly.
-/// </para>
+/// <para>Moved here from <c>tests/MartenStudio.Integration.Tests</c> (PS-5), which no longer builds this sample.</para>
 /// </remarks>
 public class PostgresStudioSampleHostTests
 {
-    // ASP.NET Core's default field name, which both samples' sign-in forms use; the Marten sample's constant names it.
+    // ASP.NET Core's default field name, which the sample's sign-in form names through its own constant.
     private static readonly Regex RequestToken = new(
         "name=\"" + LoginEndpoints.AntiforgeryFieldName + "\" value=\"(?<token>[^\"]+)\"",
         RegexOptions.None,
@@ -41,7 +37,7 @@ public class PostgresStudioSampleHostTests
     [PostgresFact]
     public async Task With_nothing_configured_it_starts_its_own_postgres_and_serves_the_studio_with_every_database_in_the_picker()
     {
-        await using SampleHost host = await SampleHost.StartAsync(SampleApp.Postgres, connectionString: null, cancellationToken: Token);
+        await using SampleHost host = await SampleHost.StartAsync(connectionString: null, Token);
 
         host.StudioPath.Should().Be("/postgres");
         host.Log.Should().Contain("throwaway PostgreSQL container was started", "D18's banner says what the sample did");
