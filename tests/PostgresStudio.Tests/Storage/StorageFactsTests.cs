@@ -183,9 +183,13 @@ public class StorageFactsTests
     [Fact]
     public void No_statement_calls_a_size_function_over_a_table_or_deparses_anything()
     {
-        string[] statements = [.. StorageQueries.Statements, StatisticsWindowQueries.CheckpointerSql, StatisticsWindowQueries.BgwriterSql];
+        string[] statements =
+        [
+            .. StorageQueries.Statements, StatisticsWindowQueries.CheckpointerSql, StatisticsWindowQueries.BgwriterSql,
+            StatisticsWindowQueries.ControlPrivilegesSql, StatisticsWindowQueries.ControlSql(true, true),
+        ];
 
-        statements.Should().HaveCount(4);
+        statements.Should().HaveCount(6);
         statements.Should().OnlyContain(x => !LockingSizeFunction.IsMatch(x), "a size function waits behind a migration (B0 G3)");
         statements.Should().OnlyContain(x => !OpensWhatItLists.IsMatch(x), "a list locks nothing it lists (D27)");
         statements.Should().OnlyContain(static x => !x.Contains("pg_locks", StringComparison.Ordinal), "nothing here opens a table, so nothing needs the guard");
@@ -226,8 +230,28 @@ public class StorageFactsTests
     {
         StatisticsWindowQueries.CheckpointerSql.Should().Contain("pg_catalog.pg_stat_checkpointer").And.NotContain("pg_stat_bgwriter");
         StatisticsWindowQueries.BgwriterSql.Should().Contain("pg_catalog.pg_stat_bgwriter").And.NotContain("pg_stat_checkpointer");
-        StatisticsWindowQueries.BgwriterSql.Should().Contain("has_function_privilege('pg_catalog.pg_control_checkpoint()', 'execute')");
         StatisticsWindowQueries.CheckpointerSql.Should().Contain("pg_catalog.pg_is_in_recovery()", "a standby's timeline follows its upstream's");
+    }
+
+    [Fact]
+    public void The_control_functions_are_statements_of_their_own_and_a_refused_one_is_never_named()
+    {
+        string[] window = [StatisticsWindowQueries.CheckpointerSql, StatisticsWindowQueries.BgwriterSql];
+
+        window.Should().OnlyContain(static x => !x.Contains("pg_control_", StringComparison.Ordinal),
+            "a platform that refuses pg_control costs only the timeline and the system identifier, never the window (CAP-fix2)");
+
+        StatisticsWindowQueries.ControlPrivilegesSql.Should()
+            .Contain("has_function_privilege('pg_catalog.pg_control_checkpoint()', 'execute')")
+            .And.Contain("has_function_privilege('pg_catalog.pg_control_system()', 'execute')")
+            .And.NotContain("(pg_catalog.pg_control_", "a CASE does not keep the executor from checking EXECUTE on what it names");
+
+        StatisticsWindowQueries.ControlSql(true, true).Should()
+            .Contain("(pg_catalog.pg_control_checkpoint()).timeline_id")
+            .And.Contain("(pg_catalog.pg_control_system()).system_identifier")
+            .And.NotContain("has_function_privilege");
+        StatisticsWindowQueries.ControlSql(false, true).Should().NotContain("pg_control_checkpoint").And.Contain("null::pg_catalog.int4");
+        StatisticsWindowQueries.ControlSql(true, false).Should().NotContain("pg_control_system").And.Contain("null::pg_catalog.int8");
     }
 
     private static StudioTable Table(string name) => new("store", name, StudioTableKind.Relational, StudioTableOwnership.Owned);
