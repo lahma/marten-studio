@@ -317,7 +317,7 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
 
             return new ServerConnectionHeadroomCheck()
                 .Evaluate(facts with { Limits = limits with { ClientBackends = limits.Available } }, HealthEvaluation.At(DateTimeOffset.UtcNow))
-                .Findings.Single(static x => x.Variant is null);
+                .Findings.Single(static x => x.Variant == ServerConnectionHeadroomCheck.ServerVariant);
         }
     }
 

@@ -1324,7 +1324,12 @@ src/PostgresStudio/Diagnostics/          The public diagnostics read model (D31)
 src/PostgresStudio/Services/Diagnostics/  The API's service, host gate, mapper, snapshot builders, read limiter and JSON
                                          writer, and the Health page's visitor download builder (W5-API)
 tests/PostgresStudio.Tests/Diagnostics/   The mapper over every enum member, the host gate's sentinels, the JSON baselines, the
-                                         limiter and the sections from hand-built facts - no database
+                                         limiter, the sections from hand-built facts, the visitor download and the Snapshot
+                                         menu - no database
+tests/PostgresStudio.Integration.Tests/Diagnostics/  Live: G9 by application as app and probe, a full snapshot that
+                                         creates nothing, three databases behind a database source, an API-only host
+tests/MartenStudio.Integration.Tests/Diagnostics/  Live: the API over a conjoined store (a tenant's finding needs
+                                         IncludeActivity) and a master-table tenancy that lists nothing
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),
