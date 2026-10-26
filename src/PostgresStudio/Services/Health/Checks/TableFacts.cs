@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Schema;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
@@ -272,6 +273,19 @@ internal static class HealthTables
         IReadOnlyList<HealthIndexRow> rows = await context.Sql
             .QueryAsync(HealthTableQueries.Indexes(Targets(set)), HealthTableQueries.ReadIndex, cancellationToken)
             .ConfigureAwait(false);
+
+        // A table somebody holds or awaits ACCESS EXCLUSIVE on - a migration - came back undeparsed rather than queued
+        // behind it (HealthTableQueries.IndexesSql). Its indexes cannot be judged, nor told from a declared one by their
+        // definition, so every check that reads the indexes says "not checked" for this sweep instead of judging part of
+        // the picture - and names no table, because the row is shown at the check's gate.
+        if (rows.Where(static x => x.TableLocked).Select(static x => (x.Schema, x.Table)).Distinct().Count() is > 0 and int locked)
+        {
+            throw new HealthCheckUnavailableException(
+                (locked == 1 ? "A table" : SessionText.Number(locked) + " tables")
+                + " whose indexes this check judges " + (locked == 1 ? "is" : "are")
+                + " locked for a schema change right now (ACCESS EXCLUSIVE, held or awaited - a migration, usually), and reading an "
+                + "index's definition would queue behind it, so the indexes are read again at the next sweep.");
+        }
 
         List<IndexFacts> facts = new(rows.Count);
         foreach (HealthIndexRow row in rows)

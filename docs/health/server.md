@@ -48,13 +48,24 @@ days before it, and **Info** within a year. **PostgreSQL 14's final release is 2
 | 16 | 2023-09-14 | 2028-11-09 |
 | 17 | 2024-09-26 | 2029-11-08 |
 | 18 | 2025-09-25 | 2030-11-14 |
+| 19 | 2026-11-19 (planned) | 2031-11-13 (planned) |
 
-From <https://www.postgresql.org/support/versioning/> (read 2026-10-17): "The PostgreSQL Global Development Group
-supports a major version for 5 years after its initial release." The table ships in the package. A major older
-than its first row is past its end of life. A major newer than its last row is newer than this release of the
-studio, which says so rather than guess a date. The fast suite fails a year before the last row's date, and
-whenever the Postgres image the live suite runs is a major the table lacks, so the table cannot go stale
-quietly.
+From <https://www.postgresql.org/support/versioning/> (read 2026-10-17, and again 2026-10-26, when every row from
+9.6 to 18 still matched): "The PostgreSQL Global Development Group supports a major version for 5 years after its
+initial release." The table ships in the package. A major older than its first row is past its end of life. A
+major newer than its last row is newer than this release of the studio, which says so rather than guess a date.
+The fast suite fails a year before the last row's date, and whenever the Postgres image the live suite runs is a
+major the table lacks, so the table cannot go stale quietly.
+
+**19 is planned.** The versioning page does not list it before it ships. Its general availability is planned for
+2026-11-19 ([PostgreSQL 19 RC 1 Released!](https://www.postgresql.org/about/news/postgresql-19-rc-1-released-3409/),
+2026-10-15), and the policy's five years end with 2031's November minor release, 2031-11-13. A 19 server is quiet
+and says its dates are the plan's. Once 19 ships, the row takes the versioning page's dates.
+
+**Below the supported floor.** The studio supports PostgreSQL 14 and later ([versions](../postgres-versions.md)).
+On an older server S01 fires anyway (13 reached its end of life on 2025-11-13), and its finding adds that the
+server is below the supported floor (14), with the floor as evidence: the studio still reads such a server, read by
+read, but is tested only on 14 and later.
 
 After the final release the community ships no more fixes for that major: no security fix, and no fix for a bug
 that corrupts data. Drivers, extensions and tools drop it in turn. A major upgrade (`pg_upgrade`, a dump and

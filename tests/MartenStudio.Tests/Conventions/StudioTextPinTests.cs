@@ -249,7 +249,7 @@ public class StudioTextPinTests
                 remedies.AutovacuumSetting(table, "autovacuum_vacuum_scale_factor", "0.02", "Vacuums sooner."),
             ];
 
-            all.Where(static x => x is not null).Should().OnlyContain(static x => !x!.IsMigration,
+            all.Where(static x => x is not null).Should().OnlyContain(static x => x!.Kind != HealthRemedyKind.Migration,
                 "design §3.6: migration SQL is a relational table's remedy only - " + remedies.GetType().Name + ", " + kind);
         }
     }
@@ -274,7 +274,7 @@ public class StudioTextPinTests
     {
         HealthRemedy remedy = new("opts.Schema.For<Order>().FillFactor(80);");
 
-        remedy.IsMigration.Should().BeFalse("a StoreOptions line is a configuration line, as it always was");
+        remedy.Kind.Should().Be(HealthRemedyKind.Configuration, "a StoreOptions line is a configuration line, as it always was");
         FluentActions.Invoking(() => new HealthRemedy("ALTER TABLE x SET (fillfactor = 80);"))
             .Should().Throw<ArgumentException>("the constructor's DDL rule is unchanged: only ForMigration makes SQL a remedy");
     }

@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -14,7 +15,14 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <param name="Value">Its value, as <c>pg_settings.setting</c> spells it.</param>
 /// <param name="Source">Where it was set: <c>default</c>, <c>configuration file</c>, <c>client</c>, <c>database</c>, …</param>
 /// <param name="PendingRestart">Whether a change to it waits for the server to restart.</param>
-internal sealed record ServerSetting(string Name, string Value, string? Source, bool PendingRestart);
+internal sealed record ServerSetting(string Name, string Value, string? Source, bool PendingRestart)
+{
+    /// <summary>
+    /// <c>pg_settings.context</c> - <c>postmaster</c>, <c>sighup</c>, <c>superuser</c>, <c>user</c>, ... - or
+    /// <see langword="null" /> when it was not read; what tells a remedy whether the change needs a restart.
+    /// </summary>
+    public string? Context { get; init; }
+}
 
 /// <summary>What S02 reads.</summary>
 /// <param name="ReadAt">When, by the studio's clock.</param>
@@ -104,7 +112,10 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
             .QueryAsync(
                 query,
                 static reader => (
-                    new ServerSetting(reader.GetString(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetBoolean(3)),
+                    new ServerSetting(reader.GetString(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetBoolean(3))
+                    {
+                        Context = reader.IsDBNull(5) ? null : reader.GetString(5),
+                    },
                     reader.GetInt64(4)),
                 cancellationToken)
             .ConfigureAwait(false);
@@ -140,7 +151,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                 + "vacuumed except to stop transaction-id wraparound: every document Marten upserts leaves a dead row version that is "
                 + "never cleared, its tables bloat, the planner's statistics go stale, and the studio's own table checks - and its "
                 + "~ estimated counts - have nothing to read.",
-                "track_counts = on",
+                "on",
                 evaluation.Text));
         }
 
@@ -176,7 +187,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                     + "its own, and the provider manages durability - " + evaluation.Text.ProductName + " cannot verify this setting's meaning on "
                     + facts.Platform.Name + ", so it reports the value rather than judging it. The provider's documentation, or its support, "
                     + "is where to confirm it.",
-                    name + " = " + (bad == "off" ? "on" : "off"),
+                    bad == "off" ? "on" : "off",
                     evaluation.Text) with
                 {
                     Remedy = null,
@@ -185,7 +196,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                 continue;
             }
 
-            findings.Add(Setting(facts, setting, HealthSeverity.Critical, title, why, name + " = " + (bad == "off" ? "on" : "off"), evaluation.Text));
+            findings.Add(Setting(facts, setting, HealthSeverity.Critical, title, why, bad == "off" ? "on" : "off", evaluation.Text));
         }
 
         if (Is(facts.Find("synchronous_commit"), "off") is { } synchronous)
@@ -198,7 +209,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                 "A commit returns before its WAL is flushed, so a crash of the server - not of the application - loses the last few "
                 + "hundred milliseconds of transactions the application was told had committed. For an event store that is events "
                 + "an async projection or a subscriber may already have acted on. It never corrupts the database; it only forgets.",
-                "synchronous_commit = on",
+                "on",
                 evaluation.Text));
         }
         else if (facts.Find("synchronous_commit") is { } other && !string.Equals(other.Value, "on", StringComparison.OrdinalIgnoreCase))
@@ -313,7 +324,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
         HealthSeverity severity,
         string title,
         string why,
-        string line,
+        string safeValue,
         StudioText text)
     {
         List<HealthEvidence> evidence =
@@ -333,9 +344,14 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
             WhyItMatters = why,
             Evidence = evidence,
             Caveat = Caveat(facts),
-            Remedy = new HealthRemedy(
-                "# " + text.ServerSettingComment + ":\n" + line,
-                Where(setting.Source, facts.Platform)),
+            Remedy = ServerSettingRemedy.Build(
+                facts.Platform,
+                setting.Name,
+                safeValue,
+                text,
+                setting.Context,
+                ":",
+                where => Where(setting.Source, where)),
         };
     }
 
@@ -356,14 +372,17 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
         _ => source,
     };
 
-    /// <summary>Where the remedy goes, from where the setting was made.</summary>
-    private static string Where(string? source, PostgresPlatform platform) => source switch
+    /// <summary>
+    /// Where the remedy goes, from where the setting was made - <paramref name="where" /> being the platform's place for it
+    /// (<see cref="ServerSettingRemedy.WhereToSet" />), which only a setting made in the server's own configuration needs.
+    /// </summary>
+    private static string Where(string? source, string where) => source switch
     {
         "client" => "It arrives with the connection: remove it from the Options of the connection string the store's data source "
             + "is built from, and every new connection runs with the server's value.",
         "database" or "user" or "database user" => "It is set for this role or this database, not for the server: whoever owns the "
             + "role or the database resets it there, and new sessions pick the server's value up.",
-        _ => "Set it in " + platform.WhereSettingsChange + ".",
+        _ => "Set it in " + where + ".",
     };
 
     private static string Caveat(DangerousSettingsFacts facts) =>

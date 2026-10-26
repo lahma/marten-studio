@@ -81,5 +81,22 @@ public class PostgresEndOfLifeTableTests
     {
         PostgresCommunitySupport.Find(major)!.FinalRelease.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
             .Should().Be(finalRelease);
+        PostgresCommunitySupport.Find(major)!.Planned.Should().BeFalse("the versioning page lists it (read 2026-10-26)");
+    }
+
+    /// <summary>
+    /// 19 is planned: GA on 2026-11-19 ("PostgreSQL 19 RC 1 Released!", 2026-10-15), and the policy's five years to 2031's
+    /// November minor release. Once the versioning page lists 19 (after GA), the row takes its dates and loses the flag.
+    /// </summary>
+    [Fact]
+    public void PostgreSQL_19_is_planned_until_the_versioning_page_lists_it()
+    {
+        PostgresMajorSupport nineteen = PostgresCommunitySupport.Find(19)!;
+
+        nineteen.Planned.Should().BeTrue();
+        nineteen.FirstRelease.Should().Be(new DateOnly(2026, 11, 19));
+        nineteen.FinalRelease.Should().Be(new DateOnly(2031, 11, 13));
+        nineteen.FinalRelease.DayOfWeek.Should().Be(DayOfWeek.Thursday, "a final release is that November's second-Thursday minor");
+        PostgresCommunitySupport.Majors.Where(static x => x.Planned).Should().ContainSingle("only the release not yet shipped is planned");
     }
 }

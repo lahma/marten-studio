@@ -51,6 +51,15 @@ public class ActivityViewsOffThePollPathTests
     /// </summary>
     private const string HorizonBuilder = "src/PostgresStudio/Internal/Sql/HealthHorizonQueries.cs";
 
+    /// <summary>
+    /// The table checks' builder (W5-VERS): its index read takes one snapshot of <c>pg_locks</c> for an
+    /// <c>AccessExclusiveLock</c> held or awaited on a listed table, so that it never deparses an index of a table a
+    /// migration is altering (<c>pg_get_indexdef</c> opens the table and would queue behind it). It runs only in the
+    /// regular sweep, at <c>HealthInterval</c>, through the sweep's shared index read - which only the health checks call
+    /// (the net below).
+    /// </summary>
+    private const string TableBuilder = "src/PostgresStudio/Internal/Sql/HealthTableQueries.cs";
+
     /// <summary>SQL that reads one of the views: from or join it, or call <c>pg_blocking_pids</c>.</summary>
     internal static readonly Regex ReadsAnActivityView = new(
         @"\b(from|join)\s+(pg_catalog\.)?pg_(stat_activity|locks|prepared_xacts)\b(?!\.)|\bpg_blocking_pids\s*\(",
@@ -66,7 +75,7 @@ public class ActivityViewsOffThePollPathTests
         List<string> offenders =
         [
             .. files
-                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder))
+                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or TableBuilder))
                 .Where(static file => ReadsAnActivityView.IsMatch(File.ReadAllText(file)))
                 .Select(SourceScanner.Relative),
         ];
@@ -79,6 +88,25 @@ public class ActivityViewsOffThePollPathTests
             .Should().BeTrue("the daemon builder reads pg_locks for D02, so its exemption is not an exemption for nothing");
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(HorizonBuilder.Split('/'))))
             .Should().BeTrue("the horizon builder reads pg_stat_activity and pg_prepared_xacts for T14, so its exemption is not an exemption for nothing");
+        ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(TableBuilder.Split('/'))))
+            .Should().BeTrue("the table builder reads pg_locks for its index read, so its exemption is not an exemption for nothing");
+    }
+
+    [Fact]
+    public void The_table_builders_index_read_is_called_only_by_the_health_checks()
+    {
+        List<string> callers =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(static file => SourceScanner.Relative(file) != TableBuilder)
+                .Where(static file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains("HealthTableQueries.Indexes(", StringComparison.Ordinal))
+                .Select(SourceScanner.Relative),
+        ];
+
+        callers.Should().NotBeEmpty("a scan that found no caller would pass for the wrong reason");
+        callers.Should().OnlyContain(
+            static x => StudioProjects.IsUnder(x, "Services", "Health", "Checks"),
+            "the index read's pg_locks snapshot is on the regular sweep's path alone");
     }
 
     [Fact]

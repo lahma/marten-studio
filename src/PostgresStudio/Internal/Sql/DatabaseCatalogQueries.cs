@@ -1313,14 +1313,18 @@ internal static class DatabaseCatalogQueries
         order by a.attnum
         """;
 
-    /// <summary>One relation's constraints, foreign keys excepted: those are read with both ends named.</summary>
+    /// <summary>
+    /// One relation's constraints, foreign keys excepted: those are read with both ends named. And NOT NULL excepted:
+    /// PostgreSQL 18 stores each one in <c>pg_constraint</c> (<c>contype = 'n'</c>, B0 §3), which listed a
+    /// <c>…_not_null</c> constraint of kind "Other" per NOT NULL column, beside the Columns tab that already says it.
+    /// </summary>
     internal const string ConstraintsSql =
         """
         select k.conname::text,
                k.contype::text,
                pg_catalog.pg_get_constraintdef(k.oid, true)
         from pg_catalog.pg_constraint k
-        where k.conrelid = @oid and k.contype <> 'f'
+        where k.conrelid = @oid and k.contype not in ('f', 'n')
         order by case k.contype when 'p' then 0 when 'u' then 1 else 2 end, k.conname
         """;
 

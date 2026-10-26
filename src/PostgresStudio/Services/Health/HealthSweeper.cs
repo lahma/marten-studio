@@ -2,6 +2,7 @@ using System.Diagnostics;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
@@ -191,7 +192,9 @@ internal sealed record HealthSweep(
 /// <b>Expected states are values</b> (AGENTS.md, the memory rule): a gatherer's
 /// <see cref="HealthCheckUnavailableException" />, a privilege Postgres refused (42501), a statement that ran
 /// out of its timeout (57014) or its lock wait (55P03) - each is an <see cref="HealthCheckOutcome.Unavailable" />
-/// row and a Debug line. Anything else is a <see cref="HealthCheckOutcome.Failed" /> row and event 9222, at
+/// row and a Debug line. A refused privilege's row says which grant and who gives it on this platform
+/// (<see cref="PostgresGrants.Refused" />, W5 §2.6), from the sweep's one grant read. Anything else is a
+/// <see cref="HealthCheckOutcome.Failed" /> row and event 9222, at
 /// Warning once per check, database and kind of failure in ten minutes (<see cref="StudioLogThrottle" />),
 /// because a page polls this. A database that will not take a connection is one failure, not one per check.
 /// </para>
@@ -252,6 +255,13 @@ internal sealed class HealthSweeper
     /// </summary>
     internal TimeSpan? SweepBudget { get; set; }
 
+    /// <summary>
+    /// Every health statement's <c>lock_timeout</c>, when a test needs one shorter than the read-only session's own -
+    /// the version matrix's "returns under 300 ms behind somebody's <c>ACCESS EXCLUSIVE</c> lock"; <see langword="null" />
+    /// - always, in a host - is <see cref="ReadOnlySqlOptions.LockTimeout" />'s default.
+    /// </summary>
+    internal TimeSpan? LockTimeout { get; set; }
+
     /// <summary>The tiers a kind of sweep runs.</summary>
     public static IReadOnlySet<HealthCostTier> TiersOf(HealthSweepKind kind) => kind switch
     {
@@ -286,6 +296,11 @@ internal sealed class HealthSweeper
             StatementTimeout = statementTimeout,
             Role = settings.SqlConsoleRole,
         };
+
+        if (LockTimeout is { } lockTimeout)
+        {
+            sessionOptions = sessionOptions with { LockTimeout = lockTimeout };
+        }
 
         await using AsyncServiceScope scope = scopes.CreateAsyncScope();
         await using HealthConnection connection = new(resolved.Target);
@@ -414,6 +429,12 @@ internal sealed class HealthSweeper
             catch (Exception exception)
             {
                 (HealthCheckOutcome outcome, HealthCheckProblem problem) = Classify(exception, budget.IsCancellationRequested);
+
+                if (problem.SqlState == PostgresErrorCodes.InsufficientPrivilege)
+                {
+                    problem = await NamingTheGrantAsync(context, info.Tier, problem).ConfigureAwait(false);
+                }
+
                 Report(info, outcome, exception, storeKey, databaseId);
 
                 return Gathered.Without(descriptor, outcome, null, problem, sql.Statements, checkStarted);
@@ -460,6 +481,13 @@ internal sealed class HealthSweeper
                         $"{info.Code}'s evaluator produced a finding coded {finding.Code}; a check speaks only for its own code.");
                 }
 
+                if (HealthCheckRegistry.FindingProblems(info, finding) is { Count: > 0 } variant)
+                {
+                    throw new HealthSweepRuleException(
+                        $"One of {info.Code}'s findings is of a variant the check does not list; a variant is frozen per code.",
+                        variant[0]);
+                }
+
                 if (finding.Evidence.GroupBy(static x => x.Label, StringComparer.Ordinal).FirstOrDefault(static x => x.Count() > 1) is { } twice)
                 {
                     throw new HealthSweepRuleException(
@@ -494,6 +522,29 @@ internal sealed class HealthSweeper
                 : new HealthCheckProblem("The check's judgement failed: " + exception.GetType().Name + ". " + MessageIsLogged, null, null);
 
             return new HealthCheckResult(info, HealthCheckOutcome.Failed, [], null, problem, gathered.Statements, gathered.Elapsed);
+        }
+    }
+
+    /// <summary>
+    /// A privilege Postgres refused (<c>42501</c>), worded as every "not checked" row is (W5 §2.6): the role the reads run
+    /// as, the grant that covers the advisor's reads, and who can grant it on this platform
+    /// (<see cref="PostgresGrants.Refused" />) - from the sweep's one grant read and its one platform read. Should either
+    /// read fail, the row keeps the sentence it had, which names neither.
+    /// </summary>
+    private static async Task<HealthCheckProblem> NamingTheGrantAsync(HealthCheckContext context, HealthCostTier tier, HealthCheckProblem problem)
+    {
+        try
+        {
+            PostgresGrants grants = await PostgresGrants.SharedAsync(context).ConfigureAwait(false);
+            PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
+
+            return problem with { Reason = PostgresGrants.Refused(server.Platform, grants.ReadsAs, tier) };
+        }
+        catch (Exception)
+        {
+            // Including a cancellation: this runs inside the check's own catch, and the sweep's loop is what rethrows
+            // a cancellation of the whole sweep, at its next turn - nothing here may escape the sweep.
+            return problem;
         }
     }
 

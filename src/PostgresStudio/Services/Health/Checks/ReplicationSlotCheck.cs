@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Services.Health.Checks;
@@ -86,6 +87,13 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
 
     /// <summary>The series prefix; the slot's name follows.</summary>
     public const string SeriesPrefix = "replication.slot-idle-retained:";
+
+    /// <summary>
+    /// <c>max_slot_wal_keep_size</c>'s <c>pg_settings.context</c> for its remedy: not read, so the remedy says nothing about
+    /// a restart - and none is needed, the setting being <c>sighup</c> on every release that has it (13+; B0's catalog dumps
+    /// of 13-18, <c>matrix-*.txt</c>).
+    /// </summary>
+    private const string? MaxSlotWalKeepSizeContext = null;
 
     /// <summary>How long an inactive slot must have held <see cref="RetainedWarningBytes" /> for a Warning.</summary>
     public static readonly TimeSpan RetainedWindow = TimeSpan.FromMinutes(10);
@@ -352,13 +360,18 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
                 + "be rebuilt from a fresh copy of the data. A consumer that is restarted before that catches up and keeps its place.",
             Evidence = evidence,
             Caveat = Caveat(snapshot, text),
-            Remedy = new HealthRemedy(
-                "# " + text.ServerSettingComment + " (PostgreSQL 13+). Raise it only if the WAL volume can hold the difference:\n"
-                + "max_slot_wal_keep_size = 100GB",
-                "Restart the consumer that reads the slot now, before the next checkpoint, so that it catches up and Postgres can "
-                + "recycle the WAL it confirms. If nothing will read the slot again, drop it (pg_drop_replication_slot) and the WAL "
-                + "goes at the next checkpoint. Raising max_slot_wal_keep_size, in " + facts.Server.Platform.WhereSettingsChange + ", "
-                + "buys time only where the disk has room for it."),
+            Remedy = ServerSettingRemedy.Build(
+                facts.Server.Platform,
+                "max_slot_wal_keep_size",
+                "100GB",
+                text,
+                MaxSlotWalKeepSizeContext,
+                " (PostgreSQL 13+). Raise it only if the WAL volume can hold the difference:",
+                static where =>
+                    "Restart the consumer that reads the slot now, before the next checkpoint, so that it catches up and Postgres can "
+                    + "recycle the WAL it confirms. If nothing will read the slot again, drop it (pg_drop_replication_slot) and the WAL "
+                    + "goes at the next checkpoint. Raising max_slot_wal_keep_size, in " + where + ", "
+                    + "buys time only where the disk has room for it."),
         };
     }
 
@@ -396,14 +409,19 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
             Caveat = Caveat(snapshot, text)
                 + " How long it has been inactive is measured across the advisor's own samples, which exist only while somebody watches"
                 + (snapshot.ServerVersion >= 170000 ? ", and by the slot's own inactive_since." : "; from PostgreSQL 17 Postgres records it itself (inactive_since)."),
-            Remedy = new HealthRemedy(
-                "# " + text.ServerSettingComment + " (PostgreSQL 13+): no slot may hold more than this.\n"
-                + "max_slot_wal_keep_size = 50GB",
-                "First the consumer: restart whatever reads the slot - a change data capture connector, a logical subscription, a "
-                + "standby - so that it catches up and Postgres can recycle the WAL; or, if nothing will read it again, drop the slot "
-                + "(pg_drop_replication_slot). Then cap what any slot may hold, in " + facts.Server.Platform.WhereSettingsChange + ": a "
-                + "slot that passes max_slot_wal_keep_size is invalidated instead of filling the disk, and its consumer has to be "
-                + "re-initialised - so size it above the longest outage a consumer should survive."),
+            Remedy = ServerSettingRemedy.Build(
+                facts.Server.Platform,
+                "max_slot_wal_keep_size",
+                "50GB",
+                text,
+                MaxSlotWalKeepSizeContext,
+                " (PostgreSQL 13+): no slot may hold more than this.",
+                static where =>
+                    "First the consumer: restart whatever reads the slot - a change data capture connector, a logical subscription, a "
+                    + "standby - so that it catches up and Postgres can recycle the WAL; or, if nothing will read it again, drop the slot "
+                    + "(pg_drop_replication_slot). Then cap what any slot may hold, in " + where + ": a "
+                    + "slot that passes max_slot_wal_keep_size is invalidated instead of filling the disk, and its consumer has to be "
+                    + "re-initialised - so size it above the longest outage a consumer should survive."),
         };
     }
 

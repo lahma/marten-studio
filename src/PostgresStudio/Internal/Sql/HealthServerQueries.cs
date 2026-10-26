@@ -154,6 +154,8 @@ internal static class HealthServerQueries
     /// <summary>
     /// The named settings as this session sees them - which is what the store's own sessions see, because they open
     /// from the same data source - with where each was set, and every setting whose change waits for a restart. S02.
+    /// Each with its <c>context</c>, which is how a server-setting remedy knows whether a change needs a restart
+    /// (<c>ServerSettingRemedy</c>).
     /// </summary>
     /// <remarks>
     /// <c>pg_settings</c> shows a role that is neither a superuser nor a member of <c>pg_read_all_settings</c> every
@@ -166,7 +168,7 @@ internal static class HealthServerQueries
         ArgumentNullException.ThrowIfNull(names);
 
         return new HealthQuery(
-            "select s.name, s.setting, s.source, s.pending_restart, pg_catalog.count(*) over () as total\n" +
+            "select s.name, s.setting, s.source, s.pending_restart, pg_catalog.count(*) over () as total, s.context\n" +
             "  from pg_catalog.pg_settings s\n" +
             " where s.name = any(@names) or s.pending_restart\n" +
             " order by s.name\n" +

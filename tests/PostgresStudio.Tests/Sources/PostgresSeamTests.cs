@@ -241,7 +241,7 @@ public sealed class PostgresSeamTests : IDisposable
             remedies.AutovacuumSetting(orders, "autovacuum_vacuum_scale_factor", "0.05", "Vacuums sooner."),
         ];
 
-        all.Should().OnlyContain(static x => x != null && x.IsMigration && x.Explanation!.EndsWith(HealthRemedy.HandOverNote));
+        all.Should().OnlyContain(static x => x != null && x.Kind == HealthRemedyKind.Migration && x.Explanation!.EndsWith(HealthRemedy.HandOverNote));
         all.Select(static x => x!.Code).Should().OnlyContain(static code => !code.Contains("\"Order Lines\"") || code.Contains("\"public\".\"Order Lines\""));
 
         all[2]!.Code.Should().Be("REINDEX INDEX CONCURRENTLY \"public\".\"by customer\";");

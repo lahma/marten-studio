@@ -7,6 +7,7 @@
 @using PostgresStudio.Services.Health
 @using PostgresStudio.Services.Live
 @using PostgresStudio.Services.Postgres
+@using PostgresStudio.Services.Server
 @using PostgresStudio.Services.Settings
 @implements IAsyncDisposable
 @inject IPostgresServerReader Server
@@ -91,7 +92,7 @@
                 <dl class="ms-kv ms-pg-overview-facts">
                     <div class="ms-kv-row">
                         <dt class="ms-kv-key">Version</dt>
-                        <dd class="ms-kv-value">PostgreSQL @facts.Version</dd>
+                        <dd class="ms-kv-value">@VersionLine(facts)</dd>
                     </div>
                     <div class="ms-kv-row">
                         <dt class="ms-kv-key">Platform</dt>
@@ -328,6 +329,10 @@
             : [.. tables.Items.OfType<DatabaseRelationSummary>().OrderByDescending(static x => x.SizeBytes).ThenBy(static x => x.Name, StringComparer.Ordinal).Take(LargestTableCount)];
 
     private string ServerValue => server?.Facts is { } facts ? facts.MajorName : started ? "unknown" : "...";
+
+    /// <summary>"PostgreSQL 17.4", and for a server below the supported floor "PostgreSQL 13.23, below the supported floor (14)".</summary>
+    private static string VersionLine(PostgresServerFacts facts) =>
+        "PostgreSQL " + facts.Version + (PostgresFeatures.IsBelowFloor(facts.VersionNumber) ? ", " + PostgresFeatures.BelowFloor : string.Empty);
 
     private string DatabaseCount => State.AvailableDatabases.Count.ToString("N0", CultureInfo.InvariantCulture);
 

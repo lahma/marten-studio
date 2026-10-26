@@ -102,10 +102,37 @@ public class ServerChecksTests
     [Fact]
     public void A_major_newer_than_the_table_is_quiet_and_says_so_rather_than_guessing()
     {
-        HealthVerdict verdict = EndOfLife(190001, Today);
+        HealthVerdict verdict = EndOfLife(200001, Today);
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Contain("PostgreSQL 19 is newer than").And.Contain("ends at 18");
+        verdict.Note.Should().Contain("PostgreSQL 20 is newer than").And.Contain("ends at 19");
+    }
+
+    /// <summary>W5-VERS: 19 is in the table, planned - its release candidate is quiet and says the dates are the plan's.</summary>
+    [Fact]
+    public void PostgreSQL_19_before_its_release_is_quiet_and_says_its_dates_are_planned()
+    {
+        HealthVerdict verdict = EndOfLife(190000, Today);
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Be(
+            "PostgreSQL 19's first release is planned for 2026-11-19, and the community's policy supports a major for five years "
+            + "from it: until 2031-11-13, which https://www.postgresql.org/support/versioning/ publishes once it ships.");
+    }
+
+    /// <summary>W5-VERS: a server below the supported floor says so in S01's finding, which 13's end of life raises anyway.</summary>
+    [Fact]
+    public void PostgreSQL_13_s_finding_names_the_supported_floor()
+    {
+        HealthFinding finding = EndOfLife(130023, Today).Findings.Should().ContainSingle().Subject;
+
+        finding.WhyItMatters.Should().EndWith(
+            " It is also below the supported floor (14): the studio still reads it, read by read, but is tested only on 14 and "
+            + "later, so a check here may not check.");
+        finding.Evidence.Should().Contain(new HealthEvidence("Studio's supported floor", "PostgreSQL 14"));
+
+        EndOfLife(140019, Today).Findings.Single().Evidence.Should().NotContain(static x => x.Label == "Studio's supported floor",
+            "14 is the floor itself");
     }
 
     [Fact]

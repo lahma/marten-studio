@@ -96,6 +96,8 @@ public class HealthCheckConventionTests
     [InlineData(typeof(UngatedStatementsCheck), "not behind the activity gate")]
     [InlineData(typeof(UntypedCheck), "without deriving from HealthCheck<TFacts>")]
     [InlineData(typeof(ConstructedCheck), "no parameterless constructor")]
+    [InlineData(typeof(ShapelessVariantCheck), "is not lower-case words joined by hyphens")]
+    [InlineData(typeof(RepeatedVariantCheck), "lists the variant 'deadlocks' twice")]
     public void The_rules_catch_a_check_that_breaks_them(Type offender, string problem)
     {
         Type k01 = StudioHealthChecks.Registry.Find("K01")!.Info.CheckType;
@@ -110,6 +112,26 @@ public class HealthCheckConventionTests
     public void A_well_formed_check_passes_every_rule()
     {
         HealthCheckRegistry.Problems([typeof(WellFormedCheck)]).Should().BeEmpty();
+        HealthCheckRegistry.Problems([typeof(VariantsCheck)]).Should().BeEmpty("lower-case words joined by hyphens, each once");
+        HealthCheckRegistry.Describe(typeof(VariantsCheck)).Variants.Should().Equal("deadlocks", "temp-files");
+    }
+
+    /// <summary>The anti-vacuity half of the finding rule: a variant the check does not list is refused, and so is one on a check that lists none.</summary>
+    [Fact]
+    public void A_finding_of_a_variant_its_check_does_not_list_is_refused()
+    {
+        HealthCheckInfo variants = HealthCheckRegistry.Describe(typeof(VariantsCheck));
+        HealthCheckInfo none = HealthCheckRegistry.Describe(typeof(WellFormedCheck));
+
+        HealthCheckRegistry.FindingProblems(variants, Finding("K86", "temp-files")).Should().BeEmpty();
+        HealthCheckRegistry.FindingProblems(variants, Finding("K86", null)).Should().BeEmpty("a finding with no variant is the shape every check has today");
+        HealthCheckRegistry.FindingProblems(variants, Finding("K86", "rollbacks")).Should().ContainSingle()
+            .Which.Should().Contain("not one of its variants (deadlocks, temp-files)");
+        HealthCheckRegistry.FindingProblems(none, Finding("K85", "deadlocks")).Should().ContainSingle()
+            .Which.Should().Contain("lists no variants");
+
+        static HealthFinding Finding(string code, string? variant) =>
+            new() { Code = code, Severity = HealthSeverity.Info, Title = "t", WhyItMatters = "w", Variant = variant };
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -312,4 +334,13 @@ public class HealthCheckConventionTests
 
     [HealthCheck("K85", HealthArea.Configuration, HealthCostTier.InProcess, "Well formed", Gate = HealthGate.None)]
     private sealed class WellFormedCheck : Quiet;
+
+    [HealthCheck("K86", HealthArea.Configuration, HealthCostTier.InProcess, "Two kinds of finding", Gate = HealthGate.None, Variants = ["deadlocks", "temp-files"])]
+    private sealed class VariantsCheck : Quiet;
+
+    [HealthCheck("K87", HealthArea.Configuration, HealthCostTier.InProcess, "A variant in capitals", Variants = ["TempFiles"])]
+    private sealed class ShapelessVariantCheck : Quiet;
+
+    [HealthCheck("K88", HealthArea.Configuration, HealthCostTier.InProcess, "A variant twice", Variants = ["deadlocks", "deadlocks"])]
+    private sealed class RepeatedVariantCheck : Quiet;
 }

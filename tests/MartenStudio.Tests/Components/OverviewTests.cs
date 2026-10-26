@@ -63,6 +63,30 @@ public class OverviewTests
         page.Markup.Should().NotContain("Password", "no connection string is ever rendered");
     }
 
+    /// <summary>W5-VERS: a server below the supported floor (14) is said to be, beside the store's facts; a supported one is not.</summary>
+    [Theory]
+    [InlineData("13.23", "13.23, below the supported floor (14)")]
+    [InlineData("12.22", "12.22, below the supported floor (14)")]
+    [InlineData("14.24", null)]
+    [InlineData("17.2", null)]
+    [InlineData(null, null)]
+    public void A_server_below_the_supported_floor_says_so(string? version, string? line)
+    {
+        using var context = new StudioComponentContext();
+        context.StoreInfo.WithStore(postgresVersion: version);
+
+        var page = context.Render<Overview>();
+
+        if (line is null)
+        {
+            page.FindAll(".ms-overview-floor").Should().BeEmpty();
+        }
+        else
+        {
+            page.KeyValue("PostgreSQL").Should().Be(line);
+        }
+    }
+
     /// <summary>
     /// A version nobody could read is drawn differently from one that is zero or missing: "cannot report"
     /// is a value (plan section 4.8).

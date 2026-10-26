@@ -413,6 +413,13 @@
                     </div>
 
                     <div class="ms-kv">
+                        @if (System.Version.TryParse(store.PostgresVersion, out System.Version? parsed) && PostgresStudio.Services.Server.PostgresFeatures.IsBelowFloor(parsed))
+                        {
+                            <div class="ms-kv-row ms-overview-floor">
+                                <span class="ms-kv-key">PostgreSQL</span>
+                                <span class="ms-kv-value">@store.PostgresVersion, @PostgresStudio.Services.Server.PostgresFeatures.BelowFloor</span>
+                            </div>
+                        }
                         <div class="ms-kv-row">
                             <span class="ms-kv-key">Tenancy</span>
                             <span class="ms-kv-value">@store.Cardinality</span>

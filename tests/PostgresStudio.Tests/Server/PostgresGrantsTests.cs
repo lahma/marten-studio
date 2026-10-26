@@ -1,0 +1,179 @@
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Server;
+
+namespace PostgresStudio.Tests.Server;
+
+/// <summary>
+/// "Not checked" is a sentence that names the grant (W5 §2.6, issue #8 A7): every grant on every platform, pinned as the
+/// page prints it - the privilege, the role the reads run as, and who can grant it there.
+/// </summary>
+public class PostgresGrantsTests
+{
+    /// <summary>What each grant's "this needs ..." says.</summary>
+    private static readonly Dictionary<string, string> Needs = new(StringComparer.Ordinal)
+    {
+        ["pg_read_all_stats"] = "pg_read_all_stats (pg_monitor includes it)",
+        ["pg_stat_scan_tables"] = "pg_stat_scan_tables (pg_monitor includes it)",
+        ["pg_read_all_settings"] = "pg_read_all_settings (pg_monitor includes it)",
+        ["pg_monitor"] = "pg_monitor",
+        ["pg_signal_backend"] = "pg_signal_backend",
+        ["pg_maintain"] = "pg_maintain",
+    };
+
+    /// <summary>Who can grant a predefined role, per platform, as the sentence ends.</summary>
+    private static readonly Dictionary<PostgresPlatformKind, string> Grantors = new()
+    {
+        [PostgresPlatformKind.SelfHosted] = "On a self-hosted server a superuser can grant it.",
+        [PostgresPlatformKind.AmazonRds] = "On Amazon RDS for PostgreSQL the master user (a member of rds_superuser) can grant it.",
+        [PostgresPlatformKind.AmazonAurora] = "On Amazon Aurora PostgreSQL the master user (a member of rds_superuser) can grant it.",
+        [PostgresPlatformKind.Azure] = "On Azure Database for PostgreSQL the server admin (a member of azure_pg_admin) can grant it.",
+        [PostgresPlatformKind.CloudSql] = "On Google Cloud SQL for PostgreSQL a member of cloudsqlsuperuser, such as the postgres user, can grant it.",
+        [PostgresPlatformKind.Neon] = "On Neon a member of neon_superuser can grant it.",
+        [PostgresPlatformKind.Supabase] = "On Supabase the postgres role can grant it.",
+    };
+
+    public static TheoryData<PostgresPlatformKind, string> Pairs
+    {
+        get
+        {
+            TheoryData<PostgresPlatformKind, string> pairs = [];
+
+            foreach (PostgresPlatformKind kind in Enum.GetValues<PostgresPlatformKind>())
+            {
+                foreach (string grant in Needs.Keys)
+                {
+                    pairs.Add(kind, grant);
+                }
+            }
+
+            return pairs;
+        }
+    }
+
+    private static PostgresPlatform Platform(PostgresPlatformKind kind) => new(kind, kind == PostgresPlatformKind.SelfHosted ? null : "a marker");
+
+    [Theory]
+    [MemberData(nameof(Pairs))]
+    public void Every_grant_on_every_platform_names_the_privilege_the_role_and_the_grantor(PostgresPlatformKind kind, string privilege)
+    {
+        PostgresGrant grant = PostgresGrant.Roles.Single(x => x.Privilege == privilege);
+
+        PostgresGrants.NotChecked(grant, Platform(kind), "app_reader").Should().Be(
+            "Not checked: this needs " + Needs[privilege] + " for role app_reader. " + Grantors[kind]);
+    }
+
+    [Fact]
+    public void Every_platform_and_every_grant_has_its_row_here()
+    {
+        Grantors.Keys.Should().BeEquivalentTo(Enum.GetValues<PostgresPlatformKind>(), "a new platform words its grantor");
+        Needs.Keys.Should().BeEquivalentTo(PostgresGrant.Roles.Select(static x => x.Privilege), "a new grant words what it needs");
+    }
+
+    [Fact]
+    public void The_brief_s_example_reads_as_it_was_written()
+    {
+        PostgresGrants.NotChecked(PostgresGrant.ReadAllStats, Platform(PostgresPlatformKind.AmazonAurora), "app_reader").Should().Be(
+            "Not checked: this needs pg_read_all_stats (pg_monitor includes it) for role app_reader. On Amazon Aurora PostgreSQL the "
+            + "master user (a member of rds_superuser) can grant it.");
+    }
+
+    [Theory]
+    [InlineData(PostgresPlatformKind.SelfHosted)]
+    [InlineData(PostgresPlatformKind.AmazonAurora)]
+    [InlineData(PostgresPlatformKind.Supabase)]
+    public void A_column_privilege_is_the_tables_owners_to_grant_on_every_platform(PostgresPlatformKind kind)
+    {
+        PostgresGrants.NotChecked(PostgresGrant.ColumnSelect("store.docs", "tenant_id"), Platform(kind), "app_reader").Should().Be(
+            "Not checked: this needs SELECT on column tenant_id of store.docs for role app_reader. The owner of store.docs can grant it.");
+    }
+
+    [Theory]
+    [InlineData(PostgresPlatformKind.SelfHosted, "On a self-hosted server a superuser can grant it.")]
+    [InlineData(PostgresPlatformKind.AmazonRds, "On Amazon RDS for PostgreSQL the master user (a member of rds_superuser) can grant it.")]
+    public void A_refused_privilege_names_the_role_pg_monitor_and_the_grantor(PostgresPlatformKind kind, string grantor)
+    {
+        PostgresGrants.Refused(Platform(kind), "probe").Should().Be(
+            "Not checked: Postgres refused role probe a read this check needs (SQLSTATE 42501); pg_monitor covers every statistics "
+            + "view the advisor reads. " + grantor);
+    }
+
+    [Fact]
+    public void A_refused_read_of_rows_names_SELECT_on_the_tables_and_their_owner_never_a_monitoring_role()
+    {
+        PostgresGrants.Refused(Platform(PostgresPlatformKind.AmazonAurora), "reader", HealthCostTier.BoundedData).Should().Be(
+            "Not checked: Postgres refused role reader a read this check needs (SQLSTATE 42501); it reads a bounded slice of the "
+            + "rows of the tables it judges, which needs SELECT on them - their owner can grant it, and no monitoring role gives it.");
+    }
+
+    [Theory]
+    [InlineData(PostgresPlatformKind.SelfHosted,
+        "On a self-hosted server a superuser can run CREATE EXTENSION pgstattuple; it is not a trusted extension, so a database owner cannot.")]
+    [InlineData(PostgresPlatformKind.AmazonRds,
+        "On Amazon RDS for PostgreSQL the master user (a member of rds_superuser) can run CREATE EXTENSION pgstattuple, where the engine version offers it.")]
+    [InlineData(PostgresPlatformKind.AmazonAurora,
+        "On Amazon Aurora PostgreSQL the master user (a member of rds_superuser) can run CREATE EXTENSION pgstattuple, where the engine version offers it.")]
+    [InlineData(PostgresPlatformKind.Azure,
+        "On Azure Database for PostgreSQL the server admin (a member of azure_pg_admin) can run CREATE EXTENSION pgstattuple once the azure.extensions server parameter allows it.")]
+    [InlineData(PostgresPlatformKind.CloudSql,
+        "On Google Cloud SQL for PostgreSQL a member of cloudsqlsuperuser, such as the postgres user, can run CREATE EXTENSION pgstattuple.")]
+    [InlineData(PostgresPlatformKind.Neon, "On Neon a member of neon_superuser can run CREATE EXTENSION pgstattuple.")]
+    [InlineData(PostgresPlatformKind.Supabase, "On Supabase the postgres role can run CREATE EXTENSION pgstattuple.")]
+    public void An_untrusted_extension_names_who_may_create_it_on_each_platform(PostgresPlatformKind kind, string who)
+    {
+        PostgresGrants.ExtensionNotInstalled("pgstattuple", trusted: false, Platform(kind)).Should().Be(
+            "Not checked: this needs the pgstattuple extension, which this database does not have. " + who);
+    }
+
+    [Fact]
+    public void A_trusted_extension_is_any_creator_on_the_databases()
+    {
+        PostgresGrants.ExtensionNotInstalled("pg_trgm", trusted: true, Platform(PostgresPlatformKind.AmazonRds)).Should().Be(
+            "Not checked: this needs the pg_trgm extension, which this database does not have. It is a trusted extension, so a role "
+            + "with CREATE on this database can run CREATE EXTENSION pg_trgm.");
+    }
+
+    [Fact]
+    public void The_three_extensions_a_check_may_need_are_untrusted()
+    {
+        PostgresGrants.KnownExtensions.Should().BeEquivalentTo(new Dictionary<string, bool>
+        {
+            ["pg_stat_statements"] = false,
+            ["pgstattuple"] = false,
+            ["hypopg"] = false,
+        });
+    }
+
+    [Fact]
+    public void Membership_through_pg_monitor_holds_what_it_includes_and_a_superuser_holds_every_role()
+    {
+        PostgresGrants monitor = new("mon", false, [new("pg_read_all_stats", true, false), new("pg_monitor", true, true)]);
+
+        monitor.Holds(PostgresGrant.ReadAllStats).Should().BeTrue("pg_monitor includes it");
+        monitor.Holds(PostgresGrant.StatScanTables).Should().BeTrue();
+        monitor.Holds(PostgresGrant.SignalBackend).Should().BeFalse();
+        monitor.Holds(PostgresGrant.ColumnSelect("store.docs", "tenant_id")).Should().BeFalse("a column privilege is never read here");
+        monitor.IsProviderAdmin.Should().BeFalse();
+        monitor.MemberOf.Should().Be("pg_monitor");
+
+        PostgresGrants superuser = new("postgres", true, []);
+        superuser.Holds(PostgresGrant.Maintain).Should().BeTrue();
+        superuser.MemberOf.Should().Be("superuser");
+
+        PostgresGrants admin = new("master", false, [new("rds_superuser", true, true)]);
+        admin.IsProviderAdmin.Should().BeTrue("a provider admin, not a superuser (B0 §5)");
+        admin.Superuser.Should().BeFalse();
+    }
+
+    [Fact]
+    public void No_kind_of_remedy_may_be_a_grant()
+    {
+        FluentActions.Invoking(static () => HealthRemedy.ForMigration("GRANT pg_read_all_stats TO app;", "Lets it read."))
+            .Should().Throw<ArgumentException>().WithMessage("*never a privilege change*");
+        FluentActions.Invoking(static () => HealthRemedy.ForServerSetting("revoke all on schema public from public", null))
+            .Should().Throw<ArgumentException>();
+        FluentActions.Invoking(static () => HealthRemedy.ForManagedPlatform("grant pg_monitor to app", null))
+            .Should().Throw<ArgumentException>();
+        FluentActions.Invoking(static () => new HealthRemedy("GRANT pg_monitor TO app;"))
+            .Should().Throw<ArgumentException>();
+    }
+}

@@ -244,6 +244,13 @@ internal sealed record HealthIndexRow
     /// </summary>
     public string? TableBuildPhase { get; init; }
 
+    /// <summary>
+    /// Whether somebody holds or awaits an <c>ACCESS EXCLUSIVE</c> lock on the table - a migration's <c>ALTER</c> - so the
+    /// index was not deparsed and <see cref="Definition" /> and <see cref="Columns" /> are empty: <c>pg_get_indexdef</c>
+    /// opens the table and would queue behind it (<see cref="HealthTableQueries.IndexesSql" />).
+    /// </summary>
+    public bool TableLocked { get; init; }
+
     /// <summary>How many index builds in this database the reading role cannot see the table of.</summary>
     public int UnseenIndexBuilds { get; init; }
 
@@ -523,11 +530,25 @@ internal static class HealthTableQueries
     /// its partitioned parent index's - with what the redundancy, validity, use and HOT judgements need.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>pg_get_indexdef</c> reads the system cache, as Weasel's own index read does and as the Schema
     /// screen's always has; it is called for the listed tables' indexes only, never a partition's. The
     /// referenced columns come from <c>pg_depend</c>, where Postgres records the columns an expression or a
     /// predicate reads, and from <c>indkey</c> for the plain ones - an index backing a constraint depends on the
     /// constraint rather than on its columns, so <c>pg_depend</c> alone would miss them.
+    /// </para>
+    /// <para>
+    /// <b>Never deparsed behind a migration.</b> <c>pg_get_indexdef</c>, in every form, builds its deparse context with
+    /// <c>deparse_context_for</c>, which opens the indexed table with <c>AccessShareLock</c> and closes it again
+    /// (<c>set_relation_column_names</c>, PG 14-19): nothing is held once a call returns, but behind somebody's
+    /// <c>ACCESS EXCLUSIVE</c> lock on the table the call queues, like a size function (B0 §3) - measured by
+    /// <c>VersionMatrixLiveTests</c> on 14 to 19, where the regular sweep's index checks all waited out the
+    /// <c>lock_timeout</c>. So <c>locked</c> reads <c>pg_locks</c> once (a shared-memory snapshot, no relation lock) for
+    /// any <c>AccessExclusiveLock</c> held or awaited on a listed table, and such a table's indexes come back undeparsed,
+    /// marked in the last column (<see cref="HealthIndexRow.TableLocked" />); the reader makes that the index checks'
+    /// "not checked" for this sweep rather than judging half a table. A lock taken between the snapshot and the call
+    /// still waits, bounded by <c>lock_timeout</c>, as before.
+    /// </para>
     /// </remarks>
     internal const string IndexesSql =
         """
@@ -537,6 +558,14 @@ internal static class HealthTableQueries
             join pg_catalog.pg_namespace n on n.nspname = m.schema_name
             join pg_catalog.pg_class c on c.relnamespace = n.oid and c.relname = m.table_name
             where c.relkind in ('r', 'p')
+        ),
+        locked as (
+            select distinct k.relation as oid
+            from pg_catalog.pg_locks k
+            where k.locktype = 'relation'
+              and k.mode = 'AccessExclusiveLock'
+              and k.database = (select db.oid from pg_catalog.pg_database db where db.datname = pg_catalog.current_database())
+              and k.relation in (select l.oid from listed l)
         ),
         indexes as (
             select l.nspname, l.relname as table_name, l.oid as table_oid,
@@ -587,10 +616,12 @@ internal static class HealthTableQueries
                i.table_name::text,
                i.index_name::text,
                i.amname::text,
-               pg_catalog.pg_get_indexdef(i.oid),
-               array(select pg_catalog.pg_get_indexdef(i.oid, k, true)
-                     from pg_catalog.generate_series(1, i.indnatts::int) as k
-                     order by k),
+               case when i.table_oid in (select lk.oid from locked lk) then null
+                    else pg_catalog.pg_get_indexdef(i.oid) end,
+               case when i.table_oid in (select lk.oid from locked lk) then null
+                    else array(select pg_catalog.pg_get_indexdef(i.oid, k, true)
+                               from pg_catalog.generate_series(1, i.indnatts::int) as k
+                               order by k) end,
                i.indnkeyatts::int,
                i.indclass::pg_catalog.oid[],
                i.indcollation::pg_catalog.oid[],
@@ -640,7 +671,8 @@ internal static class HealthTableQueries
                (select b.phase
                 from builds b
                 where b.relid in (select t.relid from table_tree t where t.root = i.table_oid)
-                limit 1)
+                limit 1),
+               i.table_oid in (select lk.oid from locked lk)
         from indexes i
         left join rolled r on r.root = i.oid
         left join pg_catalog.pg_stat_user_indexes s on s.indexrelid = i.oid
@@ -983,6 +1015,7 @@ internal static class HealthTableQueries
             IsImmediate = reader.GetBoolean(20),
             NullsNotDistinct = reader.GetBoolean(21),
             TableBuildPhase = reader.IsDBNull(22) ? null : reader.GetString(22),
+            TableLocked = !reader.IsDBNull(23) && reader.GetBoolean(23),
         };
     }
 

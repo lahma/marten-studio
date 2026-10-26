@@ -79,11 +79,14 @@ internal sealed class FakeServerReader : IPostgresServerReader
 
     public List<bool> Refreshes { get; } = [];
 
+    /// <summary>What the read answers: 17.4, self-hosted, unless a test says otherwise.</summary>
+    public PostgresServerFacts Facts { get; init; } = new(DateTimeOffset.UnixEpoch, 170004, "17.4", PostgresPlatform.SelfHosted);
+
     public Task<PostgresServerRead> ReadAsync(StudioScope scope, bool refresh = false, CancellationToken cancellationToken = default)
     {
         Requests.Add(scope);
         Refreshes.Add(refresh);
-        return Task.FromResult(new PostgresServerRead(new PostgresServerFacts(DateTimeOffset.UnixEpoch, 170004, "17.4", PostgresPlatform.SelfHosted), null));
+        return Task.FromResult(new PostgresServerRead(Facts, null));
     }
 }
 

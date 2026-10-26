@@ -1241,6 +1241,13 @@ tests/MartenStudio.Integration.Tests/Health/  Live Postgres: each check fires an
 docs/health/                             One file per health area, one "## <code> <title>" anchor per check
 tests/MartenStudio.Integration.Tests/Tenancy/  Live Postgres: first navigation per tenancy shape changes nothing,
                                          and the enumerations that still apply a lookup table
+src/PostgresStudio/Services/Server/       The server facts every W5 packet uses: the PostgreSQL version gates
+                                         (PostgresFeatures), the reading role's grants and the "not checked"
+                                         sentences (PostgresGrants), and server-setting remedies
+tests/PostgresStudio.Tests/Server/        The gate table, the grant sentence per platform and grant, the remedy kinds
+tests/MartenStudio.Integration.Tests/Versions/  The version matrix (PostgreSQL 14-18, 19's RC as a preview leg), the
+                                         Aurora shim, MatrixReads and VersionMatrixLiveTests; Marten-free, so it
+                                         moves to tests/PostgresStudio.Integration.Tests whole (PS-5)
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

@@ -448,7 +448,7 @@
             {
                 <div class="ms-health-remedy">
                     <div class="ms-health-remedy-header">
-                        <span class="ms-health-remedy-title">@(remedy.IsMigration ? HealthRemedy.MigrationHeading : "What to change")</span>
+                        <span class="ms-health-remedy-title">@remedy.Heading</span>
                         @if (remedy.Requires is { } feature)
                         {
                             <span class="@(finding.RemedyAvailable ? "ms-health-requirement" : "ms-health-requirement ms-health-requirement-missing")">

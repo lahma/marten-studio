@@ -57,6 +57,27 @@ internal sealed class HealthCheckAttribute(string code, HealthArea area, HealthC
     /// needs, and never run.
     /// </summary>
     public string? RequiresFeature { get; set; }
+
+    /// <summary>
+    /// The fixed kinds of finding the check makes - <c>deadlocks</c>, <c>temp-files</c> - each a lower-case word or words
+    /// joined by hyphens, or empty (the default) for a check with one kind of finding.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Frozen per code</b> (API design §1.10, D31): a variant, like a code, is never reused for another meaning, never
+    /// renamed, and keeps its meaning within its code - a host keys its own wording on <c>Code</c> and
+    /// <see cref="HealthFinding.Variant" />, so a renamed variant is a host's wording silently gone. A check may only set
+    /// <see cref="HealthFinding.Variant" /> to a value listed here (<see cref="HealthCheckRegistry.FindingProblems" />),
+    /// and the registry refuses a list that is malformed or repeats itself.
+    /// </para>
+    /// <para>
+    /// <b>Not the subject.</b> <see cref="HealthFinding.Subject" /> names the object a finding is about - a table, an
+    /// index, a setting, a slot - and never the kind of finding; a check with fixed kinds lists them here instead. The
+    /// five existing checks whose subject still carries a kind (C08, R01, S02, D02, T03) are split by the API packet, with
+    /// wave 6's mute-key change, and list nothing here until then.
+    /// </para>
+    /// </remarks>
+    public string[] Variants { get; set; } = [];
 }
 
 /// <summary>A check's metadata, read once from its <see cref="HealthCheckAttribute" />.</summary>
@@ -76,6 +97,9 @@ internal sealed record HealthCheckInfo(
     StudioFeatureRequirement? Requires,
     Type CheckType)
 {
+    /// <summary>The fixed kinds of finding it makes, frozen per code (<see cref="HealthCheckAttribute.Variants" />); empty for one kind.</summary>
+    public IReadOnlyList<string> Variants { get; init; } = [];
+
     /// <summary>
     /// Where the published docs live for this build of the studio; the area's file and anchor are appended.
     /// </summary>
