@@ -220,21 +220,17 @@ internal sealed class IdleInTransactionCheck : HealthCheck<IdleInTransactionFact
             WhyItMatters =
                 "A transaction left open between statements keeps every lock it took - a schema apply, or any ALTER on those "
                 + "tables, waits behind it, and everything after the ALTER waits too - holds back vacuum for the whole database while "
-                + "it has a snapshot, and once it has written it holds a transaction id that Marten's high-water detection can wait "
-                + "behind, so async projections stop moving (D01). It is nearly always application code that began a transaction "
-                + "and never finished it: a session that was never disposed, an exception path that skipped SaveChangesAsync, a "
-                + "debugger paused at a breakpoint." + harmlessNote + leaderNote,
+                + "it has a snapshot, and once it has written it holds a transaction id" + evaluation.Text.IdleTransactionIdCost
+                + ". It is nearly always application code that began a transaction "
+                + "and never finished it: a session that was never disposed, an exception path that skipped "
+                + evaluation.Text.SkippedCommit + ", a debugger paused at a breakpoint." + harmlessNote + leaderNote,
             Evidence = evidence,
             Caveat = SessionEvidence.Caveat(facts.Visibility, facts.ReadAt, evaluation.Text.StatementsOnSessionsPage),
             Link = SessionEvidence.SessionsLink,
             Remedy = new HealthRemedy(
                 evaluation.Text.EndWhatYouBeginCode,
                 "The studio never ends another session. Find the code path from the application name and the time it went idle; "
-                + "a server-wide idle_in_transaction_session_timeout is the DBA's backstop. With the HotCold leadership lock "
-                + "transaction-scoped (Events.UseAdvisoryLockTransaction, the default at Marten 9.39 and 9.40) it can also end the "
-                + "daemon's leadership session: one shorter than the minute or so the leader sits idle in its transaction - after "
-                + "taking the lead at 9.39, between DistributedLock's keepalives at 9.50.2 - or any timeout with "
-                + "Events.UseMonitoredAdvisoryLock off."),
+                + "a server-wide idle_in_transaction_session_timeout is the DBA's backstop." + evaluation.Text.IdleTimeoutLeaderClause),
         });
     }
 

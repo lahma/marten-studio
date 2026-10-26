@@ -102,9 +102,8 @@ internal sealed class PreparedTransactionCheck : HealthCheck<PreparedTransaction
                 "A prepared transaction is the first half of a two-phase commit. It outlives the session and the connection that made "
                 + "it, survives a restart of the server, and keeps every lock and every row version it holds until something says "
                 + "COMMIT PREPARED or ROLLBACK PREPARED - no timeout ends it. One whose transaction manager went away holds back vacuum "
-                + "for the whole database for good, blocks whatever needs its locks, and, having a transaction id, can hold Marten's "
-                + "high-water mark still so that async projections stop. Resolve it from the transaction manager that prepared it; "
-                + "by hand only after finding out whether it should commit or roll back.",
+                + "for the whole database " + evaluation.Text.PreparedTransactionHolds + ". Resolve it from the transaction manager "
+                + "that prepared it; by hand only after finding out whether it should commit or roll back.",
             Evidence = evidence,
             Caveat =
                 "Read in pg_prepared_xacts, for this database, at " + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)

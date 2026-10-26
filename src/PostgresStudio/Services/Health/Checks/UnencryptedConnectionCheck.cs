@@ -76,7 +76,7 @@ internal sealed class UnencryptedConnectionCheck : HealthCheck<UnencryptedConnec
             Severity = facts.IsProduction ? HealthSeverity.Warning : HealthSeverity.Info,
             Title = "Connections from " + SourceWords.DataSource(evaluation.Text) + " reach Postgres unencrypted",
             WhyItMatters =
-                "The connection crosses the network in plain text: every statement, every document and event it reads or writes, and "
+                "The connection crosses the network in plain text: every statement, " + evaluation.Text.ConnectionCarries + ", and "
                 + "the login itself, where the server does not ask for SCRAM. Anybody on the path - a shared network, a compromised "
                 + "host, a load balancer's mirror - can read it, and without a checked certificate can also stand in for the server.",
             Evidence =

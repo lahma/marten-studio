@@ -266,7 +266,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         if (result.IsSaved && result.Preview is { } preview && preview.HasDrops)
         {
             logger.DocumentWriteRoundTripDropped(
-                UserName(),
+                StudioLogValue.Cap(UserName()),
                 WriteAuditText.Sanitize(preview.DocumentTypeName ?? alias, WriteAuditText.MaxTokenLength),
                 WriteAuditText.Sanitize(id, WriteAuditText.MaxTokenLength),
                 preview.DroppedPaths.Length,

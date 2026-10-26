@@ -280,7 +280,7 @@ internal sealed class MartenRelationshipNodeSource : IRelationshipNodeSource
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogWarning(
-                exception, "Marten Studio could not read what references '{Id}' of '{Alias}'", id, alias);
+                exception, "Marten Studio could not read what references '{Id}' of '{Alias}'", StudioLogValue.Cap(id), StudioLogValue.Cap(alias));
 
             return ReferencedBy.Failed(RelationshipReads.Describe(exception, gate));
         }

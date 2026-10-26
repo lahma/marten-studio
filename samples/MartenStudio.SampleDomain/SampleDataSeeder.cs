@@ -129,6 +129,9 @@ public sealed class SampleDataSeeder : IInitialData
         await connection.OpenAsync(cancellation);
 
         await RelationalDemoSchema.ApplyAsync(connection, logger, cancellation);
+
+        // Wave 6: the studio's narrowed role reads the demo's schemas, which exist from here on (SampleConsoleRole).
+        await SampleConsoleRole.GrantAsync(connection, logger, cancellationToken: cancellation);
     }
 
     /// <summary>The seeded documents, behind <see cref="SeedMarker" />.</summary>

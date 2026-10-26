@@ -133,7 +133,7 @@ internal sealed class ChecksumFailuresCheck : HealthCheck<ChecksumFacts>
             WhyItMatters =
                 "A checksum failure is a page that changed on disk after Postgres wrote it: the storage, a controller, memory, a "
                 + "filesystem or a copy taken the wrong way corrupted it. The statement that read it failed with \"invalid page\", and "
-                + "the rows on that page - documents, events, index entries - cannot be read until it is repaired. Corruption seldom "
+                + "the rows on that page - " + evaluation.Text.PageRowsExamples + " - cannot be read until it is repaired. Corruption seldom "
                 + "stops at one page: check the storage and the server's memory, find the relation from the server log (\"page "
                 + "verification failed\" names its file), and restore it from a backup or a replica that does not have the damage. "
                 + "zero_damaged_pages and ignore_checksum_failure are not repairs - they throw the page away or use it as it is (S02).",

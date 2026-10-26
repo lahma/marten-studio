@@ -2566,7 +2566,11 @@ internal sealed partial class EventDataService : IEventDataService
             ? LogLevel.Debug
             : throttle.WarningOrDebug("EventDataService." + what, storeKey, databaseId, StudioLogThrottle.KindOf(exception));
 
-        logger.EventReadFailed(level, exception, what, storeKey, databaseId, sqlState);
+        // The scope as the address spelled it, escaped and bounded for the log (wave 6); the throttle keys on it as it is.
+        if (logger.IsEnabled(level))
+        {
+            logger.EventReadFailed(level, exception, what, StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId), sqlState);
+        }
     }
 
     /// <summary>

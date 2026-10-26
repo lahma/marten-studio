@@ -122,21 +122,12 @@ internal sealed class LongRunningStatementCheck : HealthCheck<LongRunningFacts>
                   + SessionText.Duration(ConnectionThresholds.LongRunningWarning) + ", the longest for " + SessionText.Duration(longest),
             WhyItMatters =
                 "A statement that runs this long holds its locks and its snapshot for as long as it runs: vacuum cannot clean up "
-                + "behind it anywhere in the database, and anything that needs a stronger lock on the same tables - a schema apply, "
-                + "a rebuild's truncate - queues behind it. " + evaluation.Text.LongStatementCause,
+                + "behind it anywhere in the database, and anything that needs a stronger lock on the same tables - "
+                + evaluation.Text.StrongerLockExamples + " - queues behind it. " + evaluation.Text.LongStatementCause,
             Evidence = evidence,
             Caveat = SessionEvidence.Caveat(facts.Visibility, facts.ReadAt, evaluation.Text.StatementsOnSessionsPage),
             Link = SessionEvidence.SessionsLink,
-            Remedy = new HealthRemedy(
-                """
-                // A ceiling for Marten's own statements, in seconds (Npgsql's default is 30):
-                opts.CommandTimeout = 60;
-
-                // ...and an index for the filter a slow document query uses:
-                opts.Schema.For<Order>().Index(x => x.CustomerId);
-                """,
-                "CommandTimeout bounds what Marten sends; it does not reach another application's statements. The Query page's index "
-                + "advisor says which index a document query needs."),
+            Remedy = new HealthRemedy(evaluation.Text.LongStatementRemedyCode, evaluation.Text.LongStatementRemedyExplanation),
         });
     }
 

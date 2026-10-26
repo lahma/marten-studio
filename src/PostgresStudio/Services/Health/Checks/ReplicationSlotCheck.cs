@@ -367,8 +367,8 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
                     : SessionText.Number(ordered.Count) + " inactive replication slots are at " + WalText.Percent(CapCriticalShare) + " of max_slot_wal_keep_size or more"),
             WhyItMatters =
                 "max_slot_wal_keep_size caps the WAL a slot may hold. Past it, Postgres stops keeping WAL for the slot (wal_status "
-                + "'unreserved') and removes the files at the next checkpoint; the slot is then lost, and whatever consumed it - a change "
-                + "data capture connector reading Marten's events, a logical subscription, a standby - stops receiving changes and has to "
+                + "'unreserved') and removes the files at the next checkpoint; the slot is then lost, and whatever consumed it - "
+                + text.ChangeDataCaptureConsumer + ", a logical subscription, a standby - stops receiving changes and has to "
                 + "be rebuilt from a fresh copy of the data. A consumer that is restarted before that catches up and keeps its place.",
             Evidence = evidence,
             Caveat = Caveat(snapshot, text),
@@ -409,7 +409,7 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
                   + SessionText.Duration(RetainedWindow) + " or more",
             WhyItMatters =
                 "A replication slot keeps every WAL file its consumer has not confirmed, and with no consumer connected it confirms "
-                + "nothing: it grows with every write the server takes - every Marten append, every document upsert - until the WAL volume "
+                + "nothing: it grows with every write the server takes - " + text.EveryWriteExamples + " - until the WAL volume "
                 + "fills and Postgres stops accepting writes altogether"
                 + (snapshot.HasSlotCap
                     ? ", or until it passes max_slot_wal_keep_size and is invalidated, which loses its consumer's place. "
@@ -524,7 +524,7 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
     private static string Caveat(ReplicationSlotSnapshot snapshot, StudioText text) =>
         "Read in pg_replication_slots at " + snapshot.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
         + "; what a slot holds is the server's WAL position less the slot's restart_lsn. Slots are the server's, not this "
-        + "database's, so every store database on this server counts the same ones. A physical slot's name, and a logical slot's "
+        + "database's, so " + text.EverySourceDatabase + " counts the same ones. A physical slot's name, and a logical slot's "
         + "name, plugin and database when it is this database's, are shown only with "
         + text.OptionName("Capabilities.ViewDatabaseActivity") + "; a logical slot of another database is never named here.";
 }

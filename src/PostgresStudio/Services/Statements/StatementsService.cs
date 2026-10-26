@@ -720,8 +720,17 @@ internal sealed class StatementsService : IStatementsService
         string databaseId = resolved.Target.Identity;
         PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
 
+        // Each studio's own template, called with the throttle's level right here, as every other throttled event's caller
+        // does: LogLevelsTests follows a level back to where it was computed, and cannot through a dispatcher's parameter.
         LogLevel level = throttle.WarningOrDebug("Statements.Read", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
-        logger.StatementsReadFailed(settings.Text.Product, level, exception, storeKey, databaseId, postgres?.SqlState);
+        if (settings.Text.Product == StudioProduct.PostgresStudio)
+        {
+            logger.PostgresStudioStatementsReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
+        }
+        else
+        {
+            logger.StatementsReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
+        }
 
         return PostgresFailure.IsConnectionFailure(exception)
             ? "The studio could not connect to this database."

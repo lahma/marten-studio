@@ -44,7 +44,7 @@ internal sealed class JitShareCheck : HealthCheck<JitFacts>
     /// <summary>The series of a statement's JIT time, in milliseconds.</summary>
     internal const string JitSeries = "statements.jit-ms:";
 
-    /// <summary>The remedy's line.</summary>
+    /// <summary>The remedy's line in MartenStudio (<see cref="Settings.StudioText.JitRemedyCode" /> is each studio's).</summary>
     internal const string RemedyCode =
         "opts.ConfigureNpgsqlDataSourceBuilder(b =>\n"
         + "    b.ConnectionStringBuilder.Options = ((b.ConnectionStringBuilder.Options ?? string.Empty) + \" -c jit=off\").Trim());";
@@ -100,7 +100,7 @@ internal sealed class JitShareCheck : HealthCheck<JitFacts>
         if (over.Count == 0)
         {
             return HealthVerdict.Quiet(
-                "No statement of the store's own role on its tables spent more than " + TableText.Percent(WarningShare)
+                "No statement of " + evaluation.Text.OwnRoleOnTables + " spent more than " + TableText.Percent(WarningShare)
                 + " of its time compiling, over " + TableText.Count(MinCalls) + " calls or more.");
         }
 
@@ -131,23 +131,18 @@ internal sealed class JitShareCheck : HealthCheck<JitFacts>
             Code = "T23",
             Severity = HealthSeverity.Warning,
             Title = over.Count == 1
-                ? "JIT compilation takes " + TableText.Percent(over[0].Share) + " of a store statement's time"
-                : "JIT compilation takes more than " + TableText.Percent(WarningShare) + " of the time of " + TableText.Count(over.Count) + " store statements",
+                ? "JIT compilation takes " + TableText.Percent(over[0].Share) + " of a " + evaluation.Text.JudgedStatementNoun + "'s time"
+                : "JIT compilation takes more than " + TableText.Percent(WarningShare) + " of the time of " + TableText.Count(over.Count)
+                  + " " + evaluation.Text.JudgedStatementNoun + "s",
             WhyItMatters =
                 "PostgreSQL compiles a statement to machine code when its estimated cost passes jit_above_cost, and compiles it again on "
                 + "every execution: the compiled code is not kept. That pays off for a long analytical query and costs a short one more "
-                + "than it saves - milliseconds of compiling for a statement that runs in less. Marten's statements are short, and a "
-                + "large table's cost estimates are what push them over the line.",
+                + "than it saves - milliseconds of compiling for a statement that runs in less. " + evaluation.Text.ShortStatementsJit,
             Evidence = evidence,
-            Caveat = StatementWindows.Caveat(facts.Read, first, evaluation.History)
+            Caveat = StatementWindows.Caveat(facts.Read, first, evaluation.History, evaluation.Text)
                 + " JIT time is the generation, inlining, optimisation and emission (and, from PostgreSQL 17, deforming) times "
                 + "pg_stat_statements records, all of them inside the statement's execution time.",
-            Remedy = new HealthRemedy(
-                RemedyCode,
-                "Turns JIT off for the store's own connections only - every data source Marten builds, tenant databases included - and "
-                + "leaves the server's setting alone for everybody else. A data source the host builds itself (UseNpgsqlDataSource) "
-                + "takes the same Options on its own NpgsqlDataSourceBuilder. To keep JIT for the occasional long query, a DBA can "
-                + "raise jit_above_cost for the store's role instead."),
+            Remedy = new HealthRemedy(evaluation.Text.JitRemedyCode, evaluation.Text.JitRemedyExplanation),
             DocumentTypes = [.. over.SelectMany(static x => x.Statement.DocumentTypes).Distinct()],
             GatedSchemas = [.. over.SelectMany(static x => x.Statement.GatedSchemas).Distinct(StringComparer.Ordinal)],
         });

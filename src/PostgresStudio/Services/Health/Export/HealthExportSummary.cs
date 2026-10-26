@@ -251,8 +251,13 @@ internal sealed record HealthExportSummary
     /// the result is reused for. Codes and counts only, like the data.
     /// </summary>
     /// <param name="interval">How long the result is served before the next run.</param>
-    public string Describe(TimeSpan interval)
+    /// <param name="words">
+    /// The studio's words for a source it could not reach (<see cref="StudioText.ExportSourceNoun" />), or
+    /// <see langword="null" /> for MartenStudio's.
+    /// </param>
+    public string Describe(TimeSpan interval, StudioText? words = null)
     {
+        words ??= StudioText.Marten;
         StringBuilder text = new();
 
         if (Problem is not null)
@@ -295,7 +300,7 @@ internal sealed record HealthExportSummary
 
             if (StoresNotReached > 0)
             {
-                text.Append("; ").Append(Count(StoresNotReached, "store", "stores")).Append(" could not be reached");
+                text.Append("; ").Append(Count(StoresNotReached, words.ExportSourceNoun, words.ExportSourceNoun + "s")).Append(" could not be reached");
             }
 
             if (DatabasesTimedOut > 0)

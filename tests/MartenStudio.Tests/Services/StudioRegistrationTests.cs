@@ -92,6 +92,9 @@ public class StudioRegistrationTests
         (typeof(HealthSweeper), ServiceLifetime.Singleton, How.Type, typeof(HealthSweeper)),
         (typeof(HealthSweepCache), ServiceLifetime.Singleton, How.Type, typeof(HealthSweepCache)),
         (typeof(StatementTextCache), ServiceLifetime.Singleton, How.Type, typeof(StatementTextCache)),
+
+        // Wave 6 (SEC2): the protector a browser's mute key is kept under, once per process, from the host's Data Protection.
+        (typeof(HealthMuteKeys), ServiceLifetime.Singleton, How.Factory, typeof(HealthMuteKeys)),
         (typeof(HealthMutes), ServiceLifetime.Scoped, How.Type, typeof(HealthMutes)),
         (typeof(HealthAlerts), ServiceLifetime.Scoped, How.Type, typeof(HealthAlerts)),
         (typeof(IHealthService), ServiceLifetime.Scoped, How.Type, typeof(HealthService)),
@@ -201,6 +204,7 @@ public class StudioRegistrationTests
         [typeof(StudioLogThrottle)] = typeof(StudioLogThrottle),
         [typeof(IStudioRuntime)] = typeof(MartenStudioRuntime),
         [typeof(ISqlConsoleService)] = typeof(SqlConsoleService),
+        [typeof(HealthMuteKeys)] = typeof(HealthMuteKeys),
     };
 
     /// <summary>

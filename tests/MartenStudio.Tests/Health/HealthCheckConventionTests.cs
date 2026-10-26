@@ -60,8 +60,9 @@ public class HealthCheckConventionTests
         typeof(HealthCheckRegistry).GetConstructors().Should().ContainSingle(
             "a second public constructor is one the container may prefer")
             .Which.GetParameters().Select(static x => x.ParameterType).Should().Equal(
-                [typeof(PostgresStudio.Services.Settings.StudioDescriptor), typeof(IStudioRuntime)],
-                "the descriptor is resolvable only where a studio registered one, and then it is the list to use");
+                [typeof(PostgresStudio.Services.Settings.StudioDescriptor), typeof(IStudioRuntime), typeof(PostgresStudio.Services.Settings.IStudioSettings)],
+                "the descriptor is resolvable only where a studio registered one, and then it is the list to use; the settings carry "
+                + "the studio's words, which title a check its own way (wave 6)");
     }
 
     [Fact]

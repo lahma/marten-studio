@@ -152,8 +152,8 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                 HealthSeverity.Critical,
                 "Postgres is not counting changes to tables (track_counts = off), so autovacuum cannot tell which ones need it",
                 "Autovacuum chooses what to vacuum and analyse from the per-table counters track_counts keeps. With it off, nothing is "
-                + "vacuumed except to stop transaction-id wraparound: every document Marten upserts leaves a dead row version that is "
-                + "never cleared, its tables bloat, the planner's statistics go stale, and the studio's own table checks - and its "
+                + "vacuumed except to stop transaction-id wraparound: " + evaluation.Text.UnclearedDeadRows
+                + ", its tables bloat, the planner's statistics go stale, and the studio's own table checks - and its "
                 + "~ estimated counts - have nothing to read.",
                 "on",
                 evaluation.Text));
@@ -190,12 +190,14 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                 evaluation.Text));
         }
 
-        foreach ((string name, string bad, string title, string why) in ProductionOnly)
+        foreach ((string name, string bad, string title, Func<StudioText, string> whyIn) in ProductionOnly)
         {
             if (Is(facts.Find(name), bad) is not { } setting)
             {
                 continue;
             }
+
+            string why = whyIn(evaluation.Text);
 
             if (facts.Platform.Kind == PostgresPlatformKind.Neon && name == "fsync")
             {
@@ -242,8 +244,8 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                 HealthSeverity.Info,
                 "Commits are acknowledged before they reach disk (synchronous_commit = off)",
                 "A commit returns before its WAL is flushed, so a crash of the server - not of the application - loses the last few "
-                + "hundred milliseconds of transactions the application was told had committed. For an event store that is events "
-                + "an async projection or a subscriber may already have acted on. It never corrupts the database; it only forgets.",
+                + "hundred milliseconds of transactions the application was told had committed." + evaluation.Text.LostCommitsMeaning
+                + " It never corrupts the database; it only forgets.",
                 "on",
                 evaluation.Text));
         }
@@ -283,7 +285,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                         + (pending.Count > PendingNamed ? " and " + SessionText.Number(pending.Count - PendingNamed) + " more" : string.Empty)),
                     new HealthEvidence("Platform", facts.Platform.Name),
                 ],
-                Caveat = Caveat(facts),
+                Caveat = Caveat(facts, evaluation.Text),
             });
         }
 
@@ -325,27 +327,27 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
         _ => "synchronous_commit = " + value + ".",
     };
 
-    /// <summary>The settings that are Critical in Production only: what is bad, and what it costs.</summary>
-    private static readonly (string Name, string Bad, string Title, string Why)[] ProductionOnly =
+    /// <summary>The settings that are Critical in Production only: what is bad, and what it costs in the studio's words.</summary>
+    private static readonly (string Name, string Bad, string Title, Func<StudioText, string> Why)[] ProductionOnly =
     [
         ("fsync", "off",
             "Postgres does not wait for its writes to reach disk (fsync = off), in Production",
-            "With fsync off, a power cut or an operating-system crash can leave the database corrupted - not only missing the last "
+            static _ => "With fsync off, a power cut or an operating-system crash can leave the database corrupted - not only missing the last "
             + "transactions, but with tables and indexes that no longer agree - and the only cure is the last backup. Postgres's own "
             + "documentation says to turn it off only for a database that can be recreated from scratch."),
         ("full_page_writes", "off",
             "Postgres does not protect pages against a torn write (full_page_writes = off), in Production",
-            "A page half-written when the power went cannot be repaired from the WAL without the full-page image this setting writes, "
+            static _ => "A page half-written when the power went cannot be repaired from the WAL without the full-page image this setting writes, "
             + "so crash recovery can leave a corrupted page behind. It is safe only on storage that guarantees an 8 kB page is written "
             + "whole, which ordinary disks and most cloud volumes do not promise."),
         ("zero_damaged_pages", "on",
             "Postgres replaces any damaged page it reads with zeros (zero_damaged_pages = on), in Production",
-            "Every page that fails to read cleanly is silently turned into an empty one, and the rows on it are gone for good - "
-            + "including a document or an event the store still points at. It is a last resort for salvaging a broken database, "
+            static text => "Every page that fails to read cleanly is silently turned into an empty one, and the rows on it are gone for good - "
+            + text.ZeroedPageRows + ". It is a last resort for salvaging a broken database, "
             + "set for one session by a superuser, never a way to run one."),
         ("ignore_checksum_failure", "on",
             "Postgres goes on using pages whose checksum does not match (ignore_checksum_failure = on), in Production",
-            "A checksum failure is the one warning Postgres gets that a page changed on disk behind its back. With this on, it reads "
+            static _ => "A checksum failure is the one warning Postgres gets that a page changed on disk behind its back. With this on, it reads "
             + "the damaged page as though it were good, and the corruption spreads into whatever is written from it. See S03 for "
             + "failures already counted."),
     ];
@@ -378,7 +380,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
             Title = title,
             WhyItMatters = why,
             Evidence = evidence,
-            Caveat = Caveat(facts),
+            Caveat = Caveat(facts, text),
             Remedy = ServerSettingRemedy.Build(
                 facts.Platform,
                 setting.Name,
@@ -386,7 +388,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                 text,
                 setting.Context,
                 ":",
-                where => Where(setting.Source, where)),
+                where => Where(setting.Source, where, text)),
         };
     }
 
@@ -411,18 +413,17 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
     /// Where the remedy goes, from where the setting was made - <paramref name="where" /> being the platform's place for it
     /// (<see cref="ServerSettingRemedy.WhereToSet" />), which only a setting made in the server's own configuration needs.
     /// </summary>
-    private static string Where(string? source, string where) => source switch
+    private static string Where(string? source, string where, StudioText text) => source switch
     {
-        "client" => "It arrives with the connection: remove it from the Options of the connection string the store's data source "
-            + "is built from, and every new connection runs with the server's value.",
+        "client" => "It arrives with the connection: remove it from the Options of the connection string " + SourceWords.DataSource(text)
+            + " is built from, and every new connection runs with the server's value.",
         "database" or "user" or "database user" => "It is set for this role or this database, not for the server: whoever owns the "
             + "role or the database resets it there, and new sessions pick the server's value up.",
         _ => "Set it in " + where + ".",
     };
 
-    private static string Caveat(DangerousSettingsFacts facts) =>
+    private static string Caveat(DangerousSettingsFacts facts, StudioText text) =>
         "Read in pg_settings at " + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
-        + ", on a connection from the store's own data source - so a value set for its role, its database or in its connection "
-        + "string is the one the store's sessions run with. Only the settings named in this check's documentation are judged; sizing "
+        + ", " + text.SettingsReadOn + ". Only the settings named in this check's documentation are judged; sizing "
         + "settings never are.";
 }

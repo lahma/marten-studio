@@ -938,7 +938,7 @@ internal sealed class HealthService : IHealthService
         /// <summary>What it would take to pass <paramref name="gate" />, naming the setting or the policy.</summary>
         public string WhyNot(HealthGate gate) => gate switch
         {
-            HealthGate.Database => "needs the store policy to allow this database as a whole, with no tenant selected in the policy's resource",
+            HealthGate.Database => owner.settings.Text.DatabaseGateReason,
             HealthGate.Activity => activityRefusal ?? "needs " + owner.capabilities.OptionFor(StudioCapability.ViewDatabaseActivity),
             _ => "withheld",
         };

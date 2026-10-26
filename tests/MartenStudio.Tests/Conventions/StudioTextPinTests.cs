@@ -162,6 +162,112 @@ public class StudioTextPinTests
     }
 
     /// <summary>
+    /// Wave 6: the sentences the shared checks said themselves until Postgres Studio needed its own, each now a
+    /// <see cref="StudioText" /> member, held to the literal the check wrote - so a MartenStudio host reads every finding,
+    /// caveat, remedy and status row as before.
+    /// </summary>
+    [Fact]
+    public void The_shared_checks_sentences_routed_through_the_text_are_as_the_checks_wrote_them()
+    {
+        Marten.CheckTitles.Should().BeEmpty("MartenStudio titles every check as its attribute does");
+        Marten.CheckTitle("S02", "Settings that blind or endanger the store").Should().Be("Settings that blind or endanger the store");
+
+        Marten.AmbiguousPoolNotChecked.Should().Be(
+            "More than one Npgsql pool in this process uses this database's connection string - the host's own "
+            + "AddNpgsqlDataSource beside Marten's, or NpgsqlConnections opened with Marten's connection string - and Npgsql "
+            + "reports each under that same name. Their numbers differ, so which pool is Marten's cannot be told, and the "
+            + "pool is not judged; naming the host's data source (NpgsqlDataSourceBuilder.Name), or giving its connections an "
+            + "Application Name of their own, tells them apart.");
+        Marten.PoolBorrowers.Should().Be("Every Marten session, query and daemon batch in this process");
+        Marten.PoolRemedyCode.Should().Be(
+            "// The ceiling is the connection string's \"Maximum Pool Size\" (Npgsql's default is 100).\n"
+            + "// For every data source Marten builds from a connection string:\n"
+            + "opts.ConfigureNpgsqlDataSourceBuilder(b => b.ConnectionStringBuilder.MaxPoolSize = 200);");
+        Marten.PoolRemedyExplanation.Should().Be(
+            "Raise it only when the server has the headroom (C03, and C02 for a store with a database per tenant), and after "
+            + "ruling out sessions that hold their connection too long: dispose every IDocumentSession (await using), and keep "
+            + "transactions short. A data source the host builds itself (UseNpgsqlDataSource) is configured where it is built.");
+        Marten.NextConnectionExamples.Should().Be("a pool that wants to grow, a deployment's new instance, the async daemon's next connection");
+        Marten.EveryDatabasesConnections.Should().Be("this store's and everybody else's");
+        Marten.FewerConnectionsRemedyCode.Should().Be(
+            "// Fewer connections per process - every data source Marten builds from a connection string:\n"
+            + "opts.ConfigureNpgsqlDataSourceBuilder(b => b.ConnectionStringBuilder.MaxPoolSize = 50);");
+        Marten.IdleTransactionIdCost.Should().Be(" that Marten's high-water detection can wait behind, so async projections stop moving (D01)");
+        Marten.SkippedCommit.Should().Be("SaveChangesAsync");
+        Marten.IdleTimeoutLeaderClause.Should().Be(
+            " With the HotCold leadership lock transaction-scoped (Events.UseAdvisoryLockTransaction, the default at Marten 9.39 and 9.40) "
+            + "it can also end the daemon's leadership session: one shorter than the minute or so the leader sits idle in its transaction - "
+            + "after taking the lead at 9.39, between DistributedLock's keepalives at 9.50.2 - or any timeout with "
+            + "Events.UseMonitoredAdvisoryLock off.");
+        Marten.StrongerLockExamples.Should().Be("a schema apply, a rebuild's truncate");
+        Marten.LongStatementRemedyCode.Should().Be(
+            "// A ceiling for Marten's own statements, in seconds (Npgsql's default is 30):\n"
+            + "opts.CommandTimeout = 60;\n"
+            + "\n"
+            + "// ...and an index for the filter a slow document query uses:\n"
+            + "opts.Schema.For<Order>().Index(x => x.CustomerId);");
+        Marten.LongStatementRemedyExplanation.Should().Be(
+            "CommandTimeout bounds what Marten sends; it does not reach another application's statements. The Query page's index "
+            + "advisor says which index a document query needs.");
+        Marten.PreparedTransactionHolds.Should().Be(
+            "for good, blocks whatever needs its locks, and, having a transaction id, can hold Marten's high-water mark still so that "
+            + "async projections stop");
+        Marten.RetriedFailures.Should().Be("optimistic concurrency on documents, an expected version on an event stream, unique violations");
+        Marten.ScopePolicyNoun.Should().Be("store");
+        Marten.ChangeDataCaptureConsumer.Should().Be("a change data capture connector reading Marten's events");
+        Marten.EveryWriteExamples.Should().Be("every Marten append, every document upsert");
+        Marten.EverySourceDatabase.Should().Be("every store database on this server");
+        Marten.UnclearedDeadRows.Should().Be("every document Marten upserts leaves a dead row version that is never cleared");
+        Marten.LostCommitsMeaning.Should().Be(" For an event store that is events an async projection or a subscriber may already have acted on.");
+        Marten.ZeroedPageRows.Should().Be("including a document or an event the store still points at");
+        Marten.SettingsReadOn.Should().Be(
+            "on a connection from the store's own data source - so a value set for its role, its database or in its connection string "
+            + "is the one the store's sessions run with");
+        Marten.PageRowsExamples.Should().Be("documents, events, index entries");
+        Marten.ConnectionCarries.Should().Be("every document and event it reads or writes");
+        ExpensiveStatementsCheck.GenericPlanCaveat(Marten).Should().Be(
+            " The plan is PostgreSQL's generic plan for the text as pg_stat_statements recorded it, in which the statement's "
+            + "constants - the JSON member names Marten writes into its SQL included - are placeholders; a filter on data ->> $n "
+            + "can never use an expression index in that plan, so a sequential scan filtering on one does not show that the table "
+            + "lacks an index.");
+        Marten.OwnRoleOnTables.Should().Be("the store's own role on its tables");
+        Marten.OneOfTheTables.Should().Be("one of its tables");
+        Marten.SlowStatementCause.Should().Be(
+            "A statement this slow is most often a query over a large document table with no index for its filter, or one that reads "
+            + "far more rows than it returns.");
+        Marten.UnboundedRead.Should().Be("a ToListAsync() with no Take() or paging");
+        Marten.PlanReadsNoneOfTheTables.Should().Be("The plan reads none of the store's tables directly");
+        Marten.UnnamedPlanScans.Should().Be(" of a partition, or of a table this store does not declare or the studio does not show, not named here");
+        Marten.NothingRecorded.Should().Be(
+            "pg_stat_statements has recorded no statement of the store's own role in this database yet - since its last reset, "
+            + "or since the extension was installed - so there is nothing to judge until the application has run.");
+        Marten.PartitionedIndexRepair.Should().Be(
+            " On a partitioned table a re-apply cannot resume the build: Weasel reads only the partitioned table's own indexes, "
+            + "and rebuilding under the same child index name fails while the leftover index on the partition is still there. A "
+            + "DBA drops that leftover partition index first; the next apply then builds the index again. The partition is not "
+            + "named here, because Marten names a tenant's partition after the tenant.");
+        Marten.DeclaredIndexRebuild.Should().Be(" Marten's configuration declares it, so a re-apply drops it and builds it again.");
+        Marten.AppendOnlyExamples.Should().Be("an event log such as mt_events, a history table");
+        Marten.HorizonDeadRowsLabel.Should().Be("Dead rows in the store's tables");
+        Marten.LogicalSlotConsumers.Should().Be("Debezium, a CDC pipeline on mt_events, a subscription");
+        Marten.ConfiguredKeyColumnClause.Should().Be(
+            ", and a column the table's own configuration adds to every key (a conjoined Marten table's tenant_id) need not lead");
+        Marten.JudgedStatementNoun.Should().Be("store statement");
+        Marten.ShortStatementsJit.Should().Be("Marten's statements are short, and a large table's cost estimates are what push them over the line.");
+        Marten.JitRemedyCode.Should().Be(
+            "opts.ConfigureNpgsqlDataSourceBuilder(b =>\n"
+            + "    b.ConnectionStringBuilder.Options = ((b.ConnectionStringBuilder.Options ?? string.Empty) + \" -c jit=off\").Trim());");
+        Marten.JitRemedyExplanation.Should().Be(
+            "Turns JIT off for the store's own connections only - every data source Marten builds, tenant databases included - and "
+            + "leaves the server's setting alone for everybody else. A data source the host builds itself (UseNpgsqlDataSource) "
+            + "takes the same Options on its own NpgsqlDataSourceBuilder. To keep JIT for the occasional long query, a DBA can "
+            + "raise jit_above_cost for the store's role instead.");
+        Marten.DatabaseGateReason.Should().Be("needs the store policy to allow this database as a whole, with no tenant selected in the policy's resource");
+        Marten.ExportSourceNoun.Should().Be("store");
+        Marten.PickInTheHeader.Should().Be("a store and database");
+    }
+
+    /// <summary>
     /// T07's and T08's sentence about a Marten table whose partitions disagree on <c>autovacuum_enabled</c>, composed from
     /// <see cref="StudioText.MartenTablePartitionParameters" />, byte for byte as 0.4 wrote it - for every kind of Marten
     /// table, since each says it.

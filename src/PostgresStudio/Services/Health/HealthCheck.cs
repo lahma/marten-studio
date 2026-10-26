@@ -85,7 +85,10 @@ internal sealed class HealthCheckAttribute(string code, HealthArea area, HealthC
 /// <param name="Area">The area.</param>
 /// <param name="Tier">The cost tier.</param>
 /// <param name="Gate">Who may see its findings.</param>
-/// <param name="Title">What it looks for, and its docs heading.</param>
+/// <param name="Title">
+/// What it looks for, as this studio says it - its status row's and its findings' title. The attribute's, unless the studio's
+/// words have one of their own (<see cref="Settings.StudioText.CheckTitles" />).
+/// </param>
 /// <param name="Requires">The feature it needs to run, or <see langword="null" />.</param>
 /// <param name="CheckType">The class.</param>
 internal sealed record HealthCheckInfo(
@@ -99,6 +102,13 @@ internal sealed record HealthCheckInfo(
 {
     /// <summary>The fixed kinds of finding it makes, frozen per code (<see cref="HealthCheckAttribute.Variants" />); empty for one kind.</summary>
     public IReadOnlyList<string> Variants { get; init; } = [];
+
+    /// <summary>
+    /// The attribute's title, which is the docs heading in every studio: what <see cref="DocsHeading" />,
+    /// <see cref="DocsAnchor" /> and <see cref="DocsUrl" /> are built from, so a studio that words a title its own way still
+    /// links to the one heading the docs carry.
+    /// </summary>
+    public string DocsTitle { get; init; } = Title;
 
     /// <summary>
     /// Where the published docs live for this build of the studio; the area's file and anchor are appended.
@@ -115,10 +125,10 @@ internal sealed record HealthCheckInfo(
     public string DocsFile => "docs/health/" + AreaFileName(Area);
 
     /// <summary>The heading the docs file must carry for this check.</summary>
-    public string DocsHeading => "## " + Code + " " + Title;
+    public string DocsHeading => "## " + Code + " " + DocsTitle;
 
     /// <summary>The heading's anchor, as GitHub derives it.</summary>
-    public string DocsAnchor => Anchor(Code + " " + Title);
+    public string DocsAnchor => Anchor(Code + " " + DocsTitle);
 
     /// <summary>The published page and anchor, for the finding's "Docs" link.</summary>
     public string DocsUrl => DocsRoot + AreaFileName(Area) + "#" + DocsAnchor;

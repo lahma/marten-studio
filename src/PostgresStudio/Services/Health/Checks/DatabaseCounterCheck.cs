@@ -261,8 +261,8 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
                 Title = SessionText.Percent(share) + " of this database's transactions rolled back in the last " + SessionText.Duration(span),
                 WhyItMatters =
                     "A rolled-back transaction is work the database did and threw away. A share this high is most often failures the "
-                    + "application retries - optimistic concurrency on documents, an expected version on an event stream, unique "
-                    + "violations - or a framework that rolls back read-only transactions by habit.",
+                    + "application retries - " + evaluation.Text.RetriedFailures + " - or a framework that rolls back read-only "
+                    + "transactions by habit.",
                 Evidence =
                 [
                     new("Rolled back", SessionText.Number(ownRollbacks) + " of " + SessionText.Number(transactions)),

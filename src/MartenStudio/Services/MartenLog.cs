@@ -20,17 +20,43 @@ namespace MartenStudio.Services;
 /// </remarks>
 internal static partial class MartenLog
 {
+    // Wave 6: 9206, 9207 and 9209 name the user, whose name is the host's identity's and can be shaped by a visitor, and the
+    // scope, so a site writes them only through the wrappers below, which escape and bound both (StudioLogValue.Cap) as the
+    // shared audit dispatchers do; the generated templates are the *Raw methods, which RefusalLogValuesTests lets nothing
+    // but these wrappers call.
+
     [LoggerMessage(EventId = 9206, Level = LogLevel.Information, Message = "Marten Studio user {User} applied schema changes to store {StoreKey}, database {DatabaseId}: {Summary}")]
-    public static partial void SchemaChangeApplied(this ILogger logger, string user, string storeKey, string databaseId, string summary);
+    public static partial void SchemaChangeAppliedRaw(this ILogger logger, string user, string storeKey, string databaseId, string summary);
 
     [LoggerMessage(EventId = 9207, Level = LogLevel.Information, Message = "Marten Studio user {User} started a rebuild of projection {Projection} in store {StoreKey}, database {DatabaseId}")]
-    public static partial void ProjectionRebuildStarted(this ILogger logger, string user, string projection, string storeKey, string databaseId);
+    public static partial void ProjectionRebuildStartedRaw(this ILogger logger, string user, string projection, string storeKey, string databaseId);
 
     [LoggerMessage(EventId = 9208, Level = LogLevel.Information, Message = "Rebuild of projection {Projection} in store {StoreKey}, database {DatabaseId} finished after {ElapsedMilliseconds} ms: {Outcome}")]
     public static partial void ProjectionRebuildFinished(this ILogger logger, string projection, string storeKey, string databaseId, long elapsedMilliseconds, string outcome);
 
     [LoggerMessage(EventId = 9209, Level = LogLevel.Information, Message = "Marten Studio user {User} requested daemon control {Operation} on {Target} in store {StoreKey}, database {DatabaseId}")]
-    public static partial void DaemonControlRequested(this ILogger logger, string user, string operation, string target, string storeKey, string databaseId);
+    public static partial void DaemonControlRequestedRaw(this ILogger logger, string user, string operation, string target, string storeKey, string databaseId);
+
+    /// <summary>9206, with the user's name and the scope escaped and bounded.</summary>
+    public static void SchemaChangeApplied(this ILogger logger, string user, string storeKey, string databaseId, string summary)
+    {
+        (user, storeKey, databaseId) = (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        logger.SchemaChangeAppliedRaw(user, storeKey, databaseId, summary);
+    }
+
+    /// <summary>9207, with the user's name and the scope escaped and bounded.</summary>
+    public static void ProjectionRebuildStarted(this ILogger logger, string user, string projection, string storeKey, string databaseId)
+    {
+        (user, storeKey, databaseId) = (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        logger.ProjectionRebuildStartedRaw(user, projection, storeKey, databaseId);
+    }
+
+    /// <summary>9209, with the user's name and the scope escaped and bounded.</summary>
+    public static void DaemonControlRequested(this ILogger logger, string user, string operation, string target, string storeKey, string databaseId)
+    {
+        (user, storeKey, databaseId) = (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        logger.DaemonControlRequestedRaw(user, operation, target, storeKey, databaseId);
+    }
 
     /// <remarks>
     /// Warning, and it counts the properties: Marten has no untyped write path, so saving an edited

@@ -440,8 +440,9 @@ public class LogLevelsTests
     }
 
     /// <summary>
-    /// The events the rule is about are exactly the ones the roster files as throttled in
-    /// <c>StudioLog.cs</c> and <c>MartenLog.cs</c> - 9210, 9212-9222 and 9237 - so neither list can drift from the other.
+    /// The events the rule is about are exactly the ones the roster files as throttled in the event files - 9210,
+    /// 9212-9222 and 9237 in the main ones, and the partials' 9246, 9270, 9410, 9430, 9440, 9451, 9500 and 9501 - so
+    /// neither list can drift from the other.
     /// </summary>
     [Fact]
     public void The_throttled_events_are_the_ones_the_roster_files_as_throttled()
@@ -453,6 +454,37 @@ public class LogLevelsTests
 
         ThrottledEventMethods().Should().BeEquivalentTo(fromRoster);
         ThrottledEventMethods().Should().Contain(["StoreUnavailable", "DaemonUnreachable", "LiveUpdateHandlerFailed"]);
+
+        // Anti-vacuity for the partials: 9246 is declared in StudioLog.Sessions.cs, and 9410 in a partial of each class.
+        ThrottledEventMethods().Should().Contain(
+            ["SessionActivityReadFailed", "StorageReadFailed", "PostgresStudioStorageReadFailed"],
+            "a throttled event declared in a partial is a throttled event, and its calls are checked like any other");
+    }
+
+    /// <summary>
+    /// <see cref="EventFiles" /> is every file that declares a part of <c>StudioLog</c>, <c>PostgresStudioLog</c> or
+    /// <c>MartenLog</c> - so a partial named otherwise, or put in another folder, fails here rather than going unscanned.
+    /// </summary>
+    [Fact]
+    public void The_event_files_are_every_partial_of_every_declaring_class()
+    {
+        var declaration = new Regex(
+            @"\bpartial\s+class\s+(?<name>" + string.Join("|", EventClasses.Select(static x => x.Class)) + @")\b",
+            RegexOptions.None,
+            RegexTimeout);
+
+        string[] declaring =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(file => declaration.IsMatch(SourceScanner.StripCommentsAndStrings(File.ReadAllText(file))))
+                .Select(SourceScanner.Relative)
+                .Order(StringComparer.Ordinal),
+        ];
+
+        declaring.Should().HaveCountGreaterThan(EventClasses.Length, "the classes have partials, and a scan that finds none has stopped working");
+        EventFiles.Should().BeEquivalentTo(declaring, "every part of an event class is an event file, and every event file is one");
+        EventFiles.Should().Contain(
+            ["src/PostgresStudio/Services/StudioLog.Sessions.cs", "src/PostgresStudio/Services/PostgresStudioLog.Storage.cs", "src/MartenStudio/Services/MartenLog.Query.cs"]);
     }
 
     /// <summary>Every listed throttle-less helper exists, as a static method of that name on that type.</summary>
@@ -557,16 +589,42 @@ public class LogLevelsTests
     /// <param name="Problem">What is wrong, or <see langword="null" /> when the level is the throttle's.</param>
     public sealed record ThrottledCall(string Location, string Method, string? Problem);
 
+    /// <summary>The classes that declare the studio's events, each in a file of its own name and its partials.</summary>
+    private static readonly (string Folder, string Class)[] EventClasses =
+    [
+        ("src/PostgresStudio/Services", "StudioLog"),
+        ("src/PostgresStudio/Services", "PostgresStudioLog"),
+        ("src/MartenStudio/Services", "MartenLog"),
+    ];
+
     /// <summary>
-    /// The files that declare the studio's main event blocks: the shared <c>StudioLog.cs</c> and, since 0.5's split
-    /// (PS-1a), MartenStudio's own <c>MartenLog.cs</c> - one id space, two declaring classes.
+    /// The files that declare the studio's events: the shared <c>StudioLog</c>, Postgres Studio's
+    /// <c>PostgresStudioLog</c> and, since 0.5's split (PS-1a), MartenStudio's own <c>MartenLog</c> - one id space - each
+    /// as its own file <em>and every partial of it</em> (<c>StudioLog.Sessions.cs</c>, <c>PostgresStudioLog.Storage.cs</c>,
+    /// <c>MartenLog.Query.cs</c> and the rest), read from disk rather than listed.
     /// </summary>
+    /// <remarks>
+    /// Until wave 6 this was the three main files by name, so a throttled event declared in a partial - 9246, the
+    /// Sessions page's read failure, and every one wave 5 added in a file of its own - was in the roster but not in
+    /// <see cref="ThrottledEventMethods" />, and nothing checked where its calls took their level from.
+    /// <see cref="The_event_files_are_every_partial_of_every_declaring_class" /> holds the list to the disk.
+    /// </remarks>
     private static readonly string[] EventFiles =
     [
-        "src/PostgresStudio/Services/StudioLog.cs",
-        "src/PostgresStudio/Services/PostgresStudioLog.cs",
-        "src/MartenStudio/Services/MartenLog.cs",
+        .. EventClasses.SelectMany(static x => EventFilesOf(x.Folder, x.Class)),
     ];
+
+    /// <summary><c>{Class}.cs</c> and every <c>{Class}.*.cs</c> in <paramref name="folder" />, repository-relative.</summary>
+    private static IEnumerable<string> EventFilesOf(string folder, string className) =>
+        Directory.EnumerateFiles(RepositoryRoot.Combine(folder), "*.cs", SearchOption.TopDirectoryOnly)
+            .Where(file =>
+            {
+                string name = Path.GetFileName(file);
+                return name == className + ".cs"
+                    || (name.StartsWith(className + ".", StringComparison.Ordinal) && name.EndsWith(".cs", StringComparison.Ordinal));
+            })
+            .Select(SourceScanner.Relative)
+            .Order(StringComparer.Ordinal);
 
     /// <summary>
     /// The event methods whose level is a parameter - read out of <see cref="EventFiles" /> by the
