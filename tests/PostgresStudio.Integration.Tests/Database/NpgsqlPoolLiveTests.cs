@@ -14,7 +14,7 @@ namespace PostgresStudio.Integration.Tests.Database;
 /// <summary>
 /// NPG10, live: Database › Sessions' pool panel and C01 read a real pool of a real data source, through
 /// <c>AddPostgresStudio()</c> and the application's own unkeyed <see cref="NpgsqlDataSource" />, at the Npgsql this
-/// project restored - 9.0.4 in the whole-solution pass, the latest-tested 10.x in the Npgsql pass over
+/// project restored - the floor (8.0.3) in the whole-solution pass, the latest-tested 10.x in the Npgsql pass over
 /// <c>postgres-studio.slnf</c>.
 /// </summary>
 /// <remarks>

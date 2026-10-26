@@ -22,9 +22,9 @@ namespace PostgresStudio.Tests;
 /// </summary>
 /// <remarks>
 /// The synthetic meters are the test's own, so nothing there touches the process's pools. The rest reads the real Npgsql
-/// this project restored, through data sources that never connect: 9.0.4 in the whole-solution pass, and in the Npgsql
-/// pass over <c>postgres-studio.slnf</c> the latest-tested 10.x - so each pass proves its own end, and an Npgsql that
-/// renames the instruments again fails here rather than leaving C01 and the panel quietly empty.
+/// this project restored, through data sources that never connect: the floor (8.0.3) in the whole-solution pass, and in
+/// the Npgsql pass over <c>postgres-studio.slnf</c> the latest-tested 10.x - so each pass proves its own end, and an
+/// Npgsql that renames the instruments again fails here rather than leaving C01 and the panel quietly empty.
 /// </remarks>
 public sealed class NpgsqlPoolInstrumentsTests
 {

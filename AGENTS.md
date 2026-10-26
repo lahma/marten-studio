@@ -574,7 +574,7 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 |---|---|---|---|
 | `src/MartenStudio` | `Marten` | `9.39.0` (latest tested `9.51.0`) | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. 9.39.0 is a **security** floor: it fixes GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5, and the code itself still needs nothing above 9.31.0 (bisected 2026-09-19; see *Package budget changes*, 2026-10-15). Both suites also run at a pinned latest-tested version, `MartenStudioMartenLatest`; the package is packed only at the floor. JasperFx / JasperFx.Events 2.74.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.33.0 and Npgsql 9.0.4 arrive transitively at the floor. The studio's own compilation drops the JasperFx source generator Marten bundles (`MartenStudio.csproj`). |
 | `src/PostgresStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22); it reaches a MartenStudio host through MartenStudio's `ProjectReference` to PostgresStudio (two hops, measured by PS-0, *Package budget changes* 2026-10-20). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. |
-| `src/PostgresStudio` | `Npgsql` | `9.0.4` (floor to be measured, PS-7) | The shared studio's database driver: PostgresStudio has no Marten to bring it. A central row that only projects setting `PostgresStudioPinsNpgsql` see, so MartenStudio keeps taking Npgsql through Marten and the two never drift there (D3; *Package budget changes* 2026-10-20). |
+| `src/PostgresStudio` | `Npgsql` | `8.0.3` (latest tested `10.0.3`) | The shared studio's database driver: PostgresStudio has no Marten to bring it. A central row that only projects setting `PostgresStudioPinsNpgsql` see, so MartenStudio keeps taking Npgsql through Marten and the two never drift there (D3; *Package budget changes* 2026-10-20). Floor, not exact pin, measured by PS-7 (*Package budget changes* 2026-10-26); a MartenStudio host resolves Marten's Npgsql, which is never lower (`NpgsqlVersionTests`). |
 | `samples/`, `tests/…Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres, and the container the integration suite runs against. |
 | both test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
 | both test projects | `xunit.v3` | `3.2.2` | Held — see below. |
@@ -898,6 +898,42 @@ the project file, at the restore graph (`obj/project.assets.json`) and at the bu
   `src/PostgresStudio` | `Npgsql` row joins it.
 
 **Exit condition:** move the `Npgsql` row only on PS-7's measurement, in an entry of its own.
+
+**2026-10-26 - PostgresStudio's `Npgsql` floor moves *down*, from the `9.0.4` placeholder to `8.0.3`.** PS-7 measured it
+as the 2026-09-19 entry measured Marten's. At each candidate it ran four gates over `postgres-studio.slnf`, with
+`-p:PostgresStudioNpgsqlVersion=<v>` on every command:
+
+- `dotnet restore` with `TreatWarningsAsErrors`, confirming `"Npgsql/<v>"` in `src/PostgresStudio/obj/project.assets.json`;
+- `dotnet build`;
+- `tests/PostgresStudio.Tests`;
+- `tests/PostgresStudio.Integration.Tests`, with `MARTENSTUDIO_PG_REUSE=false`.
+
+The base was `a46e257c`.
+
+| Npgsql | restore | build | fast | live | pool instruments |
+|---|---|---|---|---|---|
+| **8.0.3** | 0 NU warnings | 0 warnings | 332 of 332 | 72 of 72, no skips | read (`NpgsqlPoolLiveTests`) |
+| 7.0.7 | 0 NU warnings | 0 warnings | 3 failed | 1 failed | absent |
+| 10.0.3 (latest tested) | 0 NU warnings | 0 warnings | 332 of 332 | 72 of 72, no skips | read |
+
+There are two walls, and each is a reason no lower floor is reachable:
+
+- **7.x has no `db.client.connections.usage`/`.max` instruments.** Npgsql reported its pool through EventCounters
+  before 8.0, so at 7.0.7 the pool observer finds no pool. Three `NpgsqlPoolInstrumentsTests` fail, and so does
+  `NpgsqlPoolLiveTests.The_Sessions_pool_panel_and_C01_read_a_real_pool`: C01 reports "This database's Npgsql pool is
+  not among the pools Npgsql reports in this process", and Sessions' pool panel is empty. Everything else passes at
+  7.0.7, so the pool reading is the one member the studio needs from 8.0.
+- **8.0.0 through 8.0.2 carry CVE-2024-32655** (GHSA-x9vc-6hfv-hg8c, fixed in 8.0.3), so they were not taken as
+  candidates. A package should not set its floor on a vulnerable driver.
+
+Nothing changes for a MartenStudio host. Marten's floor resolves Npgsql 9.0.4 through Weasel.Postgresql, and NuGet takes
+the higher of that and PostgresStudio's `>= 8.0.3`; `NpgsqlVersionTests` keeps the floor at or below what the Marten
+floor resolves. A host without Marten may now stay on Npgsql 8.0.3 or later. Of 8.0.3 against 10.0.3, the live suite
+takes 21.6 s against 28.8 s, so the latest leg costs CI little.
+
+**Exit condition:** raise the floor when a member the studio needs is absent below the new value, or when a published
+advisory makes restore at the floor fail (`NU1901`-`NU1904`), and say here which. Bump `PostgresStudioNpgsqlLatest` in a
+pull request of its own, with both PostgresStudio suites green at it.
 
 **Held deliberately, and not stale.**
 
