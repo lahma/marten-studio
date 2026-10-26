@@ -116,6 +116,12 @@ internal enum PostgresFeature
     /// </summary>
     ReservedConnections,
 
+    /// <summary>
+    /// A query that is not pruned - or a generic plan of one that is - also locks a partitioned table's partitioned indexes:
+    /// 601 locks for 200 partitions of two indexes each up to 15, 603 from 16 (B0 §8a). T19 counts them from here (W5-B1).
+    /// </summary>
+    PartitionedIndexLocks,
+
     // ---- 17 -----------------------------------------------------------------------------------------------------------
 
     /// <summary>The <c>pg_stat_checkpointer</c> view; <c>pg_stat_bgwriter</c> loses its checkpoint columns. B0 §6 and G8.</summary>
@@ -198,6 +204,12 @@ internal enum PostgresFeature
     /// <c>total_autoanalyze_time</c>. B0 §6.
     /// </summary>
     TotalVacuumTime,
+
+    /// <summary>
+    /// A backend's fast-path lock slots are sized from <c>max_locks_per_transaction</c> - groups of 16 - rather than fixed at
+    /// 16: 64 at the default of 64 (B0 §6, §8a: 16 on 13-17, 64 on 18). T19's evidence says which (W5-B1).
+    /// </summary>
+    FastPathSlotsFromMaxLocks,
 
     // ---- 19 (release notes as of 2026-10-09; the matrix runs its release candidate) --------------------------------
 
@@ -306,6 +318,7 @@ internal static class PostgresFeatures
         new(PostgresFeature.ExplainGenericPlan, 160000),
         new(PostgresFeature.SlotConflicting, 160000),
         new(PostgresFeature.ReservedConnections, 160000),
+        new(PostgresFeature.PartitionedIndexLocks, 160000),
 
         // 17
         new(PostgresFeature.PgStatCheckpointer, 170000),
@@ -330,6 +343,7 @@ internal static class PostgresFeatures
         new(PostgresFeature.IdleSlotTimeout, 180000),
         new(PostgresFeature.ChecksumsDefaultOn, 180000),
         new(PostgresFeature.TotalVacuumTime, 180000),
+        new(PostgresFeature.FastPathSlotsFromMaxLocks, 180000),
 
         // 19
         new(PostgresFeature.StatsResetPerTable, 190000),

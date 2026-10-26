@@ -6,7 +6,14 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <param name="ReadAt">When the counters were read.</param>
 /// <param name="Tables">The declared tables that exist, with the catalog's row for each.</param>
 /// <param name="Database">The database-wide facts: when the counters began, how parallel a scan may be.</param>
-internal sealed record SequentialScanFacts(DateTimeOffset ReadAt, IReadOnlyList<TableFacts> Tables, DatabaseStatistics Database);
+internal sealed record SequentialScanFacts(DateTimeOffset ReadAt, IReadOnlyList<TableFacts> Tables, DatabaseStatistics Database)
+{
+    /// <summary>
+    /// The statistics window's signals and the counters' oldest recorded moment (<see cref="UsageGuard" />, issue #8 G4), or
+    /// <see langword="null" /> in a unit test that judges the window through <see cref="HealthEvaluation.Statistics" /> alone.
+    /// </summary>
+    public UsageWindowReading? Usage { get; init; }
+}
 
 /// <summary>
 /// T01: sequential scans keep reading the whole of a large Marten table.
@@ -35,6 +42,11 @@ internal sealed record SequentialScanFacts(DateTimeOffset ReadAt, IReadOnlyList<
 /// cannot be told apart: what is lost is a table whose whole-partition scans of its large partitions are
 /// outnumbered by scans of small ones, which pull the average down - the conservative side of the line.
 /// </para>
+/// <para>
+/// <b>Never over a short or reset window</b> (issue #8 G4, <see cref="UsageGuard" />): while the counters have counted for
+/// less than seven days, or look reset, there is no finding and the status row says why. The samples go on being taken,
+/// so the rate is ready the sweep the window covers.
+/// </para>
 /// </remarks>
 [HealthCheck("T01", HealthArea.Tables, HealthCostTier.Catalog, "Sequential scans on a large table")]
 internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
@@ -58,8 +70,9 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
     public override async Task<SequentialScanFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
         IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
+        UsageWindowReading usage = await UsageGuard.ReadAsync(context).ConfigureAwait(false);
 
-        return new SequentialScanFacts(context.Now, tables, DatabaseStatistics.Of(tables));
+        return new SequentialScanFacts(context.Now, tables, DatabaseStatistics.Of(tables)) { Usage = usage };
     }
 
     /// <summary>
@@ -103,8 +116,26 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
     public override HealthVerdict Evaluate(SequentialScanFacts facts, HealthEvaluation evaluation)
     {
         List<HealthFinding> findings = [];
-        int large = 0;
+        int large = facts.Tables.Count(IsJudged);
         int watched = 0;
+
+        if (large == 0)
+        {
+            return HealthVerdict.Quiet(
+                "No table the studio judges (or, for a partitioned table, no partition of one) has " + TableText.Count(LargeTableRows)
+                + " live rows or more.");
+        }
+
+        // Issue #8 G4: no verdict over statistics under seven days old or looking reset.
+        if (UsageGuard.For(facts.Usage, evaluation) is not { } usage)
+        {
+            return HealthVerdict.Quiet(UsageGuard.NotRead);
+        }
+
+        if (usage.Withheld(UsageGuard.MinimumWindow) is { } withheld)
+        {
+            return HealthVerdict.Quiet(withheld);
+        }
 
         foreach (TableFacts table in facts.Tables)
         {
@@ -112,8 +143,6 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
             {
                 continue;
             }
-
-            large++;
 
             CounterDelta? scans = TableHistory.Delta(evaluation.History.Trend(ScansSeries + table.Key));
             CounterDelta? read = TableHistory.Delta(evaluation.History.Trend(RowsReadSeries + table.Key));
@@ -137,7 +166,7 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
 
             if (wholeTableReads >= MinWholeTableReads && readWholeUnit)
             {
-                findings.Add(Finding(table, scans, read, wholeTableReads, facts, evaluation));
+                findings.Add(Finding(table, scans, read, wholeTableReads, usage, evaluation));
             }
         }
 
@@ -146,13 +175,10 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
             return new HealthVerdict(findings);
         }
 
-        return HealthVerdict.Quiet(large == 0
-            ? "No table the studio judges (or, for a partitioned table, no partition of one) has "
-              + TableText.Count(LargeTableRows) + " live rows or more."
-            : watched == 0
-                ? "Watching " + TableText.Count(large) + " large table" + (large == 1 ? string.Empty : "s")
-                  + ": a scan rate needs two samples, one interval apart."
-                : null);
+        return HealthVerdict.Quiet(watched == 0
+            ? "Watching " + TableText.Count(large) + " large table" + (large == 1 ? string.Empty : "s")
+              + ": a scan rate needs two samples, one interval apart."
+            : null);
     }
 
     private static HealthFinding Finding(
@@ -160,7 +186,7 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
         CounterDelta scans,
         CounterDelta read,
         double wholeTableReads,
-        SequentialScanFacts facts,
+        UsageWindow usage,
         HealthEvaluation evaluation)
     {
         StudioTable declared = table.Table;
@@ -194,8 +220,8 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
                 new HealthEvidence("Window", TableText.Span(window) + ", " + TableText.When(read.From) + " to " + TableText.When(read.To)),
             ],
             Caveat =
-                TableText.CountersSince(facts.Database.StatsReset, evaluation.Now)
-                + " A parallel scan counts once per worker. The studio's own exact counts, pg_dump and a one-off report are "
+                "Counters " + usage.SinceText + "; a usage verdict is never given over less than 7 days of them, or over counters "
+                + "that look reset. A parallel scan counts once per worker. The studio's own exact counts, pg_dump and a one-off report are "
                 + "sequential scans too; which statement it was is T02's to say.",
             Remedy = evaluation.TableRemedies?.IndexTheFilteredMember(declared),
             Link = declared is { Kind: StudioTableKind.DocumentTable, Alias: { } alias }

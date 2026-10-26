@@ -1,5 +1,6 @@
 using System.Globalization;
 
+using MartenStudio.Internal;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
@@ -427,6 +428,164 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
         ArgumentNullException.ThrowIfNull(table);
 
         return !table.IsDeclaredByStore ? Upkeep(table, Migration.ReenableToastAutovacuum(table)) : null;
+    }
+
+    // ---- W5-B1 ---------------------------------------------------------------------------------------------------------
+
+    /// <summary>The prefix of Marten's DCB tag tables, <c>mt_event_tag_&lt;suffix&gt;</c> (<c>EventTagTable</c>, V9.39.0 to V9.54.1).</summary>
+    internal const string TagTablePrefix = "mt_event_tag_";
+
+    /// <summary>
+    /// What T15 says of a DCB tag table instead of an index (marten#5694, first in v9.51.0 - read at V9.39.0, V9.50.3, v9.51.0
+    /// and V9.54.1: <c>EventTagTable</c> declares <c>idx_mt_event_tag_&lt;suffix&gt;_seq_id</c> from 9.51.0, and nothing below).
+    /// </summary>
+    internal const string TagTableNote =
+        "Marten creates this table, and its next apply drops any index its configuration does not declare (AutoCreate.CreateOrUpdate "
+        + "is not additive), so none is offered here. marten#5694 declares one leading with seq_id, "
+        + "idx_mt_event_tag_<suffix>_seq_id, from Marten 9.51.0: on 9.51 or later an apply builds it; below, it arrives with the "
+        + "upgrade.";
+
+    /// <summary>What T15 says of any other table Marten creates itself - the event store's, a projection's, its bookkeeping.</summary>
+    internal const string MartenTableNote =
+        "Marten creates this table, and its next apply drops any index its configuration does not declare (AutoCreate.CreateOrUpdate "
+        + "is not additive), so none is offered here: an index on it belongs in the table's own declaration, where one exists.";
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A document table's key on a duplicated field is indexed by declaring the field with <c>Duplicate(...)</c>, which adds
+    /// the column's index (<c>DocumentMapping.Duplicate</c> calls <c>AddIndex(duplicateField.ColumnName)</c> at V9.39.0, v9.51.0
+    /// and V9.54.1) - the index <c>ForeignKey&lt;TReference&gt;(...)</c> adds beside its key, and the one
+    /// <c>ForeignKey(expression, schema, table, column)</c> does not. Any other table Marten declares gets none: its next apply
+    /// drops an index nobody declares (<see cref="ForeignKeyIndexNote" /> says so).
+    /// </remarks>
+    public HealthRemedy? IndexTheForeignKey(StudioTable table, IReadOnlyList<string> columns, bool partitioned)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        if (!table.IsDeclaredByStore)
+        {
+            return Design(table, () => Migration.IndexTheForeignKey(table, columns, partitioned));
+        }
+
+        if (table is not { Kind: StudioTableKind.DocumentTable, TypeName: { } type } || columns.Count != 1 || table.DocumentType is not { } documentType)
+        {
+            return null;
+        }
+
+        Marten.Linq.Members.DuplicatedField? field = MartenDuplicatedFields.Physical(documentType)
+            .FirstOrDefault(x => string.Equals(x.ColumnName, columns[0], StringComparison.Ordinal));
+
+        if (field is null || field.Members.Length == 0 || field.Members.Any(static x => !MigrationSqlText.IsPrintableName(x.Name)))
+        {
+            return null;
+        }
+
+        string member = string.Join(".", field.Members.Select(static x => x.Name));
+
+        return new HealthRemedy(
+            "// The foreign key reads the duplicated column " + columns[0] + "; declaring the field indexes it:\n"
+            + "opts.Schema.For<" + type + ">().Duplicate(x => x." + member + ");",
+            "Duplicate(...) adds the column's index, as ForeignKey<TReference>(x => x." + member + ") does beside the key it adds, "
+            + "and the next apply builds it - under a lock that blocks writes to the table for as long as the build runs.");
+    }
+
+    /// <inheritdoc />
+    public string? ForeignKeyIndexNote(StudioTable table, IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        if (!table.IsDeclaredByStore || table.Kind == StudioTableKind.DocumentTable)
+        {
+            return null;
+        }
+
+        return table.Kind == StudioTableKind.EventTable && table.Table.StartsWith(TagTablePrefix, StringComparison.OrdinalIgnoreCase)
+            ? TagTableNote
+            : MartenTableNote;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// None for a table the store declares: <c>REINDEX</c> is not a line of configuration, and the finding says what it does in
+    /// words - it keeps the name and the definition, so the next apply sees no change.
+    /// </remarks>
+    public HealthRemedy? RebuildBloatedIndex(StudioTable table, HealthIndexRow index, IndexOrigin origin)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(index);
+
+        return !table.IsDeclaredByStore ? Upkeep(table, Migration.RebuildBloatedIndex(table, index, origin)) : null;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// None for a table the store declares: none qualifies - <c>mt_events.seq_id</c> and its sequence are <c>bigint</c>, and
+    /// HiLo is T11's.
+    /// </remarks>
+    public HealthRemedy? WidenKey(StudioTable table, HealthIntegerKeyRow key)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(key);
+
+        return !table.IsDeclaredByStore ? Design(table, () => Migration.WidenKey(table, key)) : null;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A document table on a rolling range (<c>PartitionOn(..., x =&gt; x.ByRollingRange(...))</c>, a <c>RangePartitioning</c>
+    /// whose <c>PartitionManager</c> is a <c>ManagedRangePartitions</c> - Weasel 9.33.0 and 9.46.0) is rolled forward by
+    /// <c>Advanced.RollPartitionsForwardAsync(CancellationToken)</c>, present at V9.39.0, v9.51.0 and V9.54.1. One partitioned
+    /// by <c>ByExternallyManagedRangePartitions()</c> sets <c>DocumentMapping.IgnorePartitions</c>, which Marten's
+    /// <c>DocumentTable</c> passes on as Weasel's <c>IgnorePartitionsInMigration</c> (V9.39.0 and V9.54.1): an apply neither
+    /// creates nor drops its partitions, so the next one is the same statement a table Marten does not declare is given. A
+    /// static <c>ByRange()</c> is a configuration change, said in a comment; any other table Marten declares, nothing.
+    /// </remarks>
+    public HealthRemedy? ExtendRangePartitions(StudioTable table, RangePartitionNext next)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(next);
+
+        if (!table.IsDeclaredByStore)
+        {
+            return Upkeep(table, Migration.ExtendRangePartitions(table, next));
+        }
+
+        if (table is not { Kind: StudioTableKind.DocumentTable, TypeName: { } type } || table.Mapping is not { Partitioning: Weasel.Postgresql.Tables.Partitioning.RangePartitioning range } mapping)
+        {
+            return null;
+        }
+
+        if (mapping.IgnorePartitions)
+        {
+            return MigrationSqlText.CreateRangePartition(table.Schema, table.Table, table.Table + "_" + next.Suffix, next.KeyType, next.From, next.To) is { } sql
+                ? HealthRemedy.ForMigration(
+                    sql,
+                    "The table is partitioned with ByExternallyManagedRangePartitions(), so Marten's apply neither creates nor drops "
+                    + "its partitions: the next period is the application's to create, as above or on its own schedule, named "
+                    + "as the application names them. "
+                    + (next.HasDefault
+                        ? "Creating it scans the DEFAULT partition under an ACCESS EXCLUSIVE lock for rows of the new range, and "
+                          + "fails if there are any."
+                        : "With no DEFAULT partition, an insert past the newest bound fails until it exists."))
+                : null;
+        }
+
+        return range.PartitionManager is Weasel.Postgresql.Tables.Partitioning.ManagedRangePartitions
+            ? new HealthRemedy(
+                "// Marten creates the rolling window's next periods itself - at startup when the host applies changes on startup,\n"
+                + "// and whenever this runs. Run it on a cadence shorter than one period:\n"
+                + "await store.Advanced.RollPartitionsForwardAsync(CancellationToken.None);",
+                "RollPartitionsForwardAsync creates the current window's partitions that do not exist yet, and the DEFAULT overflow "
+                + "partition, and drops nothing. A managed rolling range always has a DEFAULT partition, so rows past the window "
+                + "are never rejected - but they stay in the default, and the period they belong to cannot be created while they "
+                + "are there. periodsAhead of 2 or more leaves room for a missed run.")
+            : new HealthRemedy(
+                "// opts.Schema.For<" + type + ">() partitions this table by fixed ranges (ByRange()): add the next period's range\n"
+                + "// to that declaration (.AddRange(...)) and apply the configuration - or move it to ByRollingRange(...), which\n"
+                + "// Marten keeps ahead by itself.",
+                "Marten creates exactly the ranges the configuration declares, so the next one is a line of configuration and an apply.");
     }
 }
 

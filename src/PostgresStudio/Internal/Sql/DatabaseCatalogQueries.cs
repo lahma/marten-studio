@@ -198,7 +198,55 @@ internal sealed record CatalogForeignKey(
     string Name,
     bool Validated,
     string OnDelete,
-    string OnUpdate);
+    string OnUpdate)
+{
+    /// <summary>Its columns as attribute numbers of the pointing table (<c>conkey</c>), in key order (W5-B1).</summary>
+    public IReadOnlyList<short> Attributes { get; init; } = [];
+
+    /// <summary>The pointing table's partition key columns when it is partitioned; empty otherwise.</summary>
+    public IReadOnlyList<short> PartitionKey { get; init; } = [];
+
+    /// <summary>Every index on the pointing table, as <c>ForeignKeyCoverage</c> reads one.</summary>
+    public IReadOnlyList<PostgresStudio.Services.Schema.CoveringIndexCandidate> Indexes { get; init; } = [];
+
+    /// <summary>
+    /// Whether an index covers it (<c>ForeignKeyCoverage.IsCovered</c>, T15's rule) - <see langword="null" /> when its columns
+    /// were not read, so nothing is said either way.
+    /// </summary>
+    public bool? Covered => Attributes.Count == 0
+        ? null
+        : PostgresStudio.Services.Schema.ForeignKeyCoverage.IsCovered(Attributes, PartitionKey, Indexes);
+
+    /// <summary>The indexes <see cref="DatabaseCatalogQueries.ForeignKeysSql" /> aggregates as <c>jsonb</c>: <c>k</c> keys, <c>v</c> valid, <c>p</c> partial, <c>m</c> method.</summary>
+    internal static IReadOnlyList<PostgresStudio.Services.Schema.CoveringIndexCandidate> ParseIndexes(string json)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(json);
+
+        using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(json);
+        List<PostgresStudio.Services.Schema.CoveringIndexCandidate> indexes = [];
+
+        foreach (System.Text.Json.JsonElement index in document.RootElement.EnumerateArray())
+        {
+            List<short> keys = [];
+
+            if (index.TryGetProperty("k", out System.Text.Json.JsonElement k) && k.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (System.Text.Json.JsonElement key in k.EnumerateArray())
+                {
+                    keys.Add(key.GetInt16());
+                }
+            }
+
+            indexes.Add(new PostgresStudio.Services.Schema.CoveringIndexCandidate(
+                keys,
+                index.TryGetProperty("v", out System.Text.Json.JsonElement valid) && valid.ValueKind == System.Text.Json.JsonValueKind.True,
+                !index.TryGetProperty("p", out System.Text.Json.JsonElement partial) || partial.ValueKind != System.Text.Json.JsonValueKind.False,
+                index.TryGetProperty("m", out System.Text.Json.JsonElement method) ? method.GetString() ?? string.Empty : string.Empty));
+        }
+
+        return indexes;
+    }
+}
 
 /// <summary>One relation a view or materialized view reads, directly or through other views.</summary>
 /// <param name="ViewSchema">The view's schema.</param>
@@ -277,7 +325,35 @@ internal sealed record CatalogObjectCount(string Kind, string Schema, int Count)
 /// <c>pg_sequence_last_value</c>: <see langword="null" /> when the sequence has never been called, or when
 /// the role may not read it.
 /// </param>
-internal sealed record CatalogSequenceValue(bool CanReadValue, long? LastValue);
+internal sealed record CatalogSequenceValue(bool CanReadValue, long? LastValue)
+{
+    /// <summary>The sequence's type, as <c>format_type</c> spells it (W5-B1, from <c>pg_catalog.pg_sequence</c>).</summary>
+    public string? DataType { get; init; }
+
+    /// <summary><c>seqstart</c>.</summary>
+    public long Start { get; init; } = 1;
+
+    /// <summary><c>seqincrement</c>.</summary>
+    public long Increment { get; init; } = 1;
+
+    /// <summary><c>seqmin</c>.</summary>
+    public long Minimum { get; init; } = 1;
+
+    /// <summary><c>seqmax</c>.</summary>
+    public long Maximum { get; init; } = long.MaxValue;
+
+    /// <summary><c>seqcycle</c>.</summary>
+    public bool Cycles { get; init; }
+
+    /// <summary>The types of the columns it feeds - owned, or through a default - or <see langword="null" /> for none.</summary>
+    public string? ColumnTypes { get; init; }
+
+    /// <summary>The narrowest of those columns' ranges' maximum, or <see langword="null" /> for none that is an integer.</summary>
+    public long? ColumnMaximum { get; init; }
+
+    /// <summary>When it was read, by the server's clock: two reads make a rate.</summary>
+    public DateTimeOffset? ReadAt { get; init; }
+}
 
 /// <summary>One column of a relation.</summary>
 /// <param name="Name">The column name.</param>
@@ -732,25 +808,71 @@ internal static class DatabaseCatalogQueries
     /// transaction of its own that ends as soon as it has answered. The function raises for a role with
     /// neither <c>SELECT</c> nor <c>USAGE</c>, so it is behind the same <c>has_sequence_privilege</c> test
     /// <c>pg_sequences</c> itself uses; the function is volatile, so the <c>case</c> is not folded away.
+    /// <para>
+    /// <b>Beside it, what the headroom needs (W5-B1)</b>, all lock-free from the catalog: the sequence's type, start,
+    /// increment, minimum, maximum and cycle from <c>pg_catalog.pg_sequence</c> - never the <c>pg_sequences</c> view, which on 18
+    /// locks every sequence it lists for every reader (B0 §3) - the types of the columns it feeds, through <c>pg_depend</c>
+    /// (an owned sequence's column, deptype <c>a</c> or <c>i</c>, and every default that calls it, deptype <c>n</c>), the
+    /// narrowest of their ranges, and the server's clock, which two reads in a session make a rate of.
+    /// </para>
     /// </remarks>
     internal const string SequenceValueSql =
         """
+        with sequence_row as (
+            select c.oid, c.relname
+            from pg_catalog.pg_class c
+            join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+            where c.relkind = 'S'
+              and n.nspname = any(@schemas)
+              and c.relname::text = @exact
+              and not exists (
+                  select 1
+                  from pg_catalog.pg_depend d
+                  where d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                    and d.objid = c.oid
+                    and d.deptype = 'e')
+        ),
+        fed as (
+            select d.refobjid as rel, d.refobjsubid::int2 as num
+            from pg_catalog.pg_depend d
+            join sequence_row q on q.oid = d.objid
+            where d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+              and d.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
+              and d.refobjsubid > 0
+              and d.deptype in ('a', 'i')
+            union
+            select ad.adrelid, ad.adnum
+            from pg_catalog.pg_depend d
+            join sequence_row q on q.oid = d.refobjid
+            join pg_catalog.pg_attrdef ad on ad.oid = d.objid
+            where d.classid = 'pg_catalog.pg_attrdef'::pg_catalog.regclass
+              and d.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
+              and d.deptype = 'n'
+        )
         select coalesce(pg_catalog.has_sequence_privilege(c.oid, 'SELECT,USAGE'), false),
                case
                    when pg_catalog.has_sequence_privilege(c.oid, 'SELECT,USAGE')
                    then pg_catalog.pg_sequence_last_value(c.oid::pg_catalog.regclass)
-               end
-        from pg_catalog.pg_class c
-        join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-        where c.relkind = 'S'
-          and n.nspname = any(@schemas)
-          and c.relname::text = @exact
-          and not exists (
-              select 1
-              from pg_catalog.pg_depend d
-              where d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
-                and d.objid = c.oid
-                and d.deptype = 'e')
+               end,
+               pg_catalog.format_type(s.seqtypid, null),
+               s.seqstart,
+               s.seqincrement,
+               s.seqmin,
+               s.seqmax,
+               s.seqcycle,
+               (select pg_catalog.string_agg(distinct pg_catalog.format_type(a.atttypid, null), ', ')
+                from fed f
+                join pg_catalog.pg_attribute a on a.attrelid = f.rel and a.attnum = f.num),
+               (select pg_catalog.min(case a.atttypid
+                                          when 'pg_catalog.int2'::pg_catalog.regtype then 32767::bigint
+                                          when 'pg_catalog.int4'::pg_catalog.regtype then 2147483647::bigint
+                                          when 'pg_catalog.int8'::pg_catalog.regtype then 9223372036854775807::bigint
+                                      end)
+                from fed f
+                join pg_catalog.pg_attribute a on a.attrelid = f.rel and a.attnum = f.num),
+               pg_catalog.clock_timestamp()
+        from sequence_row c
+        join pg_catalog.pg_sequence s on s.seqrelid = c.oid
         """;
 
     /// <summary>
@@ -819,6 +941,12 @@ internal static class DatabaseCatalogQueries
     /// order - plus <c>convalidated</c>, and never an end that is a partition. <c>@relation</c> is empty for
     /// every key in the set, or one relation's name (in <c>@relation_schema</c>) for the keys at either
     /// end of it, which is what the detail view reads so that a large catalog's cap cannot hide one.
+    /// <para>
+    /// <b>And what says whether an index covers it (W5-B1)</b>: its columns as attribute numbers, the pointing table's
+    /// partition key, and every index on the pointing table as attribute numbers, validity, predicate and access method - all
+    /// from the catalog, nothing deparsed, so the list still locks nothing it lists. <c>ForeignKeyCoverage.IsCovered</c>, T15's
+    /// own rule, judges them.
+    /// </para>
     /// </remarks>
     internal const string ForeignKeysSql =
         """
@@ -835,7 +963,21 @@ internal static class DatabaseCatalogQueries
                con.conname::text,
                con.convalidated,
                con.confdeltype::text,
-               con.confupdtype::text
+               con.confupdtype::text,
+               con.conkey,
+               case when cl.relkind = 'p'
+                    then (select pg_catalog.string_to_array(p.partattrs::text, ' ')::pg_catalog.int2[]
+                          from pg_catalog.pg_partitioned_table p
+                          where p.partrelid = con.conrelid) end,
+               (select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
+                           'k', (pg_catalog.string_to_array(x.indkey::text, ' ')::pg_catalog.int2[])[1:x.indnkeyatts],
+                           'v', x.indisvalid,
+                           'p', x.indpred is not null,
+                           'm', am.amname))
+                  from pg_catalog.pg_index x
+                  join pg_catalog.pg_class ix on ix.oid = x.indexrelid
+                  join pg_catalog.pg_am am on am.oid = ix.relam
+                  where x.indrelid = con.conrelid)::text
         from pg_catalog.pg_constraint con
         join pg_catalog.pg_class cl on cl.oid = con.conrelid
         join pg_catalog.pg_namespace ns on ns.oid = cl.relnamespace
@@ -1695,6 +1837,17 @@ internal static class DatabaseCatalogQueries
 
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
             ? new CatalogSequenceValue(reader.GetBoolean(0), NullableInt64(reader, 1))
+            {
+                DataType = NullableString(reader, 2),
+                Start = reader.GetInt64(3),
+                Increment = reader.GetInt64(4),
+                Minimum = reader.GetInt64(5),
+                Maximum = reader.GetInt64(6),
+                Cycles = reader.GetBoolean(7),
+                ColumnTypes = NullableString(reader, 8),
+                ColumnMaximum = NullableInt64(reader, 9),
+                ReadAt = reader.IsDBNull(10) ? null : reader.GetFieldValue<DateTimeOffset>(10),
+            }
             : null;
     }
 
@@ -1840,7 +1993,12 @@ internal static class DatabaseCatalogQueries
                 reader.GetString(6),
                 reader.GetBoolean(7),
                 reader.IsDBNull(8) ? "a" : reader.GetString(8),
-                reader.IsDBNull(9) ? "a" : reader.GetString(9)),
+                reader.IsDBNull(9) ? "a" : reader.GetString(9))
+            {
+                Attributes = reader.IsDBNull(10) ? [] : reader.GetFieldValue<short[]>(10),
+                PartitionKey = reader.IsDBNull(11) ? [] : reader.GetFieldValue<short[]>(11),
+                Indexes = reader.IsDBNull(12) ? [] : CatalogForeignKey.ParseIndexes(reader.GetString(12)),
+            },
             schemas,
             cap,
             commandTimeoutSeconds,

@@ -56,14 +56,16 @@ What every check here has in common:
   first looks in `pg_locks` and deparses nothing on a table somebody holds or awaits `ACCESS EXCLUSIVE` on - a
   migration of the store's or of any library's: T03-T06 then judge every other table without waiting, leave that one
   out for the sweep and say how many they left out ("1 table was locked for a schema change and not judged this
-  sweep"), and read its indexes again at the next. T02's index advice skips such a table too, and T05's "unscanned
-  since" clock runs on through the lock, from what the catalog says of the locked table's indexes without opening it. A
+  sweep"), and read its indexes again at the next; T15 and T25, which judge by the same read, do the same. T02's index
+  advice skips such a table too. A
   lock taken in the instant between that look and a call still waits out `lock_timeout`; the read is then asked once
   more, and leaves the table out the same way - and should that wait too, the index checks say they waited too long for
   a lock, as any check does. Nothing is held past a call.
 - **Rates, not totals.** The `pg_stat_*` counters run from the last statistics reset, which may be a year ago,
   so T01 and T06 sample them into the in-memory history and judge the change over the window it holds, and say
   "watching" until two samples exist. A counter that goes down is a reset, and the window restarts there.
+- **No usage verdict over young or reset counters** (0.5, issue #8 G4). T01, T05 and T06 give no finding while the
+  statistics have counted for less than seven days or look reset, and their rows say why.
 - **Held, not glimpsed.** A batch delete or a bulk load makes any table look bloated or unanalysed for the
   minute before autovacuum wakes up, so T07 and T08 speak only when the condition has held for ten minutes of
   samples - unless autovacuum is switched off for the table or the server, when there is nothing to wait for.
@@ -97,6 +99,13 @@ opts.Schema.For<Order>().Duplicate(x => x.Status);
 ```
 
 The studio's own exact counts, `pg_dump` and a one-off report are sequential scans too.
+
+**Never over a short or reset window** (0.5, issue #8 G4). While the statistics have counted for less than seven days, or
+look reset - a crash, a restore, a pre-18 `pg_upgrade`, a failover - T01 makes no finding, and its row says why:
+"Withheld: statistics 3 days old (since ..., basis ...)" or "Withheld: the counters look reset (...)". The window is the
+[statistics window](connections.md#the-statistics-window) C08 and C11 read, and, while this database's own `stats_reset` is null (PostgreSQL 15
+and later, until somebody resets it), no older than the oldest moment its statistics record - so a database created after
+the server's statistics began is not taken for one as old as they are.
 
 **A partitioned table is judged by its largest partition.** A tenant-partitioned table counts one scan per
 partition read, and a per-tenant query that reads its own small partition whole is often the right plan. So the
@@ -173,22 +182,28 @@ and the next apply drops it. One nobody declares is dropped by the next apply an
 
 ## T05 Unused index on a write-heavy table
 
-**Warning** (Info until "never scanned" is proven, see below). A valid, non-unique index of at least 1 MiB that
-nothing has scanned since the counters began, on a table that has taken at least 100,000 inserts, updates and
-deletes in that time.
+**Warning** (Info on a multi-host data source). A valid, non-unique index of at least 1 MiB that nothing has scanned
+since the counters began - or, on PostgreSQL 16 and later, whose `last_idx_scan` is more than 30 days ago - on a table
+that has taken at least 100,000 inserts, updates and deletes in that time.
 
-Every insert, and every update that is not HOT, writes an entry into every index. The finding states the size
-and the write volume, and how old the counters are: `pg_stat_reset()`, a crash and a restore zero `idx_scan`, and
-an index used only by a monthly job looks unused for most of the month. Unique indexes, primary keys, exclusion
-constraints, Marten's own structural indexes and the event store's are never reported.
+Every insert, and every update that is not HOT, writes an entry into every index. The finding states the size and the
+write volume, the last scan's date on 16+ (`last_idx_scan`, set at the statistics flush after a scan and readable by
+every role), and how long the counters have counted. Unique indexes, primary keys, exclusion constraints, Marten's own
+structural indexes and the event store's are never reported.
 
-The finding is only **Info** while "never scanned" is unproven: counters reset less than a day ago, or counters
-that were never reset, whose age is unknown. The advisor's own samples are the proof it can offer there: once
-they have seen the index unscanned, without a break, for a day, the finding is a Warning.
+**Never over a short or reset window** (0.5, issue #8 G4). `pg_stat_reset()`, a crash, a restore, a pre-18 `pg_upgrade`
+and a failover zero `idx_scan`, and an index used by a weekly job looks unused for most of the week. So while the
+statistics have counted for less than seven days, or look reset, there is no finding at all, and the row says why
+("Withheld: statistics 3 days old (since ..., basis ...)", "Withheld: the counters look reset (...)"). The window is the
+one T01 reads, narrowed the same way for a database newer than the server's statistics; on PostgreSQL 19 an index whose
+own counters were reset less than seven days ago is not judged either, and counted. **What changed in 0.5:** 0.4 made
+the finding Info while the counters were under a day old or had never been reset, and a Warning once the advisor's own
+samples had seen the index unscanned for a day (`MinCounterAge`). That is folded into the guard: the finding is a
+Warning over a covering window or nothing, and T05 keeps no samples of its own.
 
 On a **multi-host data source** the finding is Info always. Its reads may go to a standby, which counts its own
-index scans, and the advisor's samples are of the primary's counters - no length of them says anything about a
-standby's. The finding says to check `pg_stat_user_indexes` on every standby before removing the index.
+index scans, and nothing read on the primary says anything about a standby's. The finding says to check
+`pg_stat_user_indexes` on every standby before removing the index.
 
 ## T06 Low HOT-update ratio
 
@@ -216,6 +231,9 @@ opts.Schema.For<Order>().Duplicate(x => x.Status);   // in place of .Index(x => 
 The columns an index reads are Postgres' own record of them (`pg_depend`). A BRIN index is left out on
 PostgreSQL 16 and later, where a summarizing index no longer blocks HOT, and counted before 16, where it does.
 Event-store tables are not judged: `mt_dcb_tag_version`'s fillfactor is E08's.
+
+**Never over a short or reset window** (0.5, issue #8 G4): as T01, no finding while the statistics have counted for less
+than seven days or look reset, and the row says why.
 
 ## Autovacuum's own triggers (T07, T08, T16, T24)
 
@@ -796,3 +814,132 @@ shown to a visitor the store policy passes for the database as a whole (`TenantI
   the platform's administrator installs it) and `pg_stat_scan_tables` (in `pg_monitor`); without either it says which,
   and who can grant or install it. It is never part of a sweep or a list - it reads the table, under an
   `AccessShareLock` - and every press is audited as "Measure bloat", with the table and nothing else.
+
+## T15 Foreign key without a covering index
+
+**Warning.** A foreign key on a judged table of 8 MiB or more (its heap, from `relpages`) that no index covers. Studios:
+both.
+
+Postgres creates an index for a primary key and a unique constraint, never for a foreign key. So every delete from the
+referenced table - and every update of its key - looks up the rows that point at it, and with no index that lookup reads
+the whole referencing table, once per row deleted; a join from the referenced table on the key does too. The evidence
+names the key, its columns, the referenced table, the size, and how many deletes the referenced table has taken since
+the counters began.
+
+**Covered** (B0 §9's rule, the same pure function the database browser's Keys tab uses): a valid, non-partial b-tree - or
+a one-column hash - whose leading key columns are exactly the key's, in any order. An index on `(b, a)` covers a key on
+`(a, b)`; one on `(a)` alone does not; a partial index does not; an expression among the leading columns does not. A
+partitioned table's key is judged on the table itself (never a partition's clone, `conparentid = 0`) against its
+partitioned indexes, and where every partition-key column is one of the key's, those are left to partition pruning: the
+key needs an index only on the rest.
+
+Catalog only: the keys and the indexes come from `pg_constraint` and `pg_index` as attribute numbers, never deparsed. A
+table locked for a schema change is left out for the sweep and counted, as every index check does. A library's table is
+exempt (index design is the library's). The remedy is `CREATE INDEX CONCURRENTLY ON ... (columns)` for the host's own
+table (`CREATE INDEX` on a partitioned one, where `CONCURRENTLY` is not allowed - or `ON ONLY` and each partition's);
+for a Marten document table whose key is on a duplicated field, `opts.Schema.For<T>().Duplicate(x => x.Member)`, which
+declares the column's index as `ForeignKey<TReference>(...)` does; and for a table Marten creates itself, nothing - its
+next apply drops an index nobody declares. Marten's DCB tag tables (`mt_event_tag_<suffix>`) are the case in point: their
+primary key leads with `value`, so a delete of an event reads every tag table whole. marten#5694 declares
+`idx_mt_event_tag_<suffix>_seq_id` from Marten 9.51.0: on 9.51 or later an apply builds it, and the tag table is covered;
+below, it arrives with the upgrade.
+
+## T17 Orphaned document tables
+
+**Info.** Tables in the store's own schemas named like Marten document tables (`mt_doc_*`) that no store in this process
+declares, counted, with their estimated size together (heap, TOAST and indexes, from `relpages`). Studios: Marten Studio.
+
+Marten creates a document type's table and never drops it: a type renamed, moved to another schema or removed leaves its
+old table on disk and in every backup. **Never named**, because a document type Marten has not loaded yet - one never
+registered with `Schema.For<T>()` that nothing in the process has touched - is unknown to `AllKnownDocumentTypes()` and
+indistinguishable here from an orphan, and may be a type the host hides; the finding says so ("or a document type this
+process has not loaded yet"). A hidden type the process knows is declared and never counted. Every registered store's
+declarations are compared, read with no connection; when one cannot be read, the check says it cannot tell and counts
+nothing.
+
+## T19 Partitions against the lock table
+
+**Info** (variant `per-transaction`) or **Warning** (variant `capacity`). Studios: both. For each partitioned table:
+
+`locks = 1 + intermediate partitioned tables + Σ leaf partitions (1 + the indexes on it)`, plus its partitioned indexes
+from PostgreSQL 16 - what one query that is not pruned takes, and a generic plan of a query that filters on the partition
+key too: B0 measured 601 locks for 200 partitions of two indexes each (603 from 16) on every release, a generic plan of a
+tenant-scoped prepared statement included. Only a custom plan prunes at plan time.
+
+- `per-transaction` - Info when `locks` passes `max_locks_per_transaction`: one such query takes more than the average
+  the lock table is sized for per connection.
+- `capacity` - Warning when `locks` passes half the documented capacity, `max_locks_per_transaction × (max_connections +
+  max_prepared_transactions)`: two such queries, or one beside ordinary traffic, can fill the shared lock table, and
+  every session then fails with "out of shared memory".
+
+Up to 18 the documented capacity is a floor - one backend measured about twice it (B0 §8b) - and the evidence says so;
+from PostgreSQL 19 the lock table keeps no such margin and `max_locks_per_transaction` defaults to 128, so a value carried
+over from an older release holds about half the locks it did. The evidence shows the formula with its numbers and the
+fast-path slots a backend has (16 up to 17; from 18 sized from `max_locks_per_transaction`, 64 at its default). The
+remedy is `max_locks_per_transaction`, sized from the formula (the smallest power of two that holds one such query
+within the line, and at least double the setting in force), which takes effect at the server's restart. Counted from the
+catalog, never by locking anything.
+
+## T20 Range partitions running out
+
+**Critical** or **Warning**. Studios: both. For a table partitioned by range on one `date`, `timestamp` or `timestamptz`
+column, judged by the newest partition's upper bound against now and the newest partition's own width:
+
+- `running-out` - **Critical** when there is no `DEFAULT` partition and the bound has passed or is within one width of
+  now: inserts for the next period then fail ("no partition of relation found for row"). **Warning** when it is ahead by
+  fewer than two widths, or - with a `DEFAULT` partition, which catches the rows - when it has passed. A `MAXVALUE` bound
+  never runs out.
+- `default-partition-rows` - **Warning** when the `DEFAULT` partition holds rows (`reltuples`, or `n_live_tup` where
+  higher): rows no range took, read whole by every query for them, and blocking the creation of the range they belong to
+  until they are moved out. A range on an integer key is judged on this alone.
+
+Read without a lock: the hierarchy through `pg_inherits` (never `pg_partition_tree`), the key from
+`pg_partitioned_table`, and each bound through `pg_get_expr(relpartbound, 0)`. `pg_get_expr(relpartbound, relid)` opens
+the partition and queues behind a migration's `ACCESS EXCLUSIVE`, and `pg_get_partkeydef` behind one on the parent; with
+no relation, a bound - which holds no column reference - is deparsed without opening anything (measured on 14.24 and
+18.6, 2026-10-26). A `timestamp` key is read as UTC. The remedy is the next period's `CREATE TABLE ... PARTITION OF ...
+FOR VALUES FROM (...) TO (...)` for the host's own table - a calendar month (or several) where the newest partition spans
+whole months - and, for a Marten document table on `ByRollingRange(...)`, `await
+store.Advanced.RollPartitionsForwardAsync(CancellationToken.None)` on a cadence shorter than one period (present at
+9.39.0 and 9.54.1); a static `ByRange()` is a configuration line the finding describes.
+
+## T25 Bloated index
+
+**Warning** (variant `issue-rule`) or **Info** (variant `key-width`). Studios: both. A b-tree index of 64 MiB or more that
+is mostly empty space, by a lock-free estimate from the catalog:
+
+- `issue-rule` - at least 10 times `reltuples × 64` bytes: the issue's own rule.
+- `key-width` - at least 4 times what its entries take packed: each entry an 8-byte tuple header and its keys aligned to
+  8 bytes, plus a 4-byte line pointer, at the index's fillfactor (90 by default). A fixed-width key counts its `attlen`, a
+  variable-width one its `pg_stats.avg_width` where the reading role may read it and 32 bytes where not. The issue's rule
+  misses narrow keys: a 95%-empty `int4` primary key measures 7.1 times its rule and 20 times this one.
+
+Calibrated on 17: a dense `int4`, `int8` or `(int4, int4)` primary key of 200,000 rows measured 22.6 bytes an entry
+against 22.2 expected; random `uuid` keys 43.7 against 31.1 and random 36-character text keys 79.9 against 48.9 (page
+splits leave leaves part-full, which the factor of 4 allows for); a duplicate-heavy index deduplicates and reads small.
+Both are estimates - `relpages` and `reltuples` as of the last `VACUUM` or `ANALYZE` - and the finding says to measure
+with `pgstatindex` (the Maintenance page's bloat measure) before rebuilding. A library's table is judged too: bloat is
+not index design. The remedy is `REINDEX INDEX CONCURRENTLY` for the host's own table (and a library's); for a table a
+Marten store declares there is no line - the finding says what a `REINDEX INDEX CONCURRENTLY` does, which keeps the name
+and the definition, so the next apply sees no change.
+
+## T26 Integer key running out
+
+**Warning** at half the range, **Critical** at four fifths (T11's lines). Studios: both. A `smallint` or `integer` column
+of a judged table - a library's included - that a sequence feeds (an identity column, a `serial`, or a default that calls
+one, as `pg_depend` records it, never matched as text), or a `bigint` column fed by a `smallint` or `integer` sequence:
+
+- `column` - the column's own range is the limit;
+- `sequence` - the sequence's `seqmax` is narrower than the column's (a `bigint` column on an `AS integer` sequence).
+
+The estimate never reads the sequence, whose value is read only under a lock (B0 §3): it is the greater of the table's
+`reltuples` past the sequence's start - for a column a one-column unique index holds, whose values are distinct - and the
+largest value the last `ANALYZE` sampled (`pg_stats`' last histogram bound or common value), which only a role with
+`SELECT` on the column sees; without it the row count is the only floor, and the finding says which grant would add the
+other. A cycling sequence, a descending one and one that starts below zero are not judged. A rolled-back insert and
+`INSERT ... ON CONFLICT DO NOTHING` take a value and store nothing, so the sequence can be further on: the database
+browser's Sequences list reads one sequence's value when asked, with the share of its column's range used and, from two
+reads, how long it has left. The remedy is `ALTER TABLE ... ALTER COLUMN ... TYPE bigint` - which rewrites the table under
+an `ACCESS EXCLUSIVE` lock - and `ALTER SEQUENCE ... AS bigint` where the sequence is narrower too (an identity column's
+follows its column), for the host's own table; Marten declares no such column (`mt_events.seq_id` is `bigint`; HiLo is
+T11's).

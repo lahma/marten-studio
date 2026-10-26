@@ -85,61 +85,44 @@ public class LockedTableIndexChecksTests
     }
 
     [Fact]
-    public void T05_counts_the_locked_table_and_samples_its_undeparsed_indexes_in_a_sweep_that_still_counts()
+    public void T05_judges_the_unlocked_table_and_counts_the_locked_one()
     {
         MartenTable orders = Document<HealthOrderDoc>();
         MartenTable ints = Document<HealthIntDoc>();
         IndexFacts unused = Index(orders, IndexRow(orders, "never", "id") with { Scans = 0 });
         IndexFacts lockedUnused = Index(ints, Undeparsed(IndexRow(ints, "never_either", "n") with { Scans = 0 }));
-        UnusedIndexFacts facts = new(Now, [unused], [Table(orders), Table(ints)], new DatabaseStatistics(Now.AddDays(-30), true, 2))
+        UnusedIndexFacts facts = new(
+            Now,
+            [unused, lockedUnused],
+            [Table(orders, row => row with { Inserts = 200_000 }), Table(ints, row => row with { Inserts = 200_000 })],
+            new DatabaseStatistics(Now.AddDays(-30), true, 2))
         {
             LockedTables = Locked(ints),
-            LockedIndexes = [lockedUnused],
         };
 
-        HealthVerdict verdict = new UnusedIndexCheck().Evaluate(facts, Evaluation());
+        HealthVerdict verdict = new UnusedIndexCheck().Evaluate(facts, UsageEvaluation());
         verdict.Note.Should().Be(OneLocked);
-        verdict.Findings.Should().NotContain(x => x.Subject == lockedUnused.Key, "a locked table is sampled, never judged");
-
-        new UnusedIndexCheck().Sample(facts).Select(static x => x.Series).Should().Contain(
-            [UnusedIndexCheck.SweptSeries, UnusedIndexCheck.UnscannedSeries + unused.Key, UnusedIndexCheck.UnscannedSeries + lockedUnused.Key],
-            "every sweep counts, and the locked table's indexes are sampled from their undeparsed rows, so no clock resets");
+        verdict.Findings.Should().ContainSingle("the unlocked table is judged").Which.Subject.Should().Be(unused.Key);
     }
 
     /// <summary>
-    /// A table locked in every sweep starves nobody: T05's clock runs for the other tables' indexes - and for the locked
-    /// table's too - and a day of it makes the finding a Warning.
+    /// While the usage guard withholds every verdict (issue #8 G4), the status row still counts the locked table: the version
+    /// matrix holds every index check's row to it behind a held lock.
     /// </summary>
     [Fact]
-    public void A_table_locked_in_every_sweep_leaves_T05s_clock_running_for_the_others()
+    public void T05_withheld_by_the_guard_still_counts_the_locked_table()
     {
         MartenTable orders = Document<HealthOrderDoc>();
-        MartenTable ints = Document<HealthIntDoc>();
         IndexFacts unused = Index(orders, IndexRow(orders, "never", "id") with { Scans = 0 });
-        IndexFacts lockedUnused = Index(ints, Undeparsed(IndexRow(ints, "never_either", "n") with { Scans = 0 }));
-        TableFacts busy = Table(orders, row => row with { Inserts = 200_000 });
-
-        UnusedIndexFacts At(DateTimeOffset at) => new(at, [unused], [busy, Table(ints)], new DatabaseStatistics(null, true, 2))
+        UnusedIndexFacts facts = new(Now, [unused], [Table(orders, row => row with { Inserts = 200_000 })], new DatabaseStatistics(null, true, 2))
         {
-            LockedTables = Locked(ints),
-            LockedIndexes = [lockedUnused],
+            LockedTables = Locked(Document<HealthIntDoc>()),
         };
 
-        // A sample every ten minutes for a day and an hour, each with ints locked.
-        HealthHistoryView history = new([
-            .. Enumerable.Range(0, 151).Select(i => Now.AddMinutes(-10 * (150 - i))).Select(at => new HealthSample(
-                at,
-                new UnusedIndexCheck().Sample(At(at)).ToDictionary(static p => p.Series, static p => p.Value, StringComparer.Ordinal))),
-        ]);
+        HealthVerdict verdict = new UnusedIndexCheck().Evaluate(facts, Evaluation() with { Statistics = StatisticsOver(TimeSpan.FromHours(5)) });
 
-        TableHistory.HeldSince(history, UnusedIndexCheck.SweptSeries, UnusedIndexCheck.UnscannedSeries + unused.Key)
-            .Should().Be(Now.AddMinutes(-1500), "the clock started at the first sample and every sweep since counted");
-        TableHistory.HeldSince(history, UnusedIndexCheck.SweptSeries, UnusedIndexCheck.UnscannedSeries + lockedUnused.Key)
-            .Should().NotBeNull("the locked table's indexes were sampled undeparsed, so their clock ran through the lock");
-
-        HealthFinding finding = new UnusedIndexCheck().Evaluate(At(Now), Evaluation(history)).Findings.Should().ContainSingle().Subject;
-        finding.Subject.Should().Be(unused.Key);
-        finding.Severity.Should().Be(HealthSeverity.Warning, "a day of the advisor's own samples proves it unscanned, lock or no lock");
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().StartWith("Withheld: statistics 5 h old").And.EndWith(OneLocked);
     }
 
     /// <summary>What an index of a locked table looks like as the read returns it: no definition, no deparsed columns.</summary>
@@ -196,10 +179,10 @@ public class LockedTableIndexChecksTests
 
         HotUpdateFacts unlocked = new([Table(orders)], [], new DatabaseStatistics(Now.AddDays(-30), true, 2));
 
-        new HotUpdateCheck().Evaluate(unlocked, Evaluation(history)).Findings.Should().ContainSingle(
+        new HotUpdateCheck().Evaluate(unlocked, UsageEvaluation(history)).Findings.Should().ContainSingle(
             "the anti-vacuity half: unlocked, no index read means the fill-factor finding");
 
-        HealthVerdict locked = new HotUpdateCheck().Evaluate(unlocked with { LockedTables = Locked(orders) }, Evaluation(history));
+        HealthVerdict locked = new HotUpdateCheck().Evaluate(unlocked with { LockedTables = Locked(orders) }, UsageEvaluation(history));
 
         locked.Findings.Should().BeEmpty("its indexes were not read, so whether one blocks HOT is unknown, not 'none'");
         locked.Note.Should().Be(OneLocked);
@@ -240,7 +223,7 @@ public class LockedTableIndexChecksTests
             [new TableFacts(upper, row with { Schema = "public", Table = "Orders" }), new TableFacts(lower, row with { Schema = "public", Table = "orders", Inserts = 10 })],
             new DatabaseStatistics(Now.AddDays(-30), true, 2));
 
-        HealthVerdict verdict = new UnusedIndexCheck().Evaluate(facts, Evaluation());
+        HealthVerdict verdict = new UnusedIndexCheck().Evaluate(facts, UsageEvaluation());
 
         verdict.Findings.Should().ContainSingle("only \"Orders\" took enough writes - its index is not judged by orders' row, nor the other way")
             .Which.Subject.Should().Be("public.Orders.upper_never");

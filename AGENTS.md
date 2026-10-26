@@ -1300,6 +1300,8 @@ tests/PostgresStudio.Integration.Tests/Server/  Live S04-S10 and K05-K07: each f
                                          14-18 as app and probe, and their no-lock, no-DDL reads
 src/PostgresStudio/wwwroot/css/parts/     A W5 packet's stylesheet section until the orchestrator folds it into studio.css
                                          (W5-index §4); never reaches main
+tests/PostgresStudio.Tests/Tables/        T15, T19, T20, T25 and T26 at their edges, the usage guards, foreign-key coverage,
+                                         sequence headroom and the lint statements' D27 shape - no database
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

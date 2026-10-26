@@ -258,10 +258,16 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
         Unprobed.Should().NotIntersectWith(Probes.Keys);
     }
 
-    /// <summary>The features no catalog read can show: a JIT plan's shape, which needs a plan costly enough to compile.</summary>
+    /// <summary>
+    /// The features no catalog read can show: a JIT plan's shape, which needs a plan costly enough to compile; and what one
+    /// transaction locks and how many of its locks take the fast path (B0 §8a measured both on every release; W5-B1's
+    /// <c>PartitionChecksLiveTests</c> counts the locks a generic plan takes).
+    /// </summary>
     private static readonly HashSet<PostgresFeature> Unprobed =
     [
         PostgresFeature.ExplainGenerationObject,
+        PostgresFeature.PartitionedIndexLocks,
+        PostgresFeature.FastPathSlotsFromMaxLocks,
     ];
 
     /// <summary>How the matrix sees each feature, as one boolean query; the null ones are answered in code.</summary>

@@ -178,6 +178,139 @@ internal sealed class PostgresHealthTableRemedies : IHealthTableRemedies
             : null;
     }
 
+    // ---- W5-B1 ---------------------------------------------------------------------------------------------------------
+
+    /// <inheritdoc />
+    public HealthRemedy? IndexTheForeignKey(StudioTable table, IReadOnlyList<string> columns, bool partitioned)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        if (!OffersIndexes(table))
+        {
+            return null;
+        }
+
+        if (partitioned)
+        {
+            return MigrationSqlText.CreateIndexOnPartitionedTable(table.Schema, table.Table, columns) is { } plain
+                ? HealthRemedy.ForMigration(
+                    plain,
+                    "An index whose leading columns are the key's lets Postgres find the rows that point at a deleted or updated "
+                    + "row without reading every partition whole. CONCURRENTLY is not allowed on a partitioned table, so this one "
+                    + "blocks writes to every partition while it builds; to avoid that, create it ON ONLY the parent, build each "
+                    + "partition's with CREATE INDEX CONCURRENTLY, and ALTER INDEX ... ATTACH PARTITION each one.")
+                : null;
+        }
+
+        return MigrationSqlText.CreateIndexConcurrently(table.Schema, table.Table, columns) is { } sql
+            ? HealthRemedy.ForMigration(
+                sql,
+                "An index whose leading columns are the key's lets Postgres find the rows that point at a deleted or updated row "
+                + "without reading the whole table. CREATE INDEX CONCURRENTLY builds without blocking writes, but cannot run "
+                + "inside a transaction block.")
+            : null;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Nothing to add: a plain source's table is the host's, and <see cref="IndexTheForeignKey" /> words it.</remarks>
+    public string? ForeignKeyIndexNote(StudioTable table, IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(columns);
+        return null;
+    }
+
+    /// <inheritdoc />
+    public HealthRemedy? RebuildBloatedIndex(StudioTable table, HealthIndexRow index, IndexOrigin origin)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(index);
+
+        // Any relational table's, a library's included: a rebuild keeps exactly the design it had (issue #8 G1: size rules apply).
+        return IsRelational(table) && MigrationSqlText.ReindexIndexConcurrently(index.Schema, index.Name) is { } sql
+            ? HealthRemedy.ForMigration(
+                sql,
+                "Builds the index again, packed, under the same name and definition, without blocking writes (PostgreSQL 12+; on a "
+                + "partitioned index, 14+). It needs room for a second copy while it runs, and a REINDEX CONCURRENTLY that fails "
+                + "leaves an invalid copy (_ccnew) behind to drop. Measure it first with pgstatindex - the Maintenance page's "
+                + "bloat measure - since the size it is judged by is an estimate.")
+            : null;
+    }
+
+    /// <inheritdoc />
+    public HealthRemedy? WidenKey(StudioTable table, HealthIntegerKeyRow key)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(key);
+
+        if (!IsHosts(table))
+        {
+            return null;
+        }
+
+        bool narrowColumn = key.ColumnType is "smallint" or "integer";
+        bool narrowSequence = key.SequenceType is "smallint" or "integer";
+        List<string> statements = [];
+
+        if (narrowColumn)
+        {
+            if (MigrationSqlText.WidenColumnToBigint(table.Schema, table.Table, key.Column) is not { } column)
+            {
+                return null;
+            }
+
+            statements.Add(column);
+        }
+
+        // An identity column's sequence follows the column's type when the column is altered (measured on 17); a serial's or
+        // a default's does not, and is altered on its own.
+        if (narrowSequence && !(narrowColumn && key.FedBy == "identity"))
+        {
+            if (MigrationSqlText.WidenSequenceToBigint(key.SequenceSchema, key.Sequence) is not { } sequence)
+            {
+                return null;
+            }
+
+            statements.Add(sequence);
+        }
+
+        if (statements.Count == 0)
+        {
+            return null;
+        }
+
+        string explanation =
+            (narrowColumn
+                ? "ALTER COLUMN ... TYPE bigint rewrites the whole table, and rebuilds every index on it, under an ACCESS "
+                  + "EXCLUSIVE lock that every read and write waits for: plan a maintenance window, or add a bigint column, "
+                  + "backfill it in batches and swap it in. Widen every column that references this one too. "
+                : string.Empty)
+            + (narrowSequence ? "ALTER SEQUENCE ... AS bigint raises the sequence's maximum to bigint's with its type." : string.Empty);
+
+        return HealthRemedy.ForMigration(string.Join("\n", statements), explanation.TrimEnd());
+    }
+
+    /// <inheritdoc />
+    public HealthRemedy? ExtendRangePartitions(StudioTable table, RangePartitionNext next)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(next);
+
+        // Upkeep, not design: a library's partitioned table needs its next period as much as the host's does.
+        return IsRelational(table)
+               && MigrationSqlText.CreateRangePartition(table.Schema, table.Table, table.Table + "_" + next.Suffix, next.KeyType, next.From, next.To) is { } sql
+            ? HealthRemedy.ForMigration(
+                sql,
+                "Creates the next period's partition, named as the studio would name it - rename it to match yours. "
+                + (next.HasDefault
+                    ? "Creating it scans the DEFAULT partition under an ACCESS EXCLUSIVE lock for rows of the new range, and fails "
+                      + "if there are any: move those out of the default first. "
+                    : string.Empty)
+                + "Create periods ahead on a schedule rather than by hand - pg_partman, or a job of the application's own.")
+            : null;
+    }
+
     /// <summary>
     /// Whether a migration statement fits <paramref name="table" /> at all: a relational table that is not named like
     /// Marten's, whose configuration would undo it.

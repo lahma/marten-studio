@@ -27,7 +27,7 @@ public class SequentialScansCheckTests
         MartenTable orders = Document<HealthOrderDoc>();
         TableFacts table = Large(orders);
 
-        HealthVerdict verdict = Check.Evaluate(Facts(table), Evaluation(Window(orders.Key, (10, 1_000_000), (14, 1_800_000))));
+        HealthVerdict verdict = Check.Evaluate(Facts(table), UsageEvaluation(Window(orders.Key, (10, 1_000_000), (14, 1_800_000))));
 
         HealthFinding finding = verdict.Findings.Should().ContainSingle().Subject;
         finding.Code.Should().Be("T01");
@@ -39,7 +39,7 @@ public class SequentialScansCheckTests
         finding.Remedy!.Code.Should().Contain("opts.Schema.For<HealthOrderDoc>().Index(x => x.FilteredMember);");
         finding.Remedy.Explanation.Should().Contain("Query").And.Contain(orders.Alias!);
         finding.Remedy.Requires.Should().BeNull("Index and Duplicate exist at the floor");
-        finding.Caveat.Should().Contain("statistics were last reset").And.Contain("parallel scan");
+        finding.Caveat.Should().Contain("Counters since").And.Contain("never given over less than 7 days").And.Contain("parallel scan");
 
         finding.Link.Should().NotBeNull("the index advisor is the screen that helps");
         finding.Link!.Route.Should().Be("query");
@@ -55,7 +55,7 @@ public class SequentialScansCheckTests
 
         HealthHistoryView one = History((TimeSpan.Zero, [(SequentialScansCheck.ScansSeries + orders.Key, 50), (SequentialScansCheck.RowsReadSeries + orders.Key, 9_000_000)]));
 
-        HealthVerdict verdict = Check.Evaluate(Facts(Large(orders)), Evaluation(one));
+        HealthVerdict verdict = Check.Evaluate(Facts(Large(orders)), UsageEvaluation(one));
 
         verdict.Findings.Should().BeEmpty("a lifetime total of scans is last spring's bulk load, not this hour's query");
         verdict.Note.Should().Contain("Watching 1 large table").And.Contain("two samples");
@@ -67,7 +67,7 @@ public class SequentialScansCheckTests
         MartenTable orders = Document<HealthOrderDoc>();
         TableFacts small = Large(orders, rows: SequentialScansCheck.LargeTableRows - 1);
 
-        HealthVerdict verdict = Check.Evaluate(Facts(small), Evaluation(Window(orders.Key, (0, 0), (1_000, 99_999_000))));
+        HealthVerdict verdict = Check.Evaluate(Facts(small), UsageEvaluation(Window(orders.Key, (0, 0), (1_000, 99_999_000))));
 
         verdict.Findings.Should().BeEmpty();
         verdict.Note.Should().Contain("100,000 live rows");
@@ -80,7 +80,7 @@ public class SequentialScansCheckTests
 
         // A million "limit 1"-shaped scans reading ten rows each: 10M rows, 50 table-equivalents, but no scan read
         // anything like the table.
-        HealthVerdict verdict = Check.Evaluate(Facts(Large(orders)), Evaluation(Window(orders.Key, (0, 0), (1_000_000, 10_000_000))));
+        HealthVerdict verdict = Check.Evaluate(Facts(Large(orders)), UsageEvaluation(Window(orders.Key, (0, 0), (1_000_000, 10_000_000))));
 
         verdict.Findings.Should().BeEmpty();
     }
@@ -93,8 +93,8 @@ public class SequentialScansCheckTests
         // Four full scans of 200,000 rows, each by a leader and two workers: twelve scans of about 66,667 rows.
         HealthHistoryView window = Window(orders.Key, (0, 0), (12, 800_000));
 
-        Check.Evaluate(Facts(Large(orders), parallelWorkers: 2), Evaluation(window)).Findings.Should().ContainSingle();
-        Check.Evaluate(Facts(Large(orders), parallelWorkers: 0), Evaluation(window)).Findings
+        Check.Evaluate(Facts(Large(orders), parallelWorkers: 2), UsageEvaluation(window)).Findings.Should().ContainSingle();
+        Check.Evaluate(Facts(Large(orders), parallelWorkers: 0), UsageEvaluation(window)).Findings
             .Should().BeEmpty("with no parallel workers a scan of a third of the table is not a whole-table scan");
     }
 
@@ -117,7 +117,7 @@ public class SequentialScansCheckTests
         // scans of 250,000 rows each, four times the table's worth.
         HealthHistoryView window = Window(orders.Key, (0, 0), (16, 4_000_000));
 
-        HealthFinding finding = Check.Evaluate(Facts(Partitioned(orders, 4, 250_000)), Evaluation(window)).Findings.Should().ContainSingle().Subject;
+        HealthFinding finding = Check.Evaluate(Facts(Partitioned(orders, 4, 250_000)), UsageEvaluation(window)).Findings.Should().ContainSingle().Subject;
 
         finding.Title.Should().StartWith("Partition-wide sequential scans of " + orders.Key).And.Contain("4 times");
     }
@@ -135,7 +135,7 @@ public class SequentialScansCheckTests
         // 10,000 per-tenant scans of one 4,000-row partition each: 40 million rows, 200 times the table's 200,000.
         HealthHistoryView window = Window(orders.Key, (0, 0), (10_000, 40_000_000));
 
-        HealthVerdict verdict = Check.Evaluate(Facts(Partitioned(orders, 50, 4_000)), Evaluation(window));
+        HealthVerdict verdict = Check.Evaluate(Facts(Partitioned(orders, 50, 4_000)), UsageEvaluation(window));
 
         verdict.Findings.Should().BeEmpty("no partition is large, and a sequential scan of a small table is often the right plan");
         verdict.Note.Should().Contain("no partition of one");
@@ -166,12 +166,12 @@ public class SequentialScansCheckTests
 
         SequentialScansCheck.IsLarge(table).Should().BeTrue("the large partition is past the size line");
         SequentialScansCheck.ScanUnit(table).Should().Be(200_000, "a whole scan is measured against the largest partition, never the mean");
-        Check.Evaluate(Facts(table), Evaluation(perTenant)).Findings
+        Check.Evaluate(Facts(table), UsageEvaluation(perTenant)).Findings
             .Should().BeEmpty("no scan read anything like the large partition, and a small partition read whole is a small table");
 
         // Scans of the large partition itself are still found: eleven of 200,000 rows read the table's worth three times.
         HealthHistoryView large = Window(orders.Key, (0, 0), (11, 2_200_000));
-        Check.Evaluate(Facts(table), Evaluation(large)).Findings.Should().ContainSingle()
+        Check.Evaluate(Facts(table), UsageEvaluation(large)).Findings.Should().ContainSingle()
             .Which.Title.Should().StartWith("Partition-wide sequential scans of " + orders.Key);
     }
 
@@ -193,11 +193,11 @@ public class SequentialScansCheckTests
             LargestLeafRows = 150_000,
         });
 
-        Check.Evaluate(Facts(table, parallelWorkers: 0), Evaluation(whole)).Findings.Should().ContainSingle();
+        Check.Evaluate(Facts(table, parallelWorkers: 0), UsageEvaluation(whole)).Findings.Should().ContainSingle();
 
         // The same rows read by four hundred thousand scans of ten rows each are index-shaped lookups, not whole scans.
         HealthHistoryView cheap = Window(orders.Key, (0, 0), (400_000, 4_000_000));
-        Check.Evaluate(Facts(table, parallelWorkers: 0), Evaluation(cheap)).Findings.Should().BeEmpty();
+        Check.Evaluate(Facts(table, parallelWorkers: 0), UsageEvaluation(cheap)).Findings.Should().BeEmpty();
     }
 
     [Fact]
@@ -212,7 +212,7 @@ public class SequentialScansCheckTests
             (TimeSpan.FromMinutes(20), [(scans, 0), (read, 0)]),
             (TimeSpan.Zero, [(scans, 1), (read, 200_000)]));
 
-        HealthVerdict verdict = Check.Evaluate(Facts(Large(orders)), Evaluation(window));
+        HealthVerdict verdict = Check.Evaluate(Facts(Large(orders)), UsageEvaluation(window));
 
         verdict.Findings.Should().BeEmpty("one whole-table read since the reset is not three");
     }
@@ -222,7 +222,7 @@ public class SequentialScansCheckTests
     {
         MartenTable events = EventTable();
 
-        HealthVerdict verdict = Check.Evaluate(Facts(Large(events)), Evaluation(Window(events.Key, (0, 0), (5, 1_000_000))));
+        HealthVerdict verdict = Check.Evaluate(Facts(Large(events)), UsageEvaluation(Window(events.Key, (0, 0), (5, 1_000_000))));
 
         HealthFinding finding = verdict.Findings.Should().ContainSingle().Subject;
         finding.Remedy.Should().BeNull("no StoreOptions line indexes an event table for an arbitrary query");
@@ -253,7 +253,7 @@ public class SequentialScansCheckTests
     [Fact]
     public void A_table_with_no_rows_read_to_judge_says_nothing()
     {
-        HealthVerdict verdict = Check.Evaluate(new SequentialScanFacts(Now, [], DatabaseStatistics.Unknown), Evaluation());
+        HealthVerdict verdict = Check.Evaluate(new SequentialScanFacts(Now, [], DatabaseStatistics.Unknown), UsageEvaluation());
 
         verdict.Findings.Should().BeEmpty();
     }

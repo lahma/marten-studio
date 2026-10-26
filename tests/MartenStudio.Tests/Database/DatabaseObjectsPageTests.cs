@@ -388,7 +388,7 @@ public class DatabaseObjectsPageTests
 
         IElement definer = FunctionRow(page, "unsafe_definer");
         IElement badge = definer.QuerySelector(".ms-db-badge-warning")!;
-        badge.TextContent.Trim().Should().Be("SECURITY DEFINER");
+        badge.TextContent.Trim().Should().Be("SECURITY DEFINER, search_path not pinned", "W5-B1: the badge says what is wrong, not only what it is");
         badge.GetAttribute("title").Should().Contain("search_path");
 
         FunctionRow(page, "archive_orders").TextContent.Should().Contain("proc");
@@ -615,7 +615,7 @@ public class DatabaseObjectsPageTests
 
         var page = DatabasePageData.RenderBrowser(context, "kind=sequences");
 
-        SequenceRow(page, "payroll_id_seq").QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("no privilege");
+        SequenceRow(page, "payroll_id_seq").QuerySelectorAll("td")[2].TextContent.Trim().Should().Be("no privilege to read the value");
 
         // A readable sequence's value is read only when asked: reading it takes a brief lock on the sequence,
         // and a list must lock nothing it lists (the DB-1 review's B1).

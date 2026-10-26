@@ -447,6 +447,12 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
             return value is { CanReadValue: true }
                 ? new DatabaseSequenceValue(reference, value.LastValue, DatabaseRefusal.None, null)
+                {
+                    // Its range and the columns it feeds, read with it from the catalog (W5-B1): what its headroom is judged by.
+                    Headroom = value is { DataType: { } type, ReadAt: { } readAt }
+                        ? new SequenceHeadroomFacts(type, value.Start, value.Increment, value.Minimum, value.Maximum, value.Cycles, value.ColumnTypes, value.ColumnMaximum, readAt)
+                        : null,
+                }
                 : Refuse(DatabaseRefusal.NotFound, DatabaseObjectAssembler.NotFound(schema, name), audited: false);
         }
         catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
