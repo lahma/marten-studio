@@ -108,6 +108,12 @@ internal static class ProjectionProgressQueries
     /// </remarks>
     public const string EventsSequence = "mt_events_sequence";
 
+    /// <summary>
+    /// Where Marten 9.52 stores projection start floors (#5740), keyed by projection name and tenant. Not gated on any
+    /// option: every event store migrated at 9.52 or later has it.
+    /// </summary>
+    public const string ProjectionFloorsTable = "mt_event_projection_floors";
+
     /// <summary>The two columns every progression row has.</summary>
     private const string NameColumn = "name";
 
@@ -413,6 +419,96 @@ internal static class ProjectionProgressQueries
     }
 
     /// <summary>
+    /// The start floors stored for one projection, every tenant's - <c>mt_event_projection_floors</c>, Marten 9.52's
+    /// table (#5740, <c>Marten.Events.Schema.ProjectionFloorTable</c>).
+    /// </summary>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="projectionName">
+    /// The projection's name, which is <c>ShardName.Name</c>: the floors are keyed by it <em>without</em> the version, so a
+    /// version bump inherits them, and by tenant - the empty string for a store-global floor.
+    /// </param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    /// <remarks>
+    /// <b>Why this is not <c>IEventDatabase.FetchProjectionFloorAsync</c>.</b> Marten's floor reads open with
+    /// <c>EnsureStorageExistsAsync(typeof(IEvent))</c> (<c>MartenDatabase.ProjectionFloors.cs</c> at <c>V9.54.1</c>), which
+    /// creates or migrates the event store under the database's <c>AutoCreate</c> - and on a store migrated below 9.52
+    /// creates this very table - because somebody opened a rebuild dialog (hard rule 14). The statement is Marten's own
+    /// <c>select floor ... where name = :name</c>, for every tenant at once.
+    /// </remarks>
+    public static NpgsqlCommand BuildProjectionFloors(string schema, string projectionName, TimeSpan? commandTimeout = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectionName);
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            command.CommandText =
+                "select " + SqlIdentifier.Quote("tenant_id") + ", " + SqlIdentifier.Quote("floor")
+                + " from " + SqlIdentifier.Qualify(schema, ProjectionFloorsTable)
+                + " where " + SqlIdentifier.Quote("name") + " = @name"
+                + " order by " + SqlIdentifier.Quote("tenant_id");
+
+            command.Parameters.Add(new NpgsqlParameter("name", NpgsqlDbType.Varchar) { Value = projectionName });
+
+            ApplyTimeout(command, commandTimeout);
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The start floors stored for one projection, or <see langword="null" /> when this database has no
+    /// <c>mt_event_projection_floors</c> - a store migrated below Marten 9.52, or no event store at all - which is not the
+    /// same answer as "none stored".
+    /// </summary>
+    /// <param name="connection">An open read connection to the database in scope.</param>
+    /// <param name="catalog">The shared, expiring <c>information_schema</c> catalog.</param>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="projectionName">The projection's name, without its version.</param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public static async Task<IReadOnlyList<ProjectionFloorRow>?> ReadProjectionFloorsAsync(
+        NpgsqlConnection connection,
+        ColumnCatalog catalog,
+        string schema,
+        string projectionName,
+        TimeSpan? commandTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(catalog);
+
+        TableColumns table = await catalog
+            .GetAsync(connection, schema, ProjectionFloorsTable, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!table.Exists)
+        {
+            return null;
+        }
+
+        await using NpgsqlCommand command = BuildProjectionFloors(schema, projectionName, commandTimeout);
+        command.Connection = connection;
+
+        List<ProjectionFloorRow> rows = [];
+
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            rows.Add(new ProjectionFloorRow(reader.IsDBNull(0) ? string.Empty : reader.GetString(0), reader.GetInt64(1)));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
     /// Every column this read asks for after name, position and the read time, in select order: the progress
     /// columns the table has (whatever the flag says), then the extended ones under the flag.
     /// </summary>
@@ -483,6 +579,12 @@ internal static class ProjectionProgressQueries
         }
     }
 }
+
+/// <summary>One stored projection start floor, exactly as <c>mt_event_projection_floors</c> holds it.</summary>
+/// <param name="TenantId">The tenant the floor is for: the empty string for a store-global floor, which is every floor
+/// except under <c>UseTenantPartitionedEvents</c>.</param>
+/// <param name="Floor">The sequence a start or a rebuild begins after.</param>
+internal sealed record ProjectionFloorRow(string TenantId, long Floor);
 
 /// <summary>
 /// What one read of <c>mt_event_progression</c> found.

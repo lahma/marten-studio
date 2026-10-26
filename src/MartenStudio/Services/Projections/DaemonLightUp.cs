@@ -52,6 +52,10 @@ internal static class DaemonLightUp
             .GetMethod("IsTransient", BindingFlags.Public | BindingFlags.Static, ExceptionParameter),
         LazyThreadSafetyMode.ExecutionAndPublication);
 
+    private static readonly Lazy<MethodInfo?> SystemicMethod = new(
+        RuntimeFeature.SystemicDatabaseFailureMethod,
+        LazyThreadSafetyMode.ExecutionAndPublication);
+
     /// <summary>
     /// Whether <paramref name="daemon" /> says it is rebuilding <paramref name="shard" />'s projection right now.
     /// <see langword="false" /> on a JasperFx without <c>IsRebuilding</c>, and on one whose daemon does not track it.
@@ -120,6 +124,90 @@ internal static class DaemonLightUp
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Whether JasperFx calls <paramref name="exception" /> a systemic database failure - a non-transient
+    /// <c>DbException</c> anywhere in its graph, which it never dead-letters (<c>ProjectionExceptions.IsSystemicDatabaseFailure</c>,
+    /// JasperFx.Events 2.93, first in Marten 9.52, <see cref="RuntimeFeature.SystemicDatabaseFailure" />) - or
+    /// <see langword="null" /> when it cannot say.
+    /// </summary>
+    public static bool? IsSystemicDatabaseFailure(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        if (!RuntimeFeature.SystemicDatabaseFailure.IsAvailable(MartenRuntime.Current) || SystemicMethod.Value is not { } method)
+        {
+            return null;
+        }
+
+        try
+        {
+            return method.Invoke(null, [exception]) as bool?;
+        }
+        catch (TargetInvocationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// What a classified failure says about being a systemic database failure, where the daemon hands over its
+    /// <see cref="ShardFailure" /> and not the exception: <see langword="true" /> for one JasperFx calls permanent
+    /// (<c>ShardFailure.IsTransient</c> false) whose innermost exception is a <c>DbException</c>, <see langword="false" />
+    /// for a transient one, and <see langword="null" /> otherwise - including below JasperFx.Events 2.93, and a permanent
+    /// failure whose root is not a database exception, because the database error may sit further up its graph.
+    /// </summary>
+    public static bool? IsSystemicDatabaseFailure(ShardFailure? failure)
+    {
+        if (failure is null || !RuntimeFeature.SystemicDatabaseFailure.IsAvailable(MartenRuntime.Current))
+        {
+            return null;
+        }
+
+        if (typeof(ShardFailure).GetProperty("IsTransient", BindingFlags.Public | BindingFlags.Instance)?.GetValue(failure) is not bool transient)
+        {
+            return null;
+        }
+
+        if (transient)
+        {
+            return false;
+        }
+
+        return IsDatabaseExceptionType(failure.RootExceptionType) ? true : null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="typeName" /> - a <c>ShardFailure</c>'s full type name, as JasperFx writes it - names a
+    /// <see cref="System.Data.Common.DbException" /> among the assemblies this process has loaded.
+    /// </summary>
+    internal static bool IsDatabaseExceptionType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return false;
+        }
+
+        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            Type? type;
+            try
+            {
+                type = assembly.GetType(typeName, throwOnError: false);
+            }
+            catch (Exception exception) when (exception is ArgumentException or FileLoadException or BadImageFormatException)
+            {
+                continue;
+            }
+
+            if (type is not null)
+            {
+                return typeof(System.Data.Common.DbException).IsAssignableFrom(type);
+            }
+        }
+
+        return false;
     }
 
     /// <summary>A sentence for a refusal: the reason, and whether a retry is expected to help, when JasperFx says.</summary>

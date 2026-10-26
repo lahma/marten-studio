@@ -1,7 +1,8 @@
 @using PostgresStudio.Components.Shared
 @* The rebuild confirm: what it will do, and the projection's name typed out before it will do it.
 
-   A rebuild deletes the projection's documents and replays every event into them. There is no undo and
+   A rebuild deletes the projection's documents and replays every event into them - from Marten 9.52, every event
+   above the projection's start floor, which the dialog then names (RebuildWording). There is no undo and
    there is no progress bar that can bring the old rows back, so this is the "type the name" severity of
    confirmation rather than the "are you sure" one. It states the scope first - tables, shards, how many
    events would be replayed and how long each shard is given - because a person cannot consent to
@@ -34,6 +35,15 @@
             <span class="ms-kv-key">Events to replay</span>
             <span class="ms-kv-value ms-mono">@EventsToReplay.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</span>
         </div>
+        @if (ReplaysFrom is { Length: > 0 })
+        {
+            @* Marten 9.52+: a rebuild replays from the projection's start floor (RebuildWording). Absent below it, where every
+               rebuild replays from the first event and the summary says so. *@
+            <div class="ms-kv-row ms-rebuild-floor">
+                <span class="ms-kv-key">Replays from</span>
+                <span class="ms-kv-value">@ReplaysFrom</span>
+            </div>
+        }
         <div class="ms-kv-row ms-rebuild-timeout">
             <span class="ms-kv-key">Time allowed per shard</span>
             <span class="ms-kv-value ms-mono">@TimeoutText</span>
@@ -46,6 +56,11 @@
             </div>
         }
     </div>
+
+    @if (FloorNote is { Length: > 0 })
+    {
+        <p class="ms-muted ms-rebuild-floor-note">@FloorNote</p>
+    }
 
     <p class="ms-muted ms-rebuild-timeout-note">
         The tables are emptied first and then replayed, so a shard that has not finished within
@@ -104,9 +119,24 @@
     [Parameter]
     public string ProjectionName { get; set; } = string.Empty;
 
-    /// <summary>How many events a rebuild would replay: the store's high-water mark.</summary>
+    /// <summary>
+    /// How many events a rebuild would replay: the store's high-water mark, less the projection's stored start floor from
+    /// Marten 9.52.
+    /// </summary>
     [Parameter]
     public long EventsToReplay { get; set; }
+
+    /// <summary>Where the summary says the replay starts - "from the beginning" below Marten 9.52 (<c>RebuildWording</c>).</summary>
+    [Parameter]
+    public string ReplayPhrase { get; set; } = "from the beginning";
+
+    /// <summary>The "Replays from" row, or <see langword="null" /> below Marten 9.52, where there is none.</summary>
+    [Parameter]
+    public string? ReplaysFrom { get; set; }
+
+    /// <summary>What the start floor does to the projection's documents, or <see langword="null" /> below Marten 9.52.</summary>
+    [Parameter]
+    public string? FloorNote { get; set; }
 
     /// <summary>The shards that would restart.</summary>
     [Parameter]
@@ -170,7 +200,7 @@
     private string Summary =>
         $"This deletes what {ProjectionName} has written and replays "
         + EventsToReplay.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)
-        + " events into it from the beginning. It cannot be undone.";
+        + " events into it " + ReplayPhrase + ". It cannot be undone.";
 
     /// <summary>The timeout in the largest unit that says it without a decimal point.</summary>
     private string TimeoutText

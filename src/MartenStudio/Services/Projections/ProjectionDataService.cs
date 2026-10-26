@@ -7,6 +7,7 @@ using Marten.Schema;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Configuration;
 using PostgresStudio.Services.Database;
 using MartenStudio.Services.Live;
 
@@ -159,6 +160,8 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         {
             Trends = trends,
             HealthHistory = history,
+            TenantPartitionedEvents = resolved.Store.Options.Events.UseTenantPartitionedEvents,
+            DatabaseAutoCreate = Read<string?>(() => resolved.Database.AutoCreate.ToString(), null),
         };
     }
 
@@ -258,13 +261,27 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         long highWaterMark = await ReadHighWaterMarkAsync(resolved, connection, cancellationToken)
             .ConfigureAwait(false) ?? 0;
 
+        // From Marten 9.52 a rebuild replays from the projection's start floor, not from the first event. The stored
+        // floors are read with the studio's own SQL, never through IEventDatabase.FetchProjectionFloorAsync, which
+        // ensures the event storage first (hard rule 14); below 9.52 nothing reads them, and nothing here does either.
+        RebuildFloor? floor = RuntimeFeature.ProjectionStartFloors.IsAvailable(MartenRuntime.Current)
+            ? RebuildFloor.From(
+                await ProjectionProgressQueries
+                    .ReadProjectionFloorsAsync(connection, catalog, EventSchemaOf(resolved), source.Name, CommandTimeout, cancellationToken)
+                    .ConfigureAwait(false),
+                resolved.Store.Options.Events.UseTenantPartitionedEvents)
+            : null;
+
         return new RebuildScope(
             source.Name,
-            highWaterMark,
+            floor?.EventsToReplay(highWaterMark) ?? highWaterMark,
             [.. ShardIdentities(source)],
             TablesFor(resolved.Store, source),
             source.Lifecycle,
-            options.Value.RebuildShardTimeout);
+            options.Value.RebuildShardTimeout)
+        {
+            Floor = floor,
+        };
     }
 
     /// <inheritdoc />
@@ -570,7 +587,10 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
                 source.Type.ToString(),
                 source.Version,
                 source.ImplementationType?.Name ?? "(unknown)",
-                [.. ShardIdentities(source)]));
+                [.. ShardIdentities(source)])
+            {
+                MemberShardNames = CompositeMemberIdentities(source),
+            });
         }
 
         projections.Sort(static (left, right) => string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
@@ -764,14 +784,45 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         };
     }
 
-    private List<ShardProgress> MergeProgress(ResolvedScope resolved, StoredProjections stored)
+    private List<ShardProgress> MergeProgress(ResolvedScope resolved, StoredProjections stored) =>
+        MergeProgress(
+            stored.Projections,
+            stored.Progress,
+            liveState.Latest(resolved.Registration.Key, resolved.Database.Id.Identity),
+            stored.HighWaterMark,
+            stored.Rows);
+
+    /// <summary>
+    /// The shard rows the page draws, from three sources - each projection's own shards, a composite's members, and the
+    /// rows nothing registered claims - with every shard name exactly once.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Once, because the names are <c>@key</c>s.</b> The projections table and the Overview's health table key each
+    /// row by its shard name (<c>Projections.razor</c>, <c>Overview.razor</c>), and two siblings with one key end the
+    /// circuit rather than the render - issue #1's failure. So the sources are taken in order of authority and a name
+    /// already drawn is never drawn again.
+    /// </para>
+    /// <para>
+    /// <b>Every projection's own shards first, then the members.</b> Neither JasperFx nor Marten refuses a composite
+    /// member whose name is also a top-level projection's, and both then write the same <c>X:All</c> row. The top-level
+    /// projection is the agent that row belongs to, so its claim is settled before any composite is looked at - which a
+    /// single pass in name order would get wrong whenever the composite sorts first.
+    /// </para>
+    /// </remarks>
+    internal static List<ShardProgress> MergeProgress(
+        IReadOnlyList<ProjectionInfo> projections,
+        IReadOnlyList<ShardState> stored,
+        IReadOnlyDictionary<string, ShardState> live,
+        long highWaterMark,
+        IReadOnlyDictionary<string, ProgressionRow>? rows)
     {
-        IReadOnlyDictionary<string, ShardState> live = liveState.Latest(
-            resolved.Registration.Key,
-            resolved.Database.Id.Identity);
+        ArgumentNullException.ThrowIfNull(projections);
+        ArgumentNullException.ThrowIfNull(stored);
+        ArgumentNullException.ThrowIfNull(live);
 
         Dictionary<string, ShardState> byShard = new(StringComparer.OrdinalIgnoreCase);
-        foreach (ShardState row in stored.Progress)
+        foreach (ShardState row in stored)
         {
             if (row.ShardName is { Length: > 0 } name && !IsBookkeepingRow(name))
             {
@@ -782,19 +833,38 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         List<ShardProgress> progress = [];
         HashSet<string> rendered = new(StringComparer.OrdinalIgnoreCase);
 
-        foreach (ProjectionInfo projection in stored.Projections)
-        {
-            // Inline and live projections have no daemon shard: the async daemon never runs them, so a
-            // progress row for one would be a number about something that does not happen.
-            if (!projection.IsAsync)
-            {
-                continue;
-            }
+        // Inline and live projections have no daemon shard: the async daemon never runs them, so a progress row for one
+        // would be a number about something that does not happen.
+        ProjectionInfo[] daemonRun = [.. projections.Where(static x => x.IsAsync)];
 
+        // Pass one: every projection's own shards.
+        foreach (ProjectionInfo projection in daemonRun)
+        {
             foreach (string shardName in projection.ShardNames)
             {
-                rendered.Add(shardName);
-                progress.Add(Build(shardName, projection.Name, byShard.GetValueOrDefault(shardName), live.GetValueOrDefault(shardName), stored.HighWaterMark, isRegistered: true, stored.Rows?.GetValueOrDefault(shardName)));
+                if (!rendered.Add(shardName))
+                {
+                    continue;
+                }
+
+                progress.Add(Build(shardName, projection.Name, byShard.GetValueOrDefault(shardName), live.GetValueOrDefault(shardName), highWaterMark, isRegistered: true, rows?.GetValueOrDefault(shardName)));
+            }
+        }
+
+        // Pass two: a composite's members, which record rows of their own that its agent advances in its own batch. They
+        // are the composite's, drawn under it, and not agents - only once they have a row, because a member that never
+        // ran is the composite never having run, which its own shard already says.
+        foreach (ProjectionInfo projection in daemonRun)
+        {
+            foreach (string memberName in projection.MemberShardNames)
+            {
+                if (byShard.GetValueOrDefault(memberName) is not { } memberRow || !rendered.Add(memberName))
+                {
+                    continue;
+                }
+
+                progress.Add(Build(memberName, projection.Name, memberRow, live.GetValueOrDefault(memberName), highWaterMark, isRegistered: true, rows?.GetValueOrDefault(memberName))
+                    with { IsCompositeMember = true });
             }
         }
 
@@ -804,9 +874,9 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         // instead of inventing a projection row for a projection this store no longer has.
         foreach (KeyValuePair<string, ShardState> orphan in byShard)
         {
-            if (!rendered.Contains(orphan.Key))
+            if (rendered.Add(orphan.Key))
             {
-                progress.Add(Build(orphan.Key, ProjectionNameOf(orphan.Key), orphan.Value, live.GetValueOrDefault(orphan.Key), stored.HighWaterMark, isRegistered: false, stored.Rows?.GetValueOrDefault(orphan.Key)));
+                progress.Add(Build(orphan.Key, ProjectionNameOf(orphan.Key), orphan.Value, live.GetValueOrDefault(orphan.Key), highWaterMark, isRegistered: false, rows?.GetValueOrDefault(orphan.Key)));
             }
         }
 
@@ -1539,6 +1609,44 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         }
 
         return shards.Length == 0 ? [source.Name + ":All"] : shards.Select(static x => x.Identity);
+    }
+
+    /// <summary>
+    /// A composite projection's members, by the shard identity each records its progress under, or none for any other
+    /// projection.
+    /// </summary>
+    /// <remarks>
+    /// Floor-safe, and the composite's own rule: <c>ProjectionStage.BuildExecution</c> names each member's shard
+    /// <c>ShardName.Compose(member.Name, tenantId: parent.TenantId, version: member.Version)</c> (JasperFx 2.74.0 and
+    /// 2.95.1), and the store-global form of that is what is listed here, as <see cref="ShardIdentities" /> lists a
+    /// projection's. <c>CompositeProjection.AllProjections()</c> is public at both ends. JasperFx 2.95.1's
+    /// <c>IEventStore.RegisteredShardNames(includeCompositeMembers: true)</c> would say the same, but it is a call on the
+    /// event store, which the studio makes none of (<c>StorageEnsuringCallTests</c>).
+    /// </remarks>
+    internal static IReadOnlyList<string> CompositeMemberIdentities(ISubscriptionSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (source is not JasperFx.Events.Projections.Composite.CompositeProjection<IDocumentOperations, IQuerySession> composite)
+        {
+            return [];
+        }
+
+        try
+        {
+            return
+            [
+                .. composite.AllProjections()
+                    .Select(static member => ShardName.Compose(member.Name, version: member.Version).Identity)
+                    .Distinct(StringComparer.OrdinalIgnoreCase),
+            ];
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A composite that will not enumerate its members still runs; its members' rows then read as unregistered, as
+            // they always did, rather than the page failing.
+            return [];
+        }
     }
 
     private static ISubscriptionSource? FindSource(IDocumentStore store, string projectionName)

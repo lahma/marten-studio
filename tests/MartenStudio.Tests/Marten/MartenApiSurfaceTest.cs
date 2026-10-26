@@ -693,6 +693,14 @@ public class MartenApiSurfaceTest
     /// <c>ProjectionDataService.AdvancedAsync</c> to call it and stop asking about databases the visitor
     /// did not select.
     /// </para>
+    /// <para>
+    /// <b>The per-database form arrived somewhere else.</b> Marten 9.52 (#5738, jasperfx#1031) implements
+    /// <c>IEventStore.AdvanceHighWaterMarkToLatestAsync(IEventDatabase, string?, long?, CancellationToken)</c> on
+    /// <c>DocumentStore</c> - a compare-and-set advance of the one database it is handed - so the lists below stay whole
+    /// while the signal they were written to raise has fired. The last assertion says where it lives
+    /// (<c>RuntimeFeature.PerDatabaseHighWaterAdvance</c>); calling it, and asking <c>(store, database, null)</c> instead
+    /// of every database, is 0.6's.
+    /// </para>
     /// </remarks>
     [Fact]
     public void The_progression_corrections_reach_every_database_and_have_no_per_database_form()
@@ -718,6 +726,16 @@ public class MartenApiSurfaceTest
         RequireProperty(typeof(Tenant), "Database").PropertyType.Should().Be<IMartenDatabase>();
         RequireMethod(typeof(TenantIdStyleExtensions), "MaybeCorrectTenantId", typeof(TenantIdStyle), typeof(string))
             .ReturnType.Should().Be<string>();
+
+        // Where the per-database form lives: on JasperFx's IEventStore, declared from JasperFx.Events 2.92 and implemented
+        // by DocumentStore from Marten 9.52 - present exactly when the probe says so.
+        bool perDatabase = MartenStudio.Services.Configuration.RuntimeFeature.PerDatabaseAdvanceMethod() is not null;
+        perDatabase.Should().Be(
+            MartenStudio.Services.Configuration.MartenRuntime.Current.VersionOf(MartenStudio.Services.Configuration.RuntimePackage.JasperFxEvents)
+                >= new Version(2, 92, 0));
+        MartenStudio.Services.Configuration.RuntimeFeature.PerDatabaseHighWaterAdvance.Probe().Should().Be(
+            MartenStudio.Services.Configuration.MartenRuntime.Current.VersionOf(MartenStudio.Services.Configuration.RuntimePackage.Marten)
+                >= new Version(9, 52, 0));
     }
 
     /// <summary>

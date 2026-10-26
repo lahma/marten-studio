@@ -1,6 +1,6 @@
 # 0.5.0
 
-- Marten 9.51.0 is the latest-tested Marten (from 9.50.2); the package still depends on Marten 9.39.0 or later.
+- Marten 9.54.1 is the latest-tested Marten (from 9.50.2); the package still depends on Marten 9.39.0 or later.
 - On a store with `Events.UseTenantPartitionedEvents`, the dead-letter page's Skip event works from Marten 9.51: it
   marks the dead letter's own tenant's event skipped and no other tenant's event of that number, and is asked as that
   tenant (with "All tenants" selected, the dead letter's). Below 9.51 it stays refused, because Marten skips by number
@@ -28,6 +28,24 @@
   transient/permanent classification of a shard failure is known to arrive with Marten 9.50.3.
 - LINQ mode: from JasperFx 2.91 (Marten 9.51) a date with no offset is read as UTC by JasperFx itself, and the
   studio's own correction stays idle, as measured.
+- From Marten 9.52 a rebuild replays from the projection's start floor rather than from the first event, and the
+  rebuild dialog says so: it names the floor stored for the projection in `mt_event_projection_floors` (read with
+  the studio's own SQL, never through Marten's floor read, which can create the event store), takes it off the
+  events to replay, says that a document only the events at or below it built is deleted and not rebuilt, and
+  where none is stored, that a floor the projection's code sets (`SubscribeFromSequence`, `SubscribeFromTime`)
+  may still apply. A store migrated below 9.52 shows the new table as one non-destructive `CREATE TABLE` on the
+  Schema screen.
+- D05 no longer offers `SkipApplyErrors = true` for a database error in projection code (a missing column or
+  table, a permission), which from Marten 9.52 pauses the shard at any setting and is never dead-lettered: where
+  the daemon in this process says the failure is one, the finding says what to fix instead; where nothing can
+  tell, the line names that exception.
+- The Advance high water mark dialog says what the advance skips: every sequence number below the new mark with
+  no committed event, an append still in flight included - not the events a projection has still to process.
+  From Marten 9.52 it also says that the advance first ensures the event store's storage - with no tenant
+  selected in every database of the store, each under its own `AutoCreate` - and on a store that numbers events
+  per tenant, which tenants' marks it moves; the button's hover text says what the first press may create.
+- A composite projection's members are listed under their composite, and no longer as "Unregistered shards"
+  that nothing advances; they offer no Start or Stop of their own.
 
 # 0.4.0
 
