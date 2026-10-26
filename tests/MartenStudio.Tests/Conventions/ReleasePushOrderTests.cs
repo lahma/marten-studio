@@ -109,6 +109,46 @@ public class ReleasePushOrderTests
         }
     }
 
+    /// <summary>
+    /// Anti-vacuity for the loop's body, one case per forbidden token: each is the ordered loop with only its body
+    /// changed, so the token is the only thing wrong with it. <c>PUSH</c> stands for the canonical push call.
+    /// </summary>
+    [Theory]
+    [InlineData("PUSH", "")]
+    [InlineData("try\n{\n    PUSH\n}\ncatch (ProcessException)\n{\n}", "catch")]
+    [InlineData("DotNetNuGetPush(_ => _.SetSource(NuGetSource).SetApiKey(apiKey).EnableSkipDuplicate().SetProcessExitHandler(null).SetTargetPath(package));", "ExitHandl")]
+    [InlineData("DotNetNuGetPush(_ => _.SetSource(NuGetSource).SetApiKey(apiKey).EnableSkipDuplicate().SetProcessExitHandling(false).SetTargetPath(package));", "ExitHandl")]
+    [InlineData("Parallel.Invoke(() => DotNetNuGetPush(_ => _.SetSource(NuGetSource).SetApiKey(apiKey).EnableSkipDuplicate().SetTargetPath(package)));", "Parallel")]
+    [InlineData("_ = Task.Run(() => DotNetNuGetPush(_ => _.SetSource(NuGetSource).SetApiKey(apiKey).EnableSkipDuplicate().SetTargetPath(package)));", "Task.")]
+    public void The_loop_check_refuses_a_body_that_could_carry_on_after_a_failed_push(string loopBody, string forbidden)
+    {
+        const string Push = "DotNetNuGetPush(_ => _.SetSource(NuGetSource).SetApiKey(apiKey).EnableSkipDuplicate().SetTargetPath(package));";
+
+        string source =
+            "Target Publish => _ => _\n" +
+            "    .Executes(() =>\n" +
+            "    {\n" +
+            "        AssertTheReleasePackagesAndNothingElse();\n" +
+            "        var packages = ReleasePackages;\n" +
+            "        var apiKey = GetTrustedPublishingApiKey();\n" +
+            "        foreach (var package in packages)\n" +
+            "        {\n" +
+            "            " + loopBody.Replace("PUSH", Push, StringComparison.Ordinal) + "\n" +
+            "        }\n" +
+            "    });\n";
+
+        IReadOnlyList<string> problems = PushProblems(source);
+
+        if (forbidden.Length == 0)
+        {
+            problems.Should().BeEmpty();
+        }
+        else
+        {
+            problems.Should().ContainSingle().Which.Should().Contain($"'{forbidden}'");
+        }
+    }
+
     private const string Loop = """
         Target Publish => _ => _
             .Executes(() =>
@@ -183,6 +223,52 @@ public class ReleasePushOrderTests
             problems.Add("the push has no --skip-duplicate, so re-running after a partial failure fails on the package that landed");
         }
 
+        // What would make the loop carry on after a failed push, or run its pushes out of order, while still looking like
+        // the loop: a catch around the push, a process exit handler that does not assert the exit code (SetProcessExitHandler,
+        // ProcessExitHandling), or the push handed to Parallel or to a Task.
+        if (loop >= 0)
+        {
+            string loopBody = LoopBody(body, loop);
+
+            foreach (string forbidden in ForbiddenInTheLoop.Where(x => loopBody.Contains(x, StringComparison.Ordinal)))
+            {
+                problems.Add($"the push loop's body contains '{forbidden}', which can carry on after a failed push or push out of order");
+            }
+        }
+
         return problems;
+    }
+
+    private static readonly string[] ForbiddenInTheLoop = ["catch", "ExitHandl", "Parallel", "Task."];
+
+    /// <summary>The body of the <c>foreach</c> starting at <paramref name="loop" />: its braces, matched, or its one statement.</summary>
+    private static string LoopBody(string body, int loop)
+    {
+        int open = body.IndexOf('{', loop);
+        int statementEnd = body.IndexOf(';', loop);
+
+        if (open < 0 || (statementEnd >= 0 && statementEnd < open))
+        {
+            return statementEnd < 0 ? body[loop..] : body[loop..(statementEnd + 1)];
+        }
+
+        int depth = 0;
+
+        for (int i = open; i < body.Length; i++)
+        {
+            depth += body[i] switch
+            {
+                '{' => 1,
+                '}' => -1,
+                _ => 0,
+            };
+
+            if (depth == 0)
+            {
+                return body[open..(i + 1)];
+            }
+        }
+
+        return body[open..];
     }
 }

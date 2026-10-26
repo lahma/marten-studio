@@ -83,23 +83,42 @@ public class PostgresStudioVersionGuardTests
     }
 
     /// <summary>
-    /// The commit after the <c>+</c> is compared when, and only when, both sides carry one: the same version built from
-    /// two commits is refused, and a build with no git on either side still compares the release versions.
+    /// The commit after the <c>+</c> is compared when, and only when, both assemblies are Release builds - as every pack
+    /// is - and both carry one: the same version packed from two commits is refused. A Debug build compares the release
+    /// versions only, because an IDE's incremental build after a commit recompiles MartenStudio with the new commit and
+    /// leaves an unchanged PostgresStudio on the old one; so does a mixed pair, a missing configuration, and a side with
+    /// no commit.
     /// </summary>
     [Theory]
-    [InlineData("0.5.0+5f1c2a9d", "0.5.0+5f1c2a9d", true)]
-    [InlineData("0.5.0+5f1c2a9d", "0.5.0+0b7e3c41", false)]
-    [InlineData("0.5.0+5f1c2a9d", "0.5.1+5f1c2a9d", false)]
-    [InlineData("0.5.0+5f1c2a9d", "0.5.0", true)]
-    [InlineData("0.5.0", "0.5.0+0b7e3c41", true)]
-    [InlineData("0.5.0+5f1c2a9d", "0.5.1", false)]
-    [InlineData("0.5.0", "0.5.0", true)]
-    [InlineData("0.5.0", "0.5.1", false)]
-    public void The_commit_is_compared_only_when_both_carry_one(string martenStudio, string postgresStudio, bool passes)
+    // Release and Release: the commit counts.
+    [InlineData("0.5.0+5f1c2a9d", "Release", "0.5.0+5f1c2a9d", "Release", true)]
+    [InlineData("0.5.0+5f1c2a9d", "Release", "0.5.0+0b7e3c41", "Release", false)]
+    [InlineData("0.5.0+5f1c2a9d", "Release", "0.5.1+5f1c2a9d", "Release", false)]
+    [InlineData("0.5.0+5f1c2a9d", "release", "0.5.0+0b7e3c41", "Release", false)]
+    // Release and Release, one side or neither with a commit: the version only.
+    [InlineData("0.5.0+5f1c2a9d", "Release", "0.5.0", "Release", true)]
+    [InlineData("0.5.0", "Release", "0.5.0+0b7e3c41", "Release", true)]
+    [InlineData("0.5.0", "Release", "0.5.0", "Release", true)]
+    [InlineData("0.5.0", "Release", "0.5.1", "Release", false)]
+    // Debug and Debug: two commits are an incremental build, not a skew; another version still is.
+    [InlineData("0.5.0+5f1c2a9d", "Debug", "0.5.0+0b7e3c41", "Debug", true)]
+    [InlineData("0.5.0+5f1c2a9d", "Debug", "0.5.1+0b7e3c41", "Debug", false)]
+    // Mixed, or no configuration at all: the version only.
+    [InlineData("0.5.0+5f1c2a9d", "Release", "0.5.0+0b7e3c41", "Debug", true)]
+    [InlineData("0.5.0+5f1c2a9d", "Debug", "0.5.0+0b7e3c41", "Release", true)]
+    [InlineData("0.5.0+5f1c2a9d", "Release", "0.5.1+5f1c2a9d", "Debug", false)]
+    [InlineData("0.5.0+5f1c2a9d", null, "0.5.0+0b7e3c41", "Release", true)]
+    [InlineData("0.5.0+5f1c2a9d", null, "0.5.0+0b7e3c41", null, true)]
+    public void The_commit_is_compared_only_between_two_release_builds_that_both_carry_one(
+        string martenStudio, string? martenConfiguration, string postgresStudio, string? postgresConfiguration, bool passes)
     {
-        PostgresStudioVersionGuard.SameBuild(martenStudio, postgresStudio).Should().Be(passes);
+        AssemblyBuilder marten = WithVersion(martenStudio, martenConfiguration);
+        AssemblyBuilder postgres = WithVersion(postgresStudio, postgresConfiguration);
+        bool bothRelease = PostgresStudioVersionGuard.IsReleaseBuild(marten) && PostgresStudioVersionGuard.IsReleaseBuild(postgres);
 
-        Action ensure = () => PostgresStudioVersionGuard.Ensure(WithVersion(martenStudio), () => WithVersion(postgresStudio));
+        PostgresStudioVersionGuard.SameBuild(martenStudio, postgresStudio, bothRelease).Should().Be(passes);
+
+        Action ensure = () => PostgresStudioVersionGuard.Ensure(marten, () => postgres);
 
         if (passes)
         {
@@ -111,10 +130,22 @@ public class PostgresStudioVersionGuardTests
         }
     }
 
+    [Theory]
+    [InlineData("Release", true)]
+    [InlineData("release", true)]
+    [InlineData("Debug", false)]
+    [InlineData("ReleaseWithSymbols", false)]
+    [InlineData(null, false)]
+    public void A_release_build_is_read_from_its_assembly_configuration(string? configuration, bool release)
+    {
+        PostgresStudioVersionGuard.IsReleaseBuild(WithVersion("0.5.0", configuration)).Should().Be(release);
+    }
+
     [Fact]
     public void Two_commits_of_one_version_are_named_in_full()
     {
-        FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure(WithVersion("0.5.0+5f1c2a9d"), () => WithVersion("0.5.0+0b7e3c41")))
+        FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure(
+                WithVersion("0.5.0+5f1c2a9d", "Release"), () => WithVersion("0.5.0+0b7e3c41", "Release")))
             .Should().Throw<InvalidOperationException>()
             .Which.Message.Should()
             .Contain("MartenStudio 0.5.0+5f1c2a9d needs PostgresStudio 0.5.0+5f1c2a9d exactly, and found PostgresStudio 0.5.0+0b7e3c41.")
@@ -206,11 +237,23 @@ public class PostgresStudioVersionGuardTests
     /// A throwaway in-memory assembly carrying <paramref name="informationalVersion" />, so every pair of versions the
     /// guard can meet goes through the real <c>Ensure</c> rather than a stand-in for it.
     /// </summary>
-    private static AssemblyBuilder WithVersion(string informationalVersion) =>
-        AssemblyBuilder.DefineDynamicAssembly(
+    private static AssemblyBuilder WithVersion(string informationalVersion, string? configuration = "Release")
+    {
+        List<CustomAttributeBuilder> attributes =
+        [
+            new(typeof(AssemblyInformationalVersionAttribute).GetConstructor([typeof(string)])!, [informationalVersion]),
+        ];
+
+        if (configuration is not null)
+        {
+            attributes.Add(new(typeof(AssemblyConfigurationAttribute).GetConstructor([typeof(string)])!, [configuration]));
+        }
+
+        return AssemblyBuilder.DefineDynamicAssembly(
             new AssemblyName("GuardProbe" + Guid.NewGuid().ToString("N")),
             AssemblyBuilderAccess.Run,
-            [new CustomAttributeBuilder(typeof(AssemblyInformationalVersionAttribute).GetConstructor([typeof(string)])!, [informationalVersion])]);
+            attributes);
+    }
 
     /// <summary>Every method of the guard, the compiler's nested helpers (a cached delegate's holder) included.</summary>
     private static IEnumerable<MethodBase> GuardMethods()

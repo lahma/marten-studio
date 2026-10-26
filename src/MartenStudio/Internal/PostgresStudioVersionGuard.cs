@@ -28,9 +28,10 @@ namespace MartenStudio.Internal;
 /// </para>
 /// <para>
 /// <b>What it compares.</b> The informational versions. The two packages are packed from one commit at one CHANGELOG
-/// version, and SourceLink appends that commit after a <c>+</c>: when both assemblies carry one, the whole strings must
-/// match, so the same version built from two commits is refused too; when either lacks it (a build from a tree with no
-/// git), only the part before the <c>+</c> is compared.
+/// version, in Release, and SourceLink appends that commit after a <c>+</c>: when both assemblies are Release builds and
+/// both carry one, the whole strings must match, so the same version packed from two commits is refused too. Otherwise -
+/// a Debug build, where an IDE's incremental build after a commit legitimately leaves the two on different commits, or a
+/// build from a tree with no git - only the part before the <c>+</c> is compared.
 /// </para>
 /// </remarks>
 internal static class PostgresStudioVersionGuard
@@ -69,14 +70,15 @@ internal static class PostgresStudioVersionGuard
         }
 
         string? postgresStudioVersion = InformationalVersion(postgresStudio);
+        bool bothRelease = IsReleaseBuild(martenStudio) && IsReleaseBuild(postgresStudio);
 
-        if (SameBuild(martenStudioVersion, postgresStudioVersion))
+        if (SameBuild(martenStudioVersion, postgresStudioVersion, bothRelease))
         {
             return;
         }
 
-        // Both carry a commit: name it, since the release version may well be the same on both sides.
-        bool commits = HasBuildMetadata(martenStudioVersion) && HasBuildMetadata(postgresStudioVersion);
+        // The commits were compared: name them, since the release version may well be the same on both sides.
+        bool commits = bothRelease && HasBuildMetadata(martenStudioVersion) && HasBuildMetadata(postgresStudioVersion);
         string shownRequired = commits ? martenStudioVersion! : required;
         string shownFound = commits ? postgresStudioVersion! : ReleaseVersion(postgresStudioVersion);
 
@@ -88,17 +90,27 @@ internal static class PostgresStudioVersionGuard
     }
 
     /// <summary>
-    /// Whether two informational versions name the same build. When both carry build metadata - the <c>+&lt;commit&gt;</c>
-    /// SourceLink appends - the whole strings must match, so two builds of one version from different commits are told
-    /// apart. When only one side carries it, or neither does, there is no commit to compare, and the release versions
-    /// (the part before the <c>+</c>) must match, as before.
+    /// Whether two informational versions name the same build. When both assemblies are Release builds and both carry
+    /// build metadata - the <c>+&lt;commit&gt;</c> SourceLink appends - the whole strings must match, so two packed builds of
+    /// one version from different commits are told apart. Otherwise the release versions (the part before the <c>+</c>)
+    /// must match: a Debug build is a development tree, where an IDE's incremental build after a commit recompiles
+    /// MartenStudio with the new commit and leaves an unchanged PostgresStudio with the old one, and that is not a skew.
     /// </summary>
     /// <param name="martenStudio">MartenStudio's informational version.</param>
     /// <param name="postgresStudio">PostgresStudio's informational version.</param>
-    internal static bool SameBuild(string? martenStudio, string? postgresStudio) =>
-        HasBuildMetadata(martenStudio) && HasBuildMetadata(postgresStudio)
+    /// <param name="bothRelease">Whether both assemblies say <c>[AssemblyConfiguration("Release")]</c>, as every pack does.</param>
+    internal static bool SameBuild(string? martenStudio, string? postgresStudio, bool bothRelease) =>
+        bothRelease && HasBuildMetadata(martenStudio) && HasBuildMetadata(postgresStudio)
             ? string.Equals(martenStudio, postgresStudio, StringComparison.Ordinal)
             : string.Equals(ReleaseVersion(martenStudio), ReleaseVersion(postgresStudio), StringComparison.Ordinal);
+
+    /// <summary>Whether an assembly was built in the Release configuration, as every pack of the two packages is.</summary>
+    /// <param name="assembly">The assembly.</param>
+    internal static bool IsReleaseBuild(Assembly assembly) =>
+        string.Equals(
+            assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration,
+            "Release",
+            StringComparison.OrdinalIgnoreCase);
 
     /// <summary>An assembly's informational version up to the <c>+</c>, or its assembly version without one.</summary>
     /// <param name="assembly">The assembly.</param>
