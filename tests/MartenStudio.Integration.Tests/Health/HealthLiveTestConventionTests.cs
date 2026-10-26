@@ -44,6 +44,7 @@ public class HealthLiveTestConventionTests
         ["T20"] = "a monthly range that ended, and rows in a default partition - Health/IndexLintLiveTests",
         ["T25"] = "a 75 MiB primary key with 39 rows in 40 deleted and vacuumed - Health/IndexLintLiveTests",
         ["T26"] = "an int4 identity restarted at 1,500,000,000 - Health/IndexLintLiveTests",
+        ["C12"] = "a head idle in its transaction holding ACCESS EXCLUSIVE with two waiters, and a running head's chain - Database/BlockingLiveTests",
     };
 
     [Fact]

@@ -39,6 +39,7 @@ baseline, so editing or deleting a row is a reviewed change.
 | [C09](connections.md#c09-async-shards-against-the-pool) | Async shards against the pool | Connections | - | - | Marten | 0.4 | - |
 | [C10](connections.md#c10-hotcold-daemon-behind-a-transaction-pooler-proven) | HotCold daemon behind a transaction pooler, proven | Connections | - | - | Marten | 0.4 | - |
 | [C11](connections.md#c11-low-cache-hit-ratio) | Low cache hit ratio | Connections | - | - | both | 0.5 | - |
+| [C12](connections.md#c12-head-of-a-blocking-chain) | Head of a blocking chain | Connections | `idle-head`, `long-chain` | - | both | 0.6 | - |
 | [D01](daemon.md#d01-high-water-mark-pinned-behind-a-gap) | High-water mark pinned behind a gap | Daemon | - | - | Marten | 0.4 | - |
 | [D02](daemon.md#d02-async-projections-behind-and-nothing-runs-the-daemon) | Async projections behind, and nothing runs the daemon | Daemon | `no-daemon`, `lock-held-idle` | - | Marten | 0.4 | - |
 | [D03](daemon.md#d03-shard-alive-but-not-moving) | Shard alive but not moving | Daemon | - | shard | Marten | 0.4 | - |

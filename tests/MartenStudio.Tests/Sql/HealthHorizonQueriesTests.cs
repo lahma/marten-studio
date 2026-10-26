@@ -20,8 +20,6 @@ public partial class HealthHorizonQueriesTests
 
     private static readonly string[] TargetTables = ["mt_doc_order", "mt_events"];
 
-    private static readonly long[] LockIds = [4004L, 123L];
-
     private static readonly HealthTableTarget[] Targets =
     [
         new("studio", "mt_doc_order"),
@@ -261,12 +259,12 @@ public partial class HealthHorizonQueriesTests
     [Fact]
     public void Every_value_the_holders_read_binds_is_a_parameter()
     {
-        HealthQuery query = HealthHorizonQueries.Holders(LockIds);
+        HealthQuery query = HealthHorizonQueries.Holders([4242, 4343]);
 
-        query.ParameterNames.Should().Equal("@daemon_lock_ids", "@limit");
-        query.Parameters[0].NpgsqlDbType.Should().Be(NpgsqlDbType.Array | NpgsqlDbType.Bigint);
-        query.Parameters[0].Value.Should().BeEquivalentTo(LockIds);
+        query.ParameterNames.Should().Equal("@daemon_lock_holders", "@limit");
+        query.Parameters[0].NpgsqlDbType.Should().Be(NpgsqlDbType.Array | NpgsqlDbType.Integer);
+        query.Parameters[0].Value.Should().BeOfType<int[]>().Which.Should().Equal([4242, 4343], "the sessions the sweep's lock table read found holding the daemon's keys");
         query.Parameters[1].Value.Should().Be(HealthHorizonQueries.MaxHolders);
-        query.Sql.Should().NotContain("4004");
+        query.Sql.Should().NotContain("4242").And.NotContain("pg_locks", "T14 takes the lock table from the sweep's one read of it (X3)");
     }
 }

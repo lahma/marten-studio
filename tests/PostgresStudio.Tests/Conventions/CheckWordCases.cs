@@ -180,7 +180,7 @@ internal static class CheckWordCases
         History((held, [(sweptSeries, 1), (conditionSeries, 1)]), (TimeSpan.Zero, [(sweptSeries, 1), (conditionSeries, 1)]));
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Connections: C01, C03-C08, C11.
+    // Connections: C01, C03-C08, C11, C12.
 
     private static IEnumerable<CheckWordCase> Connections()
     {
@@ -252,6 +252,46 @@ internal static class CheckWordCases
             "a migration behind an anti-wraparound vacuum, before PostgreSQL 14",
             new LockWaitFacts(At, new SessionVisibility(false, 2), 1, [Waiter(TimeSpan.FromMinutes(12), exact: false)], [Blocker(vacuum: true, wraparound: true)]));
         yield return Case<LockWaitCheck>("a migration behind a manual VACUUM", new LockWaitFacts(At, SessionVisibility.Everything, 1, [Waiter(TimeSpan.FromMinutes(2))], [Blocker(vacuum: true)]));
+
+        // C12 - a chain under a head idle in its transaction, one under a long statement, one under a VACUUM, and a short one.
+        LockedRelation orders = new("public", "orders", "r");
+        ChainSession Head(string state, bool vacuum = false) => new(
+            new LockGraphNode
+            {
+                ProcessId = 5151,
+                User = "app_user",
+                Application = "billing-api",
+                ClientAddress = "10.1.2.3",
+                BackendStart = At.AddHours(-1),
+                State = state,
+                StateAge = TimeSpan.FromMinutes(4),
+                TransactionAge = TimeSpan.FromMinutes(5),
+                HasTransactionId = true,
+                Vacuum = vacuum,
+                HeldModes = ["AccessExclusiveLock"],
+            },
+            null);
+        ChainSession Behind(int pid, TimeSpan waited) => new(
+            new LockGraphNode
+            {
+                ProcessId = pid,
+                User = "app_user",
+                Application = "billing-api",
+                State = "active",
+                WaitEventType = "Lock",
+                WaitEvent = "relation",
+                Wanted = new LockWanted("relation", "AccessShareLock", orders, null, null, true, waited),
+                BlockedBy = [5151],
+            },
+            relation);
+        BlockingChainFacts Chain(ChainSession head, TimeSpan waited, bool hidden = false) =>
+            new(At, hidden ? new SessionVisibility(false, 2) : SessionVisibility.Everything, [head, Behind(4242, waited), Behind(4343, TimeSpan.FromSeconds(3))], PostgresPlatform.SelfHosted);
+
+        yield return Case<BlockingChainCheck>("nothing waits", new BlockingChainFacts(At, SessionVisibility.Everything, [], PostgresPlatform.SelfHosted));
+        yield return Case<BlockingChainCheck>("a short wait behind a long statement", Chain(Head("active"), TimeSpan.FromSeconds(30)));
+        yield return Case<BlockingChainCheck>("a wait behind a head idle in its transaction", Chain(Head("idle in transaction"), TimeSpan.FromSeconds(40)));
+        yield return Case<BlockingChainCheck>("a chain six minutes old behind a long statement, others hidden", Chain(Head("active"), TimeSpan.FromMinutes(6), hidden: true));
+        yield return Case<BlockingChainCheck>("a chain three minutes old behind a VACUUM", Chain(Head("active", vacuum: true), TimeSpan.FromMinutes(3)));
 
         // C07 - a forgotten prepared transaction.
         yield return Case<PreparedTransactionCheck>("none prepared", new PreparedTransactionFacts(At, 10, []));

@@ -63,9 +63,14 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
         // read pg_control_checkpoint() and pg_control_system() apart from the window: a has_function_privilege probe, then a
         // call of only the functions it allowed - two more statements behind the same shared window read. Fifteen before
         // W5-B1's five: T15's foreign keys, the usage guard's counters-age read T01, T05 and T06 share, T26's integer keys,
-        // the partition read T19 and T20 share, and T17's document-named tables.
+        // the partition read T19 and T20 share, and T17's document-named tables. Twenty before X3's one read of the lock table,
+        // which the table read, the index read and T14's holders read now take their locks from - and which C04, C06 and C12
+        // share, so the sweep as a whole reads pg_locks once where those three statements and C04's and C06's read it seven times.
         first.Checks.Where(static x => x.Code.StartsWith('T')).SelectMany(static x => x.Statements).Select(static x => x.Sql)
-            .Distinct(StringComparer.Ordinal).Should().HaveCount(20, "the regular table checks' whole catalog cost on the sample store");
+            .Distinct(StringComparer.Ordinal).Should().HaveCount(21, "the regular table checks' whole catalog cost on the sample store");
+        first.Checks.Where(static x => x.Code.StartsWith('T')).SelectMany(static x => x.Statements).Select(static x => x.Sql).Distinct(StringComparer.Ordinal)
+            .Count(static x => x.Contains("from pg_locks", StringComparison.Ordinal) || x.Contains("from pg_catalog.pg_locks", StringComparison.Ordinal))
+            .Should().Be(1, "the table checks read the lock table only through the sweep's one read of it (X3)");
         first.Checks.Single(static x => x.Code == "T08").Statements.Should().Contain(
             static x => x.Sql.Contains("pg_catalog.pg_stat_archiver", StringComparison.Ordinal), "T08 reads the statistics window for since-restart");
         first.Checks.Single(static x => x.Code == "T08").Statements.Should().Contain(

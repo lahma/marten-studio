@@ -687,16 +687,8 @@ internal static class HealthTableQueries
             where p.datid = (select db.oid from pg_catalog.pg_database db where db.datname = pg_catalog.current_database())
         ),
         locks as (
-            select distinct l.relation as relid
-            from pg_catalog.pg_locks l
-            where l.locktype = 'relation'
-              and l.database = (select db.oid from pg_catalog.pg_database db where db.datname = pg_catalog.current_database())
-              and l.mode in ('ShareUpdateExclusiveLock', 'ShareLock', 'ShareRowExclusiveLock', 'ExclusiveLock', 'AccessExclusiveLock')
-              and (l.pid is null
-                   or (l.pid <> pg_catalog.pg_backend_pid()
-                       and l.pid not in (select v.pid from pg_catalog.pg_stat_progress_vacuum v
-                                         union all
-                                         select z.pid from pg_catalog.pg_stat_progress_analyze z)))
+            select l.relid
+            from pg_catalog.unnest(@strong_locks::oid[]) as l(relid)
         ),
         settings as (
             select pg_catalog.current_setting('block_size')::bigint as block_size,
@@ -943,12 +935,13 @@ internal static class HealthTableQueries
     /// (<c>set_relation_column_names</c>, PG 14-19): nothing is held once a call returns, but behind somebody's
     /// <c>ACCESS EXCLUSIVE</c> lock on the table the call queues, like a size function (B0 §3) - measured by
     /// <c>VersionMatrixLiveTests</c> on 14 to 19, where the regular sweep's index checks all waited out the
-    /// <c>lock_timeout</c>. So <c>locked</c> reads <c>pg_locks</c> once (a shared-memory snapshot, no relation lock) for
-    /// any <c>AccessExclusiveLock</c> held or awaited on a listed table, and such a table's indexes come back undeparsed,
-    /// marked in the last column (<see cref="HealthIndexRow.TableLocked" />); the reader leaves that table's indexes out and
-    /// counts it, so every other table is still judged and each index check says how many were not
+    /// <c>lock_timeout</c>. So <c>locked</c> is the listed tables somebody holds or awaits an <c>AccessExclusiveLock</c> on,
+    /// as the sweep's one read of <c>pg_locks</c> found them (<c>HealthConnectionQueries.LockTable</c>, a shared-memory
+    /// snapshot that takes no relation lock, bound here as <c>@exclusive_locks</c> - X3), and such a table's indexes come back
+    /// undeparsed, marked in the last column (<see cref="HealthIndexRow.TableLocked" />); the reader leaves that table's
+    /// indexes out and counts it, so every other table is still judged and each index check says how many were not
     /// (<c>HealthTables.ReadIndexesAsync</c>). A lock taken between the snapshot and a call still waits, bounded by
-    /// <c>lock_timeout</c>; the reader then asks once more, when the snapshot sees it.
+    /// <c>lock_timeout</c>; the reader then reads the lock table once more and asks again, when the snapshot sees it.
     /// </para>
     /// <para>
     /// <b>What W5-B1 reads beside them, all from the catalog and the statistics views, none of it deparsed</b> - so a locked
@@ -969,12 +962,9 @@ internal static class HealthTableQueries
             where c.relkind in ('r', 'p')
         ),
         locked as (
-            select distinct k.relation as oid
-            from pg_catalog.pg_locks k
-            where k.locktype = 'relation'
-              and k.mode = 'AccessExclusiveLock'
-              and k.database = (select db.oid from pg_catalog.pg_database db where db.datname = pg_catalog.current_database())
-              and k.relation in (select l.oid from listed l)
+            select distinct k.oid
+            from pg_catalog.unnest(@exclusive_locks::oid[]) as k(oid)
+            where k.oid in (select l.oid from listed l)
         ),
         indexes as (
             select l.nspname, l.relname as table_name, l.oid as table_oid,
@@ -1438,8 +1428,23 @@ internal static class HealthTableQueries
     }
 
     /// <summary>The listed tables, rolled up (<see cref="TablesSql" />).</summary>
-    public static HealthQuery Tables(IReadOnlyList<HealthTableTarget> tables) =>
-        new(TablesSql, [.. TargetParameters(tables), new NpgsqlParameter("min_rows", NpgsqlDbType.Bigint) { Value = UnanalyzedMinRows }]);
+    /// <param name="tables">The tables.</param>
+    /// <param name="strongLocks">
+    /// The relations somebody but a running <c>VACUUM</c> or <c>ANALYZE</c> - or a prepared transaction - holds or awaits a lock
+    /// on that autovacuum's <c>SHARE UPDATE EXCLUSIVE</c> conflicts with, from the sweep's one read of the lock table
+    /// (<c>HealthConnectionQueries.LockTable</c>, X3): what each unit's <see cref="AutovacuumUnit.Locked" /> is.
+    /// </param>
+    public static HealthQuery Tables(IReadOnlyList<HealthTableTarget> tables, IReadOnlyCollection<uint> strongLocks)
+    {
+        ArgumentNullException.ThrowIfNull(strongLocks);
+
+        return new(TablesSql,
+        [
+            .. TargetParameters(tables),
+            new NpgsqlParameter("min_rows", NpgsqlDbType.Bigint) { Value = UnanalyzedMinRows },
+            Oids("strong_locks", strongLocks),
+        ]);
+    }
 
     /// <summary>
     /// T08's line for a table never analysed (<c>StaleStatisticsCheck.MinRows</c>): that many live rows, or that many read
@@ -1449,7 +1454,20 @@ internal static class HealthTableQueries
     public const long UnanalyzedMinRows = 1_000;
 
     /// <summary>Every index on the listed tables (<see cref="IndexesSql" />).</summary>
-    public static HealthQuery Indexes(IReadOnlyList<HealthTableTarget> tables) => new(IndexesSql, TargetParameters(tables));
+    /// <param name="tables">The tables.</param>
+    /// <param name="exclusiveLocks">
+    /// The relations somebody holds or awaits an <c>AccessExclusiveLock</c> on, from a read of the lock table
+    /// (<c>HealthConnectionQueries.LockTable</c>, X3): a listed table among them comes back undeparsed.
+    /// </param>
+    public static HealthQuery Indexes(IReadOnlyList<HealthTableTarget> tables, IReadOnlyCollection<uint> exclusiveLocks)
+    {
+        ArgumentNullException.ThrowIfNull(exclusiveLocks);
+        return new(IndexesSql, [.. TargetParameters(tables), Oids("exclusive_locks", exclusiveLocks)]);
+    }
+
+    /// <summary>An <c>oid[]</c> parameter.</summary>
+    private static NpgsqlParameter Oids(string name, IReadOnlyCollection<uint> values) =>
+        new(name, NpgsqlDbType.Array | NpgsqlDbType.Oid) { Value = values.ToArray() };
 
     /// <summary>The deleted share of each listed soft-deleted table (<see cref="SoftDeleteSql" />).</summary>
     public static HealthQuery SoftDeleteShares(IReadOnlyList<HealthTableTarget> tables) => new(SoftDeleteSql, TargetParameters(tables));

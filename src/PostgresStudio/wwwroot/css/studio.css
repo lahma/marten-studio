@@ -11802,3 +11802,166 @@ a.ms-schema-health-mark:focus-visible {
         padding: var(--ms-space-md) var(--ms-space-md);
     }
 }
+
+/* ==========================================================================
+   X3. Database > Sessions > Blocking: who holds up whom, as trees
+
+   0.6's lock tree (X3). Appended after W5-API in D26 order; every selector is this packet's own (ms-blocking-, and
+   ms-sessions-tabs for the two tabs, which take .ms-tabs as they are), so nothing here re-declares an earlier rule. The tree
+   is nested lists rather than a table, so there is no TableScroll for it (D25 covers tables): each session is a row of
+   label/value pairs that wraps, and the nesting is a left rule that narrows on a phone. pg_stat_lock's table is an
+   .ms-table inside TableScroll. Notes use the secondary text colour, as UX-6 measured.
+   ========================================================================== */
+
+.ms-sessions-tabs {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-blocking-lead,
+.ms-blocking-note,
+.ms-blocking-gated {
+    max-width: 80ch;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-blocking-chains {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-blocking-chain {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left: 4px solid var(--ms-color-warning);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-blocking-chain-unrooted {
+    border-left-color: var(--ms-color-border-strong);
+}
+
+.ms-blocking-chain-summary {
+    margin: 0 0 var(--ms-space-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-blocking-tree,
+.ms-blocking-waiters {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-blocking-waiters {
+    margin-left: var(--ms-space-sm);
+    padding-left: var(--ms-space-md);
+    border-left: 2px solid var(--ms-color-border);
+}
+
+.ms-blocking-node {
+    margin: var(--ms-space-xs) 0;
+}
+
+.ms-blocking-session {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0;
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-blocking-head > .ms-blocking-session {
+    background: var(--ms-color-warning-bg);
+}
+
+.ms-blocking-field {
+    display: flex;
+    gap: var(--ms-space-xs);
+    align-items: baseline;
+    min-width: 0;
+}
+
+.ms-blocking-field dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-blocking-field dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-blocking-pid dd {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-blocking-repeat {
+    margin: var(--ms-space-xs) 0 0;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-blocking-handover {
+    margin-top: var(--ms-space-sm);
+    padding-top: var(--ms-space-sm);
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-blocking-handover-title {
+    margin: 0 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-blocking-handover-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-xs);
+}
+
+.ms-blocking-handover-line code {
+    overflow-wrap: anywhere;
+}
+
+.ms-blocking-handover-note {
+    max-width: 80ch;
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-blocking-statistics {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-blocking-subheading {
+    margin: 0 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-base);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-blocking-statistics-table td + td {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+@media (max-width: 640px) {
+    .ms-blocking-chain {
+        padding: var(--ms-space-xs) var(--ms-space-sm);
+    }
+
+    .ms-blocking-waiters {
+        margin-left: var(--ms-space-xs);
+        padding-left: var(--ms-space-sm);
+    }
+}

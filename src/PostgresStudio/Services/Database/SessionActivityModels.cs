@@ -12,15 +12,27 @@ internal static class SessionLinks
     /// <summary>The page's route under the studio's path.</summary>
     public const string Route = "database/sessions";
 
+    /// <summary>The query parameter that names the page's tab (D9: a link someone pastes reopens the same tab).</summary>
+    public const string ViewParameter = "view";
+
+    /// <summary>The Blocking tab's value of <see cref="ViewParameter" /> (X3).</summary>
+    public const string BlockingView = "blocking";
+
     /// <summary>The page, with the scope carried (D9) under the studio's own source parameter.</summary>
     /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry, or <see langword="null" />.</param>
-    public static string ToSessions(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope)
+    /// <param name="view">The tab - <see cref="BlockingView" /> - or <see langword="null" /> for the sessions themselves.</param>
+    public static string ToSessions(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope, string? view = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(descriptor);
-        return StudioScopeQuery.Append(StudioLink.To(settings, Route), scope, descriptor.SourceQueryParameter);
+
+        string route = view is { Length: > 0 }
+            ? Route + "?" + ViewParameter + "=" + Uri.EscapeDataString(view)
+            : Route;
+
+        return StudioScopeQuery.Append(StudioLink.To(settings, route), scope, descriptor.SourceQueryParameter);
     }
 }
 
@@ -215,7 +227,27 @@ internal sealed record SessionSnapshot(
     /// <see langword="null" /> from a reader that did not read them (a test's).
     /// </summary>
     public SessionConnections? Connections { get; init; }
+
+    /// <summary>
+    /// The lock table's blocking graph (X3): every waiting session and every session blocking one, read in the same snapshot
+    /// with the statement a sweep reads the lock table with - or <see langword="null" /> from a reader that did not read it.
+    /// </summary>
+    public LockTableRead? Blocking { get; init; }
+
+    /// <summary>
+    /// PostgreSQL 19's <c>pg_stat_lock</c>, by lock type - or <see langword="null" /> below 19, where the view does not exist,
+    /// and from a reader that did not read it.
+    /// </summary>
+    public IReadOnlyList<LockStatisticsRow>? LockStatistics { get; init; }
 }
+
+/// <summary>One row of PostgreSQL 19's <c>pg_stat_lock</c>: the whole server's counters for one lock type, since their reset.</summary>
+/// <param name="LockType"><c>relation</c>, <c>transactionid</c>, <c>advisory</c>…</param>
+/// <param name="Waits">How many lock requests of the type had to wait.</param>
+/// <param name="WaitTimeMilliseconds">How long they waited in all, in milliseconds.</param>
+/// <param name="FastPathExceeded">How often a backend's fast-path lock slots were full, so the lock went to the shared table.</param>
+/// <param name="StatsReset">When the counters were last reset.</param>
+internal sealed record LockStatisticsRow(string LockType, long Waits, double WaitTimeMilliseconds, long FastPathExceeded, DateTimeOffset? StatsReset);
 
 /// <summary>
 /// One application's client sessions of the database, by state - or, with no <see cref="Application" />, the database's own
@@ -392,6 +424,18 @@ internal sealed record SessionActivitySummary
     /// <summary>How sure: the role's visibility, the caps.</summary>
     public IReadOnlyList<string> Caveats { get; init; } = [];
 
+    /// <summary>
+    /// Sessions › Blocking's counts (X3): how many chains, how many sessions they hold up, the longest wait and how many heads
+    /// sit idle in their transactions - numbers about the database, which name nobody. The tree is the details'.
+    /// </summary>
+    public SessionBlockingCounts Blocking { get; init; } = SessionBlockingCounts.None;
+
+    /// <summary>
+    /// PostgreSQL 19's <c>pg_stat_lock</c>, by lock type - the whole server's counters, which name nobody - or
+    /// <see langword="null" /> below 19, where the section is absent.
+    /// </summary>
+    public IReadOnlyList<LockStatisticsRow>? LockStatistics { get; init; }
+
     /// <summary>Whether this visitor may see the details, and what it would take.</summary>
     public SessionDetailsAccess Details { get; init; } = new(false, false, null, DatabaseRefusal.CapabilityOff, null);
 
@@ -475,6 +519,12 @@ internal sealed record SessionActivityDetails
     public IReadOnlyList<PreparedDetailRow> Prepared { get; init; } = [];
 
     /// <summary>
+    /// Sessions › Blocking's tree (X3): each chain's head and the sessions waiting on it, nested, the most held up first -
+    /// every session named, so behind the same gate as the rest of the details.
+    /// </summary>
+    public IReadOnlyList<BlockingChainView> Blocking { get; init; } = [];
+
+    /// <summary>
     /// This database's sessions by <c>application_name</c>, the most first (issue #8 G9): an application's name is another
     /// program's, so it is a detail.
     /// </summary>
@@ -490,4 +540,109 @@ internal sealed record SessionActivityDetails
 
     /// <summary>Details that say why there are none.</summary>
     public static SessionActivityDetails Refused(DatabaseRefusal refusal, string reason) => new() { Refusal = refusal, Reason = reason };
+}
+
+/// <summary>Sessions › Blocking's numbers (X3): database-wide, naming nobody.</summary>
+/// <param name="Chains">How many chains have a head - a session that blocks others and waits for no lock itself.</param>
+/// <param name="Held">How many sessions they hold up, each once.</param>
+/// <param name="LongestWait">The longest wait among them, or <see langword="null" /> when nothing waits.</param>
+/// <param name="IdleHeads">How many of the heads sit idle in their transactions - C12's <c>idle-head</c>.</param>
+/// <param name="Unrooted">How many chains have no head: sessions waiting on each other, or on sessions the read did not list.</param>
+internal sealed record SessionBlockingCounts(int Chains, int Held, TimeSpan? LongestWait, int IdleHeads, int Unrooted)
+{
+    /// <summary>Nothing waits.</summary>
+    public static SessionBlockingCounts None { get; } = new(0, 0, null, 0, 0);
+}
+
+/// <summary>One session of Sessions › Blocking's tree, past the activity gate (X3).</summary>
+/// <remarks>
+/// The relation is the details' and masked for this visitor (D27): qualified for a schema they may see, <c>‹withheld›</c> -
+/// and no name - for one they may not, and nothing for a relation nobody is told about (a hidden document type's, another
+/// store's, one only the <c>mt_</c> rule calls Marten's in Postgres Studio). <see cref="Target" /> says what it is in the
+/// studio's words either way.
+/// </remarks>
+internal sealed record BlockingNodeView
+{
+    /// <summary>Its process id.</summary>
+    public required int ProcessId { get; init; }
+
+    /// <summary>Its role.</summary>
+    public string? User { get; init; }
+
+    /// <summary>Its application name.</summary>
+    public string? Application { get; init; }
+
+    /// <summary>Its client's address, or <see langword="null" /> for a Unix socket.</summary>
+    public string? ClientAddress { get; init; }
+
+    /// <summary>Its state, or <see langword="null" /> when the role may not read it or it is another database's.</summary>
+    public string? State { get; init; }
+
+    /// <summary>The class of what it waits for.</summary>
+    public string? WaitEventType { get; init; }
+
+    /// <summary>What it waits for, exactly.</summary>
+    public string? WaitEvent { get; init; }
+
+    /// <summary>How long its transaction has been open.</summary>
+    public TimeSpan? TransactionAge { get; init; }
+
+    /// <summary>How long it has been in its state.</summary>
+    public TimeSpan? StateAge { get; init; }
+
+    /// <summary>How long it has waited for its lock, for one that waits.</summary>
+    public TimeSpan? Waited { get; init; }
+
+    /// <summary>Whether <see cref="Waited" /> is measured from <c>pg_locks.waitstart</c> rather than its last state change.</summary>
+    public bool ExactWait { get; init; } = true;
+
+    /// <summary>The mode it waits for, for one that waits.</summary>
+    public string? WantedMode { get; init; }
+
+    /// <summary>The modes it holds on what the sessions below it wait for.</summary>
+    public IReadOnlyList<string> HeldModes { get; init; } = [];
+
+    /// <summary>What it waits for, in the studio's words, for one that waits - masked for this visitor.</summary>
+    public string? Target { get; init; }
+
+    /// <summary>The relation it waits for, qualified, <c>‹withheld›</c>, or <see langword="null" />.</summary>
+    public string? Relation { get; init; }
+
+    /// <summary>Whether it is a session of this database.</summary>
+    public bool SameDatabase { get; init; } = true;
+
+    /// <summary>Whether <c>pg_stat_activity</c> still had it when read.</summary>
+    public bool Known { get; init; } = true;
+
+    /// <summary>What it is when it is a <c>VACUUM</c>.</summary>
+    public string? VacuumLabel { get; init; }
+
+    /// <summary>Who blocks it.</summary>
+    public IReadOnlyList<int> BlockedBy { get; init; } = [];
+
+    /// <summary>Why its waiters are not drawn here, when they are not.</summary>
+    public BlockingRepeat Repeat { get; init; }
+
+    /// <summary>Who waits on it, the longest wait first.</summary>
+    public IReadOnlyList<BlockingNodeView> Waiters { get; init; } = [];
+}
+
+/// <summary>One chain of Sessions › Blocking, past the activity gate (X3): its head, everybody below it, and what to hand over.</summary>
+/// <param name="Head">The head and its tree.</param>
+/// <param name="HeadWaits">Whether the head waits for a lock itself: the chain has no session that holds the others up alone.</param>
+/// <param name="Held">How many sessions it holds up, each once.</param>
+/// <param name="LongestWait">The longest wait in it.</param>
+internal sealed record BlockingChainView(BlockingNodeView Head, bool HeadWaits, int Held, TimeSpan? LongestWait)
+{
+    /// <summary>
+    /// The statement that would end the head's session, for a person to run - <see langword="null" /> for a chain with no head,
+    /// or a head that has gone. The studio never runs it.
+    /// </summary>
+    public string? Terminate => HeadWaits || !Head.Known ? null : Internal.Sql.SessionHandOver.Terminate(Head.ProcessId);
+
+    /// <summary>The statement that would cancel the head's running statement, likewise - and only for a head that runs one.</summary>
+    public string? Cancel => HeadWaits || !Head.Known || Head.State is not "active" ? null : Internal.Sql.SessionHandOver.Cancel(Head.ProcessId);
+
+    /// <summary>Whether the head sits idle in its transaction - which only ending its session ends.</summary>
+    public bool IdleHead => !HeadWaits && Head.State is "idle in transaction" or "idle in transaction (aborted)";
 }

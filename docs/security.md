@@ -190,6 +190,14 @@ any evidence behind the activity gate for a store and database is one Activity e
 of checks showing it changes; the sidebar's health badge shows no evidence and records nothing. A read that
 fails for a reason nobody chose is event 9246, throttled. The studio never cancels or terminates a session.
 
+Database › Sessions › Blocking (0.6) draws the same snapshot as trees, behind the same gate and audited with the rest of
+the details: its counts - chains, sessions held up, the longest wait, heads idle in a transaction - are the database's,
+and the trees, which name every session, are details. A relation a session waits for is named only past the gate, and
+masked as the database browser masks it: `‹withheld›`, with no name, for a schema the visitor may not see. The head of a
+chain is shown with its `select pg_terminate_backend(<pid>);` - and `pg_cancel_backend`, when it runs a statement - as text
+to copy for whoever may run it: there is no button that runs either, and nothing in either package executes them. C12,
+which names the heads of chains in its findings, is an activity check.
+
 Which names stay at the database-wide gate, and why: the name of the role the studio reads as (`SqlConsoleRole`, or
 the store's or data source's own login where none is set) and the login the data source connects as are
 configuration, not somebody else's session, so a "not checked" row names the role and the grant it lacks, and S04,

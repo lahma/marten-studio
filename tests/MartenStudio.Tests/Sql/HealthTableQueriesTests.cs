@@ -75,7 +75,7 @@ public partial class HealthTableQueriesTests
     [Fact]
     public void The_tables_and_their_schemas_travel_as_two_text_arrays_and_no_name_is_in_the_text()
     {
-        foreach (HealthQuery query in new[] { HealthTableQueries.Tables(Targets), HealthTableQueries.Indexes(Targets), HealthTableQueries.SoftDeleteShares(Targets) })
+        foreach (HealthQuery query in new[] { HealthTableQueries.Tables(Targets, [16385u]), HealthTableQueries.Indexes(Targets, [16385u]), HealthTableQueries.SoftDeleteShares(Targets) })
         {
             // The table read binds T08's line too (W5-V1 review), so each partition is judged against it in the statement.
             query.ParameterNames.Take(2).Should().Equal("@schemas", "@tables");
@@ -90,8 +90,8 @@ public partial class HealthTableQueriesTests
     [Fact]
     public void Every_call_builds_a_fresh_query_with_parameters_of_its_own()
     {
-        HealthQuery first = HealthTableQueries.Tables(Targets);
-        HealthQuery second = HealthTableQueries.Tables(Targets);
+        HealthQuery first = HealthTableQueries.Tables(Targets, []);
+        HealthQuery second = HealthTableQueries.Tables(Targets, []);
 
         first.Parameters[0].Should().NotBeSameAs(second.Parameters[0], "an NpgsqlParameter belongs to one command");
     }
